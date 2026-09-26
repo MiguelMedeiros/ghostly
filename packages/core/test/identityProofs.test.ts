@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { createIdentity } from "../src/identity";
 import {
-  emptyIdentityLedger, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
+  emptyIdentityLedger, IDENTITY_CHECK_UNAVAILABLE, IdentityCheckUnavailable, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, identityRevocationValue, IDENTITY_REVOCATION_LABEL, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
   type IdentityBinding, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "../src/identityProofs";
@@ -78,7 +78,7 @@ function world(start = 1_800_000_000) {
   const errors: string[] = [];
   const online = new Set<string>();
   const revoked = new Set<string>();
-  const peer = (me: string, them: string, context: string, options: { providers?: string[]; session?: () => string } = {}) => {
+  const peer = (me: string, them: string, context: string, options: { providers?: string[]; session?: () => string; verify?: typeof fakeVerify } = {}) => {
     const key = `${me}>${them}`;
     ledgers.set(key, ledgers.get(key) ?? emptyIdentityLedger());
     const x = new IdentityExchange({
@@ -87,7 +87,7 @@ function world(start = 1_800_000_000) {
       storage: { read: () => ledgers.get(key)!, update: async change => { ledgers.set(key, change(structuredClone(ledgers.get(key)!))); } },
       providers: () => options.providers ?? ["test"],
       localProof: id => proofs.get(id),
-      verify: fakeVerify, now: () => now, onError: e => errors.push(e),
+      verify: options.verify ?? fakeVerify, now: () => now, onError: e => errors.push(e),
       revoked: async st => revoked.has(st.id),
     });
     peers.set(key, x); online.add(key);
@@ -252,6 +252,28 @@ describe("identity exchange", () => {
     const after = await ba.recheck(id);
     expect(after).toMatchObject({ status: "unconfirmed", error: "Invalid signature", checkedAt: w.now() });
     expect(receivedIdentityStatus(after, alice, bob, w.now())).toBe("unconfirmed");
+  });
+
+  it("tells the sharer only that it could not be checked when the check failed on this side's network", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    let failure: Error | undefined = new IdentityCheckUnavailable("The homeserver jenkins.corp.example.com answered 503");
+    const ab = w.peer(alice, bob, "a".repeat(64));
+    const ba = w.peer(bob, alice, "a".repeat(64), { verify: async (s, e) => { if (failure) throw failure; return fakeVerify(s, e); } });
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].status).toBe("rejected"));
+    expect(w.ledger(alice, bob).shared[0].error).toBe(IDENTITY_CHECK_UNAVAILABLE);
+    expect(JSON.stringify(w.frames)).not.toMatch(/jenkins|503/);
+    // Any other refusal still says why: it is about the proof, not about the verifier's network.
+    failure = new Error("The file on the homeserver is not this proof");
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].error).toBe("The file on the homeserver is not this proof"));
+    // The verifier's own re-check keeps the detail.
+    failure = undefined;
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(w.ledger(bob, alice).received).toHaveLength(1));
+    failure = new IdentityCheckUnavailable("The homeserver jenkins.corp.example.com answered 503");
+    expect(await ba.recheck(id)).toMatchObject({ status: "unconfirmed", error: "The homeserver jenkins.corp.example.com answered 503" });
   });
 
   it("drops oversized frames", async () => {

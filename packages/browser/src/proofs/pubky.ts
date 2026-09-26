@@ -1,9 +1,10 @@
 import {
-  homeserverWebEndpoint, openRelayPayload, pubkyHomeserverOf, PUBKY_PROOF_MAX_BYTES,
+  homeserverWebEndpoint, IdentityCheckUnavailable, openRelayPayload, pubkyHomeserverOf, PUBKY_PROOF_MAX_BYTES,
   type HomeserverEndpoint,
 } from "@ghostly/core";
 import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
 import type { ApprovalRequest, IdentityFetch } from "./contract";
+import { assertPublicHost, chosenResolver, type DohResolverId } from "./domain";
 import { getBrowserHost, type PubkyCookieSession } from "../host";
 
 /**
@@ -50,14 +51,26 @@ export async function pubkyHomeserver(key: string, fetch: IdentityFetch, signal?
 /**
  * A public file of `key` at `path`, from the homeserver its own records name: bounded, no redirects, the owner in the
  * `pubky-host` header the way the SDK addresses it. `undefined` when the homeserver says it is not there.
+ *
+ * The key's owner chooses that host, so it is contacted only on port 443 and only once its addresses are all public
+ * (the name is resolved first through the chosen DNS-over-HTTPS resolver): a proof never makes a contact's app knock
+ * on its own network. Failures on the way there are IdentityCheckUnavailable, which the contact is not told about.
  */
-export async function readPubkyFile(key: string, path: `/pub/${string}`, fetch: IdentityFetch, signal?: AbortSignal, relays?: readonly string[]): Promise<{ text: string | undefined; host: string }> {
-  const { endpoint } = await pubkyHomeserver(key, fetch, signal, relays);
-  const origin = `https://${endpoint.host}${endpoint.port ? `:${endpoint.port}` : ""}`;
-  const r = await fetch(`${origin}${path}`, { headers: { "pubky-host": key }, maxBytes: PUBKY_PROOF_MAX_BYTES, signal });
-  if (r.status === 404) return { text: undefined, host: endpoint.host };
-  if (r.status !== 200) throw new Error(`The homeserver ${endpoint.host} answered ${r.status}`);
-  return { text: r.text, host: endpoint.host };
+export async function readPubkyFile(key: string, path: `/pub/${string}`, fetch: IdentityFetch, signal?: AbortSignal, relays?: readonly string[], resolver: DohResolverId = chosenResolver().id): Promise<{ text: string | undefined; host: string }> {
+  const { endpoint: { host, port } } = await pubkyHomeserver(key, fetch, signal, relays);
+  if (port !== undefined) throw new IdentityCheckUnavailable(`The homeserver ${host} answers on port ${port}; only port 443 is contacted`);
+  try { await assertPublicHost(host, { fetch, signal, resolver }); }
+  catch (e) { throw new IdentityCheckUnavailable(`The homeserver ${host} was not contacted: ${e instanceof Error ? e.message : String(e)}`); } // eslint-disable-line preserve-caught-error -- The domain check's message says why; ES2020 has no Error.cause.
+  let r: Awaited<ReturnType<IdentityFetch>>;
+  try { r = await fetch(`https://${host}${path}`, { headers: { "pubky-host": key }, maxBytes: PUBKY_PROOF_MAX_BYTES, signal }); }
+  catch (e) {
+    // A file over the cap is the owner's doing, and says nothing about this side's network.
+    if (/too large/i.test(String(e))) throw e;
+    throw new IdentityCheckUnavailable(`The homeserver ${host} could not be reached`); // eslint-disable-line preserve-caught-error -- Only "could not be reached" is meant; ES2020 has no Error.cause.
+  }
+  if (r.status === 404) return { text: undefined, host };
+  if (r.status !== 200) throw new IdentityCheckUnavailable(`The homeserver ${host} answered ${r.status}`);
+  return { text: r.text, host };
 }
 
 // -- approving -------------------------------------------------------------------------------------

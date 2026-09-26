@@ -1,5 +1,6 @@
 import type { BrowserContext, Page, Route } from "@playwright/test";
 import jsQR from "jsqr";
+import { answerDoh, queryFromUrl } from "../../packages/browser/test/helpers/dohZone";
 import type { LocalRelay } from "./relay";
 
 /**
@@ -18,6 +19,9 @@ export const PUBKY_HOMESERVER_HOST = "pubky-homeserver.e2e.ghostly.tools";
 export const PUBKY_HOMESERVER_KEY = "8pinxxgqs41n4aididenw5apqp1urfmzdztr8jt4abrkdn435ewo";
 const PUBLIC_HTTP_RELAY = "https://httprelay.pubky.app";
 const PASSPORT = "https://passport.pubky.app";
+const RESOLVERS = /^https:\/\/(dns\.quad9\.net|cloudflare-dns\.com|dns\.google)\/dns-query\?/;
+/** A public address for the homeserver's name: a contact's app refuses one that resolves to a private network. */
+const HOMESERVER_ADDRESS = "93.184.215.14";
 
 export const pubkyTestnet = () => {
   const [homeserver, httpRelay, pkarrRelay] = ["GHOSTLY_PUBKY_HOMESERVER_URL", "GHOSTLY_PUBKY_HTTP_RELAY_URL", "GHOSTLY_PUBKY_PKARR_RELAY_URL"].map((name) => process.env[name]);
@@ -54,6 +58,14 @@ export async function attachPubky(context: BrowserContext, relay: LocalRelay, ap
   await seedHomeserver(relay);
   await context.route(`${PUBLIC_HTTP_RELAY}/**`, forward);
   await context.route(`https://${PUBKY_HOMESERVER_HOST}/**`, forward);
+  // The homeserver's name resolves nowhere: answer its address lookups, and leave any other name to other routes.
+  await context.route(RESOLVERS, (route) => {
+    const query = queryFromUrl(route.request().url());
+    // The question's labels, length-prefixed: the host's first label is enough to tell it apart.
+    if (!Buffer.from(query).includes(PUBKY_HOMESERVER_HOST.split(".")[0])) return route.fallback();
+    const answer = answerDoh(query, { a: { [PUBKY_HOMESERVER_HOST]: [HOMESERVER_ADDRESS] } });
+    return route.fulfill({ status: 200, headers: { "content-type": "application/dns-message", "access-control-allow-origin": "*", "cache-control": "no-store" }, body: Buffer.from(answer) });
+  });
   await context.route(`${PASSPORT}/**`, (route) => route.fulfill({ contentType: "text/html", body: PASSPORT_STAND_IN }));
   if (approver) {
     await context.exposeBinding("ghostlyTestPassportApprove", async (_source, fragment: string) => {

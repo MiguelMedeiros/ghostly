@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  createIdentity, encodeSvcbPacket, identityStatement, newIdentityBinding, pubkyProofPath, signRelayPayload,
+  createIdentity, encodeSvcbPacket, IdentityCheckUnavailable, identityStatement, newIdentityBinding, pubkyProofPath, signRelayPayload,
   type Identity, type IdentityStatement,
 } from "@ghostly/core";
 import { createPubkyIdentityProvider, type PubkyEvidence } from "../src/proofs/providers/pubky";
@@ -8,11 +8,13 @@ import { pubkyRecords } from "../src/proofs/pubky";
 import { boundedIdentityFetch, verifyIdentity } from "../src/proofs/verify";
 import type { IdentityFetch, VerifyContext } from "../src/proofs/contract";
 import { describeIdentityProof } from "./helpers/identityProofContract";
+import { answerDoh, queryFromUrl, type Zone } from "./helpers/dohZone";
 // covers: proofs.pubky
 
 /**
  * A Pubky network in memory, behind the engine's real bounded fetch: Pkarr relays holding signed packets (a key's
- * `_pubky` record, its homeserver's HTTPS record), and homeservers serving `/pub/…` by the `pubky-host` header.
+ * `_pubky` record, its homeserver's HTTPS record), homeservers serving `/pub/…` by the `pubky-host` header, and the
+ * default DNS-over-HTTPS resolver, which gives each homeserver's name a public address unless a test says otherwise.
  */
 class PubkyNet {
   readonly relays = new Map<string, Map<string, Uint8Array>>([["https://pkarr.pubky.org", new Map()], ["https://pkarr.pubky.app", new Map()]]);
@@ -20,6 +22,9 @@ class PubkyNet {
   readonly files = new Map<string, string>();
   readonly requests: { url: string; headers: Record<string, string> }[] = [];
   down = new Set<string>();
+  readonly zone: Zone & { a: Record<string, string[]> } = { a: {} };
+  /** Status codes homeservers answer with, by host, instead of serving files. */
+  readonly status = new Map<string, number>();
 
   publish(identity: Identity, records: Parameters<typeof encodeSvcbPacket>[0], { relays = [...this.relays.keys()], at }: { relays?: string[]; at?: bigint } = {}) {
     const payload = signRelayPayload(identity, encodeSvcbPacket(records), at ?? BigInt(Date.now()) * 1000n);
@@ -28,6 +33,7 @@ class PubkyNet {
   homeserver(host = "hs.example.com", port?: number): Identity {
     const hs = createIdentity();
     this.publish(hs, [{ name: hs.pubKeyZ32, priority: 1, target: "", port: 6287 }, { name: hs.pubKeyZ32, priority: 10, target: host, port }]);
+    this.zone.a[host] ??= ["93.184.215.14"];
     return hs;
   }
   user(homeserver: Identity, options?: { relays?: string[]; at?: bigint }): Identity {
@@ -45,6 +51,10 @@ class PubkyNet {
     const headers = Object.fromEntries(new Headers(init?.headers).entries());
     this.requests.push({ url: url.href, headers });
     if (this.down.has(url.origin)) throw new TypeError("Failed to fetch");
+    if (url.origin === "https://dns.quad9.net" && url.pathname === "/dns-query")
+      return new Response(answerDoh(queryFromUrl(url.href), this.zone) as BodyInit, { headers: { "content-type": "application/dns-message" } });
+    const status = this.status.get(url.host);
+    if (status) return new Response("no", { status });
     const relay = this.relays.get(url.origin);
     if (relay) {
       const payload = relay.get(url.pathname.slice(1));
@@ -81,20 +91,63 @@ describe("Pubky proofs: verify", () => {
 
   it("reads the file from the homeserver the key's records name, addressed by pubky-host, and says how", async () => {
     const net = new PubkyNet();
-    const hs = net.homeserver("homeserver.example.org", 8443);
+    const hs = net.homeserver("homeserver.example.org", 443);
     const me = net.user(hs);
     const s = statementFor(me.pubKeyZ32);
-    net.write("homeserver.example.org:8443", me.pubKeyZ32, pubkyProofPath(folder, s.id), s.text);
+    net.write("homeserver.example.org", me.pubKeyZ32, pubkyProofPath(folder, s.id), s.text);
     const verified = await verify(net, s, { folder });
     expect(verified).toMatchObject({ subject: me.pubKeyZ32 });
     expect(verified.source).toContain("homeserver.example.org");
     const file = net.requests.find(r => r.url.includes("/pub/ghostly.app/proofs/"))!;
-    expect(file.url).toBe(`https://homeserver.example.org:8443${pubkyProofPath(folder, s.id)}`);
+    expect(file.url).toBe(`https://homeserver.example.org${pubkyProofPath(folder, s.id)}`);
     expect(file.headers["pubky-host"]).toBe(me.pubKeyZ32);
-    // Both relays were asked for both keys; nothing else was contacted.
+    // Both relays were asked for both keys, the resolver for the homeserver's addresses; nothing else was contacted.
     expect(net.requests.filter(r => r.url.startsWith("https://pkarr.")).map(r => new URL(r.url).pathname.slice(1)).sort())
       .toEqual([hs.pubKeyZ32, hs.pubKeyZ32, me.pubKeyZ32, me.pubKeyZ32].sort());
-    expect(net.requests).toHaveLength(5);
+    expect(net.requests.filter(r => r.url.startsWith("https://dns.quad9.net/dns-query?"))).toHaveLength(2);
+    expect(net.requests).toHaveLength(7);
+  });
+
+  it("contacts the homeserver only on port 443", async () => {
+    const net = new PubkyNet();
+    const me = net.user(net.homeserver("jenkins.corp.example.com", 8443));
+    const s = statementFor(me.pubKeyZ32);
+    net.write("jenkins.corp.example.com:8443", me.pubKeyZ32, pubkyProofPath(folder, s.id), s.text);
+    const failure = await verify(net, s, { folder }).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(failure)).toMatch(/port 8443; only port 443/);
+    expect(net.requests.filter(r => !r.url.startsWith("https://pkarr."))).toEqual([]);
+  });
+
+  it("does not contact a homeserver name that resolves to a private network, or to nothing", async () => {
+    for (const [host, addresses] of [["10-0-0-5.nip.io", ["10.0.0.5"]], ["hs.corp.example.com", ["93.184.215.14", "192.168.1.20"]], ["gone.example.com", []]] as const) {
+      const net = new PubkyNet();
+      net.zone.a[host] = [...addresses];
+      const me = net.user(net.homeserver(host));
+      const s = statementFor(me.pubKeyZ32);
+      net.write(host, me.pubKeyZ32, pubkyProofPath(folder, s.id), s.text);
+      const failure = await verify(net, s, { folder }).catch((e: unknown) => e);
+      expect(failure, host).toBeInstanceOf(IdentityCheckUnavailable);
+      expect(String(failure), host).toMatch(addresses.length ? /private network address, so it was not contacted/ : /has no address/);
+      expect(net.requests.filter(r => new URL(r.url).host === host), host).toEqual([]);
+    }
+  });
+
+  it("marks what this side's network did as its own: an unreachable or failing homeserver", async () => {
+    const net = new PubkyNet();
+    const me = net.user(net.homeserver("hs.example.com"));
+    const s = statementFor(me.pubKeyZ32);
+    net.status.set("hs.example.com", 503);
+    await expect(verify(net, s, { folder })).rejects.toThrow(IdentityCheckUnavailable);
+    await expect(verify(net, s, { folder })).rejects.toThrow(/answered 503/);
+    net.status.clear();
+    net.down.add("https://hs.example.com");
+    await expect(verify(net, s, { folder })).rejects.toThrow(IdentityCheckUnavailable);
+    // The owner's own doing is not: a missing or wrong file says what is wrong.
+    net.down.clear();
+    const missing = await verify(net, s, { folder }).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/not on the homeserver/);
   });
 
   it("refuses a file that is not exactly the statement", async () => {

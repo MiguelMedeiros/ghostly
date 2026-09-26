@@ -265,6 +265,21 @@ export function receivedIdentityStatus(r: ReceivedIdentity, presenter: string | 
 const shortError = (e: unknown) => clean(e instanceof Error ? e.message : String(e), 160) ?? "Invalid proof";
 
 /**
+ * A check this side could not finish because of what its own network did: a host it refused to contact, a server
+ * that did not answer or answered an error. The message is for this side only. The contact is told the proof could
+ * not be checked, never which host, address or status was seen, so a proof cannot make a contact's app report on
+ * the network it sits in.
+ */
+export class IdentityCheckUnavailable extends Error {
+  constructor(message: string) { super(message); this.name = "IdentityCheckUnavailable"; }
+}
+
+/** What the contact is told when the check failed with an IdentityCheckUnavailable. */
+export const IDENTITY_CHECK_UNAVAILABLE = "Your contact's app could not check it. Try again later.";
+
+const peerError = (e: unknown) => e instanceof IdentityCheckUnavailable ? IDENTITY_CHECK_UNAVAILABLE : shortError(e);
+
+/**
  * The `idp-*` exchange of one conversation. Frames (all JSON, additive, over the paired channel,
  * only when both offers carry `identity-proof/1`):
  *
@@ -428,6 +443,7 @@ export class IdentityExchange {
     const known = (l: IdentityLedger) => l.challenges.some(c => c.nonce === nonce && c.issuedAt === issuedAt && c.provider === binding.provider && c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW);
     if (!known(this.options.storage.read())) throw new Error("Unknown or reused identity challenge");
     let verified: VerifiedIdentity | undefined;
+    // Only what the contact may know: see IdentityCheckUnavailable.
     let error: string | undefined;
     try {
       if (JSON.stringify(evidence ?? null).length > IDENTITY_MAX_EVIDENCE) throw new Error("Evidence too large");
@@ -439,7 +455,7 @@ export class IdentityExchange {
       // fails is not a refusal, a revocation found is.
       if (await this.options.revoked?.(statement).catch(() => false)) throw new Error("Its owner revoked this proof");
       verified = result;
-    } catch (e) { error = shortError(e); }
+    } catch (e) { error = peerError(e); }
     // Consuming the nonce and recording the outcome are one transaction.
     await this.options.storage.update(l => {
       if (!known(l)) throw new Error("Unknown or reused identity challenge");
