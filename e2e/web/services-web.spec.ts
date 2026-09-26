@@ -36,7 +36,7 @@ test("the Services page on the web explains sharing needs the extension, and off
   expect(thrown).toEqual([]);
 });
 
-test("a paired chat on the web: + → Shared apps is greyed and says sharing needs the extension or desktop app", { tag: ["@feature:services.web-unavailable", "@feature:app.web-limits", "@feature:app.composer.attach"] }, async ({ peer }) => {
+test("a paired chat on the web: + → Shared services is greyed and says sharing needs the extension or desktop app", { tag: ["@feature:services.web-unavailable", "@feature:app.web-limits", "@feature:app.composer.attach"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("svc-dialog-alice"), peer("svc-dialog-bob")]);
   const thrown = [...[alice, bob].map(errors)];
   await pair(alice, bob);
@@ -51,7 +51,7 @@ test("a paired chat on the web: + → Shared apps is greyed and says sharing nee
     const row = await composerRow(p.page, "composer-services");
     await expect(row).toBeDisabled();
     await expect(row).toHaveAttribute("title", "Needs the Ghostly extension or desktop app");
-    await expect(row).toContainText("Shared apps");
+    await expect(row).toHaveText("Shared services");
     await p.page.keyboard.press("Escape");
     await expect(p.page.getByTestId("composer-menu")).toHaveCount(0);
     await expect(p.page.getByTestId("chat-services")).toHaveCount(0);

@@ -46,7 +46,7 @@ async function openPlus(user: ReturnType<typeof renderApp>["user"]) {
   return screen.getByTestId("composer-services");
 }
 
-describe("the composer's Shared apps row", () => {
+describe("the composer's Shared services row", () => {
   it("sits beside Payment and Identity with a green globe of its own, only in a chat the platform knows the contact of", async () => {
     localApps(true);
     const view = renderApp(<ChatWithAna />);
@@ -59,7 +59,7 @@ describe("the composer's Shared apps row", () => {
     const row = await openPlus(view.user);
     const rows = within(screen.getByTestId("composer-menu")).getAllByRole("button");
     expect(rows.map((r) => r.dataset.action)).toEqual(["identity", "services"]);
-    expect(row).toHaveTextContent(/^Shared apps$/);
+    expect(row).toHaveTextContent(/^Shared services$/);
     expect(row).toBeEnabled();
     expect(row.querySelector(".composer-menu-icon")).toHaveAttribute("data-action", "services");
     expect(row.querySelector(".composer-menu-icon svg path")).toHaveAttribute("fill-rule", "evenodd");
@@ -70,7 +70,7 @@ describe("the composer's Shared apps row", () => {
     const view = renderApp(<ChatWithAna />);
     view.engine.on("setServiceShared", () => undefined);
     act(() => view.engine.update({ links: [live()], services: [app()] }));
-    // Nothing shared either way: no second line, and no strip in the chat would offer Manage.
+    // Nothing shared either way: nothing on hover, and no strip in the chat would offer Manage.
     const row = await openPlus(view.user);
     expect(row).not.toHaveAttribute("title");
 
@@ -87,7 +87,7 @@ describe("the composer's Shared apps row", () => {
     expect(screen.getByTestId("composer-more")).toHaveFocus();
   });
 
-  it("says how many apps are shared in this chat, either way, not counting a paused one", async () => {
+  it("says on hover how many apps are shared in this chat, either way, not counting a paused one, in one line", async () => {
     localApps(true);
     const view = renderApp(<ChatWithAna />);
     act(() => view.engine.update({
@@ -97,7 +97,7 @@ describe("the composer's Shared apps row", () => {
     const row = await openPlus(view.user);
     expect(row).toBeEnabled();
     expect(row).toHaveAttribute("title", "2 shared in this chat");
-    expect(row).toHaveTextContent("Shared apps2 shared in this chat");
+    expect(row).toHaveTextContent(/^Shared services$/);
   });
 
   it("still opens while apps cannot travel yet, saying why, so an app can be granted before the chat is live", async () => {
@@ -107,7 +107,8 @@ describe("the composer's Shared apps row", () => {
       capabilities: { files: false, payments: false, services: false } })], services: [app()] }));
     let row = await openPlus(view.user);
     expect(row).toBeEnabled();
-    expect(row).toHaveAttribute("title", "Shared apps open while you are connected live.");
+    expect(row).toHaveAttribute("title", "Shared services open while you are connected live.");
+    expect(row).toHaveTextContent(/^Shared services$/);
     await view.user.click(row);
     expect(screen.getByTestId("chat-service-toggle")).toBeInTheDocument();
     await view.user.keyboard("{Escape}");
@@ -116,7 +117,7 @@ describe("the composer's Shared apps row", () => {
     act(() => view.engine.update({ links: [live({ sessionOffers: { mine: both.mine, peer: null }, capabilities: { files: true, payments: false, services: false } })] }));
     row = await openPlus(view.user);
     expect(row).toBeEnabled();
-    expect(row).toHaveAttribute("title", "Ana needs an updated Ghostly to open shared apps.");
+    expect(row).toHaveAttribute("title", "Ana needs an updated Ghostly to open shared services.");
   });
 
   it("is greyed with the reason where nothing in it can be chosen: the contact's app cannot open apps", async () => {
@@ -126,6 +127,7 @@ describe("the composer's Shared apps row", () => {
     const row = await openPlus(view.user);
     expect(row).toBeDisabled();
     expect(row).toHaveAttribute("title", "Ana's app cannot open or share apps (the web app cannot reach local apps).");
+    expect(row).toHaveTextContent(/^Shared services$/);
     await view.user.click(row);
     expect(screen.queryByTestId("chat-services")).not.toBeInTheDocument();
   });
@@ -136,6 +138,7 @@ describe("the composer's Shared apps row", () => {
     const row = await openPlus(view.user);
     expect(row).toBeDisabled();
     expect(row).toHaveAttribute("title", "Needs the Ghostly extension or desktop app");
+    expect(row).toHaveTextContent(/^Shared services$/);
     // The other rows are not held back by it.
     expect(screen.getByTestId("composer-identities-button")).toBeEnabled();
   });

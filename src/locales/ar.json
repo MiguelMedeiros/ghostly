@@ -442,7 +442,7 @@
     "payment": "دفع",
     "identity": "هوية",
     "identityShared": "{{count}} مشتركة في هذه الدردشة",
-    "services": "التطبيقات المشتركة",
+    "services": "الخدمات المشتركة",
     "servicesShared": "{{count}} مشتركة في هذه الدردشة",
     "servicesNeedApp": "يتطلب إضافة Ghostly للمتصفح أو تطبيق سطح المكتب",
     "document": "مستند",

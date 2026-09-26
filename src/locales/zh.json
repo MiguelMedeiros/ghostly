@@ -442,7 +442,7 @@
     "payment": "付款",
     "identity": "身份",
     "identityShared": "此聊天中已分享 {{count}} 个",
-    "services": "共享应用",
+    "services": "共享服务",
     "servicesShared": "此聊天中已分享 {{count}} 个",
     "servicesNeedApp": "需要 Ghostly 浏览器扩展或桌面应用",
     "document": "文档",

@@ -52,7 +52,7 @@ interface MessageInputProps {
   paymentComposer?: (close: () => void) => ReactNode;
   /** A paired chat: which of this profile's identities its contact sees, from the + menu. */
   identities?: { peerKey: string; contact: string };
-  /** A 1:1 chat's shared apps, from the + menu: which of yours the contact can open, and theirs (`composerServices`). */
+  /** A 1:1 chat's shared services, from the + menu: which of yours the contact can open, and theirs (`composerServices`). */
   services?: ComposerServices;
 }
 
@@ -61,7 +61,7 @@ const TOAST_DURATION = 5_000;
 
 /**
  * The chat's composer, laid out as WhatsApp's: [+] [emoji/GIF] [message] in one rounded field, and the mic (send
- * once there is text) beside it. The + opens what else can go into the chat (a payment, an identity, shared apps, a
+ * once there is text) beside it. The + opens what else can go into the chat (a payment, an identity, shared services, a
  * document, photos, the camera); the smiley opens one panel with emoji and GIFs.
  */
 export function MessageInput({
@@ -213,7 +213,7 @@ export function MessageInput({
     hint: sharedIdentities ? t("composer.identityShared", { count: String(sharedIdentities) }) : undefined, data: { "data-count": sharedIdentities },
     onSelect: () => setShowIdentities(true) });
   if (services) actions.push({ id: "services", label: t("composer.services"), icon: <ServicesGlyph />, testId: "composer-services",
-    unavailable: services.unavailable, hint: services.hint,
+    unavailable: services.unavailable, hint: services.hint, oneLine: true,
     // The chat's dialog gives the focus back to what had it when it opened: the +, as Escape from the menu does.
     onSelect: () => { plusRef.current?.focus({ preventScroll: true }); services.onOpen(); } });
   if (onSendFile) {

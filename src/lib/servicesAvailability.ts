@@ -17,8 +17,8 @@ export function servicesBlock(peer: PeerLinkState | null | undefined): ServicesB
  */
 export function servicesUnavailable(peer: PeerLinkState | null | undefined, name: string): string | null {
   switch (servicesBlock(peer)) {
-    case "not-live": return "Shared apps open while you are connected live.";
-    case "contact-older": return `${name} needs an updated Ghostly to open shared apps.`;
+    case "not-live": return "Shared services open while you are connected live.";
+    case "contact-older": return `${name} needs an updated Ghostly to open shared services.`;
     case "contact-cannot": return `${name}'s app cannot open or share apps (the web app cannot reach local apps).`;
     default: return null;
   }

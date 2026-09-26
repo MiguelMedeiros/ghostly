@@ -14,6 +14,8 @@ export interface ComposerAction {
   unavailable?: string;
   /** A quieter second line while it can be used. */
   hint?: string;
+  /** One line always, as most rows: why it cannot be used, or its hint, is said only on hover (`title`). */
+  oneLine?: boolean;
   data?: Record<`data-${string}`, string | number | undefined>;
 }
 
@@ -52,7 +54,7 @@ export function ComposerMenu({ actions, open, onOpenChange, disabled, buttonRef 
         align="start" prefer="up" focusFirst className="composer-menu">
         {actions.map((action) => (
           <MenuItem key={action.id} testId={action.testId} icon={<span className="composer-menu-icon" data-action={action.id}>{action.icon}</span>}
-            disabled={!!action.unavailable} title={action.unavailable ?? action.hint} hint={action.unavailable ?? action.hint}
+            disabled={!!action.unavailable} title={action.unavailable ?? action.hint} hint={action.oneLine ? undefined : action.unavailable ?? action.hint}
             data={{ "data-action": action.id, ...action.data }}
             onClick={() => { onOpenChange(false); action.onSelect(); }}>
             {action.label}

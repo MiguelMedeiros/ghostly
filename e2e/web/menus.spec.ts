@@ -76,7 +76,7 @@ test("every row of the chat, group and New menus is one line and whole, in every
       // The chat's ⋮: Pin, Mute notifications, Hold messages, Refresh, Tech Info, Delete.
       // Not in it: the connection (the header's connection control has it), Payments (the composer's + → Payment),
       // Identities (the contact's marks in the header, e2e/web/contact-identities.spec.ts) and Services (the
-      // composer's + → Shared apps).
+      // composer's + → Shared services).
       await go(chatHash);
       await page.getByTestId("chat-options").click();
       const chatMenu = page.getByTestId("chat-options-menu");

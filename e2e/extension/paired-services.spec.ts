@@ -24,7 +24,7 @@ test("a local web app shared in a paired chat, from the chat itself", { tag: ["@
 
     // Nothing shared either way yet: no apps strip in the chat, so its Manage button is not there to reach.
     await expect(a.page.getByTestId("peer-services")).toHaveCount(0);
-    // A first share, granted per chat from the composer's + → Shared apps.
+    // A first share, granted per chat from the composer's + → Shared services.
     const row = await composerRow(a.page, "composer-services");
     await expect(row).toBeEnabled();
     await expect(row).not.toHaveAttribute("title");
