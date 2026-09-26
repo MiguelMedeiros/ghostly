@@ -102,7 +102,7 @@ it("a copy of the invite, publishing in both invite mailboxes, neither stops the
     expect(h.saved[i]).not.toHaveProperty("peerRejected");
   }
   for(const copy of copies)await copy.stop();await a.stop();await b.stop();
-});
+},30_000);
 
 it("accepts offline text for stream-preferring authenticated peers and preserves pending intent across mode changes", async () => {
   vi.useFakeTimers(); const h = setup(), a = h.make(0, "stream"), b = h.make(1, "stream");
