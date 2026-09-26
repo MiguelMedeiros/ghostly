@@ -184,41 +184,50 @@ describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
 });
 
 describe("one chat: first contact on two paths, one key", () => {
-  it("a copied invite that pins first over the DHT stops the chat on both layers when the real joiner's key shows", async () => {
+  it("a copied invite that pins first over the DHT keeps its pin: the real joiner's key, on the DHT and on signals, is ignored, not a stop", async () => {
     rtc.blocked = true;
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
     const inviter = open(made.inviter, pkarr, { dht: true });
     await run(2_000);
-    // Someone holding a copy of the invite answers first, with a key of its own.
+    // Someone holding a copy of the invite answers first, with a key of its own: the invite's inherent race.
     const copy = open({ ...made.joiner, seedB64: createIdentity().seedB64 }, pkarr, { dht: true });
     expect(await until(() => !!inviter.credentials.peerKey, 60_000)).toBeLessThan(Infinity);
     const first = inviter.credentials.peerKey;
     await stop(copy);
-    // The joiner the invite was for: its first contact carries another key, on the DHT and on the stream.
+    // The joiner the invite was for: its first contact carries another key, on the DHT and on the link's signals, both
+    // written under keys the invite derives. Anyone with the invite could publish them, so they prove nothing.
     rtc.blocked = false;
-    open(made.joiner, pkarr, { dht: true });
-    expect(await until(() => inviter.states.some(s => s.keyMismatch), 90_000), "a security rejection, not a fallback").toBeLessThan(Infinity);
+    const joiner = open(made.joiner, pkarr, { dht: true });
+    expect(await until(() => !!inviter.dhtView?.foreignKeySeenAt, 90_000), "a passive warning").toBeLessThan(Infinity);
     await run(60_000);
+    expect(inviter.states.some(s => s.keyMismatch), "no stop").toBe(false);
     expect(inviter.credentials.peerKey, "the pin is not replaced").toBe(first);
-    expect(inviter.link.isDataLinkOpen, "no stream either").toBe(false);
-    expect(inviter.link.textDelivery).toBe("unavailable");
-    expect(inviter.link.pairingProgress).toMatchObject({ stage: "failed", reason: "key-mismatch", retryable: false });
+    expect(inviter.link.isDataLinkOpen, "no stream with another key").toBe(false);
+    expect(joiner.link.isDataLinkOpen).toBe(false);
+    expect(inviter.received, "nothing from the other key").toEqual([]);
+    expect(inviter.dhtView?.error).toBeUndefined();
   }, 120_000);
 
-  it("a stream pinned first, then a first-contact envelope signed by another key: the live session stops too", async () => {
+  it("a live chat, then a copy of the invite publishing in the joiner's mailbox with a key of its own: the chat goes on", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
     const inviter = open(made.inviter, pkarr, { dht: true });
     await run(2_000);
     const joiner = open(made.joiner, pkarr, { dht: true });
     expect(await until(() => inviter.link.isDataLinkOpen && joiner.link.isDataLinkOpen, 60_000)).toBeLessThan(Infinity);
-    // A copy of the invite publishes in the joiner's mailbox, signed by a key of its own.
+    // A copy of the invite publishes in the joiner's mailbox, and on its link's signals, signed by a key of its own.
     const copy = open({ ...made.joiner, seedB64: createIdentity().seedB64 }, pkarr, { dht: true, credentials: { seedB64: createIdentity().seedB64 } });
-    await stop(joiner);
-    expect(await until(() => inviter.states.some(s => s.keyMismatch), 5 * 60_000 + 30_000)).toBeLessThan(Infinity);
+    await run(5 * 60_000 + 30_000);
+    expect(inviter.states.some(s => s.keyMismatch), "no stop").toBe(false);
+    expect(inviter.link.textDelivery).not.toBe("unavailable");
+    await say(inviter, joiner, "still here");
+    await say(joiner, inviter, "me too");
     await stop(copy);
-    expect(inviter.link.isDataLinkOpen).toBe(false);
-    expect(inviter.link.textDelivery).toBe("unavailable");
-  }, 120_000);
+    // With the stream gone, the DHT still carries text between the two.
+    await stop(joiner);
+    const back = open(made.joiner, pkarr, { dht: true, credentials: joiner.credentials, dhtState: joiner.dhtState });
+    expect(await until(() => back.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await say(back, inviter, "back");
+  }, 240_000);
 });
 
 function createIdentityKey(seedB64: string): string {

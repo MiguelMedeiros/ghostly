@@ -7,7 +7,7 @@ import { createIdentity, type Identity } from "../../src/identity";
 import type { GhostRecord, SignedPacket } from "../../src/pkarr";
 import type { PkarrRequestOptions, PkarrTransport } from "../../src/transport";
 import type { PairingProgress } from "../../src/pairingProgress";
-import { emptyDhtDeliveryState, type DhtDeliveryState } from "../../src/dhtDelivery";
+import { emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../../src/dhtDelivery";
 import type { PairingCredentials, PairingState } from "../../src/pairedSession";
 
 /**
@@ -164,6 +164,8 @@ export interface Opened {
   /** With `dht`: the credentials both layers share, what arrived (by id, in order), receipts, pairing states. */
   credentials: PairingCredentials; received: { id?: string; text: string; via: string }[]; receipts: string[]; states: PairingState[];
   dhtState: DhtDeliveryState;
+  /** With `dht`: the DHT delivery's last view. */
+  dhtView?: DhtDeliveryView;
 }
 
 const opened: GhostLink[] = [];
@@ -197,6 +199,7 @@ export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean
       onMessageReceipt: id => { receipts.push(id); },
       onPairingState: state => { states.push(state); },
       onDataLinkState: options.onDataLinkState,
+      onDhtDelivery: view => { result.dhtView = view; },
     },
   });
   opened.push(link);

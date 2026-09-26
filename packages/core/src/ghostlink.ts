@@ -464,7 +464,6 @@ export class GhostLink {
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
       changed: view => {
         options.events?.onDhtDelivery?.(view);
-        if (view.error?.includes("does not match")) this.dhtKeyRejected();
         this.streamBlockChanged();
         // A contact who chose DHT only (a ghostly1 code carries no mode) paired through the mailbox: the first
         // pairing ends on the DHT, chosen (WISP 400), and the stream attempt it will never answer is not a failure.
@@ -667,19 +666,17 @@ export class GhostLink {
     const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
       this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
     if (verified) void this.dataLink.handleSignal(verified);
-    else if (credentials?.requireSignedSignals && !this.isDataLinkOpen) {
-      // Only a valid signature from another key establishes a mismatch.
-      // Malformed or forged traffic cannot claim a new contact identity.
-      const keyMismatch = !!credentials.peerKey && !!verifyPairedSignal(signal,
-        options.params.peerPubKeyZ32, this.myPubKeyZ32, undefined, true);
+    else if (credentials?.peerKey) {
+      // The link's records are published under keys derived from the invite: anyone holding a copy of it can put a
+      // signal there, signed by a key of their own or by none. After the pin such a signal is dropped, never a reason
+      // to stop the chat; one validly signed by another key is a passive warning (WISP 400).
+      if (verifyPairedSignal(signal, options.params.peerPubKeyZ32, this.myPubKeyZ32, undefined, true)) this.dht?.foreignKeySeen("signal");
+      else traceLink(this.myPubKeyZ32, "signal-dropped", {});
+    } else if (credentials?.requireSignedSignals && !this.isDataLinkOpen) {
       this.securityRejected = true;
-      // Signed by another key than the one pinned (on either path): the chat stops on both layers.
-      if (keyMismatch) { this.keyStopped = true; traceLink(this.myPubKeyZ32, "key-stop", { path: "signal" }); }
-      this.tracker?.failed(keyMismatch ? "key-mismatch" : "rejected", false);
-      options.events?.onPairingState?.({ status: "error", keyMismatch, error: keyMismatch
-        ? "This connection uses a different participation key. The saved contact has not been replaced; use a fresh invitation for a new contact."
-        : "Ignored an unauthenticated discovery signal. Keep both peers on the updated version; the saved key has not been replaced.",
-      });
+      this.tracker?.failed("rejected", false);
+      options.events?.onPairingState?.({ status: "error", keyMismatch: false,
+        error: "Ignored an unauthenticated discovery signal. Keep both peers on the updated version; the saved key has not been replaced." });
     }
   }
 
@@ -765,22 +762,17 @@ export class GhostLink {
 
   private get streamBlocked(): boolean { return this.deliveryMode === "dht" || this.dht?.peerMode === "dht"; }
   /**
-   * The DHT path met a participation key other than the pinned one: a security rejection, which stops the chat
-   * on both layers until the person acts (WISP 400), never a reason to fall back to the other path.
+   * A stream authenticated a participation key other than the pinned one: a security rejection, which stops the chat
+   * on both layers until the person acts (WISP 400), never a reason to fall back to the other path. Only a stream can
+   * prove it: the DHT mailbox and the link's signals are written under keys any copy of the invite derives, so another
+   * key there is ignored instead.
    */
   private keyStopped = false;
-  private dhtKeyRejected(): void {
-    if (this.keyStopped) return;
-    this.keyStopped = true;
-    traceLink(this.myPubKeyZ32, "key-stop", { path: "dht" });
-    this.tracker?.failed("key-mismatch", false);
-    if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
-    this.options.events?.onPairingState?.({ status: "error", keyMismatch: true, peerKey: this.options.pairing?.credentials.peerKey,
-      error: "This chat met a participation key other than your contact's. It has stopped; the saved contact has not been replaced." });
-  }
+  /** A connection whose failure to authenticate says nothing about the contact: dialled in on a pinned chat. */
+  private unproven(channel: FrameChannel): boolean { return this.dialedIn.has(channel) && !!this.options.pairing?.credentials.peerKey; }
   get textDelivery(): "stream" | "dht" | "unavailable" {
     if (this.isDataLinkOpen) return "stream";
-    if (!this.dht || this.securityRejected || this.keyStopped || this.dht.view.error?.includes("key does not match")) return "unavailable";
+    if (!this.dht || this.securityRejected || this.keyStopped) return "unavailable";
     if (this.deliveryMode === "dht") return "dht";
     // A session that the policies keep from carrying the chat (a transport waited for with Fallback off) is not live:
     // text goes over the DHT floor meanwhile, as with no session (WISP 100).
@@ -1135,6 +1127,7 @@ export class GhostLink {
     this.endpoints.set(endpoint.transport, endpoint);
     endpoint.onConnection = ({ channel, binding }) => {
       if (this.streamBlocked) { channel.close(); return; }
+      this.dialedIn.add(channel);
       const plan = this.switcher.pending;
       if (this.channel && plan?.choices.includes(binding.transport)) {
         void this.attachCandidate(channel, binding, plan).catch(() => {}); return;
@@ -1822,6 +1815,13 @@ export class GhostLink {
     return new Promise<void>((resolve, reject) => this.attach(channel, binding, { plan, resolve, reject }));
   }
 
+  /**
+   * Connections that came in on this side's native endpoints. Their address was in the capability record, which before
+   * the pin anyone holding a copy of the invite could read: a key other than the pinned one on such a connection proves
+   * no more than on the DHT, so it closes that connection and nothing else.
+   */
+  private readonly dialedIn = new WeakSet<FrameChannel>();
+
   private attach(channel: FrameChannel, binding?: NativeBinding, migration?: { plan: SwitchPlan; resolve(): void; reject(error: Error): void }): void {
     if (this.options.params.profile) {
       const fingerprints = this.dataLink.fingerprints;
@@ -1854,8 +1854,15 @@ export class GhostLink {
         cashuPaymentsSupport: this.paymentEnabled("cashu"),
         lightningPaymentsSupport: this.paymentEnabled("lightning"),
         paymentsSupport: PAYMENT_METHODS.some(m => this.paymentEnabled(m)) && !!this.options.events?.onPayment && !!this.options.events?.onPaymentRequest && !!this.options.events?.onPaymentResult,
-        onState: () => { if (this.channel === channel) this.emitPairingState(); },
+        onState: () => { if (this.channel === channel && !(this.unproven(channel) && paired.state.status === "error")) this.emitPairingState(); },
         onFailure: () => {
+          if (this.unproven(channel)) {
+            if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
+            traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));
+            channel.close(); if (this.channel === channel) this.detach();
+            return;
+          }
           this.securityRejected = true;
           // Another key on the stream than the one pinned: the chat stops on both layers, the DHT's too.
           if (paired.state.keyMismatch) { this.keyStopped = true; traceLink(this.myPubKeyZ32, "key-stop", { path: "stream" }); }

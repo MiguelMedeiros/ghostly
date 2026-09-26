@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 501; editorial family allocation |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-25 |
+| Revision | 0.3.1 |
+| Updated | 2026-09-26 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
 | Implementation | Negotiated paired data links; WebRTC and supported native adapters. |
@@ -39,7 +39,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 
 ### Rules
 
-- **Consent.** A receiver takes a file of at most 25 MiB by itself while what it took that way from this contact (and still keeps) stays within 500 MiB; anything else waits for its person, who sees the name, the size and its own free space. A file larger than that space is refused with `no-room`. At most 16 offers per contact wait for an answer; the 17th is refused with `too-many`. An offer nobody answers ends after seven days (`expired`). Consent given while the sender is away holds: the next offer is accepted.
+- **Consent.** A receiver takes a file of at most 25 MiB by itself while what it took that way from this contact (and still keeps) stays within 500 MiB; anything else waits for its person, who sees the name, the size and its own free space. A file larger than that space is refused with `no-room`. At most 16 offers per contact wait for an answer; the 17th is refused with `too-many`. An offer nobody answers ends after seven days (`expired`), and the same offer sent again afterwards is refused with `expired`, never taken: nothing was agreed. A file that was taken (by the person or within those limits) and failed here (damaged, not stored) is taken again from the start when offered again. Consent given while the sender is away holds: the next offer is accepted.
 - **Flow.** A sender keeps at most 1 MiB sent and not confirmed. A receiver confirms at least every 128 KiB and whenever it has stored all it received. At most 3 files arrive from one contact at once; accepted ones beyond wait with `busy` and are accepted in turn.
 - **Resume.** Every answer is idempotent, so the sender only follows the last one: an `accept` moves it to that offset, backwards too. A receiver that sees data past what it has (a chunk lost in a transport switch) answers with an `accept` at what it has, once per gap. A sender that hears nothing for 30 s while something is outstanding offers again. A receiver makes what it stored durable every 8 MiB and records that point; after a restart it truncates the file there and accepts from it.
 - **Integrity.** The receiver computes the SHA-256 of what it stored (read back, not what passed through memory) and compares it with `pf-sum`. A mismatch deletes the file and is refused with `damaged`; the sender may offer it again under the same id, and the receiver takes it from the start without asking again.
@@ -62,6 +62,7 @@ For `files/2`: the common contract's 100 MiB file bound, three concurrent incomi
 
 ## Revision log
 
+- 0.3.1 (2026-09-26): an offer that expired unanswered is refused when offered again, never taken without consent.
 - 0.3 (2026-09-25): `files/3`: offer and consent, advertised room, 1 MiB window, resume from the stored offset after a drop, a switch or a restart, SHA-256 checked on what was stored, pause and cancel from either side. `files/2` kept for older apps.
 - 0.2 (2026-09-25): renamed Chat Files; place in the one chat; behaviour on a drop to the DHT.
 - 0.1 (2026-09-22): paired files profile.

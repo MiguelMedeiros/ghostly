@@ -57,14 +57,51 @@ it("rejects oversized UTF8 instead of truncating and stops retransmission at exp
   const b=h.make(1);await b.start();await vi.advanceTimersByTimeAsync(1000);expect(h.messages[1].size).toBe(0);
   await a.stop();await b.stop();
 });
-it("fails closed on a replacement participation key and exposes real publication errors",async()=>{
+it("ignores a replacement participation key without stopping, and exposes real publication errors",async()=>{
   vi.useFakeTimers();const h=setup(),a=h.make(0),b=h.make(1);await a.start();await b.start();await vi.advanceTimersByTimeAsync(4500);
-  await a.stop();h.credentials[0].seedB64=createIdentity().seedB64;
+  await a.stop();const pinned=h.credentials[1].peerKey;h.credentials[0].seedB64=createIdentity().seedB64;
   const replacement=h.make(0);await replacement.start();await vi.advanceTimersByTimeAsync(4500);
-  expect(h.views[1].mock.lastCall?.[0].error).toContain("does not match");
+  // Its envelopes are sealed with the invite key or to a key it cannot know: nothing is taken, and nothing stops.
+  expect(h.views[1].mock.lastCall?.[0].error).toBeUndefined();
   h.publish.mockRejectedValueOnce(new Error("relay unavailable"));
   expect(await replacement.send("private hello",Date.now(),"abcdefghijklmnopqrstuv")).toContain("publication failed");
-  expect(h.messages[1].size).toBe(0);await replacement.stop();await b.stop();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(h.messages[1].size).toBe(0);
+  expect(h.credentials[1].peerKey,"the pin is not replaced").toBe(pinned);
+  await replacement.stop();await b.stop();
+});
+
+it("a copy of the invite, publishing in both invite mailboxes, neither stops the chat nor loses a text",async()=>{
+  vi.useFakeTimers();const h=setup(),a=h.make(0),b=h.make(1);
+  await a.start();await b.start();await vi.advanceTimersByTimeAsync(4500);
+  const pins=h.credentials.map(c=>c.peerKey);
+  expect(pins.every(Boolean)).toBe(true);
+  // A text each way, and both sides are in the pinned mailboxes.
+  expect(await a.send("one",Date.now(),"aaaaaaaaaaaaaaaaaaaaaa")).toBeNull();await vi.advanceTimersByTimeAsync(10_000);
+  expect(await b.send("two",Date.now(),"bbbbbbbbbbbbbbbbbbbbbb")).toBeNull();await vi.advanceTimersByTimeAsync(10_000);
+  // The last side to move publishes there with its next envelope (a control one at the latest): here, one more text each way.
+  expect(await a.send("one again",Date.now(),"aaaaaaaaaaaaaaaaaaaaab")).toBeNull();await vi.advanceTimersByTimeAsync(10_000);
+  expect(await b.send("two again",Date.now(),"bbbbbbbbbbbbbbbbbbbbbc")).toBeNull();await vi.advanceTimersByTimeAsync(10_000);
+  expect([h.saved[0].peerPinned,h.saved[1].peerPinned]).toEqual(["seen","seen"]);
+  // Someone holding the invite: either side's link keys and a participation key of its own, republishing all the time.
+  const copies=[0,1].map(i=>new DhtDelivery({params:h.params[i],mode:"dht",credentials:{seedB64:createIdentity().seedB64},transport:{publish:h.publish,resolve:h.resolve,describe:()=>({protocol:"copy",relays:[]})},
+    save:async()=>{},pin:async()=>{},message:async()=>{},receipt:async()=>{},changed:()=>{},pollMs:100}));
+  for(const copy of copies)await copy.start();
+  const flood=setInterval(()=>{for(const copy of copies)void copy.send("spam",Date.now(),"zzzzzzzzzzzzzzzzzzzzzz");},1_000);
+  expect(await a.send("three",Date.now(),"cccccccccccccccccccccc")).toBeNull();await vi.advanceTimersByTimeAsync(10_000);
+  expect(await b.send("four",Date.now(),"dddddddddddddddddddddd")).toBeNull();await vi.advanceTimersByTimeAsync(10_000);
+  clearInterval(flood);
+  expect(h.messages[1].get("cccccccccccccccccccccc")).toBe("three");
+  expect(h.messages[0].get("dddddddddddddddddddddd")).toBe("four");
+  expect([...h.messages[0].values(),...h.messages[1].values()]).not.toContain("spam");
+  expect(h.receipts[0]).toHaveBeenCalledWith("cccccccccccccccccccccc");
+  expect(h.receipts[1]).toHaveBeenCalledWith("dddddddddddddddddddddd");
+  for(const i of [0,1]){
+    expect(h.views[i].mock.lastCall?.[0].error).toBeUndefined();
+    expect(h.credentials[i].peerKey).toBe(pins[i]);
+    expect(h.saved[i]).not.toHaveProperty("peerRejected");
+  }
+  for(const copy of copies)await copy.stop();await a.stop();await b.stop();
 });
 
 it("accepts offline text for stream-preferring authenticated peers and preserves pending intent across mode changes", async () => {
