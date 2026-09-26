@@ -10,6 +10,7 @@ import { listSessions } from "../../lib/storage";
 import { RichText } from "../rich/RichText";
 import { ACTIVITY_NETWORKS } from "./activityNetworks";
 import { ago } from "./contactBadges";
+import { contactFace, faceChoice, shownContactName } from "./contactFace";
 import "./identity-activity.css";
 
 
@@ -17,11 +18,13 @@ const number = (n: number) => n.toLocaleString();
 const hostList = (hosts: string[]) => (hosts.length <= 1 ? hosts.join("") : `${hosts.slice(0, -1).join(", ")} and ${hosts[hosts.length - 1]}`);
 const fullDate = (seconds: number) => new Date(seconds * 1000).toLocaleString();
 
-/** A contact's name for a chip: the chat's name here, what they call themselves, or their key's tag. */
+/** A contact's name for a chip, as the chat list shows it: a nickname, the identity they are shown as, their own name, or their key's tag. */
 function contactName(linkId: string, links: readonly LinkView[]): string {
-  const peer = links.find(l => l.id === linkId)?.peerPubKeyZ32;
+  const link = links.find(l => l.id === linkId);
+  const peer = link?.peerPubKeyZ32;
   const session = peer ? listSessions().find(s => s.peerPubKeyB64 === peer) : undefined;
-  return session?.label || session?.nick || `Contact · ${contactTag(peer ?? linkId)}`;
+  const face = peer ? contactFace(link?.identities?.received, faceChoice(peer)) : undefined;
+  return shownContactName({ nickname: session?.label, face, nick: session?.nick, fallback: `Contact · ${contactTag(peer ?? linkId)}` }).name;
 }
 
 /**
