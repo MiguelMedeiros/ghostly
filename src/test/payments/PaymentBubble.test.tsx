@@ -14,7 +14,8 @@ const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, spark: 
 
 /** The bubble of payment "pay-1" in the chat with "peer". */
 function show(payment: Partial<PaymentView>, { wallet, link }: { wallet?: Partial<WalletView>; link?: Partial<LinkView> } = {}) {
-  fakeEngine.setState({ links: [linkView(link)], wallet, payments: { "pay-1": paymentView(payment) } });
+  // Unless a test says otherwise, the profile has a Cashu wallet on each network: a request of either can be paid.
+  fakeEngine.setState({ links: [linkView(link)], wallet: wallet ?? { mints: [mint(REAL_MINT, 0), mint(TEST_MINT, 0)] }, payments: { "pay-1": paymentView(payment) } });
   return renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
 }
 /** A request from the contact, still to be paid. */
@@ -157,8 +158,14 @@ describe("paying a request with Cashu", () => {
     expect(engine.callsTo("preparePayment")[0]).toMatchObject({ network: "testnet", target: { network: "cashu-test", provider: TEST_MINT } });
   });
 
-  it("cannot pay a Testnet request from a Mainnet mint, even one it names", () => {
+  it("cannot pay a Testnet request from a Mainnet mint, even one it names: it says test money is asked for, and offers no Review", () => {
     show(incomingRequest({ network: "testnet", mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
+    expect(screen.getByTestId("payment-network-missing")).toHaveTextContent("Test money is asked for (test sats), and you have no Testnet wallet to pay it from");
+    expect(screen.queryByRole("combobox", { name: "Cashu mint" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
+  });
+  it("with a Testnet wallet that shares no mint with the request, says so on the mint list", () => {
+    show(incomingRequest({ network: "testnet", mints: ["https://other-test.mint"] }), { wallet: { mints: [mint(TEST_MINT, 900)] } });
     expect(screen.getByRole("combobox", { name: "Cashu mint" })).toHaveTextContent("No shared configured mint");
     expect(payButton()).toBeDisabled();
   });

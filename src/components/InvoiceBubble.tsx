@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
+import { walletNetworkOf } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { lightningNetworkFor } from "./walletCardData";
+import { MONEY_LABEL, NetworkTag, satsOf } from "./NetworkTag";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { CashuInspection } from "../lib/platform";
 import type { MoneyInText } from "../lib/money";
@@ -44,8 +46,10 @@ function useCopy(value: string) {
   };
 }
 
-function Card({ label, amount, unit, lines, qr, children, testId }: {
+function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
   label: string;
+  /** Which money: the network's tag beside the label. */
+  tag?: React.ReactNode;
   amount: number | null;
   unit: string;
   lines: (string | undefined)[];
@@ -56,7 +60,7 @@ function Card({ label, amount, unit, lines, qr, children, testId }: {
   const [showQr, setShowQr] = useState(true);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId}>
-      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{label}</p>
+      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{label}{tag}</p>
       <p className="m-0 mt-0.5 leading-tight">
         {amount === null ? (
           <span className="text-[15px] font-semibold">Any amount</span>
@@ -102,7 +106,11 @@ function relativeExpiry(expiresAt: number, now: number): string {
 function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: boolean; off: boolean }) {
   const all = useServicesPlatform()?.wallet;
   // Paid by the Lightning wallet of the invoice's network: a test invoice never meets real money.
+  const network = walletNetworkOf(invoice.network);
   const wallet = all?.forNetwork(lightningNetworkFor(all.getState(), invoice.network));
+  // No Lightning wallet on the invoice's network (the profile's wallets are known): said in words, nothing pays it.
+  const known = all?.getState()?.wallets;
+  const noWallet = !!known && !known.some((w) => w.type === "lightning" && w.network === network);
   const id = invoice.paymentHash ?? invoice.invoice.slice(-32);
   const [paid, setPaid] = useState(() => isSettled(id));
   // Handed to the mint, which has not settled it yet: paying again could pay twice.
@@ -134,9 +142,10 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
     <Card
       testId="invoice-bubble"
       label={invoice.network === "bitcoin" ? "Lightning invoice" : `Lightning invoice · ${invoice.network}`}
+      tag={<NetworkTag network={network} testId="invoice-network" />}
       amount={invoice.amountSat}
-      unit="sat"
-      lines={[invoice.description, paid ? undefined : relativeExpiry(invoice.expiresAt, now)]}
+      unit={satsOf(network)}
+      lines={[invoice.description, paid ? undefined : relativeExpiry(invoice.expiresAt, now), !mine && !paid && noWallet ? `${MONEY_LABEL[network]}: you have no ${network === "testnet" ? "Testnet" : "Mainnet"} Lightning wallet to pay it from` : undefined]}
       qr={`lightning:${invoice.invoice}`.toUpperCase()}
     >
       {paid ? (
@@ -173,7 +182,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
         </>
       ) : (
         <>
-          {wallet && !mine && !off && !expired && invoice.amountSat !== null && (
+          {wallet && !mine && !off && !expired && !noWallet && invoice.amountSat !== null && (
             <button className={button} disabled={busy} data-testid="invoice-pay" onClick={() => run(async () => setQuote(await wallet.quoteInvoice(invoice.invoice)))}>
               {busy ? "Checking…" : "Pay"}
             </button>
