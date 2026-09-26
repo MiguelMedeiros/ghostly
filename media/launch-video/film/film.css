@@ -76,7 +76,7 @@ html, body { margin: 0; background: #000; overflow: hidden; }
 .phone-send.big { width: 76px; height: 76px; font-size: 32px; flex: none; }
 .muted { color: var(--theme-text-muted); }
 .composer { display: flex; align-items: center; gap: 24px; box-sizing: border-box; padding: 18px 18px 18px 40px; border-radius: 60px; background: #1b2830; border: 2px solid #2a3942; font-size: 38px; white-space: nowrap; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, .6); }
-.composer > span:first-child { flex: 1; overflow: hidden; text-overflow: clip; direction: rtl; text-align: left; }
+.composer > span:first-child { flex: 1; overflow: hidden; }
 
 dialog[data-testid=secret-guard] { transform: translate(var(--guard-x, 0), var(--guard-y, 0)) scale(var(--guard-s, 1)); box-shadow: 0 30px 90px rgba(0, 0, 0, .8), 0 0 0 2px rgba(234, 67, 53, .6); }
 dialog[data-testid=secret-guard]::backdrop { background: rgba(0, 0, 0, .35); }

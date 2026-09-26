@@ -90,7 +90,7 @@ const graph = [
   `${label(0, scoreParts)}amix=inputs=${scoreParts}:normalize=0:duration=longest,atrim=duration=${DURATION}[score]`,
   `${label(scoreParts, chains.length)}amix=inputs=${chains.length - scoreParts}:normalize=0:duration=longest,apad,atrim=duration=${DURATION},asplit=3[cues][key][cueout]`,
   // The score ducks under every cue: a sidechain on the cues.
-  `[score][key]sidechaincompress=threshold=0.03:ratio=5:attack=4:release=180:makeup=1[ducked]`,
+  `[score][key]sidechaincompress=threshold=0.1:ratio=3:attack=4:release=180:makeup=1[ducked]`,
   `[ducked]asplit=2[duckmix][duckout]`,
   `[duckmix][cues]amix=inputs=2:normalize=0,alimiter=limit=0.95:attack=2:release=40[mix]`,
 ];

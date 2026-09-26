@@ -20,7 +20,7 @@ const [width, height] = { "16x9": [1920, 1080], "9x16": [1080, 1920], "1x1": [10
 const out = join(here, "out", format);
 mkdirSync(out, { recursive: true });
 
-const server = await createServer({ configFile: join(here, "vite.config.ts"), server: { port: Number(process.env.FILM_PORT ?? 5391) } });
+const server = await createServer({ configFile: join(here, "vite.config.ts"), server: { port: Number(process.env.FILM_PORT ?? 5391), hmr: false, watch: null } });
 await server.listen();
 const url = `http://localhost:${server.config.server.port}/?format=${format}`;
 const browser = await chromium.launch({ headless: true });

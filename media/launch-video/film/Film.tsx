@@ -82,7 +82,7 @@ function LogoScene({ t, wide }: Props) {
   const end = M.code;
   if (t >= end + 0.01) return null;
   const pop = ease.spring(prog(t, M.logo, 0.75));
-  const moved = ease.outExpo(prog(t, M.word, 0.4));
+  const moved = ease.outExpo(prog(t, M.word, 0.3));
   const out = prog(t, end - 0.12, 0.12);
   const [sx, sy] = shake(t, M.v1, 16);
   const ghostX = lerp(0, wide ? -470 : -300, moved), ghostS = lerp(1.9, 1, moved) * pop;
@@ -92,7 +92,7 @@ function LogoScene({ t, wide }: Props) {
     <At x={ghostX} y={wide ? -10 : -40} s={ghostS}><Ghost size={180} blink={blinkAt(t, M.blink)} /></At>
     <At x={wide ? 60 : 40} y={wide ? 0 : -30}>
       <span className="word hero">{letters.map((letter, i) => {
-        const p = prog(t, M.word + i * BEAT / 8, 0.32);
+        const p = prog(t, M.word + BEAT / 4 + i * BEAT / 8, 0.32);
         return <span key={i} style={{ display: "inline-block", opacity: clamp(p * 3), transform: `translateY(${lerp(90, 0, ease.outBack(p))}px)` }}>{letter}</span>;
       })}</span>
     </At>
@@ -259,7 +259,7 @@ function IdScene({ t, wide }: Props) {
   const leave = ease.inCubic(prog(t, M.shared, 0.3));
   const [sx, sy] = shake(t, M.verified, 18, 0.35);
   const pop = ease.spring(prog(t, M.photo, 0.55), 1.6);
-  const slots = wide ? [-500, 0, 500] : [-250, 0, 250];
+  const slots = wide ? [-600, 0, 600] : [-250, 0, 250];
   return <div className="scene" style={{ transform: `translate(${sx}px, ${sy}px)`, "--photo-pop": pop } as CSSProperties}>
     <Word t={t} from={M.ids} until={M.verified} y={wide ? -420 : -640} size={110}>Your identities.</Word>
     <Word t={t} from={M.share} until={M.shared + 0.2} y={wide ? 420 : 640} size={110} color="var(--film-glow)">Yours to share.</Word>
@@ -268,8 +268,8 @@ function IdScene({ t, wide }: Props) {
       const flip = prog(t, M.flips[i], 0.34);
       const turn = lerp(180, 0, ease.outBack(flip, 1.2));
       const center = i === 1;
-      let x = slots[i] * lerp(1, center ? 1 : 1.18, focus), y = lerp(900, 0, slide) + (center ? -20 * focus : 30 * focus);
-      let s = (wide ? 1 : 0.85) * (center ? lerp(1, 1.3, focus) : lerp(1, 0.86, focus));
+      let x = slots[i] * lerp(1, center ? 1 : 1.12, focus), y = lerp(900, 0, slide) + (center ? -20 * focus : 30 * focus);
+      let s = (wide ? 1.22 : 0.85) * (center ? lerp(1, 1.4, focus) : lerp(1, 0.8, focus));
       let o = center ? 1 : 1 - 0.45 * focus;
       if (!wide) { y += [-420, 0, 420][i] * (1 - focus * 0) ; x = 0; }
       // Shared: the middle card flies into the chat, the others fall away.
@@ -354,7 +354,7 @@ function PrivateScene({ t, wide }: Props) {
       <Word t={t} from={M.keys} until={M.seed - 0.12} x={wide ? 60 : 50} y={wide ? 190 : 20} size={150} color="var(--film-glow)">Your keys.</Word>
     </div>
     <At x={sx} y={(wide ? 330 : 420) + sy + lerp(200, 0, composer)} o={composer}>
-      <div className="composer" style={{ width: wide ? 1300 : 960 }}><span className={typed ? "" : "muted"}>{typed || "Message"}{typed && <span className="caret" />}</span><span className="phone-send big" style={{ transform: `scale(${1 - 0.2 * Math.sin(prog(t, M.guard - 0.12, 0.2) * Math.PI)})` }}>➤</span></div>
+      <div className="composer" style={{ width: wide ? 1300 : 960 }}><span className={typed ? "" : "muted"}>{typed ? (typed.length > 50 ? "…" + typed.slice(-50) : typed) : "Message"}{typed && <span className="caret" />}</span><span className="phone-send big" style={{ transform: `scale(${1 - 0.2 * Math.sin(prog(t, M.guard - 0.12, 0.2) * Math.PI)})` }}>➤</span></div>
     </At>
     {guardOn && <SecretGuardDialog finding={{ kind: "mnemonic" }} recipient="Launch crew" onCancel={() => {}} onConfirm={() => {}} />}
     <Word t={t} from={M.safe} until={M.words[0] - 0.1} y={wide ? 430 : 700} size={110} color="var(--film-glow)">Leak stopped.</Word>
