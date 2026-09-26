@@ -67,7 +67,7 @@ describe("a link preview in the composer", () => {
     await new Promise(resolve => setTimeout(resolve, 800));
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     send();
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://news.example/a and more", undefined));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://news.example/a and more"));
     expect(fetch).toHaveBeenCalledOnce();
   });
 
@@ -90,7 +90,7 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
     send();
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page", undefined));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
   });
 });
 
