@@ -28,6 +28,7 @@ import { setOwnDidSource } from '../proofs/providers/did';
 import { ProfileDid } from './did';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { PublicProfiles, type ProfileSubject } from './publicProfiles';
+import { PublicActivity } from './publicActivity';
 import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
@@ -122,6 +123,9 @@ import type {
   WalletTx,
   WalletType,
   WalletView,
+  PublicGraphView,
+  PublicPostImageView,
+  PublicPostsView,
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
@@ -609,7 +613,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkIds: () => [...this.links.keys()],
     online: () => this.settings.online,
-    emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); },
+    emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     publicProfile: (provider, subject) => this.publicProfiles.view({ provider, subject }),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
     resolve: async key => (await this.transport.resolve(key))?.records ?? null,
@@ -668,17 +672,37 @@ export class GhostlyNode implements EngineImplementation {
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
   });
 
-  /** Every identity whose public profile may be shown: the profile's own current proofs, and what contacts shared that verifies now. */
-  private profileSubjects(): ProfileSubject[] {
+  /** A contact's verified identity's posts and follows, asked when its card is chosen (PUBLIC-PROFILES.md, "Posts and follows"). */
+  private readonly publicActivity = new PublicActivity({
+    enabled: () => this.settings.publicProfiles !== false,
+    online: () => this.settings.online,
+    eligible: () => this.profileSubjects(),
+    nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
+    own: () => { const t = Math.floor(Date.now() / 1000); return this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject })); },
+    contacts: () => this.contactSubjects(),
+    ownNostrFollows: () => this.nostrSocial.ownFollows(),
+    nostrMuted: (note, author) => this.nostrSocial.hides(note, author),
+  });
+
+  /** What contacts shared that verifies now, with the chat it came in (paired chats only). */
+  private contactSubjects(): (ProfileSubject & { linkId: string })[] {
     const t = Math.floor(Date.now() / 1000);
-    const out: ProfileSubject[] = this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject }));
+    const out: (ProfileSubject & { linkId: string })[] = [];
     for (const live of this.links.values()) {
       const stored = live.stored;
       if (!stored.profile || !stored.identities || stored.group) continue;
       const mine = stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined;
       for (const r of stored.identities.received)
-        if (receivedIdentityStatus(r, stored.pairedPeerKey, mine, t) === "verified") out.push({ provider: r.binding.provider, subject: r.verified.subject });
+        if (receivedIdentityStatus(r, stored.pairedPeerKey, mine, t) === "verified") out.push({ provider: r.binding.provider, subject: r.verified.subject, linkId: stored.id });
     }
+    return out;
+  }
+
+  /** Every identity whose public profile may be shown: the profile's own current proofs, and what contacts shared that verifies now. */
+  private profileSubjects(): ProfileSubject[] {
+    const t = Math.floor(Date.now() / 1000);
+    const out: ProfileSubject[] = this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject }));
+    for (const c of this.contactSubjects()) out.push({ provider: c.provider, subject: c.subject });
     return out;
   }
 
@@ -958,6 +982,7 @@ export class GhostlyNode implements EngineImplementation {
     this.did.stop();
     this.nostrSocial.stop();
     this.publicProfiles.stop();
+    this.publicActivity.clear();
     for (const network of WALLET_NETWORKS) {
       await this.arkWallets[network].stop();
       await this.barkWallets[network].stop();
@@ -1221,6 +1246,15 @@ export class GhostlyNode implements EngineImplementation {
   }
   loadPublicProfile(params: { provider: string; subject: string; force?: boolean }): Promise<void> {
     return this.publicProfiles.request({ provider: String(params.provider), subject: String(params.subject), force: params.force === true });
+  }
+  loadPublicPosts(params: { provider: string; subject: string; more?: boolean; force?: boolean }): Promise<PublicPostsView | null> {
+    return this.publicActivity.loadPosts({ provider: String(params.provider), subject: String(params.subject), more: params.more === true, force: params.force === true });
+  }
+  loadPublicGraph(params: { provider: string; subject: string; force?: boolean }): Promise<PublicGraphView | null> {
+    return this.publicActivity.loadGraph({ provider: String(params.provider), subject: String(params.subject), force: params.force === true });
+  }
+  loadPublicPostImage(params: { provider: string; subject: string; postId: string; index: number }): Promise<PublicPostImageView> {
+    return this.publicActivity.loadImage({ provider: String(params.provider), subject: String(params.subject), postId: String(params.postId), index: Number(params.index) });
   }
   nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): Promise<void> { return this.nostrSocial.loadContact(params); }
   nostrForgetContact(params: { linkId: string; subject: string }): Promise<void> { return this.nostrSocial.forgetContact(params); }
@@ -2593,7 +2627,7 @@ export class GhostlyNode implements EngineImplementation {
       if (settings.publicProfiles !== false) delete this.settings.publicProfiles;
       else this.settings.publicProfiles = false;
       await db.putSettings(this.settings);
-      if (settings.publicProfiles === false) await this.publicProfiles.clear();
+      if (settings.publicProfiles === false) { await this.publicProfiles.clear(); this.publicActivity.clear(); }
     }
     // Contacts connected now are told at once, the others on their next session.
     if (settings.avatar !== undefined || settings.shareProfile !== undefined) {

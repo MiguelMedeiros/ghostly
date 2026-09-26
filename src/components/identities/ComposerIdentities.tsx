@@ -53,8 +53,10 @@ const spoken = (card: IdCardContent) => `your ${card.attested ? "account" : card
  * Once done the back says so, then the card turns face up again. The last card adds an identity without leaving the
  * chat; removing or renewing one happens on the Identities page.
  */
-export function ComposerIdentityPicker({ peerKey, contact, onClose, onShared, anchorRef }: {
+export function ComposerIdentityPicker({ peerKey, contact, initial, onClose, onShared, anchorRef }: {
   peerKey: string; contact: string; onClose: () => void;
+  /** Opens on this identity of mine (a share of mine tapped in the chat's timeline). */
+  initial?: string;
   /** An identity was shared: the sheet's work is done (the chat's timeline shows the share). Closes it by default. */
   onShared?: () => void;
   anchorRef?: RefObject<HTMLElement | null>;
@@ -69,7 +71,7 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, onShared, an
     const anchor = anchorRef?.current;
     return () => { if (anchor?.isConnected) anchor.focus({ preventScroll: true }); };
   }, [anchorRef]);
-  return <IdentityPicker peerKey={peerKey} contact={contact} onManage={() => { onClose(); nav.open("/identities"); }} onAdding={setAdding} onShared={onShared ?? onClose} head focusOnOpen
+  return <IdentityPicker peerKey={peerKey} contact={contact} initial={initial} onManage={() => { onClose(); nav.open("/identities"); }} onAdding={setAdding} onShared={onShared ?? onClose} head focusOnOpen
     frame={({ side, tone }, children) => (
       <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-label="Your identities" data-testid="composer-identities" data-side={side}
         className={`composer-identities ${tone} focus:outline-none max-h-[70dvh] overflow-y-auto`}>{children}</ComposerSheet>
@@ -77,9 +79,8 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, onShared, an
 }
 
 /**
- * The identity picker itself, wherever it is shown: in the composer's sheet (ComposerIdentityPicker), and under
- * "Yours, for this contact" in the chat's identities panel (ContactIdentitiesPanel.tsx). `frame` wraps it (the sheet,
- * or the panel's section), wearing the chosen card's colour; `head` shows the sheet's title over the cards. With
+ * The identity picker itself: in the composer's sheet (ComposerIdentityPicker). `frame` wraps it, wearing the chosen
+ * card's colour; `head` shows the sheet's title over the cards. With
  * `focusOnOpen` the keys start on the chosen card as it opens (the sheet); the panel keeps its own focus.
  *
  * The first card is the profile's Ghostly identity, what the contact sees in any case: its name and picture, and

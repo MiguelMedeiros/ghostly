@@ -3,7 +3,7 @@ import type { IdentityFetch } from "../proofs/contract";
 import { assertPublicServer, resolveAtprotoDid } from "../proofs/atproto/resolve";
 import { chosenResolver } from "../proofs/domain";
 import { readRelays } from "../nostr/relay";
-import { KIND_FOLLOWS, KIND_PROFILE, MAX_PROFILE_CONTENT, newestOf, parseFollows, parseProfile, plainText } from "../nostr/social";
+import { httpsUrl, KIND_FOLLOWS, KIND_PROFILE, MAX_PROFILE_CONTENT, newestOf, parseFollows, parseProfile, plainText } from "../nostr/social";
 import { AVATAR_MAX_BYTES, decodeAvatar, fetchAvatar, PROFILE_AVATAR_SIDE, profileName, type AvatarResult } from "./public";
 
 /**
@@ -20,6 +20,8 @@ export interface PublicProfileData {
   handle?: string;
   /** A short bio. */
   about?: string;
+  /** The website the account names: an https address, no credentials. */
+  website?: string;
   /** A sanitized `data:image/jpeg;base64,…` URL, never a remote one. */
   avatar?: string;
   /** When the profile names a picture that is not shown, which rule refused it ("it is a GIF; …"). Never the identity. */
@@ -102,9 +104,16 @@ export const nostrReader: PublicProfileReader = {
     const following = followsEvent ? parseFollows(followsEvent, subject)?.follows.length : undefined;
     if (!p) return following === undefined ? { found: false, hosts } : profile({ following }, hosts);
     const picture = p.picture ? await fetchAvatar(p.picture, { fetcher: ctx.avatarFetch, side: PROFILE_AVATAR_SIDE, signal: ctx.signal }) : undefined;
-    return profile({ name: p.name, handle: p.handle, about: plainText(p.about, PROFILE_ABOUT_MAX, true), avatar: picture?.avatar, avatarMiss: picture?.miss, following }, [...hosts, ...(picture?.hosts ?? [])]);
+    return profile({ name: p.name, handle: p.handle, about: plainText(p.about, PROFILE_ABOUT_MAX, true), website: p.website, avatar: picture?.avatar, avatarMiss: picture?.miss, following }, [...hosts, ...(picture?.hosts ?? [])]);
   },
 };
+
+/** The first https link a Pubky profile lists (`links: [{ title, url }]`). */
+function pubkyWebsite(links: unknown): string | undefined {
+  if (!Array.isArray(links)) return;
+  for (const l of links.slice(0, 16)) { const url = httpsUrl((l as { url?: unknown } | null)?.url); if (url) return url; }
+  return;
+}
 
 /**
  * Pubky: the Pubky index (nexus.pubky.app) for exactly this key: `details` (its `id` must be the key; a deleted
@@ -136,6 +145,7 @@ export const pubkyReader: PublicProfileReader = {
     return profile({
       name: name === subject ? undefined : name,
       about: plainText(d.bio, PROFILE_ABOUT_MAX, true),
+      website: pubkyWebsite(d.links),
       avatar: picture?.avatar,
       avatarMiss: picture?.miss,
       followers: count(counts?.followers),
@@ -179,6 +189,7 @@ export const atprotoReader: PublicProfileReader = {
       name: profileName(d.displayName),
       handle: handle ? `@${handle}` : undefined,
       about: plainText(d.description, PROFILE_ABOUT_MAX, true),
+      website: httpsUrl(d.website),
       avatar: picture?.avatar,
       avatarMiss: picture?.miss,
       followers: count(d.followersCount),

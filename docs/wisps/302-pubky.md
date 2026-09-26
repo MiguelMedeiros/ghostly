@@ -61,6 +61,10 @@ Either way, WISP 300's revocation applies: every contact it was shared with is t
 - **What is public.** The file sits in a random folder under `/pub/ghostly.app/proofs/`: anyone listing the key's public storage can see that the key made a Ghostly proof and read its statement (the proof key and the dates), not who it was shared with.
 - **Least privilege.** One write capability, one folder, one use. A grant for anything more is refused before any write.
 
+## Public profile, posts and follows
+
+A verified Pubky identity's public profile, posts and follow lists are read from the Pubky index (`nexus.pubky.app`), never from the homeserver: `/v0/user/{z32}/details`, `/counts`, `/following`, `/followers`, `/v0/stream/posts?source=author&author_id={z32}`, `/static/avatar/{z32}` and `/static/files/{z32}/{file}/feed`. What each route answers, and the limits, are in [PUBLIC-PROFILES.md](PUBLIC-PROFILES.md#posts-and-follows-2026-09-26). This is indexed public metadata, not something the key signed.
+
 ## CSP
 
 Web (`connect-src 'self' https: wss:`) and desktop (`connect-src … https: wss: ws:`) already reach Pubky's relays and any homeserver over HTTPS; extension pages set no `connect-src`. The SDK needs `'wasm-unsafe-eval'`, already allowed. No `frame-src`: Passport sends `frame-ancestors 'none'` and runs in its own window. The desktop app opens Passport through an allow-listed command (`open_pubky_passport`: only `https://passport.pubky.app/authorize#d=` followed by an encoded `pubkyauth:` request).

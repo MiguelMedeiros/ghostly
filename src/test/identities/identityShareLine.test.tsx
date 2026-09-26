@@ -3,12 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { IdentityTimelineEntry } from "@ghostly/core";
 import type { LinkView, PublicProfileView } from "@ghostly/browser/shared/types";
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
+import { ComposerIdentityPicker } from "../../components/identities/ComposerIdentities";
 import { IdentityShareLine } from "../../components/identities/IdentityShareLine";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { saveSession } from "../../lib/storage";
 import { mergeTimeline } from "../../lib/transportEvents";
-import { linkView } from "../fakeEngine";
+import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { identitiesView, now, proofView, receivedView, sharedView } from "./views";
 
@@ -109,10 +110,14 @@ describe("ContactIdentitiesPanel, opened from a share in the timeline", () => {
     expect(chosen).toHaveTextContent("two.example");
   });
 
-  it("opens on my card that was tapped, in the picker", () => {
-    const view = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" card={{ side: "mine", id: "p2" }} onClose={() => {}} />);
-    act(() => view.engine.update({ links: [paired()], identityProofs: [proofView({ id: "p1" }), proofView({ id: "p2", subject: "example.net" })] }));
-    const chosen = within(screen.getByTestId("chat-identities-mine")).getAllByRole("radio").find(r => r.getAttribute("aria-checked") === "true");
+});
+
+describe("the composer's picker, opened from a share of mine in the timeline", () => {
+  it("opens on my card that was tapped", () => {
+    // The proofs are there as the picker opens, as they are when a share of mine is on screen.
+    fakeEngine.update({ links: [paired()], identityProofs: [proofView({ id: "p1" }), proofView({ id: "p2", subject: "example.net" })] });
+    renderApp(<ComposerIdentityPicker peerKey="peer" contact="Alice" initial="p2" onClose={() => {}} />);
+    const chosen = within(screen.getByTestId("composer-identities")).getAllByRole("radio").find(r => r.getAttribute("aria-checked") === "true");
     expect(chosen).toHaveTextContent("example.net");
   });
 });

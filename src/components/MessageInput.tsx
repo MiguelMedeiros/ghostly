@@ -62,7 +62,8 @@ interface MessageInputProps {
   /** A composer of its own for payments instead of the chat's (a group chooses whom to pay first). */
   paymentComposer?: (close: () => void) => ReactNode;
   /** A paired chat: which of this profile's identities its contact sees, from the + menu. */
-  identities?: { peerKey: string; contact: string };
+  /** `open`: the picker opens on this identity of mine (a share of mine tapped in the timeline); a new `at` opens it again. */
+  identities?: { peerKey: string; contact: string; open?: { id: string; at: number } };
   /** A 1:1 chat's shared services, from the + menu: which of yours the contact can open, and theirs (`composerServices`). */
   services?: ComposerServices;
   /** Who reads what is sent here, for the secret guard's Cashu question (a group's name); the contact otherwise. */
@@ -219,6 +220,14 @@ export function MessageInput({
     setShowPanel(false);
     if (!phone) textareaRef.current?.focus();
   };
+
+  // A share of mine tapped in the chat's timeline: the picker, on that card.
+  const openOn = identities?.open;
+  useEffect(() => {
+    if (!openOn) return;
+    setShowMenu(false);
+    setShowIdentities(true);
+  }, [openOn]);
 
   // After the picker's own cleanup (which gives the + the focus): on a phone the + keeps it, no keyboard popping up.
   useEffect(() => {
@@ -395,7 +404,7 @@ export function MessageInput({
         )}
 
         {showIdentities && identities && (
-          <ComposerIdentityPicker peerKey={identities.peerKey} contact={identities.contact} anchorRef={plusRef}
+          <ComposerIdentityPicker key={identities.open?.at} peerKey={identities.peerKey} contact={identities.contact} initial={identities.open?.id} anchorRef={plusRef}
             onClose={() => setShowIdentities(false)}
             onShared={() => { sharedIdentity.current = true; setShowIdentities(false); }} />
         )}

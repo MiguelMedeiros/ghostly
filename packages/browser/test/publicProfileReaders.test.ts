@@ -62,6 +62,13 @@ describe("Nostr: signed kind-0 of exactly this key, following = the follow list'
     expect(relay.requests.every(f => f.authors?.length === 1 && f.authors[0] === key)).toBe(true);
   });
 
+  it("the website is an https link or nothing", async () => {
+    relay.add({ kind: 0, created_at: now(), tags: [], content: JSON.stringify({ name: "w", website: "javascript:alert(1)" }) }, secret);
+    expect((await nostrReader.read(key, ctx())).website).toBeUndefined();
+    relay.add({ kind: 0, created_at: now() + 1, tags: [], content: JSON.stringify({ name: "w", website: "https://alice.example/" }) }, secret);
+    expect((await nostrReader.read(key, ctx())).website).toBe("https://alice.example/");
+  });
+
   it("a picture on any other host is not fetched: the card keeps its mark", async () => {
     avatarFetch.mockClear();
     relay.add({ kind: 0, created_at: now(), tags: [], content: JSON.stringify({ name: "bob", picture: "https://evil.test/track.png" }) }, secret);
@@ -114,6 +121,14 @@ describe("Pubky: the index's details and counts for exactly this key", () => {
     expect(p).toMatchObject({ found: true, name: "Pat", about: "Builds things", followers: 12, following: 7, hosts: ["nexus.pubky.app"] });
     expect(p.avatar).toMatch(JPEG_DATA);
     expect(n.asked.every(u => u.startsWith("https://nexus.pubky.app/"))).toBe(true);
+  });
+
+  it("the website is the first https link the profile lists", async () => {
+    const n = nexus({
+      [`/v0/user/${key}/details`]: () => reply(200, { id: key, name: "Pat", links: [{ title: "x", url: "http://plain.example" }, { title: "y", url: "https://pat.example/" }] }),
+      [`/v0/user/${key}/counts`]: () => reply(404, ""),
+    });
+    expect((await pubkyReader.read(key, ctxOf(n.fetch))).website).toBe("https://pat.example/");
   });
 
   it("the avatar as the real index serves it: an extended WebP (VP8X) whatever was uploaded", async () => {

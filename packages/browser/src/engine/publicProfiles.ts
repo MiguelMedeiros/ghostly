@@ -40,9 +40,9 @@ interface StoredProfile extends PublicProfileData {
 const KEY = "publicProfiles";
 /**
  * Bumped when the readers learn to read more of an answer, so what older ones kept is asked again. 2: WebP pictures
- * (the Pubky index serves nothing else), more picture hosts, larger pictures.
+ * (the Pubky index serves nothing else), more picture hosts, larger pictures. 3: the website.
  */
-export const READERS_VERSION = 2;
+export const READERS_VERSION = 3;
 /** A profile found is asked again after a day; a miss or a failure no sooner than five minutes later. */
 export const PROFILE_REFRESH_SECONDS = 24 * 60 * 60;
 export const PROFILE_RETRY_SECONDS = 5 * 60;
@@ -107,7 +107,7 @@ export class PublicProfiles {
     const error = this.errors.get(key);
     if (!c && !loading && !error) return undefined;
     const view: PublicProfileView = { found: c?.found ?? false, hosts: c?.hosts ?? [], fetchedAt: c?.fetchedAt ?? 0 };
-    if (c) for (const k of ["name", "handle", "about", "avatar", "avatarMiss", "followers", "following"] as const) if (c[k] !== undefined) (view as unknown as Record<string, unknown>)[k] = c[k];
+    if (c) for (const k of ["name", "handle", "about", "website", "avatar", "avatarMiss", "followers", "following"] as const) if (c[k] !== undefined) (view as unknown as Record<string, unknown>)[k] = c[k];
     if (loading) view.loading = true;
     if (error) view.error = error;
     return view;

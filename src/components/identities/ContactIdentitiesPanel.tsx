@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
-import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { useDialogFocus } from "../../hooks/useDismiss";
 import { dateTime, providerOf, useEngineState } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
@@ -11,10 +10,11 @@ import { CardFlip, FlipTurnButton } from "../deck/Flip";
 import { useCardFlip } from "../deck/useCardFlip";
 import { NostrContactCard } from "../nostr/NostrContactCard";
 import { useCopyKey } from "../../hooks/useCopyKey";
-import { IdentityPicker } from "./ComposerIdentities";
+import { hasIdentityActivity } from "./activityNetworks";
 import { contactBadges } from "./contactBadges";
 import { ContactFacePicker } from "./ContactFacePicker";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
+import { IdentityActivity } from "./IdentityActivity";
 import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, type IdCardContent } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
@@ -25,28 +25,25 @@ type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: 
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
 
 /**
- * A chat's identities, beside the chat (the chat's column is `chat-pane`, contact-panel.css): a side panel in a wide
- * column, over the chat in a narrow one, a sheet from the bottom on a phone. The contact's identities are a deck of
- * their ID cards (the Identities page's cards, on the same deck): first their Ghostly identity, the name and picture
- * they sent and their key in this chat, then what they shared; a click turns a card over to how it was proven,
- * when this app checked it, until when it holds, and Check again. A Nostr card's back also loads the key's profile,
- * follows and notes, which asks relays. Below, which of this profile's identities the contact sees: the chat's
- * identity picker, in the panel.
+ * A contact's identities, beside the chat (the chat's column is `chat-pane`, contact-panel.css): a side panel in a wide
+ * column, over the chat in a narrow one, a sheet from the bottom on a phone. Only the contact's: a deck of their ID
+ * cards (the Identities page's cards, on the same deck), first their Ghostly identity, the name and picture they sent
+ * and their key in this chat, then what they shared; a click turns a card over to how it was proven, when this app
+ * checked it, until when it holds, and Check again. Under the deck, the chosen card's public profile, the people the
+ * reader knows that it follows, and its recent posts (IdentityActivity.tsx), when its network has them. The reader's
+ * own identities are shared from the composer (+ → Identity).
  */
 export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   peerKey: string; name: string;
-  /** Opens on this card: a share tapped in the chat's timeline, theirs or mine. */
+  /** Opens on this card: a share of theirs tapped in the chat's timeline (one of mine opens the composer's picker instead). */
   card?: { side: "mine" | "theirs"; id: string };
   onClose: () => void;
 }) {
   const state = useEngineState();
   const { t } = useI18n();
-  const nav = useAppNavigation();
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
-  const ref = useRef<HTMLElement>(null), mineRef = useRef<HTMLElement>(null);
+  const ref = useRef<HTMLElement>(null);
   const titleId = useId();
-  // One of mine: its section comes into view, the picker on that card.
-  useEffect(() => { if (card?.side === "mine") mineRef.current?.scrollIntoView({ block: "nearest" }); }, [card]);
   useDialogFocus(ref, onClose);
   const now = Math.floor(Date.now() / 1000);
   // Every identity with a mark, in the header's order (contactBadges.ts), then the ones no longer shared.
@@ -64,7 +61,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
       <div className="contact-panel-head">
         <div className="min-w-0">
           <h2 id={titleId} className="contact-panel-title">Identities with {name}</h2>
-          <p className="contact-panel-lead">Optional proofs, only in this chat. They do not prove who a person is.</p>
+          <p className="contact-panel-lead">Shared in this chat only. Not proof of who they are.</p>
         </div>
         <button type="button" aria-label="Close" data-testid="chat-identities-close" onClick={onClose} className="contact-panel-close">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
@@ -75,24 +72,20 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
         <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={`Shared by ${name}`}>
           <h3 className="contact-panel-heading">Shared by {name}</h3>
           {link
-            ? <TheirCards t={t} entries={entries} link={link} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
+            ? <TheirCards t={t} entries={entries} link={link} links={state?.links ?? []} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
             : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
         </section>
-        <section ref={mineRef} className="contact-panel-section" data-testid="chat-identities-mine" aria-label="Yours, for this contact">
-          <h3 className="contact-panel-heading">Yours, for this contact</h3>
-          {link?.identities
-            ? <IdentityPicker peerKey={peerKey} contact={name} initial={card?.side === "mine" ? card.id : undefined} onManage={() => { onClose(); nav.open("/identities"); }}
-              frame={({ side, tone }, children) => <div className={`contact-picker composer-identities ${tone}`} data-testid="chat-identities-picker" data-side={side}>{children}</div>} />
-            : <p className="contact-panel-note">Identities can be shared in paired chats only.</p>}
-        </section>
+        {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{link.identities.error}</p>}
+        <p className="contact-panel-note" data-testid="chat-identities-share-yours">Share yours from the + in the chat.</p>
       </div>
     </aside>
   </>);
 }
 
 /** The contact's ID cards: a deck, then the chosen card turned over. */
-function TheirCards({ t, entries, link, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; name: string; nostr: NostrContactView[]; initial?: string }) {
-  const [chosen, setChosen] = useState<string | undefined>(initial);
+function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; links: readonly LinkView[]; name: string; nostr: NostrContactView[]; initial?: string }) {
+  // The card shown first: the one tapped in the timeline, else their first shared identity, else their Ghostly card.
+  const [chosen, setChosen] = useState<string | undefined>(initial ?? entries.find(e => !e.ghostly)?.id);
   const { side, flipped, turn, turnBack } = useCardFlip();
   const root = useRef<HTMLDivElement>(null);
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
@@ -119,7 +112,9 @@ function TheirCards({ t, entries, link, name, nostr, initial }: { t: Translate; 
           tone={tone} />
         {entries.length === 1
           ? <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>
-          : <p className="contact-panel-hint">Choose a card to see how it was checked.</p>}
+          : <p className="contact-panel-hint">Tap a card to see how it was checked.</p>}
+        {!entry.ghostly && (entry.card.status === "verified" || entry.card.status === "expiring") && hasIdentityActivity(entry.r.provider) &&
+          <IdentityActivity key={entry.id} provider={entry.r.provider} subject={entry.r.verified.subject} profile={entry.r.publicProfile} links={links} />}
       </>}
     </div>
   );
