@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import { ChatHoldDialog } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
 import { IdentityStack } from "../components/identities/ContactMarks";
+import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { PinIcon } from "../components/PinIcon";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
@@ -265,11 +266,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
   // The chat's link as the engine shows it: its transport lines in the timeline.
   const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
-  const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : []), [messages, paired, chatLink?.transportLog]);
+  const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : [], paired ? chatLink?.identityTimeline ?? [] : []),
+    [messages, paired, chatLink?.transportLog, chatLink?.identityTimeline]);
   // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.
   const paymentsOn = walletState?.wallets?.length ? walletCards(walletState).some((c) => cardOn(chatPeer ?? undefined, c.rail, c.network)) : !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showHold, setShowHold] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
+  /** The card the identities panel opens on: a share tapped in the timeline. */
+  const [identityCard, setIdentityCard] = useState<{ side: "mine" | "theirs"; id: string }>();
   const [showServices, setShowServices] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
@@ -463,7 +467,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   </svg>
                 )}
               </p>
-              {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
+              {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
@@ -596,6 +600,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           )}
           {timeline.map((row) => row.kind === "transport"
             ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
+            : row.kind === "identity"
+            ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
+              onOpen={e => { setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true); }} />
             : (
             <MessageBubble
               key={row.message.id}
@@ -759,7 +766,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       )}
     </div>
     {showIdentities && params && (
-      <ContactIdentitiesPanel peerKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowIdentities(false)} />
+      <ContactIdentitiesPanel key={identityCard ? `${identityCard.side}:${identityCard.id}` : "panel"} peerKey={params.peerPubKeyB64} name={shownName}
+        card={identityCard} onClose={() => setShowIdentities(false)} />
     )}
     </div>
   );

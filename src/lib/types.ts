@@ -66,6 +66,11 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: number;
   lastSyncAt?: number;
+  /**
+   * When the contact last shared an identity (milliseconds), mirrored from the engine: newer than the last message,
+   * the chat list says so in its place and the chat moves up. Not a message, so not unread.
+   */
+  identitySharedAt?: number;
   /** The contact's name: what they last said they go by, or else read out of their messages. */
   nick?: string;
   /**

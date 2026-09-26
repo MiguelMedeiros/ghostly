@@ -53,7 +53,12 @@ const spoken = (card: IdCardContent) => `your ${card.attested ? "account" : card
  * Once done the back says so, then the card turns face up again. The last card adds an identity without leaving the
  * chat; removing or renewing one happens on the Identities page.
  */
-export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }: { peerKey: string; contact: string; onClose: () => void; anchorRef?: RefObject<HTMLElement | null> }) {
+export function ComposerIdentityPicker({ peerKey, contact, onClose, onShared, anchorRef }: {
+  peerKey: string; contact: string; onClose: () => void;
+  /** An identity was shared: the sheet's work is done (the chat's timeline shows the share). Closes it by default. */
+  onShared?: () => void;
+  anchorRef?: RefObject<HTMLElement | null>;
+}) {
   const nav = useAppNavigation();
   const [adding, setAdding] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -64,7 +69,7 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
     const anchor = anchorRef?.current;
     return () => { if (anchor?.isConnected) anchor.focus({ preventScroll: true }); };
   }, [anchorRef]);
-  return <IdentityPicker peerKey={peerKey} contact={contact} onManage={() => { onClose(); nav.open("/identities"); }} onAdding={setAdding} head focusOnOpen
+  return <IdentityPicker peerKey={peerKey} contact={contact} onManage={() => { onClose(); nav.open("/identities"); }} onAdding={setAdding} onShared={onShared ?? onClose} head focusOnOpen
     frame={({ side, tone }, children) => (
       <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-label="Your identities" data-testid="composer-identities" data-side={side}
         className={`composer-identities ${tone} focus:outline-none max-h-[70dvh] overflow-y-auto`}>{children}</ComposerSheet>
@@ -81,8 +86,10 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
  * this chat's key. Its back shows the key in full, to copy, and "Share only this" takes every other identity back
  * from this contact, which is the picker's default state.
  */
-export function IdentityPicker({ peerKey, contact, onManage, onAdding, frame, head = false, focusOnOpen = false }: {
-  peerKey: string; contact: string; onManage: () => void; onAdding?: (adding: boolean) => void;
+export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, onShared, frame, head = false, focusOnOpen = false }: {
+  peerKey: string; contact: string; initial?: string; onManage: () => void; onAdding?: (adding: boolean) => void;
+  /** Called once an identity was shared: the composer's sheet closes, the chat's timeline shows the share. */
+  onShared?: () => void;
   frame: (place: { side: "cards" | "back"; tone: string }, children: ReactNode) => ReactNode; head?: boolean; focusOnOpen?: boolean;
 }) {
   const state = useEngineState();
@@ -90,7 +97,7 @@ export function IdentityPicker({ peerKey, contact, onManage, onAdding, frame, he
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
   const ids = link?.identities;
   const mine = state?.identityProofs ?? [];
-  const [chosen, setChosen] = useState<string>();
+  const [chosen, setChosen] = useState<string | undefined>(initial);
   const [adding, setAddingState] = useState(false);
   const setAdding = (on: boolean) => { setAddingState(on); onAdding?.(on); };
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
@@ -125,7 +132,7 @@ export function IdentityPicker({ peerKey, contact, onManage, onAdding, frame, he
     if (!link || busy) return;
     setBusy(p.id); setError("");
     void engine.call(on ? "withdrawIdentityProof" : "shareIdentityProof", { linkId: link.id, id: p.id })
-      .then(() => setDone(on ? "stopped" : "shared"), e => setError(message(e))).finally(() => setBusy(""));
+      .then(() => { if (!on && onShared) onShared(); else setDone(on ? "stopped" : "shared"); }, e => setError(message(e))).finally(() => setBusy(""));
   };
 
   const ghostly: Ghostly | undefined = state && link ? {

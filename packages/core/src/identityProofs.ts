@@ -1,6 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeed, publicKeyFromZ32, sign, verify } from "./identity";
+import { applyIdentityEvent, type IdentityTimelineEntry, type IdentityTimelineEvent } from "./identityTimeline";
 
 /**
  * Identity proofs (WISP 300), provider-agnostic half.
@@ -223,12 +224,15 @@ export interface ReceivedIdentity {
   display?: IdentityDisplay;
 }
 
-export interface IdentityChallenge { nonce: string; issuedAt: number; provider: string }
+/** `id`: the proof the request named, kept here only (never sent) so the timeline can settle its entry. */
+export interface IdentityChallenge { nonce: string; issuedAt: number; provider: string; id?: string }
 
 export interface IdentityLedger {
   challenges: IdentityChallenge[];
   shared: SharedIdentity[];
   received: ReceivedIdentity[];
+  /** What the chat's timeline shows of this exchange (identityTimeline.ts). Local only; absent in older ledgers. */
+  timeline?: IdentityTimelineEntry[];
 }
 export const emptyIdentityLedger = (): IdentityLedger => ({ challenges: [], shared: [], received: [] });
 
@@ -295,14 +299,21 @@ export class IdentityExchange {
   private requested = new Set<string>();
   constructor(private options: IdentityExchangeOptions) {}
   private now() { return (this.options.now ?? nowSeconds)(); }
+  /** The ledger with one more step on the chat's timeline, in milliseconds (a test's clock, in seconds, when given). */
+  private log(l: IdentityLedger, event: IdentityTimelineEvent): IdentityLedger {
+    return { ...l, timeline: applyIdentityEvent(l.timeline ?? [], event, this.options.now ? this.now() * 1000 : Date.now()) };
+  }
   private incomingScope(): IdentityScope { const s = this.options.scope(); return { ...s, subject: s.audience, audience: s.subject }; }
   private send(frame: object) {
     if (JSON.stringify(frame).length > IDENTITY_MAX_FRAME) throw new Error("Identity proof too large");
     this.options.send(frame);
   }
   private shared(id: string) { return this.options.storage.read().shared.find(s => s.id === id); }
-  private async setShared(entry: SharedIdentity) {
-    await this.options.storage.update(l => ({ ...l, shared: [...l.shared.filter(s => s.id !== entry.id), entry] }));
+  private async setShared(entry: SharedIdentity, event?: IdentityTimelineEvent) {
+    await this.options.storage.update(l => {
+      const next = { ...l, shared: [...l.shared.filter(s => s.id !== entry.id), entry] };
+      return event ? this.log(next, event) : next;
+    });
   }
 
   /** The providers the contact said it verifies; undefined until its hello. */
@@ -325,7 +336,7 @@ export class IdentityExchange {
     if (!local) throw new Error("That identity is no longer in your profile");
     const { provider, subject } = local.statement.binding;
     const entry: SharedIdentity = { id, provider, subject, status: "queued", at: this.now() };
-    await this.setShared(entry);
+    await this.setShared(entry, { type: "shared", side: "mine", proof: id, provider, subject });
     if (connected) this.request(entry);
   }
   private request(s: SharedIdentity) {
@@ -338,8 +349,9 @@ export class IdentityExchange {
     const s = this.shared(id);
     if (!s || s.status === "withdrawn") return;
     this.requested.delete(id);
-    if (s.status === "queued") { await this.options.storage.update(l => ({ ...l, shared: l.shared.filter(x => x.id !== id) })); return; }
-    await this.setShared({ ...s, status: "withdrawal-pending", at: this.now(), error: undefined });
+    if (s.status === "queued") { await this.options.storage.update(l => this.log({ ...l, shared: l.shared.filter(x => x.id !== id) }, { type: "unsent", side: "mine", proof: id })); return; }
+    await this.setShared({ ...s, status: "withdrawal-pending", at: this.now(), error: undefined },
+      { type: "stopped", side: "mine", proof: id, provider: s.provider, subject: s.subject, reason: "withdrawn" });
     if (connected) this.send({ t: "idp-withdraw", id });
   }
 
@@ -355,7 +367,8 @@ export class IdentityExchange {
     const settled = r.status === "withdrawn";
     if (await this.options.revoked?.(identityStatement(r.binding)).catch(() => false)) {
       next = { ...r, status: "revoked", checkedAt: this.now(), error: undefined };
-      await this.options.storage.update(l => ({ ...l, received: l.received.map(x => x.id === id ? next : x) }));
+      await this.options.storage.update(l => this.log({ ...l, received: l.received.map(x => x.id === id ? next : x) },
+        { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "revoked" }));
       return next;
     }
     if (revocationOnly) return r;
@@ -385,12 +398,20 @@ export class IdentityExchange {
         case "idp-result": {
           const s = id ? this.shared(id) : undefined;
           if (!s || s.status !== "pending") return;
-          await this.setShared({ ...s, status: frame.ok === true ? "accepted" : "rejected", at: this.now(), error: frame.ok === true ? undefined : clean(frame.error, 160) ?? "Your contact could not verify it" });
+          const error = frame.ok === true ? undefined : clean(frame.error, 160) ?? "Your contact could not verify it";
+          await this.setShared({ ...s, status: frame.ok === true ? "accepted" : "rejected", at: this.now(), error },
+            { type: "result", side: "mine", proof: s.id, ok: frame.ok === true, error });
           return;
         }
         case "idp-withdraw":
           if (!id) return;
-          await this.options.storage.update(l => ({ ...l, received: l.received.map(r => r.id === id ? { ...r, status: "withdrawn" } : r) }));
+          await this.options.storage.update(l => {
+            const r = l.received.find(x => x.id === id);
+            const next = { ...l, received: l.received.map(x => x.id === id ? { ...x, status: "withdrawn" as const } : x) };
+            return r && r.status !== "withdrawn"
+              ? this.log(next, { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "withdrawn" })
+              : next;
+          });
           this.send({ t: "idp-withdrawn", id });
           return;
         case "idp-withdrawn": {
@@ -405,17 +426,23 @@ export class IdentityExchange {
   private async onRequest(id: string | undefined, provider: unknown) {
     if (!id) return;
     if (typeof provider !== "string" || !this.options.providers().includes(provider)) {
-      this.send({ t: "idp-result", id, ok: false, error: "Your contact's app cannot verify this kind of identity yet" });
+      const error = "Your contact's app cannot verify this kind of identity yet";
+      // Shown here too, as a share that failed: a kind this app does not know, named as the contact's app named it.
+      if (typeof provider === "string" && IDENTITY_PROVIDER_ID.test(provider)) {
+        await this.options.storage.update(l => this.log(this.log(l, { type: "shared", side: "theirs", proof: id, provider }),
+          { type: "result", side: "theirs", proof: id, provider, ok: false, error: "This app cannot verify this kind of identity yet" }));
+      }
+      this.send({ t: "idp-result", id, ok: false, error });
       return;
     }
     this.options.scope();
     const now = this.now();
-    const challenge: IdentityChallenge = { nonce: toBase64Url(randomBytes(32)), issuedAt: now, provider };
+    const challenge: IdentityChallenge = { nonce: toBase64Url(randomBytes(32)), issuedAt: now, provider, id };
     // Saved before it is sent: a presentation for a nonce this side never saved is always refused.
     await this.options.storage.update(l => {
       const live = l.challenges.filter(c => c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW);
       if (live.length >= MAX_CHALLENGES) throw new Error("Too many identity challenges");
-      return { ...l, challenges: [...live, challenge] };
+      return this.log({ ...l, challenges: [...live, challenge] }, { type: "shared", side: "theirs", proof: id, provider });
     });
     this.send({ t: "idp-challenge", id, nonce: challenge.nonce, issuedAt: challenge.issuedAt });
   }
@@ -426,7 +453,11 @@ export class IdentityExchange {
     if (!s || (s.status !== "queued" && s.status !== "pending")) return;
     this.requested.delete(id);
     const local = await this.options.localProof(id);
-    if (!local) { await this.setShared({ ...s, status: "rejected", at: this.now(), error: "That identity is no longer in your profile" }); return; }
+    if (!local) {
+      const error = "That identity is no longer in your profile";
+      await this.setShared({ ...s, status: "rejected", at: this.now(), error }, { type: "result", side: "mine", proof: id, ok: false, error });
+      return;
+    }
     const scope = this.options.scope();
     const sig = signIdentityPresentation(local.seed, id, scope, nonce, issuedAt);
     await this.setShared({ ...s, status: "pending", at: this.now(), error: undefined });
@@ -440,11 +471,14 @@ export class IdentityExchange {
     const id = statement.id;
     const scope = this.incomingScope();
     const now = this.now();
-    const known = (l: IdentityLedger) => l.challenges.some(c => c.nonce === nonce && c.issuedAt === issuedAt && c.provider === binding.provider && c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW);
+    const challengeOf = (l: IdentityLedger) => l.challenges.find(c => c.nonce === nonce && c.issuedAt === issuedAt && c.provider === binding.provider && c.issuedAt > now - IDENTITY_CHALLENGE_WINDOW);
+    const known = (l: IdentityLedger) => !!challengeOf(l);
     if (!known(this.options.storage.read())) throw new Error("Unknown or reused identity challenge");
     let verified: VerifiedIdentity | undefined;
     // Only what the contact may know: see IdentityCheckUnavailable.
     let error: string | undefined;
+    /** The same, as this side's own timeline says it. */
+    let reason: string | undefined;
     try {
       if (JSON.stringify(evidence ?? null).length > IDENTITY_MAX_EVIDENCE) throw new Error("Evidence too large");
       if (!verifyIdentityPresentation(binding.key, sig as string, id, scope, nonce, issuedAt)) throw new Error("The proof key did not sign this conversation's challenge");
@@ -455,17 +489,20 @@ export class IdentityExchange {
       // fails is not a refusal, a revocation found is.
       if (await this.options.revoked?.(statement).catch(() => false)) throw new Error("Its owner revoked this proof");
       verified = result;
-    } catch (e) { error = peerError(e); }
+    } catch (e) { error = peerError(e); reason = shortError(e); }
     // Consuming the nonce and recording the outcome are one transaction.
     await this.options.storage.update(l => {
-      if (!known(l)) throw new Error("Unknown or reused identity challenge");
+      const challenge = challengeOf(l);
+      if (!challenge) throw new Error("Unknown or reused identity challenge");
       const challenges = l.challenges.filter(c => c.nonce !== nonce);
-      if (!verified) return { ...l, challenges };
+      const logged = this.log(l, { type: "result", side: "theirs", proof: id, requested: challenge.id, provider: binding.provider,
+        subject: verified?.subject ?? binding.subject, ok: !!verified, ...(reason ? { error: reason } : {}) });
+      if (!verified) return { ...logged, challenges };
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
         verifiedAt: now, checkedAt: now, status: "verified" };
       // A newer proof of the same identity replaces the older one.
       const received = l.received.filter(r => r.id !== id && !(r.binding.provider === binding.provider && r.verified.subject === verified!.subject));
-      return { ...l, challenges, received: [...received, record] };
+      return { ...logged, challenges, received: [...received, record] };
     });
     this.send(verified ? { t: "idp-result", id, ok: true } : { t: "idp-result", id, ok: false, error });
   }

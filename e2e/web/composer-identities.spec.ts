@@ -9,10 +9,11 @@ const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 /**
  * The composer's + → Identity, beside Payment: the profile's identities as ID cards, step for step as a payment is made. With none
  * yet, the blank card adds one there, without leaving the chat. "Use …" turns the chosen card over, as a payment card
- * turns; its back shares it and the contact sees it verified, the back says so and the card comes back with the seal.
- * Turned over again, Stop sharing, and the contact sees it is no longer shared.
+ * turns; its back shares it, the picker closes, and both chats show the share as a small ID card that turns verified
+ * once the contact's app checked it. Turned over again, Stop sharing: a line in both chats, and the contact sees it is
+ * no longer shared.
  */
-test("an identity is added, shared and withdrawn from the chat's composer", { tag: ["@feature:proofs.composer", "@feature:proofs.share", "@feature:proofs.withdraw"] }, async ({ peer }) => {
+test("an identity is added, shared and withdrawn from the chat's composer, and both chats show it", { tag: ["@feature:proofs.composer", "@feature:proofs.share", "@feature:proofs.withdraw", "@feature:proofs.timeline"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("cid-alice"), peer("cid-bob")]);
   await injectNostrSigner(alice);
   await pair(alice, bob);
@@ -61,20 +62,35 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(share).toHaveText(/^Share with /);
   await expect(share).toBeFocused();
 
-  // Share: the back says it is done (briefly: the UI tests check the line), Bob's app verifies it, and the card comes
-  // back wearing the check seal.
+  // Share: the picker closes and the keys go back to the message. Both chats show the share as a small ID card,
+  // checking and then verified: Bob's app verified it.
   await share.click();
-  await expect(picker).toHaveAttribute("data-side", "cards");
-  await expect(nostr.getByTestId("id-card-shared")).toBeVisible();
-  await expect(nostr).toBeFocused();
+  await expect(picker).toHaveCount(0);
+  await expect(alice.page.getByPlaceholder("Message…")).toBeFocused();
+  const mine = alice.page.getByTestId("identity-share").and(alice.page.locator("[data-side=mine][data-kind=shared]"));
+  await expect(mine).toHaveCount(1);
+  await expect(mine.getByTestId("identity-share-text")).toHaveText("You shared Nostr");
+  await expect(mine.getByTestId("identity-share-subject")).toContainText("npub1");
+  await expect(mine).toHaveAttribute("data-state", "verified", { timeout: 60_000 });
+  const theirs = bob.page.getByTestId("identity-share").and(bob.page.locator("[data-side=theirs][data-kind=shared]"));
+  await expect(theirs).toHaveCount(1);
+  await expect(theirs.getByTestId("identity-share-text")).toHaveText(/ shared Nostr$/);
+  await expect(theirs).toHaveAttribute("data-state", "verified", { timeout: 60_000 });
+  await expect(theirs.getByTestId("identity-share-subject")).toContainText("npub1");
   await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
-  await openIdentities(bob);
+  // Tapping Bob's card opens Alice's identities on that card.
+  await theirs.getByRole("button").click();
+  await expect(bob.page.getByTestId("chat-identities")).toBeVisible();
+  const chosen = bob.page.getByTestId("chat-identities-received").getByTestId("chat-identity-received").and(bob.page.locator("[aria-checked=true]"));
+  await expect(chosen).toContainText("Nostr");
   await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
   await closeIdentities(bob);
+  // A reload keeps one card each, verified: the entries are stored, not made again.
+  await bob.page.reload();
+  await expect(theirs).toHaveCount(1, { timeout: 30_000 });
+  await expect(theirs).toHaveAttribute("data-state", "verified");
 
   // The + menu's Identity row says one is shared here; it opens the picker again.
-  await alice.page.keyboard.press("Escape");
-  await expect(picker).toHaveCount(0);
   await expect(await row()).toHaveAttribute("data-count", "1");
   await expect(await row()).toContainText("1 shared in this chat");
   await (await row()).click();
@@ -96,6 +112,9 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   const bobsCard = await turnTheirs(bob);
   await expect(bobsCard.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
   await closeIdentities(bob);
+  // Stopping is a line in both chats, after the card.
+  await expect(alice.page.getByTestId("identity-share").and(alice.page.locator("[data-kind=stopped]")).getByTestId("identity-share-text")).toHaveText(/^You stopped sharing Nostr · npub1/);
+  await expect(bob.page.getByTestId("identity-share").and(bob.page.locator("[data-kind=stopped]")).getByTestId("identity-share-text")).toHaveText(/ stopped sharing Nostr · npub1/);
 
   // Escape closes it and gives the focus back to the +; opened again, the keys start on the chosen card.
   await alice.page.keyboard.press("Escape");

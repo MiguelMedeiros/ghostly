@@ -1,4 +1,4 @@
-import { TRANSPORTS, type LiveAttempt, type PairedTransport, type TransportWait } from "@ghostly/core";
+import { TRANSPORTS, type IdentityTimelineEntry, type LiveAttempt, type PairedTransport, type TransportWait } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
 import { transportName } from "./connection";
@@ -150,22 +150,33 @@ export function transportOptions(link: Pick<LinkView, "availableTransports" | "p
   });
 }
 
-export type TimelineRow<M> = { kind: "message"; message: M } | { kind: "transport"; entry: TransportEntry; earlier: TransportEntry[] };
+export type TimelineRow<M> =
+  | { kind: "message"; message: M }
+  | { kind: "transport"; entry: TransportEntry; earlier: TransportEntry[] }
+  | { kind: "identity"; entry: IdentityTimelineEntry };
 
 /**
- * Messages and the chat's transport rows in one timeline, by time. Rows with no message between them are one row:
- * the latest, with the ones before it in `earlier` (its details list them), so the timeline never shows a column
- * of them. A legacy flapping row stays where it began.
+ * Messages, the chat's transport rows and its identity shares in one timeline, by time. Transport rows with nothing
+ * between them are one row: the latest, with the ones before it in `earlier` (its details list them), so the
+ * timeline never shows a column of them. A legacy flapping row stays where it began. An identity share is its own
+ * row, where it began (its later steps settle it in place).
  */
-export function mergeTimeline<M extends { timestamp: number }>(messages: readonly M[], lines: readonly TransportEntry[]): TimelineRow<M>[] {
+export function mergeTimeline<M extends { timestamp: number }>(messages: readonly M[], lines: readonly TransportEntry[], identities: readonly IdentityTimelineEntry[] = []): TimelineRow<M>[] {
   const at = (e: TransportEntry) => e.since ?? e.at;
   const sorted = [...lines].sort((a, b) => at(a) - at(b));
+  const shares = [...identities].sort((a, b) => a.at - b.at);
   const out: TimelineRow<M>[] = [];
-  let i = 0;
+  let i = 0, j = 0;
   const rows = (until: number) => {
-    const run: TransportEntry[] = [];
-    while (i < sorted.length && at(sorted[i]) <= until) run.push(sorted[i++]);
-    if (run.length) out.push({ kind: "transport", entry: run[run.length - 1], earlier: run.slice(0, -1) });
+    let run: TransportEntry[] = [];
+    const flush = () => { if (run.length) out.push({ kind: "transport", entry: run[run.length - 1], earlier: run.slice(0, -1) }); run = []; };
+    while ((i < sorted.length && at(sorted[i]) <= until) || (j < shares.length && shares[j].at <= until)) {
+      if (j < shares.length && shares[j].at <= until && (i >= sorted.length || at(sorted[i]) > until || shares[j].at < at(sorted[i]))) {
+        flush();
+        out.push({ kind: "identity", entry: shares[j++] });
+      } else run.push(sorted[i++]);
+    }
+    flush();
   };
   for (const message of messages) {
     rows(message.timestamp);

@@ -308,3 +308,101 @@ describe("identity exchange", () => {
     expect(w.ledger(alice, bob).shared[0].error).toMatch(/revoked/);
   });
 });
+
+describe("identity timeline, from the exchange", () => {
+  const tl = (w: ReturnType<typeof world>, me: string, them: string) => w.ledger(me, them).timeline ?? [];
+
+  it("both sides get one entry for a share: verifying, then verified", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
+    w.online.clear();
+    const id = w.addProof();
+    await ab.share(id, true);
+    expect(tl(w, alice, bob)).toEqual([{ id: `mine:${id}:0`, proof: id, side: "mine", kind: "shared", provider: "test", subject: externalKey, state: "verifying", at: w.now() * 1000 }]);
+    await ba.receive(w.frames.find(f => f.t === "idp-request")!);
+    // The contact knows the kind at once, the identity only once it is presented.
+    expect(tl(w, bob, alice)).toEqual([{ id: `theirs:${id}:0`, proof: id, side: "theirs", kind: "shared", provider: "test", state: "verifying", at: w.now() * 1000 }]);
+    await ab.receive(w.frames.find(f => f.t === "idp-challenge")!);
+    w.advance(2);
+    await ba.receive(w.frames.find(f => f.t === "idp-present")!);
+    expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ state: "verified", subject: externalKey, at: (w.now() - 2) * 1000 })]);
+    expect(tl(w, alice, bob)[0].state).toBe("verifying");
+    await ab.receive(w.frames.find(f => f.t === "idp-result")!);
+    expect(tl(w, alice, bob)).toEqual([expect.objectContaining({ state: "verified" })]);
+  });
+
+  it("a refused share turns failed on both sides, with the reason", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64));
+    w.peer(bob, alice, "a".repeat(64), { verify: async () => { throw new Error("The file on the homeserver is not this proof"); } });
+    await ab.share(w.addProof(), true);
+    await vi.waitFor(() => expect(tl(w, alice, bob)[0]?.state).toBe("failed"));
+    expect(tl(w, alice, bob)[0].error).toBe("The file on the homeserver is not this proof");
+    expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ side: "theirs", state: "failed", error: "The file on the homeserver is not this proof", subject: externalKey })]);
+  });
+
+  it("a kind the contact's app cannot verify is a failed share there too", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64), { providers: [] });
+    await ab.share(w.addProof(), true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)[0]).toMatchObject({ side: "theirs", provider: "test", state: "failed", error: expect.stringMatching(/cannot verify/) }));
+    expect(w.ledger(bob, alice).challenges).toHaveLength(0);
+  });
+
+  it("is not repeated when the request goes again at a reconnect, nor by a refresh", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64));
+    const id = w.addProof();
+    // Shared while away, then two reconnects before the answer: one entry each side.
+    w.online.delete(`${bob}>${alice}`);
+    await ab.share(id, false);
+    ab.ready(); ab.ready();
+    expect(tl(w, alice, bob)).toHaveLength(1);
+    w.online.add(`${bob}>${alice}`);
+    ab.ready();
+    await vi.waitFor(() => expect(tl(w, alice, bob)[0].state).toBe("verified"));
+    // A restart of both apps reads the same ledgers and greets again.
+    const ab2 = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64));
+    ab2.ready();
+    await ab2.share(id, true);
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].status).toBe("accepted"));
+    expect(tl(w, alice, bob)).toEqual([expect.objectContaining({ id: `mine:${id}:0`, state: "verified" })]);
+    expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ id: `theirs:${id}:0`, state: "verified" })]);
+  });
+
+  it("stopping is one entry on each side; sharing again after it is a new one", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64));
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)[0]?.state).toBe("verified"));
+    await ab.withdraw(id, true);
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].status).toBe("withdrawn"));
+    // Told again at a reconnect: still one stop.
+    await w.peers.get(`${bob}>${alice}`)!.receive({ t: "idp-withdraw", id });
+    const kinds = (me: string, them: string) => tl(w, me, them).map(e => `${e.kind}${e.reason ? `:${e.reason}` : ""}`);
+    expect(kinds(alice, bob)).toEqual(["shared", "stopped:withdrawn"]);
+    expect(kinds(bob, alice)).toEqual(["shared", "stopped:withdrawn"]);
+    expect(tl(w, bob, alice)[1]).toMatchObject({ provider: "test", subject: externalKey });
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)).toHaveLength(3));
+    await vi.waitFor(() => expect(tl(w, alice, bob)[2]).toMatchObject({ id: `mine:${id}:2`, kind: "shared", state: "verified" }));
+    expect(tl(w, bob, alice)[2]).toMatchObject({ kind: "shared", state: "verified" });
+  });
+
+  it("a share taken back before it left leaves nothing; a revocation found is a stop", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
+    const queued = w.addProof();
+    await ab.share(queued, false);
+    await ab.withdraw(queued, false);
+    expect(tl(w, alice, bob)).toEqual([]);
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(tl(w, bob, alice)[0]?.state).toBe("verified"));
+    w.revoked.add(id);
+    await ba.recheck(id, { revocationOnly: true });
+    await ba.recheck(id);
+    expect(tl(w, bob, alice).map(e => e.reason ?? e.kind)).toEqual(["shared", "revoked"]);
+  });
+});

@@ -14,7 +14,7 @@ import type { TransportCause, TransportEntry, TransportEvent } from "../engine/t
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
-import type { IdentityDisplay, IdentityLedger, IdentityStatus, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
+import type { IdentityDisplay, IdentityLedger, IdentityStatus, IdentityTimelineEntry, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, LiveAttempt, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
 import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
@@ -1050,6 +1050,10 @@ export interface LinkView {
   transportLog?: TransportEntry[];
   /** Every connection event of the chat on screen, for its connection panel, newest last. */
   transportHistory?: TransportEvent[];
+  /** Identities shared in this chat, both ways, as its timeline shows them, newest last; only for the chat on screen. Local only. */
+  identityTimeline?: IdentityTimelineEntry[];
+  /** When the contact last shared an identity here (milliseconds): the chat list's preview and order. Paired chats. */
+  identitySharedAt?: number;
   id: string;
   myPubKeyZ32: string;
   peerPubKeyZ32: string;

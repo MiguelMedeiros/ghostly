@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { ComposerIdentityPicker, DONE_MS } from "../../components/identities/ComposerIdentities";
+import { ComposerIdentityPicker, DONE_MS, IdentityPicker } from "../../components/identities/ComposerIdentities";
 import { MessageInput } from "../../components/MessageInput";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -115,8 +115,8 @@ describe("ComposerIdentityPicker", () => {
     expect(sheet()).toHaveAttribute("data-side", "cards");
   });
 
-  it("turns the chosen card over to share it; the back says so, then the card comes back wearing the seal", async () => {
-    const { user, engine } = open({ links: [paired()], identityProofs: [proofView({ id: "a" }), proofView({ id: "b", subject: "example.net" })] });
+  it("turns the chosen card over to share it, and closes once it is shared: the chat's timeline shows the share", async () => {
+    const { user, engine, onClose } = open({ links: [paired()], identityProofs: [proofView({ id: "a" }), proofView({ id: "b", subject: "example.net" })] });
     let finish = () => {};
     engine.on("shareIdentityProof", () => new Promise<void>(resolve => { finish = resolve; }));
     await user.click(cards()[1]);
@@ -137,16 +137,28 @@ describe("ComposerIdentityPicker", () => {
     expect(action()).toHaveFocus();
     await user.click(action());
     expect(engine.callsTo("shareIdentityProof")).toHaveLength(1);
+    expect(onClose).not.toHaveBeenCalled();
     await act(async () => finish());
-    act(() => engine.update({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "b", subject: "example.net", status: "pending" })] }) })] }));
-    expect(within(back()).getByTestId("composer-identity-done")).toHaveTextContent("Shared with Alice");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("in the chat's panel, a share stays open: the back says so, then the card comes back wearing the seal", async () => {
+    const result = renderApp(<IdentityPicker peerKey="peer" contact="Alice" onManage={() => {}}
+      frame={({ side }, children) => <div data-testid="composer-identities" data-side={side}>{children}</div>} />);
+    document.documentElement.dataset.reduceMotion = "true";
+    act(() => result.engine.update({ links: [paired()], identityProofs: [proofView({ id: "a" }), proofView({ id: "b", subject: "example.net" })] }));
+    result.engine.on("shareIdentityProof", () => undefined);
+    await result.user.click(cards()[1]);
+    await turned();
+    await result.user.click(action());
+    act(() => result.engine.update({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "b", subject: "example.net", status: "pending" })] }) })] }));
+    expect(await within(back()).findByTestId("composer-identity-done")).toHaveTextContent("Shared with Alice");
     expect(within(back()).queryByTestId("composer-identity-status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("composer-identity-share")).not.toBeInTheDocument();
     // Then the deck, the same card chosen and with the keys, wearing the seal.
     await deckAgain();
     expect(chosen()).toBe(cards()[1]);
     expect(within(cards()[1]).getByTestId("id-card-shared")).toBeInTheDocument();
-    // The focus follows as the deck mounts (an effect, a moment after the deck shows).
     await waitFor(() => expect(cards()[1]).toHaveFocus());
     expect(hint()).toMatch(/^Alice sees your domain example.net/);
   });
@@ -251,7 +263,7 @@ describe("ComposerIdentityPicker", () => {
     expect(use()).toBeDisabled();
   });
 
-  it("shows the engine's refusal on the back, and leads to the Identities page to manage them", async () => {
+  it("stays open with the engine's refusal on the back, and leads to the Identities page to manage them", async () => {
     const { user, engine, onClose } = open({ links: [paired()], identityProofs: [proofView()] });
     engine.on("shareIdentityProof", () => { throw new Error("Connect to this contact first"); });
     await user.click(use());
@@ -259,6 +271,12 @@ describe("ComposerIdentityPicker", () => {
     await user.click(action());
     expect(await within(back()).findByRole("alert")).toHaveTextContent("Connect to this contact first");
     expect(action()).toHaveTextContent("Share with Alice");
+    // Retry is the same button: the second try goes through, and the sheet closes.
+    expect(onClose).not.toHaveBeenCalled();
+    engine.on("shareIdentityProof", () => undefined);
+    await user.click(action());
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    onClose.mockClear();
     await user.click(screen.getByRole("button", { name: "Choose another identity" }));
     await deckAgain();
     await user.click(screen.getByRole("button", { name: "Manage identities" }));
@@ -313,6 +331,21 @@ describe("MessageInput: the + menu's Identity row", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("composer-identities")).not.toBeInTheDocument();
     expect(plus()).toHaveFocus();
+  });
+
+  it("closes the picker once an identity is shared, and gives the keys back to the message", async () => {
+    const { user, engine } = input({ peerKey: "peer", contact: "Alice" });
+    act(() => engine.update({ links: [paired()], identityProofs: [proofView({ id: "a" })] }));
+    engine.on("shareIdentityProof", () => undefined);
+    await user.click(plus());
+    await user.click(screen.getByTestId("composer-identities-button"));
+    document.documentElement.dataset.reduceMotion = "true";
+    await user.click(cards()[0]);
+    await turned();
+    await user.click(action());
+    await waitFor(() => expect(screen.queryByTestId("composer-identities")).not.toBeInTheDocument());
+    expect(engine.callsTo("shareIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }]);
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveFocus());
   });
 
   it("has no count when nothing is shared", async () => {

@@ -6,6 +6,7 @@ import {
   forgetInviteCode,
   getInviteCode,
   listSessions,
+  loadSession,
   sessionLinkParams,
   setSessionPeerNick,
   updateSessionLabel,
@@ -94,7 +95,24 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
     changed = true;
   }
   if (mirrorPeerNick(session.id, link)) changed = true;
+  if (mirrorIdentityShare(session, link)) changed = true;
   if (changed) notifySessionsChanged();
+}
+
+/**
+ * The contact's latest identity share, for the chat list: its preview ("Shared an identity") and its place, as a
+ * message would move it. Not a message, so the unread count stays (it counts messages).
+ */
+function mirrorIdentityShare(session: ChatSession, link: LinkView): boolean {
+  const at = link.identitySharedAt;
+  if (!at || at <= (session.identitySharedAt ?? 0)) return false;
+  const fresh = loadSession(session.id);
+  if (!fresh) return false;
+  fresh.identitySharedAt = at;
+  fresh.lastSyncAt = Math.max(fresh.lastSyncAt ?? 0, at);
+  saveSession(fresh);
+  session.identitySharedAt = at;
+  return true;
 }
 
 /**
@@ -134,6 +152,7 @@ async function reconcile(): Promise<void> {
     const live = engine.linkByPeer(session.peerPubKeyB64);
     if (live && session.deliveryMode !== live.deliveryMode) { session.deliveryMode = live.deliveryMode; saveSession(session); }
     if (live && mirrorPeerNick(session.id, live)) renamed = true;
+    if (live && mirrorIdentityShare(session, live)) renamed = true;
     if (session.profile && live?.pairing?.peerKey && ["ready", "waiting"].includes(live.pairing.status)) forgetInviteCode(session.id);
     if (engine.linkByPeer(session.peerPubKeyB64) || ensuring.has(session.id)) continue;
     ensuring.add(session.id);
