@@ -878,6 +878,8 @@ export interface PublicProfileView {
   about?: string;
   /** A sanitized `data:image/jpeg;base64,…` URL, never a remote one. */
   avatar?: string;
+  /** The profile names a picture that is not shown: which rule refused it, in words ("it is a GIF; …"). */
+  avatarMiss?: string;
   followers?: number;
   following?: number;
   /** The hosts it was read from, which saw this device's IP address: "nexus.pubky.app". */

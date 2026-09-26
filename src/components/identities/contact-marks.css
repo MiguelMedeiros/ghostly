@@ -5,6 +5,14 @@
 .badge-mark-tile svg{width:calc(var(--mark,14px) * .66);height:calc(var(--mark,14px) * .66)}
 .badge-mark-plain{background:var(--theme-surface-alt);color:var(--theme-text-secondary);box-shadow:inset 0 0 0 1px var(--theme-border)}
 
+/* A public profile's picture fills the mark (the header's stack); the provider's mark is a small badge on its corner,
+   and an expiring clock moves to the top corner. The picture is a 160px data URL decoded once, never filtered. */
+.badge-mark-picture{background:var(--theme-surface-alt)}
+.badge-mark-picture>img{display:block;width:100%;height:100%;object-fit:cover}
+.badge-mark-corner{position:absolute;right:calc(var(--mark,14px) * -.18);bottom:calc(var(--mark,14px) * -.18);display:grid;place-items:center;width:calc(var(--mark,14px) * .55);height:calc(var(--mark,14px) * .55);min-width:8px;min-height:8px;border-radius:999px;overflow:hidden;box-shadow:0 0 0 1.5px var(--ring,var(--theme-sidebar-bg))}
+.badge-mark-corner svg{width:70%;height:70%}
+.badge-mark[data-photo] .badge-mark-flag{bottom:auto;top:calc(var(--mark,14px) * -.22)}
+
 /* Revoked: greyed and struck through. Expired: greyed. */
 .badge-mark[data-state=revoked] .badge-mark-tile,.badge-mark[data-state=expired] .badge-mark-tile{filter:grayscale(1);opacity:.45}
 .badge-mark[data-state=revoked]::after{content:"";position:absolute;left:-1px;right:-1px;top:50%;height:1.5px;border-radius:1px;background:var(--theme-text-secondary);transform:rotate(-45deg)}

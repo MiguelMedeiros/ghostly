@@ -47,7 +47,7 @@ export function IdCardFace({ card, after, shared }: { card: IdCardContent; after
         <span className="id-card-mark-end" aria-hidden="true">{shared && <span className="id-card-check id-card-check-small">{CHECK}</span>}<ProviderMark provider={card.provider} subject={card.bound} small /></span>
       </span>
       <span className="id-card-photo" aria-hidden="true">
-        {card.photo ? <><img src={card.photo} alt="" /><span className="id-card-photo-badge"><ProviderMark provider={card.provider} subject={card.bound} small /></span></>
+        {card.photo ? <><img src={card.photo} alt="" width={160} height={160} decoding="async" draggable={false} data-testid="id-card-photo" /><span className="id-card-photo-badge" data-testid="id-card-photo-badge"><ProviderMark provider={card.provider} subject={card.bound} small /></span></>
           : card.monogram ? <><span className="id-card-monogram" data-testid="id-card-monogram">{card.monogram}</span><span className="id-card-photo-badge"><ProviderMark provider={card.provider} subject={card.bound} small /></span></>
             : <ProviderMark provider={card.provider} subject={card.bound} />}
         {/* Shared in this chat: a check seal on the photo's corner, which shows on every card of a stack. */}

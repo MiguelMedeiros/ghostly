@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { newIdentityBinding } from "@ghostly/core";
@@ -5,13 +6,15 @@ import type { IdentityFetch, IdentityFetchResponse } from "../src/proofs/contrac
 import { atprotoReader, nostrReader, pubkyReader, hasPublicProfile, PUBLIC_PROFILE_READERS, type ReaderContext } from "../src/profiles/readers";
 import { nodeSocket, TestNostrRelay } from "./helpers/nostrRelay";
 import { testAtprotoNetwork } from "./helpers/atprotoNetwork";
-// covers: proofs.public-profile, proofs.public-profile.nostr, proofs.public-profile.pubky, proofs.public-profile.atproto, profiles.picture.sanitize
+// covers: proofs.public-profile, proofs.public-profile.picture, proofs.public-profile.nostr, proofs.public-profile.pubky, proofs.public-profile.atproto, profiles.picture.sanitize
 
 vi.setConfig({ testTimeout: 20_000 });
 
 /** A 1×1 PNG header: enough for the dimension check; decoding is stubbed. */
 const PNG = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1]);
 const SVG = new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>");
+/** What nexus.pubky.app/static/avatar/{id} answers (checked 2026-09-26): an extended WebP. */
+const WEBP_EXTENDED = new Uint8Array(readFileSync(new URL("../../../e2e/support/avatar-fixtures/avatar-extended.webp", import.meta.url)));
 
 /** createImageBitmap/OffscreenCanvas as a browser has them: every decode is counted, every encode is a tiny JPEG. */
 function stubCanvas() {
@@ -52,7 +55,7 @@ describe("Nostr: signed kind-0 of exactly this key, following = the follow list'
     const follows = Array.from({ length: 3 }, () => ["p", getPublicKey(generateSecretKey())]);
     relay.add({ kind: 3, created_at: now() - 5, tags: [...follows, follows[0], ["e", "x"]], content: "" }, secret);
     const p = await nostrReader.read(key, ctx());
-    expect(p).toMatchObject({ found: true, name: "Alice Liddell", handle: "alice", about: "Down the\nrabbit hole", following: 3, hosts: [new URL(relay.url).host] });
+    expect(p).toMatchObject({ found: true, name: "Alice Liddell", handle: "alice", about: "Down the\nrabbit hole", following: 3, hosts: [new URL(relay.url).host, "image.nostr.build"] });
     expect(p.followers).toBeUndefined();
     expect(p.avatar).toMatch(JPEG_DATA);
     expect(avatarFetch).toHaveBeenCalledTimes(1);
@@ -65,6 +68,8 @@ describe("Nostr: signed kind-0 of exactly this key, following = the follow list'
     const p = await nostrReader.read(key, ctx());
     expect(p.name).toBe("bob");
     expect(p.avatar).toBeUndefined();
+    expect(p.avatarMiss).toBe("it is on evil.test, a host this app does not load pictures from");
+    expect(p.hosts).toEqual([new URL(relay.url).host]);
     expect(avatarFetch).not.toHaveBeenCalled();
   });
 
@@ -111,6 +116,21 @@ describe("Pubky: the index's details and counts for exactly this key", () => {
     expect(n.asked.every(u => u.startsWith("https://nexus.pubky.app/"))).toBe(true);
   });
 
+  it("the avatar as the real index serves it: an extended WebP (VP8X) whatever was uploaded", async () => {
+    const decoded = stubCanvas();
+    const n = nexus({
+      [`/v0/user/${key}/details`]: () => reply(200, { id: key, name: "Pat", image: "pubky://x/pub/pubky.app/files/0035N3QJCY3SG", links: [], indexed_at: 1 }),
+      [`/v0/user/${key}/counts`]: () => reply(404, ""),
+      [`/static/avatar/${key}`]: () => reply(200, WEBP_EXTENDED, "image/webp"),
+    });
+    const p = await pubkyReader.read(key, ctxOf(n.fetch));
+    expect(p.avatar).toMatch(JPEG_DATA);
+    expect(p.avatarMiss).toBeUndefined();
+    expect((decoded.mock.calls[0] as unknown as [Blob])[0].type).toBe("image/webp");
+    const missing = nexus({ [`/v0/user/${key}/details`]: () => reply(200, { id: key, name: "Pat", image: "x" }), [`/static/avatar/${key}`]: () => reply(404, "") });
+    expect(await pubkyReader.read(key, ctxOf(missing.fetch))).toMatchObject({ found: true, name: "Pat", avatarMiss: "nexus.pubky.app answered 404" });
+  });
+
   it("an answer for another key is refused; a deleted or unindexed account has no profile", async () => {
     await expect(pubkyReader.read(key, ctxOf(nexus({ [`/v0/user/${key}/details`]: () => reply(200, { id: other, name: "Mallory" }) }).fetch))).rejects.toThrow("another key");
     expect(await pubkyReader.read(key, ctxOf(nexus({ [`/v0/user/${key}/details`]: () => reply(200, { id: key, name: "Gone", deleted: true }) }).fetch))).toEqual({ found: false, hosts: ["nexus.pubky.app"] });
@@ -127,9 +147,9 @@ describe("Pubky: the index's details and counts for exactly this key", () => {
     };
     const fetch: IdentityFetch = async (url, init) => { caps.push(init?.maxBytes); return routes[url.replace("https://nexus.pubky.app", "")](); };
     const p = await pubkyReader.read(key, ctxOf(fetch));
-    expect(p).toEqual({ found: true, hosts: ["nexus.pubky.app"] });
+    expect(p).toEqual({ found: true, hosts: ["nexus.pubky.app"], avatarMiss: "it is an SVG; only PNG, JPEG and WebP pictures are shown" });
     expect(decoded).not.toHaveBeenCalled();
-    expect(caps).toEqual([16 * 1024, 16 * 1024, 256 * 1024]);
+    expect(caps).toEqual([16 * 1024, 16 * 1024, 2 * 1024 * 1024]);
   });
 
   it("an oversized or unreachable index is a failure", async () => {
@@ -175,7 +195,7 @@ describe("Bluesky: the public AppView for exactly this DID, the picture from the
     for (const avatar of [`https://cdn.bsky.app/img/avatar/plain/did:plc:z72i7hdynmk6r22z27h6tvur/${CID}@jpeg`, `https://evil.test/img/avatar/plain/x/${CID}`, "javascript:alert(1)"]) {
       const { net, alice, fetch } = network(did => answer(did, { handle: "handle.invalid", followersCount: "many", followsCount: -3, avatar }));
       const p = await atprotoReader.read(alice.did, ctxOf(fetch));
-      expect(p).toEqual({ found: true, name: "Alice", about: "Hello there", hosts: ["public.api.bsky.app"] });
+      expect(p).toEqual({ found: true, name: "Alice", about: "Hello there", hosts: ["public.api.bsky.app"], avatarMiss: "Bluesky named it at an address this app does not read" });
       expect(net.asked.some(u => u.includes("getBlob"))).toBe(false);
     }
   });
@@ -184,7 +204,7 @@ describe("Bluesky: the public AppView for exactly this DID, the picture from the
     const { net, alice, fetch } = network(answer);
     net.zone.a!["pds.alice.example"] = ["10.0.0.7"];
     const p = await atprotoReader.read(alice.did, ctxOf(fetch));
-    expect(p).toMatchObject({ found: true, name: "Alice", hosts: ["public.api.bsky.app"] });
+    expect(p).toMatchObject({ found: true, name: "Alice", hosts: ["public.api.bsky.app"], avatarMiss: "the account's server could not be asked for it" });
     expect(p.avatar).toBeUndefined();
     expect(net.asked.some(u => u.includes("getBlob"))).toBe(false);
   });

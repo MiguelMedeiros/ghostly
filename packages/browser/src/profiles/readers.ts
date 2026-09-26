@@ -4,7 +4,7 @@ import { assertPublicServer, resolveAtprotoDid } from "../proofs/atproto/resolve
 import { chosenResolver } from "../proofs/domain";
 import { readRelays } from "../nostr/relay";
 import { KIND_FOLLOWS, KIND_PROFILE, MAX_PROFILE_CONTENT, newestOf, parseFollows, parseProfile, plainText } from "../nostr/social";
-import { AVATAR_MAX_BYTES, cacheAvatar, profileName, smallAvatar } from "./public";
+import { AVATAR_MAX_BYTES, decodeAvatar, fetchAvatar, PROFILE_AVATAR_SIDE, profileName, type AvatarResult } from "./public";
 
 /**
  * Public profiles of verified identities (docs/wisps/PUBLIC-PROFILES.md): one reader per network that has a
@@ -22,6 +22,8 @@ export interface PublicProfileData {
   about?: string;
   /** A sanitized `data:image/jpeg;base64,…` URL, never a remote one. */
   avatar?: string;
+  /** When the profile names a picture that is not shown, which rule refused it ("it is a GIF; …"). Never the identity. */
+  avatarMiss?: string;
   followers?: number;
   following?: number;
   /** The hosts that were asked, for the card's "Loaded from". */
@@ -61,6 +63,7 @@ const BLUESKY_CDN_AVATAR = /^https:\/\/cdn\.bsky\.app\/img\/avatar\/plain\/(did:
 const count = (value: unknown): number | undefined =>
   Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= MAX_COUNT ? value as number : undefined;
 const hostOf = (url: string) => new URL(url).host;
+const pictureUnreachable = (host: string): AvatarResult => ({ miss: `${host} could not be reached, or the picture is larger than ${AVATAR_MAX_BYTES / 1024 / 1024} MiB` });
 
 function json(response: { status: number; text: string }): Record<string, unknown> | undefined {
   try {
@@ -98,8 +101,8 @@ export const nostrReader: PublicProfileReader = {
     const followsEvent = follows ? newestOf(follows.events, KIND_FOLLOWS, subject) : undefined;
     const following = followsEvent ? parseFollows(followsEvent, subject)?.follows.length : undefined;
     if (!p) return following === undefined ? { found: false, hosts } : profile({ following }, hosts);
-    const avatar = p.picture ? await cacheAvatar(p.picture, ctx.avatarFetch) : undefined;
-    return profile({ name: p.name, handle: p.handle, about: plainText(p.about, PROFILE_ABOUT_MAX, true), avatar, following }, hosts);
+    const picture = p.picture ? await fetchAvatar(p.picture, { fetcher: ctx.avatarFetch, side: PROFILE_AVATAR_SIDE, signal: ctx.signal }) : undefined;
+    return profile({ name: p.name, handle: p.handle, about: plainText(p.about, PROFILE_ABOUT_MAX, true), avatar: picture?.avatar, avatarMiss: picture?.miss, following }, [...hosts, ...(picture?.hosts ?? [])]);
   },
 };
 
@@ -122,16 +125,19 @@ export const pubkyReader: PublicProfileReader = {
     if (!d || d.id !== subject) throw new Error("The Pubky index answered for another key");
     if (d.deleted === true) return { found: false, hosts };
     const name = profileName(d.name);
-    const [counts, avatar] = await Promise.all([
+    const [counts, picture] = await Promise.all([
       get("/counts").then(r => (r.status === 200 ? json(r) : undefined), () => undefined),
+      // The index serves avatars as WebP (checked 2026-09-26), whatever the account uploaded.
       typeof d.image === "string" && d.image
-        ? ctx.fetch(`${PUBKY_NEXUS}/static/avatar/${subject}`, { maxBytes: AVATAR_MAX_BYTES, signal: ctx.signal }).then(r => (r.status === 200 ? smallAvatar(r.bytes) : undefined), () => undefined)
+        ? ctx.fetch(`${PUBKY_NEXUS}/static/avatar/${subject}`, { maxBytes: AVATAR_MAX_BYTES, signal: ctx.signal })
+          .then(r => (r.status === 200 ? decodeAvatar(r.bytes, PROFILE_AVATAR_SIDE) : { miss: `${hosts[0]} answered ${r.status}` }), () => pictureUnreachable(hosts[0]))
         : undefined,
     ]);
     return profile({
       name: name === subject ? undefined : name,
       about: plainText(d.bio, PROFILE_ABOUT_MAX, true),
-      avatar,
+      avatar: picture?.avatar,
+      avatarMiss: picture?.miss,
       followers: count(counts?.followers),
       following: count(counts?.following),
     }, hosts);
@@ -156,7 +162,7 @@ export const atprotoReader: PublicProfileReader = {
     if (response.status !== 200) throw new Error(`Bluesky answered ${response.status}`);
     if (!d || d.did !== subject) throw new Error("Bluesky answered for another account");
     const handle = typeof d.handle === "string" && d.handle !== "handle.invalid" ? normalizeAtprotoHandle(d.handle) : null;
-    let avatar: string | undefined;
+    let picture: AvatarResult | undefined;
     const cdn = typeof d.avatar === "string" ? BLUESKY_CDN_AVATAR.exec(d.avatar) : null;
     if (cdn && cdn[1] === subject) {
       try {
@@ -165,15 +171,16 @@ export const atprotoReader: PublicProfileReader = {
         const server = new URL(doc.pds);
         await assertPublicServer(server.hostname, resolve);
         const blob = await ctx.fetch(`${doc.pds}/xrpc/com.atproto.sync.getBlob?${new URLSearchParams({ did: subject, cid: cdn[2] })}`, { maxBytes: AVATAR_MAX_BYTES, signal: ctx.signal });
-        if (blob.status === 200) avatar = await smallAvatar(blob.bytes);
+        picture = blob.status === 200 ? await decodeAvatar(blob.bytes, PROFILE_AVATAR_SIDE) : { miss: `${server.host} answered ${blob.status}` };
         hosts.push(server.host);
-      } catch { /* the name and counts still show; the picture falls back to the mark */ }
-    }
+      } catch { picture = { miss: "the account's server could not be asked for it" }; /* the name and counts still show; the picture falls back to the mark */ }
+    } else if (typeof d.avatar === "string") picture = { miss: "Bluesky named it at an address this app does not read" };
     return profile({
       name: profileName(d.displayName),
       handle: handle ? `@${handle}` : undefined,
       about: plainText(d.description, PROFILE_ABOUT_MAX, true),
-      avatar,
+      avatar: picture?.avatar,
+      avatarMiss: picture?.miss,
       followers: count(d.followersCount),
       following: count(d.followsCount),
     }, hosts);

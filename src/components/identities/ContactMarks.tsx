@@ -14,15 +14,20 @@ const CHECK = <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-h
 /**
  * One identity's mark, with its state drawn over the tile (contactBadges.ts): the provider's colour when verified, a
  * clock when it expires soon, an amber dot when a check failed, greyed when expired and struck through when revoked.
+ * With a `photo` (its public profile's picture, in the header), the picture fills the mark and the provider's mark
+ * becomes a small badge on its corner.
  */
-export function BadgeMark({ provider, subject, state, size, ...rest }: { provider: string; subject?: string; state: BadgeState; size?: number } & Record<`data-${string}`, string | number | undefined>) {
+export function BadgeMark({ provider, subject, state, size, photo, ...rest }: { provider: string; subject?: string; state: BadgeState; size?: number; photo?: string } & Record<`data-${string}`, string | number | undefined>) {
   const icon = providerIcon(provider, subject);
   const style = size ? ({ "--mark": `${size}px` } as CSSProperties) : undefined;
+  const tile = icon ? icon.tile : "badge-mark-plain";
+  const mark = icon ? icon.mark(10) : <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="4" /></svg>;
   return (
-    <span className="badge-mark" data-state={state} data-icon={icon?.key ?? provider} style={style} aria-hidden="true" {...rest}>
-      <span className={`badge-mark-tile ${icon ? icon.tile : "badge-mark-plain"}`}>
-        {icon ? icon.mark(10) : <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="4" /></svg>}
-      </span>
+    <span className="badge-mark" data-state={state} data-icon={icon?.key ?? provider} data-photo={photo ? "" : undefined} style={style} aria-hidden="true" {...rest}>
+      {photo
+        ? <><span className="badge-mark-tile badge-mark-picture"><img src={photo} alt="" width={20} height={20} decoding="async" draggable={false} data-testid="badge-mark-photo" /></span>
+          <span className={`badge-mark-corner ${tile}`}>{mark}</span></>
+        : <span className={`badge-mark-tile ${tile}`}>{mark}</span>}
       {state === "expiring" && <span className="badge-mark-flag" data-flag="expiring">{CLOCK}</span>}
       {state === "failed" && <span className="badge-mark-flag" data-flag="failed" />}
     </span>
@@ -113,7 +118,7 @@ export function IdentityStack({ peerKey, name, onOpen, open }: { peerKey: string
             ? <span className="badge-mark" data-state={GHOSTLY} data-icon={GHOSTLY} data-badge={GHOSTLY} data-testid="chat-identity-ghostly-mark" aria-hidden="true">
               <span className="badge-mark-tile badge-mark-plain">{PROVIDER_ICONS[GHOSTLY].mark(10)}</span>
             </span>
-            : shown.map(b => <BadgeMark key={b.id} provider={b.provider} subject={b.subject} state={b.state} data-badge={b.id} data-testid="chat-identity-badge" />)}
+            : shown.map(b => <BadgeMark key={b.id} provider={b.provider} subject={b.subject} state={b.state} photo={b.photo} data-badge={b.id} data-testid="chat-identity-badge" />)}
         </span>
         {([3, 2, 1] as const).map(n => (
           <span key={n} data-upto={n}>
