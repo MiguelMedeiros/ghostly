@@ -550,7 +550,7 @@
     "src/components/rich/**": ["chat.rich.*","chat.paired.links"],
     "src/lib/parse/**": ["chat.rich.*","chat.paired.links","chats.list.rows"],
     "src/lib/parse/entities.ts": ["chat.cards.*"],
-    "src/components/chat/EntityCard*.tsx": ["chat.cards.*","invite.own","invite.rejoin"],
+    "src/components/chat/{EntityCard*.tsx,identityStanding.ts}": ["chat.cards.*","invite.own","invite.rejoin"],
     "src/components/MessageDetailsPanel.tsx": ["chat.paired.message-details"],
     "src/components/message-details.css": ["chat.paired.message-details"],
     "src/lib/messageDetails.ts": ["chat.paired.message-details"],

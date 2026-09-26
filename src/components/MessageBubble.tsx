@@ -9,6 +9,7 @@ import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
 import { PaymentBubble } from "./PaymentBubble";
 import { RichText } from "./rich/RichText";
+import { EntityCards } from "./chat/EntityCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { ChatMessage } from "../lib/types";
 
@@ -482,6 +483,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
         ) : (
           <div className="clearfix">
             <RichText testId="message-text" text={message.text} sentAt={message.timestamp} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
             {timestampEl}
           </div>
         )}
