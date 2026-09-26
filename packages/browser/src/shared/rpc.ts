@@ -13,7 +13,7 @@ import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
 import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView } from "./types";
-import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from "../nostr/types";
+import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
@@ -98,6 +98,8 @@ export interface EngineApi {
   nostrForgetContact(params: { linkId: string; subject: string }): void;
   /** The person's own profile, follows and mute list for one of their proven keys. */
   nostrLoadOwn(params: { subject: string }): void;
+  /** A key's profile or a note that a message names, on the person's tap, from the person's relays. Not stored. */
+  nostrLookup(params: NostrLookupRequest): NostrLookupResult;
   /** Publication, step 1: the unsigned event and the notice to confirm. Refused unless publication is on. */
   nostrDraft(params: NostrDraftRequest): NostrDraft;
   /** Publication, step 2: the draft, signed by the person's own signer, sent to their relays. */
