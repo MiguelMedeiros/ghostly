@@ -44,25 +44,34 @@ const TRACKING_PARAMS = new Set([
 ]);
 const isTracking = (name: string) => /^utm_/i.test(name) || TRACKING_PARAMS.has(name.toLowerCase());
 
+const LINK_CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+
 /**
  * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.") and a
  * closing bracket or quote the link did not open ("(https://x.example/a)") are left as text. The same rule as the
  * message bubble's links.
  */
 export function linkEnd(url: string): string {
-  const pairs: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
-  for (;;) {
-    const last = url[url.length - 1];
-    const opener = pairs[last];
-    const count = (c: string) => url.split(c).length - 1;
-    if (/[.,;:!?'"*_>]/.test(last) || (opener && count(last) > count(opener))) url = url.slice(0, -1);
-    else return url;
+  // Brackets counted once, then taken off as they go: linear in the link, however many ")" a peer puts at its end.
+  const count: Record<string, number> = { "(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0 };
+  for (const c of url) if (c in count) count[c]++;
+  let end = url.length;
+  while (end > 0) {
+    const last = url[end - 1];
+    const opener = LINK_CLOSERS[last];
+    if (!/[.,;:!?'"*_>]/.test(last) && !(opener && count[last] > count[opener])) break;
+    if (opener) count[last]--;
+    end--;
   }
+  return url.slice(0, end);
 }
+
+/** Characters of a link worth reading: a longer one is no address anyone shares, and is left as text. */
+export const LINK_MAX_CHARS = 4 * 1024;
 
 /** The http(s) links of a text, in order, each ending as the bubble ends it. */
 export function linksIn(text: string): string[] {
-  return [...text.matchAll(/https?:\/\/\S+/g)].map(match => linkEnd(match[0])).filter(url => url.length > 8);
+  return [...text.matchAll(/https?:\/\/\S+/g)].filter(match => match[0].length <= LINK_MAX_CHARS).map(match => linkEnd(match[0])).filter(url => url.length > 8);
 }
 
 /**

@@ -89,7 +89,8 @@
       "showAll": "Mostra tutto",
       "showLess": "Mostra meno",
       "localTime": "{{time}} nel tuo fuso orario",
-      "code": "Codice"
+      "code": "Codice",
+      "unshowable": "Impossibile mostrare questo messaggio."
     }
   },
   "group": {

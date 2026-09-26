@@ -37,6 +37,14 @@ describe("mention lists", () => {
     expect(mentionsMember([{ k: carol, o: 0, l: 6 }], bob)).toBe(false);
     expect(mentionsMember(undefined, bob)).toBe(false);
   });
+  it("drops a place holding a line break, a control or a direction character: no name has one", () => {
+    const bob = key();
+    for (const text of ["@Bob\nfake invoice", "@Bob\u202Eeoiovni", "@Bob\u0007", "@Bob\u2066x\u2069"]) {
+      expect(validMentions([{ k: bob, o: 0, l: Array.from(text).length }], text, false)).toEqual([]);
+    }
+    expect(validMentions([{ k: bob, o: 0, l: 8 }], "@Bob Lee", false)).toEqual([{ k: bob, o: 0, l: 8 }]);
+  });
+
   it("refuses a list over the bound whole, and anything that is not a list", () => {
     const text = "@a ".repeat(MENTION_LIMITS.count + 1);
     const list = Array.from({ length: MENTION_LIMITS.count + 1 }, (_, i) => ({ k: bob, o: i * 3, l: 2 }));

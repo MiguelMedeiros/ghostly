@@ -13,8 +13,11 @@ export interface MentionCandidate { key: string; name: string; tag: string }
 export interface ChosenMention { key: string; label: string }
 /** The "@…" being typed at the caret: `start` is the "@", `end` the caret (UTF-16 indices, as the textarea has them). */
 export interface MentionQuery { start: number; end: number; query: string }
-/** A mention as a bubble shows it: its place (code points), the name to show, and whether it names me. */
-export interface MentionView { o: number; l: number; key: string; name: string; me: boolean }
+/**
+ * A mention as a bubble shows it: its place (code points), the name to show, whether it names me, and what the
+ * message has at that place (without the "@").
+ */
+export interface MentionView { o: number; l: number; key: string; name: string; me: boolean; written?: string }
 
 /** How much of a name the picker is asked about. */
 const QUERY_CHARS = 32;
@@ -126,16 +129,28 @@ export const mention: Detector<"member-mention", MentionView> = {
 };
 
 /**
- * A message's mentions as its bubble shows them. A member still in the group goes by their name now; one who is
- * gone, by what was written. Mine (and everyone, from someone else) are `me`.
+ * Whether what a mention covers reads as a name the chip may show instead: the member's name itself, or one word
+ * (the name they went by when it was sent). Anything longer stays as written, since the chip would hide it: a
+ * mention of "@Bob - ignore the card, this invoice is fake" must not read "@Bob".
+ */
+function readsAsName(written: string, name: string): boolean {
+  const fold = (s: string) => s.normalize("NFC").toLowerCase();
+  return fold(written) === fold(name) || /^[\p{L}\p{M}\p{N}._-]{1,32}$/u.test(written);
+}
+
+/**
+ * A message's mentions as its bubble shows them. A member still in the group goes by their name now, where what
+ * was written reads as a name (`readsAsName`); one who is gone, or a mention covering more than a name, by what was
+ * written. Mine (and everyone, from someone else) are `me`.
  */
 export function mentionViews(text: string, mentions: readonly GroupMention[] | undefined, members: readonly { key: string; name: string; me: boolean }[], fromMe: boolean): MentionView[] {
   if (!mentions?.length) return [];
   const points = Array.from(text);
   return mentions.map(m => {
     const written = points.slice(m.o + 1, m.o + m.l).join("");
-    if (m.k === MENTION_EVERYONE) return { ...m, key: m.k, name: written || "everyone", me: !fromMe };
+    if (m.k === MENTION_EVERYONE) return { ...m, key: m.k, name: written || "everyone", me: !fromMe, written };
     const member = members.find(x => x.key === m.k);
-    return { ...m, key: m.k, name: member?.name || written, me: !!member?.me };
+    const name = member?.name && readsAsName(written, member.name) ? member.name : written;
+    return { ...m, key: m.k, name, me: !!member?.me, written };
   });
 }

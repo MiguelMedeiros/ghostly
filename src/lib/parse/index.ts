@@ -6,7 +6,7 @@ export { parseMessage } from "./blocks";
 export { tokenizeInline } from "./inline";
 export { plainText, SPOILER_PLAIN } from "./plain";
 export { DETECTORS } from "./detectors";
-export { linkEnd, link } from "./links";
+export { linkEnd, link, shownUrl } from "./links";
 export { blob, BLOB_MIN } from "./blob";
 export { time, type TimeData } from "./time";
 export { prettyJson } from "./json";

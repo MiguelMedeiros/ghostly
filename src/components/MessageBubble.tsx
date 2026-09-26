@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState, type PointerEvent as React
 import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { Menu, MenuItem } from "./Menu";
+import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
@@ -285,7 +286,17 @@ function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; on
   );
 }
 
-export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId }: MessageBubbleProps) {
+/** A message's bubble, behind its own error boundary: one message that fails to draw never takes the chat down. */
+export function MessageBubble(props: MessageBubbleProps) {
+  const { message } = props;
+  return (
+    <MessageBoundary key={message.id} text={message.text} fromMe={message.sender === "me"}>
+      <MessageBubbleView {...props} />
+    </MessageBoundary>
+  );
+}
+
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId }: MessageBubbleProps) {
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
     Date.now() - message.timestamp < 5000

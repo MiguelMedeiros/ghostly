@@ -1,4 +1,4 @@
-import { linkEnd } from "@ghostly/core";
+import { LINK_MAX_CHARS, linkEnd } from "@ghostly/core";
 
 /**
  * A place in a message: a `geo:` URI (RFC 5870, and Android's `?q=` label) or a Google Maps, Apple Maps or
@@ -48,6 +48,12 @@ function fromGeo(uri: string): Place | null {
   return place(lat, lon, uri, q && !PAIR.test(q) ? q : undefined, query.get("z") ?? undefined);
 }
 
+/**
+ * Google's own hosts, "www." already taken off: google.com, a country's google.fr / google.co.uk / google.com.br,
+ * and maps. before any of them. Never a longer name that only starts that way, like google.attacker.example.
+ */
+const GOOGLE_MAPS_HOST = /^(maps\.)?google\.(com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/;
+
 function fromMapLink(link: string): Place | null {
   let url: URL;
   try { url = new URL(link); } catch { return null; }
@@ -56,7 +62,7 @@ function fromMapLink(link: string): Place | null {
   const q = url.searchParams;
   const pair = (value: string | null) => value ? PAIR.exec(value) : null;
 
-  if (/^(google\.[a-z.]+|maps\.google\.[a-z.]+)$/.test(host) && (host.startsWith("maps.") || url.pathname.startsWith("/maps"))) {
+  if (GOOGLE_MAPS_HOST.test(host) && (host.startsWith("maps.") || url.pathname.startsWith("/maps"))) {
     // /maps/place/<Name>/@lat,lon,17z/…  ·  /maps/@lat,lon,15z  ·  ?q=lat,lon  ·  /maps/search/?api=1&query=lat,lon
     const at = new RegExp(String.raw`/@(${NUMBER}),(${NUMBER})(?:,(\d{1,2}(?:\.\d+)?)z)?`).exec(url.pathname);
     const name = /\/maps\/place\/([^/@]+)/.exec(url.pathname)?.[1];
@@ -90,6 +96,7 @@ export function findLocation(link: string): Place | null {
 /** The first place a message's text names: a `geo:` URI or a map link, in the order they appear. */
 export function locationIn(text: string): Place | null {
   for (const match of text.matchAll(/\bgeo:[^\s<>"']+|https?:\/\/\S+/gi)) {
+    if (match[0].length > LINK_MAX_CHARS) continue;
     // Ends as a link does: sentence punctuation and an unopened bracket stay text; Android's `(Label)` stays in.
     const found = findLocation(linkEnd(match[0]));
     if (found) return found;

@@ -23,6 +23,20 @@ export function linkEnd(url: string): string {
   return url.slice(0, end);
 }
 
+/** Direction and other invisible format characters, which can make a link read as another address. */
+const INVISIBLE = /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
+
+/**
+ * A link as a bubble shows it. Plain ASCII shows as typed. Anything else shows as the browser reads it: the host
+ * in punycode (a look-alike "аpple.com" reads "xn--pple-43d.com") and other characters percent-encoded, so a
+ * right-to-left override inside it cannot turn the address around. What no URL parser takes loses its invisible
+ * characters.
+ */
+export function shownUrl(url: string): string {
+  if (/^[\x21-\x7e]*$/.test(url)) return url;
+  try { return new URL(url).href; } catch { return url.replace(INVISIBLE, ""); }
+}
+
 /** Web addresses, over http(s) only: `javascript:` and `data:` never become links. */
 export const link: Detector<"link", { url: string }> = {
   kind: "link",

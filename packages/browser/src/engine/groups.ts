@@ -1,6 +1,6 @@
 import {
   GroupSession, MAX_GROUP_CHAIN, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  knockIdentity, knockRecords, mentionsMember, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
+  knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
   type GhostRecord, type GroupMention, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
@@ -681,11 +681,13 @@ export class Groups {
         try { this.host.sendOnLink(edge, frame); } catch { /* down: the sync on reopening carries it */ }
       },
       message: async m => {
+        // The sender picks the time: one far ahead would pin the group to the top of the list.
+        const timestamp = receivedTimestamp(m.timestamp);
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, m.timestamp));
-        await this.host.storeMessage({ linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp: m.timestamp, via: "datalink",
+        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, timestamp));
+        await this.host.storeMessage({ linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned) });
-        this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, m.timestamp));
+        this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
       },
       changed: () => { void this.membershipChanged(state.id); },
       metaChanged: (by, picture) => { void this.pictureChanged(state.id, session, by, picture); },

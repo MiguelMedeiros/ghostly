@@ -120,7 +120,11 @@ export function findLightningDestination(text: string): { destination: Lightning
   if (!match) return null;
   // Take the whole token the match starts in: an lnurl runs to the next space, an address stops at its domain.
   const start = match.index, end = text.slice(start).search(/\s|$/);
-  const token = text.slice(start, start + end).replace(/[),.;:!?]+$/, "");
+  // The sentence's closing punctuation stays out, taken off one by one: `/[…]+$/` retries from every character of a
+  // long run that does not reach the end, which is quadratic.
+  let stop = start + end;
+  while (stop > start && "),.;:!?".includes(text[stop - 1])) stop--;
+  const token = text.slice(start, stop);
   let destination: LightningDestination | null;
   try { destination = parseLightningDestination(token); } catch { return null; }
   if (!destination) return null;

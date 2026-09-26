@@ -89,7 +89,8 @@
       "showAll": "عرض الكل",
       "showLess": "عرض أقل",
       "localTime": "{{time}} بتوقيتك",
-      "code": "شيفرة"
+      "code": "شيفرة",
+      "unshowable": "تعذّر عرض هذه الرسالة."
     }
   },
   "group": {
