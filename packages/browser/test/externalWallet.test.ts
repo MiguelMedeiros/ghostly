@@ -165,7 +165,7 @@ describe("a test mint's invoice waits for the payer's word", () => {
       vi.mocked(lightning.quote).mockResolvedValue({ quote: "m1", amount: 21, feeReserve: 1 });
       vi.mocked(lightning.pay).mockResolvedValue(true);
       await desk.start();
-      await desk.payRequest({ linkId: "l", paymentId: "r1", via: "lightning", network });
+      await desk.payRequest({ linkId: "l", paymentId: "r1", via: "lightning", network, confirmedReal: true });
       expect(state("r1")?.state).toBe("settled");
       const said = sent.filter((s) => s.kind === "pay").map((s) => s.frame);
       if (network === "testnet") expect(said).toMatchObject([{ requestId: "r1", amount: { value: "21", asset: "sat" }, endpoint: [ENDPOINT.bolt11, INVOICE] }]);

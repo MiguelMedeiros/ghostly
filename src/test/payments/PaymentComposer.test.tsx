@@ -25,7 +25,7 @@ interface Open {
   balance?: number;
   /** Without it the composer has no wallet of its own: only the back, and Send goes through `onSend`. */
   withWallet?: boolean;
-  onSend?: (amount: number, memo: string, network?: WalletNetwork) => Promise<string | null>;
+  onSend?: (amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => Promise<string | null>;
   onRequest?: (amount: number, memo: string, method?: string, rail?: string, network?: WalletNetwork) => Promise<string | null>;
 }
 
@@ -430,13 +430,20 @@ describe("request and send", () => {
     expect(send()).toBeDisabled();
   });
 
-  it("sends ecash straight away when there is no wallet to review it with", async () => {
+  it("with no wallet to review it with, sends ecash once confirmed as real money (no card: Mainnet)", async () => {
     const { user, onSend, onClose } = open({ withWallet: false });
     await user.type(amount(), "21");
     await user.type(screen.getByRole("textbox", { name: "What for? (optional)" }), "tip");
     await user.click(send());
+    expect(screen.getByTestId("review-mainnet-confirm")).toHaveTextContent("Real money. This sends 21 sats");
+    expect(onSend).not.toHaveBeenCalled();
+    // Another amount asks again: what the step names is what it sends.
+    await user.type(amount(), "0");
+    expect(screen.queryByTestId("review-mainnet-confirm")).not.toBeInTheDocument();
+    await user.click(send());
+    await user.click(screen.getByTestId("review-confirm-send"));
     // No card, so no network: the engine sends from the wallet it would.
-    expect(onSend).toHaveBeenCalledWith(21, "tip", undefined);
+    expect(onSend).toHaveBeenCalledWith(210, "tip", undefined, true);
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -444,6 +451,7 @@ describe("request and send", () => {
     const { user, onClose } = open({ withWallet: false, onSend: async () => "Not enough sats at that mint" });
     await user.type(amount(), "21");
     await user.click(send());
+    await user.click(screen.getByTestId("review-confirm-send"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Not enough sats at that mint");
     expect(onClose).not.toHaveBeenCalled();
   });

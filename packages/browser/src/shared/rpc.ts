@@ -65,7 +65,8 @@ export interface EngineApi {
   sparkUseForLightning(params?: { network?:WalletNetwork }): void;
   /** `network`: the card chosen; a target of the other network is refused before anything is prepared. */
   preparePayment(params: {target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string;network?:WalletNetwork}): PaymentReview;
-  approvePayment(params: {id:string}): PaymentReview;
+  /** `confirmedReal`: a Mainnet review is approved only once the person confirmed it as real money. */
+  approvePayment(params: {id:string;confirmedReal?:true}): PaymentReview;
   reconcilePayment(params: {id:string}): PaymentReview;
   cancelPayment(params: {id:string}): PaymentReview;
 
@@ -161,7 +162,8 @@ export interface EngineApi {
   walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
-  walletPayQuote(params: { quote: string; mint: string; note?: string }): { paid: boolean };
+  /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */
+  walletPayQuote(params: { quote: string; mint: string; note?: string; confirmedReal?: true }): { paid: boolean };
   /** Reads a Lightning address or LNURL and fetches what it asks for. Its domain learns of the request. */
   lnurlResolve(params: { text: string; network?:WalletNetwork }): LnurlView;
   /** The invoice for `amount` sats from a resolved address, checked before it is quoted. */
@@ -188,7 +190,8 @@ export interface EngineApi {
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];
-  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork }): { paymentId: string };
+  /** `confirmedReal`: required on Mainnet (real money), refused without it. */
+  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork; confirmedReal?: true }): { paymentId: string };
   requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork }): { paymentId: string };
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */
   requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?:WalletNetwork }): { paymentId: string };
@@ -196,8 +199,11 @@ export interface EngineApi {
   groupPaymentHello(params: { groupId: string; member: string }): void;
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
   askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; memo?: string; timestamp: number; network?:WalletNetwork }): { askId: string };
-  /** `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`. */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?:WalletNetwork }): void;
+  /**
+   * `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`.
+   * `confirmedReal`: required for a Mainnet request (real money), refused without it.
+   */
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?:WalletNetwork; confirmedReal?: true }): void;
   reclaimPayment(params: { paymentId: string }): void;
   disconnect(params: { linkId: string }): void;
   addService(params: { name: string; target: string }): { serviceId: string };

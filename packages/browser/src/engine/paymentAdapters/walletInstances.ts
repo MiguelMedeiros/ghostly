@@ -73,6 +73,15 @@ export function paymentNetwork(payment: Pick<StoredPayment, "network" | "target"
 export const crossNetwork = (card: WalletNetwork, asked: WalletNetwork) =>
   `This is a ${networkLabel(asked)} payment (${asked === "mainnet" ? "real money" : "test coins"}): a ${networkLabel(card)} wallet never pays it. Use a ${networkLabel(asked)} wallet.`;
 
+/**
+ * Real money goes out only once the person confirmed it as real money ("Send real money"), whatever screen asked:
+ * a spend RPC on Mainnet without `confirmedReal` is refused before anything is spent. Test coins need no second step.
+ */
+export function assertConfirmedReal(network: WalletNetwork, confirmedReal: unknown): void {
+  if (network === "mainnet" && confirmedReal !== true) throw new Error(REAL_MONEY_UNCONFIRMED);
+}
+export const REAL_MONEY_UNCONFIRMED = "This pays with real money: confirm it with Send real money first. Nothing was sent.";
+
 /** One clear message for a creation that failed: nothing was saved, and trying again is safe. */
 export function createFailure(label: string, error: unknown): string {
   const reason = (error instanceof Error ? error.message : String(error)).replace(/\.$/, "");

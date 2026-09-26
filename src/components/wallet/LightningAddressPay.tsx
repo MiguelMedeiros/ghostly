@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { LightningAddressInfo, WalletPlatform } from "../../lib/platform";
 import { CASHU_MINT_SOURCE } from "../walletCardData";
+import { ConfirmRealMoney } from "../ConfirmRealMoney";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -20,6 +21,9 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [outcome, setOutcome] = useState<"paid" | "pending" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** Real money: Pay opens the second step, and only it pays. A wallet naming no network is Mainnet's. */
+  const [confirming, setConfirming] = useState(false);
+  const real = wallet.getState()?.mode !== "testnet";
   const ln = wallet.getState()?.lightning;
   const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? "the Cashu mints" : source === ln?.providerId ? ln.alias ?? ln.label ?? source : source);
 
@@ -58,17 +62,20 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   }
 
   if (quote && invoice) {
+    const pay = (confirmedReal: boolean) => void run(async () => {
+      const paid = await wallet.payQuote(quote.quote, quote.mint, invoice.note, confirmedReal);
+      setOutcome(paid ? "paid" : "pending");
+    });
     return (
       <div className="space-y-2" data-testid="lnurl-review">
         <p className={`${dense ? "text-xs" : "text-sm"} m-0`}>Pay <b>{quote.amount.toLocaleString()} sats</b> to {info.text}<span className="opacity-70"> + up to {quote.feeReserve.toLocaleString()} in fees · through {sourceName(quote.source)}</span></p>
         {info.description && <p className={muted}>{info.description}</p>}
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={primary} disabled={busy} data-testid="lnurl-pay" onClick={() => void run(async () => {
-            const paid = await wallet.payQuote(quote.quote, quote.mint, invoice.note);
-            setOutcome(paid ? "paid" : "pending");
-          })}>{busy ? "Paying…" : "Pay"}</button>
-          <button type="button" className={quiet} disabled={busy} onClick={() => { setQuote(null); setInvoice(null); }}>Cancel</button>
-        </div>
+        {confirming ? <ConfirmRealMoney what={`${quote.amount.toLocaleString()} sats (plus a fee of up to ${quote.feeReserve.toLocaleString()})`} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={primary} disabled={busy} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? "Paying…" : "Pay"}</button>
+            <button type="button" className={quiet} disabled={busy} onClick={() => { setQuote(null); setInvoice(null); }}>Cancel</button>
+          </div>
+        )}
         {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
       </div>
     );

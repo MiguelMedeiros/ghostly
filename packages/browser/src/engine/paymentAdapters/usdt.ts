@@ -1,7 +1,7 @@
 import { mnemonicToSeedSync } from '@scure/bip39';
 import WalletManagerEvm, { type WalletAccountEvm } from '@tetherto/wdk-wallet-evm';
 import { Interface, Transaction, getAddress, keccak256 } from 'ethers';
-import { ETHEREUM_USDT, EVM_TEST_CHAINS, SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, PaymentPreflightError, validatePaymentTarget, type PaymentAdapter, type PaymentExecution, type PaymentReview, type PaymentTarget } from '@ghostly/core';
+import { ETHEREUM_USDT, EVM_TEST_CHAINS, USDT_PUBLIC_RPC, SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, PaymentPreflightError, validatePaymentTarget, type PaymentAdapter, type PaymentExecution, type PaymentReview, type PaymentTarget } from '@ghostly/core';
 import { sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
 
 export interface UsdtConfig {
@@ -21,6 +21,16 @@ const faucet = new Interface(['function mint(address token,address to,uint256 am
 const erc20 = new Interface(['function decimals() view returns(uint8)', 'function balanceOf(address) view returns(uint256)', 'function transfer(address,uint256) returns(bool)', 'event Transfer(address indexed from,address indexed to,uint256 value)']);
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const CONFIRMATIONS = 2;
+
+/**
+ * The `provider` a request carries to the contact. Which RPC pays is the payer's own choice, so it names none of
+ * this wallet's: a typed RPC URL may hold an API key (`/v3/<key>`), and every contact would read it. Older apps
+ * require a URL here and pay only when it equals their own RPC, so it is the chain's public RPC (the default both
+ * start with), and a local test chain's origin, without its path.
+ */
+export function wireProvider(config: Pick<UsdtConfig, 'network' | 'provider'>): string {
+  return config.network === 'evm-local' ? new URL(config.provider).origin : USDT_PUBLIC_RPC[config.network];
+}
 
 /** WDK signs locally. Every network call uses the configured RPC, never a peer-supplied URL. */
 export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
@@ -102,11 +112,12 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
   }
   async target(): Promise<PaymentTarget> {
     const now = Date.now();
-    return {method:'usdt',network:this.config.network,provider:this.config.provider,asset:this.config.chainId === 1 ? 'USDT':'TEST-USDT',unit:'token-base',address:await this.address(),chainId:this.config.chainId,token:this.config.token,decimals:this.config.decimals,issuedAt:now,expiresAt:now+15*60*1000};
+    return {method:'usdt',network:this.config.network,provider:wireProvider(this.config),asset:this.config.chainId === 1 ? 'USDT':'TEST-USDT',unit:'token-base',address:await this.address(),chainId:this.config.chainId,token:this.config.token,decimals:this.config.decimals,issuedAt:now,expiresAt:now+15*60*1000};
   }
+  /** The request is for this wallet's token on its chain. Its `provider` is not compared: this wallet's own RPC pays. */
   private matches(target: PaymentTarget) {
     validatePaymentTarget(target);
-    if (target.method !== 'usdt' || target.network !== this.config.network || target.chainId !== this.config.chainId || !same(target.token!,this.config.token) || target.decimals !== this.config.decimals || target.provider !== this.config.provider) throw new Error('Request does not match the configured token, network and RPC');
+    if (target.method !== 'usdt' || target.network !== this.config.network || target.chainId !== this.config.chainId || !same(target.token!,this.config.token) || target.decimals !== this.config.decimals) throw new Error('Request does not match the configured token and network');
   }
   prepare(target: PaymentTarget, amount: number, feeCap: number) { return this.serial(async () => {
     this.matches(target);

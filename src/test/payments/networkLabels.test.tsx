@@ -72,7 +72,8 @@ describe("the review says which money, and real money asks once more", () => {
     expect(engine.callsTo("approvePayment")).toEqual([]);
     await user.click(within(panel).getByTestId("review-approve"));
     await user.click(within(panel).getByTestId("review-confirm-send"));
-    expect(engine.callsTo("approvePayment")).toEqual([{ id: "review-1" }]);
+    // Only the confirmation says real money was confirmed: the engine refuses a Mainnet approval without it.
+    expect(engine.callsTo("approvePayment")).toEqual([{ id: "review-1", confirmedReal: true }]);
     expect(await within(panel).findByTestId("review-status")).toHaveTextContent("submitted");
   });
 });

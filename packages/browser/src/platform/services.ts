@@ -88,7 +88,7 @@ function walletPlatform(network?: WalletNetwork): WalletPlatform {
     sparkRefresh: () => engine.call("sparkRefresh",on),
     sparkUseForLightning: () => engine.call("sparkUseForLightning",on),
     preparePayment: (params) => engine.call("preparePayment",{...params,...(network?{network}:{})}),
-    approvePayment: (id) => engine.call("approvePayment",{id}),
+    approvePayment: (id,confirmedReal) => engine.call("approvePayment",{id,...(confirmedReal?{confirmedReal:true as const}:{})}),
     reconcilePayment: (id) => engine.call("reconcilePayment",{id}),
     cancelPayment: (id) => engine.call("cancelPayment",{id}),
 
@@ -116,7 +116,7 @@ function walletPlatform(network?: WalletNetwork): WalletPlatform {
     bitcoinReconfigureSource: (values) => engine.call("bitcoinReconfigureSource", { values, ...(network?{network}:{}) }),
     bitcoinReceiveAddress: () => engine.call("bitcoinReceiveAddress", on),
     bitcoinRefresh: () => engine.call("bitcoinRefresh", on),
-    payQuote: async (quote, mint, note) => (await engine.call("walletPayQuote", { quote, mint, note })).paid,
+    payQuote: async (quote, mint, note, confirmedReal) => (await engine.call("walletPayQuote", { quote, mint, note, ...(confirmedReal ? { confirmedReal: true as const } : {}) })).paid,
     resolveLightningAddress: (text) => engine.call("lnurlResolve", { text, ...(network?{network}:{}) }),
     lightningAddressInvoice: (id, amount, comment) => engine.call("lnurlInvoice", { id, amount, comment, ...(network?{network}:{}) }),
     async checkPayment(peerPubKeyZ32, paymentId) {
@@ -127,11 +127,11 @@ function walletPlatform(network?: WalletNetwork): WalletPlatform {
     receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
     inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
     exportTokens: () => engine.call("walletExport", on),
-    async send(peerPubKeyZ32, amount, memo) {
+    async send(peerPubKeyZ32, amount, memo, confirmedReal) {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
       const timestamp = Date.now();
-      const { paymentId } = await engine.call("sendPayment", { linkId: link.id, amount, memo, timestamp, ...(network?{network}:{}) });
+      const { paymentId } = await engine.call("sendPayment", { linkId: link.id, amount, memo, timestamp, ...(network?{network}:{}), ...(confirmedReal ? { confirmedReal: true as const } : {}) });
       return { timestamp, paymentId };
     },
     async request(peerPubKeyZ32, amount, memo, method, rail) {
@@ -144,7 +144,8 @@ function walletPlatform(network?: WalletNetwork): WalletPlatform {
     async payRequest(peerPubKeyZ32, paymentId, options) {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-      await engine.call("payRequest", { linkId: link.id, paymentId, ...options, ...(network?{network}:{}) });
+      const { confirmedReal, ...rest } = options ?? {};
+      await engine.call("payRequest", { linkId: link.id, paymentId, ...rest, ...(network?{network}:{}), ...(confirmedReal ? { confirmedReal: true as const } : {}) });
     },
     reclaim: (paymentId) => engine.call("reclaimPayment", { paymentId }),
     getPayment: (paymentId) => engine.state?.payments[paymentId] ?? null,

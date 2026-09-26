@@ -93,8 +93,8 @@ describe("paying a contact's request, never twice", () => {
     await desk.start();
     await expect(desk.payRequest({ linkId: "x", paymentId: "r1" }), "another chat").rejects.toThrow("Unknown payment request");
     for (const id of ["r2", "r3", "nope"]) await expect(desk.payRequest({ linkId: "l", paymentId: id }), id).rejects.toThrow("Unknown payment request");
-    await expect(desk.payRequest({ linkId: "l", paymentId: "r4" })).rejects.toThrow("Review and explicitly approve");
-    await expect(desk.payRequest({ linkId: "l", paymentId: "r5" })).rejects.toThrow("no longer open");
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r4", confirmedReal: true })).rejects.toThrow("Review and explicitly approve");
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r5", confirmedReal: true })).rejects.toThrow("no longer open");
     expect(wallet.createToken).not.toHaveBeenCalled();
     expect(lightning.pay).not.toHaveBeenCalled();
   });
@@ -106,7 +106,7 @@ describe("paying a contact's request, never twice", () => {
       record({ id: "p1", kind: "payment", direction: "out", requestId: "r1", state: "failed", token: "cashuBold" }),
     ]);
     await desk.start();
-    await desk.payRequest({ linkId: "l", paymentId: "r1" });
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
     expect(wallet.createToken).toHaveBeenCalledWith(100, [MINT], undefined, expect.any(Function), "mainnet");
   });
 
@@ -114,9 +114,9 @@ describe("paying a contact's request, never twice", () => {
     const { desk, wallet, lightning, allowed } = setup([record({ id: "r1", mints: [MINT] })]);
     await desk.start();
     wallet.createToken.mockRejectedValue(new Error("You share no mint with this contact"));
-    await expect(desk.payRequest({ linkId: "l", paymentId: "r1" })).rejects.toThrow("You share no mint");
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("You share no mint");
     allowed.cashu = false;
-    await expect(desk.payRequest({ linkId: "l", paymentId: "r1" })).rejects.toThrow("No way of paying this request is allowed");
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("No way of paying this request is allowed");
     expect(lightning.quote).not.toHaveBeenCalled();
   });
 
@@ -125,12 +125,12 @@ describe("paying a contact's request, never twice", () => {
     await desk.start();
     allowed.cashu = false;
     lightning.quote.mockResolvedValueOnce({ quote: "q", mint: MINT, amount: 999, feeReserve: 1 });
-    await expect(desk.payRequest({ linkId: "l", paymentId: "r1" })).rejects.toThrow("does not match the requested amount");
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("does not match the requested amount");
     lightning.quote.mockResolvedValueOnce({ quote: "q", mint: MINT, amount: 1_000, feeReserve: 31 });
-    await expect(desk.payRequest({ linkId: "l", paymentId: "r1" })).rejects.toThrow("fee (31 sats) is too high");
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("fee (31 sats) is too high");
     expect(lightning.pay).not.toHaveBeenCalled();
     lightning.quote.mockResolvedValueOnce({ quote: "q", mint: MINT, amount: 1_000, feeReserve: 30 });
-    await desk.payRequest({ linkId: "l", paymentId: "r1" });
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
     expect(lightning.pay).toHaveBeenCalledWith(expect.objectContaining({ quote: "q" }), "Paid a contact's request", "r1");
     expect(state("r1")).toMatchObject({ state: "settled", mint: MINT });
   });
@@ -140,9 +140,9 @@ describe("paying a contact's request, never twice", () => {
     await desk.start();
     allowed.cashu = false;
     lightning.pay.mockRejectedValueOnce(new Error("No route"));
-    await expect(desk.payRequest({ linkId: "l", paymentId: "r1" })).rejects.toThrow("No route");
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toThrow("No route");
     expect(state("r1")?.lightningPending).toBeUndefined();
-    await desk.payRequest({ linkId: "l", paymentId: "r1" });
+    await desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true });
     expect(state("r1")?.state).toBe("settled");
   });
 });
@@ -775,7 +775,7 @@ describe("sending ecash", () => {
 
   it("the token written down with the spend is the one the contact gets, and it stays ours until they answer", async () => {
     const { desk, sent, state } = setup();
-    const { paymentId } = await desk.send({ linkId: "l", amount: 100, timestamp: 3, memo: " thanks " });
+    const { paymentId } = await desk.send({ linkId: "l", amount: 100, timestamp: 3, memo: " thanks ", confirmedReal: true });
     expect(sent).toEqual([{ kind: "pay", frame: { id: paymentId, timestamp: 3, requestId: undefined, amount: { value: "100", asset: "sat" }, memo: "thanks", endpoint: [ENDPOINT.cashu, "cashuBtoken"] } }]);
     expect(desk.payment(paymentId)).toMatchObject({ state: "pending", token: "cashuBtoken", mint: MINT });
     expect(state(paymentId), "the wallet's outbox, not the desk, wrote it").toBeUndefined();

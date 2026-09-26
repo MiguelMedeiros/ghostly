@@ -260,3 +260,30 @@ describe("ecash out", () => {
     expect(rows<StoredProof>("proofs").map((p) => p.secret).sort()).toEqual(["a", "c"]);
   });
 });
+
+describe("ecash of one network", () => {
+  const LOCAL = "http://127.0.0.1:3338";
+  const payment = (token: string, mintUrl: string): StoredPayment => ({ id: "p1", linkId: "l", kind: "payment", direction: "out", amount: 40, unit: "sat", state: "pending", createdAt: 0, mint: mintUrl, token });
+  // A real mint and a local test mint, both known and both funded.
+  const both = () => {
+    seed("proofs", [stored(64, "real"), { ...stored(64, "test"), mint: LOCAL }]);
+    mint.send.mockResolvedValue({ keep: [proof(24, "k1")], send: [proof(32, "s1"), proof(8, "s2")] });
+    const events = { onChange: vi.fn(), onTestMintNeeded: vi.fn(), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() };
+    return new CashuWallet((network) => network === "testnet" ? [LOCAL] : [MINT], events, () => [MINT, LOCAL]);
+  };
+
+  it("a request naming a real mint on Testnet spends only test ecash, and never real ecash for it", async () => {
+    const wallet = both();
+    // The real mint first, as a contact may list it: Testnet still pays from the test mint only.
+    expect((await wallet.createToken(40, [MINT, LOCAL], undefined, payment, "testnet")).mint).toBe(LOCAL);
+    expect(rows<StoredProof>("proofs").map((p) => p.secret)).toContain("real");
+  });
+
+  it("with only mints of the other network, nothing is spent", async () => {
+    const wallet = both();
+    await expect(wallet.createToken(40, [MINT], undefined, payment, "testnet")).rejects.toThrow("You share no mint");
+    await expect(wallet.createToken(40, [LOCAL], undefined, payment, "mainnet")).rejects.toThrow("You share no mint");
+    expect(rows<StoredProof>("proofs").map((p) => p.secret).sort()).toEqual(["real", "test"]);
+    expect(rows("payments")).toHaveLength(0);
+  });
+});

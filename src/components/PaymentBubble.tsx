@@ -9,6 +9,7 @@ import { isWorthlessMint, mintNetwork } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { Select } from "./ui/Select";
 import { MONEY_LABEL, NetworkTag } from "./NetworkTag";
+import { ConfirmRealMoney } from "./ConfirmRealMoney";
 
 const STATE_LABEL = {
   payment: { pending: "Waiting for your contact…", settled: "Received", failed: "Failed", reclaimed: "Taken back" },
@@ -26,6 +27,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const [review,setReview] = useState<Review|null>(null);
   /** A Lightning payment of the request's invoice, reviewed here before the Lightning source is asked to pay. */
   const [lnReview,setLnReview] = useState<{ fee: number; source: string } | null>(null);
+  /** Real money over Lightning: Approve opens the second step, and only it pays. */
+  const [lnConfirming,setLnConfirming] = useState(false);
   const [mint,setMint] = useState("");
   const [feeCap,setFeeCap] = useState<string|null>(null);
   const [busy, setBusy] = useState(false);
@@ -95,6 +98,10 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const viaLightning = !payment.target && !!payment.invoice && allowed?.lightning !== false && (!sharedMints.length || allowed?.cashu === false);
   // Lightning's default ceiling is the one the engine pays requests under.
   const feeInput=feeCap??(tokenPayment?'0.001':payment.target?.method==='bitcoin'?String(ONCHAIN_FEE_CAP):viaLightning?String(Math.max(10,Math.ceil(payment.amount*0.03))):'10');
+  const payLightning = (confirmedReal: boolean) => run(async () => {
+    await onNet.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput), ...(confirmedReal ? { confirmedReal } : {}) });
+    setLnReview(null); setLnConfirming(false);
+  });
   /** What another wallet can pay: the request's invoice, or the address it carries. Ecash-only requests have nothing to show. */
   const externalUri = (() => {
     try {
@@ -154,10 +161,12 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
               <p className="m-0 flex items-center gap-2">Pay {payment.amount.toLocaleString()} {testSats ? "test sats" : "sats"} over Lightning<NetworkTag network={network} testId="payment-lightning-network" /></p>
               <p className="m-0 text-text-primary/75">Through {lnReview.source} · fee up to {lnReview.fee.toLocaleString()} sats</p>
-              <div className="flex gap-2">
-                <button className={button} disabled={busy} onClick={() => run(async () => { await onNet.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput) }); setLnReview(null); })}>Approve payment</button>
-                <button className={quiet} disabled={busy} onClick={() => setLnReview(null)}>Cancel</button>
-              </div>
+              {lnConfirming ? <ConfirmRealMoney what={`${payment.amount.toLocaleString()} sats`} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
+                <div className="flex gap-2">
+                  <button className={button} data-testid="payment-lightning-approve" disabled={busy} onClick={() => network === "mainnet" ? setLnConfirming(true) : payLightning(false)}>Approve payment</button>
+                  <button className={quiet} disabled={busy} onClick={() => setLnReview(null)}>Cancel</button>
+                </div>
+              )}
             </div>
           )}
           <button data-testid="payment-pay" className={button} disabled={busy || (!payment.target && !viaLightning && !selectedMint) || !!review || !!lnReview} onClick={() => run(async () => {

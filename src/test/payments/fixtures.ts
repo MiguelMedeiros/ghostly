@@ -2,6 +2,8 @@ import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { EngineApi } from "@ghostly/browser/shared/rpc";
 import type { MintView, WalletView } from "@ghostly/browser/shared/types";
 import { TEST_MINT } from "@ghostly/browser/shared/mints";
+import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/testing";
+import { bech32 } from "@scure/base";
 import { servicesPlatform } from "../../lib/platform";
 
 /** The wallets the payment components are shown with: set up and ready unless a test says otherwise. */
@@ -69,6 +71,11 @@ export const target = (patch: Partial<PaymentTarget> = {}): PaymentTarget => ({
 // here checks signatures, only the bech32 checksum, so they decode as those networks' invoices.
 export const MAINNET_INVOICE =
   "lnbc21u1p42mkf2dqqpp56q3d9mfahf0974jqwy0yyfrg7zxksgxk7ufcc084yydhfx43daqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzyskhkhqar4dqgqfmarvdttr8x2nrp4txtamfupfftrnn4hmrp7s8ayen7hp2ye58jq8zu65rch9eplpxkhf3pf2nvuynhqxvkw5f7a2vgq486x8x";
+/** An invoice on Bitcoin that has not expired yet (the one above has): the fake regtest invoice under Bitcoin's prefix. */
+export function liveMainnetInvoice(sats: number): string {
+  const { words } = bech32.decode(fakeInvoice(sats, new Uint8Array(32).fill(9)) as `${string}1${string}`, false);
+  return bech32.encode(`lnbc${sats * 10}n`, words, false);
+}
 export const TESTNET_INVOICE =
   "lntb2500u1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpu9qrsgquk0rl77nj30yxdy8j9vdx85fkpmdla2087ne0xh8nhedh8w27kyke0lp53ut353s06fv3qfegext0eh0ymjpf39tuven09sam30g4vgp702pq0";
 export const REGTEST_INVOICE =

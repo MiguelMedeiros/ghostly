@@ -20,7 +20,7 @@ import {
 } from "@cashu/cashu-ts";
 import { STORES, openDb, store, transact, wrap } from "../shared/idb";
 import type { PaymentReview, WalletNetwork } from "@ghostly/core";
-import { isTestMint, paysItsOwnInvoices } from "../shared/mints";
+import { isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
   MintInfoView,
@@ -392,9 +392,11 @@ export class CashuWallet {
     network?: WalletNetwork,
   ): Promise<{ token: string; mint: string }> {
     assertAmount(amount);
-    // A request names its mints, and so its network; a send without one comes from this network's mints.
+    // A send without mints comes from this network's mints. A request names its mints, but a contact may name a
+    // real mint on a Testnet request: only mints of the network asked for are ever spent from.
     const mine = preferred ? this.getKnownMints() : this.getMints(network);
-    const candidates = preferred ? preferred.map((m) => m.replace(/\/+$/, "")).filter((m) => mine.includes(m)) : mine;
+    const candidates = (preferred ? preferred.map((m) => m.replace(/\/+$/, "")).filter((m) => mine.includes(m)) : mine)
+      .filter((m) => !network || mintNetwork(m) === network);
     for (const mint of candidates) {
       if ((await this.balanceAt(mint)) < amount) continue;
       return this.locked(mint, async () => {

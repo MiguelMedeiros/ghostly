@@ -61,8 +61,8 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const link = found ?? (member && community ? { id: pairLinkId(group.id, member.key), peerPubKeyZ32: member.key } : undefined);
   if (member && link) return <PaymentComposer balance={balance} contact={memberName(member)} onBack={() => setTo(null)} onClose={onClose}
     reviewContext={wallet ? { wallet, peer: link.peerPubKeyZ32, linkId: link.id } : undefined}
-    onSend={async (amount, memo, network) => {
-      try { await engine.call("sendPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), ...(network ? { network } : {}) }); return null; } catch (e) { return message(e); }
+    onSend={async (amount, memo, network, confirmedReal) => {
+      try { await engine.call("sendPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), ...(network ? { network } : {}), ...(confirmedReal ? { confirmedReal: true as const } : {}) }); return null; } catch (e) { return message(e); }
     }}
     onRequest={async (amount, memo, method, rail, network) => {
       // One way of paying per request, the card's: a Cashu request carries no invoice, a Lightning one no ecash.

@@ -61,6 +61,8 @@ export interface PaymentExecution { txid?: string; settled: boolean; pending?: b
 /** Only use before signing/broadcasting, when no spend could have happened. */
 export class PaymentPreflightError extends Error {}
 export const ETHEREUM_USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+/** Each chain's public RPC, which needs no key: the token wallet's defaults, and the `provider` its requests name. */
+export const USDT_PUBLIC_RPC = { ethereum: "https://ethereum.publicnode.com", sepolia: "https://ethereum-sepolia-rpc.publicnode.com" } as const;
 /** Test networks for the token wallet and their chain IDs. Their tokens are worthless and not issued by Tether. */
 export const EVM_TEST_CHAINS = { sepolia: 11155111, "evm-local": 31337 } as const;
 /** Aave's Sepolia test USDT (6 decimals): anyone can mint it from Aave's faucet, so a test needs only Sepolia ETH. */
