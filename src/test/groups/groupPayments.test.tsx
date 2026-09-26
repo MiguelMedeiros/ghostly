@@ -7,9 +7,9 @@ import { GroupChat } from "../../pages/GroupChat";
 import { groupPayStatus, groupPayTitle } from "../../lib/groupPayments";
 import { fakeEngine, groupView, linkView, paymentView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
-import { everyWallet } from "../payments/fixtures";
+import { everyWallet, mint, REAL_MINT, TEST_MINT } from "../payments/fixtures";
 
-// covers: groups.payments.member, groups.payments.group-request, groups.payments.notes
+// covers: groups.payments.member, groups.payments.group-request, groups.payments.notes, payments.chat.networks
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y"), BOB = "bob".padEnd(52, "y"), CAROL = "carol".padEnd(52, "y");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: true, missing: 0, ...patch });
@@ -48,7 +48,7 @@ describe("GroupPaymentComposer: whom first", () => {
     expect(screen.getByTestId("group-pay-everyone")).toBeEnabled();
   });
 
-  it("with one member: the chat's cards, and a request goes over the edge to them, on the card's rail only", async () => {
+  it("with one member: the chat's cards, and a request goes over the edge to them, on the card's rail and network only", async () => {
     const { user, engine } = composer();
     engine.on("requestPayment", () => ({ paymentId: "r1" }));
     await user.click(screen.getAllByTestId("group-pay-recipient")[0]);
@@ -57,7 +57,7 @@ describe("GroupPaymentComposer: whom first", () => {
     await user.type(screen.getByTestId("payment-amount"), "21");
     await user.type(screen.getByRole("textbox", { name: "What for? (optional)" }), "tacos");
     await user.click(screen.getByTestId("payment-request"));
-    expect(engine.callsTo("requestPayment")).toEqual([expect.objectContaining({ linkId: "edge-a", amount: 21, memo: "tacos", method: "cashu", rail: "cashu" })]);
+    expect(engine.callsTo("requestPayment")).toEqual([expect.objectContaining({ linkId: "edge-a", amount: 21, memo: "tacos", method: "cashu", rail: "cashu", network: "mainnet" })]);
   });
 
   it("back from the cards to whom", async () => {
@@ -67,19 +67,30 @@ describe("GroupPaymentComposer: whom first", () => {
     expect(screen.getAllByTestId("group-pay-recipient")).toHaveLength(3);
   });
 
-  it("the whole group: only Cashu or Lightning, no Send, and the request goes to the group on the chosen rail", async () => {
+  it("the whole group: only Cashu or Lightning, no Send, and the request goes to the group on the chosen rail and network", async () => {
     const { user, engine } = composer();
     engine.on("requestGroupPayment", () => ({ paymentId: "g1" }));
     await user.click(screen.getByTestId("group-pay-everyone"));
     expect(screen.getByTestId("payment-composer")).toHaveTextContent("with the group");
-    expect(screen.getByTestId("payment-card-arkade")).toHaveAttribute("title", "Ark cannot be used here");
+    expect(screen.getByTestId("payment-card-arkade-testnet")).toHaveAttribute("title", "Ark cannot be used here");
     // Choosing a card turns it over.
-    await user.click(screen.getByTestId("payment-card-lightning"));
+    await user.click(screen.getByTestId("payment-card-lightning-mainnet"));
     await user.type(screen.getByTestId("payment-amount"), "10");
     expect(screen.getByTestId("payment-send")).toBeDisabled();
     expect(screen.getByText(/one Lightning invoice\. Any member may pay it, once/)).toBeInTheDocument();
     await user.click(screen.getByTestId("payment-request"));
-    expect(engine.callsTo("requestGroupPayment")).toEqual([expect.objectContaining({ groupId: "group-1", amount: 10, rail: "lightning" })]);
+    expect(engine.callsTo("requestGroupPayment")).toEqual([expect.objectContaining({ groupId: "group-1", amount: 10, rail: "lightning", network: "mainnet" })]);
+  });
+
+  it("the whole group: a request made on a Testnet card asks the group for test sats", async () => {
+    // Cashu on both networks: each card asks on its own.
+    const { user, engine } = composer({ wallet: everyWallet({ mints: [mint(REAL_MINT, 500), mint(TEST_MINT, 500)], balance: 500 }) });
+    engine.on("requestGroupPayment", () => ({ paymentId: "g1" }));
+    await user.click(screen.getByTestId("group-pay-everyone"));
+    await user.click(screen.getByTestId("payment-card-cashu-testnet"));
+    await user.type(screen.getByTestId("payment-amount"), "10");
+    await user.click(screen.getByTestId("payment-request"));
+    expect(engine.callsTo("requestGroupPayment")).toEqual([expect.objectContaining({ groupId: "group-1", amount: 10, rail: "cashu", network: "testnet" })]);
   });
 
   it("says what the engine refused", async () => {

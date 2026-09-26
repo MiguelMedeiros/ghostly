@@ -70,6 +70,11 @@ export interface StoredLink {
   deletedIds?: string[];
   /** Ways of paying this device allows in this chat. Absent or true: allowed. */
   paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
+  /**
+   * For a way of paying, the networks this chat accepts it on (its cards on the Accept side). Absent for a method:
+   * every network. A request, a payment or an ask of a network off here is refused, and the contact is told.
+   */
+  paymentNetworks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>;
   /** Store-and-forward for this contact (WISP 4xx, `hold/1`). Absent: off, as for every chat from before it. */
   hold?: HoldState;
   /** An edge of a private group (WISP 900): the group, and the member at the other end. Not a chat. */
@@ -891,14 +896,17 @@ export interface LinkView {
     files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean; largeFiles?: boolean;
     /**
      * The networks the contact has a wallet on, per way of paying, as it said on the open session. Absent: it said
-     * none (an older app): any network may meet. A card is offered only where its network is in the list.
+     * none (an older app): any network may meet. A way of paying it has no wallet of is not in the map (one it has
+     * but turned off here lists no network). A card is offered only where its network is in its list.
      */
-    networks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>;
+    networks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
   };
   /** files/3 live in this chat: bytes the contact's device said it can still take for files, when it said. */
   peerFileRoom?: number | null;
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
+  /** For each way of paying, the networks this chat accepts it on. */
+  paymentNetworks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
   /** Both sides announced private groups on the open session: this contact can be invited. */
   groups?: boolean;
   /** Paired chats: what each side offers after the handshake (`paired-capabilities`); `peer` is null until it says. */

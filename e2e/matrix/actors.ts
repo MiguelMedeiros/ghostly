@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator } from "@playwright/test";
-import { expect, type Peer } from "../support/fixtures";
+import { createWallet, expect, type CreateWallet, type Peer, type WalletKind, type WalletNetwork } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
 
@@ -97,39 +97,60 @@ export async function say(actor: Actor, text: string): Promise<void> {
 export const sees = (actor: Actor, text: string, timeout = 90_000) =>
   expect(chatPane(actor).getByText(text, { exact: true }).first()).toBeVisible({ timeout });
 
-/** The payment composer on this person's chat, with the card of one rail turned over (a track on a phone). */
-export async function paymentCard(actor: Actor, card: string): Promise<void> {
+/**
+ * A card by name: one wallet's (`cashu-testnet`, `lightning-mainnet`), or a kind alone for the first card of that kind
+ * (a scenario has one wallet of each kind it pays with). Card ids are `<prefix>-<kind>-<network>`.
+ */
+const card = (actor: Actor, prefix: "payment-card" | "wallet-card", name: string): Locator =>
+  name.includes("-") ? actor.page.getByTestId(`${prefix}-${name}`) : actor.page.locator(`[data-testid^="${prefix}-${name}-"]`).first();
+
+/** The payment composer on this person's chat, with one wallet's card turned over (a track on a phone). */
+export async function paymentCard(actor: Actor, name: string): Promise<void> {
   const button = await composerButton(actor, "payment-button");
   await expect(button).toBeEnabled({ timeout: 60_000 });
   await button.click();
   const composer = actor.page.getByTestId("payment-composer");
+  const target = card(actor, "payment-card", name);
   if ((await composer.locator(".wallet-deck").getAttribute("data-mode")) === "track") {
-    const target = actor.page.getByTestId(`payment-card-${card}`);
     for (let i = 0; i < 8 && (await target.getAttribute("aria-checked")) !== "true"; i++) await actor.page.getByTestId("payment-deck-next").click();
     await expect(target).toHaveAttribute("aria-checked", "true");
     await actor.page.getByTestId("payment-use").click();
   } else {
-    await actor.page.getByTestId(`payment-card-${card}`).click();
+    await target.click();
   }
   await expect(actor.page.getByTestId("payment-amount")).toBeVisible();
 }
 
-/** The wallet page, with one card in front. */
-export async function wallet(actor: Actor, card?: string): Promise<void> {
+/** The wallet page, with one wallet's card in front (see `card` for its name). */
+export async function wallet(actor: Actor, name?: string): Promise<void> {
   await go(actor, "#/wallet");
   await expect(actor.page.getByTestId("wallet")).toBeVisible();
-  if (!card) return;
-  const target = actor.page.getByTestId(`wallet-card-${card}`);
+  if (!name) return;
+  const target = card(actor, "wallet-card", name);
   await expect(async () => {
     await target.click();
     await expect(target).toHaveAttribute("aria-selected", "true", { timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
 }
 
-export async function useTestnet(actor: Actor): Promise<void> {
+/**
+ * A wallet of one kind on one network, made with Wallets → New as a person does (support/fixtures.ts `createWallet`: a
+ * source and its form where the kind needs one), checked by the app before its card appears. A new profile has none.
+ * The dialog's words (Testnet, Mainnet, Source) are the same in every language.
+ */
+export async function newWallet(actor: Actor, kind: WalletKind, network: WalletNetwork, options: CreateWallet = {}): Promise<void> {
   await wallet(actor);
-  await actor.page.getByTestId("wallet-mode").getByRole("radio", { name: either("Testnet") }).click();
-  await expect(actor.page.getByTestId("testnet-notice")).toBeVisible();
+  await createWallet(actor, kind, network, options);
+}
+
+/** Wallets → New on one network, the dialog left open to read what it offers there. */
+export async function newWalletDialog(actor: Actor, network: WalletNetwork): Promise<Locator> {
+  await wallet(actor);
+  await actor.page.getByTestId("wallet-add").click();
+  const dialog = actor.page.getByTestId("new-wallet");
+  await dialog.getByRole("radio", { name: network === "testnet" ? "Testnet" : "Mainnet" }).click();
+  await expect(dialog.getByTestId("new-wallet-network")).toHaveAttribute("data-network", network);
+  return dialog;
 }
 
 /** The chat's Options menu, then one of its entries. */

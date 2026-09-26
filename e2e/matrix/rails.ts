@@ -6,14 +6,14 @@ import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
-import { chatPane, either, openChat, paymentCard, wallet, type Actor } from "./actors";
+import { chatPane, either, newWallet, openChat, paymentCard, wallet, type Actor } from "./actors";
 
 /**
  * The Testnet payment blocks of the rails that need e2e/infra (Lightning through LND, Core Lightning, NWC
- * and Breez; Ark through Arkade and Bark; Bitcoin on-chain through BDK; USDT). Each one sets the source
- * up the way a person does (the provider's form, or the wallet's own Regtest option), funds it from the
- * environment's scripts (e2e/support/*-regtest, fund-ark.mjs), then pays in the chat both ways — a
- * request each way and a direct Send each way — and checks the bubbles and the balances on both sides.
+ * and Breez; Ark through Arkade and Bark; Bitcoin on-chain through BDK; USDT). Each one sets its Testnet wallet
+ * up the way a person does (New with the provider's form, or the wallet New made moved to its own Regtest option),
+ * funds it from the environment's scripts (e2e/support/*-regtest, fund-ark.mjs), then pays in the chat both ways (a
+ * request each way and a direct Send each way) and checks the bubbles and the balances on both sides.
  * They reuse what each provider's own gated spec does (e2e/web/wallet-lnd, wallet-cln, wallet-nwc,
  * breez-wallet, wallet-providers, wallet-bdk), in either language and on either screen.
  *
@@ -139,23 +139,24 @@ interface LightningNode {
   lock: string;
   /** Anything to do before the scenario pays (fund, open the channel): idempotent. */
   ready?: () => Promise<unknown>;
-  /** Makes one of the environment's nodes this person's Lightning source, through the form. */
+  /** Makes one of the environment's nodes the source of this person's Testnet Lightning wallet, through New and its form. */
   connect: (actor: Actor, who: Who) => Promise<void>;
   /** The node's own balance, in sats, once nothing is in flight on it. */
   balance: (who: Who) => Promise<number>;
 }
 
-async function chooseSource(actor: Actor, provider: string): Promise<Locator> {
-  await wallet(actor, "lightning");
+/**
+ * A Testnet Lightning wallet through `provider`, made with New: `fill` fills the source's form (the dialog's form area)
+ * and saves it; the app checks the source before the card appears. Returns the card's source section. It is the
+ * person's one wallet, so every request carries an invoice of this source alone.
+ */
+async function lightningSource(actor: Actor, provider: string, fill: (form: Locator) => Promise<void>, secret?: string): Promise<Locator> {
+  await newWallet(actor, "lightning", "testnet", { provider, fill, timeout: 90_000 });
+  await wallet(actor, "lightning-testnet");
   const source = actor.page.getByTestId("lightning-source");
-  await choose(source.getByTestId("lightning-source-select"), provider);
-  return source;
-}
-
-async function saved(source: Locator, secret?: string): Promise<void> {
-  await expect(source.getByTestId("lightning-source-saved")).toBeVisible({ timeout: 60_000 });
   // The credentials are sealed in the engine, never back in the page.
-  if (secret) expect(await source.page().content()).not.toContain(secret);
+  if (secret) expect(await actor.page.content()).not.toContain(secret);
+  return source;
 }
 
 const LND: LightningNode = {
@@ -163,13 +164,13 @@ const LND: LightningNode = {
   connect: async (actor, who) => {
     const lnd = await import("../support/lnd-regtest/regtest.mjs");
     const { url, macaroon, cert } = lnd.credentials(who);
-    const source = await chooseSource(actor, "lnd");
-    const form = source.getByTestId("provider-form-lnd");
-    await form.getByLabel("REST address").fill(url);
-    await form.getByLabel("Macaroon (hex)").fill(macaroon);
-    await form.getByLabel("TLS certificate").fill(cert);
-    await form.getByTestId("provider-save").click();
-    await saved(source, macaroon);
+    const source = await lightningSource(actor, "lnd", async (area) => {
+      const form = area.getByTestId("provider-form-lnd");
+      await form.getByLabel("REST address").fill(url);
+      await form.getByLabel("Macaroon (hex)").fill(macaroon);
+      await form.getByLabel("TLS certificate").fill(cert);
+      await form.getByTestId("provider-save").click();
+    }, macaroon);
     await expect(source.getByTestId("lightning-source-status")).toContainText(`ghostly-${who}`);
   },
   balance: async (who) => {
@@ -185,13 +186,13 @@ const CLN: LightningNode = {
   connect: async (actor, who) => {
     const cln = await import("../support/cln-regtest/regtest.mjs");
     const rune: string = cln.rune(who);
-    const source = await chooseSource(actor, "core-lightning");
-    const form = source.getByTestId("provider-form-core-lightning");
-    await form.getByLabel("Node id").fill(cln.nodeId(who));
-    await form.getByLabel("WebSocket address").fill(cln.CLN_REGTEST[who].websocket);
-    await form.getByLabel("Rune").fill(rune);
-    await form.getByTestId("provider-save").click();
-    await saved(source, rune);
+    const source = await lightningSource(actor, "core-lightning", async (area) => {
+      const form = area.getByTestId("provider-form-core-lightning");
+      await form.getByLabel("Node id").fill(cln.nodeId(who));
+      await form.getByLabel("WebSocket address").fill(cln.CLN_REGTEST[who].websocket);
+      await form.getByLabel("Rune").fill(rune);
+      await form.getByTestId("provider-save").click();
+    }, rune);
     await expect(source.getByTestId("lightning-source-current")).toContainText("Core Lightning");
   },
   balance: async (who) => (await import("../support/cln-regtest/regtest.mjs")).channelBalance(who),
@@ -204,10 +205,11 @@ const NWC: LightningNode = {
     const nwc = await import("../support/nwc-regtest/regtest.mjs");
     // An app connection of this scenario's own on the person's Alby Hub.
     const uri: string = await nwc.nwcUri(who, { fresh: true });
-    const source = await chooseSource(actor, "nwc");
-    await source.getByTestId("provider-form-nwc").getByLabel("Connection URI").fill(uri);
-    await source.getByTestId("provider-save").click();
-    await saved(source, uri);
+    const source = await lightningSource(actor, "nwc", async (area) => {
+      await area.getByTestId("provider-form-nwc").getByLabel("Connection URI").fill(uri);
+      await area.getByTestId("provider-save").click();
+    }, uri);
+    await expect(source.getByTestId("lightning-source-current")).toContainText("Nostr Wallet Connect");
   },
   balance: async (who) => (await import("../support/nwc-regtest/regtest.mjs")).balances()[who].local,
 };
@@ -243,8 +245,7 @@ async function lightningNode(a: Actor, b: Actor, rail: string, node: LightningNo
     await node.connect(a, "alice");
     await node.connect(b, "bob");
     const start = { alice: await node.balance("alice"), bob: await node.balance("bob"), a: await cardBalance(a), b: await cardBalance(b) };
-    // Lightning only in this chat, on both sides: every request carries an invoice of the asker's own node.
-    for (const p of [a, b]) await chatMethods(p, ["cashu"]);
+    // Lightning is each person's one wallet: every request carries an invoice of the asker's own node.
 
     await requestInChat(b, a, { card: "lightning", amount: "210", note: `${rail}: B asks A` });
     await requestInChat(a, b, { card: "lightning", amount: "120", note: `${rail}: A asks B` });
@@ -277,10 +278,10 @@ async function breez(a: Actor, b: Actor): Promise<void> {
     const other = await counterpart();
     try {
       for (const p of [a, b]) {
-        const source = await chooseSource(p, "breez");
-        const form = source.getByTestId("provider-form-breez");
-        await form.getByTestId("breez-phrase-written").check();
-        await form.getByTestId("provider-save").click();
+        const source = await lightningSource(p, "breez", async (area) => {
+          await area.getByTestId("breez-phrase-written").check();
+          await area.getByTestId("provider-save").click();
+        });
         await expect(source.getByTestId("lightning-source-status")).toContainText("regtest", { timeout: 90_000 });
       }
       // In: an invoice of A's Breez wallet, paid by the counterpart.
@@ -290,7 +291,6 @@ async function breez(a: Actor, b: Actor): Promise<void> {
       await a.page.getByTestId("wallet-create-invoice").click();
       await other.pay((await a.page.getByTestId("wallet-invoice").innerText()).trim());
       await expect(a.page.getByTestId("wallet-paid")).toBeVisible({ timeout: 90_000 });
-      for (const p of [a, b]) await chatMethods(p, ["cashu"]);
       await requestInChat(b, a, { card: "lightning", amount: "300", note: "ln-breez: B asks A" });
       await requestInChat(a, b, { card: "lightning", amount: "100", note: "ln-breez: A asks B" });
       await payInvoiceOfCard(a, b, 50);
@@ -328,7 +328,8 @@ async function arkade(a: Actor, b: Actor): Promise<void> {
   // Every coin of the story comes from A's funding batch, and arkd's regtest batches expire quickly
   // (e2e/infra: 180): B's wallet first, A funded last, so the payments start as soon as the coins exist.
   for (const p of [b, a]) {
-    await wallet(p, "arkade");
+    // New made it on Mutinynet; an empty wallet moves to the local regtest server.
+    await wallet(p, "arkade-testnet");
     await panel(p).getByRole("radio", { name: either("Regtest") }).click({ timeout: 60_000 });
     await expect(panel(p).getByTestId("ark-balance")).toContainText("Regtest", { timeout: 60_000 });
     if (p === a) {
@@ -372,8 +373,8 @@ async function bark(a: Actor, b: Actor): Promise<void> {
   const panel = (p: Actor) => p.page.getByTestId("bark-wallet");
   const sats = async (p: Actor) => amountIn(await panel(p).getByTestId("bark-balance").innerText());
   for (const p of [a, b]) {
-    await wallet(p, "bark");
-    // Testnet starts on signet; an empty wallet makes way for the local regtest server.
+    await wallet(p, "bark-testnet");
+    // New made it on signet; an empty wallet makes way for the local regtest server.
     await panel(p).getByRole("radio", { name: either("Regtest") }).click({ timeout: 90_000 });
     await expect(panel(p).getByTestId("bark-balance")).toContainText("Regtest", { timeout: 90_000 });
     await expect(panel(p).getByTestId("bark-address")).toHaveText(/tark1p/, { timeout: 60_000 });
@@ -405,14 +406,15 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
   const mine = () => { bdkRegtest("mine", "1"); };
   const address: Partial<Record<string, string>> = {};
   for (const p of [a, b]) {
-    await wallet(p, "bitcoin");
-    await choose(panel(p).getByTestId("onchain-source-select"), "bdk");
-    const form = panel(p).getByTestId("provider-form-bdk");
-    await panel(p).getByTestId("bdk-written").check();
-    await choose(form.getByLabel(either("Network")), "regtest");
-    await form.getByLabel(either("Esplora server")).fill(BDK_REGTEST.esplora);
-    await form.getByTestId("provider-save").click();
-    await expect(panel(p).getByTestId("onchain-source-saved")).toBeVisible({ timeout: 60_000 });
+    // A Testnet Bitcoin wallet, made with New: BDK is the one on-chain source a browser runs, so New shows its form at once.
+    await newWallet(p, "bitcoin", "testnet", { timeout: 90_000, fill: async (area) => {
+      await area.getByTestId("bdk-written").check();
+      await choose(area.getByTestId("provider-form-bdk").getByLabel(either("Network")), "regtest");
+      await area.getByLabel(either("Esplora server")).fill(BDK_REGTEST.esplora);
+      await area.getByTestId("provider-save").click();
+    } });
+    await wallet(p, "bitcoin-testnet");
+    await expect(panel(p).getByTestId("onchain-source-status")).toContainText(/Connected/, { timeout: 60_000 });
     await panel(p).getByTestId("bitcoin-new-address").click();
     address[p.name] = (await panel(p).getByTestId("bitcoin-address").innerText()).trim();
     expect(address[p.name]).toMatch(/^bcrt1q/);
@@ -462,12 +464,13 @@ async function usdt(a: Actor, b: Actor): Promise<void> {
   const tokens = (p: Actor) => panel(p).getByTestId("usdt-balance");
   const address: Partial<Record<string, string>> = {};
   for (const p of [a, b]) {
-    await wallet(p, "usdt");
+    // New made it on Sepolia; an empty wallet moves to the local chain.
+    await wallet(p, "usdt-testnet");
     await panel(p).getByRole("radio", { name: either("Local test chain") }).click({ timeout: 60_000 });
     await panel(p).getByLabel(either("Token contract")).fill(USDT_LOCAL.token);
     await panel(p).getByRole("button", { name: either("Switch network") }).click();
-    // Testnet starts on Sepolia, also "TEST-USDT": wait for the local chain itself before reading the address.
-    await expect(p.page.getByTestId("wallet-card-usdt")).toContainText("EVM local", { timeout: 60_000 });
+    // Sepolia is also "TEST-USDT": wait for the local chain itself before reading the address.
+    await expect(p.page.getByTestId("wallet-card-usdt-testnet")).toContainText("EVM local", { timeout: 60_000 });
     await expect(tokens(p)).toHaveText(/^0 TEST-USDT/, { timeout: 60_000 });
     address[p.name] = (await panel(p).getByTestId("usdt-address").innerText()).trim();
     // Gas for both.

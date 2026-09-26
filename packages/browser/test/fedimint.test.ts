@@ -58,6 +58,13 @@ describe("the Fedimint wallet", () => {
     expect(w.view.history[0]).toMatchObject({ kind: "lightning-in", amount: 2_500, state: "done" });
   });
 
+  it("keeps the preview's name and guardians when the joined client says none yet", async () => {
+    const w = await wallet();
+    federation.joinedInfo = { name: undefined, guardians: [], welcome: "" };
+    await w.join(federation.invite);
+    expect(w.view.federations).toMatchObject([{ name: "Regtest federation", guardians: [{ name: "g0" }] }]);
+  });
+
   it("refuses what is not an invite code, a federation of the other network with WrongNetworkError, and one without ecash", async () => {
     const w = await wallet();
     await expect(w.preview("lnbc1xyz")).rejects.toThrow("starts with fed1");

@@ -264,7 +264,9 @@ export class FedimintWallet {
       client = await this.gate.within(sdk.join({ database, mnemonic, invite: code, recover: again }), (c) => c.close());
       if (client.federationId !== info.federationId) throw new Error("The federation changed its id while joining");
       const { federationId: _id, ...rest } = await client.info().catch(() => info);
-      const federation: StoredFederation = { ...info, ...rest, network: info.network, id: info.federationId, database, invite: code, joinedAt: Date.now() };
+      // The joined client's word wins where it says something: an empty name or guardian list keeps the preview's.
+      const said = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0)));
+      const federation: StoredFederation = { ...info, ...said, network: info.network, id: info.federationId, database, invite: code, joinedAt: Date.now() };
       delete (federation as Partial<FederationInfo>).federationId;
       const next = { ...saved, federations: [...saved.federations, federation] };
       await transact([STORES.settings], (stores) => { stores[STORES.settings].put(next, key(this.network)); });

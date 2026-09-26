@@ -1,8 +1,7 @@
 import { CLN_REGTEST, channelBalance, invoice, nodeId, pay, rune } from "../support/cln-regtest/regtest.mjs";
-import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
-import { choose } from "../support/select";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
-import { chatPayments } from "../support/payments";
+import { paymentCard } from "../support/payments";
 
 /**
  * Core Lightning as the Lightning source, against the regtest stack in e2e/support/cln-regtest (two nodes,
@@ -17,18 +16,18 @@ test.setTimeout(3 * 60_000);
 // Both tests move sats on the same two nodes: one at a time, or each sees the other's payments.
 test.describe.configure({ mode: "serial" });
 
-/** Makes the node this peer's Lightning source in Testnet, through the source picker's form. */
+/** Makes the node the source of this peer's Testnet Lightning wallet, made with New through the source's form. */
 async function useNode(p: Peer, node: Node) {
   const secret: string = rune(node);
-  await useTestnet(p);
-  await openWallet(p, "lightning");
+  await createWallet(p, "lightning", "testnet", { provider: "core-lightning", timeout: 30_000, fill: async (area) => {
+    const form = area.getByTestId("provider-form-core-lightning");
+    await form.getByLabel("Node id").fill(nodeId(node));
+    await form.getByLabel("WebSocket address").fill(CLN_REGTEST[node].websocket);
+    await form.getByLabel("Rune").fill(secret);
+    await form.getByTestId("provider-save").click();
+  } });
+  await openWallet(p, "lightning-testnet");
   const source = p.page.getByTestId("lightning-source");
-  await choose(source.getByTestId("lightning-source-select"), "core-lightning");
-  const form = source.getByTestId("provider-form-core-lightning");
-  await form.getByLabel("Node id").fill(nodeId(node));
-  await form.getByLabel("WebSocket address").fill(CLN_REGTEST[node].websocket);
-  await form.getByLabel("Rune").fill(secret);
-  await form.getByTestId("provider-save").click();
   await expect(source.getByTestId("lightning-source-current")).toContainText("Core Lightning", { timeout: 30_000 });
   await expect(source.getByTestId("lightning-source-status")).toContainText("Connected");
   // The rune is sealed in the engine: never back in the page.
@@ -59,7 +58,7 @@ test("a Core Lightning node as the Lightning source: an invoice paid into it, an
   await expect.poll(() => balance(alice), { timeout: 30_000 }).toBe(start + 150);
 
   // Send: an invoice of the other node, paid by this one under the fee cap.
-  await openWallet(alice, "lightning");
+  await openWallet(alice, "lightning-testnet");
   await page.getByTestId("wallet-send").click();
   await page.getByTestId("wallet-pay-input").fill(invoice("bob", 70, "from the e2e"));
   await page.getByRole("button", { name: "Pay 70 sats" }).click();
@@ -77,13 +76,10 @@ test("a chat request paid over Lightning, from one person's node to the other's"
   await useNode(bob, "bob");
   const before = { alice: channelBalance("alice") as number, bob: channelBalance("bob") as number };
 
-  // Lightning only in this chat, on both sides: the request carries bob's node's invoice, alice's node pays it.
-  for (const p of [alice, bob]) {
-    await openChat(p);
-    await chatPayments(p.page, { cashu: false });
-  }
+  // Lightning only, on both sides (their one wallet): the request carries bob's node's invoice, alice's node pays it.
+  for (const p of [alice, bob]) await openChat(p);
   await (await composerRow(bob.page, "payment-button")).click();
-  await bob.page.getByTestId("payment-card-lightning").click();
+  await paymentCard(bob.page, "lightning-testnet").click();
   await bob.page.getByTestId("payment-amount").fill("210");
   await bob.page.getByTestId("payment-request").click();
 
@@ -101,7 +97,7 @@ test("a chat request paid over Lightning, from one person's node to the other's"
   await expect.poll(() => channelBalance("bob") - before.bob, { timeout: 30_000 }).toBe(210);
   expect(before.alice - channelBalance("alice")).toBe(210);
   for (const [p, node] of [[alice, "alice"], [bob, "bob"]] as const) {
-    await openWallet(p, "lightning");
+    await openWallet(p, "lightning-testnet");
     await expect.poll(() => balance(p), { timeout: 30_000 }).toBe(channelBalance(node));
   }
 });

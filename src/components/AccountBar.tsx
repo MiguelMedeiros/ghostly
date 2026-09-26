@@ -39,13 +39,11 @@ export function AccountBar() {
 
   const wallet = platform?.wallet;
   const walletState = wallet?.getState();
-  const balance = walletState?.balance ?? 0;
   // The balance is not shown here (the Wallet page and its cards have it), but what came in while the wallet was
-  // closed is counted on the icon, real and test sats apart: test sats are worthless. In Testnet the wallet holds
-  // only test mints, so the whole balance is test sats.
-  const testnet = walletState?.mode === "testnet";
-  const testBalance = testnet ? balance : walletState?.mints.filter((m) => wallet?.testMintUrls.includes(m.url)).reduce((sum, m) => sum + m.balance, 0) ?? 0;
-  const realBalance = balance - testBalance;
+  // closed is counted on the icon, real and test sats apart: test sats are worthless. Each network's Cashu wallet
+  // says its own (an older engine, only the flat one: its test mints' sats are test sats).
+  const realBalance = walletState?.networks ? walletState.networks.mainnet.balance : (walletState?.balance ?? 0) - (walletState?.mints.filter((m) => wallet?.testMintUrls.includes(m.url)).reduce((sum, m) => sum + m.balance, 0) ?? 0);
+  const testBalance = walletState?.networks ? walletState.networks.testnet.balance : (walletState?.balance ?? 0) - realBalance;
   // The Profile place wears the profile's name (renamed or switched, it follows); "Profile" only for a profile with none.
   const profile = useCurrentProfile();
   const profileName = profile.name || t("tabs.profile");
@@ -70,7 +68,7 @@ export function AccountBar() {
   }, [t, profileName]);
   const identityAttention = useIdentityAttention();
   const onIdentities = location.pathname === "/identities";
-  const lastBalanceRef = useRef({ real: realBalance, test: testBalance, testnet });
+  const lastBalanceRef = useRef({ real: realBalance, test: testBalance });
   const online = platform?.isOnline() ?? false;
   const name = settings.defaultNickname;
 
@@ -86,18 +84,17 @@ export function AccountBar() {
     canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
   useEffect(() => {
     const last = lastBalanceRef.current;
-    // Switching between Mainnet and Testnet changes what is shown, not what came in.
-    const real = last.testnet === testnet ? Math.max(0, realBalance - last.real) : 0, test = last.testnet === testnet ? Math.max(0, testBalance - last.test) : 0;
+    const real = Math.max(0, realBalance - last.real), test = Math.max(0, testBalance - last.test);
     if ((real || test) && !onWallet) setUnseen((u) => ({ real: u.real + real, test: u.test + test }));
-    lastBalanceRef.current = { real: realBalance, test: testBalance, testnet };
-  }, [realBalance, testBalance, testnet, onWallet]);
+    lastBalanceRef.current = { real: realBalance, test: testBalance };
+  }, [realBalance, testBalance, onWallet]);
 
   useEffect(() => {
     if (onWallet) setUnseen({ real: 0, test: 0 });
   }, [onWallet]);
   // Real sats say how many; test sats only that some came (they are worth nothing).
   const unseenLabel = unseen.real ? `+${compact(unseen.real)}` : unseen.test ? `+${compact(unseen.test)}` : "";
-  const unseenTitle = unseen.real ? `${unseen.real.toLocaleString()} new sats` : `${unseen.test.toLocaleString()} new ${testnet ? "sats" : "test sats"}`;
+  const unseenTitle = unseen.real ? `${unseen.real.toLocaleString()} new sats` : `${unseen.test.toLocaleString()} new test sats`;
 
 
   return (

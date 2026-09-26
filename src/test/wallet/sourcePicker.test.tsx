@@ -7,7 +7,7 @@ import { descriptor, offered, sourceView } from "./descriptors";
 import type { UserEvent } from "@testing-library/user-event";
 import { choose, optionsOf } from "../select";
 
-// covers: wallet.lightning.sources, wallet.onchain.sources
+// covers: wallet.lightning.sources, wallet.onchain.sources, wallet.instances.networks
 
 type Kind = "lightning" | "onchain";
 
@@ -112,11 +112,12 @@ describe("SourcePicker", () => {
     });
 
     it.each([
-      ["mainnet", "Mainnet has its own source; your Testnet source is kept."],
-      ["testnet", "Testnet has its own source; your Mainnet source is kept."],
-    ] as const)("tells %s keeps its own source", (mode, text) => {
+      ["mainnet", "This is the Mainnet wallet's source; a Testnet wallet has its own."],
+      ["testnet", "This is the Testnet wallet's source; a Mainnet wallet has its own."],
+    ] as const)("says the source belongs to the %s wallet, and the other network's wallet has its own", (mode, text) => {
       picker("lightning", sourceView({ mode, offered: offered("lightning", mode) }));
       expect(screen.getByText(text)).toBeInTheDocument();
+      expect(document.body.textContent, "no Mainnet or Testnet mode to switch").not.toMatch(/source is kept/);
     });
   });
 

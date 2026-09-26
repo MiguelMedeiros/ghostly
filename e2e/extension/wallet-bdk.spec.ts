@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
+import { createWallet, openWallet } from "../support/fixtures";
 import { expect, test } from "../support/extension";
 import { choose } from "../support/select";
 
@@ -12,17 +13,17 @@ test("BDK on regtest in the extension: a wallet that receives and sends", { tag:
   test.setTimeout(5 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bdk-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
   regtest("ready");
-  const { page } = await extensionPeer("bdk-ext");
-  await page.getByTestId("wallet-chip").click();
-  await page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-  await page.getByTestId("wallet-card-bitcoin").click();
+  const alice = await extensionPeer("bdk-ext");
+  const { page } = alice;
+  // A Testnet Bitcoin wallet, made with New: BDK is the one on-chain source a browser runs.
+  await createWallet(alice, "bitcoin", "testnet", { timeout: 60_000, fill: async (area) => {
+    await area.getByTestId("bdk-written").check();
+    await choose(area.getByTestId("provider-form-bdk").getByLabel("Network"), "regtest");
+    await area.getByLabel("Esplora server").fill(BDK_REGTEST.esplora);
+    await area.getByTestId("provider-save").click();
+  } });
+  await openWallet(alice, "bitcoin-testnet");
   const panel = page.getByTestId("bitcoin-wallet");
-  await choose(panel.getByTestId("onchain-source-select"), "bdk");
-  const form = panel.getByTestId("provider-form-bdk");
-  await panel.getByTestId("bdk-written").check();
-  await choose(form.getByLabel("Network"), "regtest");
-  await form.getByLabel("Esplora server").fill(BDK_REGTEST.esplora);
-  await form.getByTestId("provider-save").click();
   await expect(panel.getByTestId("onchain-source-status")).toContainText(/Connected · BDK BIP84/, { timeout: 60_000 });
   await panel.getByTestId("bitcoin-new-address").click();
   const address = (await panel.getByTestId("bitcoin-address").innerText()).trim();

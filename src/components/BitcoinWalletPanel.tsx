@@ -22,8 +22,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
   const [review, setReview] = useState<Review | null>(null);
   const [changing, setChanging] = useState(false);
   const ready = bt?.status === "ready";
-  // On-chain Bitcoin goes through the mode's source: in Testnet, under the page's badge, plain sats.
-  const unit = "sats";
+  // On-chain Bitcoin goes through its network's source: a Testnet wallet's coins are test sats.
+  const unit = state.mode === "testnet" ? "test sats" : "sats";
   const intents = (state.intents ?? []).filter((i) => i.method === "bitcoin" && i.id !== review?.id);
 
   return (

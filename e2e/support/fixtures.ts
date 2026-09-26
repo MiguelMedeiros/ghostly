@@ -1,7 +1,7 @@
 import { copyInvite } from "./clipboard";
 import { pasteInvite } from "./clipboard";
 import { createLink, encodeInviteCode } from "@ghostly/core";
-import { test as base, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { test as base, expect, type Browser, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { attachMint } from "./mint";
 import { LocalRelay } from "./relay";
 
@@ -202,10 +202,63 @@ export async function setDhtOnly(page: Page, on: boolean): Promise<void> {
 /** The open conversation, without the chat list (which previews the last message too). */
 export const chat = (peer: Peer) => peer.page.locator(".chat-wallpaper");
 
+export type WalletKind = "cashu" | "lightning" | "arkade" | "bark" | "spark" | "usdt" | "bitcoin" | "fedimint";
+export type WalletNetwork = "mainnet" | "testnet";
+/** A wallet's card: `arkade-testnet`, or a kind alone for the first card of that kind (a test that has one of it). */
+export type WalletCardName = WalletKind | `${WalletKind}-${WalletNetwork}`;
+
+/** A card of the wallet page's deck, by its name (see `WalletCardName`). */
+export const walletCard = (page: Page, card: WalletCardName): Locator =>
+  card.includes("-") ? page.getByTestId(`wallet-card-${card}`) : page.locator(`[data-testid^="wallet-card-${card}-"]`).first();
+
 /** The wallet is a page beside the chat list, like Settings: opening it puts the chat away. */
-export async function openWallet(peer: Peer, card?: "cashu" | "lightning" | "arkade" | "bark" | "spark" | "usdt" | "bitcoin" | "fedimint"): Promise<void> {
+export async function openWallet(peer: Peer, card?: WalletCardName): Promise<void> {
   if (!await peer.page.getByTestId("wallet").isVisible()) await peer.page.getByTestId("wallet-chip").click();
-  if (card) await peer.page.getByTestId(`wallet-card-${card}`).click();
+  if (card) await walletCard(peer.page, card).click();
+}
+
+export interface CreateWallet {
+  /** Fedimint: the federation's invite code. */
+  invite?: string;
+  /** Lightning or on-chain: the source to pick (its id), and how to fill its form (the dialog's form area). */
+  provider?: string;
+  fill?: (form: Locator) => Promise<void>;
+  /** How long its server may take to answer (the dialog then says it failed). */
+  timeout?: number;
+}
+
+/**
+ * Wallets → New → a network → a kind, as a person does: made in one click, checked by the app before its card
+ * appears. A kind that needs one thing gets it (`invite`, or a source and its form). Nothing is done when the card
+ * is there already. A failure fails the test with the dialog's own message.
+ */
+export async function createWallet(peer: Peer, kind: WalletKind, network: WalletNetwork = "testnet", options: CreateWallet = {}): Promise<void> {
+  const page = peer.page;
+  await openWallet(peer);
+  const card = page.getByTestId(`wallet-card-${kind}-${network}`);
+  if (await card.count() && kind !== "fedimint") return;
+  await page.getByTestId("wallet-add").click();
+  const dialog = page.getByTestId("new-wallet");
+  await dialog.getByRole("radio", { name: network === "testnet" ? "Testnet" : "Mainnet" }).click();
+  await dialog.getByTestId(`new-wallet-type-${kind}`).click();
+  if (options.invite !== undefined) {
+    await dialog.getByTestId("new-wallet-invite").fill(options.invite);
+    await dialog.getByTestId("new-wallet-create").click();
+  }
+  if (options.provider || options.fill) {
+    const form = dialog.getByTestId("new-wallet-provider");
+    const select = form.getByRole("combobox", { name: "Source" });
+    if (options.provider && await select.count()) { await select.click(); await page.getByRole("option").and(page.locator(`[data-value="${options.provider}"]`)).click(); }
+    await options.fill?.(form);
+  }
+  const error = dialog.getByTestId("new-wallet-error");
+  await expect.poll(async () => await error.isVisible() ? `failed: ${await error.innerText()}` : await dialog.isVisible() ? "open" : "made", { timeout: options.timeout ?? 90_000 }).toBe("made");
+  await expect(card).toBeVisible();
+}
+
+/** Wallets on test networks, made with New: Testnet Cashu (the public test mint, answered by the suite's own) unless others are named. */
+export async function useTestnet(peer: Peer, kinds: WalletKind[] = ["cashu"]): Promise<void> {
+  for (const kind of kinds) await createWallet(peer, kind, "testnet");
 }
 
 /** The Profile page, from the account bar: its Profile place opens the account switcher, whose first entry is the page. */
@@ -214,12 +267,6 @@ export async function openProfilePage(page: Page): Promise<void> {
   await page.getByTestId("profile-switcher-current").click();
 }
 
-/** Every wallet on test networks (the Testnet mode): test sats only, and the app says so everywhere. */
-export async function useTestnet(peer: Peer): Promise<void> {
-  await openWallet(peer);
-  await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-  await expect(peer.page.getByTestId("testnet-notice")).toBeVisible();
-}
 
 /**
  * The fake Lightning and on-chain providers (regtest, in memory, Testnet only) join the source pickers:

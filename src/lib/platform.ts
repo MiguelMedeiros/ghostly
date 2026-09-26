@@ -8,7 +8,9 @@ import type { BarkConfig } from "@ghostly/browser/engine/paymentAdapters/bark";
 import type { FedimintFederationView, FedimintWalletView } from "@ghostly/browser/engine/paymentAdapters/fedimintWallet";
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { SparkCreate, SparkWalletView } from "@ghostly/browser/engine/paymentAdapters/sparkWallet";
-import type { SparkNetwork } from "@ghostly/core";
+import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
+import type { NetworkWalletsView, WalletCreate, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
+export type { NetworkWalletsView, WalletCreate, WalletInstanceView, WalletOffer, WalletType, WalletNetwork };
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
@@ -46,13 +48,19 @@ export interface PeerLinkState {
    * `methods`: ways of paying both sides allow in this chat right now. `calls` / `services`: both sides offer
    * `calls/1` / `services/1` on the open session (paired chats; they need a live connection).
    */
-  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean };
+  capabilities?: {
+    files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean;
+    /** The networks the contact has a wallet on, per way of paying. Absent: it said none (an older app): any may meet. */
+    networks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
+  };
   /** Paired chats: what each side offers after the handshake; `peer` is null until it says. */
   sessionOffers?: { mine: string[]; peer: string[] | null };
   /** Paired chats: why a call cannot be placed right now, or null when it can. */
   callsUnavailable?: string | null;
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
+  /** For each way of paying, the networks this chat takes it on (its cards on the Accept side). */
+  paymentNetworks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
   dataLink: DataLinkState;
   online: boolean;
   /** `null` while the peer advertises nothing (offline, or an older client). */
@@ -132,18 +140,27 @@ export interface WalletTransaction {
 }
 
 export interface WalletState {
-  /** Which wallets are in use: real money, or test networks. Absent means mainnet. */
-  mode?: "mainnet" | "testnet";
-  /** On Mainnet: test sats held at test mints (a contact may have sent some), shown once in Testnet. */
+  /**
+   * The network of these wallets: a platform bound to one network (`wallet.forNetwork`) shows that network's. The
+   * profile's own state names the network older pages showed. Absent means mainnet.
+   */
+  mode?: WalletNetwork;
+  /** Both networks' wallets, open side by side. */
+  networks?: Record<WalletNetwork, NetworkWalletsView>;
+  /** The wallets this profile has, one type on one network each, in the deck's order. */
+  wallets?: WalletInstanceView[];
+  /** What New can make on each network, and why not where it cannot. */
+  offers?: WalletOffer[];
+  /** Test sats held at test mints, when the page shows Mainnet. */
   waitingTestSats?: number;
   ark?: ArkWalletView;
   bark?: BarkWalletView;
   fedimint?: FedimintWalletView;
   spark?: SparkWalletView;
   usdt?: UsdtWalletView;
-  /** The Lightning source of this mode (the Cashu mints by default) and its latest operations. */
+  /** The Lightning source of this network (the Cashu mints by default) and its latest operations. */
   lightning?: LightningView;
-  /** The on-chain Bitcoin source of this mode, if one is set up. */
+  /** The on-chain Bitcoin source of this network, if one is set up. */
   bitcoin?: BitcoinView;
   intents?: PaymentReview[];
   mints: { url: string; name: string; balance: number; info: MintInfo | null }[];
@@ -177,6 +194,8 @@ export interface ChatPayment {
   federations?: string[];
   /** Fedimint payments: the federation of the notes. */
   federation?: string;
+  /** Real money or test coins: only a wallet of this network pays it. Absent on older records. */
+  network?: WalletNetwork;
 }
 
 /** A Lightning address or LNURL, resolved: what the person sees before choosing an amount (whole sats). */
@@ -200,8 +219,18 @@ export type CashuInspection =
   | { kind: "token"; amount: number; unit: string; mint: string; memo?: string; accepted: boolean }
   | { kind: "request"; amount: number | null; unit: string; mints: string[]; description?: string };
 
-/** An ecash (Cashu) wallet with Lightning in and out through the user's mints. */
+/**
+ * The profile's wallets. Each call acts on one network's wallet: the one this platform is bound to
+ * (`forNetwork`), or, unbound, the network older pages showed. A payment always goes through the wallet of its
+ * own network, whatever this is bound to.
+ */
 export interface WalletPlatform {
+  /** The network this platform's calls and state are for; absent on the profile's own, unbound one. */
+  network?: WalletNetwork;
+  /** The same wallet calls, acting on one network's wallets, and that network's state. */
+  forNetwork(network: WalletNetwork): WalletPlatform;
+  /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
+  create(params: WalletCreate): Promise<WalletInstanceView>;
   usdtCreate(params:UsdtCreate):Promise<void>;
   usdtUnlock(password:string):Promise<void>;
   /** The recovery phrase; a wallet that opens by itself needs no password. */
@@ -263,8 +292,6 @@ export interface WalletPlatform {
   removeMint(url: string): Promise<void>;
   /** The primary mint (first in the list) is where Lightning invoices are created. */
   setPrimaryMint(url: string): Promise<void>;
-  /** Real money or test networks, for every wallet at once. */
-  setMode(mode: "mainnet" | "testnet"): Promise<void>;
   /** An invoice from the active Lightning source; `via: "cashu"` asks the Cashu mints whatever the source. */
   receiveLightning(amount: number, via?: "cashu"): Promise<{ invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
   quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
@@ -301,7 +328,8 @@ export interface WalletPlatform {
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;
   send(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
-  request(peerPubKeyZ32: string, amount: number, memo?: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"): Promise<{ timestamp: number; paymentId: string }>;
+  /** `rail`: a request carrying only ecash, or only an invoice. */
+  request(peerPubKeyZ32: string, amount: number, memo?: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: "cashu" | "lightning"): Promise<{ timestamp: number; paymentId: string }>;
   /** Paying on Ark, Bark, Spark or USDT without a request: asks the contact's app for one. */
   askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", memo?: string): Promise<{ askId: string }>;
   /** The contact's request answering an ask, once it arrived. */
@@ -336,7 +364,8 @@ export interface ServicesPlatform {
   setServiceShared(id: string, peerPubKeyZ32: string, shared: boolean): Promise<void>;
   getPeer(peerPubKeyZ32: string): PeerLinkState | null;
   /** Which ways of paying the chat with this peer allows. */
-  setChatPaymentMethods(peerPubKeyZ32: string, methods: Partial<Record<PaymentMethodName, boolean>>): Promise<void>;
+  /** `networks`: for a way of paying, the networks this chat takes it on; the others are kept as they are. */
+  setChatPaymentMethods(peerPubKeyZ32: string, methods: Partial<Record<PaymentMethodName, boolean>>, networks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>): Promise<void>;
   /** Store-and-forward in the chat with this peer: accept held items from them, and hold items for them while they are away. */
   setChatHold(peerPubKeyZ32: string, enabled: boolean): Promise<void>;
   /** Where held items live: this profile's S3 storage and space (Profile → Backups); null turns holding off. */

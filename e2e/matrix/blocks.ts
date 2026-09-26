@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { expect, test, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type TestInfo } from "@playwright/test";
 import { signS3 } from "../../packages/browser/src/backup/s3";
 import { testBitcoinWallet } from "../../packages/browser/test/helpers/bitcoinSign";
 import { FakeWebln, FakeWeblnLedger } from "../../packages/browser/test/helpers/fakeWebln";
@@ -8,7 +8,8 @@ import { fingerprints, TestGpg } from "../../packages/browser/test/helpers/gpg";
 import { strangerInvoice } from "../support/bolt11";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
-import { GIF } from "../support/fixtures";
+import { GIF, type WalletKind } from "../support/fixtures";
+import { mockMainnetMints } from "../support/mint";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { injectNostrSigner } from "../support/nostrSigner";
 import { LocalOidcIssuer } from "../support/oidcIssuer";
@@ -16,7 +17,7 @@ import type { LocalRelay } from "../support/relay";
 import { testSshKey } from "../support/ssh";
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
 import {
-  chatOption, chatPane, composerButton, either, go, home, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, useTestnet, wallet, type Actor,
+  chatOption, chatPane, composerButton, either, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
 } from "./actors";
 import type { Combination } from "./dimensions";
 import { CARD, type Step } from "./plan";
@@ -461,11 +462,14 @@ export const identity: Block = {
 /* ---------- wallet ---------- */
 
 
-/** With a mint of our own, every peer adds it and makes it primary: the extension's engine cannot be rerouted to it. */
+/**
+ * With a mint of our own, every peer adds it to its Testnet Cashu wallet and makes it primary: the extension's engine
+ * cannot be rerouted to it.
+ */
 async function localMint(actor: Actor): Promise<void> {
   const url = process.env.E2E_MINT_URL;
   if (!url) return;
-  await wallet(actor, "cashu");
+  await wallet(actor, "cashu-testnet");
   await actor.page.getByTestId("wallet-mint-url").fill(url);
   await actor.page.getByTestId("wallet-add-mint").click();
   await expect(actor.page.getByTestId("wallet-mint-url")).toHaveValue("");
@@ -549,15 +553,17 @@ async function lightningThroughWebln(w: World): Promise<void> {
   const aliceWallet = new FakeWebln(ledger, { alias: "A's wallet" }), bobWallet = new FakeWebln(ledger, { alias: "B's wallet" });
   for (const [p, source] of [[a, aliceWallet], [b, bobWallet]] as const) {
     await installWebln(p, source);
-    await wallet(p, "lightning");
-    const picker = p.page.getByTestId("lightning-source");
-    await choose(picker.getByTestId("lightning-source-select"), "webln");
-    await expect(picker.getByTestId("webln-found")).toBeVisible();
-    await picker.getByTestId("provider-form-webln").getByRole("button", { name: either("Connect browser wallet") }).click();
-    await expect(picker.getByTestId("lightning-source-saved")).toBeVisible({ timeout: 30_000 });
+    // A Testnet Lightning wallet through the browser wallet, made with New. It is the person's one wallet, so a
+    // request carries its invoice alone.
+    await newWallet(p, "lightning", "testnet", { provider: "webln", timeout: 30_000, fill: async (form) => {
+      await expect(form.getByTestId("webln-found")).toBeVisible();
+      await form.getByTestId("provider-form-webln").getByRole("button", { name: either("Connect browser wallet") }).click();
+    } });
+    await wallet(p, "lightning-testnet");
+    await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-status")).toContainText("Connected");
   }
-  await chatMethods(b, ["cashu"]);
-  await paymentCard(b, "lightning");
+  await openChat(b);
+  await paymentCard(b, "lightning-testnet");
   await b.page.getByTestId("payment-amount").fill("40");
   await memo(b, "matrix lightning request");
   await b.page.getByTestId("payment-request").click();
@@ -578,29 +584,84 @@ export const TESTNET: Partial<Record<Combination["rail"], (w: World) => Promise<
   ...INFRA_RAILS,
 };
 
-/** Mainnet: nothing moves; each rail's card says what it can do there, and a chat offers it. */
+/**
+ * The Testnet wallets a rail's block pays with, made with New before it runs. A rail through a source of its own
+ * (a node, a browser wallet, Breez, BDK) makes its wallet in its block, through the source's form in New.
+ */
+const TESTNET_WALLETS: Partial<Record<Combination["rail"], WalletKind[]>> = {
+  cashu: ["cashu"], "ln-mint": ["cashu"], "ark-arkade": ["arkade"], bark: ["bark"], usdt: ["usdt"],
+};
+
+/** What Mainnet's New says of a kind: `Not yet` (with its reason), or what it takes (`One click`, `Choose a source`). */
+const offer = (dialog: Locator, kind: WalletKind) => dialog.getByTestId(`new-wallet-type-${kind}-status`);
+
+/**
+ * Mainnet: nothing moves, and no real mint, node or chain is reached. A web person makes a Mainnet Cashu wallet (and
+ * the Lightning through it) against the suite's own mint (support/mint.ts `mockMainnetMints`); the extension's
+ * offscreen engine cannot be rerouted, so there, as for every rail whose Mainnet needs a real server or is not there
+ * yet, what New offers on Mainnet is what is checked. The chat offers what was made, and nothing else.
+ */
 async function mainnetUi({ a, b, combo }: World): Promise<void> {
   const card = CARD[combo.rail];
+  const made = new Set<Actor>();
   for (const p of [a, b]) {
     await wallet(p);
-    await expect(p.page.getByTestId("wallet-mode").getByRole("radio", { name: "Mainnet" })).toHaveAttribute("aria-checked", "true");
-    await expect(p.page.getByTestId("testnet-notice")).toHaveCount(0);
-    await wallet(p, card);
-    if (combo.rail === "bark") await expect(p.page.getByTestId("bark-unavailable")).toBeVisible();
-    if (card === "bitcoin") await expect(p.page.getByTestId("onchain-source-none-offered")).toBeVisible();
-    if (card === "lightning" && combo.rail !== "ln-mint") {
-      // Only the sources Mainnet allows are offered; the test sources never are.
-      const select = p.page.getByTestId("lightning-source-select");
-      const options = await (await optionsOf(select)).allTextContents();
-      await close(select);
-      expect(options.join(" ")).not.toMatch(/fake|regtest/i);
+    // No network switch: each wallet has its own network.
+    await expect(p.page.getByTestId("wallet-mode")).toHaveCount(0);
+    if ((combo.rail === "cashu" || combo.rail === "ln-mint") && p.kind === "web") {
+      await mockMainnetMints(p.context);
+      await newWallet(p, "cashu", "mainnet");
+      await expect(p.page.getByTestId("wallet-card-cashu-mainnet").getByTestId("wallet-card-network")).toHaveCount(0);
+      if (combo.rail === "ln-mint") {
+        await wallet(p, "lightning-mainnet");
+        await expect(p.page.getByTestId("wallet-card-lightning-mainnet")).toContainText("Invoices via Cashu");
+        await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-current")).toContainText("Cashu mints");
+      }
+      made.add(p);
+      continue;
     }
+    const dialog = await newWalletDialog(p, "mainnet");
+    if (combo.rail === "cashu" || combo.rail === "ln-mint") await expect(offer(dialog, "cashu")).toHaveText("One click");
+    else if (combo.rail === "bark") {
+      await expect(offer(dialog, "bark")).toHaveText("Not yet");
+      await expect(dialog.getByTestId("new-wallet-type-bark")).toHaveAttribute("aria-disabled", "true");
+    } else if (card === "bitcoin") {
+      // No on-chain source runs in a browser on Mainnet (BDK is Testnet only; Bitcoin Core is Desktop only).
+      await expect(offer(dialog, "bitcoin")).toHaveText("Not yet");
+    } else if (card === "lightning") {
+      // Only the sources Mainnet allows are offered; the test sources never are.
+      await expect(offer(dialog, "lightning")).toHaveText("Choose a source");
+      await dialog.getByTestId("new-wallet-type-lightning").click();
+      const select = dialog.getByTestId("new-wallet-provider-select");
+      const options = (await select.count()) ? await (await optionsOf(select)).allTextContents() : [await dialog.getByTestId("new-wallet-provider").innerText()];
+      if (await select.count()) await close(select);
+      expect(options.join(" ")).not.toMatch(/fake|regtest|\(test\)/i);
+    } else {
+      // Ark and USDT: one click on Mainnet, but that reaches the real server and chain, so it is not made here.
+      await expect(offer(dialog, card as WalletKind)).toHaveText("One click");
+    }
+    await p.page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
   }
+  // Each chat tells its contact which networks its wallets are on.
+  await openChat(b);
   await openChat(a);
   const button = await composerButton(a, "payment-button");
   await expect(button).toBeEnabled({ timeout: 60_000 });
   await button.click();
-  await expect(a.page.getByTestId(`payment-card-${card}`)).toBeVisible();
+  const composer = a.page.getByTestId("payment-composer");
+  if (made.has(a)) {
+    // The Mainnet card of what was made; the card meets B's wallet of that network when B has one.
+    const shown = composer.getByTestId(`payment-card-${card}-mainnet`);
+    await expect(shown).toBeVisible();
+    await expect(composer.locator("[data-testid^=payment-card-][data-testid$=-testnet]")).toHaveCount(0);
+    if (made.has(b)) await expect(shown).not.toHaveAttribute("title", /Your contact has no Mainnet/, { timeout: 60_000 });
+    else await expect(shown).toHaveAttribute("title", /Your contact has no Mainnet/, { timeout: 60_000 });
+  } else {
+    // No wallet: no card, and the composer says how to make one.
+    await expect(composer.getByTestId("payment-no-wallet")).toBeVisible();
+    await expect(composer.locator("[data-testid^=payment-card-]")).toHaveCount(0);
+  }
   await a.page.keyboard.press("Escape");
 }
 
@@ -610,7 +671,8 @@ export const payments: Block = {
     if (w.combo.wallet === "mainnet") return mainnetUi(w);
     // Setting a source up, funding it and paying four times on a chain takes minutes of its own.
     w.info.setTimeout(w.info.timeout + 10 * 60_000);
-    for (const p of [w.a, w.b]) await useTestnet(p);
+    // A new profile has no wallet: each person makes the rail's Testnet wallets with New.
+    for (const p of [w.a, w.b]) for (const kind of TESTNET_WALLETS[w.combo.rail] ?? []) await newWallet(p, kind, "testnet");
     await TESTNET[w.combo.rail]!(w);
   },
 };

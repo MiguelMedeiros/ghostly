@@ -1,7 +1,6 @@
 import { BREEZ_TESTNET, counterpart } from "../support/breez";
-import { openWallet, useTestnet } from "../support/fixtures";
+import { createWallet, openWallet } from "../support/fixtures";
 import { expect, test } from "../support/extension";
-import { choose } from "../support/select";
 
 /**
  * The Breez source in the extension, where the engine (and so the SDK's WebAssembly) runs in the
@@ -15,11 +14,12 @@ test("Breez runs in the extension's offscreen document: in and out on regtest", 
   try {
     const alice = await extensionPeer("breez-extension");
     const page = alice.page, source = page.getByTestId("lightning-source");
-    await useTestnet(alice);
-    await openWallet(alice, "lightning");
-    await choose(source.getByTestId("lightning-source-select"), "breez");
-    await source.getByTestId("breez-phrase-written").check();
-    await source.getByTestId("provider-save").click();
+    // A Testnet Lightning wallet through Breez, made with New: its phrase written down, then checked before its card appears.
+    await createWallet(alice, "lightning", "testnet", { provider: "breez", timeout: 90_000, fill: async (area) => {
+      await area.getByTestId("breez-phrase-written").check();
+      await area.getByTestId("provider-save").click();
+    } });
+    await openWallet(alice, "lightning-testnet");
     await expect(source.getByTestId("lightning-source-status")).toHaveText("Connected · regtest", { timeout: 90_000 });
 
     await page.getByTestId("wallet-receive").click();

@@ -43,12 +43,13 @@ interface MessageInputProps {
     balance: number;
     /** Who the chat is with, as the chat shows them. */
     contact?: string;
-    onSend: (amount: number, memo: string) => Promise<string | null>;
-    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark") => Promise<string | null>;
+    /** `network`: the card's; a card of one network never pays the other's. */
+    onSend: (amount: number, memo: string, network?: import("../lib/platform").WalletNetwork) => Promise<string | null>;
+    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: import("./walletCardTypes").ChatRail, network?: import("../lib/platform").WalletNetwork) => Promise<string | null>;
     /** Why paying is not possible now (a request still is): shown on the Pay side. */
     sendUnavailable?: string;
     /** Saves which ways of paying this chat accepts, from the composer's Accept side. */
-    onSaveMethods?: (methods: import("../lib/chatPayments").ChatPaymentMethods) => Promise<void>;
+    onSaveMethods?: (accepts: import("../lib/chatPayments").ChatAccepts) => Promise<void>;
   };
   /** A composer of its own for payments instead of the chat's (a group chooses whom to pay first). */
   paymentComposer?: (close: () => void) => ReactNode;

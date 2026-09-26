@@ -5,7 +5,7 @@ import { PaymentReview } from "./PaymentReview";
 import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { isWorthlessMint } from "@ghostly/browser/shared/mints";
+import { isWorthlessMint, mintNetwork } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { Select } from "./ui/Select";
 
@@ -67,23 +67,29 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const tokenPayment=payment.target?.method==='usdt';
   const outgoing = payment.direction === "out";
   const isRequest = payment.kind === "request";
-  const sharedMints=(wallet.getState()?.mints??[]).filter(m=>payment.mints?.includes(m.url));
+  const title = isRequest ? (outgoing ? "You requested" : "Requests") : outgoing ? "You sent" : "Sent you";
+  // Test sats are worth nothing, and the bubble says so: a contact must not pass them off as money. The payment says
+  // its network; one from before networks carries it (a target's chain, a test mint, an invoice's chain).
+  // Fedimint: the network of the federation it names, when we joined it.
+  const fedimint = payment.federation ?? payment.federations?.[0];
+  const networks = wallet.getState()?.networks;
+  const federationNetwork = fedimint ? [...(networks?.mainnet.fedimint?.federations ?? []), ...(networks?.testnet.fedimint?.federations ?? []), ...(wallet.getState()?.fedimint?.federations ?? [])].find((f) => f.id === fedimint)?.network : undefined;
+  const testSats = payment.network ? payment.network === "testnet"
+    : payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" || payment.target?.method === "fedimint" || payment.target?.method === "spark" ? payment.target.network !== "bitcoin"
+    : fedimint ? !!federationNetwork && federationNetwork !== "bitcoin"
+    : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
+    : payment.target?.method === "usdt" ? payment.target.network !== "ethereum"
+    : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
+      // A request with only an invoice: its chain says (test mints use lnbc, but they come with their mints).
+      : !!payment.invoice && (decodeBolt11(payment.invoice)?.network ?? "bitcoin") !== "bitcoin");
+  /** The wallets of the payment's own network: only they pay it, quote its invoice or show its mints. */
+  const onNet = wallet.forNetwork(testSats ? "testnet" : "mainnet");
+  const sharedMints=(onNet.getState()?.mints??[]).filter(m=>payment.mints?.includes(m.url));
   const selectedMint=sharedMints.find(m=>m.url===mint)?.url ?? sharedMints[0]?.url;
   // Its invoice, through the Lightning source, when ecash cannot pay it here: no shared mint, or Cashu off.
   const viaLightning = !payment.target && !!payment.invoice && allowed?.lightning !== false && (!sharedMints.length || allowed?.cashu === false);
   // Lightning's default ceiling is the one the engine pays requests under.
   const feeInput=feeCap??(tokenPayment?'0.001':payment.target?.method==='bitcoin'?String(ONCHAIN_FEE_CAP):viaLightning?String(Math.max(10,Math.ceil(payment.amount*0.03))):'10');
-  const title = isRequest ? (outgoing ? "You requested" : "Requests") : outgoing ? "You sent" : "Sent you";
-  // Test sats are worth nothing, and the bubble says so: a contact must not pass them off as money.
-  // Fedimint: the network of the federation it names (ours, when we joined it; the mode otherwise).
-  const fedimint = payment.federation ?? payment.federations?.[0];
-  const federationNetwork = fedimint ? wallet.getState()?.fedimint?.federations.find((f) => f.id === fedimint)?.network : undefined;
-  const testSats = payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" || payment.target?.method === "fedimint" || payment.target?.method === "spark" ? payment.target.network !== "bitcoin"
-    : fedimint ? (federationNetwork ? federationNetwork !== "bitcoin" : wallet.getState()?.mode === "testnet")
-    : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
-    : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
-      // A request with only an invoice: its chain says (test mints use lnbc, but they come with their mints).
-      : !!payment.invoice && (decodeBolt11(payment.invoice)?.network ?? "bitcoin") !== "bitcoin");
   /** What another wallet can pay: the request's invoice, or the address it carries. Ecash-only requests have nothing to show. */
   const externalUri = (() => {
     try {
@@ -139,7 +145,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
               <p className="m-0">Pay {payment.amount.toLocaleString()} {testSats ? "test sats" : "sats"} over Lightning</p>
               <p className="m-0 text-text-primary/75">Through {lnReview.source} · fee up to {lnReview.fee.toLocaleString()} sats</p>
               <div className="flex gap-2">
-                <button className={button} disabled={busy} onClick={() => run(async () => { await wallet.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput) }); setLnReview(null); })}>Approve payment</button>
+                <button className={button} disabled={busy} onClick={() => run(async () => { await onNet.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput) }); setLnReview(null); })}>Approve payment</button>
                 <button className={quiet} disabled={busy} onClick={() => setLnReview(null)}>Cancel</button>
               </div>
             </div>
@@ -147,15 +153,15 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           <button data-testid="payment-pay" className={button} disabled={busy || (!payment.target && !viaLightning && !selectedMint) || !!review || !!lnReview} onClick={() => run(async () => {
             if (viaLightning) {
               // What the Lightning source would spend, shown before anything is asked of it.
-              const quote = await wallet.quoteInvoice(payment.invoice!);
+              const quote = await onNet.quoteInvoice(payment.invoice!);
               if (quote.amount !== payment.amount) throw new Error("The invoice does not match the requested amount");
               if (quote.feeReserve > Number(feeInput)) throw new Error(`The Lightning fee (up to ${quote.feeReserve} sats) is above your maximum`);
-              const ln = wallet.getState()?.lightning;
+              const ln = onNet.getState()?.lightning;
               setLnReview({ fee: quote.feeReserve, source: quote.source && quote.source === ln?.providerId ? ln.alias ?? ln.label ?? quote.source : quote.source ?? "the Cashu mints" });
               return;
             }
-            const target=payment.target ?? {method:"cashu" as const,network:wallet.testMintUrls.includes(selectedMint!) ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};
-            setReview(await wallet.preparePayment({target,amount:payment.amount,feeCap:tokenPayment?parsePaymentAmount(feeInput,18):Number(feeInput),payee:peerPubKey,linkId:payment.linkId,requestId:payment.id}));
+            const target=payment.target ?? {method:"cashu" as const,network:mintNetwork(selectedMint!) === "testnet" ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};
+            setReview(await onNet.preparePayment({target,amount:payment.amount,feeCap:tokenPayment?parsePaymentAmount(feeInput,18):Number(feeInput),payee:peerPubKey,linkId:payment.linkId,requestId:payment.id}));
           })}>
             {busy ? "Preparing…" : "Review payment"}
           </button>

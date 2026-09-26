@@ -672,8 +672,11 @@ describe("the reviewed Cashu adapter", () => {
     await expect(cashu.prepare(ark(), 100, 10)).rejects.toThrow("mint/network mismatch");
     await expect(cashu.prepare({ ...cashuTarget(), network: "cashu-test" }, 100, 10), "a real mint is not test money").rejects.toThrow("mint/network mismatch");
     await expect(cashu.prepare({ ...cashuTarget(), provider: "https://testnut.cashu.space" }, 100, 10), "the test mint is not real money").rejects.toThrow("mint/network mismatch");
+    await expect(cashu.prepare({ ...cashuTarget(), provider: "http://127.0.0.1:3338" }, 100, 10), "a mint on this machine is not real money").rejects.toThrow("mint/network mismatch");
     expect(wallet.prepareReviewedCashu).not.toHaveBeenCalled();
     await expect(cashu.prepare(cashuTarget(), 100, 1)).rejects.toThrow("fee exceeds your limit");
+    // A Testnet wallet's own mint on this machine pays in test sats, as its card says.
+    expect(await cashu.prepare({ ...cashuTarget(), provider: "http://127.0.0.1:3338", network: "cashu-test" }, 100, 2)).toEqual({ fee: 2, prepared });
     expect(await cashu.prepare({ ...cashuTarget(), provider: "https://testnut.cashu.space", network: "cashu-test" }, 100, 2)).toEqual({ fee: 2, prepared });
   });
 

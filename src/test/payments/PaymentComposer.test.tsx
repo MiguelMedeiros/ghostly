@@ -1,25 +1,37 @@
 import { act, screen, within } from "@testing-library/react";
+import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LinkView, WalletView } from "@ghostly/browser/shared/types";
+import type { LinkView, WalletInstanceView, WalletView } from "@ghostly/browser/shared/types";
+import type { WalletNetwork } from "@ghostly/core";
 import { PaymentComposer } from "../../components/PaymentComposer";
 import { rememberRail, rememberedRail } from "../../lib/chatPayments";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { arkReady, bitcoinSource, everyWallet, mint, REAL_MINT, reviewContext, reviewOf, target, TEST_MINT, usdtReady } from "./fixtures";
 
-// covers: payments.chat.cards, payments.chat.methods, payments.amounts, payments.cashu.send, payments.arkade.send, payments.bark.send, payments.bitcoin.send, payments.usdt.send
+// covers: payments.chat.cards, payments.chat.methods, payments.chat.networks, payments.amounts, payments.cashu.send, payments.arkade.send, payments.bark.send, payments.bitcoin.send, payments.usdt.send
 
 const OTHER_MINT = "https://mint2.example.com";
 const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, spark: true, bitcoin: true, usdt: true, fedimint: true };
 
+/**
+ * `everyWallet()` gives one wallet per type, each on the network of its own chain: Cashu, Lightning (through the
+ * real mint) and on-chain Bitcoin on Mainnet; Ark (Mutinynet), Bark (signet), Spark (regtest) and USDT (Sepolia) on
+ * Testnet.
+ */
 interface Open {
   wallet?: Partial<WalletView>;
   link?: Partial<LinkView>;
   balance?: number;
   /** Without it the composer has no wallet of its own: only the back, and Send goes through `onSend`. */
   withWallet?: boolean;
-  onSend?: (amount: number, memo: string) => Promise<string | null>;
-  onRequest?: (amount: number, memo: string, method?: string) => Promise<string | null>;
+  onSend?: (amount: number, memo: string, network?: WalletNetwork) => Promise<string | null>;
+  onRequest?: (amount: number, memo: string, method?: string, rail?: string, network?: WalletNetwork) => Promise<string | null>;
+}
+
+/** Where the app is: the composer navigates away to make a wallet. */
+function Where() {
+  return <p data-testid="where">{useLocation().pathname}</p>;
 }
 
 /** The composer in a chat with "peer", whose name the chat shows as Alice. */
@@ -32,15 +44,19 @@ function open({ wallet = everyWallet(), link, balance = 1_000, withWallet = true
     onClose: vi.fn(),
   };
   const view = renderApp(
-    <PaymentComposer balance={balance} {...handlers} reviewContext={withWallet ? reviewContext() : undefined} contact="Alice" />,
+    <><PaymentComposer balance={balance} {...handlers} reviewContext={withWallet ? reviewContext() : undefined} contact="Alice" /><Where /></>,
   );
   return { ...view, ...handlers };
 }
 
+/** A wallet the profile has, as the engine lists it: a test gives these when the flat fields would not make it. */
+const instance = (type: WalletInstanceView["type"], network: WalletNetwork): WalletInstanceView => ({ id: `${type}:${network}`, type, network, config: {} });
+
 const amount = () => screen.getByTestId("payment-amount");
 const send = () => screen.getByTestId("payment-send");
 const request = () => screen.getByTestId("payment-request");
-const card = (rail: string) => screen.getByTestId(`payment-card-${rail}`);
+/** A card by its type and network: `card("cashu-mainnet")`. */
+const card = (id: string) => screen.getByTestId(`payment-card-${id}`);
 const hint = () => screen.getByText((_, el) => !!el?.classList.contains("payment-back-hint"));
 
 describe("the amount", () => {
@@ -51,19 +67,19 @@ describe("the amount", () => {
     expect(amount()).toHaveAccessibleName("Amount in sats");
   });
 
-  it("takes decimals for USDT and requests in the token's smallest units", async () => {
-    rememberRail("peer", "usdt");
+  it("takes decimals for USDT and requests in the token's smallest units, on the card's network", async () => {
+    rememberRail("peer", "usdt:testnet");
     const { user, onRequest } = open();
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "1.5x");
     expect(amount()).toHaveValue("1.5");
     await user.type(screen.getByRole("textbox", { name: "What for? (optional)" }), "coffee");
     await user.click(request());
-    expect(onRequest).toHaveBeenCalledWith(1_500_000, "coffee", "usdt", "usdt");
+    expect(onRequest).toHaveBeenCalledWith(1_500_000, "coffee", "usdt", "usdt", "testnet");
   });
 
   it("refuses more USDT decimals than the token has, without asking for anything", async () => {
-    rememberRail("peer", "usdt");
+    rememberRail("peer", "usdt:testnet");
     const { user, onRequest } = open();
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "1.1234567");
@@ -73,100 +89,137 @@ describe("the amount", () => {
   });
 
   it.each([
-    ["Cashu on Mainnet", "cashu", { mode: "mainnet" as const }, "sats"],
-    ["Cashu in Testnet", "cashu", { mode: "testnet" as const }, "test sats"],
-    ["Lightning in Testnet", "lightning", { mode: "testnet" as const }, "test sats"],
-    ["Ark on Mutinynet", "arkade", { ark: arkReady({ network: "mutinynet" }) }, "test sats"],
-    ["Ark on Bitcoin", "arkade", { ark: arkReady({ network: "bitcoin" }) }, "sats"],
-    ["Bark on signet", "bark", {}, "test sats"],
-    ["on-chain on regtest", "bitcoin", { bitcoin: bitcoinSource({ network: "regtest" }) }, "test sats"],
-    ["on-chain on Bitcoin", "bitcoin", { bitcoin: bitcoinSource({ network: "bitcoin" }) }, "sats"],
-    ["USDT on Sepolia", "usdt", { usdt: usdtReady({ chainId: 11155111 }) }, "TEST-USDT"],
-    ["USDT on Ethereum", "usdt", { usdt: usdtReady({ chainId: 1 }) }, "USDT"],
-  ])("counts %s in the right unit", async (_, rail, wallet, unit) => {
-    rememberRail("peer", rail);
+    ["Cashu on Mainnet", "cashu:mainnet", {}, "sats"],
+    ["Cashu on Testnet", "cashu:testnet", { mints: [mint(TEST_MINT, 1_000)] }, "test sats"],
+    ["Lightning on Testnet", "lightning:testnet", { mints: [mint(TEST_MINT, 1_000)] }, "test sats"],
+    ["Ark on Mutinynet", "arkade:testnet", { ark: arkReady({ network: "mutinynet" }) }, "test sats"],
+    ["Ark on Bitcoin", "arkade:mainnet", { ark: arkReady({ network: "bitcoin" }) }, "sats"],
+    ["Bark on signet", "bark:testnet", {}, "test sats"],
+    ["on-chain on regtest", "bitcoin:testnet", { bitcoin: bitcoinSource({ mode: "testnet", network: "regtest" }) }, "test sats"],
+    ["on-chain on Bitcoin", "bitcoin:mainnet", { bitcoin: bitcoinSource({ network: "bitcoin" }) }, "sats"],
+    ["USDT on Sepolia", "usdt:testnet", { usdt: usdtReady({ chainId: 11155111 }) }, "TEST-USDT"],
+    ["USDT on Ethereum", "usdt:mainnet", { usdt: usdtReady({ chainId: 1 }) }, "USDT"],
+  ])("counts %s in the right unit", async (_, id, wallet, unit) => {
+    rememberRail("peer", id);
     const { user } = open({ wallet: everyWallet(wallet) });
     await user.click(screen.getByTestId("payment-use"));
+    expect(screen.getByTestId("payment-back")).toHaveAttribute("data-network", id.split(":")[1]);
     expect(amount()).toHaveAccessibleName(`Amount in ${unit}`);
   });
 });
 
 describe("the cards", () => {
-  it("starts on Cashu when no card was used before", () => {
+  it("starts on the Mainnet Cashu card when no card was used before", () => {
     open();
     expect(screen.getByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
-    expect(card("cashu")).toHaveAttribute("aria-checked", "true");
+    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("payment-use")).toHaveTextContent("Use Cashu");
   });
 
+  it("shows one card per wallet, each on its own network", () => {
+    open();
+    expect(screen.getAllByRole("radio").map((r) => r.dataset.testid)).toEqual([
+      "payment-card-cashu-mainnet", "payment-card-lightning-mainnet", "payment-card-arkade-testnet", "payment-card-bark-testnet",
+      "payment-card-spark-testnet", "payment-card-bitcoin-mainnet", "payment-card-usdt-testnet",
+    ]);
+  });
+
   it("starts on the card used last time", () => {
+    rememberRail("peer", "arkade:testnet");
+    open();
+    expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
+    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("reads a remembered rail from before networks as that rail's first card", () => {
+    // Both networks have a Cashu card: the old value "cashu" picks the first one, in the deck's order.
+    rememberRail("peer", "cashu");
+    open({ wallet: everyWallet({ mints: [mint(REAL_MINT, 500), mint(TEST_MINT, 500)], balance: 500 }) });
+    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
+    expect(card("cashu-testnet")).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("reads a remembered old rail as its card on whichever network it is", () => {
     rememberRail("peer", "arkade");
     open();
-    expect(card("arkade")).toHaveAttribute("aria-checked", "true");
-    expect(card("cashu")).toHaveAttribute("aria-checked", "false");
+    expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
+    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "false");
   });
 
   it("skips a remembered card that is off in this chat, for the first one that is on", () => {
-    rememberRail("peer", "arkade");
+    rememberRail("peer", "arkade:testnet");
     open({ link: { paymentMethods: { ...ALL_ON, cashu: false, arkade: false } } });
-    expect(card("lightning")).toHaveAttribute("aria-checked", "true");
+    expect(card("lightning-mainnet")).toHaveAttribute("aria-checked", "true");
   });
 
   it("starts on the first card that can be used, in the deck's order, not on one that is not set up", () => {
-    // No mint: Cashu and Lightning (through the mints) cannot be used; Ark is next.
-    open({ wallet: everyWallet({ mints: [], balance: 0 }) });
-    expect(card("arkade")).toHaveAttribute("aria-checked", "true");
+    // A Cashu wallet with no mint: Cashu and Lightning (through the mints) cannot be used; Ark is next.
+    open({ wallet: everyWallet({ mints: [], balance: 0, wallets: [instance("cashu", "mainnet"), instance("lightning", "mainnet"), instance("arkade", "testnet")] }) });
+    expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("payment-use")).toBeEnabled();
   });
 
   it("passes over a remembered card that cannot be used now", () => {
-    rememberRail("peer", "usdt");
+    rememberRail("peer", "usdt:mainnet");
     open({ wallet: everyWallet({ usdt: { configured: true, locked: true, chainId: 1, decimals: 6, balance: "0", gasBalance: "0" } }) });
-    expect(card("cashu")).toHaveAttribute("aria-checked", "true");
+    expect(card("usdt-mainnet")).toHaveAttribute("aria-disabled", "true");
+    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
   });
 
   it("starts past a card the contact does not accept", () => {
     open({ link: { dataLink: "open", capabilities: { files: true, payments: true, methods: { ...ALL_ON, cashu: false } } } });
-    expect(card("lightning")).toHaveAttribute("aria-checked", "true");
+    expect(card("lightning-mainnet")).toHaveAttribute("aria-checked", "true");
   });
 
   it("moves to the first card that can be used as the wallet comes up, until one is picked", async () => {
-    open({ wallet: everyWallet({ mints: [], balance: 0, ark: { configured: false, locked: true, balance: 0 }, bark: undefined, spark: undefined, usdt: undefined, bitcoin: undefined }) });
-    expect(card("cashu")).toHaveAttribute("aria-checked", "true");
+    // A Cashu wallet with no mint yet, and an Ark wallet whose provider has not answered.
+    open({ wallet: everyWallet({ mints: [], balance: 0, ark: undefined, wallets: [instance("cashu", "mainnet"), instance("arkade", "testnet")] }) });
+    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("payment-use")).toBeDisabled();
     act(() => fakeEngine.update({ wallet: { ...fakeEngine.state.wallet, ark: arkReady() } }));
     expect(await screen.findByText("Use Ark")).toBeInTheDocument();
-    expect(card("arkade")).toHaveAttribute("aria-checked", "true");
+    expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
   });
 
   it("ignores a remembered value that is not a card", () => {
     rememberRail("peer", "paypal");
     open();
-    expect(card("cashu")).toHaveAttribute("aria-checked", "true");
+    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
   });
 
-  it("turns over the card clicked and remembers it for next time", async () => {
+  it("turns over the card clicked, names its network on the back and remembers the wallet for next time", async () => {
     const { user } = open();
-    await user.click(card("arkade"));
-    expect(rememberedRail("peer")).toBe("arkade");
+    await user.click(card("arkade-testnet"));
+    expect(rememberedRail("peer")).toBe("arkade:testnet");
     const back = screen.getByTestId("payment-back");
-    expect(within(back).getByText("Ark")).toBeInTheDocument();
+    expect(back).toHaveAttribute("data-network", "testnet");
+    expect(screen.getByTestId("payment-composer")).toHaveAttribute("data-network", "testnet");
+    expect(within(back).getByText("Ark · Testnet")).toBeInTheDocument();
     expect(within(back).getByText("5,000 test sats · with Alice")).toBeInTheDocument();
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
+  });
+
+  it("names a Mainnet card on the back by its name alone", async () => {
+    const { user } = open();
+    await user.click(card("cashu-mainnet"));
+    const back = screen.getByTestId("payment-back");
+    expect(back).toHaveAttribute("data-network", "mainnet");
+    expect(within(back).getByText("Cashu")).toBeInTheDocument();
+    expect(within(back).getByText("1,000 sats · with Alice")).toBeInTheDocument();
   });
 
   it("moves along the cards with the arrow keys and turns the chosen one over with Enter", async () => {
     const { user } = open();
     // The keyboard starts on the chosen card.
-    expect(card("cashu")).toHaveFocus();
+    expect(card("cashu-mainnet")).toHaveFocus();
     await user.keyboard("{ArrowRight}");
-    expect(card("lightning")).toHaveAttribute("aria-checked", "true");
-    expect(card("lightning")).toHaveFocus();
+    expect(card("lightning-mainnet")).toHaveAttribute("aria-checked", "true");
+    expect(card("lightning-mainnet")).toHaveFocus();
     // Moving only selects: nothing is remembered until a card is turned over.
     expect(rememberedRail("peer")).toBeNull();
     await user.keyboard("{Enter}");
     expect(within(screen.getByTestId("payment-back")).getByText("Lightning")).toBeInTheDocument();
-    expect(rememberedRail("peer")).toBe("lightning");
+    expect(rememberedRail("peer")).toBe("lightning:mainnet");
   });
 
   it("goes back from the amount to the cards", async () => {
@@ -176,7 +229,7 @@ describe("the cards", () => {
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Choose another card" }));
     expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
-    expect(card("cashu")).toHaveAttribute("aria-checked", "true");
+    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
   });
 
   it("closes on Escape", async () => {
@@ -186,40 +239,90 @@ describe("the cards", () => {
   });
 });
 
+describe("a profile with no wallet", () => {
+  it("offers to create one, and goes to the wallet page to do it", async () => {
+    const { user, onClose } = open({ wallet: {} });
+    expect(screen.getByTestId("payment-no-wallet")).toHaveTextContent("You have no wallet yet.");
+    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("payment-amount")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("payment-no-wallet-create"));
+    expect(onClose).toHaveBeenCalled();
+    expect(await screen.findByText("/wallet")).toBeInTheDocument();
+  });
+});
+
 describe("a card that cannot be used here", () => {
   it("says a wallet that is not ready yet is still connecting, and is not turned over", async () => {
-    const { user } = open({ wallet: everyWallet({ ark: { configured: false, locked: true, balance: 0 } }) });
-    expect(card("arkade")).toHaveAttribute("aria-disabled", "true");
-    expect(card("arkade")).toHaveAttribute("title", "Ark is connecting…");
-    await user.click(card("arkade"));
+    const { user } = open({ wallet: everyWallet({ ark: arkReady({ address: undefined, automatic: true }) }) });
+    expect(card("arkade-testnet")).toHaveAttribute("aria-disabled", "true");
+    expect(card("arkade-testnet")).toHaveAttribute("title", "Ark is connecting…");
+    await user.click(card("arkade-testnet"));
     // It comes up, to say why, but stays a card.
-    expect(card("arkade")).toHaveAttribute("aria-checked", "true");
+    expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("Ark is connecting…", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByTestId("payment-use")).toBeDisabled();
     expect(rememberedRail("peer")).toBeNull();
   });
 
-  it("says a way of paying is off in this chat", () => {
+  it("says a way of paying is off in this chat, naming the card's network", () => {
     open({ link: { paymentMethods: { ...ALL_ON, bark: false } } });
-    expect(card("bark")).toHaveAttribute("title", "Bark is off in this chat");
-    expect(within(card("bark")).getByText("Off here")).toBeInTheDocument();
+    expect(card("bark-testnet")).toHaveAttribute("title", "Testnet Bark is off in this chat");
+    expect(within(card("bark-testnet")).getByText("Off here")).toBeInTheDocument();
+  });
+
+  it("says a card is off when this chat takes its way of paying on the other network only", () => {
+    open({ link: { paymentNetworks: { ...Object.fromEntries(Object.keys(ALL_ON).map((m) => [m, ["mainnet", "testnet"]])), cashu: ["testnet"] } as LinkView["paymentNetworks"] } });
+    expect(card("cashu-mainnet")).toHaveAttribute("title", "Mainnet Cashu is off in this chat");
+    expect(card("lightning-mainnet")).not.toHaveAttribute("aria-disabled");
   });
 
   it("says the contact does not accept a way of paying", () => {
     open({ link: { dataLink: "open", capabilities: { files: true, payments: true, methods: { ...ALL_ON, usdt: false } } } });
-    expect(card("usdt")).toHaveAttribute("title", "Your contact does not accept USDT in this chat");
-    expect(within(card("usdt")).getByText("Not accepted")).toBeInTheDocument();
+    expect(card("usdt-testnet")).toHaveAttribute("title", "Your contact does not accept USDT in this chat");
+    expect(within(card("usdt-testnet")).getByText("Not accepted")).toBeInTheDocument();
   });
 
   it("does not hold what the contact accepts against them while the chat is not connected", () => {
     open({ link: { dataLink: "idle", capabilities: { files: true, payments: true, methods: { ...ALL_ON, usdt: false } } } });
-    expect(card("usdt")).not.toHaveAttribute("aria-disabled");
+    expect(card("usdt-testnet")).not.toHaveAttribute("aria-disabled");
+  });
+
+  describe("when the contact has no wallet of the card's network", () => {
+    // Alice has Cashu on Mainnet only: a test sat must not go to her, nor be asked of her.
+    const theirs = { cashu: ["mainnet"], lightning: ["mainnet"] } as const;
+    const testCashu = () => everyWallet({ mints: [mint(TEST_MINT, 500)], balance: 500 });
+
+    it("blocks the card and says which wallet the contact lacks", async () => {
+      const { user } = open({ wallet: testCashu(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } } });
+      expect(card("cashu-testnet")).toHaveAttribute("aria-disabled", "true");
+      expect(card("cashu-testnet")).toHaveAttribute("title", "Your contact has no Testnet Cashu wallet");
+      expect(within(card("cashu-testnet")).getByText("Not accepted")).toBeInTheDocument();
+      await user.click(card("cashu-testnet"));
+      expect(screen.getByText("Your contact has no Testnet Cashu wallet", { selector: "p" })).toBeInTheDocument();
+      expect(screen.getByTestId("payment-use")).toBeDisabled();
+    });
+
+    it("still offers the card the contact has a wallet for", () => {
+      open({ wallet: everyWallet(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } } });
+      expect(card("cashu-mainnet")).not.toHaveAttribute("aria-disabled");
+      expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("does not hold it against them while the chat is not connected", () => {
+      open({ wallet: testCashu(), link: { dataLink: "idle", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } } });
+      expect(card("cashu-testnet")).not.toHaveAttribute("aria-disabled");
+    });
+
+    it("lets every network meet when the contact said none (an older app)", () => {
+      open({ wallet: testCashu(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON } } });
+      expect(card("cashu-testnet")).not.toHaveAttribute("aria-disabled");
+    });
   });
 });
 
 describe("request and send", () => {
   it("requests with a Lightning invoice but sends nothing on Lightning", async () => {
-    rememberRail("peer", "lightning");
+    rememberRail("peer", "lightning:mainnet");
     const { user, onRequest, onClose } = open();
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "50");
@@ -227,8 +330,8 @@ describe("request and send", () => {
     expect(send()).toHaveAttribute("title", "To pay on this card, tap Pay on your contact's request");
     await user.click(request());
     // A Lightning request is a Cashu request: it carries the invoice.
-    // The card rides along: a chat ignores it, a group asks for that rail only.
-    expect(onRequest).toHaveBeenCalledWith(50, "", "cashu", "lightning");
+    // The card rides along: a chat ignores it, a group asks for that rail only. So does its network.
+    expect(onRequest).toHaveBeenCalledWith(50, "", "cashu", "lightning", "mainnet");
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -247,7 +350,7 @@ describe("request and send", () => {
   });
 
   it("measures an Ark amount against the Ark balance", async () => {
-    rememberRail("peer", "arkade");
+    rememberRail("peer", "arkade:testnet");
     const { user } = open({ balance: 1_000_000 });
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "6000");
@@ -260,7 +363,8 @@ describe("request and send", () => {
     await user.type(amount(), "21");
     await user.type(screen.getByRole("textbox", { name: "What for? (optional)" }), "tip");
     await user.click(send());
-    expect(onSend).toHaveBeenCalledWith(21, "tip");
+    // No card, so no network: the engine sends from the wallet it would.
+    expect(onSend).toHaveBeenCalledWith(21, "tip", undefined);
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -281,6 +385,44 @@ describe("request and send", () => {
   });
 });
 
+describe("a Testnet and a Mainnet card of one type", () => {
+  // Cashu on both networks: a real mint and the test mint. Each card is its own wallet.
+  const both = () => everyWallet({ mints: [mint(REAL_MINT, 800), mint(TEST_MINT, 800)], balance: 800 });
+
+  it("offers both, each named by its network", () => {
+    open({ wallet: both() });
+    expect(card("cashu-mainnet")).toBeInTheDocument();
+    expect(card("cashu-testnet")).toBeInTheDocument();
+    expect(card("lightning-mainnet")).toBeInTheDocument();
+    expect(card("lightning-testnet")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["mainnet", "cashu-mainnet", "bitcoin", REAL_MINT],
+    ["testnet", "cashu-testnet", "cashu-test", TEST_MINT],
+  ] as const)("sends from the %s card on its own network, from its own mint", async (network, id, chain, provider) => {
+    const view = open({ wallet: both(), balance: 10_000 });
+    view.engine.on("preparePayment", reviewOf);
+    await view.user.click(card(id));
+    expect(screen.getByTestId("payment-back")).toHaveAttribute("data-network", network);
+    await view.user.type(amount(), "30");
+    await view.user.click(send());
+    await screen.findByRole("region", { name: "Payment review" });
+    expect(view.engine.callsTo("preparePayment")).toEqual([expect.objectContaining({ network, target: expect.objectContaining({ network: chain, provider }) })]);
+  });
+
+  it.each([
+    ["mainnet", "lightning-mainnet"],
+    ["testnet", "lightning-testnet"],
+  ] as const)("requests on the %s card with its network", async (network, id) => {
+    const { user, onRequest } = open({ wallet: both() });
+    await user.click(card(id));
+    await user.type(amount(), "12");
+    await user.click(request());
+    expect(onRequest).toHaveBeenCalledWith(12, "", "cashu", "lightning", network);
+  });
+});
+
 describe("sending Cashu from the chat's wallet", () => {
   async function sendCashu(mints: ReturnType<typeof mint>[], sats: string) {
     const view = open({ wallet: everyWallet({ mints, balance: mints.reduce((s, m) => s + m.balance, 0) }), balance: 10_000 });
@@ -292,21 +434,21 @@ describe("sending Cashu from the chat's wallet", () => {
     return view;
   }
 
-  it("reviews test ecash from the test mint, as the Cashu test network", async () => {
+  it("reviews test ecash from the test mint, as the Cashu test network, on the Testnet wallet", async () => {
     const { engine, onSend } = await sendCashu([mint(TEST_MINT, 500)], "30");
     expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
     expect(engine.callsTo("preparePayment")).toEqual([{
       target: { method: "cashu", network: "cashu-test", provider: TEST_MINT, address: "peer", asset: "BTC", unit: "sat", expiresAt: expect.any(Number) },
-      amount: 30, feeCap: 10, payee: "peer", linkId: "link-1", memo: "pizza",
+      amount: 30, feeCap: 10, payee: "peer", linkId: "link-1", memo: "pizza", network: "testnet",
     }]);
     // With a wallet to review it, nothing goes out before the review is approved.
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("pays real sats from a real mint", async () => {
+  it("pays real sats from a real mint, on the Mainnet wallet", async () => {
     const { engine } = await sendCashu([mint(REAL_MINT, 500)], "30");
     await screen.findByRole("region", { name: "Payment review" });
-    expect(engine.callsTo("preparePayment")[0].target).toMatchObject({ network: "bitcoin", provider: REAL_MINT });
+    expect(engine.callsTo("preparePayment")[0]).toMatchObject({ network: "mainnet", target: { network: "bitcoin", provider: REAL_MINT } });
   });
 
   it("pays from the mint that holds the most", async () => {
@@ -339,8 +481,8 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   afterEach(() => { vi.useRealTimers(); });
   const tick = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
 
-  async function ask(rail: string, typed: string) {
-    rememberRail("peer", rail);
+  async function ask(id: string, typed: string) {
+    rememberRail("peer", id);
     const view = open();
     view.engine.on("askToPay", () => ({ askId: "ask-1" })).on("preparePayment", reviewOf);
     await view.user.click(screen.getByTestId("payment-use"));
@@ -352,32 +494,32 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   }
 
   it.each([
-    ["arkade", "250", 250],
-    ["bark", "250", 250],
-    ["bitcoin", "250", 250],
-    ["usdt", "2.5", 2_500_000],
-  ])("on %s, asks the contact's app for an address first", async (rail, typed, units) => {
-    const { engine } = await ask(rail, typed);
-    expect(engine.callsTo("askToPay")).toEqual([{ linkId: "link-1", amount: units, method: rail, memo: "lunch", timestamp: expect.any(Number) }]);
+    ["arkade", "arkade:testnet", "250", 250],
+    ["bark", "bark:testnet", "250", 250],
+    ["bitcoin", "bitcoin:mainnet", "250", 250],
+    ["usdt", "usdt:testnet", "2.5", 2_500_000],
+  ])("on %s, asks the contact's app for an address first, on the card's network", async (rail, id, typed, units) => {
+    const { engine } = await ask(id, typed);
+    expect(engine.callsTo("askToPay")).toEqual([{ linkId: "link-1", amount: units, method: rail, memo: "lunch", timestamp: expect.any(Number), network: id.split(":")[1] }]);
     expect(send()).toBeDisabled();
     expect(request()).toBeDisabled();
     expect(engine.callsTo("preparePayment")).toEqual([]);
   });
 
   it.each([
-    ["arkade", target({ method: "arkade" }), 10],
-    ["bitcoin", target({ method: "bitcoin", provider: "onchain", address: "bcrt1qpayee" }), 2_000],
-    ["usdt", target({ method: "usdt", network: "sepolia", asset: "TEST-USDT", unit: "token-base", decimals: 6 }), 10 ** 15],
-  ])("on %s, reviews the request the contact's app answers with", async (rail, answer, feeCap) => {
-    const { engine } = await ask(rail, "3");
+    ["arkade:testnet", target({ method: "arkade" }), 10],
+    ["bitcoin:mainnet", target({ method: "bitcoin", provider: "onchain", address: "bcrt1qpayee" }), 2_000],
+    ["usdt:testnet", target({ method: "usdt", network: "sepolia", asset: "TEST-USDT", unit: "token-base", decimals: 6 }), 10 ** 15],
+  ])("on %s, reviews the request the contact's app answers with, on the card's network", async (id, answer, feeCap) => {
+    const { engine } = await ask(id, "3");
     act(() => engine.update({ payments: { "req-1": paymentView({ id: "req-1", kind: "request", direction: "in", ask: "ask-1", amount: 3, target: answer }) } }));
     tick(400);
     expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
-    expect(engine.callsTo("preparePayment")).toEqual([{ target: answer, amount: 3, feeCap, payee: "peer", linkId: "link-1", requestId: "req-1" }]);
+    expect(engine.callsTo("preparePayment")).toEqual([{ target: answer, amount: 3, feeCap, payee: "peer", linkId: "link-1", requestId: "req-1", network: id.split(":")[1] }]);
   });
 
   it("does not take a request that answers another ask", async () => {
-    const { engine } = await ask("arkade", "3");
+    const { engine } = await ask("arkade:testnet", "3");
     act(() => engine.update({ payments: { "req-2": paymentView({ id: "req-2", kind: "request", direction: "in", ask: "ask-other", target: target() }) } }));
     tick(2_000);
     expect(engine.callsTo("preparePayment")).toEqual([]);
@@ -385,7 +527,7 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   });
 
   it("gives up when the contact's app does not answer", async () => {
-    await ask("arkade", "3");
+    await ask("arkade:testnet", "3");
     tick(45_600);
     expect(await screen.findByRole("alert")).toHaveTextContent("Your contact's app did not answer.");
     expect(send()).toHaveTextContent("Send");
@@ -393,7 +535,7 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   });
 
   it("shows why the contact could not be asked", async () => {
-    rememberRail("peer", "bark");
+    rememberRail("peer", "bark:testnet");
     const { user, engine } = open();
     engine.on("askToPay", () => { throw new Error("Your contact is offline"); });
     await user.click(screen.getByTestId("payment-use"));

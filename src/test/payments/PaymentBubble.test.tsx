@@ -8,7 +8,7 @@ import { renderApp } from "../render";
 import { lightningSource, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
 import { choose } from "../select";
 
-// covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external
+// covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external, payments.chat.networks
 
 const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, spark: true, bitcoin: true, usdt: true, fedimint: true };
 
@@ -122,7 +122,7 @@ describe("test sats", () => {
 });
 
 describe("paying a request with Cashu", () => {
-  it("reviews the payment from the mint both sides share", async () => {
+  it("reviews the payment from the mint both sides share, on that mint's network", async () => {
     const { user, engine } = show(incomingRequest({ mints: [REAL_MINT, "https://other.example"] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
     engine.on("preparePayment", reviewOf);
     const picker = screen.getByRole("combobox", { name: "Cashu mint" });
@@ -132,18 +132,35 @@ describe("paying a request with Cashu", () => {
     expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
     expect(engine.callsTo("preparePayment")).toEqual([{
       target: { method: "cashu", network: "bitcoin", provider: REAL_MINT, asset: "BTC", unit: "sat", address: "pay-1", expiresAt: expect.any(Number) },
-      amount: 21, feeCap: 10, payee: "peer", linkId: "link-1", requestId: "pay-1",
+      amount: 21, feeCap: 10, payee: "peer", linkId: "link-1", requestId: "pay-1", network: "mainnet",
     }]);
     // One review at a time.
     expect(payButton()).toBeDisabled();
   });
 
-  it("pays from the test mint on the Cashu test network", async () => {
-    const { user, engine } = show(incomingRequest({ mints: [TEST_MINT] }), { wallet: { mode: "testnet", mints: [mint(TEST_MINT, 900)] } });
+  it("pays from the test mint on the Cashu test network, through the Testnet wallet", async () => {
+    const { user, engine } = show(incomingRequest({ mints: [TEST_MINT] }), { wallet: { mints: [mint(TEST_MINT, 900)] } });
     engine.on("preparePayment", reviewOf);
     await user.click(payButton());
     await screen.findByRole("region", { name: "Payment review" });
-    expect(engine.callsTo("preparePayment")[0].target).toMatchObject({ network: "cashu-test", provider: TEST_MINT });
+    expect(engine.callsTo("preparePayment")[0]).toMatchObject({ network: "testnet", target: { network: "cashu-test", provider: TEST_MINT } });
+  });
+
+  it("pays a request on the network it says, from that network's mints only", async () => {
+    // Both networks have a mint the request names: the request is a Testnet one, so the test mint pays it.
+    const { user, engine } = show(incomingRequest({ network: "testnet", mints: [REAL_MINT, TEST_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900), mint(TEST_MINT, 900)] } });
+    engine.on("preparePayment", reviewOf);
+    const picker = screen.getByRole("combobox", { name: "Cashu mint" });
+    expect(picker).toHaveAttribute("data-value", TEST_MINT);
+    await user.click(payButton());
+    await screen.findByRole("region", { name: "Payment review" });
+    expect(engine.callsTo("preparePayment")[0]).toMatchObject({ network: "testnet", target: { network: "cashu-test", provider: TEST_MINT } });
+  });
+
+  it("cannot pay a Testnet request from a Mainnet mint, even one it names", () => {
+    show(incomingRequest({ network: "testnet", mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
+    expect(screen.getByRole("combobox", { name: "Cashu mint" })).toHaveTextContent("No shared configured mint");
+    expect(payButton()).toBeDisabled();
   });
 
   it("pays from the mint picked, under the fee typed", async () => {
@@ -191,7 +208,7 @@ describe("paying a request with Cashu", () => {
 });
 
 describe("paying a request on other rails", () => {
-  it("reviews an on-chain request under the on-chain fee ceiling", async () => {
+  it("reviews an on-chain request under the on-chain fee ceiling, on the network of its chain", async () => {
     const onchain = target({ method: "bitcoin", network: "signet", provider: "onchain", address: "tb1qpayee" });
     const { user, engine } = show(incomingRequest({ amount: 5_000, target: onchain }));
     engine.on("preparePayment", reviewOf);
@@ -199,7 +216,8 @@ describe("paying a request on other rails", () => {
     expect(screen.getByRole("textbox", { name: "Maximum fee (sats)" })).toHaveValue("2000");
     await user.click(payButton());
     await screen.findByRole("region", { name: "Payment review" });
-    expect(engine.callsTo("preparePayment")).toEqual([{ target: onchain, amount: 5_000, feeCap: 2_000, payee: "peer", linkId: "link-1", requestId: "pay-1" }]);
+    // A signet address: the Testnet wallet pays it.
+    expect(engine.callsTo("preparePayment")).toEqual([{ target: onchain, amount: 5_000, feeCap: 2_000, payee: "peer", linkId: "link-1", requestId: "pay-1", network: "testnet" }]);
   });
 
   it("caps a USDT payment's gas in ETH", async () => {
@@ -209,7 +227,7 @@ describe("paying a request on other rails", () => {
     expect(screen.getByRole("textbox", { name: "Maximum gas (ETH)" })).toHaveValue("0.001");
     await user.click(payButton());
     await screen.findByRole("region", { name: "Payment review" });
-    expect(engine.callsTo("preparePayment")[0].feeCap).toBe(10 ** 15);
+    expect(engine.callsTo("preparePayment")[0]).toMatchObject({ feeCap: 10 ** 15, network: "testnet" });
   });
 });
 
@@ -237,20 +255,20 @@ describe("paying a request's invoice over Lightning", () => {
   const lightningRequest = () => incomingRequest({ amount: 2_100, invoice: MAINNET_INVOICE, mints: ["https://other.example"] });
   const quote = (patch = {}) => ({ quote: "q-1", mint: "", amount: 2_100, feeReserve: 5, source: "cln-1", ...patch });
 
-  it("shows what the Lightning source would spend, then pays with the fee ceiling on Approve", async () => {
+  it("shows what the Mainnet Lightning source would spend, then pays with the fee ceiling on Approve", async () => {
     const { user, engine } = show(lightningRequest(), { wallet: { lightning: lightningSource({ providerId: "cln-1", alias: "My node" }) } });
     engine.on("walletQuoteInvoice", () => quote()).on("payRequest", () => undefined);
     expect(screen.queryByRole("combobox", { name: "Cashu mint" })).not.toBeInTheDocument();
     // 3% of the amount, as the engine pays requests under.
     expect(screen.getByRole("textbox", { name: "Maximum fee (sats)" })).toHaveValue("63");
     await user.click(payButton());
-    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: MAINNET_INVOICE, via: undefined }]);
+    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: MAINNET_INVOICE, via: undefined, network: "mainnet" }]);
     const review = await screen.findByTestId("payment-review");
     expect(review).toHaveTextContent("Pay 2,100 sats over Lightning");
     expect(review).toHaveTextContent("Through My node · fee up to 5 sats");
     expect(payButton()).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Approve payment" }));
-    expect(engine.callsTo("payRequest")).toEqual([{ linkId: "link-1", paymentId: "pay-1", via: "lightning", maxFee: 63 }]);
+    expect(engine.callsTo("payRequest")).toEqual([{ linkId: "link-1", paymentId: "pay-1", via: "lightning", maxFee: 63, network: "mainnet" }]);
     await expect.poll(() => screen.queryByTestId("payment-review")).toBeNull();
   });
 
@@ -281,11 +299,22 @@ describe("paying a request's invoice over Lightning", () => {
     expect(engine.callsTo("preparePayment")).toEqual([]);
   });
 
-  it("says test sats for a regtest invoice", async () => {
+  it("says test sats for a regtest invoice, and quotes it on the Testnet wallet", async () => {
     const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }));
     engine.on("walletQuoteInvoice", () => quote({ amount: 250_000 }));
     await user.click(payButton());
     expect(await screen.findByTestId("payment-review")).toHaveTextContent("Pay 250,000 test sats over Lightning");
+    expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: REGTEST_INVOICE, via: undefined, network: "testnet" }]);
+  });
+
+  it("shows the Testnet Lightning source for a Testnet request, not the Mainnet one", async () => {
+    // One source per network: the review names the one of the request's network.
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "cln-test", alias: "Test node" }) } });
+    engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "cln-test" })).on("payRequest", () => undefined);
+    await user.click(payButton());
+    expect(await screen.findByTestId("payment-review")).toHaveTextContent("Through Test node");
+    await user.click(screen.getByRole("button", { name: "Approve payment" }));
+    expect(engine.callsTo("payRequest")).toEqual([expect.objectContaining({ paymentId: "pay-1", via: "lightning", network: "testnet" })]);
   });
 
   it("refuses an invoice for another amount than the one requested", async () => {

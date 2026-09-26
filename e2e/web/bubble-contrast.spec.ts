@@ -1,9 +1,10 @@
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { strangerInvoice } from "../support/bolt11";
-import { chat, expect, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
+import { chat, expect, say, test, useTestnet, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
+import { paymentCard } from "../support/payments";
 
 /**
  * Message bubbles take their colours from the theme: a sent and a received bubble in every colour theme, light
@@ -33,12 +34,6 @@ async function recordVoice(page: Page) {
   await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
   await page.waitForTimeout(1_500);
   await page.mouse.up();
-}
-
-async function testnetMint(p: Peer) {
-  await openWallet(p, "cashu");
-  await p.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-  await expect(p.page.getByTestId("wallet-balance")).toBeVisible();
 }
 
 /**
@@ -126,6 +121,8 @@ function readings(page: Page): Promise<Reading[]> {
 
 test("message bubbles follow the theme, and what is in them stays readable in every theme", { tag: ["@feature:app.theme.bubbles"] }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("bubbles-alice", { viewport: { width: 1100, height: 1500 } }), peer("bubbles-bob", { viewport: { width: 1100, height: 1500 } })]);
+  // With a local mint, a payment request too: both make a Testnet Cashu wallet (a new profile has none) before they pair.
+  if (localMint()) for (const p of [alice, bob]) await useTestnet(p);
   await pair(alice, bob);
 
   // Text, a link, a file and a voice message each way, an invoice pasted as text, and a payment request.
@@ -146,10 +143,8 @@ test("message bubbles follow the theme, and what is in them stays readable in ev
     await card.getByTitle("Hide the QR code").click();
   }
   if (localMint()) {
-    for (const p of [alice, bob]) await testnetMint(p);
-    for (const p of [alice, bob]) await openChat(p);
     await (await composerRow(bob.page, "payment-button")).click();
-    await bob.page.getByTestId("payment-card-cashu").click();
+    await paymentCard(bob.page, "cashu-testnet").click();
     await bob.page.getByTestId("payment-amount").fill("12");
     await bob.page.getByTestId("payment-composer").getByPlaceholder("What for? (optional)").fill("half the pizza");
     await bob.page.getByTestId("payment-request").click();

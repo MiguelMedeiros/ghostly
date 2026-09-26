@@ -89,7 +89,9 @@ export class ArkWallet {
     let adapter:ArkadeAdapter|undefined;
     try {adapter=await this.gate.within(ArkadeAdapter.connect(config,mnemonic),a=>a.dispose());await this.save(saved,replaced||undefined);}
     catch(error){await adapter?.dispose();if(replaced)void this.ensureReady();throw error;}
-    this.saved=saved;this.adapter=adapter;this.view={configured:true,locked:false,automatic:!!deviceKey,balance:0,network:config.network,provider:config.provider};await this.refresh();
+    this.saved=saved;this.adapter=adapter;this.view={configured:true,locked:false,automatic:!!deviceKey,balance:0,network:config.network,provider:config.provider};this.changed();
+    // Made: its addresses and balance come in the background. A slow explorer must not hold up the creation.
+    void this.refresh().catch(error=>console.warn("Ark refresh:",error instanceof Error?error.message:error));
   }
   async unlock(password?:string) {
     if(!this.saved)throw new Error("Create or restore an Ark wallet first");

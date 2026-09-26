@@ -1,5 +1,5 @@
 import { schnorr } from "@noble/curves/secp256k1.js";
-import { expect, openWallet, test, useTestnet } from "../support/fixtures";
+import { createWallet, expect, openWallet, test, walletCard } from "../support/fixtures";
 import { choose, optionsOf, close } from "../support/select";
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -9,27 +9,37 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "
  * this build with GHOSTLY_PLUGINS (playwright.config.ts). The gate of docs/wisps/ADAPTER-ROADMAP.md:
  * an independently authored adapter, in the pickers, doing its job. Nothing here reaches a network.
  */
-test("a plugin's Lightning source and identity proof show in the pickers and work", { tag: ["@feature:sdk.plugin.lightning", "@feature:sdk.plugin.identity"] }, async ({ peer }) => {
+test("a plugin's Lightning source and identity proof show in the pickers and work", { tag: ["@feature:sdk.plugin.lightning", "@feature:sdk.plugin.identity", "@feature:wallet.instances.create"] }, async ({ peer }) => {
   const alice = await peer("sdk-plugin");
   const page = alice.page;
-  await openWallet(alice, "lightning");
-  const source = page.getByTestId("lightning-source");
-  // Regtest only: not offered in Mainnet, whatever the plugin says.
-  await expect((await optionsOf(source.getByTestId("lightning-source-select"))).filter({ hasText: "Paper Lightning" })).toHaveCount(0);
-  await close(source.getByTestId("lightning-source-select"));
+  await openWallet(alice);
+  await page.getByTestId("wallet-add").click();
+  const dialog = page.getByTestId("new-wallet");
+  // Regtest only: not a Mainnet Lightning source, whatever the plugin says.
+  await dialog.getByRole("radio", { name: "Mainnet" }).click();
+  await dialog.getByTestId("new-wallet-type-lightning").click();
+  const sources = dialog.getByTestId("new-wallet-provider-select");
+  await expect((await optionsOf(sources)).filter({ hasText: "Paper Lightning" })).toHaveCount(0);
+  await close(sources);
+  await dialog.getByRole("radio", { name: "Testnet" }).click();
+  await dialog.getByTestId("new-wallet-type-lightning").click();
+  await choose(sources, "paper-lightning");
+  await expect(dialog.getByTestId("new-wallet-provider")).toContainText("An example source built with the SDK");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
 
-  await useTestnet(alice);
-  await openWallet(alice, "lightning");
-  await choose(source.getByTestId("lightning-source-select"), "paper-lightning");
-  const form = source.getByTestId("provider-form-paper-lightning");
-  await expect(source.getByTestId("lightning-source-config")).toContainText("An example source built with the SDK");
-  await form.getByLabel("Name").fill("Paper node");
-  await form.getByLabel("Ticket").fill("twenty-one-characters");
-  await form.getByTestId("provider-save").click();
-  await expect(source.getByTestId("lightning-source-saved")).toBeVisible();
+  // New → Testnet → Lightning with the plugin's source: the form is all it asks.
+  await createWallet(alice, "lightning", "testnet", { provider: "paper-lightning", fill: async (form) => {
+    await form.getByLabel("Name").fill("Paper node");
+    await form.getByLabel("Ticket").fill("twenty-one-characters");
+    await form.getByTestId("provider-save").click();
+  } });
+  await expect(walletCard(page, "lightning-testnet")).toContainText("Via Paper node");
+  await expect(walletCard(page, "lightning-testnet").getByTestId("wallet-card-network")).toHaveText("Testnet");
+  await openWallet(alice, "lightning-testnet");
+  const source = page.getByTestId("lightning-source");
   await expect(source.getByTestId("lightning-source-current")).toContainText("Paper Lightning (SDK example)");
   await expect(source.getByTestId("lightning-source-status")).toContainText("Connected");
-  await expect(page.getByTestId("wallet-card-lightning")).toContainText("Via Paper node");
   // 1,000 sats per character of the ticket, and the ticket itself is sealed in the engine: never back in the page.
   await expect(page.getByTestId("wallet-balance")).toContainText("21,000");
   expect(await page.content()).not.toContain("twenty-one-characters");

@@ -42,14 +42,19 @@ const RAIL_REQUIREMENT: Partial<Record<Combination["rail"], string>> = {
   "ark-arkade": "ark", bark: "bark", "btc-bdk": "bdk", "btc-core": "bitcoind", usdt: "usdt",
 };
 
+/**
+ * What each rail's Testnet block exercises. A rail through a source of its own (a node, a browser wallet, Breez) has
+ * that Lightning wallet as each person's one wallet, so its requests carry the source's invoice with no way turned
+ * off in the chat: `payments.chat.method-off` is the Cashu rail's (Lightning off beside a Cashu wallet).
+ */
 const RAIL_FEATURES: Partial<Record<Combination["rail"], string[]>> = {
   cashu: ["wallet.cashu.mint.add", "wallet.cashu.receive-lightning", "payments.cashu.send", "payments.cashu.request", "payments.chat.review", "payments.chat.method-off"],
   "ln-mint": ["wallet.cashu.mint.add", "wallet.cashu.receive-lightning", "wallet.lightning.cashu-mint.pay", "wallet.lightning.cashu-mint.receive"],
-  "ln-webln": ["wallet.lightning.webln.connect", "wallet.lightning.webln.pay", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
-  "ln-lnd": ["wallet.lightning.lnd.connect", "wallet.lightning.lnd.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
-  "ln-cln": ["wallet.lightning.cln.connect", "wallet.lightning.cln.commando", "wallet.lightning.cln.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
-  "ln-nwc": ["wallet.lightning.nwc.connect", "wallet.lightning.nwc.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
-  "ln-breez": ["wallet.lightning.breez.connect", "wallet.lightning.breez.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
+  "ln-webln": ["wallet.lightning.webln.connect", "wallet.lightning.webln.pay", "payments.lightning.request", "payments.chat.review"],
+  "ln-lnd": ["wallet.lightning.lnd.connect", "wallet.lightning.lnd.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review"],
+  "ln-cln": ["wallet.lightning.cln.connect", "wallet.lightning.cln.commando", "wallet.lightning.cln.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review"],
+  "ln-nwc": ["wallet.lightning.nwc.connect", "wallet.lightning.nwc.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review"],
+  "ln-breez": ["wallet.lightning.breez.connect", "wallet.lightning.breez.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review"],
   "ark-arkade": ["payments.arkade.send", "payments.arkade.request", "payments.chat.review"],
   bark: ["payments.bark.send", "payments.chat.review"],
   "btc-bdk": ["wallet.onchain.sources", "payments.bitcoin.send", "payments.chat.review"],
@@ -134,10 +139,12 @@ export const PLAN: readonly Step[] = [
   },
   {
     id: "payments",
-    title: "the rail: a request and a direct send (Testnet), or its Mainnet UI",
+    title: "the rail: its Testnet wallets made with New, a request and a direct send; or what Mainnet has of it (no value moves)",
     applies: always,
     features: (c) =>
-      c.wallet === "mainnet" ? ["wallet.mode", "wallet.deck", "payments.chat.cards"] : ["wallet.mode", ...(RAIL_FEATURES[c.rail] ?? [])],
+      c.wallet === "mainnet"
+        ? ["wallet.mode", "wallet.instances.networks", "wallet.deck", "payments.chat.cards"]
+        : ["wallet.mode", "wallet.instances.networks", ...(RAIL_FEATURES[c.rail] ?? [])],
     requires: (c) => (c.wallet === "testnet" && RAIL_REQUIREMENT[c.rail] ? [RAIL_REQUIREMENT[c.rail]!] : []),
     notYet: (c) => (withDesktop(c) ? DESKTOP_CHATS_ONLY : c.wallet === "testnet" && !TESTNET_RAILS.includes(c.rail) ? `no Testnet payment block for ${c.rail} yet` : undefined),
   },

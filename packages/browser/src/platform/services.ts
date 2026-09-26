@@ -10,7 +10,8 @@ import {
   toBase64Url,
   randomBytes,
 } from "@ghostly/core";
-import type { ServicesPlatform } from "../../../../src/lib/platform";
+import type { ServicesPlatform, WalletPlatform } from "../../../../src/lib/platform";
+import type { WalletNetwork } from "@ghostly/core";
 import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { storedBlob } from "../shared/storedFiles";
@@ -35,6 +36,126 @@ function preparingChanged(force = false): void {
 }
 
 /** Ephemeral services for the shared UI, backed by the browser peer. */
+/**
+ * The wallet calls, acting on one network's wallets when bound to it (the card they are made on), else on the
+ * network older pages showed. A payment still goes through the wallet of its own network either way.
+ */
+function walletPlatform(network?: WalletNetwork): WalletPlatform {
+  const on = network ? { network } : undefined;
+  return {
+    network,
+    forNetwork: (next) => walletPlatform(next),
+    create: (params) => engine.call("walletCreate", params),
+    usdtCreate:params=>engine.call("usdtCreate",params),
+    usdtUnlock:password=>engine.call("usdtUnlock",{password,...(network?{network}:{})}),
+    usdtReveal:password=>engine.call("usdtReveal",{password,...(network?{network}:{})}),
+    usdtLock:()=>engine.call("usdtLock",on),
+    usdtRefresh:()=>engine.call("usdtRefresh",on),
+    usdtGetTestTokens:()=>engine.call("usdtGetTestTokens",on),
+    usdtExportBackup:password=>engine.call("usdtExportBackup",{password,...(network?{network}:{})}),
+    usdtRestoreBackup:(text,password)=>engine.call("usdtRestoreBackup",{text,password,...(network?{network}:{})}),
+    arkCreate: (params) => engine.call("arkCreate",params),
+    arkUnlock: (password) => engine.call("arkUnlock",{password,...(network?{network}:{})}),
+    arkLock: () => engine.call("arkLock",on),
+    arkBackup: (password) => engine.call("arkBackup",{password,...(network?{network}:{})}),
+    arkExportBackup:(password)=>engine.call("arkExportBackup",{password,...(network?{network}:{})}),
+    arkRestoreBackup:(text,password)=>engine.call("arkRestoreBackup",{text,password,...(network?{network}:{})}),
+    arkRefresh: () => engine.call("arkRefresh",on),
+    arkRecover: () => engine.call("arkRecover",on),
+    barkCreate: (params) => engine.call("barkCreate",params),
+    barkBackup: () => engine.call("barkBackup",on),
+    barkExportBackup: (password) => engine.call("barkExportBackup",{password,...(network?{network}:{})}),
+    barkRestoreBackup: (text,password) => engine.call("barkRestoreBackup",{text,password,...(network?{network}:{})}),
+    barkRefresh: () => engine.call("barkRefresh",on),
+    barkBoard: () => engine.call("barkBoard",on),
+    fedimintPreview: (invite) => engine.call("fedimintPreview", { invite, ...(network?{network}:{}) }),
+    fedimintJoin: (invite, recover) => engine.call("fedimintJoin", { invite, recover, ...(network?{network}:{}) }),
+    fedimintLeave: (federation) => engine.call("fedimintLeave", { federation }),
+    fedimintRefresh: () => engine.call("fedimintRefresh", on),
+    fedimintSpendNotes: (federation, amount) => engine.call("fedimintSpendNotes", { federation, amount }),
+    fedimintReceiveNotes: (notes) => engine.call("fedimintReceiveNotes", { notes, ...(network?{network}:{}) }),
+    fedimintInvoice: (federation, amount, memo) => engine.call("fedimintInvoice", { federation, amount, memo }),
+    fedimintTakeBack: (federation, operation) => engine.call("fedimintTakeBack", { federation, operation }),
+    fedimintBackup: () => engine.call("fedimintBackup", on),
+    fedimintExportBackup: (password) => engine.call("fedimintExportBackup", { password, ...(network?{network}:{}) }),
+    fedimintRestoreBackup: (text, password) => engine.call("fedimintRestoreBackup", { text, password, ...(network?{network}:{}) }),
+    fedimintRestorePhrase: (mnemonic, invites) => engine.call("fedimintRestorePhrase", { mnemonic, invites, ...(network?{network}:{}) }),
+    sparkCreate: (params) => engine.call("sparkCreate",params),
+    sparkBackup: () => engine.call("sparkBackup",on),
+    sparkExportBackup: (password) => engine.call("sparkExportBackup",{password,...(network?{network}:{})}),
+    sparkRestoreBackup: (text,password,apiKey) => engine.call("sparkRestoreBackup",{text,password,apiKey,...(network?{network}:{})}),
+    sparkRefresh: () => engine.call("sparkRefresh",on),
+    sparkUseForLightning: () => engine.call("sparkUseForLightning",on),
+    preparePayment: (params) => engine.call("preparePayment",{...params,...(network?{network}:{})}),
+    approvePayment: (id) => engine.call("approvePayment",{id}),
+    reconcilePayment: (id) => engine.call("reconcilePayment",{id}),
+    cancelPayment: (id) => engine.call("cancelPayment",{id}),
+
+    testMintUrl: TEST_MINT,
+    testMintUrls: TEST_MINTS,
+    getState: () => {
+      const state = engine.state?.wallet;
+      if (!state || !network) return state ?? null;
+      // One network's wallets, in the shape every panel reads; what the profile has and can make stays whole.
+      return { ...state, ...state.networks?.[network], mode: network };
+    },
+    // The test mint is for trying things out right away, so it takes over as primary.
+    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: TEST_MINTS.includes(url) })),
+    setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
+    removeMint: (url) => engine.call("walletRemoveMint", { url }),
+    receiveLightning: (amount, via) => engine.call("walletReceiveLightning", { amount, via, ...(network?{network}:{}) }),
+    quoteInvoice: (invoice, via) => engine.call("walletQuoteInvoice", { invoice, via, ...(network?{network}:{}) }),
+    lightningSetSource: (providerId, values) => engine.call("lightningSetSource", { providerId, values, ...(network?{network}:{}) }),
+    lightningClearSource: () => engine.call("lightningClearSource", on),
+    lightningRetrySource: () => engine.call("lightningRetrySource", on),
+    lightningReconfigureSource: (values) => engine.call("lightningReconfigureSource", { values, ...(network?{network}:{}) }),
+    bitcoinSetSource: (providerId, values) => engine.call("bitcoinSetSource", { providerId, values, ...(network?{network}:{}) }),
+    bitcoinClearSource: () => engine.call("bitcoinClearSource", on),
+    bitcoinRetrySource: () => engine.call("bitcoinRetrySource", on),
+    bitcoinReconfigureSource: (values) => engine.call("bitcoinReconfigureSource", { values, ...(network?{network}:{}) }),
+    bitcoinReceiveAddress: () => engine.call("bitcoinReceiveAddress", on),
+    bitcoinRefresh: () => engine.call("bitcoinRefresh", on),
+    payQuote: async (quote, mint, note) => (await engine.call("walletPayQuote", { quote, mint, note })).paid,
+    resolveLightningAddress: (text) => engine.call("lnurlResolve", { text, ...(network?{network}:{}) }),
+    lightningAddressInvoice: (id, amount, comment) => engine.call("lnurlInvoice", { id, amount, comment, ...(network?{network}:{}) }),
+    async checkPayment(peerPubKeyZ32, paymentId) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      await engine.call("checkPayment", { linkId: link.id, paymentId });
+    },
+    receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
+    inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
+    exportTokens: () => engine.call("walletExport"),
+    async send(peerPubKeyZ32, amount, memo) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      const timestamp = Date.now();
+      const { paymentId } = await engine.call("sendPayment", { linkId: link.id, amount, memo, timestamp, ...(network?{network}:{}) });
+      return { timestamp, paymentId };
+    },
+    async request(peerPubKeyZ32, amount, memo, method, rail) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      const timestamp = Date.now();
+      const { paymentId } = await engine.call("requestPayment", { linkId: link.id, amount, memo, timestamp, method, rail, ...(network?{network}:{}) });
+      return { timestamp, paymentId };
+    },
+    async payRequest(peerPubKeyZ32, paymentId, options) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      await engine.call("payRequest", { linkId: link.id, paymentId, ...options, ...(network?{network}:{}) });
+    },
+    reclaim: (paymentId) => engine.call("reclaimPayment", { paymentId }),
+    getPayment: (paymentId) => engine.state?.payments[paymentId] ?? null,
+    async askToPay(peerPubKeyZ32, amount, method, memo) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      return engine.call("askToPay", { linkId: link.id, amount, method, memo, timestamp: Date.now(), ...(network?{network}:{}) });
+    },
+    answerTo: (askId) => Object.values(engine.state?.payments ?? {}).find((p) => p.ask === askId && p.kind === "request" && p.direction === "in") ?? null,
+  };
+}
+
 export const servicesPlatform: ServicesPlatform | null = {
   subscribe: (listener) => {
     preparingListeners.add(listener);
@@ -61,12 +182,12 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   getPeer(peerPubKeyZ32) {
     const link = engine.linkByPeer(peerPubKeyZ32);
-    return link ? { id: link.id, deliveryMode: link.deliveryMode, textDelivery: link.textDelivery, canSendText: link.canSendText, dhtDelivery: link.dhtDelivery, hold: link.hold, capabilities: link.capabilities, sessionOffers: link.sessionOffers, callsUnavailable: link.callsUnavailable, paymentMethods: link.paymentMethods, pairing: link.pairing, transportWait: link.transportWait, dataLink: link.dataLink, online: link.peerOnline, services: link.peerServices } : null;
+    return link ? { id: link.id, deliveryMode: link.deliveryMode, textDelivery: link.textDelivery, canSendText: link.canSendText, dhtDelivery: link.dhtDelivery, hold: link.hold, capabilities: link.capabilities, sessionOffers: link.sessionOffers, callsUnavailable: link.callsUnavailable, paymentMethods: link.paymentMethods, paymentNetworks: link.paymentNetworks, pairing: link.pairing, transportWait: link.transportWait, dataLink: link.dataLink, online: link.peerOnline, services: link.peerServices } : null;
   },
-  async setChatPaymentMethods(peerPubKeyZ32, methods) {
+  async setChatPaymentMethods(peerPubKeyZ32, methods, networks) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-    await engine.call("setChatPaymentMethods", { linkId: link.id, methods });
+    await engine.call("setChatPaymentMethods", { linkId: link.id, methods, ...(networks ? { networks } : {}) });
   },
   async setChatHold(peerPubKeyZ32, enabled) {
     const link = engine.linkByPeer(peerPubKeyZ32);
@@ -198,111 +319,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     return bytes.save(fileId, stored.metadata.name);
   },
 
-  wallet: {
-    usdtCreate:params=>engine.call("usdtCreate",params),
-    usdtUnlock:password=>engine.call("usdtUnlock",{password}),
-    usdtReveal:password=>engine.call("usdtReveal",{password}),
-    usdtLock:()=>engine.call("usdtLock"),
-    usdtRefresh:()=>engine.call("usdtRefresh"),
-    usdtGetTestTokens:()=>engine.call("usdtGetTestTokens"),
-    usdtExportBackup:password=>engine.call("usdtExportBackup",{password}),
-    usdtRestoreBackup:(text,password)=>engine.call("usdtRestoreBackup",{text,password}),
-    arkCreate: (params) => engine.call("arkCreate",params),
-    arkUnlock: (password) => engine.call("arkUnlock",{password}),
-    arkLock: () => engine.call("arkLock"),
-    arkBackup: (password) => engine.call("arkBackup",{password}),
-    arkExportBackup:(password)=>engine.call("arkExportBackup",{password}),
-    arkRestoreBackup:(text,password)=>engine.call("arkRestoreBackup",{text,password}),
-    arkRefresh: () => engine.call("arkRefresh"),
-    arkRecover: () => engine.call("arkRecover"),
-    barkCreate: (params) => engine.call("barkCreate",params),
-    barkBackup: () => engine.call("barkBackup"),
-    barkExportBackup: (password) => engine.call("barkExportBackup",{password}),
-    barkRestoreBackup: (text,password) => engine.call("barkRestoreBackup",{text,password}),
-    barkRefresh: () => engine.call("barkRefresh"),
-    barkBoard: () => engine.call("barkBoard"),
-    fedimintPreview: (invite) => engine.call("fedimintPreview", { invite }),
-    fedimintJoin: (invite, recover) => engine.call("fedimintJoin", { invite, recover }),
-    fedimintLeave: (federation) => engine.call("fedimintLeave", { federation }),
-    fedimintRefresh: () => engine.call("fedimintRefresh"),
-    fedimintSpendNotes: (federation, amount) => engine.call("fedimintSpendNotes", { federation, amount }),
-    fedimintReceiveNotes: (notes) => engine.call("fedimintReceiveNotes", { notes }),
-    fedimintInvoice: (federation, amount, memo) => engine.call("fedimintInvoice", { federation, amount, memo }),
-    fedimintTakeBack: (federation, operation) => engine.call("fedimintTakeBack", { federation, operation }),
-    fedimintBackup: () => engine.call("fedimintBackup"),
-    fedimintExportBackup: (password) => engine.call("fedimintExportBackup", { password }),
-    fedimintRestoreBackup: (text, password) => engine.call("fedimintRestoreBackup", { text, password }),
-    fedimintRestorePhrase: (mnemonic, invites) => engine.call("fedimintRestorePhrase", { mnemonic, invites }),
-    sparkCreate: (params) => engine.call("sparkCreate",params),
-    sparkBackup: () => engine.call("sparkBackup"),
-    sparkExportBackup: (password) => engine.call("sparkExportBackup",{password}),
-    sparkRestoreBackup: (text,password,apiKey) => engine.call("sparkRestoreBackup",{text,password,apiKey}),
-    sparkRefresh: () => engine.call("sparkRefresh"),
-    sparkUseForLightning: () => engine.call("sparkUseForLightning"),
-    preparePayment: (params) => engine.call("preparePayment",params),
-    approvePayment: (id) => engine.call("approvePayment",{id}),
-    reconcilePayment: (id) => engine.call("reconcilePayment",{id}),
-    cancelPayment: (id) => engine.call("cancelPayment",{id}),
-
-    testMintUrl: TEST_MINT,
-    testMintUrls: TEST_MINTS,
-    getState: () => engine.state?.wallet ?? null,
-    // The test mint is for trying things out right away, so it takes over as primary.
-    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: TEST_MINTS.includes(url) })),
-    setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
-    setMode: (mode) => engine.call("walletSetMode", { mode }),
-    removeMint: (url) => engine.call("walletRemoveMint", { url }),
-    receiveLightning: (amount, via) => engine.call("walletReceiveLightning", { amount, via }),
-    quoteInvoice: (invoice, via) => engine.call("walletQuoteInvoice", { invoice, via }),
-    lightningSetSource: (providerId, values) => engine.call("lightningSetSource", { providerId, values }),
-    lightningClearSource: () => engine.call("lightningClearSource"),
-    lightningRetrySource: () => engine.call("lightningRetrySource"),
-    lightningReconfigureSource: (values) => engine.call("lightningReconfigureSource", { values }),
-    bitcoinSetSource: (providerId, values) => engine.call("bitcoinSetSource", { providerId, values }),
-    bitcoinClearSource: () => engine.call("bitcoinClearSource"),
-    bitcoinRetrySource: () => engine.call("bitcoinRetrySource"),
-    bitcoinReconfigureSource: (values) => engine.call("bitcoinReconfigureSource", { values }),
-    bitcoinReceiveAddress: () => engine.call("bitcoinReceiveAddress"),
-    bitcoinRefresh: () => engine.call("bitcoinRefresh"),
-    payQuote: async (quote, mint, note) => (await engine.call("walletPayQuote", { quote, mint, note })).paid,
-    resolveLightningAddress: (text) => engine.call("lnurlResolve", { text }),
-    lightningAddressInvoice: (id, amount, comment) => engine.call("lnurlInvoice", { id, amount, comment }),
-    async checkPayment(peerPubKeyZ32, paymentId) {
-      const link = engine.linkByPeer(peerPubKeyZ32);
-      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-      await engine.call("checkPayment", { linkId: link.id, paymentId });
-    },
-    receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
-    inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
-    exportTokens: () => engine.call("walletExport"),
-    async send(peerPubKeyZ32, amount, memo) {
-      const link = engine.linkByPeer(peerPubKeyZ32);
-      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-      const timestamp = Date.now();
-      const { paymentId } = await engine.call("sendPayment", { linkId: link.id, amount, memo, timestamp });
-      return { timestamp, paymentId };
-    },
-    async request(peerPubKeyZ32, amount, memo, method) {
-      const link = engine.linkByPeer(peerPubKeyZ32);
-      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-      const timestamp = Date.now();
-      const { paymentId } = await engine.call("requestPayment", { linkId: link.id, amount, memo, timestamp, method });
-      return { timestamp, paymentId };
-    },
-    async payRequest(peerPubKeyZ32, paymentId, options) {
-      const link = engine.linkByPeer(peerPubKeyZ32);
-      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-      await engine.call("payRequest", { linkId: link.id, paymentId, ...options });
-    },
-    reclaim: (paymentId) => engine.call("reclaimPayment", { paymentId }),
-    getPayment: (paymentId) => engine.state?.payments[paymentId] ?? null,
-    async askToPay(peerPubKeyZ32, amount, method, memo) {
-      const link = engine.linkByPeer(peerPubKeyZ32);
-      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-      return engine.call("askToPay", { linkId: link.id, amount, method, memo, timestamp: Date.now() });
-    },
-    answerTo: (askId) => Object.values(engine.state?.payments ?? {}).find((p) => p.ask === askId && p.kind === "request" && p.direction === "in") ?? null,
-  },
+  wallet: walletPlatform(),
 
   getNetwork() {
     const state = engine.state;

@@ -5,7 +5,6 @@ import { PaymentReview } from "./PaymentReview";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Segmented, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
-import { pageUnit } from "./walletCardData";
 import { InputGroup, Truncate } from "./layout";
 
 type Network = "bitcoin" | "mutinynet" | "signet" | "regtest";
@@ -29,7 +28,7 @@ export function ArkWalletPanel({ wallet, state }: { wallet: WalletPlatform; stat
  const [custom, setCustom] = useState(false), [provider, setProvider] = useState(""), [explorer, setExplorer] = useState("");
  const network = (ark?.network ?? "bitcoin") as Network;
  const test = network !== "bitcoin";
- const unit = pageUnit(state, test);
+ const unit = test ? "test sats" : "sats";
  const ready = !!ark?.configured && !ark.locked;
  const intents = (state.intents ?? []).filter(i => i.method === "arkade");
  const stuck = !!ark?.configured && !!ark.automatic && !ready;
@@ -66,7 +65,7 @@ export function ArkWalletPanel({ wallet, state }: { wallet: WalletPlatform; stat
   {ark?.error && ready && <Notice tone="warning">{ark.error}</Notice>}
 
   {(ready || stuck) && <Section title="Settings">
-   {/* Mainnet is Bitcoin only; the test networks are the Testnet mode's (switch at the top of the wallet). */}
+   {/* A Mainnet wallet is Bitcoin only; a Testnet wallet may move between the test networks while empty. */}
    {state.mode === "testnet" && <Row label="Network" hint={stuck ? "This network is not answering. You can switch to another one." : canReplace ? "Test networks use worthless coins." : "Only while this wallet is empty and has no payments."}>
     <Segmented label="Ark network" value={network} disabled={busy || !canReplace} options={(Object.keys(NETWORKS) as Network[]).filter(value => value !== "bitcoin").map(value => ({ value, label: NETWORKS[value].label }))} onChange={next => void run(() => use(next))} />
    </Row>}

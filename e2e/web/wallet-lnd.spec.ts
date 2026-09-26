@@ -1,9 +1,8 @@
 import { decodeBolt11 } from "@ghostly/core";
 import { balance, credentials, invoice, lookupInvoice, settled } from "../support/lnd-regtest/regtest.mjs";
-import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
-import { choose } from "../support/select";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
-import { chatPayments } from "../support/payments";
+import { paymentCard } from "../support/payments";
 
 /**
  * The LND provider against real nodes: GHOSTLY_LND_REGTEST=1 with e2e/infra up (npm run e2e:infra:up) and this
@@ -17,17 +16,18 @@ import { chatPayments } from "../support/payments";
 test.skip(process.env.GHOSTLY_LND_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_LND_REGTEST=1");
 test.describe.configure({ mode: "serial" });
 
+/** Makes the node the source of this peer's Testnet Lightning wallet, made with New through the source's form. */
 async function useNode(p: Peer, node: "alice" | "bob") {
   const { url, macaroon, cert } = credentials(node);
-  await openWallet(p, "lightning");
+  await createWallet(p, "lightning", "testnet", { provider: "lnd", timeout: 30_000, fill: async (area) => {
+    const form = area.getByTestId("provider-form-lnd");
+    await form.getByLabel("REST address").fill(url);
+    await form.getByLabel("Macaroon (hex)").fill(macaroon);
+    await form.getByLabel("TLS certificate").fill(cert);
+    await form.getByTestId("provider-save").click();
+  } });
+  await openWallet(p, "lightning-testnet");
   const source = p.page.getByTestId("lightning-source");
-  await choose(source.getByTestId("lightning-source-select"), "lnd");
-  const form = source.getByTestId("provider-form-lnd");
-  await form.getByLabel("REST address").fill(url);
-  await form.getByLabel("Macaroon (hex)").fill(macaroon);
-  await form.getByLabel("TLS certificate").fill(cert);
-  await form.getByTestId("provider-save").click();
-  await expect(source.getByTestId("lightning-source-saved")).toBeVisible({ timeout: 30_000 });
   await expect(source.getByTestId("lightning-source-status")).toContainText(`ghostly-${node}`);
   await expect(source.getByTestId("lightning-source-status")).toContainText("regtest");
   // The credentials are sealed in the engine, never back in the page.
@@ -37,14 +37,14 @@ async function useNode(p: Peer, node: "alice" | "bob") {
 /** The node's channel balance once no HTLC is left on it, after the Lightning card shows the same. */
 async function cardBalance(p: Peer, node: "alice" | "bob") {
   await expect.poll(() => settled(node), { timeout: 30_000 }).toBe(true);
-  await openWallet(p, "lightning");
+  await openWallet(p, "lightning-testnet");
   const shown = p.page.getByTestId("wallet-balance");
   await expect.poll(async () => Number(/[\d,]+/.exec(await shown.innerText())?.[0].replace(/,/g, "")), { timeout: 30_000 }).toBe(balance(node));
   return balance(node);
 }
 
 async function payFromCard(p: Peer, request: string, sats: number) {
-  await openWallet(p, "lightning");
+  await openWallet(p, "lightning-testnet");
   await p.page.getByTestId("wallet-send").click();
   await p.page.getByTestId("wallet-pay-input").fill(request);
   await p.page.getByRole("button", { name: `Pay ${sats.toLocaleString()} sats` }).click();
@@ -57,14 +57,13 @@ test("LND: a node per person, invoices in and out through the card, a chat reque
   const [alice, bob] = await Promise.all([peer("lnd-alice", { ignoreHTTPSErrors: true }), peer("lnd-bob", { ignoreHTTPSErrors: true })]);
   await link(alice, bob);
   await connect(alice, bob);
-  for (const p of [alice, bob]) await useTestnet(p);
   await useNode(alice, "alice");
   await useNode(bob, "bob");
-  await expect(alice.page.getByTestId("wallet-card-lightning")).toContainText("ghostly-alice");
+  await expect(alice.page.getByTestId("wallet-card-lightning-testnet")).toContainText("ghostly-alice");
   let [a, b] = [await cardBalance(alice, "alice"), await cardBalance(bob, "bob")];
 
   // In: Alice's card asks her node for an invoice; Bob's app pays it through his node.
-  await openWallet(alice, "lightning");
+  await openWallet(alice, "lightning-testnet");
   await alice.page.getByTestId("wallet-receive").click();
   await alice.page.getByTestId("wallet-receive-amount").fill("1000");
   await alice.page.getByTestId("wallet-create-invoice").click();
@@ -88,10 +87,9 @@ test("LND: a node per person, invoices in and out through the card, a chat reque
 
   // A chat request: Bob asks over Lightning, the invoice comes from his node; Alice pays it from the bubble.
   for (const p of [alice, bob]) await openChat(p);
-  // Lightning only in this chat for Bob, so the request is paid over Lightning and not as ecash.
-  await chatPayments(bob.page, { cashu: false });
+  // Lightning is Bob's one wallet, so the request is paid over Lightning and not as ecash.
   await (await composerRow(bob.page, "payment-button")).click();
-  await bob.page.getByTestId("payment-card-lightning").click();
+  await paymentCard(bob.page, "lightning-testnet").click();
   await bob.page.getByTestId("payment-amount").fill("2100");
   await bob.page.getByTestId("payment-request").click();
   const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
@@ -108,7 +106,7 @@ test("LND: a node per person, invoices in and out through the card, a chat reque
   expect(a - aliceEnd).toBeLessThanOrEqual(2100 + 63);
 
   // The journal says so, and Alice's node agrees the invoice her card made was settled.
-  await openWallet(bob, "lightning");
+  await openWallet(bob, "lightning-testnet");
   await expect(bob.page.getByTestId("lightning-recent").getByTestId("lightning-op").first()).toContainText("paid");
   expect(lookupInvoice("alice", decodeBolt11(aliceInvoice)!.paymentHash!).state).toBe("SETTLED");
   console.log(`  LND regtest: Alice ${aliceEnd} sats, Bob ${await cardBalance(bob, "bob")} sats after 1000 in, 500 out and a 2100 request`);

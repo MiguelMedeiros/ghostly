@@ -5,7 +5,6 @@ import { PaymentReview } from "./PaymentReview";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
-import { pageUnit } from "./walletCardData";
 
 /** Spark transfers cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
@@ -23,7 +22,7 @@ export function SparkWalletPanel({ wallet, state }: { wallet: WalletPlatform; st
  const [apiKey, setApiKey] = useState("");
  const network = spark?.network ?? (state.mode === "testnet" ? "regtest" : "bitcoin");
  const mainnet = network === "bitcoin";
- const unit = pageUnit(state, !mainnet);
+ const unit = mainnet ? "sats" : "test sats";
  const ready = !!spark?.configured && !spark.locked;
  const intents = (state.intents ?? []).filter(i => i.method === "spark");
  const canReplace = intents.length === 0 && ready && !spark.balance && !spark.history?.length;
@@ -39,7 +38,7 @@ export function SparkWalletPanel({ wallet, state }: { wallet: WalletPlatform; st
    <Notice tone="warning">Mainnet moves real bitcoin. Spark on Mainnet needs a Breez API key (free, from Breez), kept sealed on this device.</Notice>
    <input aria-label="Breez API key" type="password" autoComplete="off" spellCheck={false} placeholder="Breez API key" className={`${input} font-mono text-xs`} value={apiKey} onChange={e => setApiKey(e.target.value)} />
    <Button variant="primary" className="w-full" data-testid="spark-mainnet-create" disabled={busy || !apiKey.trim()} onClick={() => void run(async () => { await wallet.sparkCreate({ network: "bitcoin", apiKey }); setApiKey(""); })}>Open a Mainnet Spark wallet</Button>
-   <Notice>Or switch the wallets to Testnet: Spark there runs on regtest, with worthless sats and no key.</Notice>
+   <Notice>Or create a Testnet Spark wallet with New: it runs on regtest, with worthless sats and no key.</Notice>
   </div>
   {error && <Notice tone="error">{error}</Notice>}
  </div>;

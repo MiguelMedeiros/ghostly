@@ -63,10 +63,11 @@ export const DIMENSIONS = [
   },
   {
     id: "wallet",
-    label: "wallet mode",
+    // The network of the wallets the scenario makes with New: each wallet has its own, both open at once.
+    label: "wallet network",
     values: [
-      { id: "mainnet", label: "Mainnet: the rail's UI only, no value moves" },
-      { id: "testnet", label: "Testnet: a request and a direct send, paid" },
+      { id: "mainnet", label: "Mainnet: a Mainnet Cashu wallet against mocked mints, or what New offers for the rail; no value moves" },
+      { id: "testnet", label: "Testnet: the rail's Testnet wallets made with New, a request and a direct send, paid" },
     ],
   },
   {

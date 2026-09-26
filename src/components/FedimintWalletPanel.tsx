@@ -5,7 +5,6 @@ import type { WalletPlatform, WalletState } from "../lib/platform";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun, downloadJson } from "./wallet/run";
 import { Select } from "./ui/Select";
-import { pageUnit } from "./walletCardData";
 
 const short = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`;
 const KIND: Record<string, string> = { "notes-out": "Notes sent", "notes-in": "Notes received", "lightning-in": "Lightning received", "lightning-out": "Lightning paid", onchain: "On-chain" };
@@ -40,7 +39,7 @@ export function FedimintWalletPanel({ wallet, state }: { wallet: WalletPlatform;
   const [restoreInvites, setRestoreInvites] = useState(""), [phrase, setPhrase] = useState(""), [shownPhrase, setShownPhrase] = useState("");
   const [password, setPassword] = useState(""), [file, setFile] = useState(""), [filePassword, setFilePassword] = useState(""), [open, setOpen] = useState<"none" | "backup" | "restore">("none");
   const test = current ? current.network !== "bitcoin" : state.mode === "testnet";
-  const unit = pageUnit(state, test);
+  const unit = test ? "test sats" : "sats";
   const ready = current?.status === "ready";
   const lnSource = state.lightning?.providerId === "fedimint";
 
@@ -128,7 +127,7 @@ export function FedimintWalletPanel({ wallet, state }: { wallet: WalletPlatform;
       </Block>}
     </Section>}
     <Section title="Restore">
-      <Row label="From a backup" hint={federations.length ? "Only into a wallet mode with no federation yet" : "Every federation is joined again and recovers its ecash"}><Button disabled={!!federations.length && open !== "restore"} onClick={() => setOpen(open === "restore" ? "none" : "restore")}>{open === "restore" ? "Cancel" : "Restore"}</Button></Row>
+      <Row label="From a backup" hint={federations.length ? "Only into a Fedimint wallet with no federation yet" : "Every federation is joined again and recovers its ecash"}><Button disabled={!!federations.length && open !== "restore"} onClick={() => setOpen(open === "restore" ? "none" : "restore")}>{open === "restore" ? "Cancel" : "Restore"}</Button></Row>
       {open === "restore" && <Block>
         <textarea aria-label="Fedimint recovery phrase" rows={2} spellCheck={false} placeholder="Recovery phrase" className={`${input} font-mono resize-none`} value={phrase} onChange={(e) => setPhrase(e.target.value)} />
         <textarea aria-label="Invite codes to restore" rows={2} spellCheck={false} placeholder="Invite codes, one per line (fed1…)" className={`${input} font-mono text-xs resize-none`} value={restoreInvites} onChange={(e) => setRestoreInvites(e.target.value)} />

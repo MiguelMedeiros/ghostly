@@ -1644,6 +1644,8 @@ export class GhostLink {
    * not say (an older app, or before its first word): any network may meet.
    */
   peerPaymentNetworks(method: PaymentMethodName): ("mainnet" | "testnet")[] | undefined { return this.peerNetworks ? this.peerNetworks[method] ?? [] : undefined; }
+  /** The whole map as the contact said it: a way of paying it has no wallet of is not in it. Undefined: it did not say. */
+  peerWalletNetworks(): PaymentNetworks | undefined { return this.peerNetworks ? { ...this.peerNetworks } : undefined; }
   /** The apps this contact may reach, said on the open session. Older apps drop the frame (no id). */
   private sendPairedServices(): void {
     if (!this.options.params.profile || !this.channel || !this.supportsServices || this.paired?.state.status !== "ready") return;
@@ -1724,8 +1726,12 @@ export class GhostLink {
   /** Older apps drop this frame (it carries no id) and keep using the handshake offer. */
   private sendPaymentMethods(): void {
     if (!this.options.params.profile || !this.channel || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return;
-    const methods = PAYMENT_METHODS.filter(m => this.paymentEnabled(m)), networks = this.options.paymentNetworks;
-    try { this.channel.send(JSON.stringify({ t: "paired-payments", m: methods, ...(networks ? { n: Object.fromEntries(methods.filter(m => networks[m]).map(m => [m, networks[m]])) } : {}) })); } catch { /* the next session offers it */ }
+    // Offered: the ways this chat has on and (once this app says its wallets' networks) has a wallet of; a way with
+    // no wallet is nothing the contact can pay to. A wallet whose networks are all off here still names the way.
+    const networks = this.options.paymentNetworks;
+    const methods = PAYMENT_METHODS.filter(m => this.paymentEnabled(m) && (!networks || networks[m] !== undefined));
+    // The networks go for every wallet, on or off here: a way turned off is told apart from one with no wallet.
+    try { this.channel.send(JSON.stringify({ t: "paired-payments", m: methods, ...(networks ? { n: networks } : {}) })); } catch { /* the next session offers it */ }
   }
   async requirePaymentSupport(): Promise<void> {
     if (!PAYMENT_METHODS.some(m => this.paymentEnabled(m))) throw new Error("Payments are turned off in this chat.");

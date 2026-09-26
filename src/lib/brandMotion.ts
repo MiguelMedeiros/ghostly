@@ -45,14 +45,6 @@ const OUT = "cubic-bezier(.22,1,.36,1)";
 const blink = (delay: number): [Keyframe[], KeyframeAnimationOptions] =>
   [[{ transform: "scaleY(1)" }, { transform: "scaleY(.1)" }, { transform: "scaleY(1)" }], { duration: 160, delay, easing: "ease-in-out" }];
 
-/** The Testnet badge's part of an opening: it fades in with A, and comes in last with B. */
-export function enterBrandBadge(root: HTMLElement, motion: BrandMotion): Animation[] {
-  const badge = root.querySelector<HTMLElement>(".app-brand-badge");
-  if (!badge?.animate) return [];
-  return [motion === "breathe"
-    ? badge.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, delay: 420, fill: "backwards" })
-    : badge.animate([{ opacity: 0, transform: "scale(.9)" }, { opacity: 1, transform: "scale(1)" }], { duration: 280, delay: 1000, easing: OUT, fill: "backwards" })];
-}
 
 /** Plays one motion on the logo's parts, and returns its animations. The ghost moves as a whole; the eyes in the drawing's own units. */
 export function playBrandMotion(root: HTMLElement, motion: BrandMotion, cue: BrandCue): Animation[] {
@@ -70,7 +62,6 @@ export function playBrandMotion(root: HTMLElement, motion: BrandMotion, cue: Bra
     ghost.animate([{ transform: "translateY(4px)", opacity: 0.5 }, { transform: "translateY(-1px)", opacity: 1, offset: 0.7 }, { transform: "translateY(0)", opacity: 1 }], { duration: 520, easing: OUT }),
     ...letters.map((letter, i) => letter.animate([{ opacity: 0, top: "3px" }, { opacity: 1, top: "0px" }], { duration: 320, delay: 120 + i * 28, easing: OUT, fill: "backwards" })),
     eyes.animate(...blink(560)),
-    ...enterBrandBadge(root, motion),
   ];
   if (motion === "breathe") return [
     ghost.animate([{ transform: "translateY(0)" }, { transform: "translateY(-2px)" }, { transform: "translateY(0)" }], { duration: 360, easing: OUT }),
@@ -80,7 +71,6 @@ export function playBrandMotion(root: HTMLElement, motion: BrandMotion, cue: Bra
     ghost.animate(["0deg", "-6deg", "4deg", "-1.5deg", "0deg"].map((a) => ({ transform: `rotate(${a})` })), { duration: 900, easing: "ease-in-out" }),
     glance(1100, 500, true),
     ...letters.map((letter, i) => letter.animate([{ opacity: 1 }, { opacity: 0.45 }, { opacity: 1 }], { duration: 260, delay: 620 + i * 45, easing: "ease-in-out" })),
-    ...enterBrandBadge(root, motion),
   ];
   return [
     ghost.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(-3deg)" }, { transform: "rotate(0deg)" }], { duration: 420, easing: "ease-in-out" }),

@@ -1,25 +1,37 @@
 import { FakeNwcWallet, TestRelay } from "../../packages/browser/test/helpers/fakeNwc";
-import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
-import { chatPayments } from "../support/payments";
+import { paymentCard } from "../support/payments";
 
 /**
- * Lightning through Nostr Wallet Connect: the person pastes a wallet's `nostr+walletconnect://` URI as the
- * Lightning source of the Testnet mode, and invoices are made and paid by that wallet over its relay.
+ * Lightning through Nostr Wallet Connect: the person makes a Testnet Lightning wallet with New, pasting a wallet's
+ * `nostr+walletconnect://` URI as its source, and invoices are made and paid by that wallet over its relay.
  *  - Always: a fake NWC wallet service on a relay in this test process (regtest sats in memory, no network).
  *  - GHOSTLY_NWC_REGTEST=1: two Alby Hubs on two regtest LND nodes with a channel (e2e/infra, e2e/support/nwc-regtest):
  *    each person connects their own, and a request in the chat is paid over real Lightning.
  */
 
+/** Wallets → New → Testnet → Lightning, with NWC as the source: the dialog, its form open. */
+async function newNwc(p: Peer) {
+  await openWallet(p);
+  await expect(p.page.getByTestId("wallet")).toBeVisible();
+  await p.page.getByTestId("wallet-add").click();
+  const dialog = p.page.getByTestId("new-wallet");
+  await dialog.getByRole("radio", { name: "Testnet" }).click();
+  await dialog.getByTestId("new-wallet-type-lightning").click();
+  await choose(dialog.getByTestId("new-wallet-provider-select"), "nwc");
+  return dialog;
+}
+
 async function useNwc(p: Peer, uri: string) {
-  await openWallet(p, "lightning");
+  await createWallet(p, "lightning", "testnet", { provider: "nwc", timeout: 30_000, fill: async (form) => {
+    await expect(form).toContainText("custodial or not depends on the wallet");
+    await form.getByTestId("provider-form-nwc").getByLabel("Connection URI").fill(uri);
+    await form.getByTestId("provider-save").click();
+  } });
+  await openWallet(p, "lightning-testnet");
   const source = p.page.getByTestId("lightning-source");
-  await choose(source.getByTestId("lightning-source-select"), "nwc");
-  await expect(source.getByTestId("lightning-source-config")).toContainText("custodial or not depends on the wallet");
-  await source.getByTestId("provider-form-nwc").getByLabel("Connection URI").fill(uri);
-  await source.getByTestId("provider-save").click();
-  await expect(source.getByTestId("lightning-source-saved")).toBeVisible({ timeout: 30_000 });
   await expect(source.getByTestId("lightning-source-current")).toContainText("Nostr Wallet Connect");
   await expect(source.getByTestId("lightning-source-status")).toContainText(/Connected · .* via 127\.0\.0\.1:\d+ · regtest/);
   // The URI holds a spending key: sealed in the engine, never back in the page.
@@ -28,7 +40,7 @@ async function useNwc(p: Peer, uri: string) {
 
 /** The balance the Lightning card shows for its source, in sats. */
 async function lightningBalance(p: Peer): Promise<number> {
-  await openWallet(p, "lightning");
+  await openWallet(p, "lightning-testnet");
   const shown = p.page.getByTestId("wallet-balance");
   // Once the wallet has answered: before that the card has no number, and a NaN compares with nothing.
   await expect(shown).toHaveText(/^\s*[\d,]+/, { timeout: 60_000 });
@@ -46,10 +58,9 @@ test.describe("NWC with a fake wallet service", () => {
     const [mine, other] = [await FakeNwcWallet.start(relay.url, { alias: "Fake hub", balance: 5_000 }), await FakeNwcWallet.start(relay.url)];
     try {
       const alice = await peer("nwc-fake");
-      await useTestnet(alice);
       await useNwc(alice, mine.uri());
       const page = alice.page;
-      await expect(page.getByTestId("wallet-card-lightning")).toContainText("Via Fake hub");
+      await expect(page.getByTestId("wallet-card-lightning-testnet")).toContainText("Via Fake hub");
       await expect(page.getByTestId("wallet-balance")).toContainText("5,000");
 
       // In: the invoice is the wallet's; the wallet sees it paid, and so does the app.
@@ -80,18 +91,18 @@ test.describe("NWC with a fake wallet service", () => {
     const mainnet = await FakeNwcWallet.start(relay.url, { network: "mainnet" });
     try {
       const alice = await peer("nwc-refused");
-      await useTestnet(alice);
-      await openWallet(alice, "lightning");
-      const source = alice.page.getByTestId("lightning-source");
-      await choose(source.getByTestId("lightning-source-select"), "nwc");
-      const form = source.getByTestId("provider-form-nwc");
+      const dialog = await newNwc(alice);
+      const form = dialog.getByTestId("provider-form-nwc"), error = dialog.getByTestId("new-wallet-error");
       await form.getByLabel("Connection URI").fill("lnbc1notauri");
-      await source.getByTestId("provider-save").click();
-      await expect(source.getByTestId("lightning-source-error")).toContainText("not a Nostr Wallet Connect URI");
+      await form.getByTestId("provider-save").click();
+      await expect(error).toContainText("not a Nostr Wallet Connect URI");
       await form.getByLabel("Connection URI").fill(mainnet.uri());
-      await source.getByTestId("provider-save").click();
-      await expect(source.getByTestId("lightning-source-error")).toContainText("real money", { timeout: 30_000 });
-      await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
+      await form.getByTestId("provider-save").click();
+      await expect(error).toContainText("real money", { timeout: 30_000 });
+      await expect(error).toContainText("Nothing was saved");
+      await alice.page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(alice.page.locator("[data-testid^=wallet-card-lightning-]")).toHaveCount(0);
     } finally { await mainnet.close(); }
   });
 });
@@ -108,14 +119,13 @@ test.describe("NWC on regtest Lightning", () => {
     const [alice, bob] = await Promise.all([peer("nwc-alice"), peer("nwc-bob")]);
     await link(alice, bob);
     await connect(alice, bob);
-    for (const [p, uri] of [[alice, aliceUri], [bob, bobUri]] as const) { await useTestnet(p); await useNwc(p, uri); }
+    for (const [p, uri] of [[alice, aliceUri], [bob, bobUri]] as const) await useNwc(p, uri);
     const before = { alice: await lightningBalance(alice), bob: await lightningBalance(bob), channel: regtest.balances() };
 
-    // Bob asks over Lightning only (Cashu off in this chat): the invoice in the request is his own wallet's.
+    // Bob asks over Lightning only (his one wallet: no Cashu to fall back on): the invoice in the request is his own wallet's.
     await openChat(bob);
-    await chatPayments(bob.page, { cashu: false });
     await (await composerRow(bob.page, "payment-button")).click();
-    await bob.page.getByTestId("payment-card-lightning").click();
+    await paymentCard(bob.page, "lightning-testnet").click();
     await bob.page.getByTestId("payment-amount").fill("2100");
     await bob.page.getByTestId("payment-request").click();
 
