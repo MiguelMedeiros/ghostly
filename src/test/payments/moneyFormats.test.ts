@@ -206,6 +206,9 @@ describe("false positives: ordinary text stays text", () => {
     "0x0000000000000000000000000000000000000000 is the zero address, no USDT here",
     "call me at +1 555 123 4567 or mail someone@example.com today",
     "https://example.com/bitcoin/path?amount=1 is a web page",
+    `see https://mempool.space/address/${BC1Q} for the history`,
+    `explorer: https://etherscan.io/address/${EVM} (USDT)`,
+    `https://arkade.example/${BARK_TESTNET}`,
     "bitcoin: the currency, not a link",
     "ethereum:not-an-address@1 and usdt",
   ])("%s", (text) => {

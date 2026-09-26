@@ -14,3 +14,14 @@ export function trimUriEnd(uri: string): string {
     else return uri;
   }
 }
+
+/**
+ * Whether `index` falls inside a web link (`https://mempool.space/address/bc1q…`): an address there is part of
+ * the link, which stays a link, not money.
+ */
+export function insideUrl(text: string, index: number): boolean {
+  for (const url of text.matchAll(/\bhttps?:\/\/\S+/gi)) {
+    if (index >= url.index! && index < url.index! + url[0].length) return true;
+  }
+  return false;
+}

@@ -1,7 +1,7 @@
 import { bech32m } from "@scure/base";
 import type { WalletNetwork } from "@ghostly/core";
 import { btcToSats, findBip21 } from "./money-bitcoin";
-import { cut } from "./money-text";
+import { cut, insideUrl } from "./money-text";
 
 /**
  * An Ark address. Two Ark implementations run beside each other and never pay each other: Arkade (`arkade`,
@@ -81,7 +81,7 @@ export function findArkAddress(text: string): { request: ArkRequest; rest: strin
     return { request: { address: address.toLowerCase(), ...decoded, ...(sats ? { amountSat: sats } : {}), uri: link.uri }, rest: cut(text, link.index, link.uri.length) };
   }
   for (const match of text.matchAll(ARK_WORD)) {
-    const decoded = decodeArkAddress(match[0]);
+    const decoded = insideUrl(text, match.index!) ? null : decodeArkAddress(match[0]);
     if (decoded) return { request: { address: match[0].toLowerCase(), ...decoded }, rest: cut(text, match.index!, match[0].length) };
   }
   return null;

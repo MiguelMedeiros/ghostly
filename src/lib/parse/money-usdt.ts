@@ -1,6 +1,6 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ETHEREUM_USDT, SEPOLIA_TEST_USDT, type WalletNetwork } from "@ghostly/core";
-import { cut, trimUriEnd } from "./money-text";
+import { cut, insideUrl, trimUriEnd } from "./money-text";
 
 /** The EVM chains a USDT wallet here runs on, by EIP-155 chain ID. */
 export const USDT_CHAINS: Record<number, { name: string; network: WalletNetwork }> = {
@@ -91,7 +91,7 @@ export function findUsdtAddress(text: string): { request: UsdtRequest; rest: str
   // A link this could not read is not searched for a bare address: it would find the token's or a mangled one.
   if (!mentioned || /(?<![A-Za-z0-9])ethereum:/i.test(text)) return null;
   for (const match of text.matchAll(BARE)) {
-    if (isEvmAddress(match[0])) return { request: { recipient: match[0] }, rest: cut(text, match.index!, match[0].length) };
+    if (!insideUrl(text, match.index!) && isEvmAddress(match[0])) return { request: { recipient: match[0] }, rest: cut(text, match.index!, match[0].length) };
   }
   return null;
 }

@@ -1,6 +1,6 @@
 import { bech32 } from "@scure/base";
 import type { WalletNetwork } from "@ghostly/core";
-import { cut, trimUriEnd } from "./money-text";
+import { cut, insideUrl, trimUriEnd } from "./money-text";
 
 /** A BOLT 12 offer: a reusable Lightning payment code, read from its TLV fields (nothing is fetched). */
 export interface Bolt12Offer {
@@ -117,7 +117,7 @@ const OFFER_WORD = /(?<![A-Za-z0-9])(?:(?:lightning:|bitcoin:\?(?:[^\s]*&)?lno=)
 /** A BOLT 12 offer anywhere in a message, bare, `lightning:` or in a `bitcoin:?lno=` link. */
 export function findBolt12Offer(text: string): { offer: Bolt12Offer; rest: string } | null {
   for (const match of text.matchAll(OFFER_WORD)) {
-    const decoded = decodeBolt12Offer(match[1]);
+    const decoded = insideUrl(text, match.index!) ? null : decodeBolt12Offer(match[1]);
     if (!decoded) continue;
     // The rest of a `bitcoin:` link around the offer goes with it.
     const whole = match[0].startsWith("bitcoin:") ? trimUriEnd(text.slice(match.index!).split(/\s/)[0]) : match[0];
