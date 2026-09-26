@@ -17,3 +17,4 @@
 .wallet-network-view[data-swap=prev]{--from:-14px}
 @keyframes wallet-network-in{from{opacity:0;transform:translateX(var(--from,14px))}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.wallet-network-view[data-swap]{animation:none}}
+:root[data-reduce-motion=true] .wallet-network-view[data-swap]{animation:none}

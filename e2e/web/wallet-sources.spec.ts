@@ -1,4 +1,4 @@
-import { createWallet, expect, openWallet, test, useFakeProviders, type Peer, type WalletNetwork } from "../support/fixtures";
+import { createWallet, expect, openWallet, showNetwork, test, useFakeProviders, type Peer, type WalletNetwork } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { choose, optionsOf, close } from "../support/select";
 
@@ -94,6 +94,7 @@ test("a Lightning source is picked per wallet: invoices go through it, and the M
   await openWallet(alice, "lightning-mainnet");
   await expect(mainnetCard).toContainText("Invoices via Cashu");
   await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
+  await showNetwork(page, "testnet");
   await expect(testnetCard).toContainText("Via Test node");
 
   // Back to the default.

@@ -1,4 +1,4 @@
-import { createWallet, expect, getTestCoins, openWallet, test, useTestnet, walletCard, type Peer } from "../support/fixtures";
+import { createWallet, expect, getTestCoins, openWallet, showNetwork, test, useTestnet, walletCard, type Peer } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 
 /**
@@ -96,7 +96,7 @@ test("the Lightning card pays invoices and addresses, not tokens, and its settin
   const page = alice.page;
   await expect(page.getByTestId("wallet-card-lightning-testnet")).toHaveAttribute("aria-selected", "true");
   // The card's own tabs, under the deck (which is a tablist too).
-  const tabs = page.getByRole("tabpanel").getByRole("tablist").getByRole("tab");
+  const tabs = page.getByTestId("wallet-panel").getByRole("tablist").getByRole("tab");
   await expect(tabs).toHaveText(["Receive", "Send"]);
   await expect(page.getByTestId("wallet-history")).toHaveCount(0);
   // No mint settings here: they belong to the Cashu card.
@@ -128,6 +128,9 @@ test.describe("test sats", { tag: "@network" }, () => {
     await expect(page.getByTestId("testnet-notice")).toHaveCount(0);
     await expect(page.getByTestId("testnet-badge")).toHaveCount(0);
     await expect(testnet.getByTestId("wallet-card-network")).toHaveText("Testnet");
+    // Each network is a tab of its own: the Mainnet card is on the Mainnet tab, with no Testnet tag.
+    await expect(mainnet).toHaveCount(0);
+    await showNetwork(page, "mainnet");
     await expect(mainnet.getByTestId("wallet-card-network")).toHaveCount(0);
     await expect(page.getByTestId("wallet-chip"), "the bar names the place, not the balance").toHaveText("Wallets");
 
@@ -164,6 +167,7 @@ test.describe("test sats", { tag: "@network" }, () => {
     await page.reload();
     await openWallet(alice, "cashu-testnet");
     await expect(page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats$/);
+    await showNetwork(page, "mainnet");
     await expect(walletCard(page, "cashu-mainnet")).toBeVisible();
   });
 
