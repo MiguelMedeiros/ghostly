@@ -8,7 +8,7 @@ import { PinIcon } from "./PinIcon";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
-import { groupChat, muteEndText, useChatMute } from "../lib/chatMute";
+import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { groupReadAt } from "../lib/groups";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
@@ -97,7 +97,7 @@ function RowActions({ active, children }: { active: boolean; children: ReactNode
  * menu of durations. A muted chat's mark so turns into this button in place. Nothing from here reaches the row, which
  * would open the chat.
  */
-function RowMute({ chat }: { chat: string }) {
+function RowMute({ chat, mentions }: { chat: string; mentions?: boolean }) {
   const { t, language } = useI18n();
   const until = useChatMute(chat);
   const [open, setOpen] = useState(false);
@@ -115,7 +115,7 @@ function RowMute({ chat }: { chat: string }) {
         aria-haspopup="true" aria-expanded={open} aria-label={label} title={label} onClick={() => setOpen(o => !o)} className={rowAction()}>
         <BellIcon muted={until !== undefined} />
       </button>
-      <MuteMenu chat={chat} open={open} onClose={close} anchorRef={wrapper} portal />
+      <MuteMenu chat={chat} open={open} onClose={close} anchorRef={wrapper} portal mentions={mentions} />
     </div>
   );
 }
@@ -263,6 +263,9 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const invitation = group.invitation;
   const unread = !active && !invitation && group.lastMessageAt > groupReadAt(group.id);
+  // An unread message that names me: "@" beside the dot, in the accent unless the mute keeps mentions quiet too.
+  const mention = unread && (group.lastMentionAt ?? 0) > groupReadAt(group.id);
+  const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
     setBusy(true);
     try { await engine.call(method, { groupId: group.id }); } catch { /* the row says what state it is in */ } finally { setBusy(false); }
@@ -282,9 +285,13 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
           time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt) : undefined}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
           status={muted && <MutedMark label={t("mute.bell")} />}
-          timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} /></RowActions>}
+          timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}
           preview={<span className="text-text-muted">{status}</span>}
-          trailing={unread && <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label="Unread messages" role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />}
+          trailing={unread && <span className="flex items-center gap-1.5">
+            {mention && <span data-testid="group-row-mention" data-muted={mentionQuiet || undefined} aria-label={t("mentions.unread")} title={t("mentions.unread")} role="img"
+              className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold leading-none ${mentionQuiet ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>@</span>}
+            <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label="Unread messages" role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
+          </span>}
         />
         {invitation && !invitation.accepted && <div className="mt-1.5 flex gap-2">
           <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">Accept</button>

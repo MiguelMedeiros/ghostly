@@ -116,7 +116,8 @@
     "muted": "已静音",
     "bell": "通知已静音",
     "bellUntil": "通知静音至 {{time}}",
-    "stillArrive": "消息照常接收，来电照常响铃。"
+    "stillArrive": "消息照常接收，来电照常响铃。",
+    "mentions": "被提及时仍然通知我"
   },
   "invite": {
     "copy": "复制邀请",
@@ -555,5 +556,10 @@
     "thisChat": "此聊天",
     "send": "发送",
     "sendAnyway": "仍然发送"
+  },
+  "mentions": {
+    "label": "可提及的成员",
+    "everyoneHint": "通知所有人",
+    "unread": "有人提及了你"
   }
 }

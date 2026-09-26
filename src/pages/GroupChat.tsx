@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
@@ -21,14 +21,25 @@ import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { navOnly } from "../lib/navigation";
+import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
+import type { GroupMention } from "@ghostly/core";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 
-function toChatMessage(message: StoredMessage, group: GroupView): ChatMessage {
+/** `myName`: how a mention of me reads (my own name, as a member sees it); the others go by the roster's names. */
+function toChatMessage(message: StoredMessage, group: GroupView, myName = ""): ChatMessage {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
+  const names = group.members.map(m => ({ key: m.key, me: m.me, name: m.me ? myName : memberName(m) }));
+  const mentions = mentionViews(message.text, message.mentions, names, message.sender === "me");
   return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, paymentId: message.paymentId,
-    nick: message.sender === "peer" && message.member ? (member ? memberName(member) : `Member ${message.member.slice(0, 8)}`) : undefined };
+    nick: message.sender === "peer" && message.member ? (member ? memberName(member) : `Member ${message.member.slice(0, 8)}`) : undefined,
+    ...(mentions.length ? { mentions } : {}) };
+}
+
+/** Whom "@" offers in the composer: every other member, by name and the end of their key. */
+function mentionCandidates(group: GroupView): MentionCandidate[] {
+  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m), tag: `…${m.key.slice(-6)}` }));
 }
 
 /** The group note a payment of this device is part of: a request's own, or the request a payment answers. */
@@ -116,10 +127,13 @@ export function GroupChat() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
   useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
 
-  const send = useCallback(async (text: string): Promise<string | null> => {
-    try { return (await engine.call("sendGroupMessage", { groupId, text })).error; }
+  const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
+    try { return (await engine.call("sendGroupMessage", mentions?.length ? { groupId, text, mentions } : { groupId, text })).error; }
     catch (e) { return e instanceof Error ? e.message : "Could not send"; }
   }, [groupId]);
+
+  // "@everyone": a private group's admin only; a community has no everyone (WISP 9xx § Mentions).
+  const mentions = useMemo(() => group ? { candidates: mentionCandidates(group), everyone: group.profile === "mesh" && group.isAdmin } : undefined, [group]);
 
   if (!state) return null;
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm text-text-muted">This group is gone from this device.</div>;
@@ -194,7 +208,7 @@ export function GroupChat() {
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
             </Menu>
-            <MuteMenu chat={groupChat(group.id)} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
+            <MuteMenu chat={groupChat(group.id)} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} mentions />
           </div>
         </div>
       </div>
@@ -234,16 +248,16 @@ export function GroupChat() {
             // A note about a payment this device is part of is shown under its own bubble instead.
             : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
             : m.paymentId ? <div key={m.id} data-testid="group-payment">
-              <MessageBubble message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} />
+              <MessageBubble message={toChatMessage(m, group, settings.defaultNickname)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} />
               {/* Said once, under the request (or the payment) itself: not again under a payment that answers it. */}
               {noteIdOf(state, m.paymentId) === m.paymentId && notes.get(m.paymentId) && <GroupPaymentCaption note={notes.get(m.paymentId)!} group={group} />}
             </div>
-            : <MessageBubble key={m.id} message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} />)}
+            : <MessageBubble key={m.id} message={toChatMessage(m, group, settings.defaultNickname)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} />)}
           <div ref={bottomRef} />
         </div>
       </div>}
 
-      {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name}
+      {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
         fileUnavailable="Files are not part of groups yet"
         paymentsUnavailable={others.length === 0 ? "Nobody else is in the group yet" : undefined}
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}

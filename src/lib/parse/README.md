@@ -17,6 +17,7 @@ is ever rendered as HTML: segments carry plain text and `src/components/rich/` b
 | 80+ base64/hex characters | one line, Show all, Copy | Keys, signatures, tokens. |
 | `2026-09-25T14:00Z`, `at 14:00 UTC`, `3pm GMT+2` | the reader's local time on hover or tap | Only with a zone; see `time.ts` for the zones read. |
 | `https://…` | a link | `linkEnd` leaves trailing punctuation and unopened brackets out. |
+| `@Name` picked in a group's composer | the member's name now, mine stronger | Not a pattern: the message's mentions give the places (`mentions.ts` marks them before parsing for the `member-mention` detector). |
 
 Markers pair within one line, and only at word edges: a marker opens after a space, punctuation or the start and
 before a non-space, and closes the other way round. So `snake_case_name`, `2*3*4` and `__init__.py` stay text, and

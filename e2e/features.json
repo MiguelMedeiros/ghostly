@@ -558,6 +558,8 @@
     "src/components/message-details.css": ["chat.paired.message-details"],
     "src/lib/messageDetails.ts": ["chat.paired.message-details"],
     "src/components/MessageInput.tsx": ["*"],
+    "src/components/MentionChip.tsx": ["groups.mentions"],
+    "src/lib/parse/mentions.ts": ["groups.mentions"],
     "src/components/ChatConnection.tsx": ["*"],
     "src/components/ConnectionIcon.tsx": ["chat.paired.status","transport.indicator","groups.connection"],
     "src/components/pairing/**": ["chat.paired.pairing-progress","chat.paired.pair"],

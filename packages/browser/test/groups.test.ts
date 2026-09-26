@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { createIdentity, encodeGroupEntryLink, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
-// covers: groups.picture.set, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry
+// covers: groups.picture.set, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
 
 /** One peer's database, in memory. */
 function memoryStore(messages: StoredMessage[]): GroupStore {
@@ -191,6 +191,37 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(again.views()[0]).toMatchObject({ id: groupId, status: "active", epoch: 1 });
     expect((await again.messages(groupId)).map(m => m.event)).toEqual(["joined"]);
   });
+  it("mentions: kept with the message, flagged on the side they name, in the list's view and after a restart", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await alice.load(); await bob.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    const keys = (globalThis as unknown as { __keys: Map<string, string> }).__keys;
+    const record = (g: Groups) => { for (const v of g.views()) if (v.myKey) keys.set((g as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(v.id)!.state.seedB64, v.myKey); };
+    record(alice);
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); await world.settle();
+    record(bob);
+    await world.settle();
+    await world.meet();
+    const bobKey = bob.views()[0].myKey!;
+    const mentions = [{ k: bobKey, o: 0, l: 4 }];
+    expect(await alice.send(groupId, "@Bob look", mentions)).toEqual({ error: null });
+    expect(await alice.send(groupId, "no one", [])).toEqual({ error: null });
+    await world.settle();
+    const onBob = world.peers.get("bob")!.messages.filter(m => !m.event);
+    expect(onBob.map(m => [m.text, m.mentions, m.mentioned])).toEqual([["@Bob look", mentions, true], ["no one", undefined, undefined]]);
+    // The sender keeps the mentions to draw them, and is not "mentioned" by its own message.
+    const onAlice = world.peers.get("alice")!.messages.filter(m => !m.event);
+    expect(onAlice.map(m => [m.mentions, m.mentioned])).toEqual([[mentions, undefined], [undefined, undefined]]);
+    expect(bob.views()[0].lastMentionAt).toBe(onBob[0].timestamp);
+    expect(alice.views()[0].lastMentionAt).toBeUndefined();
+    const again = new Groups({ ...(bob as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("bob")!.store);
+    await again.load();
+    expect(again.views()[0].lastMentionAt).toBe(onBob[0].timestamp);
+  });
+
   it("a stranger joins through the group's link: knocks, is admitted over an entry session, then meets everyone on edges", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");

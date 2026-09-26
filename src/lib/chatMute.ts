@@ -66,7 +66,35 @@ export function setChatMute(chat: string, until: MutedUntil | undefined): void {
 
 /** Forgets a chat's mute with the chat. */
 export function forgetChatMute(chat: string): void {
-  try { localStorage.removeItem(muteKey(chat)); } catch { /* storage unavailable */ }
+  try { localStorage.removeItem(muteKey(chat)); localStorage.removeItem(mentionsKey(chat)); } catch { /* storage unavailable */ }
+}
+
+/*
+ * A group's "Still notify me when I'm mentioned": while the group is muted, a message that names me (or everyone)
+ * still plays and shows its notification. On unless turned off, as in WhatsApp; kept apart from the mute itself,
+ * so it outlives one mute and applies to the next.
+ */
+const mentionsKey = (chat: string) => `${getPrefix()}mute_mentions_${chat}`;
+
+/** Whether a mention of me gets through this chat's mute. */
+export function mentionsNotify(chat: string): boolean {
+  try { return localStorage.getItem(mentionsKey(chat)) !== "off"; } catch { return true; }
+}
+export function setMentionsNotify(chat: string, on: boolean): void {
+  try {
+    if (on) localStorage.removeItem(mentionsKey(chat));
+    else localStorage.setItem(mentionsKey(chat), "off");
+  } catch { /* storage unavailable: the default stays */ }
+  window.dispatchEvent(new Event(MUTE_EVENT));
+}
+
+/**
+ * Whether this chat's mute silences an event now: the chat is muted, and it is not a mention of me that the chat
+ * lets through. `chat` undefined (an event of no chat) is never muted.
+ */
+export function mutedFor(chat: string | undefined, mention: boolean, now = Date.now()): boolean {
+  if (!chat || mutedUntil(chat, now) === undefined) return false;
+  return !(mention && mentionsNotify(chat));
 }
 
 /**

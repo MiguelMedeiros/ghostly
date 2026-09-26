@@ -33,6 +33,8 @@ export type Block =
 export interface ParseContext {
   /** When the message was sent (ms): "at 14:00 UTC" means that day's 14:00. */
   sentAt?: number;
+  /** A group message's mentions, by the index their marks carry (mentions.ts). */
+  mentions?: readonly { key: string; name: string; me: boolean }[];
 }
 
 /**

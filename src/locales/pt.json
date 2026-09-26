@@ -116,7 +116,8 @@
     "muted": "Silenciado",
     "bell": "Notificações silenciadas",
     "bellUntil": "Notificações silenciadas até {{time}}",
-    "stillArrive": "Mensagens seguem chegando. Chamadas tocam."
+    "stillArrive": "Mensagens seguem chegando. Chamadas tocam.",
+    "mentions": "Ainda me notificar quando eu for mencionado"
   },
   "invite": {
     "copy": "Copiar convite",
@@ -555,5 +556,10 @@
     "thisChat": "esta conversa",
     "send": "Enviar",
     "sendAnyway": "Enviar mesmo assim"
+  },
+  "mentions": {
+    "label": "Membros para mencionar",
+    "everyoneHint": "Notificar todos",
+    "unread": "Você foi mencionado"
   }
 }

@@ -116,7 +116,8 @@
     "muted": "Silenziata",
     "bell": "Notifiche silenziate",
     "bellUntil": "Notifiche silenziate fino alle {{time}}",
-    "stillArrive": "I messaggi arrivano. Le chiamate squillano."
+    "stillArrive": "I messaggi arrivano. Le chiamate squillano.",
+    "mentions": "Avvisami comunque quando vengo menzionato"
   },
   "invite": {
     "copy": "Copia invito",
@@ -555,5 +556,10 @@
     "thisChat": "questa chat",
     "send": "Invia",
     "sendAnyway": "Invia comunque"
+  },
+  "mentions": {
+    "label": "Membri da menzionare",
+    "everyoneHint": "Avvisa tutti",
+    "unread": "Sei stato menzionato"
   }
 }
