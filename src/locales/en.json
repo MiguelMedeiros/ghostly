@@ -442,7 +442,7 @@
     "payment": "Payment",
     "identity": "Identity",
     "identityShared": "{{count}} shared in this chat",
-    "services": "Shared apps",
+    "services": "Shared services",
     "servicesShared": "{{count}} shared in this chat",
     "servicesNeedApp": "Needs the Ghostly extension or desktop app",
     "document": "Document",

@@ -302,7 +302,7 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
         if ((await alice.app.attribute('[data-testid="composer-more"]', "aria-expanded")) !== "true") await alice.app.click('[data-testid="composer-more"]');
         expect(await alice.app.text('[data-testid="composer-services"]'), "the composer's + menu").not.toBeNull();
       }).toPass({ timeout: 30_000 });
-      // A first share, from + → Shared apps: both apps offer services/1, so the row opens.
+      // A first share, from + → Shared services: both apps offer services/1, so the row opens.
       expect(await alice.app.attribute('[data-testid="composer-services"]', "disabled")).toBeNull();
       await alice.app.click('[data-testid="composer-services"]');
       await expect.poll(() => alice.app.text('[data-testid="chat-service-toggle"]')).not.toBeNull();

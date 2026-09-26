@@ -442,7 +442,7 @@
     "payment": "支払い",
     "identity": "ID",
     "identityShared": "このチャットで {{count}} 件共有中",
-    "services": "共有アプリ",
+    "services": "共有サービス",
     "servicesShared": "このチャットで {{count}} 件共有中",
     "servicesNeedApp": "Ghostly の拡張機能またはデスクトップアプリが必要です",
     "document": "書類",

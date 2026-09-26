@@ -181,7 +181,7 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `web/network-settings.spec.ts` | TURN server saved, kept, cleared; relays sanitized; a relay list with none, or a TURN address WebRTC refuses, is refused with the reason |
 | `web/call-edges.spec.ts` | hanging up while it rings, a call that rings while you are elsewhere in the app, declining, a call nobody answers (camera and microphone released) |
 | `web/pairing-extras.spec.ts` | the connection popover (click, Escape, outside), the verification code on both sides, offline and Reconnect |
-| `web/services-web.spec.ts` | a web page says sharing needs the extension or desktop: in the Services page, on a chat's greyed + → Shared apps, and in an older chat's Manage dialog |
+| `web/services-web.spec.ts` | a web page says sharing needs the extension or desktop: in the Services page, on a chat's greyed + → Shared services, and in an older chat's Manage dialog |
 | `web/profiles.spec.ts` · `profile-lock.spec.ts` | profiles keep chats and settings apart, switching, deleting; the lock screen (change, remove, at startup) goes with new profiles and guards deleting a locked one |
 | `web/profile-backup-file.spec.ts` · `profile-backup.spec.ts` | a whole profile backed up to a file (and to S3 with `GHOSTLY_S3_*`), restored as a new profile; passphrase rules |
 | `web/chat-payments.spec.ts` | each chat accepts its own ways of paying, chosen on the composer's cards (+ → Payment → Accept); both sides' choices shown; one chat's choice and starting card are its own |

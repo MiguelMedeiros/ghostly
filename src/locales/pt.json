@@ -442,7 +442,7 @@
     "payment": "Pagamento",
     "identity": "Identidade",
     "identityShared": "{{count}} compartilhada(s) nesta conversa",
-    "services": "Apps compartilhados",
+    "services": "Serviços compartilhados",
     "servicesShared": "{{count}} compartilhado(s) nesta conversa",
     "servicesNeedApp": "Precisa da extensão ou do app desktop do Ghostly",
     "document": "Documento",
