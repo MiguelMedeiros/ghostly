@@ -1,116 +1,15 @@
 import { inviteLink, MENTION_EVERYONE, type GroupMention, type PairedTransport } from "@ghostly/core";
-import type { GhostlyNode } from "@ghostly/browser/engine/node";
-import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
+import type { GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
-import type { EventHub, GhostlyEvent } from "./events";
-import type { Runtime } from "./runtime/engine";
+import type { GhostlyEvent } from "./events";
+import {
+  bool, chatOf, findChat, groupOf, list, node, num, oneOf, state, str, waitForState,
+  type ApiContext, type Method, type Params,
+} from "./apiKit";
+import { WALLET_METHODS } from "./wallets";
 import { chatDetailsJson, chatJson, groupJson, messageJson } from "./views";
-
-/**
- * The methods of the local control API (WISP 11xx): the daemon answers them over its socket, and a one-shot
- * command calls them in its own process. Parameters come from JSON: every one is checked here.
- */
-export interface ApiContext {
-  runtime: Runtime;
-  hub: EventHub;
-  /** How the host runs: a daemon stays; a one-shot leaves when its command is done. */
-  mode: "daemon" | "one-shot";
-  version: string;
-  /** The daemon asks to stop (answered first). */
-  stop?: () => void;
-}
-
-type Params = Record<string, unknown>;
-type Method = (ctx: ApiContext, params: Params) => Promise<unknown>;
-
-const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
-const state = (ctx: ApiContext): EngineState => node(ctx).getState();
-
-// ---------- parameters ----------
-
-function str(params: Params, name: string, required: true): string;
-function str(params: Params, name: string, required?: false): string | undefined;
-function str(params: Params, name: string, required = false): string | undefined {
-  const value = params[name];
-  if (value === undefined || value === null || value === "") {
-    if (required) throw new CliError("bad_request", `${name} is required`);
-    return undefined;
-  }
-  if (typeof value !== "string") throw new CliError("bad_request", `${name} must be a string`);
-  return value;
-}
-function num(params: Params, name: string, fallback: number, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}): number {
-  const value = params[name];
-  if (value === undefined || value === null) return fallback;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) throw new CliError("bad_request", `${name} must be a number from ${min} to ${max}`);
-  return value;
-}
-function bool(params: Params, name: string): boolean {
-  const value = params[name];
-  if (value === undefined || value === null) return false;
-  if (typeof value !== "boolean") throw new CliError("bad_request", `${name} must be true or false`);
-  return value;
-}
-function list(params: Params, name: string): string[] {
-  const value = params[name];
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new CliError("bad_request", `${name} must be a list of strings`);
-  return value as string[];
-}
-function oneOf<T extends string>(params: Params, name: string, values: readonly T[], fallback: T): T {
-  const value = str(params, name) ?? fallback;
-  if (!values.includes(value as T)) throw new CliError("bad_request", `${name} must be one of ${values.join(", ")}`);
-  return value as T;
-}
-
-// ---------- finding things ----------
-
-/** A chat by its id, a unique prefix of it, or its name (label or the contact's name), in that order. */
-export function findChat(links: readonly LinkView[], ref: string): LinkView {
-  const exact = links.find((link) => link.id === ref);
-  if (exact) return exact;
-  const byPrefix = links.filter((link) => link.id.startsWith(ref));
-  if (byPrefix.length === 1) return byPrefix[0];
-  const lower = ref.toLowerCase();
-  const byName = links.filter((link) => [link.label, link.peerNick].some((name) => name?.trim().toLowerCase() === lower));
-  if (byName.length === 1) return byName[0];
-  if (byPrefix.length > 1 || byName.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: [...byPrefix, ...byName].map((link) => link.id) });
-  throw new CliError("not_found", `No chat ${JSON.stringify(ref)}`);
-}
-
-export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
-  const exact = groups.find((group) => group.id === ref);
-  if (exact) return exact;
-  const byPrefix = groups.filter((group) => group.id.startsWith(ref));
-  if (byPrefix.length === 1) return byPrefix[0];
-  const byName = groups.filter((group) => group.name.trim().toLowerCase() === ref.toLowerCase());
-  if (byName.length === 1) return byName[0];
-  if (byPrefix.length > 1 || byName.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: [...byPrefix, ...byName].map((group) => group.id) });
-  throw new CliError("not_found", `No group ${JSON.stringify(ref)}`);
-}
-
-const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true));
-const groupOf = (ctx: ApiContext, params: Params) => findGroup(state(ctx).groups, str(params, "group", true));
-
-// ---------- waiting ----------
-
-/** Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. */
-function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string): Promise<T> {
-  const now = check(state(ctx));
-  if (now !== undefined) return Promise.resolve(now);
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => { off(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
-    const off = ctx.hub.onState((next) => {
-      const value = check(next);
-      if (value === undefined) return;
-      clearTimeout(timer);
-      off();
-      resolve(value);
-    });
-  });
-}
 
 const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
 
@@ -206,6 +105,8 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
 // ---------- methods ----------
 
 const METHODS: Record<string, Method> = {
+  ...WALLET_METHODS,
+
   async status(ctx) {
     const s = state(ctx);
     return {
@@ -481,6 +382,8 @@ function history(messages: StoredMessage[], params: Params) {
   return { messages: page.map(messageJson), more };
 }
 
+export { findChat, findGroup } from "./apiKit";
+export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
 /** Runs one method of the API. */

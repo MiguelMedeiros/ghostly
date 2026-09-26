@@ -229,7 +229,7 @@
     "title": "WISP 11xx: Headless Runtime and Local Control API",
     "status": "Draft",
     "updated": "2026-09-26",
-    "implementation": "Experimental: packages/cli (@ghostly/cli, command ghostly), phase 1 on dev",
+    "implementation": "Experimental: packages/cli (@ghostly/cli, command ghostly), phases 1 and 2 on dev",
     "documentKind": "Contract (local API; nothing here goes on the wire between peers)",
     "dependencies": [
       "04-profiles.md",

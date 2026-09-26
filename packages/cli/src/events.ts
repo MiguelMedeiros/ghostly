@@ -3,6 +3,7 @@ import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { chatJson, groupJson, messageJson } from "./views";
+import { paymentJson } from "./wallets";
 
 /**
  * The event stream (WISP 11xx § Event stream): what happened, derived from the engine's own events, one JSON object
@@ -38,6 +39,7 @@ export class EventHub {
   private firstRun = false;
   private chats = new Map<string, ChatShape>();
   private groups = new Map<string, GroupShape>();
+  private payments = new Map<string, string>();
   private baselined = false;
   private db!: IDBDatabase;
   state: EngineState | null = null;
@@ -186,6 +188,14 @@ export class EventHub {
       if (groups.has(id)) continue;
       this.groups.delete(id);
       if (!quiet) this.emit("group.removed", `group.removed:${id}`, { group: id });
+    }
+    for (const [id, payment] of Object.entries(state.payments ?? {})) {
+      const shape = `${payment.state}|${payment.error ?? ""}|${payment.closed ? 1 : 0}`, before = this.payments.get(id);
+      this.payments.set(id, shape);
+      if (quiet || before === shape) continue;
+      const json = paymentJson(payment);
+      if (before === undefined) this.emit("payment.created", `payment.created:${id}`, { chat: payment.linkId, payment: json });
+      else this.emit("payment.updated", `payment.updated:${id}:${payment.state}:${this.now()}`, { chat: payment.linkId, payment: json });
     }
     this.state = state;
     for (const listener of this.stateListeners) {

@@ -486,6 +486,8 @@
     {"id":"headless.events","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Event stream: JSON lines with seq and stable ids, journal replay (--since), no flood on first run"},
     {"id":"headless.hooks","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"listen --exec (event on stdin) and --webhook (loopback only), --cursor acknowledgement"},
     {"id":"headless.web-interop","wisp":"11xx-headless","kind":"protocol","clients":["web","cli"],"infra":["pkarr-relay"],"title":"A headless bot and the web app in one chat, invites both ways, live over WebRTC (libdatachannel and Chromium)"},
+    {"id":"headless.wallets","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["cashu-mint"],"title":"Headless wallets: list with balances, create (Bark and Fedimint refused on Node), remove with acceptLoss, faucet, receive, Lightning cards"},
+    {"id":"headless.payments","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["cashu-mint"],"title":"Headless payments: pay and request in a chat, pay a request, pay an invoice or address, payment events; Mainnet only with --confirm-real"},
     {"id":"headless.groups","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless community groups: create with a link, join, send with @mentions, mention flag on receipt"}
   ],
   "paths": {

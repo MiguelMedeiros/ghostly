@@ -4,12 +4,12 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.2 |
+| Revision | 0.3 |
 | Updated | 2026-09-26 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
-| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phase 1 on `dev` |
+| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 and 2 on `dev` |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -82,7 +82,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 - `seq` grows by one per event in a profile, across restarts. `listen --since <seq>` replays what the journal still holds (the last 10,000 events) before following.
 - `id` is stable for the fact it reports: the same message received is the same id whenever the daemon derives it again, so a bot that restarts dedupes by `id`.
-- Types in phase 1: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `call.offer`; `events.gap` (a replay asked for more than the journal keeps). Later phases add `payment.*`, `file.*` and `identity.*`.
+- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.offer`; `events.gap` (a replay asked for more than the journal keeps). Later phases add `file.*` and `identity.*`.
 - Which messages were reported is kept in the profile's own store (a database of the CLI's beside the engine's): a restart reports only what is new, a message that arrived while no process derived events (a crash) is reported at the next start, and a profile's first start reports none of the history it already had.
 - As the app's chat screen does, the side that joined says `👋 <name> joined` once the chat first goes live and the other side answers once; each is said once per chat, across restarts.
 - Hooks: `listen --exec "<command>"` runs the command once per event, in order, with the event on its stdin; `listen --webhook <url>` POSTs each event to a local bridge (loopback only); `listen --cursor <file>` records the last event handled (the acknowledgement), and a restarted listener resumes after it. With no daemon running, `listen` becomes the daemon, socket included, so a hook can answer with `ghostly send`.
@@ -122,11 +122,11 @@ Status: **Phase 1** (in the first pull request), **Planned (phase n)**, or **Not
 | Files | Send, receive into a folder, consent for large files (re-asked after expiry, #302), progress events; voice notes as files | Planned (phase 3) |
 | Groups | Create (community with its link, or a private mesh), join by link, leave, forget, accept or decline an invitation, list, send, history, @mentions in and out | Phase 1 (needs WebRTC) |
 | Groups | Admin: remove, make admin, rotate, link on/off, picture; invite a contact | Planned (phase 3) |
-| Payments | Wallet instances per network (the New flow types), list, balance, remove with the #303 protections | Planned (phase 2) |
-| Payments | Several Lightning cards, default for receiving | Planned (phase 2) |
-| Payments | Testnet faucet | Planned (phase 2) |
-| Payments | Pay and request in a chat, accept per chat per network, pay an invoice, LNURL or BIP 21, history | Planned (phase 2) |
-| Payments | Mainnet spends only with `--confirm-real`; cross-network refusal | Phase 1 for the passthrough (see Mainnet); commands in phase 2 |
+| Payments | Wallet instances per network (the New flow types), list, balance, remove with the #303 protections | Phase 2 (Bark and Fedimint: app only, see below) |
+| Payments | Several Lightning cards, default for receiving | Phase 2 |
+| Payments | Testnet faucet | Phase 2 |
+| Payments | Pay and request in a chat, accept per chat per network, pay an invoice or a Lightning address/LNURL, history, payment events | Phase 2; BIP 21 and on-chain sends through `engine preparePayment`/`approvePayment` until phase 3 |
+| Payments | Mainnet spends only with `--confirm-real`; cross-network refusal | Phase 2: every spending command refuses Mainnet without it (exit 5), and `pay` never infers Mainnet from an invoice (test mints issue `lnbc` invoices) |
 | Identities | Add proofs that need no browser (Nostr with a key or bunker, domain, OpenPGP, SSH, Bitcoin address, DID); list; share per contact; a contact's identities and checks; public profiles | Planned (phase 3) |
 | Identities | Proofs that need a browser or an approval app (OpenID, Bluesky, Pubky Ring) | Planned (phase 3): the URL or QR is printed and the command waits; where that cannot work headless, app only |
 | Services | Share a loopback web app with a contact; list what a contact shares; open one as a local port | Planned (phase 3) |
@@ -134,17 +134,22 @@ Status: **Phase 1** (in the first pull request), **Planned (phase n)**, or **Not
 | Settings | Pkarr relays, Iroh relays, HyperDHT relay, ICE servers, public profiles, sharing the profile's name | Phase 1 through `settings set` and `profile set` |
 | Settings | DHT-direct (Mainline reached over UDP, as the Desktop) | Planned (phase 3) |
 
-## Wallet SDKs on Node (phase 2 checks)
+## Wallet SDKs on Node (phase 2)
 
-| Method | SDK | Expected on Node |
+Checked on 2026-09-26 by creating each Testnet wallet in a headless profile:
+
+| Method | SDK | On Node |
 |---|---|---|
-| Cashu | `@cashu/cashu-ts` | Pure JavaScript and `fetch`: works |
-| Lightning sources | LND REST, Core Lightning (Commando over WebSocket), NWC, LNURL, Breez/Spark | LND's pinned certificate needs Node's own TLS options (the Desktop uses a Rust command); WebSocket is global in Node 22; Breez ships a Node build |
-| Arkade | `@arkade-os/sdk` | JavaScript; its event streams may need an `EventSource` for Node |
-| Bark | `@secondts/bark` (wasm) | The wasm is imported with Vite's `?url`; on Node it must be read from disk |
-| Fedimint | web SDK (wasm in a worker, OPFS) | Gap: no OPFS or module worker on Node. Needs the SDK's Node transport or the Rust client |
-| Bitcoin (BDK) | `@bitcoindevkit/bdk-wallet-web` (wasm) | As Bark: wasm from disk |
-| USDT | `ethers`, WDK | JavaScript: works |
+| Cashu | `@cashu/cashu-ts` | Works as is |
+| USDT | `ethers`, WDK | Works as is |
+| Arkade | `@arkade-os/sdk` | Works. Its descriptor library is CommonJS and `require`s the ESM `@scure/bip32`; loaded while the engine's imports were still evaluating it, it saw no `HDKey`, so the runtime loads both first. Its server events need `EventSource`, which Node lacks: the `eventsource` package provides it |
+| Spark (Breez) | `@breeztech/breez-sdk-spark` web build | Works. Its storage checks `window.indexedDB` (Node has no `window`, and defining one would turn other libraries onto their browser paths): the build rewrites that one check to `indexedDB` and fails if a Breez release changes it. Its wasm is copied beside the bundle |
+| Bitcoin (BDK) | `@bitcoindevkit/bdk-wallet-web` (wasm) | Works: `?url` assets become `file:` URLs beside the chunk that imports them, and the runtime's `fetch` reads `file:` URLs of `.wasm` files only. The CLI draws the recovery phrase the app's form would |
+| Lightning sources | NWC, LND REST, Core Lightning (Commando), Breez, LNURL | They load as in the web app (WebSocket and `fetch`); only the Cashu mints' card was exercised end to end so far. An LND behind a self-signed certificate is untested (the Desktop pins it through Rust) |
+| Bark | `@secondts/bark` (browser build only) | **Gap.** Its Rust storage insists on a browser `window`; pretending one gets further, then the wasm panics and takes the process down. App only until Bark ships a Node build |
+| Fedimint | web SDK (wasm in a module worker, OPFS) | **Gap.** No OPFS and no module worker on Node; needs the SDK's Node transport or the Rust client. App only |
+
+No wallet is made by itself on Node (`automaticWallets` is off): a bot has only the wallets it created, and none on Mainnet unless asked.
 
 ## The Rust `ghostly-cli`
 

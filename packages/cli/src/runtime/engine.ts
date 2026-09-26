@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { fromBase64Url } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
+import { installFileFetch } from "./fileFetch";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import type { ProfilePaths } from "../profiles";
 
@@ -48,6 +49,23 @@ async function installWebRtc(): Promise<boolean> {
   }
 }
 
+/** Server-sent events, which browsers have and Node does not: Arkade follows its server with them. */
+async function installEventSource(): Promise<void> {
+  const scope = globalThis as unknown as Record<string, unknown>;
+  if (scope.EventSource) return;
+  scope.EventSource = (await import("eventsource")).EventSource;
+}
+
+/**
+ * Arkade's descriptor library is CommonJS and `require`s `@scure/bip32`, which is ESM. When the engine's own imports
+ * are still evaluating that module, Node's require(esm) hands the library a namespace without `HDKey` yet ("reading
+ * 'fromMasterSeed'"). Loading it whole first avoids the race.
+ */
+async function preloadWalletModules(): Promise<void> {
+  await import("@scure/bip32").catch(() => {});
+  await import("@bitcoinerlab/descriptors-scure").catch(() => {});
+}
+
 /** Iroh's wasm, from next to the bundle (a package) or from the workspace (development and tests). */
 function irohWasmBytes(): Buffer {
   const beside = fileURLToPath(new URL("./ghostly_iroh_web_bg.wasm", import.meta.url));
@@ -64,6 +82,9 @@ function irohWasmBytes(): Buffer {
 export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
   const store = await openPersistentIndexedDb(paths.db);
   const webrtc = await installWebRtc();
+  installFileFetch();
+  await installEventSource();
+  await preloadWalletModules();
   // Loaded after IndexedDB is in place: nothing of the engine may open its database first.
   const iroh = await import("@ghostly/iroh-web");
   iroh.initSync({ module: irohWasmBytes() });

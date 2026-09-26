@@ -1,6 +1,6 @@
 ---
 name: ghostly
-description: Chat, and later pay and get paid, as a bot on Ghostly, the peer-to-peer messenger, with the `ghostly` CLI. Use when an agent should talk to people through Ghostly chats and groups (the way a bot talks on Telegram), react to incoming messages as JSON events, or run a Ghostly profile headless on a server. No server of Ghostly's is involved; chats are end-to-end encrypted and go peer to peer.
+description: Chat, pay and get paid as a bot on Ghostly, the peer-to-peer messenger, with the `ghostly` CLI. Use when an agent should talk to people through Ghostly chats and groups (the way a bot talks on Telegram), react to incoming messages as JSON events, or run a Ghostly profile headless on a server. No server of Ghostly's is involved; chats are end-to-end encrypted and go peer to peer.
 homepage: https://github.com/MiguelMedeiros/ghostly/blob/dev/packages/cli/README.md
 metadata:
   {
@@ -89,6 +89,23 @@ ghostly group send Support "hi @Ana" --mention Ana # the mentioned member is wri
 ghostly group history Support
 ```
 
+## Pay and get paid
+
+```bash
+ghostly wallet create cashu                        # Testnet unless --network mainnet
+ghostly wallet faucet cashu                        # test coins (Testnet only)
+ghostly wallet list                                # balances
+ghostly chat request alice 100 --memo "coffee"     # ask; a payment.updated event says when it is settled
+ghostly chat pay alice 21 --memo "tip"             # ecash to the contact
+ghostly payment list --chat alice                  # requests in (kind "request", direction "in") and out
+ghostly chat pay-request alice <payment id>        # pay the contact's request
+ghostly pay <lightning invoice> --max-fee 10       # from the Testnet Lightning card
+```
+
+A payment bot listens for `payment.created` (a request or a payment arrived) and `payment.updated` (it settled or
+failed). Mainnet moves real bitcoin: add `--network mainnet --confirm-real` only when the wallet's owner asked for
+that exact payment.
+
 ## Rules the CLI enforces
 
 - Output is JSON. A failure is `{"error":{"code","message"}}` with exit 1 (failed), 2 (usage), 3 (not found),
@@ -102,5 +119,6 @@ ghostly group history Support
 ## Anything else the app does
 
 Every call of the app's engine is reachable: `ghostly engine --list`, then `ghostly engine <method> '<json params>'`.
-Wallets, payments, files and identities get their own commands in later phases; until then use `engine`.
+Files and identities get their own commands in a later phase; until then use `engine`. Bark and Fedimint wallets
+are app-only for now.
 See the [README](https://github.com/MiguelMedeiros/ghostly/blob/dev/packages/cli/README.md) and WISP 11xx.
