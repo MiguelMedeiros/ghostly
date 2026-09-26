@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { fromBase64Url } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
+import { nodeLocalFetch } from "../services";
 import { installFileFetch } from "./fileFetch";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import type { ProfilePaths } from "../profiles";
@@ -99,9 +100,11 @@ export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
   const server = new EngineServer({
     irohWeb: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
-    // Phase 1: no wallet starts by itself, and no local app is shared (WISP 11xx § Phases).
+    // No wallet starts by itself: a bot has the wallets it made (WISP 11xx § Wallet SDKs on Node).
     automaticWallets: false,
-    servicesSupport: false,
+    // Local web apps may be shared with a contact, reached on loopback only (src/services.ts).
+    servicesSupport: true,
+    localFetch: nodeLocalFetch,
   });
   try {
     await server.ready;

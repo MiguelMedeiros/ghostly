@@ -100,6 +100,17 @@ ghostly file accept alice <file id>                # a file over 25 MiB waits fo
 
 Only accept and save files you expect: they come from other people.
 
+## Identities and shared apps
+
+```bash
+ghostly identity providers                         # kinds of proof, and which signers work here
+ghostly identity contact alice                     # what alice proved to you (status "verified" when it checks out)
+ghostly service add docs http://127.0.0.1:8080     # a web app on this machine
+ghostly service share <service id> alice           # alice may open it; nobody else
+```
+
+Making a proof of your own needs its tool (ssh-keygen, gpg) and a person who holds the key: leave that to the owner.
+
 ## Pay and get paid
 
 ```bash

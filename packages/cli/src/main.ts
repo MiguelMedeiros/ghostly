@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { openSync } from "node:fs";
+import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { callApi, redactSettings } from "./api";
@@ -10,8 +10,10 @@ import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { openHost, serve, type Host } from "./host";
 import { checkWebhook, eventHandler, readCursor } from "./listen";
+import { resolve } from "node:path";
+import { restoreProfile } from "./backup";
 import {
-  createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
+  checkProfileName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
 } from "./profiles";
 
@@ -67,6 +69,8 @@ const SPECIAL: [string, string][] = [
   ["profile use <name>", "Make a profile the current one"],
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see"],
+  ["profile backup --out <file> [--passphrase-file f]", "An encrypted backup of the profile (passphrase from a file or GHOSTLY_BACKUP_PASSPHRASE)"],
+  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile"],
   ["daemon [--detach]", "Keep the profile online (foreground; --detach runs it in the background)"],
   ["daemon status", "Whether a daemon runs the profile"],
   ["daemon stop", "Stop the profile's daemon"],
@@ -75,14 +79,15 @@ const SPECIAL: [string, string][] = [
   ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, nick"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret]", "Any call of the app's engine, with its own parameters"],
   ["engine --list", "The engine's calls"],
+  ["identity add <provider> [subject] [--signer id] [--field name=value]... [--days n]", "Make an identity proof (a tool's or a published one finishes with identity complete)"],
 ];
 
 function help(): string {
   const rows: [string, string][] = [
-    ...SPECIAL.slice(0, 5),
+    ...SPECIAL.slice(0, 7),
     ...Object.values(COMMANDS).filter((c) => c.method !== "events.replay").map((c) => [c.usage, c.summary] as [string, string]),
     ...Object.values(TEXT_COMMANDS).map((c) => [c.usage, c.summary] as [string, string]),
-    ...SPECIAL.slice(5),
+    ...SPECIAL.slice(7),
     [COMMANDS.events.usage, COMMANDS.events.summary],
   ];
   const width = 58;
@@ -106,6 +111,8 @@ function help(): string {
 async function profileCommand(sub: string | undefined, argv: string[]): Promise<void> {
   const specs: Record<string, Record<string, OptionSpec>> = {
     create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" } },
+    backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" } },
+    restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "" } },
   };
   const parsed = parseArgs(argv, specs[sub ?? ""] ?? {});
@@ -147,8 +154,23 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       print(await withSession(g, (s) => s.call("profile.set", params)));
       return;
     }
+    case "backup": {
+      const out = parsed.options.out;
+      if (typeof out !== "string") throw new CliError("usage", "ghostly profile backup --out <file> [--passphrase-file f] (or GHOSTLY_BACKUP_PASSPHRASE)");
+      const passphrase = backupPassphrase(parsed.options["passphrase-file"]);
+      print(await withSession(g, (s) => s.call("profile.backup", { path: resolve(out), passphrase })));
+      return;
+    }
+    case "restore": {
+      const [file, name] = parsed.positionals;
+      if (!file || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      const paths = await restoreProfile(g.home, checkProfileName(name), readFileSync(file, "utf8"), backupPassphrase(parsed.options["passphrase-file"]));
+      if (parsed.options.use) selectProfile(g.home, name);
+      print({ restored: name, folder: paths.dir });
+      return;
+    }
     default:
-      throw new CliError("usage", "ghostly profile create|list|use|show|set");
+      throw new CliError("usage", "ghostly profile create|list|use|show|set|picture|backup|restore");
   }
 }
 
@@ -164,6 +186,13 @@ function stopper(work: () => Promise<void>): () => void {
     setTimeout(() => process.exit(1), 20_000).unref();
     void work().then(() => process.exit(0), () => process.exit(1));
   };
+}
+
+/** The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). */
+function backupPassphrase(file: unknown): string {
+  const value = typeof file === "string" ? readFileSync(file, "utf8").replace(/\r?\n$/, "") : process.env.GHOSTLY_BACKUP_PASSPHRASE;
+  if (!value) throw new CliError("usage", "The backup passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE (at least 12 characters)");
+  return value;
 }
 
 async function runDaemon(g: Globals): Promise<void> {
@@ -341,6 +370,49 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   }));
 }
 
+/**
+ * `identity add`: a proof. An in-app signer finishes in this one command (what it waits on is printed to stderr as it
+ * comes); a tool or a published record answers with the statement, and `identity complete` finishes it later, in the
+ * same daemon.
+ */
+async function identityAddCommand(argv: string[]): Promise<void> {
+  const parsed = parseArgs(argv, {
+    signer: { type: "string", description: "" }, field: { type: "list", description: "" }, days: { type: "number", description: "" }, timeout: { type: "number", description: "" },
+  });
+  const g = globals(parsed);
+  pretty = g.pretty;
+  const [provider, ...subject] = parsed.positionals;
+  if (!provider) throw new CliError("usage", "ghostly identity add <provider> [subject] [--signer id] [--field name=value]... [--days n]");
+  const fields: Record<string, string> = {};
+  for (const item of (parsed.options.field as string[] | undefined) ?? []) {
+    const eq = item.indexOf("=");
+    if (eq < 1) throw new CliError("usage", `--field takes name=value, not ${JSON.stringify(item)}`);
+    fields[item.slice(0, eq)] = item.slice(eq + 1);
+  }
+  const params = { provider, subject: subject.join(" ") || undefined, signer: parsed.options.signer, fields, days: parsed.options.days, timeout: parsed.options.timeout };
+  const tell = (event: GhostlyEvent) => {
+    if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
+  };
+  requireProfile(g);
+  const client = await connectDaemon(g.paths.socket);
+  if (client) {
+    const watcher = await connectDaemon(g.paths.socket);
+    await watcher?.subscribe(undefined, tell);
+    try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
+    return;
+  }
+  const host = await openHost(g.paths, "one-shot", VERSION);
+  const off = host.ctx.hub.onEvent(tell);
+  try {
+    const result = await callApi(host.ctx, "identity.add", params) as { done: boolean; draft?: string };
+    if (!result.done) {
+      await callApi(host.ctx, "identity.cancel", { draft: result.draft }).catch(() => {});
+      throw new CliError("unavailable", "A proof made in two steps waits in the daemon between them: start `ghostly daemon --detach`, then run this again");
+    }
+    print(result);
+  } finally { off(); await host.close(); }
+}
+
 async function tableCommand(name: string, argv: string[]): Promise<void> {
   const command = COMMANDS[name];
   const parsed = parseArgs(argv, command.options ?? {});
@@ -349,6 +421,12 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   const args = positionals(command, parsed.positionals);
   const params = command.params?.(parsed, args) ?? {};
   for (const key of Object.keys(params)) if (params[key] === undefined) delete params[key];
+  // Evidence is read here, where the file is: the daemon runs elsewhere.
+  if (command.method === "identity.complete") {
+    if (params.evidenceFile) params.evidence = readFileSync(params.evidenceFile as string, "utf8");
+    else if (params.stdin) params.evidence = await readStdin();
+    delete params.evidenceFile; delete params.stdin;
+  }
   print(await withSession(g, async (s) => {
     const result = await s.call(command.method, params) as Record<string, unknown>;
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.
@@ -372,6 +450,7 @@ export async function main(input: string[]): Promise<number> {
   if (first === "listen") { await listenCommand(argv.slice(1)); return -1; }
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }
   if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
+  if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
   if (two && TEXT_COMMANDS[two]) { await textCommand(two, argv.slice(2)); return 0; }
   if (two && COMMANDS[two]) { await tableCommand(two, argv.slice(2)); return 0; }
   if (TEXT_COMMANDS[first]) { await textCommand(first, argv.slice(1)); return 0; }
