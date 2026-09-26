@@ -104,6 +104,8 @@ export function MessageInput({
   const phone = useIsMobile();
   const [showPayment, setShowPayment] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
+  /** The picker closed because an identity was shared: the keys go back to the message, not to the +. */
+  const sharedIdentity = useRef(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
@@ -217,6 +219,13 @@ export function MessageInput({
     setShowPanel(false);
     if (!phone) textareaRef.current?.focus();
   };
+
+  // After the picker's own cleanup (which gives the + the focus): on a phone the + keeps it, no keyboard popping up.
+  useEffect(() => {
+    if (showIdentities || !sharedIdentity.current) return;
+    sharedIdentity.current = false;
+    if (!phone) textareaRef.current?.focus({ preventScroll: true });
+  }, [showIdentities, phone]);
 
   /** Whatever the composer has open over it. */
   const closeAll = () => {
@@ -385,7 +394,8 @@ export function MessageInput({
 
         {showIdentities && identities && (
           <ComposerIdentityPicker peerKey={identities.peerKey} contact={identities.contact} anchorRef={plusRef}
-            onClose={() => setShowIdentities(false)} />
+            onClose={() => setShowIdentities(false)}
+            onShared={() => { sharedIdentity.current = true; setShowIdentities(false); }} />
         )}
       </div>
 

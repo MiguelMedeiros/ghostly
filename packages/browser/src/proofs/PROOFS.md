@@ -225,6 +225,12 @@ The presentation the proof key signs is the UTF-8 JSON
 A challenge is single-use, answered within 300 s, at most 8 outstanding per conversation; consuming it and
 storing the outcome are one transaction.
 
+The chat's timeline shows each share on both sides (`@ghostly/core` `identityTimeline.ts`, WISP 300 "In the
+conversation"), from these same frames: nothing is added to the wire. UI: `IdentityShareLine.tsx`, test ids
+`identity-share` (`data-side` mine/theirs, `data-kind` shared/stopped, `data-state`), `identity-share-text`,
+`identity-share-name`, `identity-share-subject`, `identity-share-photo`, `identity-share-state`; the chat list's
+`chat-row-note`.
+
 ## Testing
 
 - **Contract**: `describeIdentityProof(name, make)` with a harness: `provider`, a `subject` you control,

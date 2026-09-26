@@ -250,6 +250,7 @@ export function Sidebar() {
               keyLabel={peerKey}
               peerPubKey={session.peerPubKeyB64}
               lastMessage={lastMsg}
+              note={(session.identitySharedAt ?? 0) > (lastMsg?.timestamp ?? 0) ? t("sidebar.sharedIdentity") : undefined}
               time={formatListTime(session.lastSyncAt ?? session.createdAt)}
               unread={unread}
               pinned={isSessionPinned(session.id)}

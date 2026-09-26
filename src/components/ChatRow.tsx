@@ -168,6 +168,8 @@ export interface ChatRowProps {
   keyLabel: string;
   peerPubKey: string;
   lastMessage?: ChatMessage;
+  /** Something newer than the last message, said in its place: the contact shared an identity. */
+  note?: string;
   time: string;
   unread: number;
   pinned: boolean;
@@ -223,7 +225,9 @@ export function ChatRow(p: ChatRowProps) {
             ? <span data-testid="chat-row-key" className="block text-[11px] leading-4 text-text-muted/60 font-mono whitespace-nowrap">{p.keyLabel}</span>
             : <span className="sr-only"> · {p.keyLabel}</span>}
         </>}
-        preview={p.lastMessage
+        preview={p.note
+          ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
+          : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} />}
               {previewText(p.lastMessage.text)}

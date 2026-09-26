@@ -32,13 +32,20 @@ type Received = Extract<Entry, { r: ReceivedIdentityView }>;
  * follows and notes, which asks relays. Below, which of this profile's identities the contact sees: the chat's
  * identity picker, in the panel.
  */
-export function ContactIdentitiesPanel({ peerKey, name, onClose }: { peerKey: string; name: string; onClose: () => void }) {
+export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
+  peerKey: string; name: string;
+  /** Opens on this card: a share tapped in the chat's timeline, theirs or mine. */
+  card?: { side: "mine" | "theirs"; id: string };
+  onClose: () => void;
+}) {
   const state = useEngineState();
   const { t } = useI18n();
   const nav = useAppNavigation();
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
-  const ref = useRef<HTMLElement>(null);
+  const ref = useRef<HTMLElement>(null), mineRef = useRef<HTMLElement>(null);
   const titleId = useId();
+  // One of mine: its section comes into view, the picker on that card.
+  useEffect(() => { if (card?.side === "mine") mineRef.current?.scrollIntoView({ block: "nearest" }); }, [card]);
   useDialogFocus(ref, onClose);
   const now = Math.floor(Date.now() / 1000);
   // Every identity with a mark, in the header's order (contactBadges.ts), then the ones no longer shared.
@@ -66,13 +73,13 @@ export function ContactIdentitiesPanel({ peerKey, name, onClose }: { peerKey: st
         <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={`Shared by ${name}`}>
           <h3 className="contact-panel-heading">Shared by {name}</h3>
           {link
-            ? <TheirCards t={t} entries={entries} link={link} name={name} nostr={link.nostr ?? []} />
+            ? <TheirCards t={t} entries={entries} link={link} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
             : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
         </section>
-        <section className="contact-panel-section" data-testid="chat-identities-mine" aria-label="Yours, for this contact">
+        <section ref={mineRef} className="contact-panel-section" data-testid="chat-identities-mine" aria-label="Yours, for this contact">
           <h3 className="contact-panel-heading">Yours, for this contact</h3>
           {link?.identities
-            ? <IdentityPicker peerKey={peerKey} contact={name} onManage={() => { onClose(); nav.open("/identities"); }}
+            ? <IdentityPicker peerKey={peerKey} contact={name} initial={card?.side === "mine" ? card.id : undefined} onManage={() => { onClose(); nav.open("/identities"); }}
               frame={({ side, tone }, children) => <div className={`contact-picker composer-identities ${tone}`} data-testid="chat-identities-picker" data-side={side}>{children}</div>} />
             : <p className="contact-panel-note">Identities can be shared in paired chats only.</p>}
         </section>
@@ -82,8 +89,8 @@ export function ContactIdentitiesPanel({ peerKey, name, onClose }: { peerKey: st
 }
 
 /** The contact's ID cards: a deck, then the chosen card turned over. */
-function TheirCards({ t, entries, link, name, nostr }: { t: Translate; entries: Entry[]; link: LinkView; name: string; nostr: NostrContactView[] }) {
-  const [chosen, setChosen] = useState<string>();
+function TheirCards({ t, entries, link, name, nostr, initial }: { t: Translate; entries: Entry[]; link: LinkView; name: string; nostr: NostrContactView[]; initial?: string }) {
+  const [chosen, setChosen] = useState<string | undefined>(initial);
   const { side, flipped, turn, turnBack } = useCardFlip();
   const root = useRef<HTMLDivElement>(null);
   const entry = entries.find(e => e.id === chosen) ?? entries[0];

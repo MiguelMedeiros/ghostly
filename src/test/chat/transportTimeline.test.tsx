@@ -111,7 +111,7 @@ describe("transport lines in the timeline", () => {
     const rows = mergeTimeline(messages, [
       line({ id: "a", at: 5 }), line({ id: "b", at: 20 }), line({ id: "c", at: 30 }), line({ id: "d", at: 40 }), line({ id: "e", at: 60 }),
     ]);
-    expect(rows.map(r => r.kind === "message" ? r.message.id : `${r.entry.id}+${r.earlier.map(e => e.id).join("")}`))
+    expect(rows.map(r => r.kind === "message" ? r.message.id : r.kind === "transport" ? `${r.entry.id}+${r.earlier.map(e => e.id).join("")}` : r.entry.id))
       .toEqual(["a+", "m1", "d+bc", "m2", "e+"]);
   });
 });
