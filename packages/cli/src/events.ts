@@ -15,6 +15,9 @@ export const JOURNAL_KEEP = 10_000;
 const SEEN_DB = "ghostly-cli";
 const SEEN = "seen";
 
+/** The notice an app sends when a chat first goes live (src/hooks/useChat.ts): shown as a line, not a message. */
+export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
+
 type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
@@ -190,6 +193,15 @@ export class EventHub {
     }
   }
 
+  /** Whether this side said something once in a chat (the join notice): kept with the seen set. */
+  said(chat: string, what: string): boolean {
+    return this.seen.get(`said:${chat}`)?.has(what) ?? false;
+  }
+  markSaid(chat: string, what: string): void {
+    this.seenOf(`said:${chat}`).set(what, "yes");
+    this.persist(`said:${chat}`, [[what, "yes"]]);
+  }
+
   private seenOf(chat: string): Map<string, string> {
     let map = this.seen.get(chat);
     if (!map) this.seen.set(chat, (map = new Map()));
@@ -215,8 +227,9 @@ export class EventHub {
           const type = message.event ? "group.event" : message.sender === "peer" ? "group.message" : "group.sent";
           this.emit(type, `${type}:${group}:${message.id}`, { group, message: json });
         } else {
-          const type = message.sender === "peer" ? "message.received" : "message.sent";
-          this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json });
+          const notice = JOIN_NOTICE.exec(message.text);
+          const type = notice ? (message.sender === "peer" ? "chat.joined" : "chat.announced") : message.sender === "peer" ? "message.received" : "message.sent";
+          this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json, ...(notice ? { name: notice[1] ?? null } : {}) });
         }
       } else if (message.sender === "me" && !group) {
         this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${state}`, { chat, messageId: message.id, delivery: state, ...(message.deliveryError ? { error: message.deliveryError } : {}) });

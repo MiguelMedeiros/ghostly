@@ -2,6 +2,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { chmodSync, existsSync, rmSync } from "node:fs";
 import { createInterface } from "node:readline";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
+import { announceJoins } from "./announce";
 import { callApi, type ApiContext } from "./api";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
@@ -38,6 +39,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     for (const link of now.links) histories.set(link.id, await node.getMessages(link.id));
     for (const group of now.groups) histories.set(`group:${group.id}`, await node.groupMessages({ groupId: group.id }));
     hub.baseline(now, histories);
+    announceJoins(hub, node);
     runtime.server.attach(hub.sink);
   } catch (error) {
     await runtime.close().catch(() => {});

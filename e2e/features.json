@@ -485,6 +485,7 @@
     {"id":"headless.chat","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless one chat: invite create/join (self-invite refused), live over WebRTC or HyperDHT, send (args/stdin), history, transport switch"},
     {"id":"headless.events","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Event stream: JSON lines with seq and stable ids, journal replay (--since), no flood on first run"},
     {"id":"headless.hooks","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"listen --exec (event on stdin) and --webhook (loopback only), --cursor acknowledgement"},
+    {"id":"headless.web-interop","wisp":"11xx-headless","kind":"protocol","clients":["web","cli"],"infra":["pkarr-relay"],"title":"A headless bot and the web app in one chat, invites both ways, live over WebRTC (libdatachannel and Chromium)"},
     {"id":"headless.groups","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless community groups: create with a link, join, send with @mentions, mention flag on receipt"}
   ],
   "paths": {

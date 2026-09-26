@@ -222,6 +222,27 @@
     "notices": []
   },
   {
+    "file": "11xx-headless.md",
+    "sourcePath": "docs/wisps/11xx-headless.md",
+    "aliases": [],
+    "slug": "11xx-headless",
+    "title": "WISP 11xx: Headless Runtime and Local Control API",
+    "status": "Draft",
+    "updated": "2026-09-26",
+    "implementation": "Experimental: packages/cli (@ghostly/cli, command ghostly), phase 1 on dev",
+    "documentKind": "Contract (local API; nothing here goes on the wire between peers)",
+    "dependencies": [
+      "04-profiles.md",
+      "400-chat.md",
+      "401-paired-chat.md",
+      "100-transports.md",
+      "200-payments.md",
+      "900-group-sessions.md"
+    ],
+    "summary": "Bots talk through chats the way the Hermes agent does on Telegram: a process that stays online, reads what arrives, answers, pays and gets paid. For that, everything the app does has to be reachable without a screen. This document fixes how Ghostly runs headless (the runtime), how other programs on the same machine drive it (the local control API), and what it tells them (the event stream). It changes nothing between",
+    "notices": []
+  },
+  {
     "file": "200-payments.md",
     "sourcePath": "docs/wisps/200-payments.md",
     "aliases": [

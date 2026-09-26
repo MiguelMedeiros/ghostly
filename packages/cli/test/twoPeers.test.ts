@@ -60,6 +60,17 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       expect(ok(await as(dir, "chat", "wait", chat, "--until", "live", "--timeout", "90"))).toMatchObject({ live: true, transport: expect.stringMatching(/^(webrtc|hyperdht)\/1$/) });
     }
     expect(ok(await as(bob, "chat", "show", "alice"))).toMatchObject({ id: chatB, peerName: "Alice bot", pairing: "ready" });
+    // As the app's chat screen does: the joiner says it joined, the inviter answers, each once.
+    const until = Date.now() + 30_000;
+    let notices: string[] = [];
+    while (Date.now() < until && notices.length < 2) {
+      notices = (ok(await as(alice, "chat", "history", "bob")).messages as { text: string }[]).map((m) => m.text);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    expect(notices.sort()).toEqual(["👋 Alice bot joined", "👋 Bob joined"]);
+    const events = ok(await as(alice, "events")).events as { type: string; name?: string }[];
+    expect(events.filter((e) => e.type === "chat.joined").map((e) => e.name)).toEqual(["Bob"]);
+    expect(events.filter((e) => e.type === "message.received")).toEqual([]);
   });
 
   it("move a chat to native HyperDHT when asked", async () => {
@@ -90,7 +101,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     error(await as(alice, "send", "bob", "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"), "confirm", 5);
     await listen.waitFor((l) => (l.message as { text?: string } | undefined)?.text === "-dash first");
     const history = ok(await as(bob, "chat", "history", "alice")).messages as { text: string }[];
-    expect(history.map((m) => m.text)).toEqual(["hello bob", "from stdin", "-dash first"]);
+    expect(history.map((m) => m.text).filter((t) => !t.startsWith("👋"))).toEqual(["hello bob", "from stdin", "-dash first"]);
     await listen.stop();
   });
 

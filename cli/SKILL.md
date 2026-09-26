@@ -14,6 +14,10 @@ metadata:
 
 # ghostly-cli
 
+> **Legacy.** `ghostly-cli` is the compatibility client: it speaks the older v0.4 DHT records (no `ghostly1` invites,
+> no chat sessions, no groups). For a bot that talks to people on today's Ghostly apps, use the `ghostly` CLI and its
+> skill, [packages/cli/SKILL.md](../packages/cli/SKILL.md). This one keeps working for bots already built on it.
+
 Use `ghostly-cli` to send/receive encrypted ephemeral messages via the Ghost protocol.
 
 ## When to Use
