@@ -1,0 +1,37 @@
+{
+  "name": "@ghostly/cli",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "description": "Ghostly for bots and terminals: the app's own engine, headless on Node, behind a daemon and a `ghostly` command with JSON output.",
+  "license": "MIT",
+  "bin": {
+    "ghostly": "./dist/ghostly.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SKILL.md"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ghostly/browser": "*",
+    "@ghostly/core": "*",
+    "@ghostly/iroh-web": "*",
+    "fake-indexeddb": "6.2.5",
+    "hyperdht": "6.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
