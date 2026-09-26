@@ -209,6 +209,10 @@ describe("plain text for previews", () => {
     expect(plainText("*Hi* _there_, ~~old~~ `code` ||the butler||")).toBe(`Hi there, old code ${SPOILER_PLAIN}`);
   });
 
+  it("keeps JSON as it was written", () => {
+    expect(plainText(' {"amount":21, "memo":"*coffee*"}\n')).toBe('{"amount":21, "memo":"*coffee*"}');
+  });
+
   it("leaves text with no formatting as it was", () => {
     expect(plainText("snake_case 2*3 a ~ b | c")).toBe("snake_case 2*3 a ~ b | c");
   });
