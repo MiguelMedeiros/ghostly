@@ -94,6 +94,7 @@ export class RelayTransport implements PkarrTransport {
   /**
    * Publishes to every relay. Peers may be configured with different relay
    * sets; writing everywhere keeps the overlap warm, the DHT covers the rest.
+   * Returns once one relay took the packet: the others finish in the background.
    */
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
@@ -114,37 +115,55 @@ export class RelayTransport implements PkarrTransport {
     await this.putEverywhere(pubKeyZ32, payload, seq, options);
   }
 
-  private async putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions): Promise<void> {
+  /**
+   * Puts the packet on every relay and settles as soon as one of them took it. A relay that is slow to
+   * answer (one that stores the packet and answers the PUT only at the timeout) must not hold a link's
+   * presence, offer or answer back: the rest finish in the background, their outcomes still counted.
+   * When no relay takes it, this waits for all of them to say why.
+   */
+  private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions): Promise<void> {
     const waitingBefore = new Map(this.writeWaiting);
-    const results = await Promise.allSettled(
-      this.relays.map(async (relay) => {
-        const slot = `${relay} ${pubKeyZ32}`;
-        const previous = this.lastPut.get(slot);
-        this.lastPut.set(slot, timestamp);
-
-        // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
-        // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
-        let response = await this.put(relay, pubKeyZ32, payload, previous, options.background);
-        // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
-        if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, options.background);
-        // The relay's own rate limit: this packet did not go in, and goes once the relay says so.
-        if (response.status === 429) throw new DiscoveryBudgetError(this.coolDown(relay, response), `${relay} responded 429; retry shortly`);
-        if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
-      }),
-    );
-
     // Out on one relay: the link will not try again, so a relay that refused it has no write to wait for.
-    if (results.some((r) => r.status === "fulfilled")) {
+    const noWriteWaits = () => {
       for (const relay of this.relays) if (this.writeWaiting.get(relay) !== waitingBefore.get(relay)) this.writeWaiting.delete(relay);
-    }
-    if (!results.some((r) => r.status === "fulfilled")) {
-      // Every relay held it back for its budget (this client's, or the relay's rate limit): a wait for the first
-      // of them to free a request, not a failure.
-      const held = results.map((r) => (r.status === "rejected" && isDiscoveryBudgetError(r.reason) ? r.reason : null));
-      const reasons = results.map((r) => (r.status === "rejected" ? String(r.reason) : "")).join("; ");
-      if (held.every((e) => e !== null)) throw new DiscoveryBudgetError(Math.min(...held.map((e) => e!.retryInMs)), `Publish held back on every relay: ${reasons}`);
-      throw new Error(`Publish failed on every relay: ${reasons}`);
-    }
+    };
+    const puts = this.relays.map(async (relay) => {
+      const slot = `${relay} ${pubKeyZ32}`;
+      const previous = this.lastPut.get(slot);
+      this.lastPut.set(slot, timestamp);
+
+      // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
+      // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
+      let response = await this.put(relay, pubKeyZ32, payload, previous, options.background);
+      // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
+      if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, options.background);
+      // The relay's own rate limit: this packet did not go in, and goes once the relay says so.
+      if (response.status === 429) throw new DiscoveryBudgetError(this.coolDown(relay, response), `${relay} responded 429; retry shortly`);
+      if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
+    });
+    const settled = Promise.allSettled(puts);
+
+    return new Promise<void>((resolve, reject) => {
+      let accepted = false;
+      for (const put of puts) {
+        put.then(() => {
+          if (accepted) return;
+          accepted = true;
+          noWriteWaits();
+          resolve();
+        }, () => { /* read from `settled` */ });
+      }
+      void settled.then((results) => {
+        // A relay that finished after the first one took the packet may have been refused on its retry since.
+        if (accepted) { noWriteWaits(); return; }
+        // Every relay held it back for its budget (this client's, or the relay's rate limit): a wait for the first
+        // of them to free a request, not a failure.
+        const held = results.map((r) => (r.status === "rejected" && isDiscoveryBudgetError(r.reason) ? r.reason : null));
+        const reasons = results.map((r) => (r.status === "rejected" ? String(r.reason) : "")).join("; ");
+        if (held.every((e) => e !== null)) reject(new DiscoveryBudgetError(Math.min(...held.map((e) => e!.retryInMs)), `Publish held back on every relay: ${reasons}`));
+        else reject(new Error(`Publish failed on every relay: ${reasons}`));
+      });
+    });
   }
 
   /**
