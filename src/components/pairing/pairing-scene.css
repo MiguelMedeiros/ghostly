@@ -212,13 +212,13 @@
 
 /* The scene in small, as the chat's connection icon while a first pairing is on its way (PairingGlyph.tsx). */
 .pg { overflow: visible; }
-.pi-end { fill: currentColor; opacity: 0.55; }
+.pi-end { fill: currentColor; opacity: 0.7; }
 .pi-me { fill: var(--theme-accent); }
-.pi-line { stroke: currentColor; stroke-width: 1.4; stroke-dasharray: 2 2; opacity: 0.5; }
+.pi-line { stroke: currentColor; stroke-width: 2; stroke-dasharray: 2 2; opacity: 0.6; }
 .pi-packet { fill: var(--theme-accent); animation: pi-move 1.4s ease-in-out infinite; }
 .pg[data-direction="in"] .pi-packet { animation-direction: reverse; }
 .pg[data-stage="waiting"] .pi-packet { animation: pi-wait 2.4s ease-in-out infinite; }
-@keyframes pi-move { 0% { transform: translateX(0); opacity: 0; } 20%, 80% { opacity: 1; } 100% { transform: translateX(16px); opacity: 0; } }
+@keyframes pi-move { 0% { transform: translateX(0); opacity: 0; } 20%, 80% { opacity: 1; } 100% { transform: translateX(14px); opacity: 0; } }
 @keyframes pi-wait { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .pi-packet { animation: none !important; transform: translateX(8px); opacity: 1; } }
-:root[data-reduce-motion="true"] .pi-packet { animation: none !important; transform: translateX(8px); opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .pi-packet { animation: none !important; transform: translateX(7px); opacity: 1; } }
+:root[data-reduce-motion="true"] .pi-packet { animation: none !important; transform: translateX(7px); opacity: 1; }

@@ -8,9 +8,9 @@ import "./pairing-scene.css";
  */
 export function PairingGlyph({ stage, direction, size }: { stage: PairingStage; direction: "in" | "out"; size: number }) {
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" className="pg shrink-0" data-testid="pairing-glyph" data-stage={stage} data-direction={direction}>
-    <line className="pi-line" x1="4" y1="12" x2="20" y2="12" />
-    <circle className="pi-me" cx="3" cy="12" r="3" />
-    <circle className="pi-end" cx="21" cy="12" r="3" />
-    <circle className="pi-packet" cx="4" cy="12" r="1.8" />
+    <line className="pi-line" x1="7" y1="12" x2="17" y2="12" />
+    <circle className="pi-me" cx="3.5" cy="12" r="3.5" />
+    <circle className="pi-end" cx="20.5" cy="12" r="3.5" />
+    <circle className="pi-packet" cx="5" cy="12" r="2" />
   </svg>;
 }
