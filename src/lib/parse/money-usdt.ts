@@ -1,6 +1,6 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ETHEREUM_USDT, SEPOLIA_TEST_USDT, type WalletNetwork } from "@ghostly/core";
-import { cut, insideUrl, trimUriEnd } from "./money-text";
+import { cut, insideUrl, trimUriEnd, URI_MAX_CHARS } from "./money-text";
 
 /** The EVM chains a USDT wallet here runs on, by EIP-155 chain ID. */
 export const USDT_CHAINS: Record<number, { name: string; network: WalletNetwork }> = {
@@ -68,6 +68,7 @@ function chainOf(chainId: number | undefined): Pick<UsdtRequest, "chainId" | "ne
 export function findUsdtAddress(text: string): { request: UsdtRequest; rest: string } | null {
   const mentioned = USDT_WORD.test(text);
   for (const match of text.matchAll(EIP681)) {
+    if (match[0].length > URI_MAX_CHARS) continue;
     const uri = trimUriEnd(match[0]);
     const [, target, chain, fn, query] = match;
     const params = new URLSearchParams((query ?? "").slice(1).replace(/\+/g, "%2B"));

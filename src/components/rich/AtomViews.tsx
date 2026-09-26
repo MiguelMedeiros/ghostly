@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
-import type { Atom, TimeData } from "../../lib/parse";
+import { shownUrl, type Atom, type TimeData } from "../../lib/parse";
 import { CopyButton } from "./CopyButton";
 
-/** A web address: a new tab, with no opener and no referrer. */
+/**
+ * A web address: a new tab, with no opener and no referrer. It reads left to right on its own (`dir`), so no
+ * direction control before or inside it can make it show another address, and as it is typed only when that is
+ * plain ASCII: anything else shows as the browser will read it (`shownUrl`).
+ */
 export function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
   return (
-    <a href={atom.data.url} target="_blank" rel="noopener noreferrer" className="text-link underline hover:decoration-2 break-all">
-      {atom.text}
+    <a href={atom.data.url} dir="ltr" target="_blank" rel="noopener noreferrer" className="text-link underline hover:decoration-2 break-all">
+      {shownUrl(atom.text)}
     </a>
   );
 }
@@ -45,6 +49,8 @@ export function TimeView({ atom, sentAt }: { atom: Atom<"time", TimeData>; sentA
   const [open, setOpen] = useState(false);
   const sent = new Date(sentAt ?? Date.now());
   const local = new Date(atom.data.at);
+  // A moment no date holds (the parser refuses one; this is the last guard): the text as written, not a crash.
+  if (Number.isNaN(local.getTime())) return <>{atom.text}</>;
   const label = t("chat.rich.localTime", { time: localLabel(atom.data.at, local.toDateString() === sent.toDateString()) });
   return (
     <span data-testid="rich-time">

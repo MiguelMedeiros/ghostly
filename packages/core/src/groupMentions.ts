@@ -21,12 +21,15 @@ export const MENTION_LIMITS = {
   chars: 65,
 } as const;
 
+// eslint-disable-next-line no-control-regex
+const NOT_IN_A_NAME = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 const isInt = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 
 /**
  * The mentions of a message as a receiver (or the sender) takes them: at most `count` of them, each naming a
- * member key (or everyone, when `everyone` allows it), at a place of the text that starts with "@", in order and
- * not overlapping. An entry that is none of that is dropped; a list longer than the bound is dropped whole.
+ * member key (or everyone, when `everyone` allows it), at a place of the text that starts with "@" and holds no
+ * line break or control character, in order and not overlapping. An entry that is none of that is dropped; a list
+ * longer than the bound is dropped whole.
  */
 export function validMentions(raw: unknown, text: string, everyone: boolean): GroupMention[] {
   if (!Array.isArray(raw) || raw.length > MENTION_LIMITS.count) return [];
@@ -37,6 +40,8 @@ export function validMentions(raw: unknown, text: string, everyone: boolean): Gr
     const { k, o, l } = entry as Record<string, unknown>;
     if (typeof k !== "string" || !(MEMBER_KEY.test(k) || (everyone && k === MENTION_EVERYONE))) continue;
     if (!isInt(o) || !isInt(l) || l < 2 || l > MENTION_LIMITS.chars || o + l > points.length || points[o] !== "@") continue;
+    // A name has no line break, control or direction character: a mention holding one is not a name.
+    if (NOT_IN_A_NAME.test(points.slice(o, o + l).join(""))) continue;
     kept.push({ k, o, l });
   }
   kept.sort((a, b) => a.o - b.o);

@@ -89,7 +89,8 @@
       "showAll": "Tout afficher",
       "showLess": "Afficher moins",
       "localTime": "{{time}} chez vous",
-      "code": "Code"
+      "code": "Code",
+      "unshowable": "Impossible d'afficher ce message."
     }
   },
   "group": {

@@ -26,6 +26,9 @@ export interface TimeData {
   dated: boolean;
 }
 
+/** Whether a moment is one a date can hold (±8.64e15 ms): a peer picks the time a message was sent. */
+const isMoment = (ms: number) => !Number.isNaN(new Date(ms).getTime());
+
 /** Minutes east of UTC for "+02:00", "-3", "+0530"; null past ±14 h. */
 function offsetMinutes(offset: string): number | null {
   const m = /^([+-])(\d{1,2})(?::?(\d{2}))?$/.exec(offset);
@@ -47,7 +50,7 @@ export const time: Detector<"time", TimeData> = {
       if (offset === null || month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return null;
       const at = Date.UTC(year, month - 1, day, hour, minute, second) - offset * 60_000;
       // February 30th rolls over into March: not a date anyone wrote.
-      if (new Date(at + offset * 60_000).getUTCDate() !== day) return null;
+      if (!isMoment(at) || new Date(at + offset * 60_000).getUTCDate() !== day) return null;
       return { data: { at, dated: true } };
     }
     let hour = Number(m[8]);
@@ -62,9 +65,11 @@ export const time: Detector<"time", TimeData> = {
     } else if (hour > 23) return null;
     const offset = m[13] ? ZONES[m[13].toUpperCase()] : m[12] ? offsetMinutes(m[12]) : 0;
     if (offset === null || offset === undefined) return null;
-    // The day it was where the message was written.
+    // The day it was where the message was written. A sending time no date can hold names no day: the time is text.
     const there = new Date((ctx.sentAt ?? Date.now()) + offset * 60_000);
+    if (!isMoment(there.getTime())) return null;
     const at = Date.UTC(there.getUTCFullYear(), there.getUTCMonth(), there.getUTCDate(), hour, minute) - offset * 60_000;
+    if (!isMoment(at)) return null;
     return { data: { at, dated: false } };
   },
 };

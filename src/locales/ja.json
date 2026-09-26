@@ -89,7 +89,8 @@
       "showAll": "すべて表示",
       "showLess": "折りたたむ",
       "localTime": "あなたの時刻で {{time}}",
-      "code": "コード"
+      "code": "コード",
+      "unshowable": "このメッセージは表示できませんでした。"
     }
   },
   "group": {

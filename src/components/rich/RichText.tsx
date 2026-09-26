@@ -42,8 +42,10 @@ function segments(list: Segment[], sentAt: number | undefined, key = ""): React.
         return <Spoiler key={k}>{inner}</Spoiler>;
       }
       case "atom": {
+        // Each atom is isolated from the text around it: a direction control in the message cannot reorder a link,
+        // a name or a time, and one inside an atom stops at its edge.
         const View = VIEWS[segment.kind] as ComponentType<AtomViewProps> | undefined;
-        return View ? <View key={k} atom={segment} sentAt={sentAt} /> : segment.text;
+        return <bdi key={k}>{View ? <View atom={segment} sentAt={sentAt} /> : segment.text}</bdi>;
       }
     }
   });

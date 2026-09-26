@@ -1,5 +1,5 @@
 import { decodeBolt11, isBitcoinAddress, type BitcoinNetwork, type Bolt11Invoice, type WalletNetwork } from "@ghostly/core";
-import { cut, insideUrl, trimUriEnd } from "./money-text";
+import { cut, insideUrl, trimUriEnd, URI_MAX_CHARS } from "./money-text";
 
 /**
  * The chain an address is for, as far as its prefix says. `tb1…` and the base58 test prefixes are shared by
@@ -76,7 +76,7 @@ const BIP21 = /(?<![A-Za-z0-9])bitcoin:[^\s<>"'`]+/gi;
 export function findBip21(text: string): Bip21[] {
   const found: Bip21[] = [];
   for (const match of text.matchAll(BIP21)) {
-    if (insideUrl(text, match.index!)) continue;
+    if (match[0].length > URI_MAX_CHARS || insideUrl(text, match.index!)) continue;
     const uri = trimUriEnd(match[0]);
     const body = uri.slice("bitcoin:".length);
     const query = body.indexOf("?");

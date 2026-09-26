@@ -2,11 +2,24 @@ import { findMoney } from "./money";
 import { plainText } from "./parse";
 import { moreMoneyPreview } from "./parse/money-preview";
 
+/** Previews already worked out, by message text: the list draws each row again on every change anywhere. */
+const PREVIEWS = new Map<string, string>();
+const PREVIEWS_KEPT = 256;
+
 /**
  * A pasted invoice or token reads as what it is, not as its first characters; formatted text reads without its
- * markers, and a spoiler stays hidden.
+ * markers, and a spoiler stays hidden. Worked out once per text.
  */
 export function previewText(text: string): string {
+  const known = PREVIEWS.get(text);
+  if (known !== undefined) return known;
+  const preview = readPreview(text);
+  if (PREVIEWS.size >= PREVIEWS_KEPT) PREVIEWS.delete(PREVIEWS.keys().next().value!);
+  PREVIEWS.set(text, preview);
+  return preview;
+}
+
+function readPreview(text: string): string {
   const money = findMoney(text);
   if (!money) return plainText(text);
   if (money.type === "cashu") return "⚡ Ecash";

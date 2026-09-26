@@ -89,7 +89,8 @@
       "showAll": "显示全部",
       "showLess": "收起",
       "localTime": "你的时间 {{time}}",
-      "code": "代码"
+      "code": "代码",
+      "unshowable": "无法显示此消息。"
     }
   },
   "group": {
