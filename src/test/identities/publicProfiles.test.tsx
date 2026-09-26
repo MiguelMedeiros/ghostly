@@ -149,7 +149,8 @@ describe("a contact's cards", () => {
     act(() => engine.update(paired([pubkyReceived()])));
     fireEvent.pointerOver(screen.getByTestId("chat-identity-badge"), { pointerType: "mouse" });
     await vi.waitFor(() => expect(engine.callsTo("loadPublicProfile")).toEqual([{ provider: "pubky", subject: PUBKY_KEY }]));
-    expect(screen.getByTestId("chat-identity-tip")).not.toHaveTextContent("Alice Liddell");
+    // The card opens after the hover's pause; the call is made as it opens, before React has drawn it.
+    expect(await screen.findByTestId("chat-identity-tip")).not.toHaveTextContent("Alice Liddell");
     act(() => engine.update(paired([pubkyReceived({ publicProfile: profile() })])));
     expect(within(screen.getByTestId("chat-identity-tip")).getByTestId("identity-tip-name")).toHaveTextContent("Alice Liddell");
   });
