@@ -14,7 +14,7 @@ import { answerDoh, queryFromUrl, type Zone } from "./helpers/dohZone";
 /**
  * A Pubky network in memory, behind the engine's real bounded fetch: Pkarr relays holding signed packets (a key's
  * `_pubky` record, its homeserver's HTTPS record), homeservers serving `/pub/…` by the `pubky-host` header, and the
- * default DNS-over-HTTPS resolver, which gives each homeserver's name a public address unless a test says otherwise.
+ * DNS-over-HTTPS resolvers, which give each homeserver's name a public address unless a test says otherwise.
  */
 class PubkyNet {
   readonly relays = new Map<string, Map<string, Uint8Array>>([["https://pkarr.pubky.org", new Map()], ["https://pkarr.pubky.app", new Map()]]);
@@ -51,7 +51,7 @@ class PubkyNet {
     const headers = Object.fromEntries(new Headers(init?.headers).entries());
     this.requests.push({ url: url.href, headers });
     if (this.down.has(url.origin)) throw new TypeError("Failed to fetch");
-    if (url.origin === "https://dns.quad9.net" && url.pathname === "/dns-query")
+    if (["https://dns.quad9.net", "https://cloudflare-dns.com", "https://dns.google"].includes(url.origin) && url.pathname === "/dns-query")
       return new Response(answerDoh(queryFromUrl(url.href), this.zone) as BodyInit, { headers: { "content-type": "application/dns-message" } });
     const status = this.status.get(url.host);
     if (status) return new Response("no", { status });
@@ -117,6 +117,25 @@ describe("Pubky proofs: verify", () => {
     expect(failure).toBeInstanceOf(IdentityCheckUnavailable);
     expect(String(failure)).toMatch(/port 8443; only port 443/);
     expect(net.requests.filter(r => !r.url.startsWith("https://pkarr."))).toEqual([]);
+  });
+
+  it("asks the next resolver when the chosen one cannot be reached (Quad9 from WebKit), the way homeserver.pubky.app is published", async () => {
+    const net = new PubkyNet();
+    // homeserver.pubky.app's own packet: its Pubky TLS endpoint (target ".", port 6287), then its ICANN name, no port.
+    const hs = net.homeserver("homeserver.pubky.app");
+    const me = net.user(hs);
+    const s = statementFor(me.pubKeyZ32);
+    net.write("homeserver.pubky.app", me.pubKeyZ32, pubkyProofPath(folder, s.id), s.text);
+    // Quad9's HTTP/3 answers carry no Access-Control-Allow-Origin: in the Mac desktop app every fetch of it fails.
+    net.down.add("https://dns.quad9.net");
+    expect(await verify(net, s, { folder })).toMatchObject({ subject: me.pubKeyZ32 });
+    const lookups = net.requests.filter(r => r.url.includes("/dns-query?")).map(r => new URL(r.url).host);
+    expect(lookups.sort()).toEqual(["cloudflare-dns.com", "cloudflare-dns.com", "dns.quad9.net", "dns.quad9.net"]);
+    // No resolver answers at all: this side's network, not the proof.
+    net.down.add("https://cloudflare-dns.com").add("https://dns.google");
+    const failure = await verify(net, s, { folder }).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(failure)).toMatch(/Quad9 could not be reached/);
   });
 
   it("does not contact a homeserver name that resolves to a private network, or to nothing", async () => {

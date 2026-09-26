@@ -84,7 +84,7 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
     validity: { defaultDays: 90, maxDays: 365 },
     // The file can be deleted, or the key can move to another homeserver, before the proof expires.
     recheck: { afterSeconds: 86_400 },
-    privacy: "Your contact’s app reads your key’s records from Pubky’s Pkarr relays (pkarr.pubky.org, pkarr.pubky.app), looks up your homeserver’s address through its DNS-over-HTTPS resolver (it only contacts a public address, on port 443), and reads the proof file from your homeserver, which sees the contact’s IP address.",
+    privacy: "Your contact’s app reads your key’s records from Pubky’s Pkarr relays (pkarr.pubky.org, pkarr.pubky.app), looks up your homeserver’s address through its DNS-over-HTTPS resolver (or the next one when that cannot be reached; it only contacts a public address, on port 443), and reads the proof file from your homeserver, which sees the contact’s IP address.",
     signers: [signer],
     // Pubky's own URI form for a key, as its SDK writes resources (`pubky://<key>/…`).
     publicUri: key => `pubky://${key}`,

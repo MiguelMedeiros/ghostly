@@ -628,6 +628,6 @@
     "identityChecks": "Identity checks",
     "domainLookups": "Domain lookups",
     "domainLookupsHint": "Checks contacts' domain proofs. The resolver sees which domain.",
-    "domainLookupsInfo": "When a contact shares a domain proof, this app looks up its record through {{name}}, a DNS-over-HTTPS resolver. It learns which domain was looked up and when, never your chats. Proofs published as a file on a website are downloaded from that website, which sees your IP address."
+    "domainLookupsInfo": "When a contact shares a domain proof, this app looks up its record through {{name}}, a DNS-over-HTTPS resolver. If it cannot be reached, the next of Quad9, Cloudflare and Google is asked. The resolver learns which domain was looked up and when, never your chats. Proofs published as a file on a website are downloaded from that website, which sees your IP address."
   }
 }

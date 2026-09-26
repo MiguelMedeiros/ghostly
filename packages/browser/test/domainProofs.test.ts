@@ -86,9 +86,28 @@ describe('DNS TXT through DNS over HTTPS', () => {
     await Promise.all([1, 2, 3].map(() => lookupDomain('example.com', 'dns', { fetch: net.fetch })));
     expect(net.calls).toHaveLength(1);
     const down: DomainFetch = vi.fn(async () => { throw new TypeError('offline'); });
-    await expect(lookupDomain('down.com', 'dns', { fetch: down })).rejects.toThrow(/could not be reached/);
-    await expect(lookupDomain('down.com', 'dns', { fetch: down })).rejects.toThrow(/could not be reached/);
-    expect(down).toHaveBeenCalledTimes(2);
+    await expect(lookupDomain('down.com', 'dns', { fetch: down })).rejects.toThrow(/Quad9 could not be reached/);
+    await expect(lookupDomain('down.com', 'dns', { fetch: down })).rejects.toThrow(/Quad9 could not be reached/);
+    // Each lookup asked the three resolvers in turn.
+    expect(down).toHaveBeenCalledTimes(6);
+  });
+
+  it('asks the next resolver only when the chosen one gives no answer at all, and says who answered', async () => {
+    const net = network({ txt: { '_ghostly.example.com': [domainTxtRecord(mine)] } });
+    // Quad9 cannot be read from WebKit (its HTTP/3 answers carry no CORS header): the fetch fails there.
+    const noQuad9: DomainFetch = async (url, options) => { if (url.startsWith('https://dns.quad9.net/')) throw new TypeError('Load failed'); return net.fetch(url, options); };
+    const found = await lookupDomain('example.com', 'dns', { fetch: noQuad9 });
+    expect(found).toMatchObject({ records: [mine], resolver: 'cloudflare' });
+    expect(net.calls.map(c => new URL(c.url).host)).toEqual(['cloudflare-dns.com']);
+    // One that refuses the request counts as unreachable; the choice is kept first.
+    const refusing: DomainFetch = async (url, options) => url.startsWith('https://cloudflare-dns.com/') ? { status: 505, contentType: 'text/html', text: '', bytes: new Uint8Array() } : net.fetch(url, options);
+    clearDomainCache();
+    expect(await lookupDomain('example.com', 'dns', { fetch: refusing, resolver: 'cloudflare' })).toMatchObject({ resolver: 'quad9' });
+    // An answer is never asked again elsewhere, even a failure: that would route around a resolver's DNSSEC check.
+    clearDomainCache();
+    const servfail = vi.fn<DomainFetch>(async url => { const b = answerDoh(queryFromUrl(url), {}); b[3] = (b[3] & 0xf0) | 2; return { status: 200, contentType: 'application/dns-message', text: '', bytes: b }; });
+    await expect(lookupDomain('example.com', 'dns', { fetch: servfail })).rejects.toThrow(/Quad9 could not resolve/);
+    expect(servfail).toHaveBeenCalledTimes(1);
   });
 
   it.each<[string, DomainFetch, RegExp]>([

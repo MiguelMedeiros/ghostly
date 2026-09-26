@@ -12,7 +12,8 @@ import type { IdentityFetch } from './contract';
  * answer is bounded and parsed strictly, and lookups are cached only briefly.
  *
  * What a check reveals, and to whom:
- *  - DNS: the chosen resolver learns that this device looked up `_ghostly.<domain>`.
+ *  - DNS: the chosen resolver learns that this device looked up `_ghostly.<domain>`
+ *    (the next one in DOH_RESOLVERS too, when the chosen one gives no answer).
  *    The domain's own servers see only the resolver.
  *  - HTTPS / NIP-05: the resolver learns the domain (its addresses are looked up
  *    first, to refuse private networks), and the domain's web server — run by
@@ -61,22 +62,44 @@ export interface DomainLookupOptions {
 /** A check that did not confirm the record, with a message for people. */
 export class DomainCheckError extends Error {}
 
-/** One RFC 8484 GET. The query has ID 0 and no client subnet, so it carries only the name. */
-export async function dohQuery(name: string, type: DnsType, options: DomainLookupOptions): Promise<DnsResponse> {
-  const resolver = resolverById(options.resolver);
+/** A resolver that gave no DNS answer at all: not reached, or it refused the request. The next one may answer. */
+class ResolverUnavailable extends DomainCheckError {}
+
+/** One RFC 8484 GET to one resolver. The query has ID 0 and no client subnet, so it carries only the name. */
+async function askResolver(resolver: DohResolver, name: string, type: DnsType, options: DomainLookupOptions): Promise<DnsResponse> {
   let response: Awaited<ReturnType<DomainFetch>>;
   try {
     response = await options.fetch(`${resolver.url}?dns=${toBase64Url(encodeDnsQuery(name, type))}`, {
       headers: { accept: 'application/dns-message' }, maxBytes: DNS_MAX_BYTES, signal: options.signal, redirect: 'error' });
   } catch (e) {
-    throw new DomainCheckError(/too large/i.test(String(e)) ? `${resolver.name} sent an answer that is too large` : `${resolver.name} could not be reached`);
+    throw /too large/i.test(String(e))
+      ? new DomainCheckError(`${resolver.name} sent an answer that is too large`)
+      : new ResolverUnavailable(`${resolver.name} could not be reached`);
   }
   if (response.status !== 200 || !/^application\/dns-message\b/i.test(response.contentType))
-    throw new DomainCheckError(`${resolver.name} refused the lookup`);
+    throw new ResolverUnavailable(`${resolver.name} refused the lookup`);
   let answer: DnsResponse;
   try { answer = decodeDnsResponse(response.bytes, name, type); } catch { throw new DomainCheckError(`${resolver.name} sent an unusable answer`); }
   if (answer.rcode !== 0 && answer.rcode !== 3) throw new DomainCheckError(`${resolver.name} could not resolve ${name}`);
   return answer;
+}
+
+/**
+ * A lookup through the chosen resolver, and through the others in turn (in list order) only when it gives no DNS
+ * answer at all. Quad9, for one, cannot be read from WebKit (the Mac desktop app, Safari): its HTTP/3 answers carry
+ * no CORS header. An answer, even "no such name" or a failure, is never asked again elsewhere. `resolver`: who answered.
+ */
+export async function dohQuery(name: string, type: DnsType, options: DomainLookupOptions): Promise<DnsResponse & { resolver: DohResolverId }> {
+  const chosen = resolverById(options.resolver);
+  let first: DomainCheckError | undefined;
+  for (const resolver of [chosen, ...DOH_RESOLVERS.filter(r => r !== chosen)]) {
+    try { return { ...await askResolver(resolver, name, type, options), resolver: resolver.id }; }
+    catch (e) {
+      if (!(e instanceof ResolverUnavailable) || options.signal?.aborted) throw e;
+      first ??= e;
+    }
+  }
+  throw first!;
 }
 
 /**
@@ -130,7 +153,7 @@ async function lookup(domain: string, method: DomainMethod, options: DomainLooku
     const values: string[] = [];
     for (const record of answer.answers.slice(0, 32)) { try { values.push(txtValue(record.data)); } catch { /* not text: not ours */ } }
     const ttlMs = answer.answers.length ? Math.min(...answer.answers.map(a => a.ttl)) * 1000 : 0;
-    return { domain, method, resolver, records: recordsFromTxt(values), found: answer.answers.length > 0, dnssec: answer.authenticated, ttlMs };
+    return { domain, method, resolver: answer.resolver, records: recordsFromTxt(values), found: answer.answers.length > 0, dnssec: answer.authenticated, ttlMs };
   }
   const text = await fetchWellKnown(domain, method, options);
   const base = { domain, method, resolver, dnssec: false, records: [] as DomainRecord[], ttlMs: CACHE_FILE_MS };

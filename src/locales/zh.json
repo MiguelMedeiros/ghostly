@@ -628,6 +628,6 @@
     "identityChecks": "身份验证",
     "domainLookups": "域名查询",
     "domainLookupsHint": "验证联系人的域名证明。解析器能看到是哪个域名。",
-    "domainLookupsInfo": "当联系人分享域名证明时,本应用会通过 DNS-over-HTTPS 解析器 {{name}} 查询其记录。解析器能知道查询了哪个域名以及何时查询,但看不到你的聊天。以文件形式发布在网站上的证明会从该网站下载,该网站能看到你的 IP 地址。"
+    "domainLookupsInfo": "当联系人分享域名证明时,本应用会通过 DNS-over-HTTPS 解析器 {{name}} 查询其记录。如果无法访问它,则询问 Quad9、Cloudflare 和 Google 中的下一个。解析器能知道查询了哪个域名以及何时查询,但看不到你的聊天。以文件形式发布在网站上的证明会从该网站下载,该网站能看到你的 IP 地址。"
   }
 }
