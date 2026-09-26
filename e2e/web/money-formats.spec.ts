@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
-import { chat, connect, expect, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { BARK_TESTNET, arkadeAddress, bcrt1q, bolt12Offer } from "../../src/test/payments/moneyFormatFixtures";
 
@@ -55,16 +55,15 @@ test("BDK on regtest: a pasted bitcoin: link is paid from the regtest wallet aft
   await link(alice, bob);
   await connect(alice, bob);
 
-  // Alice: a BDK wallet on regtest, funded by the miner.
+  // Alice: a Testnet BDK wallet on regtest, made with New, funded by the miner.
   const panel = alice.page.getByTestId("bitcoin-wallet");
-  await useTestnet(alice);
-  await openWallet(alice, "bitcoin");
-  await choose(panel.getByTestId("onchain-source-select"), "bdk");
-  const form = panel.getByTestId("provider-form-bdk");
-  await panel.getByTestId("bdk-written").check();
-  await choose(form.getByLabel("Network"), "regtest");
-  await form.getByLabel("Esplora server").fill(BDK_REGTEST.esplora);
-  await form.getByTestId("provider-save").click();
+  await createWallet(alice, "bitcoin", "testnet", { timeout: 60_000, fill: async (form) => {
+    await form.getByTestId("bdk-written").check();
+    await choose(form.getByTestId("provider-form-bdk").getByLabel("Network"), "regtest");
+    await form.getByLabel("Esplora server").fill(BDK_REGTEST.esplora);
+    await form.getByTestId("provider-save").click();
+  } });
+  await openWallet(alice, "bitcoin-testnet");
   await expect(panel.getByTestId("onchain-source-status")).toContainText(/Connected · BDK BIP84 · [0-9a-f]{8} · regtest/, { timeout: 60_000 });
   await panel.getByTestId("bitcoin-new-address").click();
   regtest("send", (await panel.getByTestId("bitcoin-address").innerText()).trim(), "100000");
