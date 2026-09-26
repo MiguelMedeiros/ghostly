@@ -102,6 +102,8 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   const [adding, setAddingState] = useState(false);
   const setAdding = (on: boolean) => { setAddingState(on); onAdding?.(on); };
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
+  /** The call in flight stops a share (else it shares). */
+  const [stopping, setStopping] = useState(false);
   /** What the back last did, said on it until the card turns face up again. */
   const [done, setDone] = useState<"shared" | "stopped" | "only" | null>(null);
   const { side, flipped, turn, turnBack } = useCardFlip();
@@ -129,9 +131,10 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   const providers = addableProviders().map(p => p.id);
   const canAdd = providers.length > 0;
   const manage = onManage;
+  /** `on`: stop sharing it here. Else share it, or share it again after the contact's app could not verify it. */
   const toggle = (p: IdentityProofView, on: boolean) => {
     if (!link || busy) return;
-    setBusy(p.id); setError("");
+    setBusy(p.id); setStopping(on); setError("");
     void engine.call(on ? "withdrawIdentityProof" : "shareIdentityProof", { linkId: link.id, id: p.id })
       .then(() => { if (!on && onShared) onShared(); else setDone(on ? "stopped" : "shared"); }, e => setError(message(e))).finally(() => setBusy(""));
   };
@@ -189,8 +192,8 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
         front={<IdCardFace card={showing.card} shared={showing.on} />}
         back={showing.ghostly
           ? <GhostlyBack t={t} card={showing.card} contact={contact} others={others.length} busy={busy} done={done} error={error} actionRef={actionRef} onShareOnly={shareOnlyGhostly} onCards={backToCards} />
-          : <IdentityBack entry={showing} contact={contact} now={now} busy={busy} done={done} error={error} actionRef={actionRef}
-            status={ids?.shared.find(s => s.id === showing.id)} onToggle={() => toggle(showing.proof, showing.on)} onCards={backToCards} />} />
+          : <IdentityBack entry={showing} contact={contact} now={now} busy={busy} stopping={stopping} done={done} error={error} actionRef={actionRef}
+            status={ids?.shared.find(s => s.id === showing.id)} onShare={() => toggle(showing.proof, false)} onStop={() => toggle(showing.proof, true)} onCards={backToCards} />} />
       : <>
         {head && <ComposerSheetHead title="Your identities" who={`shown to ${contact} only`} />}
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={use}
@@ -276,11 +279,15 @@ function GhostlyBack({ t, card, contact, others, busy, done, error, actionRef, o
  * The chosen identity's card, turned over: what the contact sees (its mark, the identity, who stands behind it and
  * until when), where it stands in this chat, and Share or Stop sharing. Once done, a line saying so in its place.
  */
-function IdentityBack({ entry, contact, now, busy, done, error, status, actionRef, onToggle, onCards }: {
-  entry: Proof; contact: string; now: number; busy: string; done: "shared" | "stopped" | "only" | null; error: string; status?: Shared;
-  actionRef: RefObject<HTMLButtonElement | null>; onToggle: () => void; onCards: () => void;
+function IdentityBack({ entry, contact, now, busy, stopping, done, error, status, actionRef, onShare, onStop, onCards }: {
+  entry: Proof; contact: string; now: number; busy: string; stopping: boolean; done: "shared" | "stopped" | "only" | null; error: string; status?: Shared;
+  actionRef: RefObject<HTMLButtonElement | null>; onShare: () => void; onStop: () => void; onCards: () => void;
 }) {
   const { proof: p, card, on } = entry;
+  // The contact's app could not verify it: the way on is to share it again (a new check), not to stop first.
+  const retry = on && status?.status === "rejected";
+  /** The main action stops the share. */
+  const stops = on && !retry;
   const state = status && status.status !== "withdrawn" ? `${SHARED_STATUS[status.status]}${status.status === "rejected" && status.error ? `: ${status.error}` : ""}` : "Not shared";
   const warn = p.expiresAt > now && expiringSoon(p, now) ? `Expires in ${daysLeft(p.expiresAt, now)} ${daysLeft(p.expiresAt, now) === 1 ? "day" : "days"}` : "";
   const tone = status?.status === "rejected" ? "text-danger" : status?.status === "accepted" && on ? "text-accent" : undefined;
@@ -311,11 +318,12 @@ function IdentityBack({ entry, contact, now, busy, done, error, status, actionRe
           {done === "shared" ? `Shared with ${contact}` : `${contact} no longer sees it`}
         </p> : <>
           {/* While a call runs the button stays focusable (a disabled button would drop the keyboard's focus). */}
-          <button ref={actionRef} type="button" data-testid="composer-identity-share" data-variant={on ? "secondary" : undefined} className="composer-sheet-action"
-            aria-disabled={!!busy || undefined} aria-busy={working || undefined} onClick={onToggle}>
-            {working ? (on ? "Stopping…" : "Sharing…") : on ? "Stop sharing" : <>Share with {contact}<ForwardArrow /></>}
+          <button ref={actionRef} type="button" data-testid="composer-identity-share" data-variant={stops ? "secondary" : undefined} className="composer-sheet-action"
+            aria-disabled={!!busy || undefined} aria-busy={(working && stopping === stops) || undefined} onClick={stops ? onStop : onShare}>
+            {working && stopping === stops ? (stops ? "Stopping…" : "Sharing…") : stops ? "Stop sharing" : retry ? <>Share again<ForwardArrow /></> : <>Share with {contact}<ForwardArrow /></>}
           </button>
-          {on && <p className="id-card-back-note">Stopping tells {contact}; a copy they kept stays.</p>}
+          {retry ? <button type="button" data-testid="composer-identity-stop" className="composer-identities-manage" aria-disabled={!!busy || undefined} aria-busy={(working && stopping) || undefined} onClick={onStop}>{working && stopping ? "Stopping…" : "Stop sharing"}</button>
+            : on && <p className="id-card-back-note">Stopping tells {contact}; a copy they kept stays.</p>}
         </>}
         {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
       </div>

@@ -84,6 +84,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
           </span>
           {shown.name && <span className="block truncate text-sm font-medium text-text-primary" data-testid="identity-share-name">{shown.name}</span>}
           <span className={`block truncate ${shown.name ? "text-xs text-text-secondary" : "text-sm font-medium text-text-primary"}`} data-testid="identity-share-subject" title={entry.subject}>{shown.short ?? "…"}</span>
+          {mark === "failed" && entry.error && <span className="block truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={entry.error}>{entry.error}</span>}
         </span>
         <ShareMarkIcon mark={mark} title={title} />
       </button>

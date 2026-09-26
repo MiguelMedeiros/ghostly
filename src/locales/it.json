@@ -628,6 +628,6 @@
     "identityChecks": "Verifica dell'identità",
     "domainLookups": "Ricerche di dominio",
     "domainLookupsHint": "Verifica le prove di dominio dei contatti. Il resolver vede quale dominio.",
-    "domainLookupsInfo": "Quando un contatto condivide una prova di dominio, questa app cerca il suo record tramite {{name}}, un resolver DNS-over-HTTPS. Sa quale dominio è stato cercato e quando, mai le tue chat. Le prove pubblicate come file su un sito web vengono scaricate da quel sito, che vede il tuo indirizzo IP."
+    "domainLookupsInfo": "Quando un contatto condivide una prova di dominio, questa app cerca il suo record tramite {{name}}, un resolver DNS-over-HTTPS. Se non risponde, si interroga il successivo tra Quad9, Cloudflare e Google. Il resolver sa quale dominio è stato cercato e quando, mai le tue chat. Le prove pubblicate come file su un sito web vengono scaricate da quel sito, che vede il tuo indirizzo IP."
   }
 }

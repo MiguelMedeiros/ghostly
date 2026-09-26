@@ -96,7 +96,7 @@ export const domain: IdentityProofProvider<DomainEvidence> = {
   publicUri: domain => `https://${domain}`,
   validity: { defaultDays: 90, maxDays: 365 },
   recheck: { afterSeconds: 86_400 },
-  privacy: "DNS: the contact's app asks the DNS-over-HTTPS resolver chosen in its settings (Quad9 by default) for the record, " +
+  privacy: "DNS: the contact's app asks the DNS-over-HTTPS resolver chosen in its settings (Quad9 by default; the next of Quad9, Cloudflare and Google when it cannot be reached) for the record, " +
     "so that resolver learns the domain was checked. Website or NIP-05: the resolver learns the domain, and the domain's web server sees the contact's IP address.",
   signers: [dnsSigner, httpsSigner, nip05Signer("nip05-nip07"), nip05Signer("nip05-nip46")],
   parseEvidence(raw) {

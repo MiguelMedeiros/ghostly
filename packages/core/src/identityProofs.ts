@@ -350,8 +350,9 @@ export class IdentityExchange {
     if (!s || s.status === "withdrawn") return;
     this.requested.delete(id);
     if (s.status === "queued") { await this.options.storage.update(l => this.log({ ...l, shared: l.shared.filter(x => x.id !== id) }, { type: "unsent", side: "mine", proof: id })); return; }
+    // One the contact refused, it never held: its app writes no stop, and neither does this side.
     await this.setShared({ ...s, status: "withdrawal-pending", at: this.now(), error: undefined },
-      { type: "stopped", side: "mine", proof: id, provider: s.provider, subject: s.subject, reason: "withdrawn" });
+      s.status === "rejected" ? undefined : { type: "stopped", side: "mine", proof: id, provider: s.provider, subject: s.subject, reason: "withdrawn" });
     if (connected) this.send({ t: "idp-withdraw", id });
   }
 

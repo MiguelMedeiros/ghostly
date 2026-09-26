@@ -341,6 +341,32 @@ describe("identity timeline, from the exchange", () => {
     expect(tl(w, bob, alice)).toEqual([expect.objectContaining({ side: "theirs", state: "failed", error: "The file on the homeserver is not this proof", subject: externalKey })]);
   });
 
+  it("a refused share tried again is a new attempt, never a stop; stopping a refused one writes no stop line", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    let refuse = true;
+    const ab = w.peer(alice, bob, "a".repeat(64));
+    w.peer(bob, alice, "a".repeat(64), { verify: async (s, e) => { if (refuse) throw new Error("Quad9 could not be reached"); return fakeVerify(s, e); } });
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(tl(w, alice, bob)[0]?.state).toBe("failed"));
+    // Shared again straight from the failed state (the picker's "Share again"): no "You stopped sharing" in between.
+    refuse = false;
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(tl(w, alice, bob)[1]?.state).toBe("verified"));
+    const kinds = (me: string, them: string) => tl(w, me, them).map(e => `${e.kind}:${e.state ?? e.reason}`);
+    expect(kinds(alice, bob)).toEqual(["shared:failed", "shared:verified"]);
+    expect(kinds(bob, alice)).toEqual(["shared:failed", "shared:verified"]);
+    // A refused share taken back: the contact never held it, so neither side shows a stop.
+    const other = w.addProof();
+    refuse = true;
+    await ab.share(other, true);
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared.find(s => s.id === other)?.status).toBe("rejected"));
+    await ab.withdraw(other, true);
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared.find(s => s.id === other)?.status).toBe("withdrawn"));
+    expect(kinds(alice, bob).slice(2)).toEqual(["shared:failed"]);
+    expect(kinds(bob, alice).slice(2)).toEqual(["shared:failed"]);
+  });
+
   it("a kind the contact's app cannot verify is a failed share there too", async () => {
     const w = world(), { alice, bob } = w.ids;
     const ab = w.peer(alice, bob, "a".repeat(64)); w.peer(bob, alice, "a".repeat(64), { providers: [] });
