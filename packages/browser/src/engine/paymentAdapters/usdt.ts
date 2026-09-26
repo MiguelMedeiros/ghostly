@@ -1,7 +1,7 @@
 import { mnemonicToSeedSync } from '@scure/bip39';
 import WalletManagerEvm, { type WalletAccountEvm } from '@tetherto/wdk-wallet-evm';
 import { Interface, Transaction, getAddress, keccak256 } from 'ethers';
-import { ETHEREUM_USDT, EVM_TEST_CHAINS, SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, PaymentPreflightError, validatePaymentTarget, type PaymentAdapter, type PaymentExecution, type PaymentReview, type PaymentTarget } from '@ghostly/core';
+import { ETHEREUM_USDT, EVM_TEST_CHAINS, USDT_PUBLIC_RPC, SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, PaymentPreflightError, validatePaymentTarget, type PaymentAdapter, type PaymentExecution, type PaymentReview, type PaymentTarget } from '@ghostly/core';
 import { sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
 
 export interface UsdtConfig {
@@ -22,9 +22,6 @@ const erc20 = new Interface(['function decimals() view returns(uint8)', 'functio
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const CONFIRMATIONS = 2;
 
-/** Each chain's public RPC, which needs no key: the defaults, and what a request names as its `provider`. */
-export const PUBLIC_USDT_RPC = { ethereum: 'https://ethereum.publicnode.com', sepolia: 'https://ethereum-sepolia-rpc.publicnode.com' } as const;
-
 /**
  * The `provider` a request carries to the contact. Which RPC pays is the payer's own choice, so it names none of
  * this wallet's: a typed RPC URL may hold an API key (`/v3/<key>`), and every contact would read it. Older apps
@@ -32,7 +29,7 @@ export const PUBLIC_USDT_RPC = { ethereum: 'https://ethereum.publicnode.com', se
  * start with), and a local test chain's origin, without its path.
  */
 export function wireProvider(config: Pick<UsdtConfig, 'network' | 'provider'>): string {
-  return config.network === 'evm-local' ? new URL(config.provider).origin : PUBLIC_USDT_RPC[config.network];
+  return config.network === 'evm-local' ? new URL(config.provider).origin : USDT_PUBLIC_RPC[config.network];
 }
 
 /** WDK signs locally. Every network call uses the configured RPC, never a peer-supplied URL. */

@@ -60,7 +60,7 @@ describe("a payment never crosses networks", () => {
     expect(lightnings.testnet.pay).not.toHaveBeenCalled();
     expect(lightnings.mainnet.pay).not.toHaveBeenCalled();
     // Paid with no card named, it goes through the request's own network: Mainnet's Lightning, never Testnet's.
-    await desk.payRequest({ linkId: "l", paymentId: "real-one" });
+    await desk.payRequest({ linkId: "l", paymentId: "real-one", confirmedReal: true });
     expect(lightnings.mainnet.quote).toHaveBeenCalledWith("lnbc100");
     expect(lightnings.testnet.quote).not.toHaveBeenCalled();
   });

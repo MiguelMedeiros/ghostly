@@ -87,7 +87,7 @@ describe("paying a request", () => {
     const { desk, wallet, state } = await setup([incomingRequest]);
     wallet.createToken.mockRejectedValue(new Error("Not enough sats in your wallet"));
     wallet.payQuote.mockResolvedValue(true);
-    await desk.payRequest({ linkId: "l1", paymentId: "r1" });
+    await desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true });
     expect(wallet.payQuote).toHaveBeenCalledOnce();
     expect(state("r1")).toMatchObject({ state: "settled", mint: MINT });
   });
@@ -100,7 +100,7 @@ describe("paying a request", () => {
     });
     link.sendPayment.mockRejectedValue(new Error("The contact went away"));
     wallet.receiveToken.mockRejectedValue(new Error("Token already spent"));
-    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1" })).rejects.toThrow(/went away/);
+    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true })).rejects.toThrow(/went away/);
     expect(wallet.quoteInvoice).not.toHaveBeenCalled();
     expect(wallet.payQuote).not.toHaveBeenCalled();
   });
@@ -110,9 +110,9 @@ describe("paying a request", () => {
     wallet.createToken.mockRejectedValue(new Error("You share no mint with this contact"));
     wallet.payQuote.mockResolvedValue(false);
 
-    await desk.payRequest({ linkId: "l1", paymentId: "r1" });
+    await desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true });
     expect(state("r1")).toMatchObject({ state: "pending", lightningPending: true });
-    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1" })).rejects.toThrow(/still pending/);
+    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true })).rejects.toThrow(/still pending/);
 
     await desk.onMeltResolved({ quote: "m1", mint: MINT, paymentId: "r1" } as PendingMelt, true);
     expect(state("r1")).toMatchObject({ state: "settled", mint: MINT });
@@ -123,7 +123,7 @@ describe("paying a request", () => {
     const { desk, wallet, state } = await setup([incomingRequest]);
     wallet.createToken.mockRejectedValue(new Error("You share no mint with this contact"));
     wallet.payQuote.mockResolvedValue(false);
-    await desk.payRequest({ linkId: "l1", paymentId: "r1" });
+    await desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true });
     await desk.onMeltResolved({ quote: "m1", mint: MINT, paymentId: "r1" } as PendingMelt, false);
     expect(state("r1")).toMatchObject({ state: "pending", error: "The Lightning payment did not go through" });
     expect(state("r1")?.lightningPending).toBeUndefined();
@@ -140,9 +140,9 @@ describe("paired payment admission and concurrency", () => {
   it("coalesces simultaneous pay clicks into one spend", async () => {
     const { desk, wallet } = await setup([incomingRequest]);
     wallet.createToken.mockResolvedValue({ token: "fixture", mint: MINT });
-    await Promise.all([desk.payRequest({ linkId: "l1", paymentId: "r1" }), desk.payRequest({ linkId: "l1", paymentId: "r1" })]);
+    await Promise.all([desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true }), desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true })]);
     expect(wallet.createToken).toHaveBeenCalledOnce();
-    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1" })).rejects.toThrow(/already paid/);
+    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true })).rejects.toThrow(/already paid/);
   });
   it("deduplicates concurrent incoming tokens and repeats the receipt", async () => {
     const { desk, wallet, link } = await setup([]);
@@ -176,7 +176,7 @@ describe("ways of paying chosen per chat", () => {
     const { desk, wallet, allowed } = await setup([incomingRequest]);
     allowed.cashu = false;
     wallet.payQuote.mockResolvedValue(true);
-    await desk.payRequest({ linkId: "l1", paymentId: "r1" });
+    await desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true });
     expect(wallet.createToken).not.toHaveBeenCalled();
     expect(wallet.quoteInvoice).toHaveBeenCalledWith("lnbc40", "mainnet");
   });
@@ -185,10 +185,10 @@ describe("ways of paying chosen per chat", () => {
     wallet.createToken.mockResolvedValue({ token: "fixture", mint: MINT });
     wallet.payQuote.mockResolvedValue(true);
     allowed.lightning = false;
-    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", via: "lightning" })).rejects.toThrow(/cannot be paid over Lightning/);
+    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true, via: "lightning" })).rejects.toThrow(/cannot be paid over Lightning/);
     allowed.lightning = true;
-    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", via: "lightning", maxFee: 1 })).rejects.toThrow(/fee \(2 sats\) is too high/);
-    await desk.payRequest({ linkId: "l1", paymentId: "r1", via: "lightning", maxFee: 2 });
+    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true, via: "lightning", maxFee: 1 })).rejects.toThrow(/fee \(2 sats\) is too high/);
+    await desk.payRequest({ linkId: "l1", paymentId: "r1", confirmedReal: true, via: "lightning", maxFee: 2 });
     expect(wallet.createToken).not.toHaveBeenCalled();
     expect(wallet.payQuote).toHaveBeenCalledOnce();
     expect(state("r1")).toMatchObject({ state: "settled" });

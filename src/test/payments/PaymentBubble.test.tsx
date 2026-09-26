@@ -264,7 +264,7 @@ describe("paying a request's invoice over Lightning", () => {
   const lightningRequest = () => incomingRequest({ amount: 2_100, invoice: MAINNET_INVOICE, mints: ["https://other.example"] });
   const quote = (patch = {}) => ({ quote: "q-1", mint: "", amount: 2_100, feeReserve: 5, source: "cln-1", ...patch });
 
-  it("shows what the Mainnet Lightning source would spend, then pays with the fee ceiling on Approve", async () => {
+  it("shows what the Mainnet Lightning source would spend, then pays with the fee ceiling once confirmed as real money", async () => {
     const { user, engine } = show(lightningRequest(), { wallet: { lightning: lightningSource({ providerId: "cln-1", alias: "My node" }) } });
     engine.on("walletQuoteInvoice", () => quote()).on("payRequest", () => undefined);
     expect(screen.queryByRole("combobox", { name: "Cashu mint" })).not.toBeInTheDocument();
@@ -277,7 +277,14 @@ describe("paying a request's invoice over Lightning", () => {
     expect(review).toHaveTextContent("Through My node · fee up to 5 sats");
     expect(payButton()).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Approve payment" }));
-    expect(engine.callsTo("payRequest")).toEqual([{ linkId: "link-1", paymentId: "pay-1", via: "lightning", maxFee: 63, network: "mainnet" }]);
+    // Real money asks once more, in words; Back sends nothing.
+    const confirm = screen.getByTestId("review-mainnet-confirm");
+    expect(confirm).toHaveTextContent("Real money. This sends 2,100 sats");
+    await user.click(screen.getByTestId("review-confirm-back"));
+    expect(engine.callsTo("payRequest")).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Approve payment" }));
+    await user.click(screen.getByTestId("review-confirm-send"));
+    expect(engine.callsTo("payRequest")).toEqual([{ linkId: "link-1", paymentId: "pay-1", via: "lightning", maxFee: 63, network: "mainnet", confirmedReal: true }]);
     await expect.poll(() => screen.queryByTestId("payment-review")).toBeNull();
   });
 

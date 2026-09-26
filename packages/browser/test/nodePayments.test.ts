@@ -9,6 +9,7 @@ import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
 import { FakeLightningProvider, FakeOnchainProvider, fakeAddress, fakeInvoice, fakeLightning, fakeOnchain } from "../src/engine/paymentAdapters/providers/testing";
 import type { StoredLink, StoredPayment } from "../src/shared/types";
+import { REAL_MONEY_UNCONFIRMED } from "../src/engine/paymentAdapters/walletInstances";
 // covers: payments.chat.review, payments.chat.method-off, payments.chat.reconcile, wallet.mode, wallet.onchain.sources, wallet.cashu.mint.manage, wallet.cashu.export
 
 /** A connected contact, as far as the engine's payment paths look at it. */
@@ -381,5 +382,64 @@ describe("the Cashu wallet and Lightning", () => {
     expect(await node.walletExport()).toEqual([{ mint: TEST_MINT, token: "cashuBexported-secret", amount: 3 }]);
     await node["refreshWallet"]();
     expect(JSON.stringify(node.getState())).not.toContain("cashuBexported-secret");
+  });
+});
+
+describe("real money goes out only once confirmed as such, whatever screen asked", () => {
+  const REAL = "https://mint.minibits.cash/Bitcoin";
+  const usdtTarget = (): PaymentTarget => ({ method: "usdt", network: "sepolia", provider: "https://ethereum-sepolia-rpc.publicnode.com", asset: "TEST-USDT", unit: "token-base", chainId: 11155111,
+    token: "0x" + "1".repeat(40), decimals: 6, address: "0x" + "2".repeat(40), issuedAt: Date.now() - 1_000, expiresAt: Date.now() + 60_000 });
+
+  it("approvePayment: a Mainnet review without confirmedReal is refused before the coordinator, and stays pending; Testnet needs nothing", async () => {
+    const { node } = track(engine());
+    const approve = vi.spyOn(node["paymentCoordinator"], "approve").mockRejectedValue(new Error("reached the coordinator"));
+    const chat = addChat(node, stubLink());
+    for (const review of [savedReview({ linkId: chat.id, network: "bitcoin", provider: REAL }), savedReview({ linkId: chat.id, method: "bitcoin", network: "bitcoin", provider: ONCHAIN_PROVIDER })]) {
+      await intentRepository.put({ review, prepared: {} });
+      await expect(node.approvePayment({ id: review.id }), review.method).rejects.toThrow(REAL_MONEY_UNCONFIRMED);
+      expect((await intentRepository.get(review.id))?.review.state).toBe("pending");
+      expect(approve).not.toHaveBeenCalled();
+      await expect(node.approvePayment({ id: review.id, confirmedReal: true })).rejects.toThrow("reached the coordinator");
+      approve.mockClear();
+    }
+    const test = savedReview({ linkId: chat.id });
+    await intentRepository.put({ review: test, prepared: {} });
+    await expect(node.approvePayment({ id: test.id })).rejects.toThrow("reached the coordinator");
+  });
+
+  it("walletPayQuote: a Mainnet mint's quote, or a Mainnet Lightning source's, is not paid without confirmedReal", async () => {
+    const { node } = track(engine());
+    const cashuPay = vi.spyOn(node["wallet"], "payQuote").mockResolvedValue(true);
+    await expect(node.walletPayQuote({ quote: "melt", mint: REAL })).rejects.toThrow(REAL_MONEY_UNCONFIRMED);
+    expect(cashuPay).not.toHaveBeenCalled();
+    expect(await node.walletPayQuote({ quote: "melt", mint: REAL, confirmedReal: true })).toEqual({ paid: true });
+    expect(await node.walletPayQuote({ quote: "melt", mint: TEST_MINT })).toEqual({ paid: true });
+    expect(cashuPay).toHaveBeenCalledTimes(2);
+
+    // A quote the Mainnet Lightning source made: its network decides, not the mint named with it.
+    const mainnet = node["lightnings"].mainnet;
+    vi.spyOn(mainnet, "hasQuote").mockImplementation((quote) => quote === "ln-quote");
+    const pay = vi.spyOn(mainnet, "pay").mockResolvedValue(true);
+    await expect(node.walletPayQuote({ quote: "ln-quote", mint: TEST_MINT })).rejects.toThrow(REAL_MONEY_UNCONFIRMED);
+    expect(pay).not.toHaveBeenCalled();
+    expect(await node.walletPayQuote({ quote: "ln-quote", mint: TEST_MINT, confirmedReal: true })).toEqual({ paid: true });
+  });
+
+  it("sendPayment: Mainnet ecash without confirmedReal is refused before any ecash is made", async () => {
+    const { node } = track(engine());
+    const chat = addChat(node, stubLink());
+    const createToken = vi.spyOn(node["wallet"], "createToken").mockRejectedValue(new Error("reached the wallet"));
+    for (const network of [undefined, "mainnet"] as const) await expect(node.sendPayment({ linkId: chat.id, amount: 5, timestamp: 1, network })).rejects.toThrow(REAL_MONEY_UNCONFIRMED);
+    expect(createToken).not.toHaveBeenCalled();
+    await expect(node.sendPayment({ linkId: chat.id, amount: 5, timestamp: 1, confirmedReal: true })).rejects.toThrow("reached the wallet");
+    await expect(node.sendPayment({ linkId: chat.id, amount: 5, timestamp: 2, network: "testnet" })).rejects.toThrow("reached the wallet");
+  });
+
+  it("preparePayment: a way this chat has off on that network (Testnet USDT) prepares nothing", async () => {
+    const { node } = track(engine());
+    const prepare = vi.spyOn(node["paymentCoordinator"], "prepare");
+    const chat = addChat(node, stubLink(), { paymentNetworks: { usdt: ["mainnet"] } });
+    await expect(node.preparePayment({ target: usdtTarget(), amount: 1_000, feeCap: 10 ** 15, payee: chat.peerPubKeyZ32, linkId: chat.id })).rejects.toThrow("Testnet USDT is off in this chat");
+    expect(prepare).not.toHaveBeenCalled();
   });
 });

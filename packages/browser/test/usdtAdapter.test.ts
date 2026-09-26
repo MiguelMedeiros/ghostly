@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HDNodeWallet, Interface, Transaction, getAddress, keccak256 } from "ethers";
-import { ETHEREUM_USDT, PaymentPreflightError, type PaymentReview, type PaymentTarget } from "@ghostly/core";
+import { ETHEREUM_USDT, PaymentPreflightError, USDT_PUBLIC_RPC, validatePaymentTarget, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import { UsdtAdapter, type UsdtConfig, type UsdtPrepared } from "../src/engine/paymentAdapters/usdt";
 import { PaymentCoordinator, type IntentRepository, type SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 // covers: payments.usdt.send, payments.chat.reconcile, payments.amounts, wallet.usdt.send
@@ -177,6 +177,34 @@ describe("checking the token and RPC before a wallet is used", () => {
   });
 });
 
+describe("the RPC a request names", () => {
+  const Adapter = UsdtAdapter as unknown as new (c: UsdtConfig) => UsdtAdapter;
+  const onChain = async (over: Partial<UsdtConfig>) => {
+    const adapter = new Adapter(config(over));
+    Object.assign(adapter, { account: { getAddress: async () => BOB } });
+    return (await adapter.target()).provider;
+  };
+  it("never carries this wallet's own RPC URL (a key in its path): the chain's public RPC, a local chain's origin", async () => {
+    const keyed = await onChain({ network: "ethereum", chainId: 1, token: ETHEREUM_USDT, provider: "https://mainnet.infura.io/v3/not-a-real-key" });
+    expect(keyed).toBe(USDT_PUBLIC_RPC.ethereum);
+    expect(await onChain({ network: "sepolia", chainId: 11155111, provider: "https://eth-sepolia.g.alchemy.com/v2/not-a-real-key" })).toBe(USDT_PUBLIC_RPC.sepolia);
+    expect(await onChain({ provider: `${RPC}/rpc/not-a-real-key` })).toBe(RPC);
+    // What older apps read: still a URL they accept, with no path, query or credentials.
+    for (const provider of [keyed, RPC]) expect(validatePaymentTarget({ ...target(), provider }).provider).toBe(provider);
+  });
+  it("pays a request naming another RPC through this wallet's own: the payee's is never asked", async () => {
+    const { adapter } = await wallet();
+    const asked: string[] = [];
+    const chainFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", (url: string, init: RequestInit) => { asked.push(String(url)); return chainFetch(url, init); });
+    const { review, prepared } = await reviewed(adapter, 1_000_000, target({ provider: "https://payee-rpc.example" }));
+    expect(review.provider).toBe("https://payee-rpc.example");
+    await adapter.execute(review, prepared, journal());
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((url) => url === RPC)).toBe(true);
+  });
+});
+
 describe("preparing a token payment (the review)", () => {
   it("prices the worst-case gas and pins the nonce, signing and sending nothing", async () => {
     const { adapter, me } = await wallet();
@@ -187,9 +215,9 @@ describe("preparing a token payment (the review)", () => {
     expect(review.evm).toMatchObject({ nonce: 7, confirmations: 2 });
     expect(chain.sent).toEqual([]);
   });
-  it("refuses a request for another chain, token, precision or RPC, or one that pays itself or the token", async () => {
+  it("refuses a request for another chain, token or precision, or one that pays itself or the token", async () => {
     const { adapter, me } = await wallet();
-    for (const over of [{ chainId: 11155111, network: "sepolia" as const }, { token: "0x" + "3".repeat(40) }, { decimals: 18 }, { provider: "http://127.0.0.1:1" }])
+    for (const over of [{ chainId: 11155111, network: "sepolia" as const }, { token: "0x" + "3".repeat(40) }, { decimals: 18 }])
       await expect(adapter.prepare(target(over), 1, FEE_CAP)).rejects.toThrow(/does not match|Token metadata/);
     await expect(adapter.prepare(target({ address: getAddress(me) }), 1, FEE_CAP)).rejects.toThrow("different recipient");
     await expect(adapter.prepare(target({ address: TOKEN }), 1, FEE_CAP)).rejects.toThrow("different recipient");
@@ -238,7 +266,6 @@ describe("executing an approved token payment", () => {
     await refused({ ...review, amount: 2_000_000 }, prepared, journal(), "no longer matches the approved review");
     await refused({ ...review, feeCap: review.fee - 1 }, prepared, journal(), "no longer matches the approved review");
     await refused({ ...review, evm: { ...review.evm!, nonce: 8 } }, prepared, journal(), "no longer matches the approved review");
-    await refused({ ...review, provider: "http://127.0.0.1:1" }, prepared, journal(), "does not match the configured");
     await refused({ ...review, chainId: 1 }, prepared, journal(), "Token metadata");
     await refused(review, { ...prepared, from: BOB }, journal(), "no longer matches the approved review");
     chain.nonces.set(me, 8);

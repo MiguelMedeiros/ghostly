@@ -2335,11 +2335,10 @@ export class GhostlyNode implements EngineImplementation {
 
   /** `network`: the Cashu card of that network sends (its mints). `confirmedReal`: required on Mainnet. */
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork; confirmedReal?: boolean }) {
-    assertConfirmedReal(this.net(params.network), params.confirmedReal);
     const live = this.links.get(params.linkId);
     // Ecash is a bearer token: it is never held for an away contact, only a request for it is.
     if (live && this.holdingFor(live)) throw new Error("Ecash is not held for an away contact. Send a request instead, or wait until they are back.");
-    return this.desk.send({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, network: this.net(params.network) });
+    return this.desk.send({ ...params, network: this.net(params.network) });
   }
 
   /** `network`: the card's network; the request is paid only by a wallet of that network. */

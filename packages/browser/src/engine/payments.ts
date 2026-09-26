@@ -221,7 +221,8 @@ export class PaymentDesk {
 
   // -- what the user does --------------------------------------------------------
 
-  async send(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork }): Promise<{ paymentId: string }> {
+  /** `confirmedReal`: the person confirmed a Mainnet send as real money; without it one is refused. */
+  async send(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork; confirmedReal?: boolean }): Promise<{ paymentId: string }> {
     assertAmount(params.amount);
     const link = this.requireLink(params.linkId);
     // Reach the peer before taking ecash out of the wallet.
@@ -230,7 +231,8 @@ export class PaymentDesk {
     const network = params.network ?? this.defaultNetwork();
     const off = this.offNetwork(params.linkId, link, "cashu", network);
     if (off) throw new Error(off);
-    const paymentId = await this.sendEcash(link, { ...params, network });
+    assertConfirmedReal(network, params.confirmedReal);
+    const paymentId = await this.sendEcash(link, { linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, network });
     return { paymentId };
   }
 
@@ -441,7 +443,6 @@ export class PaymentDesk {
     // Paid only by a wallet of the request's own network: a test card never settles a request for real money.
     const network = paymentNetwork(request);
     if (params.network && params.network !== network) throw new Error(crossNetwork(params.network, network));
-    assertConfirmedReal(network, params.confirmedReal);
     if (request.target) throw new Error("Review and explicitly approve this payment before sending");
     if (request.state !== "pending") throw new Error("This request is no longer open");
     if (request.lightningPending) throw new Error("A Lightning payment for this request is still pending");
@@ -450,6 +451,8 @@ export class PaymentDesk {
       (p) => p.kind === "payment" && p.direction === "out" && p.requestId === request.id && p.state !== "reclaimed" && p.state !== "failed",
     );
     if (inFlight) throw new Error("You already paid this request");
+    // Real money only once the person confirmed it as such: nothing below runs without it.
+    assertConfirmedReal(network, params.confirmedReal);
     const link = this.requireLink(params.linkId);
     await link.requirePaymentSupport();
     const lightning = !!request.invoice && link.allowsPayment("lightning");
