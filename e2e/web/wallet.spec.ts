@@ -166,6 +166,9 @@ test.describe("wallet", { tag: "@network" }, () => {
 
     await bob.page.getByPlaceholder("Message…").fill(token);
     await bob.page.getByPlaceholder("Message…").press("Enter");
+    // Ecash in the text box is money handed over: the composer asks first, with the amount read from the token.
+    await expect(bob.page.getByRole("alertdialog", { name: /^Send 7 sats to .+\?$/ })).toBeVisible();
+    await bob.page.getByTestId("secret-guard-send").click();
     const card = chat(alice).getByTestId("cashu-token-bubble").last();
     await expect(card.getByTestId("money-amount")).toHaveText("7");
     await expect(card).toContainText("testnut.cashu.space");
