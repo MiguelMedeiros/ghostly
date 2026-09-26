@@ -4,6 +4,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { ALL_METHODS_ON, cardOn, type ChatAccepts, type ChatPaymentNetworks } from "../lib/chatPayments";
 import type { PeerLinkState } from "../lib/platform";
 import { CardDeck } from "./WalletDeck";
+import { SwitchLook } from "./wallet/ui";
 import type { InstanceCard } from "./walletCardData";
 
 /** A card's test id on the Accept side: its kind and its network (`payment-accept-cashu-testnet`). */
@@ -12,8 +13,9 @@ export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(":"
 /**
  * The payment composer's Accept side (PaymentComposer.tsx): which ways of paying this chat accepts from the contact,
  * chosen on the same cards as paying, any number of them. Each card is one wallet on one network, so Testnet Cashu
- * can be on while Mainnet Cashu is off. A card that is on sits a little raised and wears a check; a click (or Space)
- * turns one on or off, and every card stays here, so one turned off can be turned on again. Nothing is paid or asked
+ * can be on while Mainnet Cashu is off. Each card is a switch, drawn on its face: one that is on sits a little raised
+ * in its colours, one that is off is grey. A click (or Space) turns one on or off without turning it over, and every
+ * card stays here, so one turned off can be turned on again. Nothing is paid or asked
  * for here. Save tells the contact: at once when the chat is connected, otherwise in the next handshake. Only this
  * chat changes.
  *
@@ -54,6 +56,8 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
     detail: theirs(card) === "on" ? t("payments.accept.contactOn") : theirs(card) === "off" ? t("payments.accept.contactOff") : card.detail,
   }));
   const card = cards.find((c) => c.id === active);
+  /** What a card's switch does, as a screen reader says it: "Accept Cashu (Testnet) from Alice". */
+  const label = (card: InstanceCard) => t("payments.accept.card", { card: `${card.name} (${card.network === "testnet" ? "Testnet" : "Mainnet"})`, name: contact });
   const hint = (card: InstanceCard) => {
     const params = { card: card.network === "testnet" ? `Testnet ${card.name}` : card.name, name: contact };
     if (!draft[card.id]) return t("payments.accept.hint.off", params);
@@ -96,13 +100,14 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
       setDone(true); setBusy(false);
       // Save goes grey once saved: the keyboard goes back to the cards rather than out of the sheet.
       const at = document.activeElement;
-      if (!at || at === document.body || at === saveRef.current) saveRef.current?.closest(".composer-sheet")?.querySelector<HTMLElement>('[role=checkbox][tabindex="0"]')?.focus({ preventScroll: true });
+      if (!at || at === document.body || at === saveRef.current) saveRef.current?.closest(".composer-sheet")?.querySelector<HTMLElement>('[role=switch][tabindex="0"]')?.focus({ preventScroll: true });
     }, (e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); });
   };
 
   return <>
     <CardDeck<string> compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
-      onSelect={setActive} onChoose={toggle} checked={(c) => !!draft[c.id]} testId={acceptCardTestId} size={{ max: 250, share: .62 }} />
+      onSelect={setActive} onChoose={toggle} checked={(c) => !!draft[c.id]} cardLabel={(c) => label(c as InstanceCard)} testId={acceptCardTestId} size={{ max: 250, share: .62 }}
+      corner={(c) => <SwitchLook checked={!!draft[c.id]} className="wallet-deck-card-switch" testId={`payment-accept-switch-${c.id.replace(":", "-")}`} />} />
     <p className="composer-sheet-hint" data-testid="payment-accept-hint">{card && hint(card)}</p>
     <p className="payment-accept-status" data-testid="payment-accept-status" data-state={state} role="status">{status}</p>
     {error && <p role="alert" className="text-danger text-xs m-0">{error}</p>}

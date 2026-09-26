@@ -5,12 +5,27 @@ import { focusInPlace } from "../../lib/focus";
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
 export { Section, Row, Block } from "../layout/Section";
 
+const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-surface-alt"}`;
+const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"}`} />;
+
 export function Switch({ checked, onChange, label, disabled, testId }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; testId?: string }) {
   return (
     <button type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)}
-      className={`relative w-12 h-6 rounded-full transition-colors shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-[''] ${checked ? "bg-accent" : "bg-surface-alt"}`}>
-      <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"}`} />
+      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
+      <SwitchKnob checked={checked} />
     </button>
+  );
+}
+
+/**
+ * The Switch's look alone, inside something that is itself the switch (a chat's Accept card, whose whole card is a
+ * `role=switch` button: a button cannot hold another).
+ */
+export function SwitchLook({ checked, className = "", testId }: { checked: boolean; className?: string; testId?: string }) {
+  return (
+    <span aria-hidden="true" data-on={checked} data-testid={testId} className={`${switchTrack(checked)} block ${className}`}>
+      <SwitchKnob checked={checked} />
+    </span>
   );
 }
 

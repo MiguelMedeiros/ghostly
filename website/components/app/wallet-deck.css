@@ -24,11 +24,12 @@
 .wallet-deck-card-balance{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(11px,calc(var(--card-w) * .036),13px);letter-spacing:.04em;color:rgba(255,255,255,.88);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wallet-deck-card-detail{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgba(255,255,255,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wallet-deck-card-chip{grid-row:3;grid-column:2;align-self:end;justify-self:end;width:clamp(24px,calc(var(--card-w) * .1),36px);height:clamp(18px,calc(var(--card-w) * .075),27px);border-radius:6px;background:linear-gradient(135deg,rgba(255,255,255,.35),rgba(255,255,255,.08))}
-/* In a deck of checks (the ways of paying a chat accepts), a card that is on wears a check on its mark, on either
-   edge that shows; one that is off has its mark dimmed. */
-.wallet-deck-card-check{position:absolute;right:-5px;bottom:-4px;display:none;place-items:center;width:14px;height:14px;border-radius:999px;background:rgb(var(--card-rgb));color:#10181d;box-shadow:0 0 0 2px var(--to,#0b1f2a)}
-.wallet-deck-card-check svg{width:10px;height:10px}
-.wallet-deck-face[data-checked=true] .wallet-deck-card-check{display:grid}
+/* In a deck of checks (the ways of paying a chat accepts) each card is a switch, drawn in its chip's place and lit in
+   the card's ink when on. A card that is off turns grey: its colours are swapped for greys (never a filter, which
+   would cost every face at rest a layer, see deck.css), its mark dimmed. */
+.wallet-deck-card-switch{grid-row:3;grid-column:2;align-self:end;justify-self:end}
+.wallet-deck-card-switch[data-on=true]{background:rgb(var(--card-rgb))}
+.wallet-deck-face[data-checked=false]{--card-rgb:150,158,166;--from:#2c3136;--to:#15181b;--ghost-eye:#15181b;color:rgba(255,255,255,.72)}
 .wallet-deck-face[data-checked=false] :is(.wallet-deck-card-glyph,.wallet-deck-card-glyph-end){opacity:.45}
 /* A test wallet's card says so, discreetly, before its status: the network is the card's own. */
 .wallet-deck-card-network{display:inline-block;margin-right:6px;padding:0 5px;border:1px solid currentColor;border-radius:999px;line-height:1.35;text-transform:uppercase;opacity:.85}

@@ -516,6 +516,7 @@
     },
     "accept": {
       "deck": "Modi di pagamento che questa chat accetta da {{name}}",
+      "card": "Accetta {{card}} da {{name}}",
       "on": "Attivo qui",
       "off": "Spento qui",
       "contactOn": "Contatto: lo accetta",

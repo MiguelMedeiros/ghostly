@@ -28,7 +28,9 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
       return leaves[leaves.length - 1]===ref;
     };
     let beganOutside = false;
-    const outside = (e: PointerEvent) => !!ref.current && !ref.current.contains(e.target as Node) && !anchorRef?.current?.contains(e.target as Node);
+    // By the event's path, not by what holds its target now: a click that swaps what it landed on (a card turning
+    // over, a step back to the deck) leaves that target detached before this runs, and it was still inside.
+    const outside = (e: PointerEvent) => { const path = e.composedPath(); return !!ref.current && !path.includes(ref.current) && !(anchorRef?.current && path.includes(anchorRef.current)); };
     const blocked = () => !topLayer() || !!document.querySelector("dialog[open]");
     const down = (e: PointerEvent) => { beganOutside = !blocked() && outside(e); };
     const up = (e: PointerEvent) => { if (beganOutside && !blocked() && outside(e)) callback.current(); beganOutside = false; };

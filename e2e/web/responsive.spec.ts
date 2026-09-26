@@ -313,7 +313,7 @@ test("the payment sheet fits a short window: its head in view, Use and Save in r
     // Save works where it is: a way turned off, saved, and on again.
     for (const on of ["false", "true"]) {
       await page.getByTestId("payment-accept-deck-next").click();
-      const current = sheet.locator("[role=checkbox][data-active=true]");
+      const current = sheet.locator("[role=switch][data-active=true]");
       await current.press("Space");
       await expect(current).toHaveAttribute("aria-checked", on);
       await page.getByTestId("payment-accept-save").click();

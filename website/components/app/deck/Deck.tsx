@@ -55,10 +55,12 @@ export interface DeckProps<C extends DeckCard> {
  onChoose?:(id:string)=>void;
  /**
   * Tabs over a panel (`panel` names it and each tab's id), a choice of one among the cards (radios), or any number
-  * of them turned on (checks: `checked` says which, and those sit a little raised).
+  * of them turned on (checks: each card is a switch, `checked` says which are on, and those sit a little raised).
   */
  kind:'tabs'|'radios'|'checks';
  checked?:(card:C)=>boolean;
+ /** A card's accessible name, when its face does not say what choosing it does (a switch: "Accept Cashu (Testnet) from Alice"). */
+ cardLabel?:(card:C)=>string;
  panel?:{id:string;tabId:(id:string)=>string};
  label:string;
  testId:(card:C)=>string;
@@ -85,7 +87,7 @@ export interface DeckProps<C extends DeckCard> {
  resting?:boolean;
 }
 
-export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,checked,panel,label,testId,face,mark,tone,blocked,size,name,className,compact,resting=false}:DeckProps<C>) {
+export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,checked,cardLabel,panel,label,testId,face,mark,tone,blocked,size,name,className,compact,resting=false}:DeckProps<C>) {
  const part=(p:string)=>`deck-${p} ${className}-${p}`;
  const active=Math.max(0,cards.findIndex(card=>card.id===selected));
  const root=useRef<HTMLDivElement>(null),track=useRef<HTMLDivElement>(null),tabs=useRef<(HTMLButtonElement|null)[]>([]);
@@ -236,8 +238,8 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
     const strip=strips[i]??{left:0,right:cardWidth},left=layout.lefts[i]??0;
     const place={'--bl':`${Math.round(strip.left)}px`,'--bw':`${Math.max(6,Math.round(strip.right-strip.left))}px`,'--fl':`${Math.round(left)-Math.round(strip.left)}px`,'--ft':`${top}px`,
      '--y':`${on?-LIFT:ticked?-RAISE:0}px`,'--s':top1?1:Math.max(.9,1-.025*distance),'--dim':top1?0:1-Math.max(.45,.92-.13*distance),'--origin':offset<0?'left center':offset>0?'right center':'center',zIndex:20-distance} as CSSProperties;
-    const semantics=kind==='tabs'?{role:'tab',id:panel?.tabId(card.id),'aria-selected':on,'aria-controls':panel?.id}:kind==='checks'?{role:'checkbox','aria-checked':ticked}:{role:'radio','aria-checked':on};
-    return <button key={card.id} ref={el=>{tabs.current[i]=el;}} type="button" {...semantics} tabIndex={top1?0:-1} aria-disabled={why?true:undefined} title={why}
+    const semantics=kind==='tabs'?{role:'tab',id:panel?.tabId(card.id),'aria-selected':on,'aria-controls':panel?.id}:kind==='checks'?{role:'switch','aria-checked':ticked}:{role:'radio','aria-checked':on};
+    return <button key={card.id} ref={el=>{tabs.current[i]=el;}} type="button" {...semantics} aria-label={cardLabel?.(card)} tabIndex={top1?0:-1} aria-disabled={why?true:undefined} title={why}
      className={`${part('card')} ${tone(card)}`} data-active={top1} data-checked={ticked} data-blocked={why?true:undefined} data-testid={testId(card)} style={place} onClick={()=>choose(i)}>
      {face(card,{active:top1,after:offset>0,checked:ticked})}
     </button>;

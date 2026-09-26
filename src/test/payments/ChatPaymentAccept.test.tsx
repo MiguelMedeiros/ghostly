@@ -55,7 +55,7 @@ const accept = (id: string) => screen.getByTestId(`payment-accept-${id}`);
 const save = () => screen.getByTestId("payment-accept-save");
 const status = () => screen.getByTestId("payment-accept-status");
 const hint = () => screen.getByTestId("payment-accept-hint");
-const ticked = () => screen.getAllByRole("checkbox").filter((c) => c.getAttribute("aria-checked") === "true").map((c) => c.dataset.testid);
+const ticked = () => screen.getAllByRole("switch").filter((c) => c.getAttribute("aria-checked") === "true").map((c) => c.dataset.testid);
 
 describe("Pay and Accept", () => {
   it("has Pay and Accept in its head, and opens on Pay", () => {
@@ -74,7 +74,7 @@ describe("Pay and Accept", () => {
     await user.click(mode("accept"));
     expect(screen.getByRole("group", { name: "Ways of paying this chat accepts from Alice" })).toBeInTheDocument();
     // One card per wallet the profile has.
-    expect(screen.getAllByRole("checkbox")).toHaveLength(7);
+    expect(screen.getAllByRole("switch")).toHaveLength(7);
     expect(accept("bark-testnet")).toHaveAttribute("aria-checked", "false");
     expect(within(accept("bark-testnet")).getByText("Off here")).toBeInTheDocument();
     expect(accept("spark-testnet")).toHaveAttribute("aria-checked", "true");
@@ -95,6 +95,50 @@ describe("Pay and Accept", () => {
 });
 
 describe("choosing what this chat accepts", () => {
+  it("makes each card a switch, labelled by what it accepts: in its colours when on, grey and switched off when off", async () => {
+    const { user } = open({ link: { paymentMethods: { ...ALL_METHODS_ON, bark: false } } });
+    await user.click(mode("accept"));
+    expect(screen.getByRole("switch", { name: "Accept Cashu (Mainnet) from Alice" })).toBe(accept("cashu-mainnet"));
+    expect(screen.getByRole("switch", { name: "Accept Bark (Testnet) from Alice" })).toBe(accept("bark-testnet"));
+    const face = (id: string) => accept(id).querySelector("[data-deck=face]")!;
+    const drawn = (id: string) => screen.getByTestId(`payment-accept-switch-${id}`);
+    // On: the card's face in its colours, its switch lit. Off: a grey face (wallet-deck.css), its switch off.
+    expect(face("cashu-mainnet")).toHaveAttribute("data-checked", "true");
+    expect(drawn("cashu-mainnet")).toHaveAttribute("data-on", "true");
+    expect(drawn("cashu-mainnet")).toHaveClass("wallet-deck-card-switch");
+    expect(face("bark-testnet")).toHaveAttribute("data-checked", "false");
+    expect(drawn("bark-testnet")).toHaveAttribute("data-on", "false");
+    // The switch takes the chip's place; the check the marks once wore is gone, the network tags stay.
+    expect(accept("cashu-mainnet").querySelector(".wallet-deck-card-chip")).toBeNull();
+    expect(document.querySelector(".wallet-deck-card-check")).toBeNull();
+    expect(within(accept("cashu-mainnet")).getByTestId("wallet-card-network")).toHaveTextContent("Mainnet");
+    expect(within(accept("bark-testnet")).getByTestId("wallet-card-network")).toHaveTextContent("Testnet");
+
+    // A click turns one off, and it goes grey; again, and it is back in its colours. Nothing turns over.
+    await user.click(accept("cashu-mainnet"));
+    expect(accept("cashu-mainnet")).toHaveAttribute("aria-checked", "false");
+    expect(face("cashu-mainnet")).toHaveAttribute("data-checked", "false");
+    expect(drawn("cashu-mainnet")).toHaveAttribute("data-on", "false");
+    await user.click(accept("cashu-mainnet"));
+    expect(accept("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
+    expect(drawn("cashu-mainnet")).toHaveAttribute("data-on", "true");
+    expect(screen.queryByTestId("payment-back")).not.toBeInTheDocument();
+  });
+
+  it("reaches every switch from the keyboard: the arrows move along the cards, Space turns the one in front", async () => {
+    const { user } = open();
+    await user.click(mode("accept"));
+    accept("cashu-mainnet").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(accept("lightning-mainnet")).toHaveFocus();
+    expect(accept("lightning-mainnet")).toHaveAttribute("aria-checked", "true");
+    await user.keyboard(" ");
+    expect(accept("lightning-mainnet")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("payment-accept-switch-lightning-mainnet")).toHaveAttribute("data-on", "false");
+    await user.keyboard("{Enter}");
+    expect(accept("lightning-mainnet")).toHaveAttribute("aria-checked", "true");
+  });
+
   it("changes nothing until Save, then saves the cards turned off by their networks", async () => {
     const { user, onSaveMethods } = open();
     await user.click(mode("accept"));

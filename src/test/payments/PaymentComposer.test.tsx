@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkView, WalletInstanceView, WalletView } from "@ghostly/browser/shared/types";
@@ -228,14 +228,66 @@ describe("the cards", () => {
     expect(rememberedRail("peer")).toBe("lightning:mainnet");
   });
 
-  it("goes back from the amount to the cards", async () => {
+  it("goes back from the amount to the cards with the Cards button in the card's top-left corner", async () => {
     document.documentElement.dataset.reduceMotion = "true";
-    const { user } = open();
-    await user.click(screen.getByTestId("payment-use"));
+    const { user, onClose } = open();
+    await user.click(card("arkade-testnet"));
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Choose another card" }));
+    const cards = screen.getByRole("button", { name: "Back to the cards" });
+    expect(cards).toHaveTextContent("Cards");
+    // It leads the card's head, before the mark and the name: where a way back is looked for.
+    expect(cards.parentElement!.firstElementChild).toBe(cards);
+    await user.click(cards);
     expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
-    expect(card("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
+    // The keyboard is back on the card that was turned over, which is still the chosen one.
+    expect(card("arkade-testnet")).toHaveAttribute("aria-checked", "true");
+    await waitFor(() => expect(card("arkade-testnet")).toHaveFocus());
+    expect(onClose).not.toHaveBeenCalled();
+    // And another card turns over from there.
+    await user.click(card("usdt-testnet"));
+    expect(within(screen.getByTestId("payment-back")).getByText("USDT · Testnet")).toBeInTheDocument();
+  });
+
+  it("steps back on Escape: from a turned card to the cards, and only then closes", async () => {
+    document.documentElement.dataset.reduceMotion = "true";
+    const { user, onClose } = open();
+    await user.click(card("arkade-testnet"));
+    await waitFor(() => expect(amount()).toHaveFocus());
+    await user.keyboard("{Escape}");
+    expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(card("arkade-testnet")).toHaveFocus());
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("steps back on Escape wherever the focus is, a click on the card's text having left it on the page", async () => {
+    document.documentElement.dataset.reduceMotion = "true";
+    const { user, onClose } = open();
+    await user.click(card("arkade-testnet"));
+    await user.click(hint());
+    (document.activeElement as HTMLElement | null)?.blur();
+    await user.keyboard("{Escape}");
+    expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("never closes on a click inside, on the cards or on a turned card", async () => {
+    document.documentElement.dataset.reduceMotion = "true";
+    const { user, onClose } = open();
+    await user.click(screen.getByText("Pay or request"));
+    await user.click(card("arkade-testnet"));
+    await user.click(hint());
+    await user.click(screen.getByTestId("payment-back"));
+    await user.click(screen.getByRole("button", { name: "Back to the cards" }));
+    await screen.findByRole("radiogroup", { name: "Pay with" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on a click outside", async () => {
+    const { user, onClose } = open();
+    await user.click(screen.getByTestId("where"));
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("closes on Escape", async () => {
