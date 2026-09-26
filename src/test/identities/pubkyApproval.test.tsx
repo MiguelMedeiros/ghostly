@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, newIdentityBinding, pubkyProofPath } from "@ghostly/core";
 import { AddIdentityDialog } from "../../components/identities/AddIdentityDialog";
@@ -113,7 +113,8 @@ describe("Pubky approval in the UI", () => {
     await act(async () => { sdk.approve!(session(), "cookie"); });
     // The request is polled every second.
     await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce(), { timeout: 5_000 });
-    expect(screen.queryByTestId("approval")).not.toBeInTheDocument();
+    // onClose is called before the approval is cleared (in run's finally), so the screen goes a render later.
+    await waitFor(() => expect(screen.queryByTestId("approval")).not.toBeInTheDocument());
     expect(popup.close).toHaveBeenCalled();
     const [call] = engine.callsTo("beginIdentityProof");
     expect(call).toMatchObject({ provider: "pubky", subject: key });
