@@ -778,12 +778,6 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 
 .conversation-pin { transform-origin: center; transition: transform 180ms ease-out; }
 
-@keyframes contact-fetch-pulse {
-  0% { box-shadow: 0 0 0 0 rgb(34 197 94 / 0.45); }
-  100% { box-shadow: 0 0 0 5px rgb(34 197 94 / 0); }
-}
-.contact-fetch-pulse { animation: contact-fetch-pulse 400ms ease-out 1; }
-
 /* The desktop header follows the resizable column, not the window width. The logo and the buttons keep at least 8px
    between them there; wherever the row has room, it spreads them further apart. */
 .sidebar-desktop .sidebar-header { container: chat-sidebar / inline-size; gap: 8px; }

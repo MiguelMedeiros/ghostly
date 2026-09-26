@@ -26,7 +26,7 @@ const held = (p: Peer, text: string) => chat(p).locator(".group").filter({ hasTe
 async function away(alice: Peer, bob: Peer): Promise<string> {
   const url = bob.page.url();
   await bob.page.close();
-  await expect(alice.page.getByTestId("contact-status")).toHaveAttribute("aria-label", "Away · messages are held", { timeout: 60_000 });
+  await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("data-status", "Away · messages are held", { timeout: 60_000 });
   return url;
 }
 async function back(bob: Peer, url: string) {
@@ -110,7 +110,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await expect(alice.page.getByTestId("hold-indicator")).toHaveCount(0);
   await expect.poll(async () => ((await (await s3("GET", "?list-type=2")).text()).match(/\.ghostly-held<\/Key>/g) ?? []).length, { timeout: 60_000 }).toBe(0);
   // The session is back too: what is sent now goes live, and Bob's side keeps the held ones once.
-  await expect(alice.page.getByTestId("contact-status")).toHaveAttribute("aria-label", "Connected", { timeout: 60_000 });
+  await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("data-status", "Connected", { timeout: 60_000 });
   await say(bob, "back and live");
   await expect(chat(alice).getByText("back and live")).toBeVisible();
   await bob.page.reload();
@@ -136,7 +136,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   // An item nobody picks up within its lifetime (shortened to seconds here) is dropped, and Bob never sees it.
   await alice.page.evaluate(() => localStorage.setItem("ghostly-test-hold-ttl", "5000"));
   await alice.page.reload();
-  await expect(alice.page.getByTestId("contact-status")).toHaveAttribute("aria-label", "Connected", { timeout: 60_000 });
+  await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("data-status", "Connected", { timeout: 60_000 });
   const once = await away(alice, bob);
   await say(alice, `nobody will read this in time${LONG}`);
   await expect(held(alice, "nobody will read this in time").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
@@ -159,7 +159,7 @@ test("a contact whose app does not hold is unaffected: nothing is held, offline 
   const url = dave.page.url();
   await dave.page.close();
   // Not "held": short text falls back to the DHT mailbox of WISP 403, exactly as before.
-  await expect(carol.page.getByTestId("contact-status")).not.toHaveAttribute("aria-label", "Connected", { timeout: 60_000 });
+  await expect(carol.page.getByTestId("connection-options")).not.toHaveAttribute("data-status", "Connected", { timeout: 60_000 });
   await say(carol, "old way while away");
   await expect(held(carol, "old way while away").getByText("Sent · waiting for receipt")).toBeVisible({ timeout: 30_000 });
   // Longer than the DHT carries, and nothing holds it: it waits, with a cancel, and goes when the chat is live.

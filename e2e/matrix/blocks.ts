@@ -226,7 +226,7 @@ export const delivery: Block = {
         await a.page.keyboard.press("Escape");
       }).toPass({ timeout: 60_000 });
       const back = await away(b);
-      await expect(a.page.getByTestId("contact-status")).toHaveAttribute("aria-label", "Away · messages are held", { timeout: 60_000 });
+      await expect(a.page.getByTestId("connection-options")).toHaveAttribute("data-status", "Away · messages are held", { timeout: 60_000 });
       // Past the 256 bytes the DHT carries: a short text would take the DHT floor (WISP 403); a longer one is held.
       await say(a, `held in my S3 for you ${"and more words past what the DHT carries. ".repeat(7)}`);
       await a.page.getByTestId("file-input").setInputFiles({ name: "held.gif", mimeType: "image/gif", buffer: GIF });

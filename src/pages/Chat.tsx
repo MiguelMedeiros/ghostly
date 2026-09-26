@@ -14,7 +14,6 @@ import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { ChatConnection } from "../components/ChatConnection";
 import { PairingScene } from "../components/pairing/PairingScene";
-import { PairingIndicator } from "../components/pairing/PairingIndicator";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
@@ -106,7 +105,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setChatFastPoll,
     addSystemMessage,
     deleteMessage,
-    pollCountdown,
     setNick,
   } = useChat(params);
 
@@ -390,7 +388,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const displayName = chatLabel || contactNick;
   const isAnonymous = !displayName;
   const shownName = displayName || t("common.unnamedContact", { key: contactTag(params.peerPubKeyB64) });
-  // Until live: the "connected" moment belongs to the scene, and the header goes back to how it was.
+  // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
   return (
@@ -469,25 +467,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
             )}
-            <div className="flex min-w-0 items-center gap-2">
-              {/* The contact's status and key. The connection is the icon beside the calls; both keys are in its panel. */}
-              <span className="flex min-w-0 items-center gap-1.5" data-testid="chat-subtitle">
-                <span role="img" aria-label={statusLabel} data-testid="contact-status"
-                  className={`h-2 w-2 shrink-0 rounded-full ${statusLabel === "Connected" ? `bg-green-500 ${pollCountdown.isPolling ? "contact-fetch-pulse" : ""}` : /issue|unavailable|mismatch/.test(statusLabel) ? "bg-danger" : "bg-text-muted"}`} />
-                <span className={`text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap ${pairing.show ? "max-md:hidden" : ""}`}>
-                  {truncatedPeerKey}
-                </span>
-              </span>
-              {pairingShown && pairing.progress && (
-                <PairingIndicator progress={pairing.progress}
-                  onOpen={() => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" })} />
-              )}
-            </div>
+            {/* The contact's key. Everything about the connection, pairing included, is the icon beside the calls. */}
+            <p className="m-0 truncate text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap" data-testid="chat-subtitle">
+              {truncatedPeerKey}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1">
           {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
-          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel} />
+          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
+            pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
+              ? () => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" }) : undefined } : undefined} />
           <CallButtons blocked={callsBlocked} busy={webrtc.callState !== "idle"} onCall={(withVideo) => webrtc.startCall(withVideo)} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>

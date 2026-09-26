@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { PairingIndicator } from "../../components/pairing/PairingIndicator";
+import { ChatConnection } from "../../components/ChatConnection";
 import { PairingScene } from "../../components/pairing/PairingScene";
 import { CELEBRATE_MS, usePairingProgress } from "../../hooks/usePairingProgress";
 import { deriveStage, failureReason, formatElapsed, type PairingProgress } from "../../lib/pairingProgress";
@@ -21,12 +21,12 @@ vi.mock("../../lib/sounds", async (importOriginal) => ({ ...(await importOrigina
 type Pairing = NonNullable<LinkView["pairing"]>;
 const pairing = (patch: Partial<Pairing>) => patch as Pairing;
 
-/** Chat.tsx's use of the scene, without the rest of the chat. */
-function Pairing({ inviter = true, createdAt, muted }: { inviter?: boolean; createdAt?: number; muted?: boolean }) {
+/** Chat.tsx's use of the scene and the connection icon, without the rest of the chat. */
+function Pairing({ inviter = true, createdAt, muted, onShow }: { inviter?: boolean; createdAt?: number; muted?: boolean; onShow?(): void }) {
   const p = usePairingProgress("peer", { inviter, enabled: true, createdAt, muted });
   if (!p.show || !p.progress) return <p>the chat</p>;
   return <>
-    <PairingIndicator progress={p.progress} />
+    <ChatConnection peerKey="peer" pairing={p.progress.stage === "live" ? undefined : { progress: p.progress, onShow: p.scene ? onShow : undefined }} />
     <PairingScene progress={p.progress} contact="Alice" retry={() => void p.retry()} retrying={p.retrying} retryError={p.retryError} />
   </>;
 }
@@ -134,7 +134,8 @@ describe("the inviter's scene", () => {
     expect(label()).toBe("Putting your invite on the network…");
     expect(screen.getByTestId("pairing-slow")).toHaveTextContent("Still publishing your invite.");
     expect(screen.getByTestId("pairing-detail")).toHaveTextContent("Could not publish discovery: 429");
-    expect(screen.queryByRole("alert")).toBeNull();
+    // The scene has no failure; the connection icon's panel says the relay's error, as it always did.
+    expect(within(scene()!).queryByRole("alert")).toBeNull();
   });
 
   it("is not a slow wait a few seconds in", () => {
@@ -231,7 +232,9 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Your contact's app did not answer in time.");
     expect(alert).toHaveTextContent("no answer after 30 s");
-    expect(screen.getByTestId("pairing-indicator-tip")).toHaveTextContent("Your contact's app did not answer in time.");
+    expect(screen.getByTestId("connection-options")).toHaveAccessibleName("Connection options: Pairing · Could not connect");
+    expect(screen.getByTestId("connection-options")).toHaveAttribute("data-state", "failure");
+    expect(screen.getByTestId("connection-tooltip")).toHaveTextContent("Your contact's app did not answer in time.");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(engine.callsTo("connect")).toEqual([{ linkId: "link-1" }]);
   });
@@ -269,30 +272,55 @@ describe("the engine's own report (the pairing-progress contract)", () => {
   });
 });
 
-describe("the header indicator", () => {
-  it("names the stage, and its tooltip the sentence and the time", () => {
+describe("the connection icon while pairing (the header's only connection element)", () => {
+  const icon = () => screen.getByTestId("connection-options");
+
+  it("is the scene in small, names the stage, and its tooltip the sentence and the time", () => {
     const { engine } = renderApp(<Pairing inviter={false} />);
     show({ ...knocked, createdAt: Date.now() - 3_000 }, engine);
-    const indicator = screen.getByTestId("pairing-indicator");
-    expect(indicator).toHaveAccessibleName("Pairing: Knocking on your contact's door…");
-    expect(indicator).toHaveAttribute("data-stage", "knocking");
-    expect(screen.getByTestId("pairing-indicator-tip")).toHaveTextContent(/^Knocking on your contact's door… · 0:0\d$/);
+    expect(icon()).toHaveAccessibleName("Connection options: Pairing · Knocking on your contact's door…");
+    expect(icon()).toHaveAttribute("data-pairing", "knocking");
+    expect(icon()).toHaveAttribute("data-busy", "true");
+    expect(within(icon()).getByTestId("pairing-glyph")).toHaveAttribute("data-stage", "knocking");
+    expect(within(icon()).queryByTestId("connection-dot")).toBeNull();
+    expect(screen.getByTestId("connection-tooltip")).toHaveTextContent(/^Pairing · Knocking on your contact's door… · 0:0\d$/);
   });
 
-  it("opens the scene on click", async () => {
-    const onOpen = vi.fn();
-    const { user } = renderApp(<PairingIndicator onOpen={onOpen} progress={{ role: "inviter", stage: "waiting", since: Date.now(), startedAt: Date.now(), attempt: 1, derived: true }} />);
-    await user.click(screen.getByTestId("pairing-indicator"));
-    expect(onOpen).toHaveBeenCalledOnce();
+  it("the panel's state line says the stage, the step and the time; Details list the steps", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
+    show({ ...published, createdAt: Date.now() - 5_000 }, engine);
+    await user.click(icon());
+    expect(screen.getByTestId("connection-state")).toHaveTextContent(/^Pairing · Waiting for your contact to open the invite · 0:0\d$/);
+    expect(screen.getByTestId("connection-pairing-step")).toHaveTextContent("Step 2 of 5");
+    const details = screen.getByTestId("connection-pairing-details");
+    expect(within(details).getByRole("list", { name: "Pairing steps" }).querySelector("[aria-current=step]")).toHaveAttribute("data-step", "waiting");
+  });
+
+  it("Show pairing progress brings the scene into view and closes the panel", async () => {
+    const onShow = vi.fn();
+    const { engine, user } = renderApp(<Pairing inviter onShow={onShow} />);
+    show(published, engine);
+    await user.click(icon());
+    await user.click(screen.getByTestId("connection-show-pairing"));
+    expect(onShow).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("connection-menu")).not.toHaveAttribute("open");
+  });
+
+  it("goes back to the plain icon once live", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    for (const link of [published, knocked, connecting, live]) show(link, engine);
+    expect(icon()).toHaveAccessibleName("Connection options: Connected · WebRTC");
+    expect(icon()).not.toHaveAttribute("data-pairing");
+    expect(within(icon()).queryByTestId("pairing-glyph")).toBeNull();
   });
 });
 
 describe("a pairing that ends on the DHT (WISP 400)", () => {
-  /** Chat.tsx's split: the indicator while `show`, the scene only while `scene`. */
+  /** Chat.tsx's split: the pairing in the connection icon while `show`, the scene only while `scene`. */
   function Chat() {
     const p = usePairingProgress("peer", { inviter: false, enabled: true, createdAt: Date.now() });
     return <>
-      {p.show && p.progress && <PairingIndicator progress={p.progress} />}
+      <ChatConnection peerKey="peer" pairing={p.show && p.progress ? { progress: p.progress } : undefined} />
       {p.scene && p.progress ? <PairingScene progress={p.progress} contact="Alice" retry={() => {}} retrying={false} retryError="" /> : <p>the chat</p>}
     </>;
   }
@@ -303,10 +331,12 @@ describe("a pairing that ends on the DHT (WISP 400)", () => {
     show(onDht("transport"), engine);
     expect(scene()).toBeNull();
     expect(screen.getByText("the chat")).toBeInTheDocument();
-    const indicator = screen.getByTestId("pairing-indicator");
-    expect(indicator).toHaveAttribute("data-stage", "on-dht");
-    expect(indicator).toHaveTextContent("On DHT · retrying live");
-    expect(screen.getByTestId("pairing-indicator-tip")).toHaveTextContent("No live link came up yet. It is retried in the background.");
+    const icon = screen.getByTestId("connection-options");
+    expect(icon).toHaveAttribute("data-pairing", "on-dht");
+    expect(icon).toHaveAttribute("data-state", "dht");
+    expect(icon).toHaveAccessibleName("Connection options: On DHT · retrying live");
+    expect(within(icon).getByTestId("connection-dot")).toHaveClass("motion-safe:animate-pulse");
+    expect(screen.getByTestId("connection-tooltip")).toHaveTextContent("No live link came up yet. It is retried in the background.");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -314,7 +344,7 @@ describe("a pairing that ends on the DHT (WISP 400)", () => {
     const { engine } = renderApp(<Chat />);
     for (const [reason, words] of [["no-common-transport", "share no live transport"], ["chosen", "DHT only was chosen"], ["waiting", "being tried in the background"]]) {
       show(onDht(reason), engine);
-      expect(screen.getByTestId("pairing-indicator-tip")).toHaveTextContent(words);
+      expect(screen.getByTestId("connection-tooltip")).toHaveTextContent(words);
     }
   });
 });

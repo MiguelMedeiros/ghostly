@@ -20,7 +20,7 @@ export interface PairingProgressState extends PairingProgress {
 
 export interface PairingPresence {
   progress: PairingProgressState | null;
-  /** A first pairing not live yet, or its short "connected" moment: the header indicator is on. */
+  /** A first pairing not live yet, or its short "connected" moment: the connection icon tells the pairing. */
   show: boolean;
   /** The scene itself is on: `show`, except once the pairing is on the DHT, where the chat takes over (WISP 400). */
   scene: boolean;
