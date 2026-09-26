@@ -6,6 +6,7 @@ import { cardOn, rememberRail, rememberedRail, type ChatAccepts } from "../lib/c
 import type { WalletNetwork, WalletPlatform } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { PaymentReview as Review } from "@ghostly/core";
+import { NetworkTag } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
@@ -226,6 +227,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
           {card && <span className="payment-back-mark" aria-hidden="true"><WalletMark rail={card.rail} /></span>}
           <span className="payment-back-title">
             <span className="payment-back-name">{card ? (card.network === "testnet" ? `${card.name} · Testnet` : card.name) : "Payment"}</span>
+            {card && <NetworkTag network={card.network} testId="payment-back-network" className="payment-back-network" />}
             <span className="payment-back-meta">{card ? `${card.balance} · with ${who}` : `With ${who}`}</span>
           </span>
           {cards.length > 0 && !review && (
