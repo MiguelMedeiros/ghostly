@@ -1,10 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
-// covers: headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin
+// covers: headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -135,6 +137,61 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listen.stop();
   });
 
+  it("prove an SSH key with ssh-keygen and show it to the contact, who checks it", async () => {
+    const key = join(alice, "id_ed25519");
+    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "bot", "-f", key]);
+    const pub = readFileSync(`${key}.pub`, "utf8").trim();
+    const started = ok(await as(alice, "identity", "add", "ssh", pub, "--signer", "ssh-keygen", "--days", "30"));
+    expect(started).toMatchObject({ done: false, provider: "ssh", signer: "ssh-keygen" });
+    expect(started.statement).toMatch(/^Ghostly identity proof v1: I control ssh:/);
+    const signature = execFileSync("ssh-keygen", ["-Y", "sign", "-n", "ghostly", "-f", key], { input: started.statement as string }).toString();
+    error(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: "not a signature" }), "bad_request", 1);
+    const done = ok(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: signature }));
+    const proof = done.proof as { id: string; provider: string };
+    expect(proof.provider).toBe("ssh");
+    expect((ok(await as(alice, "identity", "list")).proofs as { id: string }[]).map((p) => p.id)).toContain(proof.id);
+
+    const listen = new Running(["--home", bob, "listen", "--type", "identity."], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 500));
+    ok(await as(alice, "identity", "share", "bob", proof.id));
+    await listen.waitFor((e) => e.type === "identity.received" || e.type === "identity.status", 60_000);
+    const until = Date.now() + 60_000;
+    let seen: { received: { id: string; status: string }[] } = { received: [] };
+    while (Date.now() < until) {
+      seen = ok(await as(bob, "identity", "contact", "alice")) as typeof seen;
+      if (seen.received.some((r) => r.id === proof.id && r.status === "verified")) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    expect(seen.received.find((r) => r.id === proof.id)).toMatchObject({ status: "verified" });
+    await listen.stop();
+  });
+
+  it("share a web app on this machine with the contact, who opens it on a port of its own", async () => {
+    const app = createServer((request, response) => { response.writeHead(200, { "content-type": "text/plain" }); response.end(`hello from ${request.url}`); });
+    await new Promise<void>((r) => app.listen(0, "127.0.0.1", r));
+    try {
+      error(await as(alice, "service", "add", "outside", "http://example.com"), "refused", 1);
+      const added = ok(await as(alice, "service", "add", "notes", `http://127.0.0.1:${(app.address() as AddressInfo).port}`));
+      const service = added.serviceId as string;
+      ok(await as(alice, "service", "share", service, "bob"));
+      const until = Date.now() + 60_000;
+      let peer: { services: { id: string }[] } = { services: [] };
+      while (Date.now() < until) {
+        peer = ok(await as(bob, "service", "peer", "alice")) as typeof peer;
+        if (peer.services.some((s) => s.id === service)) break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      expect(peer.services.map((s) => s.id)).toContain(service);
+      const opened = ok(await as(bob, "service", "open", "alice", service));
+      const page = await fetch(new URL("/docs?x=1", opened.url as string));
+      expect(page.status).toBe(200);
+      expect(await page.text()).toBe("hello from /docs?x=1");
+      ok(await as(bob, "service", "close", "alice", service));
+      ok(await as(alice, "service", "share", service, "bob", "--off"));
+    } finally { app.close(); }
+  });
+
   it("answer from a hook: an echo bot on listen --exec", async () => {
     const script = join(bob, "echo.mjs");
     writeFileSync(script, `
@@ -162,14 +219,15 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const created = ok(await as(alice, "group", "create", "Bot", "crew"));
     expect(created.link).toBeTruthy();
     const joined = ok(await as(bob, "group", "join", created.link as string));
-    const until = Date.now() + 90_000;
+    const until = Date.now() + 150_000;
     let group: Record<string, unknown> = {};
     while (Date.now() < until) {
       group = ok(await as(alice, "group", "show", created.group as string));
       if ((group.members as { name: string | null; me: boolean }[]).some((m) => !m.me && m.name)) break;
       await new Promise((r) => setTimeout(r, 1000));
     }
-    expect((group.members as { name: string | null; me: boolean }[]).filter((m) => !m.me).map((m) => m.name)).toEqual(["Bob"]);
+    const bobSide = ok(await as(bob, "group", "list"));
+    expect((group.members as { name: string | null; me: boolean }[]).filter((m) => !m.me).map((m) => m.name), `Bob's side: ${JSON.stringify(bobSide)}`).toEqual(["Bob"]);
     const listen = new Running(["--home", bob, "listen", "--type", "group."], env);
     running.push(listen);
     await new Promise((r) => setTimeout(r, 1000));

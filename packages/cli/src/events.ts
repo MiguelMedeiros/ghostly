@@ -41,6 +41,7 @@ export class EventHub {
   private groups = new Map<string, GroupShape>();
   private payments = new Map<string, string>();
   private transfers = new Map<string, string>();
+  private received = new Map<string, string>();
   private baselined = false;
   private db!: IDBDatabase;
   state: EngineState | null = null;
@@ -197,6 +198,16 @@ export class EventHub {
       const json = paymentJson(payment);
       if (before === undefined) this.emit("payment.created", `payment.created:${id}`, { chat: payment.linkId, payment: json });
       else this.emit("payment.updated", `payment.updated:${id}:${payment.state}:${this.now()}`, { chat: payment.linkId, payment: json });
+    }
+    for (const link of state.links) {
+      for (const identity of link.identities?.received ?? []) {
+        const key = `${link.id}:${identity.id}`, shape = identity.status, before = this.received.get(key);
+        this.received.set(key, shape);
+        if (quiet || before === shape) continue;
+        this.emit(before === undefined ? "identity.received" : "identity.status", `identity.${before === undefined ? "received" : "status"}:${key}:${shape}`, {
+          chat: link.id, identity: { id: identity.id, provider: identity.provider, subject: identity.subject, status: identity.status, verified: identity.verified },
+        });
+      }
     }
     for (const [id, transfer] of Object.entries(state.transfers ?? {})) {
       const shape = `${transfer.state}|${transfer.stage ?? ""}`, before = this.transfers.get(id);

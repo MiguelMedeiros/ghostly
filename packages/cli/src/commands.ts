@@ -219,6 +219,29 @@ export const COMMANDS: Record<string, Command> = {
     params: ({ options }, a) => ({ path: here(a.path), clear: options.clear === true }),
   },
 
+  "identity providers": { method: "identity.providers", usage: "identity providers", summary: "Kinds of identity proof, and which signers work here" },
+  "identity list": { method: "identity.list", usage: "identity list", summary: "This profile's identity proofs" },
+  "identity complete": {
+    method: "identity.complete", usage: "identity complete <draft> [--evidence-file f | --stdin]", summary: "Finish a proof: what the tool printed, or nothing for a published record",
+    args: ["draft"], options: { "evidence-file": { type: "string", description: "The tool's output, from this file" }, stdin: { type: "boolean", description: "The tool's output, from stdin" } },
+    params: ({ options }, a) => ({ draft: a.draft, evidenceFile: here(options["evidence-file"]), stdin: options.stdin === true }),
+  },
+  "identity cancel": { method: "identity.cancel", usage: "identity cancel <draft>", summary: "Drop a proof not finished", args: ["draft"], params: (_, a) => ({ draft: a.draft }) },
+  "identity remove": { method: "identity.remove", usage: "identity remove <id>", summary: "Remove a proof: withdrawn from every chat, revoked", args: ["id"], params: (_, a) => ({ id: a.id }) },
+  "identity share": { method: "identity.share", usage: "identity share <chat> <id>", summary: "Show a proof to a contact", args: ["chat", "id"], params: (_, a) => ({ chat: a.chat, id: a.id }) },
+  "identity withdraw": { method: "identity.withdraw", usage: "identity withdraw <chat> <id>", summary: "Withdraw a proof from a contact", args: ["chat", "id"], params: (_, a) => ({ chat: a.chat, id: a.id }) },
+  "identity contact": { method: "identity.contact", usage: "identity contact <chat>", summary: "What a contact shared, as this device checked it", args: ["chat"], params: (_, a) => ({ chat: a.chat }) },
+  "identity recheck": { method: "identity.recheck", usage: "identity recheck <chat> <id>", summary: "Check a contact's proof again", args: ["chat", "id"], params: (_, a) => ({ chat: a.chat, id: a.id }) },
+
+  "service list": { method: "service.list", usage: "service list", summary: "Web apps this profile shares" },
+  "service add": { method: "service.add", usage: "service add <name> <http://127.0.0.1:port>", summary: "A web app on this machine that contacts may be given", args: ["name", "target"], params: (_, a) => ({ name: a.name, target: a.target }) },
+  "service remove": { method: "service.remove", usage: "service remove <service>", summary: "Stop sharing a web app with anyone", args: ["service"], params: (_, a) => ({ service: a.service }) },
+  "service enable": { method: "service.enable", usage: "service enable <service> [--off]", summary: "Turn a shared app on or off", args: ["service"], options: { off: { type: "boolean", description: "Turn it off" } }, params: ({ options }, a) => ({ service: a.service, off: options.off === true }) },
+  "service share": { method: "service.share", usage: "service share <service> <chat> [--off]", summary: "Give (or take back) a contact access to a web app", args: ["service", "chat"], options: { off: { type: "boolean", description: "Take it back" } }, params: ({ options }, a) => ({ service: a.service, chat: a.chat, off: options.off === true }) },
+  "service peer": { method: "service.peer", usage: "service peer <chat>", summary: "What a contact shares with you", args: ["chat"], params: (_, a) => ({ chat: a.chat }) },
+  "service open": { method: "service.open", usage: "service open <chat> <service> [--port p]", summary: "A contact's app on a loopback port here (daemon)", args: ["chat", "service"], options: { port: { type: "number", description: "Local port (default: any free one)" } }, params: ({ options }, a) => ({ chat: a.chat, service: a.service, port: options.port }) },
+  "service close": { method: "service.close", usage: "service close <chat> <service>", summary: "Close a contact's app opened here", args: ["chat", "service"], params: (_, a) => ({ chat: a.chat, service: a.service }) },
+
   "events": {
     method: "events.replay", usage: "events [--since seq]", summary: "Events the journal holds, without following",
     options: { since: { type: "number", description: "Only events after this seq" } }, params: ({ options }) => ({ since: options.since ?? 0 }),

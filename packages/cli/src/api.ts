@@ -10,6 +10,9 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
+import { IDENTITY_METHODS } from "./identities";
+import { SERVICE_METHODS } from "./services";
+import { BACKUP_METHODS } from "./backup";
 import { WALLET_METHODS } from "./wallets";
 import { chatDetailsJson, chatJson, groupJson, messageJson } from "./views";
 
@@ -110,6 +113,9 @@ const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
   ...GROUP_ADMIN_METHODS,
+  ...IDENTITY_METHODS,
+  ...SERVICE_METHODS,
+  ...BACKUP_METHODS,
 
   async status(ctx) {
     const s = state(ctx);
