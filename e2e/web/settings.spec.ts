@@ -163,7 +163,7 @@ test("network: relays can be changed and reset", { tag: ["@feature:settings.netw
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   const relays = page.getByTestId("network-relays");
-  await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app");
+  await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app\nhttps://relay.pkarr.org");
   await relays.fill("https://relay.example.org/\nnot a url");
   await page.getByTestId("network-save").click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
@@ -174,5 +174,5 @@ test("network: relays can be changed and reset", { tag: ["@feature:settings.netw
   await page.getByTestId("network-save").click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.reload();
-  await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app");
+  await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app\nhttps://relay.pkarr.org");
 });
