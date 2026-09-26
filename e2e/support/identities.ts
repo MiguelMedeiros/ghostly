@@ -106,3 +106,14 @@ export async function backToTheirCards(peer: Peer) {
   await peer.page.getByTestId("chat-identity-cards").click();
   await expect(peer.page.getByTestId("chat-identity-back")).toHaveCount(0);
 }
+
+/**
+ * Settings → Load public profiles (on by default): identity cards then ask their network for the profile once on
+ * screen. Specs that count the requests a relay gets for something else turn it off first. Leaves the page on Settings.
+ */
+export async function setLoadPublicProfiles(peer: Peer, on: boolean) {
+  await peer.page.evaluate(() => { location.hash = "#/settings"; });
+  const toggle = peer.page.getByTestId("settings-public-profiles");
+  if ((await toggle.getAttribute("aria-checked")) !== String(on)) await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", String(on));
+}

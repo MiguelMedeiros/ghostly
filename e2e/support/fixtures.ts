@@ -34,6 +34,20 @@ export interface PeerOptions {
   irohRelay?: string;
 }
 
+/**
+ * The public hosts identity cards read public profiles from (PUBLIC-PROFILES.md): the Pubky index, Bluesky's AppView and
+ * CDN, the Nostr picture hosts and the default Nostr relays. Load public profiles is on by default and a card on screen
+ * asks, so every peer refuses them unless its test answers them itself: a route or relay added later takes precedence.
+ */
+export const PUBLIC_PROFILE_HOSTS = [/^https:\/\/nexus\.pubky\.app\//, /^https:\/\/public\.api\.bsky\.app\//, /^https:\/\/cdn\.bsky\.app\//,
+  /^https:\/\/(nostr\.build|image\.nostr\.build|i\.nostr\.build|media\.nostr\.band|pfp\.nostr\.build)\//];
+export const DEFAULT_NOSTR_RELAYS = ["wss://relay.damus.io", "wss://nos.lol"];
+
+export async function guardPublicProfiles(context: BrowserContext): Promise<void> {
+  for (const host of PUBLIC_PROFILE_HOSTS) await context.route(host, route => route.abort("blockedbyclient"));
+  await context.routeWebSocket(url => DEFAULT_NOSTR_RELAYS.some(relay => url.href.startsWith(relay)), ws => { void ws.close({ code: 1008, reason: "No public relay in the test suite" }); });
+}
+
 /** Where the Mainnet Ark and USDT wallets a new profile makes by itself go: the Ark server, its explorer, the Ethereum RPC. */
 export const MAINNET_SERVICES = [/^https:\/\/arkade\.computer\//, /^https:\/\/mempool\.space\/api\//, /^https:\/\/ethereum\.publicnode\.com/];
 
@@ -54,6 +68,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
   });
   await guardArchive(context);
+  await guardPublicProfiles(context);
   if (!options.realRelays) await relay.attach(context);
   await attachMint(context);
   await stubGifServices(context);

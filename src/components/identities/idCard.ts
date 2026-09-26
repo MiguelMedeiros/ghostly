@@ -58,9 +58,12 @@ const face = (profile: PublicProfileView | undefined, name: string | undefined, 
   const picture = profile?.found && profile.avatar?.startsWith("data:image/") ? profile.avatar : avatar?.startsWith("data:image/") ? avatar : undefined;
   return { name: (profile?.found ? profile.name : undefined) ?? name, photo: picture };
 };
-const lookupOf = (provider: string, subject: string, current: boolean): ProfileLookup | undefined =>
-  current && hasPublicProfile(provider) ? { provider, subject } : undefined;
-const withLookup = (lookup: ProfileLookup | undefined) => (lookup ? { lookup } : {});
+/**
+ * The profile and its lookup, for a provider with public profiles and only while the proof is current and verified:
+ * an expired, revoked or withdrawn identity's card never wears what its account says about itself.
+ */
+const profileOf = (provider: string, subject: string, profile: PublicProfileView | undefined, current: boolean): { lookup?: ProfileLookup; profile?: PublicProfileView } =>
+  current && hasPublicProfile(provider) ? { lookup: { provider, subject }, ...(profile ? { profile } : {}) } : {};
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -75,6 +78,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     expiring: `Expires in ${plural(daysLeft(p.expiresAt, now), "day", "days")}`,
     verified: "Verified",
   }[status];
+  const pp = profileOf(p.provider, p.verified.subject, p.publicProfile, !expired && !revoking);
   return {
     id: p.id,
     provider: p.provider,
@@ -82,7 +86,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     subject: p.verified.subject,
     short: shortSubject(p.provider, p.verified.subject),
     bound: p.subject,
-    ...face(p.publicProfile, p.verified.display?.name, p.verified.display?.avatar),
+    ...face(pp.profile, p.verified.display?.name, p.verified.display?.avatar),
     category: attested ? `Attested by ${p.verified.attester ?? "the provider"}` : "Your own key",
     attested,
     status,
@@ -91,8 +95,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     issued: date(p.issuedAt),
     shared: p.sharedWith === 0 ? "Not shared" : `Shared in ${plural(p.sharedWith, "chat", "chats")}`,
     refusedBy,
-    ...(p.publicProfile ? { profile: p.publicProfile } : {}),
-    ...withLookup(lookupOf(p.provider, p.verified.subject, !expired && !revoking)),
+    ...pp,
   };
 }
 
@@ -114,6 +117,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000)
     revoking: "",
   }[status];
   const avatar = r.display?.avatar ?? r.verified.display?.avatar;
+  const pp = profileOf(r.provider, r.verified.subject, r.publicProfile, status === "verified" || status === "expiring");
   return {
     id: r.id,
     provider: r.provider,
@@ -121,7 +125,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000)
     subject: r.verified.subject,
     short: shortSubject(r.provider, r.verified.subject),
     bound: r.subject,
-    ...face(r.publicProfile, r.display?.name ?? r.verified.display?.name, avatar),
+    ...face(pp.profile, r.display?.name ?? r.verified.display?.name, avatar),
     category: attested ? `Attested by ${r.verified.attester ?? "the provider"}` : "Their own key",
     attested,
     status,
@@ -130,8 +134,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000)
     issued: date(r.verifiedAt),
     shared: `Checked ${ago(r.checkedAt, now)}`,
     refusedBy: [],
-    ...(r.publicProfile ? { profile: r.publicProfile } : {}),
-    ...withLookup(lookupOf(r.provider, r.verified.subject, status === "verified" || status === "expiring")),
+    ...pp,
   };
 }
 
