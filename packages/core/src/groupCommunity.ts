@@ -24,9 +24,10 @@ import {
  *  - a commit carries the hash of the roster after it, not the roster, and members replay the chain;
  *  - `add`, `role` and `link` derive the next epoch's secret from the previous one and the commit, so
  *    only a newcomer is sent it; `leave`, `remove` and `rotate` get a fresh secret sealed to everyone;
- *  - concurrent commits are a race with a deterministic winner (longest branch, then lowest hash of
- *    the first commit after the common parent), not a fork. Two commits by the admin after the same
- *    commit are still a fork and halt the group;
+ *  - concurrent commits are a race with a deterministic winner, not a fork: the branch that keeps the
+ *    admin's changes (remove, role, rotate, link) since the common parent, then the longest, then the
+ *    lowest hash of the first commit after the common parent. The admin signing changes on two
+ *    branches (after the same commit or not) is still a fork and halts the group;
  *  - messages name the commit of their epoch, so messages under a commit that lost stay readable;
  *    every member keeps recent frames from everyone and re-sends them to whoever was away.
  *
@@ -82,6 +83,12 @@ export type CommunityKind = "create" | "add" | "leave" | "remove" | "role" | "ro
 const KINDS: CommunityKind[] = ["create", "add", "leave", "remove", "role", "rotate", "link"];
 /** Kinds whose epoch secret is fresh: they take someone out, or start or re-key the group. */
 const FRESH: ReadonlySet<CommunityKind> = new Set(["create", "leave", "remove", "rotate"]);
+/**
+ * Kinds only the admin commits. They are final: a branch that drops one never replaces the branch
+ * that has it, however long, so no member can undo a removal, a hand-over, a rotation or a link change
+ * by outgrowing it with admissions.
+ */
+const ADMIN_ONLY: ReadonlySet<CommunityKind> = new Set(["remove", "role", "rotate", "link"]);
 
 export interface CommunityCommit {
   v: 2;
@@ -357,6 +364,8 @@ export class CommunitySession {
     this.state = state;
     this.identity = identityFromSeedB64(state.seedB64);
     this.rebuild();
+    // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
+    if ((state.status === "active" || state.status === "lost") && this.bestBranch().tip !== this.topHash) void this.serialize(() => this.chooseBranch());
   }
 
   // -- creation and joining ----------------------------------------------------------------------
@@ -524,16 +533,52 @@ export class CommunitySession {
     return path;
   }
 
-  /** Is branch tip `a` better than tip `b`? Longer first; then the lower hash of the first commit after their common parent. */
-  private better(a: string, b: string): boolean {
-    const ca = this.known.get(a)!, cb = this.known.get(b)!;
-    if (ca.e !== cb.e) return ca.e > cb.e;
-    if (a === b) return false;
-    const chain = (h: string) => { const out: string[] = []; let x: string | undefined = h; while (x) { out.unshift(x); x = this.known.get(x)?.p || undefined; } return out; };
-    const pa = chain(a), pb = chain(b);
-    let i = 0;
-    while (i < pa.length && i < pb.length && pa[i] === pb[i]) i++;
-    return (pa[i] ?? "") < (pb[i] ?? "");
+  /** A branch: its tip, the main-branch index it leaves from, and its commits off the main branch (oldest first). */
+  private branch(tip: string): Branch | null {
+    if (this.mainIndex.has(tip)) return { tip, fork: this.mainIndex.get(tip)!, path: [] };
+    const path = this.pathToMain(tip);
+    return path ? { tip, fork: this.mainIndex.get(this.known.get(path[0])!.p)!, path } : null;
+  }
+
+  /** How many admin changes the main branch holds up to each index. */
+  private adminCounts(): number[] {
+    const counts: number[] = [];
+    this.state.chain.forEach((c, i) => counts.push((i ? counts[i - 1] : 0) + (ADMIN_ONLY.has(c.k) ? 1 : 0)));
+    return counts;
+  }
+
+  /** What each of two branches holds after their common parent: whether it has an admin change, and its first commit. */
+  private parting(a: Branch, b: Branch, counts: number[]): { parent: number; admin: [boolean, boolean]; first: [string, string] } {
+    const m = Math.min(a.fork, b.fork);
+    // Off the same main commit, the side paths may share their start too.
+    let shared = 0;
+    if (a.fork === b.fork) while (shared < a.path.length && shared < b.path.length && a.path[shared] === b.path[shared]) shared++;
+    const parent = shared ? this.known.get(a.path[shared - 1])!.e : this.state.chain[m].e;
+    const side = (x: Branch) => {
+      const path = x.path.slice(shared);
+      const admin = counts[x.fork] - counts[m] > 0 || path.some(h => ADMIN_ONLY.has(this.known.get(h)!.k));
+      const first = x.fork > m ? communityCommitHash(this.state.chain[m + 1]) : path[0] ?? "";
+      return { admin, first };
+    };
+    const sa = side(a), sb = side(b);
+    return { parent, admin: [sa.admin, sb.admin], first: [sa.first, sb.first] };
+  }
+
+  /**
+   * Is branch `a` better than branch `b`? After their common parent: the one that keeps an admin
+   * change first, however short and however far back it parts; then the longer; then, parting within
+   * the window, the lower hash of the first commit. Both holding admin changes means the admin signed
+   * two histories: `b` stays (a fresh one halts the group, see `receiveCommit`).
+   */
+  private better(a: Branch, b: Branch, counts: number[]): boolean {
+    if (a.tip === b.tip) return false;
+    const { parent, admin, first } = this.parting(a, b, counts);
+    if (admin[0] !== admin[1]) return admin[0];
+    if (admin[0]) return false;
+    const ea = this.known.get(a.tip)!.e, eb = this.known.get(b.tip)!.e;
+    if (ea !== eb) return ea > eb;
+    if (parent < this.epoch - COMMUNITY_LIMITS.window) return false;
+    return first[0] < first[1];
   }
 
   /**
@@ -568,6 +613,17 @@ export class CommunitySession {
       }
     }
     this.known.set(h, commit); this.rosters.set(h, result.roster);
+    const branch = this.branch(h);
+    if (branch && branch.path.length) {
+      const { admin } = this.parting(branch, this.branch(this.topHash)!, this.adminCounts());
+      // The admin's change on a branch parting from one that holds another of theirs: two histories.
+      if (ADMIN_ONLY.has(commit.k) && admin[1]) {
+        await this.fork(`The admin signed changes on two branches after epoch ${this.state.chain[branch.fork].e}`);
+        return true;
+      }
+      // A branch that drops an admin change never wins: from someone the main branch took out, it is not kept or passed on.
+      if (admin[1] && !admin[0] && !rosterHas(this.roster, commit.by)) { this.known.delete(h); this.rosters.delete(h); return false; }
+    }
     if (!this.mainIndex.has(h)) this.state.side.push(commit);
     this.takeDerived(h);
     const sealed = this.pendingSecrets.get(h);
@@ -582,28 +638,34 @@ export class CommunitySession {
   }
 
   /**
-   * Follows the best branch among the known tips; reorganizes the main branch when it changed. A
-   * longer branch wins however far back it parts (a member away through a race must end up where
-   * everyone is); a branch of the same length only within the window.
+   * Follows the best branch among the known tips (see `better`); reorganizes the main branch when it
+   * changed. A branch that keeps the admin's changes, or a longer one, wins however far back it parts
+   * (a member away through a race must end up where everyone is); a branch of the same length only
+   * within the window.
    */
   private async chooseBranch(): Promise<void> {
-    let best = this.topHash;
-    const floor = this.epoch - COMMUNITY_LIMITS.window;
-    for (const c of this.state.side) {
-      const h = communityCommitHash(c);
-      if (this.mainIndex.has(h) || c.e < this.epoch) continue;
-      const path = this.pathToMain(h);
-      if (!path) continue;
-      if (c.e === this.epoch && this.known.get(this.known.get(path[0])!.p)!.e < floor) continue;
-      if (this.better(h, best)) best = h;
-    }
-    if (best !== this.topHash) await this.adopt(best);
+    const best = this.bestBranch();
+    if (best.tip !== this.topHash) await this.adopt(best.tip);
     if (this.state.status === "lost" && rosterHas(this.roster, this.myKey)) { this.state.status = "active"; delete this.state.statusReason; }
     this.followEntry();
     this.pruneSide();
     await this.persist();
     this.hooks.changed();
     await this.replayWaiting();
+  }
+
+  private bestBranch(): Branch {
+    const counts = this.adminCounts();
+    let best = this.branch(this.topHash)!;
+    const parents = new Set(this.state.side.map(c => c.p));
+    for (const c of this.state.side) {
+      const h = communityCommitHash(c);
+      // Only tips: a commit's children keep what it has and are longer.
+      if (this.mainIndex.has(h) || parents.has(h)) continue;
+      const branch = this.branch(h);
+      if (branch && this.better(branch, best, counts)) best = branch;
+    }
+    return best;
   }
 
   private async adopt(tip: string): Promise<void> {
@@ -1251,6 +1313,8 @@ export class CommunitySession {
     this.hooks.changed();
   }
 }
+
+interface Branch { tip: string; fork: number; path: string[] }
 
 export function signCommunity(commit: Omit<CommunityCommit, "sig">, seed: Uint8Array): CommunityCommit {
   return { ...commit, sig: toBase64Url(sign(utf8Encode(tuple(commit)), seed)) };

@@ -862,7 +862,8 @@ export class Communities {
   /** A frame on an edge, from the member it is pinned to: handled, then relayed on by a hub. */
   async handleEdgeFrame(groupId: string, peerKey: string, frame: unknown): Promise<void> {
     const live = this.live.get(groupId);
-    if (!live || !frame || typeof frame !== "object") return;
+    // Someone the chain took out is not heard, nor relayed for: what they have to say ended with them.
+    if (!live || !frame || typeof frame !== "object" || live.session.wasRemoved(peerKey)) return;
     const f = frame as Record<string, unknown>;
     // Addressed to someone else: a hub routes it, whoever it is for.
     if ((f.t === "group-secret" || f.t === "group-entry") && typeof f.to === "string" && f.to !== live.session.myKey) {
