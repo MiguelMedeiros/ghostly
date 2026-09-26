@@ -261,24 +261,32 @@ describe("adversarial input", () => {
     }));
   });
 
-  const TIME_LIMIT = 1_500;
-  const big = 1_000_000;
-  it.each([
-    ["marker soup", "*_~~||`".repeat(big / 7)],
-    ["openers with no closers", "*a _b ~~c ||d ".repeat(big / 14)],
-    ["closers with no openers", "a* b_ c~~ d|| ".repeat(big / 14)],
-    ["backtick runs", "` `` ``` ".repeat(big / 9)],
-    ["closing brackets after a link", `https://x.example/${")".repeat(big)}`],
-    ["runs just short of a blob", `${"A".repeat(79)} `.repeat(big / 80)],
-    ["one huge blob", "A".repeat(big)],
-    ["clock-like numbers", "1:00 12:30 ".repeat(big / 11)],
-    ["fences with no end", "```\n".repeat(big / 4)],
-    ["almost JSON", `[${"1,".repeat(big / 2)}`],
-    ["nested openers", "*_".repeat(big / 2) + "x"],
-  ])("stays fast on %s", (_, text) => {
+  /** How long parsing and previewing `text` takes, in ms. */
+  const cost = (text: string) => {
     const start = performance.now();
     parseMessage(text);
     plainText(text);
-    expect(performance.now() - start).toBeLessThan(TIME_LIMIT);
+    return performance.now() - start;
+  };
+  const MB = 1_000_000;
+  // Linear work grows 4x from a quarter of the input to all of it; backtracking or a rescan grows 16x or more. The
+  // ratio holds on a slow runner, where a fixed budget would not; the cap only catches the pathological.
+  it.each<[string, (n: number) => string]>([
+    ["marker soup", (n) => "*_~~||`".repeat(n / 7)],
+    ["openers with no closers", (n) => "*a _b ~~c ||d ".repeat(n / 14)],
+    ["closers with no openers", (n) => "a* b_ c~~ d|| ".repeat(n / 14)],
+    ["backtick runs", (n) => "` `` ``` ".repeat(n / 9)],
+    ["closing brackets after a link", (n) => `https://x.example/${")".repeat(n)}`],
+    ["runs just short of a blob", (n) => `${"A".repeat(79)} `.repeat(n / 80)],
+    ["one huge blob", (n) => "A".repeat(n)],
+    ["clock-like numbers", (n) => "1:00 12:30 ".repeat(n / 11)],
+    ["fences with no end", (n) => "```\n".repeat(n / 4)],
+    ["almost JSON", (n) => `[${"1,".repeat(n / 2)}`],
+    ["nested openers", (n) => "*_".repeat(n / 2) + "x"],
+  ])("stays linear on %s (1 MB)", (_, make) => {
+    const quarter = cost(make(MB / 4));
+    const whole = cost(make(MB));
+    expect(whole).toBeLessThan(10 * Math.max(quarter, 25));
+    expect(whole).toBeLessThan(10_000);
   });
 });

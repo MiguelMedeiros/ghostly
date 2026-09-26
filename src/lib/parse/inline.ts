@@ -159,7 +159,7 @@ function splitMarkers(text: string, prev: string | undefined, nextChar: string |
 function pairMarkers(items: Item[]) {
   // Open markers in order, where each one sits in that list, and the same markers per run.
   const stack: number[] = [];
-  const depthOf = new Map<number, number>();
+  const depthOf = new Int32Array(items.length);
   const byRun = new Map<string, number[]>();
   const popTo = (depth: number) => {
     while (stack.length > depth) byRun.get((items[stack.pop()!] as Mark).run)!.pop();
@@ -176,11 +176,11 @@ function pairMarkers(items: Item[]) {
     if (item.canClose && openers?.length) {
       const opener = openers[openers.length - 1];
       // Whatever opened after it and is still open never closes: "*a _b* c_" is bold "a _b", then text.
-      popTo(depthOf.get(opener)!);
+      popTo(depthOf[opener]);
       (items[opener] as Mark).pair = "open";
       item.pair = "close";
     } else if (item.canOpen) {
-      depthOf.set(i, stack.length);
+      depthOf[i] = stack.length;
       stack.push(i);
       if (openers) openers.push(i);
       else byRun.set(item.run, [i]);
