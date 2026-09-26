@@ -8,7 +8,7 @@ test("on a phone: tabs for chats, wallet, sharing and settings, and Profile thro
 
   await tabs.getByRole("button", { name: "Wallets" }).click();
   await expect(page).toHaveURL(/#\/wallet$/);
-  await expect(page.getByRole("heading", { name: "Wallet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Wallet", exact: true })).toBeVisible();
   await expect(page.getByTestId("wallet")).toBeVisible();
 
   await tabs.getByRole("button", { name: "Services" }).click();
@@ -67,7 +67,7 @@ test("on a wide screen the wallet and services are pages beside the list", { tag
   await expect(page.getByTestId("mobile-tabs")).toHaveCount(0);
   await page.getByTestId("wallet-chip").click();
   await expect(page).toHaveURL(/#\/wallet$/);
-  await expect(page.getByRole("heading", { name: "Wallet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Wallet", exact: true })).toBeVisible();
   await page.getByTestId("account-services").click();
   await expect(page).toHaveURL(/#\/services$/);
   await expect(page.getByRole("heading", { name: "Services" })).toBeVisible();
