@@ -474,7 +474,7 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
   });
 
   it("a stored branch from before the fix that dropped an admin change is dropped in turn", async () => {
-    const { net, alice, bob, carol, mallory } = await group();
+    const { net, alice, bob, mallory } = await group();
     const before = alice.session.top, beforeRoster = alice.session.roster;
     await alice.session.remove(mallory.session.myKey);
     await net.settle();

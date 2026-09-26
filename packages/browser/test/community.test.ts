@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { COMMUNITY_TOPOLOGY, decodeCommunityLink } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.community.join, groups.community.send, groups.community.catch-up, groups.community.remove, groups.community.leave, groups.protocol.community-topology
@@ -88,6 +88,15 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     await world.run(5_000);
     expect(world.texts(dave, id)).toContain("after carol");
     expect(world.texts(carol, id)).not.toContain("after carol");
+    // Whatever Carol still sends on an edge is dropped before the session sees it; a member's is not.
+    const session = (bob.groups.communities as unknown as { live: Map<string, { session: { handle: (from: string, frame: unknown) => Promise<boolean> } }> }).live.get(id)!.session;
+    const handle = vi.spyOn(session, "handle");
+    const sync = { t: "group-sync", v: 2, g: id, e: 0, h: "0".repeat(64), have: {}, secrets: [] };
+    await bob.groups.handleEdgeFrame(id, carolKey, sync);
+    expect(handle).not.toHaveBeenCalled();
+    await bob.groups.handleEdgeFrame(id, world.view(dave, id)!.myKey!, sync);
+    expect(handle).toHaveBeenCalledTimes(1);
+    handle.mockRestore();
 
     // Dave leaves: his list is empty at once; a hub commits it.
     const daveKey = world.view(dave, id)!.myKey!;
