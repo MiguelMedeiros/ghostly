@@ -17,7 +17,7 @@ describe("Settings, Network: Pkarr relays", () => {
     // An unsaved edit of the list does not go with the switch.
     await user.type(screen.getByTestId("network-relays"), "\nhttps://unsaved.example");
     await user.click(toggle);
-    expect(engine.callsTo("updateSettings").at(-1)).toEqual({ settings: { relays: RELAYS, iceServers: [], readRelays: true } });
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toEqual({ settings: { relays: RELAYS, iceServers: [], readRelays: true } });
     act(() => engine.update({ settings: { relays: RELAYS, readRelays: true } }));
     expect(screen.getByTestId("network-read-relays")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText(/this app writes to them too/)).toBeInTheDocument();
