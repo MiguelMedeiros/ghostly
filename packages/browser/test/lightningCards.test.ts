@@ -161,6 +161,10 @@ describe("several cards on one network", () => {
     await registry.start();
     const home = await registry.add("fake-node", { alias: "Home" });
     expect(registry.receivingId, "the mints' card is not shown without mints").toBe(home);
+    expect(registry.has(CASHU_CARD), "a card of their own took its place: a Cashu wallet made later does not bring it back").toBe(false);
+    mints = true;
+    expect(registry.views().map((v) => v.card)).toEqual([home]);
+    mints = false;
     const office = await registry.add("fake-node", { alias: "Office" });
     expect(registry.receivingId).toBe(home);
     await registry.setReceive(office);

@@ -193,9 +193,14 @@ export class LightningCards {
       finally { this.adding = undefined; }
       card.name = this.freeName(service.view.alias ? `${service.view.alias.slice(0, 20)} (${shortName(providerId, this.label)})` : shortName(providerId, this.label));
       const receive = this.receivingId === CASHU_CARD ? id : this.stored.receive;
-      try { await this.save({ cards: [...this.stored.cards, card], receive }, card.id); }
+      // The mints' card of a network with no mints is not shown and holds nothing: a card of the person's own takes its
+      // place, as the one source did before cards (a Cashu wallet made later does not bring it back).
+      const hidden = this.services.has(CASHU_CARD) && !this.options.hasMints();
+      const cards = [...this.stored.cards.filter((c) => !hidden || c.id !== CASHU_CARD), card];
+      try { await this.save({ cards, receive }, card.id); }
       catch (error) { await service.sources.forget().catch(() => {}); await service.stop(); throw error; }
       this.services.set(id, service);
+      if (hidden) { const gone = this.services.get(CASHU_CARD)!; this.services.delete(CASHU_CARD); await gone.stop(); }
       return id;
     });
   }
