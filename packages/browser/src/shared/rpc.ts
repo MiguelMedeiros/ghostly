@@ -90,6 +90,12 @@ export interface EngineApi {
   recheckIdentityProof(params: { linkId: string; id: string }): void;
   /** Only on request: the public name/picture of what the contact shared. */
   lookupIdentityDisplay(params: { linkId: string; id: string }): void;
+  /**
+   * The public profile of one verified identity (the person's own or a contact's), asked for when its card is on
+   * screen. Does nothing unless the proof is current and verified, Settings → Load public profiles is on and the
+   * network is on; a copy younger than a day is not asked again (`force`: after five minutes).
+   */
+  loadPublicProfile(params: { provider: string; subject: string; force?: boolean }): void;
   /** Lists one of the profile's identities in its public DID document (`alsoKnownAs`), or takes it out. */
   setDidListed(params: { id: string; listed: boolean }): void;
   /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */

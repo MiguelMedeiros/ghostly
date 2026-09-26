@@ -8,7 +8,7 @@ import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./paymen
 import type { IdentityProofProvider } from "../proofs/contract";
 import { identityProviders } from "../proofs/registry";
 import { boundedIdentityFetch, verifyIdentity } from "../proofs/verify";
-import type { IdentityProofView, LinkIdentitiesView } from "../shared/types";
+import type { IdentityProofView, LinkIdentitiesView, PublicProfileView } from "../shared/types";
 
 /** A proof key's seed, sealed with a device key like the wallet seeds. It never leaves the profile. */
 export interface SealedProofKey { sealed: EncryptedSeed; deviceKey: string }
@@ -37,6 +37,8 @@ export interface IdentityLinkHost {
   linkIds(): string[];
   online(): boolean;
   emit(): void;
+  /** The public profile kept for an identity (PUBLIC-PROFILES.md), shown only while its proof is current and verified. */
+  publicProfile?(provider: string, subject: string): PublicProfileView | undefined;
   /** Pkarr (the Ghost DHT or its relays): publish records under a key, read a key's latest records. */
   publish(seed: Uint8Array, records: { label: string; value: string }[]): Promise<void>;
   resolve(key: string): Promise<{ label: string; value: string }[] | null>;
@@ -207,9 +209,11 @@ export class IdentityProofs {
     const id = identityStatement(p.binding).id;
     const sharedWith = this.host.linkIds().filter(l => this.host.ledger(l)?.shared.some(s => s.id === id && s.status !== "withdrawn" && s.status !== "withdrawal-pending" && s.status !== "rejected")).length;
     const publicUri = this.publicUri(p);
+    const expiresAt = Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity);
+    const publicProfile = expiresAt > now() ? this.host.publicProfile?.(p.binding.provider, p.verified.subject) : undefined;
     return { id, provider: p.binding.provider, subject: p.binding.subject, key: p.binding.key, verified: p.verified,
-      issuedAt: p.binding.issuedAt, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity), createdAt: p.createdAt, sharedWith, evidence: p.evidence,
-      ...(publicUri ? { publicUri } : {}) };
+      issuedAt: p.binding.issuedAt, expiresAt, createdAt: p.createdAt, sharedWith, evidence: p.evidence,
+      ...(publicUri ? { publicUri } : {}), ...(publicProfile ? { publicProfile } : {}) };
   }
 
   /** What the profile's public DID would list for this identity: the provider's URI for the verified subject, if well formed. */
@@ -305,10 +309,13 @@ export class IdentityProofs {
       shared: ledger.shared,
       received: ledger.received.map(r => {
         const provider = this.providers().find(p => p.id === r.binding.provider);
+        const status = receivedIdentityStatus(r, theirs, mine, t);
+        const publicProfile = status === "verified" ? this.host.publicProfile?.(r.binding.provider, r.verified.subject) : undefined;
         return { id: r.id, provider: r.binding.provider, subject: r.verified.subject, verified: r.verified, display: r.display,
-          status: receivedIdentityStatus(r, theirs, mine, t), verifiedAt: r.verifiedAt, checkedAt: r.checkedAt,
+          status, verifiedAt: r.verifiedAt, checkedAt: r.checkedAt,
           expiresAt: Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity), error: r.error,
-          recheckDue: !!provider?.recheck && t - r.checkedAt >= provider.recheck.afterSeconds };
+          recheckDue: !!provider?.recheck && t - r.checkedAt >= provider.recheck.afterSeconds,
+          ...(publicProfile ? { publicProfile } : {}) };
       }),
       error: this.errors.get(linkId),
     };
