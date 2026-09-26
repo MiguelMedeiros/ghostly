@@ -189,6 +189,32 @@ export function followHints(theirs: readonly string[], mine: readonly string[], 
 export const npub = (hex: string) => { try { return npubEncode(hex); } catch { return hex; } };
 export const shortNpub = (hex: string) => { const n = npub(hex); return n.startsWith("npub1") ? `${n.slice(0, 12)}…${n.slice(-4)}` : n; };
 
+/** What a NIP-19 code in a message points at: a key (`npub`, `nprofile`) or a note (`note`, `nevent`). */
+export type NostrPointer =
+  | { type: "profile"; pubkey: string; relays: string[] }
+  | { type: "note"; id: string; author?: string; relays: string[] };
+
+/**
+ * Decodes an `npub`, `nprofile`, `note` or `nevent` (a `nostr:` prefix allowed), checksum and all; undefined for
+ * anything else. Relay hints are returned as written: the social layer never asks them (see `relay.ts`).
+ */
+export function nostrPointer(input: string): NostrPointer | undefined {
+  const code = input.trim().replace(/^nostr:/i, "").toLowerCase();
+  if (!/^(npub|nprofile|note|nevent)1/.test(code) || code.length > 1_000) return undefined;
+  try {
+    const d = nip19Decode(code);
+    const hints = (r: unknown) => (Array.isArray(r) ? r.filter((x): x is string => typeof x === "string").slice(0, 8) : []);
+    if (d.type === "npub" && HEX64.test(d.data)) return { type: "profile", pubkey: d.data, relays: [] };
+    if (d.type === "nprofile" && HEX64.test(d.data.pubkey)) return { type: "profile", pubkey: d.data.pubkey, relays: hints(d.data.relays) };
+    if (d.type === "note" && HEX64.test(d.data)) return { type: "note", id: d.data, relays: [] };
+    if (d.type === "nevent" && HEX64.test(d.data.id)) {
+      const author = d.data.author && HEX64.test(d.data.author) ? d.data.author : undefined;
+      return { type: "note", id: d.data.id, ...(author ? { author } : {}), relays: hints(d.data.relays) };
+    }
+  } catch { /* not a valid code */ }
+  return undefined;
+}
+
 /** A public key the person typed: npub or hex → hex. */
 export function normalizePubkey(input: string): string {
   const value = input.trim();

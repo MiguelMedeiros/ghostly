@@ -192,3 +192,53 @@ describe("the Nostr social layer in the engine", () => {
     } finally { await bad.close(); }
   });
 });
+
+// covers: chat.cards.nostr
+describe("a key or note a message names (nostrLookup)", () => {
+  const relay = new TestNostrRelay();
+  const dave = generateSecretKey(), D = getPublicKey(dave);
+  let noteId = "", mutedId = "";
+  beforeAll(async () => {
+    await relay.listen();
+    relay.add({ kind: 0, tags: [], content: JSON.stringify({ name: "dave", display_name: "Dave", about: "not a contact" }), created_at: now - 100 }, dave);
+    noteId = relay.add({ kind: 1, tags: [], content: "hello from a stranger", created_at: now - 50 }, dave).id;
+    mutedId = relay.add({ kind: 1, tags: [], content: "the casino is open", created_at: now - 40 }, dave).id;
+    relay.add({ kind: 10000, tags: [["word", "casino"]], content: "", created_at: now - 30 }, bob);
+  });
+  afterAll(() => relay.close());
+
+  it("reads any key's profile from the person's relays, without a proof, and stores nothing", async () => {
+    const { engine, contacts } = bobsEngine(relay, { verified: [] });
+    await engine.load();
+    const result = await engine.lookup({ type: "profile", pubkey: D });
+    expect(result).toMatchObject({ found: true, relays: [relay.url], profile: { name: "Dave", handle: "dave", about: "not a contact", hasPicture: false } });
+    expect(relay.requests.at(-1)).toMatchObject({ kinds: [0], authors: [D] });
+    expect(contacts).toEqual({});
+    expect(await engine.lookup({ type: "profile", pubkey: C })).toMatchObject({ found: false });
+  });
+
+  it("reads a note by id (and author, when the code names one); a wrong author is not it", async () => {
+    const { engine } = bobsEngine(relay);
+    await engine.load();
+    expect(await engine.lookup({ type: "note", id: noteId })).toMatchObject({ found: true, note: { id: noteId, author: D, content: "hello from a stranger", reply: false } });
+    expect(relay.requests.at(-1)).toMatchObject({ kinds: [1], ids: [noteId] });
+    expect(await engine.lookup({ type: "note", id: noteId, author: A })).toMatchObject({ found: false });
+  });
+
+  it("hides a note the person's mute list hides", async () => {
+    const { engine } = bobsEngine(relay);
+    await engine.load();
+    await engine.loadOwn({ subject: B });
+    expect(await engine.lookup({ type: "note", id: mutedId })).toMatchObject({ found: true, note: { muted: true, content: "" } });
+  });
+
+  it("refuses offline, and anything that is not a key or an event id, before asking a relay", async () => {
+    const before = relay.requests.length;
+    const offline = bobsEngine(relay, { online: false });
+    await expect(offline.engine.lookup({ type: "profile", pubkey: D })).rejects.toThrow(/Offline/);
+    const { engine } = bobsEngine(relay);
+    await expect(engine.lookup({ type: "profile", pubkey: "npub1nope" })).rejects.toThrow(/not a Nostr public key/);
+    await expect(engine.lookup({ type: "note", id: "x".repeat(64) })).rejects.toThrow(/not a Nostr note/);
+    expect(relay.requests.length).toBe(before);
+  });
+});

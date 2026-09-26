@@ -28,7 +28,7 @@ import { setOwnDidSource } from '../proofs/providers/did';
 import { ProfileDid } from './did';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { normalizeNostrRelays } from '../nostr/relay';
-import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
+import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { WALLET_NETWORKS, walletNetworkOf, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
@@ -1095,6 +1095,7 @@ export class GhostlyNode implements EngineImplementation {
   nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): Promise<void> { return this.nostrSocial.loadContact(params); }
   nostrForgetContact(params: { linkId: string; subject: string }): Promise<void> { return this.nostrSocial.forgetContact(params); }
   nostrLoadOwn(params: { subject: string }): Promise<void> { return this.nostrSocial.loadOwn(params); }
+  nostrLookup(params: NostrLookupRequest): Promise<NostrLookupResult> { return this.nostrSocial.lookup(params); }
   nostrDraft(params: NostrDraftRequest): Promise<NostrDraft> { return this.nostrSocial.draft(params); }
   nostrPublish(params: { draftId: string; event: unknown }): Promise<NostrPublishResult> { return this.nostrSocial.publish(params); }
 

@@ -121,3 +121,17 @@ export type NostrDraftRequest =
   | { subject: string; action: "profile"; fields: { name?: string; displayName?: string; about?: string; picture?: string; nip05?: string; website?: string } };
 
 export interface NostrPublishResult { accepted: string[]; rejected: { relay: string; reason: string }[] }
+
+/** A key or a note named in a message, looked up on the person's tap (`nostrLookup`). */
+export type NostrLookupRequest = { type: "profile"; pubkey: string } | { type: "note"; id: string; author?: string };
+
+/** What the person's relays hold for a `NostrLookupRequest`, returned and never stored. */
+export interface NostrLookupResult {
+  fetchedAt: number;
+  /** The relays that answered. */
+  relays: string[];
+  found: boolean;
+  profile?: NostrProfileView;
+  /** A note hidden by the person's own mute list comes back `muted`, with no text. */
+  note?: NostrNoteView & { author: string; muted?: boolean };
+}

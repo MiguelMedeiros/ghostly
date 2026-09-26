@@ -6,7 +6,7 @@ import {
   followHints, followsTemplate, KIND_FOLLOWS, KIND_MUTE, KIND_NOTE, KIND_PROFILE, MAX_NOTES_KEPT, mutedBecause, newestOf, normalizePubkey, noteTemplate,
   NOTES_PAGE, npub, parseFollows, parseMuteList, parseNote, parseProfile, profileTemplate, shortNpub, STALE_AFTER_SECONDS, type EventTemplate, type NostrMuteList, type NostrNote, type NostrProfile,
 } from "../nostr/social";
-import type { NostrContactCache, NostrContactView, NostrDraft, NostrDraftRequest, NostrOwnCache, NostrOwnView, NostrProfileView, NostrPublishResult, NostrSocialSettings, NostrSocialState } from "../nostr/types";
+import type { NostrContactCache, NostrContactView, NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrOwnCache, NostrOwnView, NostrProfileView, NostrPublishResult, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 
 /** What the engine gives the social layer. */
 export interface NostrSocialHost {
@@ -29,6 +29,7 @@ export interface NostrSocialHost {
 
 const OWN_KEY = "nostrSocial";
 const DRAFT_TTL_MS = 10 * 60_000;
+const HEX64 = /^[a-f0-9]{64}$/;
 const MAX_DRAFTS = 8;
 const PROFILE_SOURCE = "Nostr profile (kind 0, signed by this key, self-described)";
 
@@ -224,6 +225,49 @@ export class NostrSocial {
     const notes = [...known.values()].sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id)).slice(0, MAX_NOTES_KEPT);
     const fetchedAt = this.now;
     await this.patchContact(linkId, subject, c => ({ ...c, notes: { fetchedAt, relays: result.answered, notes, exhausted: page.length < NOTES_PAGE || notes.length >= MAX_NOTES_KEPT } }));
+  }
+
+  // -- a key or note named in a message ------------------------------------------------------------
+
+  /**
+   * A key or a note a message names, on the person's tap: read from the person's own relays (a code's relay hints
+   * are never asked), parsed like a contact's, and returned without being stored. A note whose author or words the
+   * person's mute list hides comes back `muted`, without its text.
+   */
+  async lookup(request: NostrLookupRequest): Promise<NostrLookupResult> {
+    this.requireOnline();
+    const { relays } = this.settings;
+    if (request.type === "profile") {
+      const pubkey = String(request.pubkey).toLowerCase();
+      if (!HEX64.test(pubkey)) throw new Error("That is not a Nostr public key");
+      const result = await readRelays(relays, { kinds: [KIND_PROFILE], authors: [pubkey], limit: 3 }, this.readOptions());
+      if (result.answered.length === 0) throw new Error("No relay answered");
+      const event = newestOf(result.events, KIND_PROFILE, pubkey);
+      const profile = event ? parseProfile(event, pubkey) : undefined;
+      let avatar: string | undefined;
+      if (profile?.picture) {
+        const small = await cacheAvatar(profile.picture);
+        if (small && typeof sanitizeAvatar(small) === "string") avatar = small;
+      }
+      const view = this.profileView(profile, avatar);
+      return { fetchedAt: this.now, relays: result.answered, found: !!view, ...(view ? { profile: view } : {}) };
+    }
+    const id = String(request.id).toLowerCase();
+    const author = request.author === undefined ? undefined : String(request.author).toLowerCase();
+    if (!HEX64.test(id) || (author !== undefined && !HEX64.test(author))) throw new Error("That is not a Nostr note");
+    const filter = { kinds: [KIND_NOTE], ids: [id], ...(author ? { authors: [author] } : {}), limit: 1 };
+    const result = await readRelays(relays, filter, { ...this.readOptions(), maxEvents: 4 });
+    if (result.answered.length === 0) throw new Error("No relay answered");
+    // A relay may answer with other events: only the one asked for, by the author the code names, counts.
+    const event = result.events.find(e => e.id === id && (!author || e.pubkey === author));
+    const note = event ? parseNote(event, event.pubkey) : undefined;
+    const fetchedAt = this.now;
+    if (!event || !note) return { fetchedAt, relays: result.answered, found: false };
+    const muted = this.muteLists().some(m => m.pubkeys.includes(event.pubkey)) || this.muted(note, event.pubkey);
+    return {
+      fetchedAt, relays: result.answered, found: true,
+      note: { id, createdAt: note.createdAt, reply: note.reply, author: event.pubkey, content: muted ? "" : note.content, ...(muted ? { muted: true } : {}) },
+    };
   }
 
   async forgetContact({ linkId, subject }: { linkId: string; subject: string }): Promise<void> {

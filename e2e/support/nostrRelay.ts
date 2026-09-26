@@ -51,9 +51,14 @@ export class LocalNostrRelay {
     return this.events.filter(e => matches(e, f)).sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id)).slice(0, f.limit ?? 500);
   }
 
-  /** Answers this context's connections to the test relay, recording them under `name`. */
-  async attach(context: BrowserContext, name: string): Promise<void> {
-    await context.routeWebSocket(url => url.href.startsWith(NOSTR_TEST_RELAY), (ws: WebSocketRoute) => {
+  /**
+   * Answers this context's connections to the test relay, recording them under `name`. `urls` adds relays it answers
+   * as well (the app's defaults, for a person who never changed them): none of them is reached. Like any Playwright
+   * route, it covers pages loaded after it: reload a page that was already open.
+   */
+  async attach(context: BrowserContext, name: string, urls: readonly string[] = []): Promise<void> {
+    const answered = [NOSTR_TEST_RELAY, ...urls];
+    await context.routeWebSocket(url => answered.some(relay => url.href.startsWith(relay)), (ws: WebSocketRoute) => {
       ws.onMessage(raw => {
         let frame: unknown[];
         try { frame = JSON.parse(typeof raw === "string" ? raw : raw.toString()); } catch { return; }
