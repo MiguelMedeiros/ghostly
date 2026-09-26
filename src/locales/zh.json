@@ -527,5 +527,23 @@
       "text": "此聊天中没有开启任何付款方式。",
       "action": "选择此聊天接受的方式"
     }
+  },
+  "secretGuard": {
+    "mnemonicTitle": "发送钱包助记词？",
+    "mnemonic": "这看起来像钱包助记词。任何看到它的人都能拿走你的资金。仍要发送吗？",
+    "nsecTitle": "发送 Nostr 私钥？",
+    "nsec": "这看起来像 Nostr 私钥 (nsec)。任何看到它的人都能以你的身份发帖并阅读你的私信。仍要发送吗？",
+    "bitcoinKeyTitle": "发送私钥？",
+    "bitcoinKey": "这看起来像比特币私钥。任何看到它的人都能拿走你的资金。仍要发送吗？",
+    "hexKeyTitle": "发送私钥？",
+    "hexKey": "这看起来像私钥或种子。任何看到它的人都能拿走你的资金或冒充你。仍要发送吗？",
+    "cashuTitle": "向 {{contact}} 发送 {{amount}}？",
+    "cashuUnknownTitle": "向 {{contact}} 发送这笔 ecash？",
+    "cashu": "这是一个 Cashu 代币：它就是钱，谁先兑换就归谁。发送后无法撤回。",
+    "sat": "{{count}} sat",
+    "sats": "{{count}} sats",
+    "thisChat": "此聊天",
+    "send": "发送",
+    "sendAnyway": "仍然发送"
   }
 }

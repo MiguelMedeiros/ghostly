@@ -527,5 +527,23 @@
       "text": "Nenhuma forma de pagamento está ativa nesta conversa.",
       "action": "Escolher o que esta conversa aceita"
     }
+  },
+  "secretGuard": {
+    "mnemonicTitle": "Enviar uma seed de carteira?",
+    "mnemonic": "Isto parece uma seed de carteira. Quem a vir pode levar seus fundos. Enviar mesmo assim?",
+    "nsecTitle": "Enviar uma chave privada Nostr?",
+    "nsec": "Isto parece uma chave privada Nostr (nsec). Quem a vir pode publicar como você e ler suas mensagens privadas. Enviar mesmo assim?",
+    "bitcoinKeyTitle": "Enviar uma chave privada?",
+    "bitcoinKey": "Isto parece uma chave privada Bitcoin. Quem a vir pode levar seus fundos. Enviar mesmo assim?",
+    "hexKeyTitle": "Enviar uma chave privada?",
+    "hexKey": "Isto parece uma chave privada ou uma seed. Quem a vir pode levar seus fundos ou agir como você. Enviar mesmo assim?",
+    "cashuTitle": "Enviar {{amount}} para {{contact}}?",
+    "cashuUnknownTitle": "Enviar este ecash para {{contact}}?",
+    "cashu": "Isto é um token Cashu: é dinheiro, e fica com quem resgatar primeiro. Depois de enviado, não dá para desfazer.",
+    "sat": "{{count}} sat",
+    "sats": "{{count}} sats",
+    "thisChat": "esta conversa",
+    "send": "Enviar",
+    "sendAnyway": "Enviar mesmo assim"
   }
 }

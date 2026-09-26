@@ -243,7 +243,7 @@ export function GroupChat() {
         </div>
       </div>}
 
-      {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384}
+      {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name}
         fileUnavailable="Files are not part of groups yet"
         paymentsUnavailable={others.length === 0 ? "Nobody else is in the group yet" : undefined}
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}
