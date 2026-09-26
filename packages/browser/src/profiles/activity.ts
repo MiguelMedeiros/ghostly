@@ -256,6 +256,9 @@ export function expandLinkFacets(text: string, facets: unknown): string {
     const start = index?.byteStart, end = index?.byteEnd, uri = feature?.uri;
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || typeof uri !== "string" || uri.length > 2048) continue;
     if ((start as number) < 0 || (end as number) > bytes.length || (start as number) >= (end as number)) continue;
+    // A range that starts or ends inside a character would cut it in half.
+    const inside = (i: number) => i < bytes.length && (bytes[i] & 0xc0) === 0x80;
+    if (inside(start as number) || inside(end as number)) continue;
     try { if (new URL(uri).protocol !== "https:") continue; } catch { continue; }
     links.push({ start: start as number, end: end as number, uri });
   }

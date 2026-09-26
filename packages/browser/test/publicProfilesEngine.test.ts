@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { describe, expect, it, vi } from "vitest";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
-// covers: proofs.public-profile.setting
+// covers: proofs.public-profile.setting, proofs.public-activity
 
 describe("public profiles in the engine", () => {
   it("Load public profiles is on unless turned off, and nothing is asked for an identity without a verified proof", async () => {
@@ -18,6 +18,10 @@ describe("public profiles in the engine", () => {
       await node.updateSettings({ settings: { online: true } });
       await node.loadPublicProfile({ provider: "nostr", subject: "a".repeat(64) });
       await node.loadPublicProfile({ provider: "pubky", subject: "y".repeat(52), force: true });
+      // Posts and follows: the same gate. No verified proof, no answer, nobody asked.
+      expect(await node.loadPublicPosts({ provider: "pubky", subject: "y".repeat(52) })).toBeNull();
+      expect(await node.loadPublicGraph({ provider: "nostr", subject: "a".repeat(64) })).toBeNull();
+      await expect(node.loadPublicPostImage({ provider: "pubky", subject: "y".repeat(52), postId: "X", index: 0 })).rejects.toThrow();
       expect(fetcher.mock.calls.filter(([url]) => /nexus\.pubky\.app|bsky/.test(String(url)))).toEqual([]);
       expect(sockets.mock.calls.filter(([url]) => /damus|nos\.lol/.test(String(url)))).toEqual([]);
       await node.updateSettings({ settings: { publicProfiles: false } });
