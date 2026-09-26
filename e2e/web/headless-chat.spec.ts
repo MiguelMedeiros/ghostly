@@ -31,7 +31,8 @@ test("a person on the web chats with a headless bot, both ways", { tag: ["@featu
     await expect(chat(person).getByText("~Helper bot").first()).toBeVisible();
     // The person's app announced itself; the bot saw a join, not a message, and answered it as the app would.
     expect(await bot.event((e) => e.type === "chat.joined")).toMatchObject({ chat: invite.chat });
-    await expect(chat(person).getByText("Helper bot joined the chat").or(chat(person).getByText("👋 Helper bot joined")).first()).toBeVisible();
+    // The app shows each notice as a line: the person's own, and the bot's answer.
+    await expect(chat(person).getByText(/joined the chat/)).toHaveCount(2);
 
     // The person invites; the bot joins.
     await person.page.goto("/#/");
