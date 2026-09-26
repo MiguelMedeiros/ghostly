@@ -250,7 +250,7 @@ describe("Show as, in the contact's identities", () => {
     const select = screen.getByTestId("contact-face-select");
     expect((await optionsOf(user, select)).map(o => o.label)).toEqual(["Ghostly (none)", "Alice Liddell", "Alice on Nostr"]);
     await user.keyboard("{Escape}");
-    await choose(user, select, `nostr\n${NOSTR_KEY}`);
+    await choose(user, select, `nostr:${NOSTR_KEY}`);
     expect(faceChoice(PEER)).toEqual({ provider: "nostr", subject: NOSTR_KEY });
     expect(screen.getByTestId("contact-face-hint")).toHaveTextContent("Your nickname “Mom” stays; the photo is theirs.");
   });

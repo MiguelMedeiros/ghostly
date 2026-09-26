@@ -8,7 +8,7 @@ import { contactFace, faceCandidates, setFaceChoice, suggestedFace, useFaceChoic
 import { loadShownProfiles } from "./markTip";
 
 const GHOSTLY_VALUE = "ghostly";
-const valueOf = (f: Pick<ContactFace, "provider" | "subject">) => `${f.provider}\n${f.subject}`;
+const valueOf = (f: Pick<ContactFace, "provider" | "subject">) => `${f.provider}:${f.subject}`;
 
 /** A candidate's picture, or its provider's mark. */
 const faceMark = (f: ContactFace, size: number) => <BadgeMark provider={f.provider} subject={f.subject} state="verified" photo={f.photo} size={size} />;
