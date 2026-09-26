@@ -392,7 +392,7 @@ describe("text in a chat", () => {
   it("a paired chat keeps the message before it goes out, and hands it to the outbox", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
-    expect(await node.sendMessage({ linkId: chat.id, text: "  hi  ", timestamp: 4 })).toEqual({ error: null });
+    expect(await node.sendMessage({ linkId: chat.id, text: "  hi  ", timestamp: 4 })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
     const [message] = await db.getMessages(chat.id);
     expect(message).toMatchObject({ text: "hi", sender: "me", via: "datalink" });
     expect(linkOf(chat.id).sendMessage).toHaveBeenCalledWith("hi", 4, message.wireId);
@@ -406,11 +406,11 @@ describe("text in a chat", () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const preview = { u: "https://news.example/a", t: "A story" };
-    expect(await node.sendMessage({ linkId: chat.id, text: "see https://news.example/a?utm_source=x", timestamp: 5, preview })).toEqual({ error: null });
+    expect(await node.sendMessage({ linkId: chat.id, text: "see https://news.example/a?utm_source=x", timestamp: 5, preview })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
     const [message] = await db.getMessages(chat.id);
     expect(message.preview).toEqual(preview);
     expect(linkOf(chat.id).sendMessage).toHaveBeenCalledWith("see https://news.example/a?utm_source=x", 5, message.wireId, preview);
-    expect(await node.sendMessage({ linkId: chat.id, text: "no link here", timestamp: 6, preview })).toEqual({ error: null });
+    expect(await node.sendMessage({ linkId: chat.id, text: "no link here", timestamp: 6, preview })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
     const second = (await db.getMessages(chat.id)).find(m => m.text === "no link here")!;
     expect(second.preview).toBeUndefined();
     expect(linkOf(chat.id).sendMessage).toHaveBeenLastCalledWith("no link here", 6, second.wireId);
@@ -424,7 +424,7 @@ describe("text in a chat", () => {
     expect(await node.sendMessage({ linkId: chat.id, text: "x".repeat(600) })).toMatchObject({ refused: true });
     expect(await db.getMessages(chat.id)).toEqual([]);
     link.isDataLinkOpen = true;
-    expect(await node.sendMessage({ linkId: chat.id, text: "x".repeat(600), timestamp: 9 })).toEqual({ error: null });
+    expect(await node.sendMessage({ linkId: chat.id, text: "x".repeat(600), timestamp: 9 })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
     expect(node.getState().links[0].peerAck).toBe(9);
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_9", via: "datalink" });
   });
@@ -436,7 +436,7 @@ describe("text in a chat", () => {
     vi.spyOn(node["hold"], "canHold").mockReturnValue(true);
     const hold = vi.spyOn(node["hold"], "hold").mockResolvedValue();
     expect((await node.sendMessage({ linkId: chat.id, text: "x".repeat(70_000) })).error).toContain("16384");
-    expect(await node.sendMessage({ linkId: chat.id, text: "later", timestamp: 3 })).toEqual({ error: null });
+    expect(await node.sendMessage({ linkId: chat.id, text: "later", timestamp: 3 })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ text: "later", via: "hold", delivery: "sending" });
     expect(hold).toHaveBeenCalledWith(chat.id, expect.objectContaining({ kind: "text", timestamp: 3 }));
     expect(node.getState().links[0]).toMatchObject({ textDelivery: "hold", canSendText: true });

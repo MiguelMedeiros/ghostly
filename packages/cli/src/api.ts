@@ -1,0 +1,492 @@
+import { inviteLink, MENTION_EVERYONE, type GroupMention, type PairedTransport } from "@ghostly/core";
+import type { GhostlyNode } from "@ghostly/browser/engine/node";
+import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
+import { findSecret } from "../../../src/lib/parse/secrets";
+import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
+import { CliError } from "./errors";
+import type { EventHub, GhostlyEvent } from "./events";
+import type { Runtime } from "./runtime/engine";
+import { chatDetailsJson, chatJson, groupJson, messageJson } from "./views";
+
+/**
+ * The methods of the local control API (WISP 11xx): the daemon answers them over its socket, and a one-shot
+ * command calls them in its own process. Parameters come from JSON: every one is checked here.
+ */
+export interface ApiContext {
+  runtime: Runtime;
+  hub: EventHub;
+  /** How the host runs: a daemon stays; a one-shot leaves when its command is done. */
+  mode: "daemon" | "one-shot";
+  version: string;
+  /** The daemon asks to stop (answered first). */
+  stop?: () => void;
+}
+
+type Params = Record<string, unknown>;
+type Method = (ctx: ApiContext, params: Params) => Promise<unknown>;
+
+const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
+const state = (ctx: ApiContext): EngineState => node(ctx).getState();
+
+// ---------- parameters ----------
+
+function str(params: Params, name: string, required: true): string;
+function str(params: Params, name: string, required?: false): string | undefined;
+function str(params: Params, name: string, required = false): string | undefined {
+  const value = params[name];
+  if (value === undefined || value === null || value === "") {
+    if (required) throw new CliError("bad_request", `${name} is required`);
+    return undefined;
+  }
+  if (typeof value !== "string") throw new CliError("bad_request", `${name} must be a string`);
+  return value;
+}
+function num(params: Params, name: string, fallback: number, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}): number {
+  const value = params[name];
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) throw new CliError("bad_request", `${name} must be a number from ${min} to ${max}`);
+  return value;
+}
+function bool(params: Params, name: string): boolean {
+  const value = params[name];
+  if (value === undefined || value === null) return false;
+  if (typeof value !== "boolean") throw new CliError("bad_request", `${name} must be true or false`);
+  return value;
+}
+function list(params: Params, name: string): string[] {
+  const value = params[name];
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new CliError("bad_request", `${name} must be a list of strings`);
+  return value as string[];
+}
+function oneOf<T extends string>(params: Params, name: string, values: readonly T[], fallback: T): T {
+  const value = str(params, name) ?? fallback;
+  if (!values.includes(value as T)) throw new CliError("bad_request", `${name} must be one of ${values.join(", ")}`);
+  return value as T;
+}
+
+// ---------- finding things ----------
+
+/** A chat by its id, a unique prefix of it, or its name (label or the contact's name), in that order. */
+export function findChat(links: readonly LinkView[], ref: string): LinkView {
+  const exact = links.find((link) => link.id === ref);
+  if (exact) return exact;
+  const byPrefix = links.filter((link) => link.id.startsWith(ref));
+  if (byPrefix.length === 1) return byPrefix[0];
+  const lower = ref.toLowerCase();
+  const byName = links.filter((link) => [link.label, link.peerNick].some((name) => name?.trim().toLowerCase() === lower));
+  if (byName.length === 1) return byName[0];
+  if (byPrefix.length > 1 || byName.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: [...byPrefix, ...byName].map((link) => link.id) });
+  throw new CliError("not_found", `No chat ${JSON.stringify(ref)}`);
+}
+
+export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
+  const exact = groups.find((group) => group.id === ref);
+  if (exact) return exact;
+  const byPrefix = groups.filter((group) => group.id.startsWith(ref));
+  if (byPrefix.length === 1) return byPrefix[0];
+  const byName = groups.filter((group) => group.name.trim().toLowerCase() === ref.toLowerCase());
+  if (byName.length === 1) return byName[0];
+  if (byPrefix.length > 1 || byName.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: [...byPrefix, ...byName].map((group) => group.id) });
+  throw new CliError("not_found", `No group ${JSON.stringify(ref)}`);
+}
+
+const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true));
+const groupOf = (ctx: ApiContext, params: Params) => findGroup(state(ctx).groups, str(params, "group", true));
+
+// ---------- waiting ----------
+
+/** Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. */
+function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string): Promise<T> {
+  const now = check(state(ctx));
+  if (now !== undefined) return Promise.resolve(now);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => { off(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
+    const off = ctx.hub.onState((next) => {
+      const value = check(next);
+      if (value === undefined) return;
+      clearTimeout(timer);
+      off();
+      resolve(value);
+    });
+  });
+}
+
+const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
+
+/** Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). */
+async function waitForMessage(ctx: ApiContext, chat: string, messageId: string, target: "sent" | "delivered", ms: number): Promise<StoredMessage> {
+  const want = DELIVERY_RANK[target];
+  const look = (message: StoredMessage | undefined) => {
+    if (!message) return undefined;
+    const delivery = message.delivery ?? "sent";
+    if (delivery === "failed") throw new CliError("engine", message.deliveryError ?? "The message could not be sent", { messageId, delivery });
+    return (DELIVERY_RANK[delivery] ?? 0) >= want ? message : undefined;
+  };
+  const current = look((await node(ctx).getMessages(chat)).find((m) => m.id === messageId));
+  if (current) return current;
+  return new Promise<StoredMessage>((resolve, reject) => {
+    let settled = false;
+    const finish = (error: unknown, message?: StoredMessage) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); off();
+      if (error) reject(error); else resolve(message!);
+    };
+    const timer = setTimeout(() => {
+      void node(ctx).getMessages(chat).then((messages) => {
+        const message = messages.find((m) => m.id === messageId);
+        finish(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the message is ${message?.delivery ?? "not sent yet"} and still goes by itself while this profile is online`, { messageId, delivery: message?.delivery ?? null }));
+      }, finish);
+    }, ms);
+    const off = ctx.hub.onEvent((event: GhostlyEvent) => {
+      if (event.type !== "message.delivery" || event.chat !== chat || event.messageId !== messageId) return;
+      void node(ctx).getMessages(chat).then((messages) => {
+        try { const done = look(messages.find((m) => m.id === messageId)); if (done) finish(null, done); } catch (error) { finish(error); }
+      }, finish);
+    });
+  });
+}
+
+// ---------- settings ----------
+
+/** Settings as a bot may read them: storage credentials and other secrets masked unless asked for. */
+export function redactSettings(settings: Settings, showSecret = false): Record<string, unknown> {
+  if (showSecret) return settings as unknown as Record<string, unknown>;
+  const mask = (value: unknown, key = ""): unknown => {
+    if (value && typeof value === "object" && !Array.isArray(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mask(v, k)]));
+    if (Array.isArray(value)) return value.map((item) => mask(item, key));
+    if (typeof value === "string" && /secret|password|token|credential|privatekey|nsec|bunker/i.test(key)) return "<hidden>";
+    return value;
+  };
+  const { avatar, ...rest } = settings;
+  return { ...(mask(rest) as Record<string, unknown>), ...(avatar ? { avatar: "<set>" } : {}) };
+}
+
+/** Settings a command may change; the rest are the app's to manage. */
+const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
+  relays: "strings", irohRelays: "strings", hyperdhtRelay: "string", readRelays: "boolean",
+  iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", nick: "string",
+};
+
+// ---------- transports ----------
+
+const TRANSPORT_NAMES: Record<string, PairedTransport | "auto" | "dht"> = {
+  auto: "auto", dht: "dht", webrtc: "webrtc/1", iroh: "iroh/1", hyperdht: "hyperdht/1",
+  "webrtc/1": "webrtc/1", "iroh/1": "iroh/1", "hyperdht/1": "hyperdht/1",
+};
+
+// ---------- mentions ----------
+
+/** Code points before `index` (UTF-16) in `text`: mentions count code points (WISP 9xx § Mentions). */
+const codePoints = (text: string, index: number) => [...text.slice(0, index)].length;
+
+/**
+ * Mentions for a group message: each ref (a member key, a unique prefix of one, a member's name, or `everyone`) must
+ * be written in the text as `@<name>` (or `@<key prefix>`, `@everyone`); the first such place is the mention.
+ */
+export function mentionsFor(text: string, refs: readonly string[], group: GroupView): GroupMention[] {
+  const out: GroupMention[] = [];
+  for (const ref of refs) {
+    let key: string, spelled: string[];
+    if (ref === "everyone" || ref === MENTION_EVERYONE) { key = MENTION_EVERYONE; spelled = ["everyone", "all"]; }
+    else {
+      const lower = ref.toLowerCase();
+      const matches = group.members.filter((m) => !m.me && (m.key === ref || m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower));
+      if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${JSON.stringify(ref)} names more than one member` : `No member ${JSON.stringify(ref)} in ${group.name}`);
+      key = matches[0].key;
+      spelled = [matches[0].nick?.trim(), ref, key.slice(0, 8)].filter((s): s is string => !!s);
+    }
+    const found = spelled.map((name) => ({ name, index: text.toLowerCase().indexOf("@" + name.toLowerCase()) })).find((f) => f.index >= 0);
+    if (!found) throw new CliError("bad_request", `Write @${spelled[0]} in the text to mention ${ref}`);
+    out.push({ k: key, o: codePoints(text, found.index), l: [..."@" + found.name].length });
+  }
+  return out;
+}
+
+// ---------- methods ----------
+
+const METHODS: Record<string, Method> = {
+  async status(ctx) {
+    const s = state(ctx);
+    return {
+      version: ctx.version, profile: ctx.runtime.paths.name, mode: ctx.mode, pid: process.pid,
+      online: s.settings.online, name: s.settings.nick || null, webrtc: ctx.runtime.webrtc,
+      chats: s.links.length, live: s.links.filter((l) => l.textDelivery === "stream").length, groups: s.groups.length,
+      discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
+      events: { lastSeq: ctx.hub.lastSeq },
+    };
+  },
+
+  async "profile.get"(ctx) {
+    const { settings } = state(ctx);
+    return { profile: ctx.runtime.paths.name, name: settings.nick || null, shareProfile: settings.shareProfile !== false, picture: !!settings.avatar, online: settings.online };
+  },
+  async "profile.set"(ctx, params) {
+    const patch: Partial<Settings> = {};
+    const name = params.name;
+    if (name !== undefined) {
+      if (typeof name !== "string" || [...name].length > 64) throw new CliError("bad_request", "name must be a string of up to 64 characters");
+      patch.nick = name.trim();
+    }
+    if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
+    await node(ctx).updateSettings({ settings: patch });
+    return METHODS["profile.get"](ctx, {});
+  },
+
+  async "settings.get"(ctx, params) {
+    return redactSettings(state(ctx).settings, bool(params, "showSecret"));
+  },
+  async "settings.set"(ctx, params) {
+    const patch: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(params)) {
+      const kind = SETTABLE[key];
+      if (!kind) throw new CliError("bad_request", `${key} is not a setting the CLI changes (${Object.keys(SETTABLE).join(", ")})`);
+      if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
+      if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
+      if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
+      if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
+      patch[key] = value;
+    }
+    await node(ctx).updateSettings({ settings: patch });
+    return redactSettings(state(ctx).settings);
+  },
+
+  async "invite.create"(ctx, params) {
+    const label = str(params, "label");
+    const { linkId, inviteCode } = await node(ctx).createLink();
+    if (label) await node(ctx).renameLink({ linkId, label });
+    // Native listeners start for the chat on screen (or a paired one): a new invite is the chat a bot waits on.
+    node(ctx).setActiveLink({ linkId });
+    // Its first records must be out before a one-shot leaves.
+    await waitForState(ctx, (s) => { const stage = s.links.find((l) => l.id === linkId)?.pairingProgress?.stage; return stage && stage !== "publishing" ? true : undefined; }, 20_000, "the invite to be published").catch(() => {});
+    return { chat: linkId, invite: inviteCode, link: inviteLink(inviteCode) };
+  },
+  async "invite.join"(ctx, params) {
+    let invite = str(params, "invite", true).trim();
+    const hash = invite.indexOf("#");
+    if (/^https?:\/\//i.test(invite) && hash !== -1) invite = invite.slice(hash + 1);
+    let linkId: string;
+    try {
+      ({ linkId } = await node(ctx).joinLink({ inviteCode: invite }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/own invite/i.test(message)) throw new CliError("refused", message);
+      if (/does not look like/i.test(message)) throw new CliError("bad_request", message);
+      throw error;
+    }
+    const label = str(params, "label");
+    if (label) await node(ctx).renameLink({ linkId, label });
+    node(ctx).setActiveLink({ linkId });
+    return { chat: linkId };
+  },
+
+  async "chat.list"(ctx) {
+    return { chats: state(ctx).links.map(chatJson).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
+  },
+  async "chat.get"(ctx, params) {
+    return chatDetailsJson(chatOf(ctx, params));
+  },
+  async "chat.history"(ctx, params) {
+    const link = chatOf(ctx, params);
+    return history(await node(ctx).getMessages(link.id), params);
+  },
+  async "chat.send"(ctx, params) {
+    const link = chatOf(ctx, params);
+    const text = str(params, "text", true);
+    if (!bool(params, "force")) {
+      const secret = findSecret(text);
+      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
+    }
+    const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
+    const result = await node(ctx).sendMessage({ linkId: link.id, text });
+    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
+    let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
+    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
+    return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null };
+  },
+  async "chat.retry"(ctx, params) {
+    const link = chatOf(ctx, params);
+    await node(ctx).retryMessage({ linkId: link.id, messageId: str(params, "message", true) });
+    return { chat: link.id, messageId: params.message };
+  },
+  async "chat.delete"(ctx, params) {
+    const link = chatOf(ctx, params);
+    const messageId = str(params, "message", true);
+    if (!(await node(ctx).getMessages(link.id)).some((m) => m.id === messageId)) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    await node(ctx).deleteMessage({ linkId: link.id, messageId });
+    return { chat: link.id, deleted: messageId };
+  },
+  async "chat.details"(ctx, params) {
+    const link = chatOf(ctx, params);
+    const details = await node(ctx).messageDetails({ linkId: link.id, messageId: str(params, "message", true) });
+    if (!details) throw new CliError("not_found", `No message ${String(params.message)} in this chat`);
+    return details;
+  },
+  async "chat.rename"(ctx, params) {
+    const link = chatOf(ctx, params);
+    await node(ctx).renameLink({ linkId: link.id, label: str(params, "name") ?? "" });
+    return chatJson(findChat(state(ctx).links, link.id));
+  },
+  async "chat.remove"(ctx, params) {
+    const link = chatOf(ctx, params);
+    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
+    await node(ctx).removeLink({ linkId: link.id });
+    return { removed: link.id };
+  },
+  async "chat.transport"(ctx, params) {
+    const link = chatOf(ctx, params);
+    const name = str(params, "transport", true);
+    const transport = TRANSPORT_NAMES[name];
+    if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
+    await node(ctx).setChatTransport({ linkId: link.id, transport });
+    return chatDetailsJson(findChat(state(ctx).links, link.id));
+  },
+  async "chat.connect"(ctx, params) {
+    const link = chatOf(ctx, params);
+    await node(ctx).connect({ linkId: link.id });
+    return chatJson(findChat(state(ctx).links, link.id));
+  },
+  async "chat.disconnect"(ctx, params) {
+    const link = chatOf(ctx, params);
+    node(ctx).disconnect({ linkId: link.id });
+    return chatJson(findChat(state(ctx).links, link.id));
+  },
+  async "chat.verify"(ctx, params) {
+    const link = chatOf(ctx, params);
+    const code = str(params, "code", true).replace(/\s+/g, "").toLowerCase();
+    const mine = link.pairing?.code?.replace(/\s+/g, "").toLowerCase();
+    if (!mine) throw new CliError("unavailable", "This chat shows no comparison code yet (it needs a live session)");
+    if (code !== mine) throw new CliError("refused", "The code does not match the one this side shows: do not trust this chat until you know why");
+    await node(ctx).confirmPair({ linkId: link.id, code: link.pairing!.code! });
+    return chatJson(findChat(state(ctx).links, link.id));
+  },
+  async "chat.wait"(ctx, params) {
+    const link = chatOf(ctx, params);
+    const until = oneOf(params, "until", ["live", "text", "paired"] as const, "live");
+    const ms = num(params, "timeout", 60, { min: 1, max: 86_400 }) * 1000;
+    const view = await waitForState(ctx, (s) => {
+      const now = s.links.find((l) => l.id === link.id);
+      if (!now) throw new CliError("not_found", `Chat ${link.id} was removed`);
+      const ok = until === "live" ? now.textDelivery === "stream"
+        : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
+        : !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || now.textDelivery === "stream";
+      return ok ? now : undefined;
+    }, ms, `chat ${link.id} to be ${until}`);
+    return chatJson(view);
+  },
+
+  async "group.create"(ctx, params) {
+    const name = str(params, "name", true);
+    const profile = oneOf(params, "profile", ["community", "mesh"] as const, "community");
+    const { groupId } = await node(ctx).createGroup({ name, profile });
+    let link: string | null = null;
+    if (profile === "community") ({ link } = await node(ctx).enableGroupLink({ groupId }));
+    return { group: groupId, link };
+  },
+  async "group.join"(ctx, params) {
+    const { groupId } = await node(ctx).joinGroupByLink({ link: str(params, "link", true) });
+    return { group: groupId };
+  },
+  async "group.list"(ctx) {
+    return { groups: state(ctx).groups.map(groupJson).sort((a, b) => b.lastMessageAt - a.lastMessageAt) };
+  },
+  async "group.get"(ctx, params) {
+    return groupJson(groupOf(ctx, params));
+  },
+  async "group.history"(ctx, params) {
+    const group = groupOf(ctx, params);
+    return history(await node(ctx).groupMessages({ groupId: group.id }), params);
+  },
+  async "group.send"(ctx, params) {
+    const group = groupOf(ctx, params);
+    const text = str(params, "text", true);
+    if (!bool(params, "force")) {
+      const secret = findSecret(text);
+      if (secret) throw new CliError("confirm", "The text looks like a secret or a Cashu token; send it with --force if you mean to", { kind: secret.kind });
+    }
+    const mentions = mentionsFor(text, list(params, "mentions"), group);
+    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}) });
+    if (result.error) throw new CliError("unavailable", result.error);
+    return { group: group.id, sent: true };
+  },
+  async "group.leave"(ctx, params) {
+    const group = groupOf(ctx, params);
+    await node(ctx).leaveGroup({ groupId: group.id });
+    return { left: group.id };
+  },
+  async "group.forget"(ctx, params) {
+    const group = groupOf(ctx, params);
+    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass yes (--yes) to go on");
+    await node(ctx).forgetGroup({ groupId: group.id });
+    return { forgotten: group.id };
+  },
+  async "group.accept"(ctx, params) {
+    const group = groupOf(ctx, params);
+    await node(ctx).acceptGroupInvitation({ groupId: group.id });
+    return { group: group.id };
+  },
+  async "group.decline"(ctx, params) {
+    const group = groupOf(ctx, params);
+    await node(ctx).declineGroupInvitation({ groupId: group.id });
+    return { group: group.id };
+  },
+
+  async "events.replay"(ctx, params) {
+    return { events: ctx.hub.replay(num(params, "since", 0)), lastSeq: ctx.hub.lastSeq };
+  },
+
+  async "daemon.stop"(ctx) {
+    if (ctx.mode !== "daemon" || !ctx.stop) throw new CliError("unavailable", "No daemon runs this profile");
+    setTimeout(() => ctx.stop!(), 10);
+    return { stopping: true, pid: process.pid };
+  },
+
+  async "engine.call"(ctx, params) {
+    const method = str(params, "method", true);
+    if (!ENGINE_METHODS.includes(method) && !ENGINE_READS.includes(method)) throw new CliError("not_found", `The engine has no call ${method}`);
+    const raw = params.params;
+    if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
+    let args = raw as Params | undefined;
+    // Real money moves only on an explicit confirmation of this call (WISP 11xx § Mainnet).
+    if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
+      throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
+    }
+    if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
+    if (method === "getState") return state(ctx);
+    const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
+    if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
+    if (args === undefined) args = undefined;
+    return (await target.call(node(ctx), args)) ?? null;
+  },
+};
+
+function history(messages: StoredMessage[], params: Params) {
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+  const before = params.before;
+  const after = params.after;
+  let list = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
+  const cut = (value: unknown, side: "before" | "after") => {
+    if (value === undefined || value === null) return;
+    if (typeof value === "number") { list = list.filter((m) => (side === "before" ? m.timestamp < value : m.timestamp > value)); return; }
+    if (typeof value !== "string") throw new CliError("bad_request", `${side} must be a timestamp or a message id`);
+    const index = list.findIndex((m) => m.id === value);
+    if (index === -1) throw new CliError("not_found", `No message ${value}`);
+    list = side === "before" ? list.slice(0, index) : list.slice(index + 1);
+  };
+  cut(before, "before");
+  cut(after, "after");
+  const more = after !== undefined && after !== null ? list.length > limit : list.length > limit;
+  const page = after !== undefined && after !== null ? list.slice(0, limit) : list.slice(-limit);
+  return { messages: page.map(messageJson), more };
+}
+
+export const API_METHODS: readonly string[] = Object.keys(METHODS);
+
+/** Runs one method of the API. */
+export async function callApi(ctx: ApiContext, method: string, params: unknown = {}): Promise<unknown> {
+  const run = METHODS[method];
+  if (!run) throw new CliError("not_found", `No method ${method}`);
+  if (params === null || typeof params !== "object" || Array.isArray(params)) throw new CliError("bad_request", "params must be an object");
+  return run(ctx, params as Params);
+}

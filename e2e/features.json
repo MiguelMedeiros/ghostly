@@ -475,7 +475,17 @@
     {"id":"cli.send","wisp":"402","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"ghostly-cli send (flags, env, stdin)"},
     {"id":"cli.recv","wisp":"402","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"ghostly-cli recv / watch (NDJSON)"},
     {"id":"cli.interop","wisp":"402","kind":"protocol","clients":["web","cli"],"infra":["pkarr-relay"],"title":"CLI and TypeScript peers interoperate (records, crypto)"},
-    {"id":"headless.storage","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":[],"title":"Headless runtime: the engine's IndexedDB kept on disk per profile (snapshot + fsynced journal)"}
+    {"id":"headless.storage","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":[],"title":"Headless runtime: the engine's IndexedDB kept on disk per profile (snapshot + fsynced journal)"},
+    {"id":"headless.cli","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":[],"title":"ghostly CLI: JSON output, exit codes, strict arguments (dash values, --), profiles, help"},
+    {"id":"headless.daemon","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"ghostly daemon: one profile online, a local socket API (0600), start/status/stop, busy lock"},
+    {"id":"headless.one-shot","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"A command with no daemon runs the profile itself, waits for its outcome and leaves"},
+    {"id":"headless.api","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":[],"title":"The local control API: chats found by id/prefix/name, paging, waits, settings with secrets hidden"},
+    {"id":"headless.engine-passthrough","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":[],"title":"Every engine call as engine.<method>; secret answers only with --show-secret; Mainnet spends only with --confirm-real"},
+    {"id":"headless.secret-guard","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":[],"title":"send refuses seeds, keys and ecash unless --force (the app's detector)"},
+    {"id":"headless.chat","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless one chat: invite create/join (self-invite refused), live over WebRTC or HyperDHT, send (args/stdin), history, transport switch"},
+    {"id":"headless.events","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Event stream: JSON lines with seq and stable ids, journal replay (--since), no flood on first run"},
+    {"id":"headless.hooks","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"listen --exec (event on stdin) and --webhook (loopback only), --cursor acknowledgement"},
+    {"id":"headless.groups","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless community groups: create with a link, join, send with @mentions, mention flag on receipt"}
   ],
   "paths": {
     "{docs/**,**/*.md,LICENSE,hero-banner.png,preview-screenshots.png,screenshots/**}": [],

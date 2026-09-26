@@ -14,7 +14,7 @@ const openpgp = join(createRequire(import.meta.url).resolve("openpgp"), "../../l
 export default defineConfig({
   resolve: { alias: [{ find: /^openpgp\/lightweight$/, replacement: openpgp }] },
   build: {
-    ssr: "src/main.ts",
+    ssr: "src/bin.ts",
     target: "node22",
     outDir: "dist",
     emptyOutDir: true,

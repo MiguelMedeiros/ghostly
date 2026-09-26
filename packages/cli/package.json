@@ -26,7 +26,8 @@
     "@ghostly/core": "*",
     "@ghostly/iroh-web": "*",
     "fake-indexeddb": "6.2.5",
-    "hyperdht": "6.34.0"
+    "hyperdht": "6.34.0",
+    "node-datachannel": "^0.33.4"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

@@ -1339,7 +1339,7 @@ export class GhostlyNode implements EngineImplementation {
     }));
   }
 
-  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview }): Promise<{ error: string | null; refused?: boolean }> {
+  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
     if (!live?.link) return { error: "You are offline" };
@@ -1363,7 +1363,7 @@ export class GhostlyNode implements EngineImplementation {
       live.peerAck = timestamp;
       this.emitState();
     }
-    return { error };
+    return { error, messageId: `me_${timestamp}` };
   }
 
   /**
@@ -1371,7 +1371,7 @@ export class GhostlyNode implements EngineImplementation {
    * both sides allow it; otherwise kept as `waiting` ("Sends when live") and sent by itself, in order, once
    * the chat can carry it. Only what must never wait, or a security stop, is refused.
    */
-  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview): Promise<{ error: string | null; refused?: boolean }> {
+  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { link } = live, linkId = live.stored.id;
     if (!link) return { error: "You are offline" };
     const bytes = new TextEncoder().encode(trimmed).length;
@@ -1386,7 +1386,7 @@ export class GhostlyNode implements EngineImplementation {
         await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: delivery === "dht" ? "pkarr" : "datalink", delivery: "sending", ...(preview && { preview }) });
         await this.outboxFor(linkId).transmit(id);
         // The durable row carries delivery errors and an explicit retry action.
-        return { error: null };
+        return { error: null, messageId: id };
       }
       if (/Payment tokens|does not match/.test(validationError)) return { error: validationError, refused: true };
     }
@@ -1395,14 +1395,14 @@ export class GhostlyNode implements EngineImplementation {
       await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending", ...(preview && { preview }) });
       // The durable row carries the outcome; the promise only says whether it could start.
       void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
-      return { error: null };
+      return { error: null, messageId: id };
     }
     const reason = delivery === "dht" && bytes <= DHT_TEXT_BYTES ? "Waits for the text before it to be confirmed."
       : delivery === "dht" ? `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries: it is sent when you are live.`
       : "Sent when your contact is reachable.";
     await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "datalink", delivery: "waiting", deliveryError: reason, ...(preview && { preview }) });
     await this.outboxFor(linkId).wait(id, reason);
-    return { error: null };
+    return { error: null, messageId: id };
   }
 
   /**
