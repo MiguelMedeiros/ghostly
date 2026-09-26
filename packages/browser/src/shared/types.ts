@@ -898,14 +898,14 @@ export interface LinkView {
      * The networks the contact has a wallet on, per way of paying, as it said on the open session. Absent: it said
      * none (an older app): any network may meet. A card is offered only where its network is in the list.
      */
-    networks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>;
+    networks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
   };
   /** files/3 live in this chat: bytes the contact's device said it can still take for files, when it said. */
   peerFileRoom?: number | null;
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
   /** For each way of paying, the networks this chat accepts it on. */
-  paymentNetworks?: Record<PaymentMethodName, WalletNetwork[]>;
+  paymentNetworks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
   /** Both sides announced private groups on the open session: this contact can be invited. */
   groups?: boolean;
   /** Paired chats: what each side offers after the handshake (`paired-capabilities`); `peer` is null until it says. */

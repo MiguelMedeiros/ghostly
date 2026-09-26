@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ENDPOINT, cashuRequestPayload, type GhostLink, type PaymentTarget } from "@ghostly/core";
+import { ENDPOINT, WALLET_NETWORKS, cashuRequestPayload, type GhostLink, type PaymentTarget } from "@ghostly/core";
 import { PaymentDesk, type DeskLightning } from "../src/engine/payments";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { CashuWallet } from "../src/engine/wallet";
@@ -145,4 +145,72 @@ describe("the wallets and their networks", () => {
     await expect(node.arkRestoreBackup({ text: "backup", password: "wrong" })).rejects.toThrow("Wrong password");
     expect(testnet).toHaveBeenCalledOnce();
   });
+});
+
+describe("a chat's ways of paying, per network", () => {
+  it("a network this chat has off for a way of paying is refused both ways, and the other network still works", async () => {
+    const { desk, sent, link, wallet } = setup();
+    const accepts = vi.fn((_linkId: string, method: string, network: string) => !(method === "cashu" && network === "testnet"));
+    (desk as unknown as { host: { acceptsNetwork: typeof accepts } }).host.acceptsNetwork = accepts;
+    // An incoming Testnet Cashu request is dropped; a Mainnet one is kept.
+    await desk.onPaymentRequest("l", { id: "test-cashu", timestamp: 1, amount: { value: "10", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]], network: "testnet" });
+    await desk.onPaymentRequest("l", { id: "real-cashu", timestamp: 2, amount: { value: "10", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([REAL])]], network: "mainnet" });
+    expect(desk.payment("test-cashu")).toBeUndefined();
+    expect(desk.payment("real-cashu")?.network).toBe("mainnet");
+    // Test ecash from the contact is refused unredeemed.
+    Object.assign(wallet, { inspect: () => ({ kind: "token", mint: TEST_MINT, amount: 5, unit: "sat", accepted: true }), receiveToken: vi.fn() });
+    await desk.onPayment("l", { id: "token-1", timestamp: 3, amount: { value: "5", asset: "sat" }, endpoint: [ENDPOINT.cashu, "cashuBtest"] });
+    expect(link.sendPaymentResult).toHaveBeenCalledWith({ id: "token-1", ok: false, error: "Testnet Cashu is off in this chat" });
+    expect((wallet as unknown as { receiveToken: ReturnType<typeof vi.fn> }).receiveToken).not.toHaveBeenCalled();
+    // Sending or requesting on it from here is refused before anything is made.
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 4, rail: "cashu", network: "testnet" })).rejects.toThrow("Testnet Cashu is off in this chat");
+    const before = sent.length;
+    await desk.request({ linkId: "l", amount: 21, timestamp: 5, network: "testnet" });
+    // Testnet Lightning is still on: the request carries only the invoice.
+    expect(sent.length).toBe(before + 1);
+    expect(sent.at(-1)?.frame).toMatchObject({ network: "testnet", endpoints: [[ENDPOINT.bolt11, "lnbc-testnet"]] });
+  });
+
+  it("a contact that said its networks is offered only those: a Testnet card never goes to a Mainnet-only contact", async () => {
+    const { desk, link } = setup();
+    Object.assign(link, { peerPaymentNetworks: (method: string) => method === "arkade" ? ["mainnet"] : ["mainnet", "testnet"] });
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 1, method: "arkade", network: "testnet" })).rejects.toThrow("Your contact has no Testnet Ark wallet");
+    await expect(desk.ask({ linkId: "l", amount: 21, method: "arkade", timestamp: 2, network: "testnet" })).rejects.toThrow("Your contact has no Testnet Ark wallet");
+    // An older contact says nothing: anything may meet.
+    Object.assign(link, { peerPaymentNetworks: () => undefined });
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 3, method: "arkade", network: "testnet" })).resolves.toHaveProperty("paymentId");
+  });
+
+  it("the engine keeps each chat's networks, and tells the contact only the networks it has wallets on and the chat takes", async () => {
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    node["emitState"] = () => {};
+    node["walletView"] = { ...node["walletView"], wallets: [
+      { id: "cashu:mainnet", type: "cashu", network: "mainnet", config: {} }, { id: "cashu:testnet", type: "cashu", network: "testnet", config: {} },
+      { id: "arkade:testnet", type: "arkade", network: "testnet", config: {} },
+    ] };
+    const setPaymentNetworks = vi.fn(), setPaymentMethods = vi.fn();
+    node["links"].set("chat", { stored: { id: "chat" }, link: { setPaymentNetworks, setPaymentMethods } } as never);
+    const patch = vi.spyOn((await import("../src/engine/db")).db, "patchLink").mockResolvedValue(undefined);
+    await node.setChatPaymentMethods({ linkId: "chat", methods: { cashu: true }, networks: { cashu: ["mainnet"] } });
+    expect(patch).toHaveBeenCalledWith("chat", { paymentMethods: { cashu: true }, paymentNetworks: { cashu: ["mainnet"] } });
+    expect(setPaymentNetworks).toHaveBeenLastCalledWith({ cashu: ["mainnet"], arkade: ["testnet"] });
+    expect(node["acceptsNetwork"](node["links"].get("chat")!.stored, "cashu", "testnet")).toBe(false);
+    expect(node["acceptsNetwork"](node["links"].get("chat")!.stored, "arkade", "testnet"), "a way with no choice takes every network").toBe(true);
+    await expect(node.setChatPaymentMethods({ linkId: "chat", methods: {}, networks: { cashu: ["signet" as never] } })).rejects.toThrow("Chat not found");
+    patch.mockRestore();
+  });
+});
+
+it("a new profile starts with no wallet: no mint and nothing else is made by itself", async () => {
+  const { db } = await import("../src/engine/db");
+  await transact([STORES.settings], (s) => s[STORES.settings].clear());
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: true, transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "fixture", relays: [] }) } as never });
+  const created = WALLET_NETWORKS.flatMap((n) => [vi.spyOn(node["arkWallets"][n], "createDefaultNow"), vi.spyOn(node["usdtWallets"][n], "createDefaultNow")]);
+  await db.putSettings({ online: false, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: false });
+  await node.start();
+  expect(node["settings"].mints).toEqual([]);
+  expect(node.getState().wallet.wallets).toEqual([]);
+  for (const spy of created) expect(spy).not.toHaveBeenCalled();
+  expect(node["arkWallets"].testnet.configured || node["usdtWallets"].mainnet.configured).toBe(false);
+  await node.shutdown();
 });

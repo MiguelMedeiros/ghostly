@@ -51,7 +51,7 @@ export interface PeerLinkState {
   capabilities?: {
     files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean;
     /** The networks the contact has a wallet on, per way of paying. Absent: it said none (an older app): any may meet. */
-    networks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>;
+    networks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
   };
   /** Paired chats: what each side offers after the handshake; `peer` is null until it says. */
   sessionOffers?: { mine: string[]; peer: string[] | null };
@@ -60,7 +60,7 @@ export interface PeerLinkState {
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
   /** For each way of paying, the networks this chat takes it on (its cards on the Accept side). */
-  paymentNetworks?: Record<PaymentMethodName, WalletNetwork[]>;
+  paymentNetworks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
   dataLink: DataLinkState;
   online: boolean;
   /** `null` while the peer advertises nothing (offline, or an older client). */

@@ -10,7 +10,7 @@ export type ChatPaymentNetworks = Partial<Record<PaymentMethodName, WalletNetwor
 /** What the Accept side saves: the ways of paying, and for each the networks, of the cards turned on. */
 export interface ChatAccepts { methods: ChatPaymentMethods; networks: ChatPaymentNetworks }
 /** A card (one way of paying on one network) is on in this chat: its way of paying, and its network, are. */
-export const cardOn = (chat: { paymentMethods?: Partial<ChatPaymentMethods>; paymentNetworks?: ChatPaymentNetworks } | undefined, method: PaymentMethodName, network: WalletNetwork) =>
+export const cardOn = (chat: { paymentMethods?: Partial<ChatPaymentMethods>; paymentNetworks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>> } | undefined, method: PaymentMethodName, network: WalletNetwork) =>
   chat?.paymentMethods?.[method] !== false && (chat?.paymentNetworks?.[method]?.includes(network) ?? true);
 
 /**

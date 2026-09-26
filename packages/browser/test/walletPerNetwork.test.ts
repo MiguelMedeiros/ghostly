@@ -70,18 +70,20 @@ it("after the migration, a profile left in either mode opens every wallet it had
   }
 });
 
-it("the page's network (the old switch) shows its own mints, brings the public test mint, and parks nothing", async () => {
-  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
-  node["settings"].mints = ["https://mint.minibits.cash/Bitcoin", "https://21mint.me"];
+it("the network a call names none for (the old switch) changes only that: nothing is made, added, parked or closed", async () => {
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: true });
+  node["settings"].mints = ["https://mint.minibits.cash/Bitcoin", "https://21mint.me", TEST_MINT];
   vi.spyOn(node["wallet"], "view").mockImplementation(async () => ({ mints: [], balance: 0, history: [], feesPaid: 0 }));
   const lock = vi.spyOn(node["arkWallets"].mainnet, "lock");
+  const made = vi.spyOn(node["arkWallets"].testnet, "createDefaultNow");
   await node.walletSetMode({ mode: "testnet" });
   expect(node["settings"].walletMode).toBe("testnet");
-  expect(node["settings"].mints).toEqual(["https://mint.minibits.cash/Bitcoin", "https://21mint.me", TEST_MINT]);
+  expect(node["settings"].mints, "no mint added").toEqual(["https://mint.minibits.cash/Bitcoin", "https://21mint.me", TEST_MINT]);
   expect(node["networkMints"]()).toEqual([TEST_MINT]);
   expect(node["networkMints"]("mainnet"), "Mainnet's mints are still Mainnet's").toEqual(["https://mint.minibits.cash/Bitcoin", "https://21mint.me"]);
   expect(node["walletView"]).toMatchObject({ mode: "testnet" });
-  expect(lock, "no wallet is closed by showing the other network").not.toHaveBeenCalled();
+  expect(lock, "no wallet is closed").not.toHaveBeenCalled();
+  expect(made, "no wallet is made").not.toHaveBeenCalled();
   await node.walletSetMode({ mode: "mainnet" });
   expect(node["networkMints"]()).toEqual(["https://mint.minibits.cash/Bitcoin", "https://21mint.me"]);
   await expect(node.walletSetMode({ mode: "regtest" as never })).rejects.toThrow("Unknown wallet mode");

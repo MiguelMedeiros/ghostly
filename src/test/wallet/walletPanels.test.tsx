@@ -55,7 +55,7 @@ describe("choosing a source from the wallet cards", () => {
     engine.on("bitcoinRetrySource", () => undefined);
     const block = screen.getByTestId("bitcoin-connecting");
     expect(block).toHaveTextContent("Connecting to BDK wallet…");
-    expect(screen.getByTestId("bitcoin-last-balance")).toHaveTextContent("Last known balance: 1,234 sats");
+    expect(screen.getByTestId("bitcoin-last-balance")).toHaveTextContent("Last known balance: 1,234 test sats");
     expect(screen.getByTestId("bitcoin-connect-error")).toHaveTextContent("did not answer in 20 s · trying again by itself");
     expect(screen.getByTestId("onchain-source-status")).toHaveTextContent(/^Connecting… · Could not connect to BDK wallet: .* · trying again by itself$/);
     await user.click(screen.getByTestId("bitcoin-retry"));

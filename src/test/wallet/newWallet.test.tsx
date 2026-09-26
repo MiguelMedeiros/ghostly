@@ -64,7 +64,7 @@ describe("a profile with no wallet yet", () => {
     expect(screen.queryByTestId("wallet-first-error-cashu")).not.toBeInTheDocument();
     usdtDown = false;
     await user.click(screen.getByTestId("wallet-first-retry-usdt"));
-    expect(engine.callsTo("walletCreate").at(-1)).toEqual({ type: "usdt", network: "mainnet" });
+    expect(engine.callsTo("walletCreate").slice(-1)).toEqual([{ type: "usdt", network: "mainnet" }]);
     expect(screen.queryByTestId("wallet-first-error-usdt")).not.toBeInTheDocument();
   });
 });
