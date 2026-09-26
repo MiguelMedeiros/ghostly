@@ -67,7 +67,7 @@ It prints each step with the reason it runs, runs whole, or is skipped, then a s
 
 | Step | What runs |
 |---|---|
-| Unit | `vitest related <changed files> --run --maxWorkers=$JOBS` in each workspace whose tests can import them (core, browser, sdk, extension, ui, matrix, scripts); changed tests run themselves. A change in `packages/core/src` is followed through the `@ghostly/core` barrel to the files that import one of the changed module's names (type-only imports aside): through `index.ts`, every test is "related" to every core module. |
+| Unit | `vitest related <changed files> --run --maxWorkers=$JOBS` in each workspace whose tests can import them (core, browser, sdk, extension, ui, matrix, scripts); changed tests run themselves. A change in `packages/core/src` is followed through the `@ghostly/core` barrel to the files that import one of the changed module's names (type-only imports aside): through `index.ts`, every test is "related" to every core module. A test that imports a file outside its workspace by relative path (`packages/browser/test/chatConnection.test.ts` imports `src/components/ChatConnection.tsx`) runs when that file, or anything it imports that way, changes. |
 | Lint | `eslint` on the changed files |
 | Typecheck | `tsc --noEmit -p` of each touched package and of the packages importing it (a core change rechecks everything: its API breaks the importers, not core) |
 | Rust | `cargo fmt --check`, `clippy -D warnings` and `test` for `src-tauri` (+ `native-transports`) or `cli`, only when they changed |

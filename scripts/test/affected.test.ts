@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkPaths, featureGrep, globToRegExp, plan, specsImporting, throughCoreBarrel } from "../affected/select.mjs";
+import { checkPaths, featureGrep, globToRegExp, plan, specsImporting, testsReaching, throughCoreBarrel } from "../affected/select.mjs";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
 const inventory = {
@@ -154,6 +154,58 @@ describe("a core change", () => {
   it("without the sources it passes the core module to vitest as it is", () => {
     const p = plan({ changed: changed("packages/core/src/sshsig.ts"), inventory, e2eFiles });
     expect(byName(p.unit).browser.files).toEqual(["packages/core/src/sshsig.ts"]);
+  });
+});
+
+describe("tests that import across workspaces", () => {
+  // packages/browser/test/chatConnection.test.ts imports the app's component by relative path: src/ is not among
+  // the browser project's sources, so a change to it used to skip these tests (CI caught the break in #287).
+  const codeFiles: Record<string, string> = {
+    "src/components/ChatConnection.tsx": `import { useI18n } from "../contexts/I18nContext";\nimport { icon } from "./icons/index.js";`,
+    "src/components/icons/index.ts": `export const icon = 1;`,
+    "src/contexts/I18nContext.tsx": `import en from "../i18n/en.json";`,
+    "src/components/Other.tsx": `export const other = 1;`,
+    "packages/browser/test/chatConnection.test.ts": `import { ChatConnection } from "../../../src/components/ChatConnection";\nimport { I18nProvider } from "../../../src/contexts/I18nContext";`,
+    "packages/browser/test/storage.test.ts": `import { save } from "../../../src/lib/storage";`,
+    "packages/browser/test/helpers/fake.ts": `export const fake = 1;`,
+    "e2e/matrix/blocks.ts": `import { fake } from "../../packages/browser/test/helpers/fake";`,
+    "e2e/matrix/table.test.ts": `import { rows } from "./matrix";`,
+    "e2e/matrix/rails.test.ts": `import { blocks } from "./blocks.ts";`,
+  };
+
+  it("a change to src/components/ChatConnection.tsx runs packages/browser/test/chatConnection.test.ts", () => {
+    const p = plan({ changed: changed("src/components/ChatConnection.tsx"), inventory, e2eFiles, codeFiles });
+    const unit = byName(p.unit);
+    expect(unit.browser).toMatchObject({ mode: "related", files: ["packages/browser/test/chatConnection.test.ts"] });
+    expect(unit.browser.reason).toContain("1 test file(s) importing the change by relative path");
+    // Projects whose sources hold src/ still get the changed file itself.
+    expect(unit.ui.files).toEqual(["src/components/ChatConnection.tsx"]);
+    expect(unit.core.mode).toBe("skip");
+    expect(unit.matrix.mode).toBe("skip");
+  });
+
+  it("follows the imports through other files, index files, .js specifiers and non-code files", () => {
+    for (const file of ["src/contexts/I18nContext.tsx", "src/components/icons/index.ts", "src/i18n/en.json", "-src/components/icons/index.ts"]) {
+      const p = plan({ changed: changed(file), inventory, e2eFiles, codeFiles });
+      expect(byName(p.unit).browser.files, file).toEqual(["packages/browser/test/chatConnection.test.ts"]);
+    }
+    expect(byName(plan({ changed: changed("src/components/Other.tsx"), inventory, e2eFiles, codeFiles }).unit).browser.mode).toBe("skip");
+  });
+
+  it("reaches another project's tests through its helpers", () => {
+    const p = plan({ changed: changed("packages/browser/test/helpers/fake.ts"), inventory, e2eFiles, codeFiles });
+    expect(byName(p.unit).matrix.files).toEqual(["e2e/matrix/rails.test.ts"]);
+  });
+
+  it("keeps to the test files the project runs", () => {
+    expect(testsReaching(["packages/browser/test/helpers/fake.ts"], codeFiles, ["packages/browser/test/**"])).toEqual([]);
+    expect(testsReaching(["src/components/ChatConnection.tsx"], codeFiles, ["e2e/matrix/*"])).toEqual([]);
+  });
+
+  it("finds the real chatConnection test from the real component", () => {
+    const root = join(import.meta.dirname, "..", "..");
+    const real = Object.fromEntries(["packages/browser/test/chatConnection.test.ts", "src/components/ChatConnection.tsx"].map((f) => [f, readFileSync(join(root, f), "utf8")]));
+    expect(testsReaching(["src/components/ChatConnection.tsx"], real, ["packages/browser/test/**"])).toEqual(["packages/browser/test/chatConnection.test.ts"]);
   });
 });
 
