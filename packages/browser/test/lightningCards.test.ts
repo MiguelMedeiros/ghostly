@@ -125,7 +125,8 @@ describe("several cards on one network", () => {
     nodes.get("Home")!.balance = 1_000;
     await Promise.all(registry.all().map((s) => s.sources.refresh()));
     const views = registry.views();
-    expect(views.map((v) => [v.card, v.name, v.receive])).toEqual([[CASHU_CARD, "Cashu", true], [home, "Home (Fake node)", false], [office, "Office (Fake node)", false]]);
+    // The first card of the person's own takes receiving over from the mints'; the next one leaves it.
+    expect(views.map((v) => [v.card, v.name, v.receive])).toEqual([[CASHU_CARD, "Cashu", false], [home, "Home (Fake node)", true], [office, "Office (Fake node)", false]]);
     expect(views.find((v) => v.card === home)?.balance).toBe(1_000);
     expect(views.find((v) => v.card === office)?.balance).toBe(100_000);
     expect(await keys()).toEqual(expect.arrayContaining([`lightningSource-testnet-${home}`, `lightningSource-testnet-${office}`]));
@@ -243,7 +244,7 @@ describe("the engine", () => {
     const home = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-node", values: { alias: "Home" } });
     const office = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-node", values: { alias: "Office" } });
     expect(home.id).not.toBe(office.id);
-    expect(lightningWallets(node)).toEqual([["lightning:testnet:cashu", "Cashu", true], [home.id, "Home (Fake node)", false], [office.id, "Office (Fake node)", false]]);
+    expect(lightningWallets(node)).toEqual([["lightning:testnet:cashu", "Cashu", false], [home.id, "Home (Fake node)", true], [office.id, "Office (Fake node)", false]]);
     expect(node.getState().wallet.offers?.find((o) => o.type === "lightning" && o.network === "testnet")).toMatchObject({ several: true, available: true });
 
     await node.lightningSetReceive({ network: "testnet", card: office.card! });
@@ -259,7 +260,7 @@ describe("the engine", () => {
     expect(nodes.get("Office")!.paid).toEqual([]);
 
     await node.walletRemove({ type: "lightning", network: "testnet", card: office.card });
-    expect(lightningWallets(node)).toEqual([["lightning:testnet:cashu", "Cashu", true], [home.id, "Home (Fake node)", false]]);
+    expect(lightningWallets(node), "the default went to the first card of their own left").toEqual([["lightning:testnet:cashu", "Cashu", false], [home.id, "Home (Fake node)", true]]);
     // The mints' card goes alone next to another card; a network's only one comes with its Cashu wallet.
     expect(walletRemoval("lightning", "testnet", node.getState().wallet.networks?.testnet, [], CASHU_CARD).comesWith).toBeUndefined();
     await node.walletRemove({ type: "lightning", network: "testnet", card: CASHU_CARD });

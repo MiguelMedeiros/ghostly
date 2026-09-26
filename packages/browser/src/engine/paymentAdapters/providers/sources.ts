@@ -6,8 +6,8 @@ import { describeProvider, networkMode, offeredIn, redact, sourceProblem, type P
 
 /**
  * What is stored for a source, under `<kind>Source-<mode>` (or `<kind>Source-<mode>-<key>`, one Lightning card of
- * several) in the settings store: never in the Settings
- * object (which the UI sees), and its secrets sealed with a device key, like the Ark and USDT seeds.
+ * several) in the settings store: never in the Settings object (which the UI sees), and its secrets sealed with a
+ * device key, like the Ark and USDT seeds.
  */
 interface StoredSource {
   providerId: string;

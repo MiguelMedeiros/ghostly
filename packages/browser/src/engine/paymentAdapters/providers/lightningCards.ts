@@ -164,8 +164,9 @@ export class LightningCards {
 
   /**
    * Adds a card with `providerId` and the values of its form: connected and checked first, like any source; only then
-   * saved. Nothing is saved when it fails. The same wallet twice (same source, same settings) is refused. The first
-   * card shown becomes the default for receiving.
+   * saved. Nothing is saved when it fails. The same wallet twice (same source, same settings) is refused. A card of the
+   * person's own takes receiving over from the mints' card (what a source chosen before cards did); next to another
+   * card of their own, the default stays.
    */
   add(providerId: string, values: Record<string, string>): Promise<string> {
     return this.serial(async () => {
@@ -191,7 +192,8 @@ export class LightningCards {
       catch (error) { await service.stop(); throw error; }
       finally { this.adding = undefined; }
       card.name = this.freeName(service.view.alias ? `${service.view.alias.slice(0, 20)} (${shortName(providerId, this.label)})` : shortName(providerId, this.label));
-      try { await this.save({ ...this.stored, cards: [...this.stored.cards, card] }, card.id); }
+      const receive = this.receivingId === CASHU_CARD ? id : this.stored.receive;
+      try { await this.save({ cards: [...this.stored.cards, card], receive }, card.id); }
       catch (error) { await service.sources.forget().catch(() => {}); await service.stop(); throw error; }
       this.services.set(id, service);
       return id;
@@ -214,7 +216,7 @@ export class LightningCards {
 
   /**
    * Removes a card: its source and sealed secrets go (refused while a payment through it has not ended). The default
-   * for receiving moves to the first card left. A network left with no card gets the Cashu card back, as before cards.
+   * for receiving moves to the first card of the person's own left, else the mints' card. A network left with no card gets the Cashu card back, as before cards.
    */
   remove(id: string): Promise<void> {
     return this.serial(async () => {
@@ -233,7 +235,8 @@ export class LightningCards {
         await added.start();
       }
       const shown = cards.filter((c) => c.id !== CASHU_CARD || this.options.hasMints());
-      const receive = this.stored.receive === id || !cards.some((c) => c.id === this.stored.receive) ? (shown[0] ?? cards[0]).id : this.stored.receive;
+      const next = shown.find((c) => c.id !== CASHU_CARD) ?? shown[0] ?? cards[0];
+      const receive = this.stored.receive === id || !cards.some((c) => c.id === this.stored.receive) ? next.id : this.stored.receive;
       await this.save({ cards, receive });
       if (added) void added.ensureReady();
     });
