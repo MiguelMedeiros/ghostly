@@ -8,12 +8,18 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
 import { ConnectionIcon } from "./ConnectionIcon";
+import { PairingGlyph } from "./pairing/PairingGlyph";
+import { usePairingWords } from "./pairing/words";
+import { useI18n } from "../contexts/I18nContext";
+import { useNow, type PairingProgressState } from "../hooks/usePairingProgress";
+import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed } from "../lib/pairingProgress";
 import { TransportOptions } from "./TransportOptions";
 import { ConnectionHistory } from "./TransportTimeline";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 const name = transportName;
+const ON_DHT = "On DHT · retrying live";
 
 /**
  * The chat's one connection control, beside the call buttons: an icon, by shape before colour (the transport's own
@@ -23,14 +29,19 @@ const name = transportName;
  * is under Details: what the chat waits for, discovery help, the live path and why, per-transport errors, contact
  * verification, both keys, the connection history and notes. A chat made with a v0.4 code (`paired` false) has no
  * choices: its status (`status`, as `contactStatus` says it) and the keys.
+ *
+ * It is the header's only connection element: while a first pairing is on its way (`pairing`), the icon is the
+ * pairing scene in small, its name says the stage, and the panel says how far it got, with a way to the scene.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status }: {
+export function ChatConnection({ peerKey, paired = true, myKey, status, pairing }: {
   peerKey: string;
   paired?: boolean;
   /** This side's key in the chat. */
   myKey?: string;
-  /** A v0.4-code chat's status: what its icon and panel say. */
+  /** The contact's status (`contactStatus`): what a v0.4-code chat's icon and panel say, and `data-status` for any chat. */
   status?: string;
+  /** A first pairing not live yet (`usePairingProgress`), and how to bring its scene into view, while there is one. */
+  pairing?: { progress: PairingProgressState; onShow?(): void };
 }) {
   const state = useSyncExternalStore(subscribe, snapshot);
   const link = paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined, pair = link?.pairing;
@@ -54,10 +65,33 @@ export function ChatConnection({ peerKey, paired = true, myKey, status }: {
   const waitText = wait ? transportWaitText(wait, contact) : undefined;
   // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT only.
   const notLive = paired && pinned && !dht && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact) : undefined;
-  const label = !paired ? status ?? "Connecting" : !online ? "Offline" : connectionFailure ? "Connection issue" : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "Publication unavailable" : "Discovery unavailable") : dht ? "DHT only · chosen by you" : textDht && link?.dhtDelivery?.peerMode === "dht" ? "DHT only · chosen by your contact" : waitOff && pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : waitOff ? `${textDht ? "On DHT · waiting" : "Waiting"} for ${name(wait.transport)}` : textDht ? "On DHT · retrying live" : pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : ready ? `Connected · ${name(pair?.transport)}${link?.transportRelayed ? " (relayed)" : ""}` : pair?.status === "confirm" ? "Confirm peer" : awaitingJoin ? "No contact yet" : !link?.peerOnline && link?.dataLink === "idle" ? "Waiting for contact" : "Connecting…";
+  const { t } = useI18n();
+  const words = usePairingWords();
+  // A first pairing on its way: its stage names the connection until the chat is live, on the DHT or failed.
+  const progress = paired ? pairing?.progress : undefined, stage = progress?.stage;
+  const pairingOn = !!progress && stage !== "live" && stage !== "on-dht" && stage !== "failed";
+  const pairingFailed = stage === "failed";
+  const ticking = pairingOn && online;
+  const now = useNow(ticking);
+  // `now` only ticks; a stage that began after its last tick still reads from the clock.
+  const inStage = progress ? Math.max(0, Math.max(now, Date.now()) - progress.since) : 0;
+  const stageWords = progress ? words.stage(progress.stage, progress.role) : "";
+  const slow = ticking && inStage >= SLOW_AFTER_MS[stage!] ? words.slow(stage!) : "";
+  const pairingReason = pairingFailed ? words.reason(failureReason(progress?.reason)) : "";
+  const onDhtWhy = stage === "on-dht" ? words.onDht(progress?.reason) : "";
+  const steps = progress ? PAIRING_STEPS[progress.role] : [];
+  const step = pairingOn ? steps.indexOf(stage!) + 1 : 0;
+  const pairingLabel = t("pairing.indicator", { stage: stageWords });
+  const label = !paired ? status ?? "Connecting" : !online ? "Offline" : connectionFailure ? "Connection issue" : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "Publication unavailable" : "Discovery unavailable") : dht ? "DHT only · chosen by you" : textDht && link?.dhtDelivery?.peerMode === "dht" ? "DHT only · chosen by your contact" : waitOff && pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : waitOff ? `${textDht ? "On DHT · waiting" : "Waiting"} for ${name(wait.transport)}` : textDht ? ON_DHT : pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : ready ? `Connected · ${name(pair?.transport)}${link?.transportRelayed ? " (relayed)" : ""}` : pair?.status === "confirm" ? "Confirm peer" : pairingOn || pairingFailed ? pairingLabel : stage === "on-dht" ? ON_DHT : awaitingJoin ? "No contact yet" : !link?.peerOnline && link?.dataLink === "idle" ? "Waiting for contact" : "Connecting…";
   const kind: ConnectionKind = !paired ? (/^Connected/.test(label) ? "connected" : /issue|unavailable|mismatch/.test(label) ? "failure" : label === "Offline" ? "offline" : "waiting")
-    : !online ? "offline" : failure ? "failure" : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
+    : !online ? "offline" : failure || (pairingFailed && label === pairingLabel) ? "failure" : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht || label === ON_DHT ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
   const connecting = kind === "waiting" && (label === "Connecting…" || !!pair?.transitionTarget);
+  // On the DHT while a live link is tried underneath: the DHT mark, with a dot that breathes.
+  const retrying = kind === "dht" && label === ON_DHT && !(stage === "on-dht" && progress?.reason === "chosen");
+  // The pairing scene in small, while its stage is the label: this side, the contact and a packet between them.
+  const glyph = pairingOn && label === pairingLabel;
+  const elapsed = glyph && ticking ? formatElapsed(inStage) : "";
+  const direction = stage === "answering" && progress?.role === "joiner" ? "in" : "out";
   // Live, or live and moving to another transport: the transport's own mark, and what it is at a glance.
   const liveOn = ready && !dht && !textDht ? pair?.transport : undefined;
   const iconKind: ConnectionKind = liveOn && !failure ? "connected" : kind;
@@ -81,18 +115,27 @@ export function ChatConnection({ peerKey, paired = true, myKey, status }: {
     if (e.key !== "Escape") return;
     if (root.current?.open) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
   }} className="relative" data-testid="connection-menu">
-    <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid="connection-options" data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined} aria-label={`Connection options: ${label}`} aria-describedby={`${id}-tip`}
+    <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid="connection-options" data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined}
+      data-pairing={stage} data-status={status} data-busy={glyph || connecting || retrying || undefined} aria-label={`Connection options: ${label}`} aria-describedby={`${id}-tip`}
       onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
       onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
       className={`relative flex cursor-pointer list-none items-center justify-center rounded-full p-2 transition-colors max-md:p-2.5 hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
-      <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={18} weight={2} />
-      {dots[kind] && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-1.5 max-md:top-1.5 ${dots[kind]} ${connecting ? "motion-safe:animate-pulse" : ""}`} />}
+      {glyph ? <PairingGlyph stage={stage!} direction={direction} size={18} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={18} weight={2} />}
+      {!glyph && (dots[kind] || retrying) && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-1.5 max-md:top-1.5 ${dots[kind] ?? "bg-text-muted"} ${connecting || retrying ? "motion-safe:animate-pulse" : ""}`} />}
     </summary>
     <div role="dialog" aria-label="Connection options" className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
       <div className="flex items-center gap-2 px-1 font-medium text-text-primary" data-testid="connection-state">
-        <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />
-        <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · {rtt} ms</span>}</span>
+        {glyph ? <PairingGlyph stage={stage!} direction={direction} size={16} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={16} weight={1.7} />}
+        <span className="min-w-0 break-words">{label}{rtt !== undefined && <span className="font-normal text-text-secondary"> · {rtt} ms</span>}{elapsed && <span className="font-normal tabular-nums text-text-secondary"> · {elapsed}</span>}</span>
       </div>
+      {progress && (pairingOn || pairingFailed || onDhtWhy) && <div data-testid="connection-pairing" data-stage={stage} className="mt-1 space-y-0.5 px-1">
+        {step > 0 && <p data-testid="connection-pairing-step">{t("pairing.stepOf", { n: step, total: steps.length })}{progress.attempt > 1 && ` · ${t("pairing.attempt", { n: progress.attempt })}`}</p>}
+        {slow && <p className="text-text-secondary">{slow}</p>}
+        {pairingReason && !failure && <p className="break-words text-danger">{pairingReason}</p>}
+        {onDhtWhy && <p>{onDhtWhy}</p>}
+        {pairing?.onShow && <button type="button" data-testid="connection-show-pairing" className={`-mx-1 min-h-9 rounded-md px-1 text-accent hover:bg-surface-hover ${focus}`}
+          onClick={() => { close(); pairing.onShow?.(); }}>{t("pairing.showProgress")}</button>}
+      </div>}
       {failure && <p role="alert" className="mt-1.5 break-words px-1 text-danger">{failure}</p>}
       {paired && <fieldset disabled={busy || !online || !link} className="mt-2">
         <legend className="sr-only">Connection</legend>
@@ -114,6 +157,14 @@ export function ChatConnection({ peerKey, paired = true, myKey, status }: {
               {waitText.automatic && link && <button type="button" data-testid="connection-waiting-automatic" disabled={busy || !online}
                 className={`mt-1.5 min-h-9 rounded-md px-2 text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
                 onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>Use Automatic</button>}
+            </div>}
+            {progress && (pairingOn || pairingFailed) && <div data-testid="connection-pairing-details" className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
+              <p className="font-medium text-text-primary">{stageWords}</p>
+              <ol aria-label={t("pairing.steps")} className="mt-1 flex flex-wrap gap-x-2">
+                {steps.map((s, i) => <li key={s} data-step={s} aria-current={s === stage ? "step" : undefined}
+                  className={s === stage ? "text-text-primary" : i < step - 1 ? "text-accent" : undefined}>{words.step(s)}</li>)}
+              </ol>
+              {progress.detail && <p className="mt-0.5 break-words">{progress.detail}</p>}
             </div>}
             {notLive && <div data-testid="connection-not-live" data-side={link?.liveAttempt?.side ?? "none"} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <p className="font-medium text-text-primary">{notLive.label}</p>
@@ -168,8 +219,11 @@ export function ChatConnection({ peerKey, paired = true, myKey, status }: {
     </div>
   </details>
   <span role="tooltip" id={`${id}-tip`} data-testid="connection-tooltip" className={`pointer-events-none absolute end-0 top-full z-50 mt-1.5 w-max max-w-[min(16rem,55vw)] rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] leading-4 text-text-primary shadow-lg motion-safe:transition-opacity ${tip && !menuOpen ? "opacity-100" : "invisible opacity-0"}`}>
-    {label}{summary && !failure && <span data-testid="connection-tooltip-detail" className="mt-0.5 block text-text-secondary">{summary.detail}</span>}
+    {label}{elapsed && ` · ${elapsed}`}{summary && !failure && <span data-testid="connection-tooltip-detail" className="mt-0.5 block text-text-secondary">{summary.detail}</span>}
+    {slow && <span className="mt-0.5 block text-text-secondary">{slow}</span>}
+    {onDhtWhy && <span className="mt-0.5 block text-text-secondary">{onDhtWhy}</span>}
     {failure && failure !== label && <span className="mt-0.5 block break-words text-danger">{failure}</span>}
+    {pairingReason && !failure && <span className="mt-0.5 block break-words text-danger">{pairingReason}</span>}
   </span>
   <span className="sr-only" aria-live="polite">{label}</span>
   </div>;

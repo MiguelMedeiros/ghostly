@@ -28,8 +28,8 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  */
 
 /**
- * Keeps, in the page, each chat state the header showed, in order: the pairing indicator's stage and the
- * connection button's label. The states can pass faster than a poll, so they are recorded as they happen.
+ * Keeps, in the page, each chat state the header showed, in order: the pairing stage and the label of the
+ * connection button, the header's only connection element. The states can pass faster than a poll, so they are recorded as they happen.
  */
 const RECORD = `
   if (window.qaStates) return;
@@ -37,10 +37,10 @@ const RECORD = `
   const last = {};
   const note = (kind, value) => { if (value && last[kind] !== value) { last[kind] = value; states.push(kind + ":" + value); } };
   const look = () => {
-    note("stage", document.querySelector('[data-testid="pairing-indicator"]')?.getAttribute("data-stage"));
+    note("stage", document.querySelector('[data-testid="connection-options"]')?.getAttribute("data-pairing"));
     note("label", document.querySelector('[data-testid="connection-options"]')?.getAttribute("aria-label")?.replace(/^Connection options: /, ""));
   };
-  new MutationObserver(look).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage", "aria-label"] });
+  new MutationObserver(look).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-pairing", "aria-label"] });
   look();`;
 
 const states = (p: DesktopPerson) => p.app.execute<string[]>(`return window.qaStates ?? [];`);

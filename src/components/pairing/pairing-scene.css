@@ -210,27 +210,15 @@
   .pairing-invite-row > * { flex: 0 1 22rem; min-width: 0; margin-inline: 0; }
 }
 
-/* The header's small version (PairingIndicator.tsx). */
-.pi { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 6px; border-radius: 999px; cursor: pointer;
-  color: var(--theme-text-secondary); font-size: 11px; line-height: 16px; background: color-mix(in srgb, var(--theme-accent) 12%, transparent); }
-.pi:hover { color: var(--theme-accent); }
-.pi:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 1px; }
-.pi[data-stage="failed"] { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
-.pi svg { flex-shrink: 0; overflow: visible; }
+/* The scene in small, as the chat's connection icon while a first pairing is on its way (PairingGlyph.tsx). */
+.pg { overflow: visible; }
 .pi-end { fill: currentColor; opacity: 0.55; }
 .pi-me { fill: var(--theme-accent); }
-.pi[data-stage="failed"] .pi-me { fill: currentColor; }
-.pi-line { stroke: currentColor; stroke-width: 1.2; stroke-dasharray: 2 2; opacity: 0.5; }
+.pi-line { stroke: currentColor; stroke-width: 1.4; stroke-dasharray: 2 2; opacity: 0.5; }
 .pi-packet { fill: var(--theme-accent); animation: pi-move 1.4s ease-in-out infinite; }
-.pi[data-direction="in"] .pi-packet { animation-direction: reverse; }
-.pi[data-stage="waiting"] .pi-packet { animation: pi-wait 2.4s ease-in-out infinite; }
-.pi[data-stage="failed"] .pi-packet, .pi[data-stage="live"] .pi-packet { display: none; }
-.pi[data-stage="live"] .pi-line { stroke-dasharray: none; opacity: 1; stroke: var(--theme-accent); }
+.pg[data-direction="in"] .pi-packet { animation-direction: reverse; }
+.pg[data-stage="waiting"] .pi-packet { animation: pi-wait 2.4s ease-in-out infinite; }
 @keyframes pi-move { 0% { transform: translateX(0); opacity: 0; } 20%, 80% { opacity: 1; } 100% { transform: translateX(16px); opacity: 0; } }
 @keyframes pi-wait { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
-.pi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.pi-tip { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 50; width: max-content; max-width: min(16rem, 70vw); padding: 4px 8px;
-  border: 1px solid var(--theme-border); border-radius: 6px; background: var(--theme-surface-alt); color: var(--theme-text-primary);
-  font-size: 11px; line-height: 16px; text-align: start; white-space: normal; box-shadow: 0 8px 20px rgb(0 0 0 / 0.25); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .pi-packet { animation: none !important; transform: translateX(8px); opacity: 1; } }
 :root[data-reduce-motion="true"] .pi-packet { animation: none !important; transform: translateX(8px); opacity: 1; }

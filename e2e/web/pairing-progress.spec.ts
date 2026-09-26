@@ -20,9 +20,10 @@ async function recordStages(page: Page) {
     const look = () => {
       const stage = document.querySelector("[data-testid=pairing-scene]")?.getAttribute("data-stage");
       if (stage && seen[seen.length - 1] !== stage) seen.push(stage);
-      if (document.querySelector("[data-testid=pairing-indicator]")) state.qaPairingIndicator = true;
+      // The connection icon told the pairing: its stage, and the scene in small while it was on its way.
+      if (document.querySelector("[data-testid=connection-options][data-pairing] [data-testid=pairing-glyph]")) state.qaPairingIndicator = true;
     };
-    new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage"] });
+    new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage", "data-pairing"] });
     look();
   });
 }
@@ -49,9 +50,21 @@ test("pairing shows its stages in order on both sides, ends live, then gives the
   await expect(alice.page.getByTestId("pairing-stage-label")).toHaveText("Waiting for your contact to open the invite");
   await expect(alice.page.getByTestId("pairing-elapsed")).toHaveText(/^\d+:\d\d$/);
   await expect(alice.page.getByTestId("pairing-steps").locator("[aria-current=step]")).toHaveAttribute("data-step", "waiting");
-  // The invite is right under the scene, and the header says the same in small.
+  // The invite is right under the scene. The header says the same in small, in its only connection element: the
+  // connection icon. Under the name there is only the contact's key, with no pill and no status dot.
   await expect(alice.page.getByTestId("invite-card")).toBeVisible();
-  await expect(alice.page.getByTestId("pairing-indicator")).toHaveAccessibleName("Pairing: Waiting for your contact to open the invite");
+  const icon = alice.page.getByTestId("connection-options");
+  await expect(icon).toHaveAccessibleName("Connection options: Pairing · Waiting for your contact to open the invite");
+  await expect(icon).toHaveAttribute("data-pairing", "waiting");
+  await expect(alice.page.getByTestId("chat-subtitle")).toHaveText(/^\S+\.\.\.\S+$/);
+  await expect(alice.page.getByTestId("chat-subtitle").locator("svg, [role=img], button")).toHaveCount(0);
+  await expect(alice.page.getByTestId("contact-status")).toHaveCount(0);
+  // Its panel says the step and brings the scene back into view.
+  await icon.click();
+  await expect(alice.page.getByTestId("connection-pairing-step")).toHaveText("Step 2 of 5");
+  await alice.page.getByTestId("connection-show-pairing").click();
+  await expect(alice.page.getByTestId("connection-menu")).not.toHaveAttribute("open");
+  await expect(scene).toBeInViewport();
 
   const invite = await copyInvite(alice.page);
   await bob.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
@@ -59,10 +72,11 @@ test("pairing shows its stages in order on both sides, ends live, then gives the
   await expect(bob.page.getByTestId("pairing-scene")).toBeVisible();
 
   for (const { page } of [alice, bob]) await expect(page.getByPlaceholder("Message…")).toBeEnabled();
-  // The "connected" moment, then the chat is the chat again: no scene, no indicator.
+  // The "connected" moment, then the chat is the chat again: no scene, and the icon is the transport's.
   for (const { page } of [alice, bob]) {
     await expect(page.getByTestId("pairing-scene")).toHaveCount(0, { timeout: 10_000 });
-    await expect(page.getByTestId("pairing-indicator")).toHaveCount(0);
+    await expect(page.getByTestId("connection-options")).not.toHaveAttribute("data-pairing");
+    await expect(page.getByTestId("connection-options")).toHaveAccessibleName(/^Connection options: Connected · /);
   }
 
   const [inviter, joiner] = await Promise.all([recorded(alice.page), recorded(bob.page)]);

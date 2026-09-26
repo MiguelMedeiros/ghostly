@@ -45,7 +45,7 @@ describe("ChatConnection: what the header says", () => {
     ["discovery that could not be read", { dataLink: "idle", discoveryError: "Could not read discovery: timeout" }, {}, { label: "Discovery unavailable", kind: "failure", dot: "bg-danger", pulse: false, failure: "Could not read discovery: timeout" }],
     ["discovery that could be neither published nor read", { dataLink: "idle", discoveryError: "Could not publish discovery: a; Could not read discovery: b" }, {}, { label: "Discovery unavailable", kind: "failure", dot: "bg-danger", pulse: false, failure: "Could not publish discovery: a; Could not read discovery: b" }],
     ["DHT-only delivery", { deliveryMode: "dht", dataLink: "idle" }, {}, { label: "DHT only · chosen by you", kind: "dht", dot: null, pulse: false }],
-    ["on the DHT while live is retried", { textDelivery: "dht", pairing: ready() }, {}, { label: "On DHT · retrying live", kind: "dht", dot: null, pulse: false }],
+    ["on the DHT while live is retried", { textDelivery: "dht", pairing: ready() }, {}, { label: "On DHT · retrying live", kind: "dht", dot: "bg-text-muted", pulse: true }],
     ["DHT only, chosen by the contact", { textDelivery: "dht", pairing: ready(), dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } }, {}, { label: "DHT only · chosen by your contact", kind: "dht", dot: null, pulse: false }],
     ["a switch to HyperDHT", { pairing: ready({ transitionTarget: "hyperdht/1" }) }, {}, { label: "Switching · HyperDHT", kind: "waiting", dot: "bg-text-muted", pulse: true }],
     // A chosen transport not reached yet (WISP 100): waited for, never a connection issue.

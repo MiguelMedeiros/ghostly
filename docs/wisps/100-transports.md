@@ -34,7 +34,7 @@ Once the contact is pinned, and unless either side is `dht-chosen`:
 
 Layer 1 is lost when its channel closes, when its runtime goes away (the native bridge exits, the browser suspends the page), or when liveness gives up (three pings in a row unanswered, [401](401-paired-chat.md#liveness-and-reconnection)). The chat then:
 
-1. moves to `on-dht` at once, which the header indicator shows; the timeline gets a row only if the outage outlasts a short drop ([400](400-chat.md#transport-rows));
+1. moves to `on-dht` at once, which the header's connection icon shows; the timeline gets a row only if the outage outlasts a short drop ([400](400-chat.md#transport-rows));
 2. marks every unconfirmed layer-1 text `queued`, and sends the ones that fit over the DHT under the same ids ([403](403-dht-text.md#when-text-goes-over-the-dht));
 3. keeps files, payment requests and long texts waiting, or holds them ([4xx](4xx-store-and-forward.md)) where both sides allow it;
 4. speeds its DHT mailbox reads back up ([403](403-dht-text.md#poll-pace)) and starts the background retry below.
@@ -86,7 +86,7 @@ The transports a chat allows come from both sides' policies: a transport chosen 
 2. **Retried, never given up.** The switch, or with no session the dial, is tried again at once when the contact's capability record (re)appears or names the transport or a descriptor for it, when the contact's session policy changes, and when either side chooses again. Otherwise it follows the background pace above: 20 s after a failed attempt, doubling to at most 3 minutes, while the contact is online. The lower rendezvous key still coordinates. Applying a standing choice is not probing (above).
 3. **Where the chat is meanwhile.** With Fallback on for both, the chat stays live on the transport it is on, and the connection panel says the choice is waiting. With Fallback off on either side, no other transport may carry the chat: it is `on-dht` ([400](400-chat.md#states-of-a-chat)), short text goes over the DHT, the rest waits, and the header says "On DHT · waiting for <transport>". An authenticated session already open on another transport MAY stay open to coordinate the switch. It carries nothing of the chat (no text, files, payments or calls), and it is not `live`.
 4. **Said plainly.** `contact-lacks` reads as "<contact>'s app doesn't have <transport>", with **Automatic** offered beside it. The chat keeps watching: a newer record that lists the transport makes it `starting` again, and the switch follows by itself.
-5. **Quiet.** Waiting shows in the header indicator, the connection panel and the Connection menu, never as timeline rows ([400](400-chat.md#transport-rows)). The choice is one row. A switch that could not connect while the chat stayed live on another transport is one row the first time; later attempts go to the connection history only. When the chat reaches the chosen transport, the choice's row becomes the switch ("You switched to HyperDHT"), however long it waited.
+5. **Quiet.** Waiting shows in the header's connection icon and its panel, never as timeline rows ([400](400-chat.md#transport-rows)). The choice is one row. A switch that could not connect while the chat stayed live on another transport is one row the first time; later attempts go to the connection history only. When the chat reaches the chosen transport, the choice's row becomes the switch ("You switched to HyperDHT"), however long it waited.
 
 ### A choice made while not live (revision 0.5)
 

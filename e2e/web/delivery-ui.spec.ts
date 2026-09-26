@@ -198,7 +198,7 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
     await expect.poll(() => copyInvite(page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
     const menu = page.getByTestId("connection-options");
     await expect.poll(() => reads).toBeGreaterThan(0);
-    await expect(menu).toHaveAccessibleName(unavailable === "none" ? /No contact yet/ : unavailable === "publication-network" ? /Publication unavailable/ : /Discovery unavailable|Publication unavailable/);
+    await expect(menu).toHaveAccessibleName(unavailable === "none" ? /Pairing · (Putting your invite on the network|Waiting for your contact to open the invite)/ : unavailable === "publication-network" ? /Publication unavailable/ : /Discovery unavailable|Publication unavailable/);
     await menu.click();
     // The failure is on the panel's first lines; the help, under Details.
     await page.getByTestId("connection-details-summary").click();
