@@ -1,4 +1,5 @@
 import { copyInvite } from "./clipboard";
+import { IMAGE_HOSTS, IMAGE_REDIRECTS } from "../../packages/browser/src/profiles/public";
 import { pasteInvite } from "./clipboard";
 import { createLink, encodeInviteCode } from "@ghostly/core";
 import { test as base, expect, type Browser, type BrowserContext, type Locator, type Page } from "@playwright/test";
@@ -39,8 +40,9 @@ export interface PeerOptions {
  * CDN, the Nostr picture hosts and the default Nostr relays. Load public profiles is on by default and a card on screen
  * asks, so every peer refuses them unless its test answers them itself: a route or relay added later takes precedence.
  */
-export const PUBLIC_PROFILE_HOSTS = [/^https:\/\/nexus\.pubky\.app\//, /^https:\/\/public\.api\.bsky\.app\//, /^https:\/\/cdn\.bsky\.app\//,
-  /^https:\/\/(nostr\.build|image\.nostr\.build|i\.nostr\.build|media\.nostr\.band|pfp\.nostr\.build)\//];
+const PICTURE_HOSTS = new Set([...IMAGE_HOSTS, ...Object.values(IMAGE_REDIRECTS).flatMap(to => [...to])]);
+export const PUBLIC_PROFILE_HOSTS: (RegExp | ((url: URL) => boolean))[] = [/^https:\/\/nexus\.pubky\.app\//, /^https:\/\/public\.api\.bsky\.app\//, /^https:\/\/cdn\.bsky\.app\//,
+  url => url.protocol === "https:" && PICTURE_HOSTS.has(url.hostname)];
 export const DEFAULT_NOSTR_RELAYS = ["wss://relay.damus.io", "wss://nos.lol"];
 
 export async function guardPublicProfiles(context: BrowserContext): Promise<void> {

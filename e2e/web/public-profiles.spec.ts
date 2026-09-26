@@ -18,6 +18,9 @@ import { attachPubky, PubkyApprover, pubkyTestnet } from "../support/pubky";
  */
 
 const PNG = readFileSync(new URL("../../src-tauri/icons/32x32.png", import.meta.url));
+/** Real WebP files (e2e/support/avatar-fixtures): what the Pubky index serves (extended, VP8X) and a lossy one. */
+const WEBP = readFileSync(new URL("../support/avatar-fixtures/avatar-extended.webp", import.meta.url));
+const WEBP_LOSSY = readFileSync(new URL("../support/avatar-fixtures/avatar-lossy.webp", import.meta.url));
 const CORS = { "access-control-allow-origin": "*" };
 const now = () => Math.floor(Date.now() / 1000);
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
@@ -41,17 +44,19 @@ async function ownCard(page: Page, which: string | RegExp) {
 }
 
 test("a Nostr card loads its signed profile when on screen, for the owner and for a contact it was shared with; off, and once withdrawn, it is gone", {
-  tag: ["@feature:proofs.public-profile", "@feature:proofs.public-profile.nostr", "@feature:proofs.public-profile.setting", "@feature:proofs.nostr", "@feature:proofs.share"],
+  tag: ["@feature:proofs.public-profile", "@feature:proofs.public-profile.nostr", "@feature:proofs.public-profile.picture", "@feature:proofs.public-profile.setting", "@feature:proofs.nostr", "@feature:proofs.share"],
 }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
   const relay = new LocalNostrRelay();
   const [alice, bob] = await Promise.all([peer("pp-alice"), peer("pp-bob")]);
   // Neither changed the relays: the defaults are answered here, and no real relay is reached.
   await Promise.all([relay.attach(alice.context, "alice", DEFAULT_NOSTR_RELAYS), relay.attach(bob.context, "bob", DEFAULT_NOSTR_RELAYS)]);
+  // Her picture is a nostr.build short link, as many are: it is read where it redirects (image.nostr.build), a WebP.
+  // (A redirect answered by a route is not intercepted on its second leg, so Primal's redirects are unit-tested.)
   let pictures = 0;
-  for (const p of [alice, bob]) await p.context.route("https://image.nostr.build/**", route => { pictures++; return route.fulfill({ status: 200, contentType: "image/png", headers: CORS, body: PNG }); });
+  for (const p of [alice, bob]) await p.context.route("https://image.nostr.build/**", route => { pictures++; return route.fulfill({ status: 200, contentType: "image/webp", headers: CORS, body: WEBP_LOSSY }); });
   const a = await injectNostrSigner(alice);
-  relay.add({ kind: 0, created_at: now() - 600, tags: [], content: JSON.stringify({ name: "alice", display_name: "Alice Nostr", about: "Ghosts and relays.", picture: "https://image.nostr.build/alice.png" }) }, a.secret);
+  relay.add({ kind: 0, created_at: now() - 600, tags: [], content: JSON.stringify({ name: "alice", display_name: "Alice Nostr", about: "Ghosts and relays.", picture: "https://nostr.build/i/alice.webp" }) }, a.secret);
   relay.add({ kind: 3, created_at: now() - 300, tags: [["p", getPublicKey(generateSecretKey())], ["p", getPublicKey(generateSecretKey())]], content: "" }, a.secret);
 
   // Her own card, once made and on screen: the picture and the name on its face, the rest under it.
@@ -59,11 +64,13 @@ test("a Nostr card loads its signed profile when on screen, for the owner and fo
   const own = await ownCard(alice.page, "Nostr");
   await expect(own.face).toHaveAttribute("data-profile", "found");
   await expect(own.card.getByTestId("id-card-name")).toHaveText("Alice Nostr");
-  await expect(own.card.locator(".id-card-photo img")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
+  await expect(own.card.getByTestId("id-card-photo")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
+  await expect(own.card.getByTestId("id-card-photo-badge").locator("[data-icon]")).toHaveAttribute("data-icon", "nostr");
   await expect(own.details.getByTestId("identity-public-profile-details-handle")).toHaveText("alice");
   await expect(own.details.getByTestId("identity-public-profile-details-about")).toHaveText("Ghosts and relays.");
   await expect(own.details.getByTestId("identity-public-profile-details-counts")).toHaveText("2 following");
-  await expect(own.details.getByTestId("identity-public-profile-details-source")).toContainText("Loaded from relay.damus.io and nos.lol");
+  // The picture's hosts are named too: they saw this device's address as well.
+  await expect(own.details.getByTestId("identity-public-profile-details-source")).toContainText("Loaded from relay.damus.io, nos.lol and image.nostr.build");
   await expect(own.details).toContainText("IP address");
   expect(pictures).toBe(1);
   await shot(alice, "own-card");
@@ -79,6 +86,7 @@ test("a Nostr card loads its signed profile when on screen, for the owner and fo
   await openIdentities(bob);
   await expect(theirFace(bob, "Nostr")).toHaveAttribute("data-profile", "found");
   await expect(theirCards(bob).getByTestId("id-card-name")).toHaveText("Alice Nostr");
+  await expect(theirCards(bob).getByTestId("id-card-photo")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
   await shot(bob, "contact-card");
   const back = await turnTheirs(bob, "Nostr");
   const theirs = back.getByTestId("chat-identity-public-profile");
@@ -87,6 +95,10 @@ test("a Nostr card loads its signed profile when on screen, for the owner and fo
   await shot(bob, "contact-card-back");
   expect(relay.requests.filter(r => r.by === "bob").every(r => r.filter.authors?.[0] === a.pubkey)).toBe(true);
   await closeIdentities(bob);
+  // Once read, the header's mark wears her picture too, the Nostr mark on its corner.
+  const mark = bob.page.getByTestId("chat-identity-badge").first();
+  await expect(mark.getByTestId("badge-mark-photo")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
+  await shot(bob, "header-mark");
   const withAlice = await chatId(bob);
 
   // Off on Bob's side: the cards show only what the proof carries, and nothing more is asked.
@@ -96,6 +108,7 @@ test("a Nostr card loads its signed profile when on screen, for the owner and fo
   await openIdentities(bob);
   await expect(theirCards(bob)).toHaveCount(1);
   await expect(theirCards(bob).getByTestId("id-card-name")).toHaveCount(0);
+  await expect(theirCards(bob).getByTestId("id-card-photo")).toHaveCount(0);
   await expect(theirFace(bob)).not.toHaveAttribute("data-profile", "found");
   await shot(bob, "setting-off");
   await closeIdentities(bob);
@@ -123,13 +136,14 @@ async function answerNexus(context: BrowserContext, key: string, asked: string[]
     asked.push(path);
     if (path === `/v0/user/${key}/details`) return route.fulfill(json({ id: key, name: "Pat Pubky", bio: "Writes on Pubky.", image: "pubky://x/pub/pubky.app/files/1", links: [], status: null, indexed_at: 1 }));
     if (path === `/v0/user/${key}/counts`) return route.fulfill(json({ tagged: 0, tags: 0, unique_tags: 0, posts: 4, replies: 0, following: 7, followers: 12, friends: 2, bookmarks: 0 }));
-    if (path === `/static/avatar/${key}`) return route.fulfill({ status: 200, contentType: "image/png", headers: CORS, body: PNG });
+    // The real index serves every avatar as WebP (checked 2026-09-26): #292's PNG here hid that no WebP was decoded.
+    if (path === `/static/avatar/${key}`) return route.fulfill({ status: 200, contentType: "image/webp", headers: CORS, body: WEBP });
     return route.fulfill(json({ error: "not found" }, 404));
   });
 }
 
 test("a Pubky card shows the index's name, picture, followers and following, loaded from nexus.pubky.app", {
-  tag: ["@gated", "@feature:proofs.public-profile.pubky", "@feature:proofs.pubky"],
+  tag: ["@gated", "@feature:proofs.public-profile.pubky", "@feature:proofs.public-profile.picture", "@feature:proofs.pubky"],
 }, async ({ peer, relay }) => {
   test.skip(!pubkyTestnet(), "Needs the e2e infra's Pubky testnet (npm run e2e:infra:use)");
   test.setTimeout(240_000);
@@ -150,7 +164,9 @@ test("a Pubky card shows the index's name, picture, followers and following, loa
 
     const own = await ownCard(alice.page, "Pubky");
     await expect(own.card.getByTestId("id-card-name")).toHaveText("Pat Pubky");
-    await expect(own.card.locator(".id-card-photo img")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
+    await expect(own.card.getByTestId("id-card-photo")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
+    await expect(own.card.getByTestId("id-card-photo-badge").locator("[data-icon]")).toHaveAttribute("data-icon", "pubky");
+    await shot(alice, "pubky-card");
     await expect(own.details.getByTestId("identity-public-profile-details-about")).toHaveText("Writes on Pubky.");
     await expect(own.details.getByTestId("identity-public-profile-details-counts")).toHaveText("12 followers · 7 following");
     await expect(own.details.getByTestId("identity-public-profile-details-source")).toContainText("Loaded from nexus.pubky.app");

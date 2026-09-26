@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { describe, expect, it, vi } from "vitest";
-import { MAX_CACHED_PROFILES, PROFILE_REFRESH_SECONDS, PROFILE_RETRY_SECONDS, PublicProfiles, type ProfileSubject, type PublicProfileHost } from "../src/engine/publicProfiles";
+import { transact, STORES } from "../src/shared/idb";
+import { MAX_CACHED_PROFILES, PROFILE_REFRESH_SECONDS, PROFILE_RETRY_SECONDS, PublicProfiles, READERS_VERSION, type ProfileSubject, type PublicProfileHost } from "../src/engine/publicProfiles";
 import type { PublicProfileData, PublicProfileReader } from "../src/profiles/readers";
-// covers: proofs.public-profile, proofs.public-profile.setting
+// covers: proofs.public-profile, proofs.public-profile.setting, proofs.public-profile.picture
 
 const ALICE: ProfileSubject = { provider: "pubky", subject: "alice" };
 const BOB: ProfileSubject = { provider: "nostr", subject: "bob" };
@@ -60,6 +61,27 @@ describe("public profile cache", () => {
     t.later(PROFILE_REFRESH_SECONDS); await t.cache.request(ALICE);
     t.later(PROFILE_RETRY_SECONDS); await t.cache.request(ALICE);
     expect(t.read).toHaveBeenCalledTimes(5);
+  });
+
+  it("a copy kept by older readers (before WebP pictures) is asked again without waiting a day; the reason a picture is missing is shown", async () => {
+    const t = setup();
+    await t.fresh();
+    const old = { found: true, name: "Alice", hosts: ["nexus.pubky.app"], provider: "pubky", subject: "alice", fetchedAt: 1_800_000_000 - 3600, checkedAt: 1_800_000_000 - 3600 };
+    await transact([STORES.settings], stores => { stores[STORES.settings].put({ "pubky\nalice": old }, "publicProfiles"); });
+    await t.cache.load();
+    t.answers.set("alice", { found: true, name: "Alice", hosts: ["nexus.pubky.app"], avatarMiss: "it is a GIF; only PNG, JPEG and WebP pictures are shown" });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    await t.cache.request(ALICE);
+    expect(t.read).toHaveBeenCalledTimes(1);
+    expect(t.cache.view(ALICE)).toMatchObject({ avatarMiss: "it is a GIF; only PNG, JPEG and WebP pictures are shown" });
+    // Logged with the rule and the network, never the identity.
+    expect(info).toHaveBeenCalledWith("Public profile (pubky): the picture is not shown: it is a GIF; only PNG, JPEG and WebP pictures are shown.");
+    expect(info.mock.calls.flat().join(" ")).not.toContain("alice");
+    info.mockRestore();
+    // Kept by these readers: a day, as before.
+    t.later(PROFILE_RETRY_SECONDS + 1); await t.cache.request(ALICE);
+    expect(t.read).toHaveBeenCalledTimes(1);
+    expect(READERS_VERSION).toBeGreaterThanOrEqual(2);
   });
 
   it("a failure keeps the copy it had and says so; concurrent requests share one read", async () => {

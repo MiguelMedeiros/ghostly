@@ -51,6 +51,7 @@ export function PublicProfileDetails({ provider, profile, tone = "back", compact
           </span>
         </div>
         {!compact && profile.about && <p className="public-profile-about" data-testid={`${testId}-about`}>{profile.about}</p>}
+        {!profile.avatar && profile.avatarMiss && <p className="public-profile-note" data-testid={`${testId}-picture-miss`}>The profile’s picture is not shown: {profile.avatarMiss}.</p>}
       </>}
       {read && <p className="public-profile-source" data-testid={`${testId}-source`}>
         {state === "found" ? "Loaded from" : "Asked"} {from} {ago(profile.fetchedAt, now)}. {state === "found" ? "What the account says about itself, not part of the proof. " : ""}Asking told that server this device’s IP address.

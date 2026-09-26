@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { IMAGE_HOSTS, IMAGE_REDIRECTS } from "@ghostly/browser/profiles/public";
 
 // covers: files.voice.play
 
@@ -47,6 +48,17 @@ describe("the Content-Security-Policy of every shell", () => {
     if (images === "anything") return;
     expect(images).toContain("data:");
     expect(images).toContain("https://tile.openstreetmap.org");
+  });
+
+  // covers: proofs.public-profile.picture
+  it.each(Object.keys(policies) as (keyof typeof policies)[])("%s fetches profile pictures from the fixed hosts (connect-src) and shows them as data: (img-src)", (shell) => {
+    const connect = allowed(policies[shell](), "connect-src");
+    const images = allowed(policies[shell](), "img-src");
+    // The engine fetches the picture and re-encodes it: the page only ever shows a data: URL.
+    if (images !== "anything") expect(images).toContain("data:");
+    if (connect === "anything") return;
+    const hosts = [...IMAGE_HOSTS, ...Object.values(IMAGE_REDIRECTS).flatMap(s => [...s])];
+    for (const host of hosts) expect(connect.includes("https:") || connect.includes(`https://${host}`), `${shell} connect-src reaches ${host}`).toBe(true);
   });
 
   it("names media-src on Desktop, rather than leaning on default-src", () => {

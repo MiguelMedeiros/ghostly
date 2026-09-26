@@ -50,6 +50,8 @@ export interface Badge {
   state: BadgeState;
   /** "GitHub: mmedeiros · verified 2 h ago": what the mark is, for a tooltip and a screen reader. */
   label: string;
+  /** The identity's public profile picture (a sanitized data URL), while the proof still vouches for it: the header's mark wears it. */
+  photo?: string;
 }
 
 /** "2 h ago", "3 days ago", "in 3 days", in the interface's language. */
@@ -80,9 +82,10 @@ export function contactBadges(received: ReceivedIdentityView[] | undefined, { go
     const state = badgeState(r, now);
     if (!state || (good && !isGood(state))) return;
     // A public profile's name, while the proof still vouches for it: "Nostr: npub1…yz (Alice) · verified 2 h ago".
-    const profileName = isGood(state) && r.publicProfile?.found ? r.publicProfile.name : undefined;
-    const label = `${providerLabel(r.provider)}: ${shortSubject(r.provider, r.verified.subject)}${profileName ? ` (${profileName})` : ""} · ${STATE_WORDS[state](r, now)}`;
-    badges.push({ id: r.id, provider: r.provider, subject: r.subject, state, label, rank: badgeRank(r.provider, r.subject), i });
+    const profile = isGood(state) && r.publicProfile?.found ? r.publicProfile : undefined;
+    const label = `${providerLabel(r.provider)}: ${shortSubject(r.provider, r.verified.subject)}${profile?.name ? ` (${profile.name})` : ""} · ${STATE_WORDS[state](r, now)}`;
+    const photo = profile?.avatar?.startsWith("data:image/") ? profile.avatar : undefined;
+    badges.push({ id: r.id, provider: r.provider, subject: r.subject, state, label, ...(photo ? { photo } : {}), rank: badgeRank(r.provider, r.subject), i });
   });
   return badges
     .sort((a, b) => Number(isGood(b.state)) - Number(isGood(a.state)) || a.rank - b.rank || a.i - b.i)

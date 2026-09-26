@@ -173,7 +173,7 @@ export const atprotoReader: PublicProfileReader = {
         const blob = await ctx.fetch(`${doc.pds}/xrpc/com.atproto.sync.getBlob?${new URLSearchParams({ did: subject, cid: cdn[2] })}`, { maxBytes: AVATAR_MAX_BYTES, signal: ctx.signal });
         picture = blob.status === 200 ? await decodeAvatar(blob.bytes, PROFILE_AVATAR_SIDE) : { miss: `${server.host} answered ${blob.status}` };
         hosts.push(server.host);
-      } catch { picture = pictureUnreachable("the account's server"); /* the name and counts still show; the picture falls back to the mark */ }
+      } catch { picture = { miss: "the account's server could not be asked for it" }; /* the name and counts still show; the picture falls back to the mark */ }
     } else if (typeof d.avatar === "string") picture = { miss: "Bluesky named it at an address this app does not read" };
     return profile({
       name: profileName(d.displayName),
