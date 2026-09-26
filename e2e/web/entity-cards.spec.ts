@@ -70,6 +70,8 @@ test("an npub in a message is a card that loads the profile from the reader's re
   // Neither has changed the relays: the app's defaults are answered here, and no real relay is reached.
   const defaults = ["wss://relay.damus.io", "wss://nos.lol"];
   await Promise.all([relay.attach(alice.context, "alice", defaults), relay.attach(bob.context, "bob", defaults)]);
+  // A route covers pages loaded after it: the peers' pages were open already.
+  await Promise.all([alice.page.reload(), bob.page.reload()]);
   const dave = generateSecretKey();
   const D = getPublicKey(dave);
   relay.add({ kind: 0, tags: [], content: JSON.stringify({ name: "dave", display_name: "Dave Nostr", about: "A stranger on Nostr." }), created_at: Math.floor(Date.now() / 1000) - 60 }, dave);

@@ -53,7 +53,8 @@ export class LocalNostrRelay {
 
   /**
    * Answers this context's connections to the test relay, recording them under `name`. `urls` adds relays it answers
-   * as well (the app's defaults, for a person who never changed them): none of them is reached.
+   * as well (the app's defaults, for a person who never changed them): none of them is reached. Like any Playwright
+   * route, it covers pages loaded after it: reload a page that was already open.
    */
   async attach(context: BrowserContext, name: string, urls: readonly string[] = []): Promise<void> {
     const answered = [NOSTR_TEST_RELAY, ...urls];
