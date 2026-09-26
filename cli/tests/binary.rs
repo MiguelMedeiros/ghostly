@@ -223,5 +223,9 @@ fn reads_the_dht_alone_unless_told_to_read_the_relays_too() {
     assert!(help.contains("--read-relays"), "{help}");
     // The flag is global: it goes before or after the command.
     let output = cli(&["recv", "--read-relays", "--peer", "p"]);
-    assert_eq!(output.status.code(), Some(2), "still a usage error: no --key");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "still a usage error: no --key"
+    );
 }

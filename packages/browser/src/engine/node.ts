@@ -2449,7 +2449,8 @@ export class GhostlyNode implements EngineImplementation {
     if (settings.relays) {
       this.relays?.setRelays(settings.relays);
       if (this.relays) this.settings.relays = this.relays.describe().relays;
-      else this.settings.relays = [...new Set(settings.relays.map(normalizeRelayUrl).filter((relay): relay is string => relay !== null))];
+      // The Desktop writes to them: kept as the browsers keep theirs. Elsewhere (a transport of one's own) as given.
+      else if (this.transport.configure) this.settings.relays = [...new Set(settings.relays.map(normalizeRelayUrl).filter((relay): relay is string => relay !== null))];
     }
     if (settings.relays || settings.readRelays !== undefined) {
       if (this.settings.readRelays !== true) delete this.settings.readRelays;

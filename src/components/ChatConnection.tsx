@@ -180,7 +180,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
               {summary.since !== undefined && <><dt>Live since</dt><dd className="text-text-primary">{new Date(summary.since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ({lasting(Date.now() - summary.since)})</dd></>}
               <dt>Why</dt><dd className="min-w-0 break-words text-text-primary">{summary.why}</dd>
             </dl>}
-            <DiscoveryHealth status={state?.transport.discovery} />
+            <DiscoveryHealth status={state?.transport?.discovery} />
             {!dht && Object.entries(link?.transportErrors ?? {}).map(([t,reason]) => <p key={t}>{name(t as PairedTransport)}: {reason}</p>)}
             {(pinned || pair?.keyMismatch) && <div data-testid="pair-trust">
               {pair?.keyMismatch ? <p role="alert" className="text-danger">This key does not match the saved contact. No data was accepted; the saved key has not been replaced.</p> : <>

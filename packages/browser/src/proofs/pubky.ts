@@ -1,5 +1,5 @@
 import {
-  DEFAULT_RELAYS, homeserverWebEndpoint, openRelayPayload, pubkyHomeserverOf, PUBKY_PROOF_MAX_BYTES,
+  homeserverWebEndpoint, openRelayPayload, pubkyHomeserverOf, PUBKY_PROOF_MAX_BYTES,
   type HomeserverEndpoint,
 } from "@ghostly/core";
 import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
@@ -15,7 +15,7 @@ import { getBrowserHost, type PubkyCookieSession } from "../host";
 // -- reading ---------------------------------------------------------------------------------------
 
 /** Pkarr relays the records are read from: Pubky's own, the ones the Pubky SDK uses. */
-export const PUBKY_RELAYS: readonly string[] = DEFAULT_RELAYS;
+export const PUBKY_RELAYS: readonly string[] = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 /** A Pkarr relay payload: 64-byte signature, 8-byte timestamp, a DNS packet of at most 1000 bytes. */
 const RELAY_PAYLOAD_MAX = 1072;
 
