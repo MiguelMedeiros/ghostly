@@ -196,6 +196,17 @@ mod tests {
             .collect()
     }
 
+    /// The names `commands!` registers (what `invoke_handler` takes), read from this file's source.
+    fn registered() -> Vec<String> {
+        let source = include_str!("main.rs");
+        let list = &source[source.find("tauri::generate_handler![").unwrap()..];
+        let list = &list[list.find('[').unwrap() + 1..list.find(']').unwrap()];
+        list.split(',')
+            .map(|path| path.trim().rsplit("::").next().unwrap().to_string())
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+
     fn capability() -> serde_json::Value {
         serde_json::from_str(include_str!("../capabilities/default.json")).unwrap()
     }
@@ -262,7 +273,7 @@ mod tests {
             "timeoutMs": 1, "peer": "p", "service": "s", "title": "t",
             "response": {"status": 200, "headers": [], "bodyB64": ""},
             "port": 0, "expectedState": "x", "space": "x", "prefix": "", "size": 0,
-            "offset": 0, "length": 0, "name": "x", "session": "x",
+            "offset": 0, "length": 0, "name": "x", "session": "x", "payloadB64": "x",
         });
         // Past what one `json!` expands.
         arguments["relays"] = serde_json::json!([]);
@@ -273,7 +284,7 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 56, "{declared:?}");
+        assert_eq!(declared.len(), 57, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()
@@ -300,13 +311,33 @@ mod tests {
         assert!(capability.get("platforms").is_none());
     }
 
+    /// A command registered but not declared is refused by the ACL ("not allowed by ACL") from the Ghostly
+    /// window too: the app would build and the feature would silently never work.
     #[test]
-    fn every_declared_command_is_registered() {
+    fn every_registered_command_is_declared_and_every_declared_one_registered() {
+        let names = registered();
+        let handled: BTreeSet<String> = names.iter().cloned().collect();
+        let declared: BTreeSet<String> = declared().into_iter().collect();
+        assert_eq!(handled.len(), names.len(), "a command registered twice");
+        assert_eq!(
+            handled.difference(&declared).collect::<Vec<_>>(),
+            Vec::<&String>::new(),
+            "registered in main.rs but missing from build.rs COMMANDS (and the capability)"
+        );
+        assert_eq!(
+            declared.difference(&handled).collect::<Vec<_>>(),
+            Vec::<&String>::new(),
+            "declared in build.rs but not registered in main.rs"
+        );
+    }
+
+    #[test]
+    fn every_registered_command_is_allowed_from_the_ghostly_window() {
         let app = app();
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        for command in declared() {
+        for command in registered() {
             // An empty payload: most commands refuse it for a missing argument,
             // which only happens once the command was found and allowed.
             let answer = invoke(&main, "tauri://localhost", &command, serde_json::json!({}));
@@ -324,7 +355,7 @@ mod tests {
     fn a_contacts_app_cannot_call_any_command() {
         let app = app();
         let (viewer, url) = viewer(&app, "svc-1");
-        for command in declared() {
+        for command in registered() {
             let error = invoke(&viewer, &url, &command, arguments())
                 .expect_err(&command)
                 .to_string();

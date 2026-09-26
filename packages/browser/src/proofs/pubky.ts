@@ -58,13 +58,13 @@ export async function readPubkyFile(key: string, path: `/pub/${string}`, fetch: 
   const { endpoint: { host, port } } = await pubkyHomeserver(key, fetch, signal, relays);
   if (port !== undefined) throw new IdentityCheckUnavailable(`The homeserver ${host} answers on port ${port}; only port 443 is contacted`);
   try { await assertPublicHost(host, { fetch, signal, resolver }); }
-  catch (e) { throw new IdentityCheckUnavailable(`The homeserver ${host} was not contacted: ${e instanceof Error ? e.message : String(e)}`); } // eslint-disable-line preserve-caught-error -- The domain check's message says why; ES2020 has no Error.cause.
+  catch (e) { throw new IdentityCheckUnavailable(`The homeserver ${host} was not contacted: ${e instanceof Error ? e.message : String(e)}`); }
   let r: Awaited<ReturnType<IdentityFetch>>;
   try { r = await fetch(`https://${host}${path}`, { headers: { "pubky-host": key }, maxBytes: PUBKY_PROOF_MAX_BYTES, signal }); }
   catch (e) {
     // A file over the cap is the owner's doing, and says nothing about this side's network.
     if (/too large/i.test(String(e))) throw e;
-    throw new IdentityCheckUnavailable(`The homeserver ${host} could not be reached`); // eslint-disable-line preserve-caught-error -- Only "could not be reached" is meant; ES2020 has no Error.cause.
+    throw new IdentityCheckUnavailable(`The homeserver ${host} could not be reached`);
   }
   if (r.status === 404) return { text: undefined, host };
   if (r.status !== 200) throw new IdentityCheckUnavailable(`The homeserver ${host} answered ${r.status}`);

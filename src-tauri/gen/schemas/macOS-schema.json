@@ -471,6 +471,12 @@
           "markdownDescription": "Enables the publish_records command without any pre-configured scope."
         },
         {
+          "description": "Enables the publish_signed_packet command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-publish-signed-packet",
+          "markdownDescription": "Enables the publish_signed_packet command without any pre-configured scope."
+        },
+        {
           "description": "Enables the read_clipboard_text command without any pre-configured scope.",
           "type": "string",
           "const": "allow-read-clipboard-text",
@@ -805,6 +811,12 @@
           "type": "string",
           "const": "deny-publish-records",
           "markdownDescription": "Denies the publish_records command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the publish_signed_packet command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-publish-signed-packet",
+          "markdownDescription": "Denies the publish_signed_packet command without any pre-configured scope."
         },
         {
           "description": "Denies the read_clipboard_text command without any pre-configured scope.",

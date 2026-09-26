@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "publish_messages",
     "resolve_messages",
     "publish_records",
+    "publish_signed_packet",
     "resolve_records",
     "set_pkarr_relays",
     "pkarr_status",
