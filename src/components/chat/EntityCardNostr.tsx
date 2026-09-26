@@ -56,7 +56,7 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
       {p && <>
         {p.avatar && <img src={p.avatar} alt="" data-testid="entity-nostr-avatar" className="h-10 w-10 rounded-full object-cover" />}
         {p.about && <p data-testid="entity-nostr-about" className="m-0 line-clamp-4 whitespace-pre-wrap break-words text-text-primary">{p.about}</p>}
-        {p.nip05 && <p className="m-0 break-all">{p.nip05} <span className="text-text-primary/65">(NIP-05, as they wrote it, not checked)</span></p>}
+        {p.nip05 && <p className="m-0"><span className="break-all">{p.nip05}</span> <span className="text-text-primary/65">(NIP-05, as they wrote it, not checked)</span></p>}
       </>}
       {note && (note.muted
         ? <p className="m-0" data-testid="entity-nostr-muted">Hidden by your Nostr mute list.</p>

@@ -23,7 +23,8 @@ export function identityStanding(state: EngineState | null | undefined, provider
     const r = link.identities?.received.find(x => x.provider === provider && x.subject === subject);
     const badge = r && badgeState(r);
     if (!badge) continue;
-    const who = contactName(chats.get(link.peerPubKeyZ32)) ?? "a contact";
+    const name = contactName(chats.get(link.peerPubKeyZ32));
+    const who = name ? `~${name}` : "a contact";
     if (isGood(badge)) return { kind: "contact", state: badge, who };
     best ??= { state: badge, who };
   }

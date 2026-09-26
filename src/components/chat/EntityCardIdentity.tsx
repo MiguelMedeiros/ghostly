@@ -75,7 +75,7 @@ export function IdentityEntityCard({ provider, subject, peerPubKey }: { provider
   const badge = standing.kind === "own"
     ? <StatusPill ok testId="entity-identity-badge">{standing.label}</StatusPill>
     : standing.kind === "contact"
-      ? <StatusPill ok={isGood(standing.state)} warn={standing.state === "expiring" || standing.state === "failed"} testId="entity-identity-badge">{STATE_WORDS[standing.state]} ~{standing.who}</StatusPill>
+      ? <StatusPill ok={isGood(standing.state)} warn={standing.state === "expiring" || standing.state === "failed"} testId="entity-identity-badge">{STATE_WORDS[standing.state]} {standing.who}</StatusPill>
       : <StatusPill testId="entity-identity-badge">Not proved in your chats</StatusPill>;
 
   return (
