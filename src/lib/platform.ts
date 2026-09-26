@@ -151,8 +151,6 @@ export interface WalletState {
   wallets?: WalletInstanceView[];
   /** What New can make on each network, and why not where it cannot. */
   offers?: WalletOffer[];
-  /** Test sats held at test mints, when the page shows Mainnet. */
-  waitingTestSats?: number;
   ark?: ArkWalletView;
   bark?: BarkWalletView;
   fedimint?: FedimintWalletView;

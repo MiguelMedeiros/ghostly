@@ -108,7 +108,12 @@ test("two people pay on the same network; a card of a network the contact has no
   await alice.page.getByTestId("payment-send").click();
   const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
   await expect(review).toContainText("cashu-test");
+  // Which money, in words: test money goes on Approve, with no second question.
+  await expect(review.getByTestId("review-network")).toHaveText("Test money");
+  await expect(review).toContainText("21 test sats");
+  await expect(alice.page.getByTestId("payment-back-network")).toHaveText("Test money");
   await review.getByRole("button", { name: "Approve payment" }).click();
+  await expect(review.getByTestId("review-mainnet-confirm")).toHaveCount(0);
   await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state")).toHaveText(/Received/, { timeout: 30_000 });
   await openWallet(bob, "cashu-testnet");
   await expect.poll(async () => (await panelBalance(bob).innerText()).trim(), { timeout: 15_000 }).toMatch(/^21\s*test sats/);

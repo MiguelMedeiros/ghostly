@@ -142,8 +142,6 @@ export interface EngineApi {
   setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;
   walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
-  /** The network the legacy wallet page shows, and what a call naming no network acts on. Every wallet stays open. */
-  walletSetMode(params: { mode: "mainnet" | "testnet" }): void;
   /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
   walletCreate(params: WalletCreate): WalletInstanceView;
   /** The app is in front again: chats look now, and dropped ones reconnect at once. */

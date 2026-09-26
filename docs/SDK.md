@@ -54,7 +54,7 @@ malicious adapter. It protects them from an honest one's mistakes.
 
 A **Lightning source** creates and pays invoices (a node, a remote wallet, a mint); an **on-chain
 source** gives addresses, signs and broadcasts transactions (a BDK wallet, a Bitcoin Core wallet). One
-of each is active per profile and per wallet mode. Everything around it is the app's: storage, sealed
+of each is active per profile and per network (a Testnet wallet and a Mainnet wallet each have their own). Everything around it is the app's: storage, sealed
 secrets, per-mode sources, the picker and its form, the Lightning journal, the on-chain
 review/approve/reconcile flow, reconciliation of lost answers.
 

@@ -70,32 +70,22 @@ it("after the migration, a profile left in either mode opens every wallet it had
   }
 });
 
-it("the network a call names none for (the old switch) changes only that: nothing is made, added, parked or closed", async () => {
+it("a call naming no network acts on Mainnet; nothing is made, added, parked or closed for it", async () => {
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: true });
   node["settings"].mints = ["https://mint.minibits.cash/Bitcoin", "https://21mint.me", TEST_MINT];
   vi.spyOn(node["wallet"], "view").mockImplementation(async () => ({ mints: [], balance: 0, history: [], feesPaid: 0 }));
   const lock = vi.spyOn(node["arkWallets"].mainnet, "lock");
   const made = vi.spyOn(node["arkWallets"].testnet, "createDefaultNow");
-  await node.walletSetMode({ mode: "testnet" });
-  expect(node["settings"].walletMode).toBe("testnet");
-  expect(node["settings"].mints, "no mint added").toEqual(["https://mint.minibits.cash/Bitcoin", "https://21mint.me", TEST_MINT]);
-  expect(node["networkMints"]()).toEqual([TEST_MINT]);
-  expect(node["networkMints"]("mainnet"), "Mainnet's mints are still Mainnet's").toEqual(["https://mint.minibits.cash/Bitcoin", "https://21mint.me"]);
-  expect(node["walletView"]).toMatchObject({ mode: "testnet" });
+  expect(node["net"]()).toBe("mainnet");
+  expect(node["net"]("testnet")).toBe("testnet");
+  expect(node["networkMints"]()).toEqual(["https://mint.minibits.cash/Bitcoin", "https://21mint.me"]);
+  expect(node["networkMints"]("testnet"), "Testnet's mints are still Testnet's").toEqual([TEST_MINT]);
+  await node["refreshWallet"]();
+  expect(node["walletView"]).not.toHaveProperty("mode");
+  expect(node["walletView"]).not.toHaveProperty("waitingTestSats");
   expect(lock, "no wallet is closed").not.toHaveBeenCalled();
   expect(made, "no wallet is made").not.toHaveBeenCalled();
-  await node.walletSetMode({ mode: "mainnet" });
-  expect(node["networkMints"]()).toEqual(["https://mint.minibits.cash/Bitcoin", "https://21mint.me"]);
-  await expect(node.walletSetMode({ mode: "regtest" as never })).rejects.toThrow("Unknown wallet mode");
-});
-
-it("showing another network answers at once, even while a wallet is busy on a slow network", async () => {
-  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: true });
-  vi.spyOn(node["wallet"], "view").mockImplementation(async () => ({ mints: [], balance: 0, history: [], feesPaid: 0 }));
-  for (const wallet of [node["arkWallets"].testnet, node["barkWallets"].testnet, node["sparkWallets"].testnet, node["usdtWallets"].testnet]) vi.spyOn(wallet, "ensureReady").mockImplementation(() => new Promise(() => {}));
-  const answered = await Promise.race([node.walletSetMode({ mode: "testnet" }).then(() => "answered"), new Promise((r) => setTimeout(() => r("stuck"), 300))]);
-  expect(answered).toBe("answered");
-  expect(node["settings"].walletMode).toBe("testnet");
+  expect((node as unknown as Record<string, unknown>).walletSetMode, "the old switch is gone").toBeUndefined();
 });
 
 it("a gate's switch ends the wait for a wallet of the other mode, and what arrives late is closed", async () => {

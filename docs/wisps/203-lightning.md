@@ -18,7 +18,7 @@ The current `btc-lightning-bolt11` endpoint carries an invoice; the application 
 
 ## Lightning sources
 
-The application reaches Lightning through one **active source** per profile and wallet mode (Mainnet,
+The application reaches Lightning through one **active source** per profile and network (Mainnet,
 Testnet), behind a `LightningProvider` contract: `info` (network, alias, balance when it has one),
 `createInvoice`, `invoiceStatus`, `payInvoice` (with a fee ceiling) and `paymentStatus`. The Cashu mints are
 the default source and the only one shipped so far; node and remote-wallet sources (LND, Core Lightning,
