@@ -81,7 +81,7 @@ export function useFaceChoice(peerKey: string | undefined): FaceChoice | undefin
 export function cleanFaceName(value: string | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   // eslint-disable-next-line no-control-regex
-  const text = value.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, "").replace(/\s+/g, " ").trim();
+  const text = value.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, "").replace(/\s+/g, " ").trim();
   return Array.from(text).slice(0, 64).join("").trim() || undefined;
 }
 
