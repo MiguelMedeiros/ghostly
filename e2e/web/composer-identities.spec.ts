@@ -141,8 +141,8 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
 
   // On a phone the + menu is a sheet from the bottom; the input keeps its width.
   await alice.page.setViewportSize({ width: 390, height: 844 });
-  const input = await alice.page.getByPlaceholder("Message…").boundingBox();
-  expect(input!.width).toBeGreaterThan(200);
+  // Read once the layout has settled at the new width.
+  await expect.poll(async () => (await alice.page.getByPlaceholder("Message…").boundingBox())?.width ?? 0).toBeGreaterThan(200);
   await plus.click();
   const menu = alice.page.getByTestId("composer-menu");
   await expect(menu).toHaveAttribute("data-menu", "sheet");

@@ -17,7 +17,7 @@ test("the inviter hears the contact knock, once; Interface sounds stay off by de
   expect(await heard(guest, NOTE.knock)).toBe(0);
 
   // Settings: five categories, Interface off; Connection's ▶ plays the knock.
-  await host.page.getByTitle("Settings").click();
+  await host.page.goto("/#/settings");
   await expect(host.page.getByTestId("settings-cues-interface")).toHaveAttribute("aria-checked", "false");
   for (const category of ["payments", "identities", "connection", "chat"]) await expect(host.page.getByTestId(`settings-cues-${category}`)).toHaveAttribute("aria-checked", "true");
   await host.page.getByTestId("settings-cues-connection-preview").click();
