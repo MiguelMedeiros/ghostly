@@ -30,6 +30,8 @@ export interface ChatJson {
   invite: string | null;
   /** A chat of the older protocol (WISP 402). */
   compatibility: boolean;
+  /** The contact sent a picture (checked by the engine; `engine getState` has it). */
+  peerPicture: boolean;
 }
 
 export function chatJson(link: LinkView): ChatJson {
@@ -52,6 +54,7 @@ export function chatJson(link: LinkView): ChatJson {
     verified: !!link.peerVerified,
     invite: link.pairing?.status === "ready" ? null : link.inviteCode ?? null,
     compatibility: !link.profile,
+    peerPicture: !!link.peerAvatar,
   };
 }
 
@@ -131,5 +134,6 @@ export function groupJson(group: GroupView) {
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online })),
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
     community: group.community ?? null,
+    picture: !!group.picture,
   };
 }

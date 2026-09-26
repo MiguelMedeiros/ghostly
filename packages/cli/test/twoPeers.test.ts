@@ -1,9 +1,10 @@
-import { writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
-// covers: headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli
+// covers: headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -105,6 +106,35 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listen.stop();
   });
 
+  it("send files: a small one taken at once, a large one only once accepted, saved byte for byte", async () => {
+    const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+    const listen = new Running(["--home", bob, "listen", "--type", "file.", "--type", "message.received"], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    const small = join(alice, "note.txt");
+    writeFileSync(small, randomBytes(200_000));
+    const sent = ok(await as(alice, "file", "send", "bob", small));
+    const fileMessage = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: unknown }).file);
+    const incoming = (fileMessage.message as { file: { id: string; name: string; size: number } }).file;
+    expect(incoming).toMatchObject({ name: "note.txt", size: 200_000 });
+    await listen.waitFor((e) => e.type === "file.done" && e.file === incoming.id);
+    const saved = ok(await as(bob, "file", "save", incoming.id, "--dir", bob));
+    expect(sha(saved.path as string)).toBe(sha(small));
+    error(await as(bob, "file", "save", incoming.id, "--dir", bob), "confirm", 5);
+    expect((sent.file as { size: number }).size).toBe(200_000);
+
+    const large = join(alice, "big.bin");
+    writeFileSync(large, randomBytes(26 * 1024 * 1024));
+    ok(await as(alice, "file", "send", "bob", large));
+    const offer = await listen.waitFor((e) => e.type === "file.offered", 90_000);
+    ok(await as(bob, "file", "accept", "alice", offer.file as string));
+    await listen.waitFor((e) => e.type === "file.done" && e.file === offer.file, 120_000);
+    const savedLarge = ok(await as(bob, "file", "save", offer.file as string, "--path", join(bob, "big-copy.bin")));
+    expect(savedLarge.size).toBe(26 * 1024 * 1024);
+    expect(sha(join(bob, "big-copy.bin"))).toBe(sha(large));
+    await listen.stop();
+  });
+
   it("answer from a hook: an echo bot on listen --exec", async () => {
     const script = join(bob, "echo.mjs");
     writeFileSync(script, `
@@ -146,6 +176,34 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(alice, "group", "send", "Bot crew", "hey @Bob", "--mention", "Bob"));
     const event = await listen.waitFor((l) => l.type === "group.message", 60_000);
     expect(event).toMatchObject({ group: joined.group, message: { text: "hey @Bob", mentioned: true } });
+
+    // The admin's tools: a picture everyone sees (only the admin sets it), a new link (the old one stops working),
+    // a fresh secret. A picture that is not a JPEG is refused before the engine is asked.
+    const fixtures = join(import.meta.dirname, "../../../e2e/support/avatar-fixtures");
+    ok(await as(alice, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")));
+    error(await as(bob, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")), "engine", 1);
+    error(await as(alice, "group", "picture", "Bot crew", join(fixtures, "avatar.png")), "bad_request", 1);
+    const reset = ok(await as(alice, "group", "link", "Bot crew", "--reset"));
+    expect(reset.link).toBeTruthy();
+    expect(reset.link).not.toBe(created.link);
+    ok(await as(alice, "group", "rotate", "Bot crew"));
+    const shown = Date.now() + 60_000;
+    let seen: Record<string, unknown> = {};
+    while (Date.now() < shown) {
+      seen = ok(await as(bob, "group", "show", joined.group as string));
+      if (seen.picture) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    expect(seen.picture).toBe(true);
+    ok(await as(alice, "profile", "picture", join(fixtures, "avatar.jpg")));
+    const face = Date.now() + 60_000;
+    let chat: Record<string, unknown> = {};
+    while (Date.now() < face) {
+      chat = ok(await as(bob, "chat", "show", "alice"));
+      if (chat.peerPicture) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    expect(chat.peerPicture).toBe(true);
     await listen.stop();
   });
 

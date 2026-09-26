@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { OptionSpec, Parsed } from "./args";
 import { CliError } from "./errors";
 
@@ -23,6 +24,11 @@ const net: OptionSpec = { type: "string", description: "mainnet or testnet (defa
 const card: OptionSpec = { type: "string", description: "A Lightning card (its id; default: the network's default)" };
 const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
 const confirmReal: OptionSpec = { type: "boolean", description: "Confirm a Mainnet (real money) spend" };
+
+/** A path as this command's working directory means it: the daemon runs elsewhere. */
+function here(path: unknown): string | undefined {
+  return typeof path === "string" ? resolve(path) : undefined;
+}
 
 /** A whole number of sats from the command line. */
 function sats(value: string | undefined): number {
@@ -175,6 +181,43 @@ export const COMMANDS: Record<string, Command> = {
   "payment list": { method: "payment.list", usage: "payment list [--chat <chat>]", summary: "Payments and requests, newest first", options: { chat: { type: "string", description: "Only this chat's" } }, params: ({ options }) => ({ chat: options.chat }) },
   "payment check": { method: "payment.check", usage: "payment check <chat> <payment>", summary: "Paid from another wallet: the contact's app looks now", args: ["chat", "payment"], params: (_, a) => ({ chat: a.chat, payment: a.payment }) },
   "payment reclaim": { method: "payment.reclaim", usage: "payment reclaim <payment>", summary: "Take back ecash the contact has not taken", args: ["payment"], params: (_, a) => ({ payment: a.payment }) },
+
+  "file send": {
+    method: "file.send", usage: "file send <chat> <path> [--name n] [--mime t] [--voice <ms> [--peaks 0,40,…]]", summary: "Send a file (or, with --voice, a voice note)",
+    args: ["chat", "path"], options: { name: { type: "string", description: "The name the contact sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", description: "A voice note of this many milliseconds" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated" } },
+    params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, voice: options.voice, peaks: typeof options.peaks === "string" ? options.peaks.split(",") : undefined }),
+  },
+  "file list": { method: "file.list", usage: "file list <chat>", summary: "A chat's files and their transfers", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "file accept": { method: "file.action", usage: "file accept <chat> <file>", summary: "Take a file the contact offers", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
+  "file decline": { method: "file.action", usage: "file decline <chat> <file>", summary: "Refuse a file the contact offers", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "decline" }) },
+  "file pause": { method: "file.action", usage: "file pause <chat> <file>", summary: "Pause a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "pause" }) },
+  "file resume": { method: "file.action", usage: "file resume <chat> <file>", summary: "Resume a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resume" }) },
+  "file cancel": { method: "file.action", usage: "file cancel <chat> <file>", summary: "Cancel a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "cancel" }) },
+  "file save": {
+    method: "file.save", usage: "file save <file> [--dir d | --path p] [--force]", summary: "Write a received file to disk (never over a file without --force)",
+    args: ["file"], options: { dir: { type: "string", description: "Into this folder, under its own name" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" } },
+    params: ({ options }, a) => ({ file: a.file, dir: here(options.dir ?? "."), path: options.path === undefined ? undefined : here(options.path), force: options.force === true }),
+  },
+
+  "group invite": { method: "group.invite", usage: "group invite <group> <chat>", summary: "Invite a contact into a group you administer", args: ["group", "chat"], params: (_, a) => ({ group: a.group, chat: a.chat }) },
+  "group remove": { method: "group.remove", usage: "group remove <group> <member>", summary: "Remove a member (admin)", args: ["group", "member"], params: (_, a) => ({ group: a.group, member: a.member }) },
+  "group admin": { method: "group.admin", usage: "group admin <group> <member>", summary: "Make a member the admin (admin)", args: ["group", "member"], params: (_, a) => ({ group: a.group, member: a.member }) },
+  "group rotate": { method: "group.rotate", usage: "group rotate <group>", summary: "A fresh group secret, members unchanged (admin)", args: ["group"], params: (_, a) => ({ group: a.group }) },
+  "group link": {
+    method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Turn the group's link on (--reset: a new one), or --off", args: ["group"],
+    options: { off: { type: "boolean", description: "Turn the link off" }, reset: { type: "boolean", description: "Replace it: the old link stops working" } },
+    params: ({ options }, a) => ({ group: a.group, on: options.off !== true, reset: options.reset === true }),
+  },
+  "group picture": {
+    method: "group.picture", usage: "group picture <group> <jpeg> | --clear", summary: "Set or clear the group's picture (admin; a square JPEG)", args: ["group", "path..."],
+    options: { clear: { type: "boolean", description: "Remove the picture" } },
+    params: ({ options }, a) => ({ group: a.group, path: here(a.path), clear: options.clear === true }),
+  },
+  "profile picture": {
+    method: "profile.picture", usage: "profile picture <jpeg> | --clear", summary: "The picture contacts see (a square JPEG, 128 px is what the app sends)", args: ["path..."],
+    options: { clear: { type: "boolean", description: "Remove the picture" } },
+    params: ({ options }, a) => ({ path: here(a.path), clear: options.clear === true }),
+  },
 
   "events": {
     method: "events.replay", usage: "events [--since seq]", summary: "Events the journal holds, without following",

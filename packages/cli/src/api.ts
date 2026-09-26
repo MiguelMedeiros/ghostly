@@ -8,6 +8,8 @@ import {
   bool, chatOf, findChat, groupOf, list, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
+import { FILE_METHODS } from "./files";
+import { GROUP_ADMIN_METHODS } from "./groupAdmin";
 import { WALLET_METHODS } from "./wallets";
 import { chatDetailsJson, chatJson, groupJson, messageJson } from "./views";
 
@@ -106,6 +108,8 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
 
 const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
+  ...FILE_METHODS,
+  ...GROUP_ADMIN_METHODS,
 
   async status(ctx) {
     const s = state(ctx);
