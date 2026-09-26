@@ -54,8 +54,14 @@ export function Wallet() {
   // The decks paint first and the chosen card's panel follows, in a render React can interrupt for frames: the two
   // together overrun a frame, and opening the wallet (or bringing up another card) would stutter.
   const panel = useDeferredValue<string | null>(selected?.id ?? null, null);
-  const select = (next: string) => {
+  // Whether the panel's field (Cashu's amount) takes the focus: when a person chose the wallet (a click, a tap or Enter
+  // on its card, a link to it), never as the page opens or as its card comes up under the pointer passing over the
+  // deck, a key moving along it or a swipe settling. The field is below the decks: a focus there would move the focus
+  // away from where the person is (and in WebKit, the page down to the field).
+  const [focusPanel, setFocusPanel] = useState(false);
+  const select = (next: string, focus = true) => {
     setChosen(next);
+    setFocusPanel(focus);
     const network = parseCardId(next)?.network;
     if (network) setTops((t) => t[network] === next ? t : { ...t, [network]: next });
     try { sessionStorage.setItem(CARD_KEY, next); } catch { /* storage unavailable */ }
@@ -72,7 +78,7 @@ export function Wallet() {
   const removed = (id: string) => {
     const rest = cards.filter((c) => c.id !== id), network = parseCardId(id)?.network;
     const next = rest.find((c) => c.network === network) ?? rest[0];
-    if (next) select(next.id);
+    if (next) select(next.id, false);
   };
 
   return (
@@ -87,7 +93,7 @@ export function Wallet() {
           {NETWORKS.map((network) => {
             const mine = cards.filter((c) => c.network === network), live = selected.network === network;
             const top = live ? selected.id : (mine.find((c) => c.id === tops[network]) ?? mine[0])?.id;
-            return <NetworkSection key={network} network={network} cards={mine} selected={top} resting={!live} onSelect={select} onNew={() => setCreating(network)} />;
+            return <NetworkSection key={network} network={network} cards={mine} selected={top} resting={!live} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} onNew={() => setCreating(network)} />;
           })}
           <div role="tabpanel" id="wallet-panel" aria-labelledby={`wallet-tab-${selected.id}`} data-testid="wallet-panel" data-network={selected.network} className="space-y-6">
             <p className="flex flex-wrap items-center gap-2 text-sm text-text-secondary" data-testid="wallet-panel-title">
@@ -96,7 +102,7 @@ export function Wallet() {
             </p>
             {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
             {panel && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={wallet.forNetwork("testnet")} state={networkState(state, "testnet")} />}
-            {panel && <WalletPanel id={panel} wallet={wallet} state={state} onOpen={select} />}
+            {panel && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} onOpen={select} />}
             {panel && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
           </div>
         </>}
@@ -113,12 +119,13 @@ export function Wallet() {
  * One network's wallets: a heading that says whose money it is in words ("Real money · Mainnet"), the network's deck,
  * or, with none yet, a line saying so and New for that network.
  */
-function NetworkSection({ network, cards, selected, resting, onSelect, onNew }: {
+function NetworkSection({ network, cards, selected, resting, onSelect, onChoose, onNew }: {
   network: WalletNetwork;
   cards: InstanceCard[];
   selected: string | undefined;
   resting: boolean;
   onSelect: (id: string) => void;
+  onChoose: (id: string) => void;
   onNew: () => void;
 }) {
   const name = NETWORK_NAME[network];
@@ -133,7 +140,7 @@ function NetworkSection({ network, cards, selected, resting, onSelect, onNew }: 
         </div>
         <p className="text-xs text-text-muted">{network === "mainnet" ? "Money you own: spend it with care." : "Test coins, worth nothing: for trying things out."}</p>
       </div>
-      {cards.length && selected ? <WalletDeck network={network} cards={cards} selected={selected} resting={resting} onSelect={onSelect} /> : (
+      {cards.length && selected ? <WalletDeck network={network} cards={cards} selected={selected} resting={resting} onSelect={onSelect} onChoose={onChoose} /> : (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border px-4 py-3" data-testid={`wallet-section-${network}-empty`}>
           <p className="text-sm text-text-secondary">No {name} wallets yet.</p>
           <Button data-testid={`wallet-section-${network}-new`} onClick={onNew}>New {name} wallet</Button>
@@ -144,13 +151,13 @@ function NetworkSection({ network, cards, selected, resting, onSelect, onNew }: 
 }
 
 /** The chosen wallet's panel, on its own network: its calls and its state are that network's. */
-function WalletPanel({ id, wallet, state, onOpen }: { id: string; wallet: WalletPlatform; state: WalletState; onOpen: (id: InstanceCard["id"]) => void }) {
+function WalletPanel({ id, wallet, state, focus, onOpen }: { id: string; wallet: WalletPlatform; state: WalletState; focus: boolean; onOpen: (id: InstanceCard["id"]) => void }) {
   const card = parseCardId(id);
   if (!card) return null;
   const { rail, network } = card;
   const scoped = wallet.forNetwork(network), shown = networkState(state, network);
   switch (rail) {
-    case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} onOpenCashu={() => onOpen(cardId("cashu", network))} />;
+    case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} onOpenCashu={() => onOpen(cardId("cashu", network))} focusAmount={focus} />;
     case "arkade": return <ArkWalletPanel key={id} wallet={scoped} state={shown} />;
     case "bark": return <BarkWalletPanel key={id} wallet={scoped} state={shown} />;
     case "spark": return <SparkWalletPanel key={id} wallet={scoped} state={shown} />;

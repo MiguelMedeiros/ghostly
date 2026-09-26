@@ -526,6 +526,7 @@
     "src/lib/connection.ts": ["*"],
     "src/lib/contactStatus.ts": ["chat.paired.status","chat.paired.reconnect","chat.dht.*","delivery.hold.*","app.offline-switch"],
     "src/lib/documentLanguage.ts": ["app.i18n"],
+    "src/lib/focus.ts": ["wallet.deck","wallet.cashu.*"],
     "src/lib/format.ts": ["files.*"],
     "src/lib/groupPayments.ts": ["groups.payments.*","groups.community.payments.*"],
     "src/lib/groups.ts": ["groups.*","chats.list.*"],
