@@ -20,7 +20,7 @@ The defaults are `DEFAULT_RELAYS` in `packages/core/src/relay.ts`. The Desktop g
 |---|---|---|---|
 | `https://pkarr.pubky.org` | Pubky (Synonym) | Yes | Writes through to the DHT. CORS allows `*` and `If-Match`. `x-ratelimit-limit: 50` a minute per address. Same IP as `pkarr.pubky.app`. |
 | `https://pkarr.pubky.app` | Pubky (Synonym) | Yes | Writes through to the DHT. CORS as above. `x-ratelimit-limit: 1000`. In the Rust pkarr crate's own defaults. |
-| `https://relay.pkarr.org` | pkarr.org | No | Writes through to the DHT, CORS allows both origins and `If-Match`, and it enforces `If-Match` (412). It allows 10 requests a minute per address, and on 2026-09-25 its PUTs stored the packet but did not answer within 20 s, which would hold every browser publish for its timeout. Add it by hand for a relay run by someone other than Pubky; the client gives it 5 requests a minute (`RELAY_REQUESTS_PER_MINUTE`). |
+| `https://relay.pkarr.org` | pkarr.org | No | Writes through to the DHT, CORS allows both origins and `If-Match`, and it enforces `If-Match` (412). It allows 10 requests a minute per address, too few for a default, and on 2026-09-25 its PUTs stored the packet but did not answer within 20 s (a browser publish no longer waits for that, since it returns on the first relay that took the packet). Add it by hand for a relay run by someone other than Pubky; the client gives it 5 requests a minute (`RELAY_REQUESTS_PER_MINUTE`). |
 | `https://dns.iroh.link/pkarr` | n0 (iroh) | No | A separate namespace: it does not read or write the DHT (iroh's own code says so), so a Desktop reading the DHT never sees what is put there. Its CORS preflight does not allow `If-Match`, and it accepts stale sequence numbers without an error. n0 rate-limits its public servers and guarantees no uptime. |
 | `https://staging-dns.iroh.link/pkarr` | n0 (iroh) | No | As above, and marked as a testing server. |
 | `pkarr-*.anytype.io/pkarr` | Anytype | No | Anytype's own infrastructure, not the DHT. |
@@ -30,7 +30,7 @@ No broader list of public relays exists: the pkarr repository's `relays.txt` nam
 ## What a default relay must do
 
 1. Speak the relay protocol (`GET`/`PUT /<z-base-32 key>`, the 64-byte signature, 8-byte timestamp and DNS packet payload), and write what it gets through to the Mainline DHT. A relay with its own namespace splits browser contacts from native ones.
-2. Answer a `PUT` in a few seconds. A browser publish waits for every relay.
+2. Answer a `PUT` in a few seconds. A publish returns on the first relay that took the packet, but a relay that never answers still counts against its breaker.
 3. Send CORS headers a browser and the extension accept: `Access-Control-Allow-Origin`, and `If-Match` among the allowed headers.
 4. Reject stale sequence numbers (409), so write conflicts show up.
 5. Allow enough requests per address for several peers behind one IP. Say it in `x-ratelimit-limit` if possible.
