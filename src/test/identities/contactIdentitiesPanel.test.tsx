@@ -5,7 +5,7 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { DAY, identitiesView, now, proofView, receivedView, sharedView } from "./views";
+import { DAY, identitiesView, now, receivedView } from "./views";
 
 // covers: proofs.badges, proofs.recheck, proofs.expiry, proofs.unverifiable, proofs.public-activity
 
