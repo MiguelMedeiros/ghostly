@@ -16,6 +16,7 @@ import {
 } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
+import type { PubkyCookieSession } from "@ghostly/browser/host";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
@@ -70,6 +71,28 @@ const tauriLocalFetch: LocalFetch = async (request) => {
     status: response.status,
     headers: response.headers,
     body: body.length > 0 ? [body] : null,
+  };
+};
+
+/**
+ * A Pubky cookie session (Pubky Ring's approval) through Rust: WKWebView drops the homeserver's session cookie, a
+ * third-party one in the page, so the homeserver refused every write. Rust keeps this approval's cookies in a jar of
+ * its own (`pubky_session`), which `close` drops; the page never sees them.
+ */
+const pubkyCookieSession = (): PubkyCookieSession => {
+  const session = toBase64Url(crypto.getRandomValues(new Uint8Array(18)));
+  return {
+    async fetch(request) {
+      const answer = await invoke<{ status: number; headers: [string, string][]; body_b64: string }>("pubky_session_fetch", {
+        session,
+        url: request.url,
+        method: request.method,
+        headers: request.headers,
+        bodyB64: request.body ? toBase64(request.body) : null,
+      });
+      return { status: answer.status, headers: answer.headers, body: fromBase64(answer.body_b64) };
+    },
+    close: () => void invoke("pubky_session_close", { session }).catch(() => {}),
   };
 };
 
@@ -132,6 +155,8 @@ export function createDesktopHost(version: string) {
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
     // Passport in the system browser: the SDK's relay brings the approval back either way.
     openPubkyPassport: (url) => invoke("open_pubky_passport", { url }),
+    // Ring's cookie session: its homeserver requests through Rust, which keeps the cookie WKWebView drops.
+    pubkyCookieSession,
     // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).
     shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).

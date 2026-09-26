@@ -4,7 +4,7 @@ import {
 } from "@ghostly/core";
 import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
 import type { ApprovalRequest, IdentityFetch } from "./contract";
-import { getBrowserHost } from "../host";
+import { getBrowserHost, type PubkyCookieSession } from "../host";
 
 /**
  * Pubky, browser side: reading a key's records and files the way a contact's app does (through the proof
@@ -123,11 +123,13 @@ const refused = (e: unknown) => {
 /**
  * Polls every request until one of them is approved and resolves with that session and its request; a cancel, the
  * deadline or a failed poll ends the wait for all of them. Each request is freed once its last poll has settled
- * (never while one is in flight), and a session that lands after the end is signed out at once.
+ * (never while one is in flight), and a session that lands after the end is signed out at once; `onSettled` runs
+ * once all of that is done.
  */
-function firstApproval(requests: readonly PendingRequest[], signal: AbortSignal, timeoutMs: number): Promise<{ session: Session; request: PendingRequest }> {
+function firstApproval(requests: readonly PendingRequest[], signal: AbortSignal, timeoutMs: number, onSettled: () => void): Promise<{ session: Session; request: PendingRequest }> {
   return new Promise((resolve, reject) => {
     let over = false;
+    let polling = requests.length;
     const wakers = new Set<() => void>();
     const end = (settle: () => void) => {
       if (over) return;
@@ -158,10 +160,62 @@ function firstApproval(requests: readonly PendingRequest[], signal: AbortSignal,
           if (session) { const approved = session; end(() => resolve({ session: approved, request })); return; }
           if (!over) await pause();
         }
-      } finally { request.free(); }
+      } finally {
+        request.free();
+        if (--polling === 0) onSettled();
+      }
     };
     for (const request of requests) void poll(request);
   });
+}
+
+/**
+ * A request of a cookie session (Ring's approval) to its homeserver: its `/session` or a file of its storage
+ * (`/storage/<key>/pub/…`, or `/pub/…` where the homeserver does not address storage by path), sent with the
+ * browser's credentials. A grant session's requests carry an `Authorization` header instead, and the relay's
+ * and the Pkarr relays' are elsewhere: those stay the page's.
+ */
+const cookieSessionRequest = (request: Request) =>
+  request.credentials === "include" && !request.headers.has("authorization") && /^\/(?:session$|storage\/|pub\/)/.test(new URL(request.url).pathname);
+
+/** Statuses a Response carries no body with. */
+const NO_BODY = new Set([204, 205, 304]);
+
+/**
+ * Sends the SDK's cookie-session requests through `transport` until the returned function runs. The SDK fetches with
+ * the global fetch, so this wraps it; everything else goes on to the page's fetch as it was. The cookie the
+ * homeserver sets stays in the transport: the page, and so the SDK, never sees it.
+ */
+function routeCookieSession(transport: PubkyCookieSession): () => void {
+  const pageFetch = globalThis.fetch;
+  let closed = false;
+  const routed = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // A Request made from another takes its body over: whatever is made here is what goes on.
+    const request = input instanceof Request && init === undefined ? input : new Request(input, init);
+    // Once closed, a wrapper something else has wrapped since stays in place: it only passes requests on.
+    if (closed || !cookieSessionRequest(request)) return pageFetch(request);
+    request.signal.throwIfAborted();
+    const body = request.body ? new Uint8Array(await request.arrayBuffer()) : null;
+    let answer;
+    try { answer = await transport.fetch({ url: request.url, method: request.method, headers: [...request.headers], body }); }
+    catch (e) { throw Object.assign(new TypeError(e instanceof Error ? e.message : String(e)), { cause: e }); }
+    const response = new Response(NO_BODY.has(answer.status) ? null : answer.body as BodyInit, { status: answer.status, headers: answer.headers });
+    // The SDK parses the answer's URL, which a Response made here does not have: it is the request's (no redirects).
+    Object.defineProperty(response, "url", { value: request.url });
+    return response;
+  };
+  globalThis.fetch = routed;
+  return () => {
+    if (closed) return;
+    closed = true;
+    if (globalThis.fetch === routed) globalThis.fetch = pageFetch;
+    transport.close();
+  };
+}
+
+/** The host's way around a page that drops the homeserver's cookie, if it has one. */
+function cookieSessionTransport(): PubkyCookieSession | undefined {
+  try { return getBrowserHost().pubkyCookieSession?.(); } catch { return undefined; }
 }
 
 /**
@@ -208,9 +262,30 @@ export async function withPubkyApproval<T>(options: PubkyApprovalOptions, work: 
     ],
   });
 
+  // Where the page would drop the cookie session's cookie (the desktop app), its requests go through the host, from
+  // the first poll (an approval is redeemed inside one) until the last poll has settled and the work is over.
+  const transport = cookieSessionTransport();
+  const unroute = transport ? routeCookieSession(transport) : () => {};
+  let settled!: () => void;
+  const polled = new Promise<void>(done => { settled = done; });
+  try {
+    return await approveAndWork(options, work, { grant, cookie, opened, settled, cookieKept: !!transport });
+  } finally {
+    void polled.then(unroute);
+  }
+}
+
+/**
+ * The rest of `withPubkyApproval`, once both requests are shown: the wait, the check, and the work. `cookieKept`: the
+ * host keeps a cookie session's cookie, so a refusal is not the page's cookie policy.
+ */
+async function approveAndWork<T>(options: PubkyApprovalOptions, work: (session: PubkyApprovedSession) => Promise<T>, { grant, cookie, opened, settled, cookieKept }: {
+  grant: GrantAuthFlow; cookie: AuthFlow; opened: { window?: Window | null }; settled: () => void; cookieKept: boolean;
+}): Promise<T> {
+  const { signal } = options;
   let session: Session, viaCookie: boolean;
   try {
-    const first = await firstApproval([grant, cookie], signal, options.timeoutMs ?? APPROVAL_TIMEOUT);
+    const first = await firstApproval([grant, cookie], signal, options.timeoutMs ?? APPROVAL_TIMEOUT, settled);
     session = first.session;
     viaCookie = first.request === cookie;
   } finally {
@@ -235,11 +310,11 @@ export async function withPubkyApproval<T>(options: PubkyApprovalOptions, work: 
     throw e;
   }
 
-  // A cookie session lives in the homeserver's cookie, a third-party cookie here. WebKit drops it (Safari, and the
-  // WKWebView of Ghostly's macOS app), so the homeserver then refuses the session's writes: say that, not "401".
+  // A cookie session lives in the homeserver's cookie, a third-party cookie in a page. WebKit drops it (Safari), so the
+  // homeserver then refuses the session's writes: say that, not "401". The desktop app keeps it outside its WebView.
   const fail = (what: string) => (e: unknown) => {
-    if (viaCookie && refused(e))
-      throw new Error("Pubky Ring approved, but this browser blocked the sign-in cookie of your homeserver, so nothing was changed. Approve with Pubky Passport instead, or use Ghostly in Chrome.");
+    if (viaCookie && !cookieKept && refused(e))
+      throw new Error("Pubky Ring approved, but this browser blocked the sign-in cookie of your homeserver, so nothing was changed. Approve with Pubky Passport instead, or use Ghostly in Chrome or the desktop app.");
     throw failure(what, e);
   };
   const approved = session;

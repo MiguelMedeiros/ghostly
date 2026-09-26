@@ -38,6 +38,8 @@
     "allow-open-project-link",
     "allow-open-payment-link",
     "allow-open-pubky-passport",
+    "allow-pubky-session-fetch",
+    "allow-pubky-session-close",
     "allow-share-text",
     "allow-read-clipboard-text",
     "allow-oidc-loopback-start",

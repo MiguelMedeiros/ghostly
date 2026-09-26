@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pubky-session-fetch"
+description = "Enables the pubky_session_fetch command without any pre-configured scope."
+commands.allow = ["pubky_session_fetch"]
+
+[[permission]]
+identifier = "deny-pubky-session-fetch"
+description = "Denies the pubky_session_fetch command without any pre-configured scope."
+commands.deny = ["pubky_session_fetch"]

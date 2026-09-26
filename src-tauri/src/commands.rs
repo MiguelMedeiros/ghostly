@@ -9,6 +9,7 @@ use crate::lnd::{self, LndRequest, LndResponse};
 use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
 use crate::pkarr_network::Pkarr;
+use crate::pubky_session::{self, SessionResponse};
 use crate::records::{self, RecordInput, ResolvedPacket};
 use crate::types::{CompactMessage, KeypairResult, ResolvedBatch};
 use crate::viewer::{self, ServiceResponse};
@@ -282,6 +283,25 @@ pub fn open_pubky_passport(url: String) -> Result<(), String> {
         return Err("Not a Pubky Passport request".into());
     }
     launch(&url)
+}
+
+/// One request of a Pubky cookie session (Pubky Ring's approval) to the homeserver, with that session's own
+/// cookies, which stay here: WKWebView drops the homeserver's cookie. See `pubky_session`.
+#[tauri::command]
+pub async fn pubky_session_fetch(
+    session: String,
+    url: String,
+    method: String,
+    headers: Vec<(String, String)>,
+    body_b64: Option<String>,
+) -> Result<SessionResponse, String> {
+    pubky_session::fetch(session, url, method, headers, body_b64).await
+}
+
+/// Forgets a Pubky cookie session's cookies, once the approval is over.
+#[tauri::command]
+pub fn pubky_session_close(session: String) {
+    pubky_session::close(session)
 }
 
 fn is_pubky_passport_url(url: &str) -> bool {

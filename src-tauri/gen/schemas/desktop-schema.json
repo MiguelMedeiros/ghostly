@@ -429,6 +429,18 @@
           "markdownDescription": "Enables the paired_native_send command without any pre-configured scope."
         },
         {
+          "description": "Enables the pubky_session_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pubky-session-close",
+          "markdownDescription": "Enables the pubky_session_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pubky_session_fetch command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pubky-session-fetch",
+          "markdownDescription": "Enables the pubky_session_fetch command without any pre-configured scope."
+        },
+        {
           "description": "Enables the publish_messages command without any pre-configured scope.",
           "type": "string",
           "const": "allow-publish-messages",
@@ -727,6 +739,18 @@
           "type": "string",
           "const": "deny-paired-native-send",
           "markdownDescription": "Denies the paired_native_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pubky_session_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pubky-session-close",
+          "markdownDescription": "Denies the pubky_session_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pubky_session_fetch command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pubky-session-fetch",
+          "markdownDescription": "Denies the pubky_session_fetch command without any pre-configured scope."
         },
         {
           "description": "Denies the publish_messages command without any pre-configured scope.",
