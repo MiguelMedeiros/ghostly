@@ -5,7 +5,7 @@ import { PaymentReview } from "./PaymentReview";
 import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { isWorthlessMint } from "@ghostly/browser/shared/mints";
+import { isWorthlessMint, mintNetwork } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { Select } from "./ui/Select";
 
@@ -160,7 +160,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
               setLnReview({ fee: quote.feeReserve, source: quote.source && quote.source === ln?.providerId ? ln.alias ?? ln.label ?? quote.source : quote.source ?? "the Cashu mints" });
               return;
             }
-            const target=payment.target ?? {method:"cashu" as const,network:wallet.testMintUrls.includes(selectedMint!) ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};
+            const target=payment.target ?? {method:"cashu" as const,network:mintNetwork(selectedMint!) === "testnet" ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};
             setReview(await onNet.preparePayment({target,amount:payment.amount,feeCap:tokenPayment?parsePaymentAmount(feeInput,18):Number(feeInput),payee:peerPubKey,linkId:payment.linkId,requestId:payment.id}));
           })}>
             {busy ? "Preparing…" : "Review payment"}
