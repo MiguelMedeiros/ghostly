@@ -1,5 +1,5 @@
 import type { Identity } from "./identity";
-import { createRelayPayload, openRelayPayload, parseRelayPayload, type GhostRecord, type SignedPacket } from "./pkarr";
+import { createRelayPayload, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
@@ -262,7 +262,11 @@ export class RelayTransport implements PkarrTransport {
       this.breaker.begin(relay);
       let status = 0;
       try {
-        const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
+        let payload: Uint8Array | undefined;
+        const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" }, async (r, signal) => {
+          status = r.status;
+          if (r.ok && r.status !== 404) payload = await readRelayBody(r, signal);
+        });
         status = response.status;
         if (response.status === 429) {
           budgetWait = Math.min(budgetWait, this.coolDown(relay, response));
@@ -271,7 +275,7 @@ export class RelayTransport implements PkarrTransport {
         }
         if (response.status !== 404) {
           if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
-          const packet = parseRelayPayload(pubKeyZ32, new Uint8Array(await response.arrayBuffer()));
+          const packet = parseRelayPayload(pubKeyZ32, payload!);
           const known = this.newest.get(pubKeyZ32);
           if (!known || packet.timestampMicros > known.timestampMicros) this.newest.set(pubKeyZ32, packet);
         }
@@ -396,14 +400,55 @@ export class RelayTransport implements PkarrTransport {
     return seconds * 1000;
   }
 
-  private async request(url: string, init: RequestInit): Promise<Response> {
+  /**
+   * One request under one time limit. `read` runs before the timer is cleared, so a body read there is bounded in
+   * time as well: a relay that sends its headers and then trickles, or never ends, is given up on like one that
+   * never answered.
+   */
+  private async request(url: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       // Relays answer with `cache-control: max-age=300`; polling needs fresh data.
-      return await this.fetchFn(url, { ...init, cache: "no-store", signal: controller.signal });
+      const response = await this.fetchFn(url, { ...init, cache: "no-store", signal: controller.signal });
+      await read?.(response, controller.signal);
+      return response;
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+/**
+ * A relay's answer body, at most RELAY_PAYLOAD_MAX_BYTES: refused on a larger `content-length` before anything is
+ * read, and otherwise streamed with a running count, so a relay (a default one or one the person added, working or
+ * compromised) cannot fill memory with a huge or endless body. Stops when `signal` aborts.
+ */
+export async function readRelayBody(response: Response, signal: AbortSignal, max = RELAY_PAYLOAD_MAX_BYTES): Promise<Uint8Array> {
+  const tooLarge = () => new Error(`Relay answer is larger than ${max} bytes`);
+  if (Number(response.headers.get("content-length")) > max) { void response.body?.cancel().catch(() => {}); throw tooLarge(); }
+  if (!response.body) return new Uint8Array(0);
+  const reader = response.body.getReader();
+  // The fetch aborts its own stream; this also stops a body that is not tied to the request's signal.
+  const stop = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    for (;;) {
+      if (signal.aborted) throw new Error("Relay answer timed out");
+      const { done, value } = await reader.read();
+      if (signal.aborted) throw new Error("Relay answer timed out");
+      if (done) break;
+      length += value.byteLength;
+      if (length > max) { stop(); throw tooLarge(); }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(length);
+    let at = 0;
+    for (const chunk of chunks) { body.set(chunk, at); at += chunk.byteLength; }
+    return body;
+  } finally {
+    signal.removeEventListener("abort", stop);
   }
 }

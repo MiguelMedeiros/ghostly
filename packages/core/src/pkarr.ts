@@ -6,6 +6,8 @@ import { publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 export const MAX_DNS_PACKET_BYTES = 1000;
 const SIGNATURE_LENGTH = 64;
 const TIMESTAMP_LENGTH = 8;
+/** The largest relay payload: a 64-byte signature, an 8-byte timestamp and the largest DNS packet (1072 bytes). */
+export const RELAY_PAYLOAD_MAX_BYTES = SIGNATURE_LENGTH + TIMESTAMP_LENGTH + MAX_DNS_PACKET_BYTES;
 
 /** A label relative to the publisher's key, e.g. `_msgs`. */
 export interface GhostRecord {

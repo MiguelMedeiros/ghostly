@@ -1,5 +1,5 @@
 import {
-  homeserverWebEndpoint, IdentityCheckUnavailable, openRelayPayload, pubkyHomeserverOf, PUBKY_PROOF_MAX_BYTES,
+  homeserverWebEndpoint, IdentityCheckUnavailable, openRelayPayload, pubkyHomeserverOf, PUBKY_PROOF_MAX_BYTES, RELAY_PAYLOAD_MAX_BYTES,
   type HomeserverEndpoint,
 } from "@ghostly/core";
 import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
@@ -17,8 +17,6 @@ import { getBrowserHost, type PubkyCookieSession } from "../host";
 
 /** Pkarr relays the records are read from: Pubky's own, the ones the Pubky SDK uses. */
 export const PUBKY_RELAYS: readonly string[] = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
-/** A Pkarr relay payload: 64-byte signature, 8-byte timestamp, a DNS packet of at most 1000 bytes. */
-const RELAY_PAYLOAD_MAX = 1072;
 
 /**
  * The newest DNS packet the relays hold for `key`, its signature checked against `key`. Every relay is asked; one
@@ -28,7 +26,7 @@ export async function pubkyRecords(key: string, fetch: IdentityFetch, signal?: A
   const failed: unknown[] = [];
   const answers = await Promise.all(relays.map(async relay => {
     let r;
-    try { r = await fetch(`${relay.replace(/\/+$/, "")}/${key}`, { maxBytes: RELAY_PAYLOAD_MAX, signal }); }
+    try { r = await fetch(`${relay.replace(/\/+$/, "")}/${key}`, { maxBytes: RELAY_PAYLOAD_MAX_BYTES, signal }); }
     catch (e) { failed.push(e); return undefined; }
     try { return r.status === 200 ? openRelayPayload(key, r.bytes) : undefined; } catch { return undefined; }
   }));
