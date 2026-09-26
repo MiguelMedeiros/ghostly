@@ -493,6 +493,7 @@
     {"id":"headless.identities","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless identity proofs: add with a tool (SSH), complete, share, the contact verifies; in-app signers with fields and approval events"},
     {"id":"headless.services","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless shared web apps: loopback only, granted per contact, a contact's app opened on a local port"},
     {"id":"headless.backup","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":[],"title":"Headless profile backup: WISP 05 envelope, restore into a new profile, passphrase never on the command line"},
+    {"id":"headless.package","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":[],"title":"The npm package: every import of the bundle declared, the WebAssembly beside it"},
     {"id":"headless.groups","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless community groups: create with a link, join, send with @mentions, mention flag on receipt"}
   ],
   "paths": {

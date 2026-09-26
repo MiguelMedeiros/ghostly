@@ -69,8 +69,11 @@ async function preloadWalletModules(): Promise<void> {
 
 /** Iroh's wasm, from next to the bundle (a package) or from the workspace (development and tests). */
 function irohWasmBytes(): Buffer {
-  const beside = fileURLToPath(new URL("./ghostly_iroh_web_bg.wasm", import.meta.url));
-  if (existsSync(beside)) return readFileSync(beside);
+  // Beside this chunk, wherever the bundler put it (the entry, or assets/); else the workspace's.
+  for (const place of ["./ghostly_iroh_web_bg.wasm", "./assets/ghostly_iroh_web_bg.wasm"]) {
+    const path = fileURLToPath(new URL(place, import.meta.url));
+    if (existsSync(path)) return readFileSync(path);
+  }
   return readFileSync(createRequire(import.meta.url).resolve("@ghostly/iroh-web/wasm"));
 }
 

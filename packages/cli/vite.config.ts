@@ -22,7 +22,11 @@ const ON_NODE: { file: RegExp; find: string; replace: string }[] = [
  * WebAssembly a bundled SDK loads with `new URL("<file>", import.meta.url)`, which SSR builds leave as written: the
  * file is copied beside the chunks (every chunk is in `assets/`).
  */
-const BESIDE_CHUNKS = [{ entry: "@breeztech/breez-sdk-spark/web", file: "breez_sdk_spark_wasm_bg.wasm" }];
+const BESIDE_CHUNKS = [
+  { entry: "@breeztech/breez-sdk-spark/web", file: "breez_sdk_spark_wasm_bg.wasm" },
+  // Iroh's wasm build, which the runtime loads itself (src/runtime/engine.ts).
+  { entry: "@ghostly/iroh-web", file: "ghostly_iroh_web_bg.wasm" },
+];
 
 function walletSdksOnNode(): Plugin {
   return {
@@ -37,7 +41,7 @@ function walletSdksOnNode(): Plugin {
       const rule = ON_NODE.find((r) => r.file.test(id));
       if (!rule) return;
       if (!code.includes(rule.find)) this.error(`${id} changed: review ON_NODE in packages/cli/vite.config.ts`);
-      return code.replace(rule.find, rule.replace);
+      return { code: code.replace(rule.find, rule.replace), map: null };
     },
   };
 }

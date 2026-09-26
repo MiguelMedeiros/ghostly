@@ -4,12 +4,12 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.5 |
+| Revision | 0.6 |
 | Updated | 2026-09-26 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
-| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 to 3 on `dev` |
+| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 to 4 on `dev`; the npm package is not published |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -167,4 +167,4 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 1. The runtime, the daemon and the API, profiles, invites, one chat (send, receive, stream, transports), basic groups, the event stream and hooks. End-to-end: two CLI peers; a CLI peer and the web app.
 2. Wallets and payments on the test networks of the shared regtest stack, with `--confirm-real` on Mainnet.
 3. Files, identities, services, advanced groups, pictures, backups (DHT-direct left planned).
-4. Packaging (npm, then a single binary), the bot skill, examples (echo bot, payment bot), docs.
+4. Packaging: an npm package whose dependencies are exactly what the bundle imports (a test keeps them so), checked by installing the packed tarball outside the repository and running two bots and four wallets from it; the bot skill; examples (echo bot, payment bot). A single-file binary and DHT-direct remain open.
