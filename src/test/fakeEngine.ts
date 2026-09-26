@@ -59,7 +59,7 @@ function offersFor(networks: Record<WalletNetwork, NetworkWalletsView>, wallets:
     if ((type === "bark" || type === "spark" || type === "fedimint") && network === "mainnet") return { type, network, exists, available: false, reason: `${type} on Mainnet is not available yet` };
     if (type === "fedimint") return { type, network, exists, available: true, needs: "invite" };
     if (type === "lightning" || type === "bitcoin") {
-      const providers = (type === "lightning" ? networks[network].lightning : networks[network].bitcoin)?.offered.filter((d) => d.id !== "cashu-mint") ?? [];
+      const providers = (type === "lightning" ? networks[network].lightning : networks[network].bitcoin)?.offered?.filter((d) => d.id !== "cashu-mint") ?? [];
       return providers.length ? { type, network, exists, available: true, needs: "provider", providers } : { type, network, exists, available: false, reason: "No source runs here yet" };
     }
     return { type, network, exists, available: true };
