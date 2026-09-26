@@ -339,6 +339,12 @@
           "markdownDescription": "Enables the oidc_loopback_wait command without any pre-configured scope."
         },
         {
+          "description": "Enables the open_notification_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-notification-settings",
+          "markdownDescription": "Enables the open_notification_settings command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_payment_link command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-payment-link",
@@ -679,6 +685,12 @@
           "type": "string",
           "const": "deny-oidc-loopback-wait",
           "markdownDescription": "Denies the oidc_loopback_wait command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_notification_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-notification-settings",
+          "markdownDescription": "Denies the open_notification_settings command without any pre-configured scope."
         },
         {
           "description": "Denies the open_payment_link command without any pre-configured scope.",

@@ -84,4 +84,5 @@ export const tauriAliases: NonNullable<UserConfig["resolve"]>["alias"] = {
   "@tauri-apps/plugin-notification": platform("nativeNotifications.ts"),
   "@tauri-apps/api/core": platform("tauri.ts"),
   "@tauri-apps/api/app": platform("tauri.ts"),
+  "@tauri-apps/api/event": platform("tauri.ts"),
 };

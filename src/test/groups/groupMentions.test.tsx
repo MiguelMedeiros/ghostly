@@ -17,7 +17,7 @@ import { renderApp } from "../render";
 
 const sound = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}), notice: vi.fn(async (_id: string, _body: string) => {}) }));
 vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
-vi.mock("../../lib/notifications", () => ({ showPrivateNotification: sound.notice }));
+vi.mock("../../lib/notifications", () => ({ showPrivateNotification: sound.notice, onNotificationOpen: () => () => {} }));
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y"), BOB = "bob".padEnd(52, "y"), BOB2 = "bobtwo".padEnd(52, "k");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: true, missing: 0, ...patch });

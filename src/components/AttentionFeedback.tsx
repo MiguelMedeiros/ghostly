@@ -1,8 +1,11 @@
 import {useEffect} from "react";
+import {useNavigate} from "react-router-dom";
 import {engine} from "@ghostly/browser/platform/engine";
 import type {AttentionEvent} from "@ghostly/browser/shared/rpc";
 import {installAudioGestures,playSound} from "../lib/sounds";
-import {showPrivateNotification} from "../lib/notifications";
+import {onNotificationOpen,showPrivateNotification} from "../lib/notifications";
+import {chatPath} from "../lib/url";
+import {groupPath} from "../lib/groups";
 import {loadSettings} from "../lib/settings";
 import {attentionOutcome,chatOfLink,mutedFor} from "../lib/chatMute";
 import {eventSound,playCue} from "../lib/cues";
@@ -13,6 +16,9 @@ const seen=new Set<string>();
 /** The engine sends live facts separately from replayed snapshots. */
 export function AttentionFeedback(){
   const {t}=useI18n();
+  const navigate=useNavigate();
+  // A click on a notification opens its chat.
+  useEffect(()=>onNotificationOpen(chat=>navigate(chat.startsWith("group:")?groupPath(chat.slice(6)):chatPath(chat))),[navigate]);
   useEffect(()=>installAudioGestures(),[]);
   useEffect(()=>{setDeckSwitchSound(()=>playCue("slide"));return ()=>setDeckSwitchSound(undefined);},[]);
   useEffect(()=>engine.onAttention((event:AttentionEvent)=>{
@@ -35,7 +41,7 @@ export function AttentionFeedback(){
       const notifications=loadSettings().notifications;
       const outcome=attentionOutcome(event.type,muted,notifications,background);
       if(outcome.sound) playSound(eventSound({...event,type:event.type},notifications));
-      if(outcome.notice) await showPrivateNotification(event.id,t("settings.privateNotice"));
+      if(outcome.notice) await showPrivateNotification(event.id,t("settings.privateNotice"),chat);
     };
     if(navigator.locks) void navigator.locks.request("ghostly-feedback",run);
     else void run();

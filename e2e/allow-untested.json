@@ -2,6 +2,5 @@
   "app.updates.desktop": "The Tauri updater needs a signed release feed; the Desktop harness only has a boot smoke test",
   "settings.storage-used": "Nothing asserts the storage figure in Settings; a component test (npm run test:ui) can",
   "storage.local": "The local file storage adapter (WISP 1001) is exercised only through backup.profile.file, never on its own",
-  "desktop.bundle-wiring": "Guarded by npm run check:desktop-bundle in PR CI, a build assertion the test map does not read",
-  "desktop.notifications": "Native notifications need the Desktop harness (Linux only) and no spec drives them"
+  "desktop.bundle-wiring": "Guarded by npm run check:desktop-bundle in PR CI, a build assertion the test map does not read"
 }

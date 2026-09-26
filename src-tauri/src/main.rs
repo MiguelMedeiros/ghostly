@@ -54,6 +54,7 @@ macro_rules! commands {
         tauri::generate_handler![
             notifications::native_notification_permission,
             notifications::native_private_notification,
+            notifications::open_notification_settings,
             paired_transport::paired_iroh_start,
             paired_transport::paired_iroh_address,
             paired_transport::paired_iroh_connect,
@@ -143,6 +144,7 @@ fn main() {
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
+            notifications::install(app.handle());
             // Files sent and received in chats, one folder per profile.
             app.manage(file_store::FileStore::new(
                 app.path().app_data_dir()?.join("files"),
@@ -284,7 +286,7 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 57, "{declared:?}");
+        assert_eq!(declared.len(), 58, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

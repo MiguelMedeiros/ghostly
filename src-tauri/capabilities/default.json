@@ -63,8 +63,11 @@
     "allow-file-bytes-save",
     "updater:default",
     "process:allow-restart",
-    "notification:default",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
     "allow-native-notification-permission",
-    "allow-native-private-notification"
+    "allow-native-private-notification",
+    "allow-open-notification-settings"
   ]
 }
