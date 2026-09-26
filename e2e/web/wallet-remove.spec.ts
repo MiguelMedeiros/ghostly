@@ -1,5 +1,7 @@
-import { createWallet, expect, openWallet, test, useFakeProviders, walletCard } from "../support/fixtures";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, test, useFakeProviders, useTestnet, walletCard, type Peer } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 import { mockMainnetMints } from "../support/mint";
+import { paymentCard } from "../support/payments";
 
 /**
  * A wallet is removed from its details: Remove, a dialog that says what it holds and on which network, and a
@@ -93,4 +95,42 @@ test("a funded wallet says how much and on which network, offers its ecash, and 
   await expect(page.getByTestId("wallet-section-mainnet-empty")).toBeVisible();
   // The Testnet Cashu wallet is untouched.
   await expect(walletCard(page, "cashu-testnet")).toBeVisible();
+});
+
+test("a wallet holding nothing with an open chat request lists it, asks in words, and the request closes on both sides", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("remove-request-a"), peer("remove-request-b")]);
+  for (const p of [alice, bob]) await useTestnet(p);
+  await link(alice, bob);
+  await connect(alice, bob);
+  for (const p of [alice, bob]) await openChat(p);
+
+  // Bob asks for 10 test sats: the invoice is a quote at his Testnet Cashu mint, and his wallet holds nothing.
+  await (await composerRow(bob.page, "payment-button")).click();
+  await paymentCard(bob.page, "cashu-testnet").click();
+  await bob.page.getByTestId("payment-amount").fill("10");
+  await bob.page.getByTestId("payment-request").click();
+  const bubble = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "10" });
+  await expect(bubble(alice).getByTestId("payment-state")).toHaveText("Waiting for payment");
+
+  await openWallet(bob, "cashu-testnet");
+  await bob.page.getByTestId("wallet-remove").click();
+  const dialog = bob.page.getByTestId("wallet-remove-dialog");
+  await expect(dialog.getByTestId("wallet-remove-held")).toHaveText("It holds nothing.");
+  // Its money could still arrive: the request is listed, and removing needs the loss confirmed in words.
+  await expect(dialog.getByTestId("wallet-remove-awaiting-item")).toHaveText(["A request for 10 test sats in a chat, still open"]);
+  await expect(dialog.getByTestId("wallet-remove-awaiting-note")).toHaveText("Removing the wallet closes its open requests, and your contacts are told. Anything paid to them afterwards is lost. To keep it, wait until they are paid or have expired.");
+  await expect(dialog.getByTestId("wallet-remove-consent")).toHaveText("I understand: anything paid to its open requests and invoices after it is removed is lost.");
+  const confirm = dialog.getByTestId("wallet-remove-confirm");
+  await expect(confirm).toBeDisabled();
+  await dialog.getByTestId("wallet-remove-understood").check();
+  await confirm.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(walletCard(bob.page, "cashu-testnet")).toHaveCount(0);
+
+  // Closed on both sides: Alice is told, and her bubble offers nothing to pay it with, not even another wallet.
+  await openChat(bob);
+  await expect(bubble(bob).getByTestId("payment-state")).toHaveText("Closed · you removed the Testnet Cashu wallet it was paid to");
+  await expect(bubble(alice).getByTestId("payment-state")).toHaveText("Closed · your contact removed the wallet it was paid to");
+  await expect(bubble(alice).getByTestId("payment-pay")).toHaveCount(0);
+  await expect(bubble(alice).getByTestId("payment-external")).toHaveCount(0);
 });

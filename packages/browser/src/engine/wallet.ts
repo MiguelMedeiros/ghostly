@@ -298,8 +298,20 @@ export class CashuWallet {
     }
   }
 
-  /** Asks the mints about the open invoices now, without waiting for the next round. */
-  checkQuotes(): Promise<void> { return this.pollQuotes(); }
+  /**
+   * Asks the mints about the open invoices now, without waiting for the next round. `mints`: only the invoices at
+   * these mints (one network's wallet, before it is removed), claiming what is paid; the regular round is left alone.
+   */
+  async checkQuotes(mints?: readonly string[]): Promise<void> {
+    if (!mints) return this.pollQuotes();
+    const at = new Set(mints);
+    await this.settleQuotes((await this.quotes()).filter((q) => at.has(q.mint)));
+  }
+
+  /** Every invoice of ours the mints have not settled yet, held, paid-unclaimed and issued-unclaimed ones included. */
+  async quotes(): Promise<StoredQuote[]> {
+    return wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
+  }
 
   /**
    * Invoices are paid by someone else, somewhere else; all we can do is ask the mint. A quote is the only
@@ -314,6 +326,13 @@ export class CashuWallet {
     for (const held of quotes.filter((q) => q.held && q.expiresAt && q.expiresAt + 60_000 < Date.now())) {
       await wrap((await store(STORES.quotes, "readwrite")).delete(held.quote));
     }
+    await this.settleQuotes(quotes);
+
+    const remaining = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
+    if (remaining.some((q) => !q.issuedUnclaimed && !q.held)) this.quoteTimer = setTimeout(() => void this.pollQuotes(), QUOTE_POLL_MS);
+  }
+
+  private async settleQuotes(quotes: readonly StoredQuote[]): Promise<void> {
     for (const { quote, mint } of quotes.filter((q) => !q.issuedUnclaimed && !q.held)) {
       try {
         const paid = await this.locked(mint, () => this.settleQuote(quote));
@@ -326,9 +345,6 @@ export class CashuWallet {
         // mint unreachable: try again on the next round
       }
     }
-
-    const remaining = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
-    if (remaining.some((q) => !q.issuedUnclaimed && !q.held)) this.quoteTimer = setTimeout(() => void this.pollQuotes(), QUOTE_POLL_MS);
   }
 
   /** Runs under the mint's lock, so two rounds never mint one quote twice. Returns the quote once its ecash is in. */
@@ -353,6 +369,9 @@ export class CashuWallet {
       return null;
     }
 
+    // Paid: money arrived, and until it is minted this quote is the only claim on it. Written down, so a wallet
+    // about to be removed can say so (walletRemoval) while the mint is slow to hand the ecash over.
+    if (!quote.paid) await wrap((await store(STORES.quotes, "readwrite")).put({ ...quote, paid: true } satisfies StoredQuote));
     const proofs = await wallet.mintProofsBolt11(quote.amount, quote.quote);
     const minted = sats(proofs);
     const tx = walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? "Test coins from the test mint" : undefined);
@@ -745,9 +764,10 @@ export class CashuWallet {
   }
 
   /**
-   * The person removes the Cashu wallet of a network (the engine checked what it holds and what they confirmed): the
-   * ecash held at its mints, reserved or not, and their unpaid invoices are deleted. A Lightning payment still in
-   * flight from one of them is not cut off: the removal is refused until it settles.
+   * The person removes the Cashu wallet of a network (the engine checked what it holds and what it still waits for,
+   * claimed what was already paid, and the person confirmed the rest): the ecash held at its mints, reserved or not,
+   * and every invoice of theirs are deleted. A Lightning payment still in flight from one of them is not cut off: the
+   * removal is refused until it settles.
    */
   async forget(mints: readonly string[]): Promise<void> {
     const at = new Set(mints);

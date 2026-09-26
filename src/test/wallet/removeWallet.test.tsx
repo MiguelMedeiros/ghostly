@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { WalletView } from "@ghostly/browser/shared/types";
+import type { WalletNetwork } from "@ghostly/core";
+import type { WalletAwaitingView, WalletView } from "@ghostly/browser/shared/types";
 import { Wallet } from "../../pages/Wallet";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -15,6 +16,11 @@ async function removing(wallet: WalletView, card: string) {
   await app.user.click(await screen.findByTestId(`wallet-card-${card}`));
   await app.user.click(await screen.findByTestId("wallet-remove"));
   return { ...app, dialog: screen.getByTestId("wallet-remove-dialog") };
+}
+
+/** The view, with what one network's wallets still wait for (the engine reads it from quotes, journals and payments). */
+function awaitingOn(wallet: WalletView, network: WalletNetwork, awaiting: WalletAwaitingView[]): WalletView {
+  return { ...wallet, networks: { ...wallet.networks!, [network]: { ...wallet.networks![network], awaiting } } };
 }
 
 describe("Remove, in a wallet's details", () => {
@@ -93,6 +99,41 @@ describe("Remove, in a wallet's details", () => {
     expect(section).toHaveTextContent("This card comes with your Testnet Cashu wallet");
     await user.click(within(section).getByTestId("wallet-remove-open-cashu"));
     expect(screen.getByTestId("wallet-card-cashu-testnet")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("a Mainnet wallet holding nothing that still waits for money lists it, says it is lost afterwards, and asks in words", async () => {
+    const wallet = awaitingOn(walletView({ mints: [mint(REAL_MINT, 0)], balance: 0 }), "mainnet", [
+      { type: "cashu", kind: "request", amount: 50_000, paymentId: "r1" },
+      { type: "cashu", kind: "paid", amount: 700 },
+      { type: "cashu", kind: "sent", amount: 21, paymentId: "p1" },
+      { type: "arkade", kind: "request", amount: 9, paymentId: "someone-else" },
+    ]);
+    const { user, engine, dialog } = await removing(wallet, "cashu-mainnet");
+    expect(within(dialog).getByTestId("wallet-remove-held")).toHaveTextContent("It holds nothing.");
+    expect(within(dialog).getAllByTestId("wallet-remove-awaiting-item").map((i) => [i.dataset.kind, i.textContent])).toEqual([
+      ["request", "A request for 50,000 sats in a chat, still open"],
+      ["paid", "700 sats paid to an invoice, not claimed from the mint yet"],
+    ]);
+    expect(within(dialog).getByTestId("wallet-remove-awaiting-note")).toHaveTextContent("Removing the wallet closes its open requests, and your contacts are told. Anything paid to them afterwards is lost: this is real money.");
+    expect(within(dialog).getByTestId("wallet-remove-returnable")).toHaveTextContent("Ecash you sent from this wallet has not been taken yet (21 sats). It is not lost: to take it back later, add its mint again first.");
+    // Money may still come to it: its backup is offered, and the loss is confirmed in words.
+    expect(within(dialog).getByTestId("wallet-remove-backup")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("wallet-remove-consent")).toHaveTextContent("I understand: anything paid to its open requests and invoices after it is removed is lost, and it is real money.");
+    const confirm = within(dialog).getByTestId("wallet-remove-confirm");
+    expect(confirm).toBeDisabled();
+    await user.click(within(dialog).getByTestId("wallet-remove-understood"));
+    engine.on("walletRemove", () => undefined);
+    await user.click(confirm);
+    expect(engine.callsTo("walletRemove")).toEqual([{ type: "cashu", network: "mainnet", acceptLoss: true }]);
+  });
+
+  it("a source whose money is elsewhere lists its open requests, which close, and asks nothing about funds", async () => {
+    const wallet = awaitingOn(walletView({ mints: [mint(TEST_MINT, 0)], lightning: lightningSource({ mode: "testnet", providerId: "nwc", label: "NWC", alias: "Alby Hub", balance: 800, status: "ready" }) }), "testnet", [{ type: "lightning", kind: "request", amount: 1_000, paymentId: "r1" }]);
+    const { dialog } = await removing(wallet, "lightning-testnet");
+    expect(within(dialog).getByTestId("wallet-remove-awaiting")).toHaveTextContent("A request for 1,000 test sats in a chat, still open");
+    expect(within(dialog).getByTestId("wallet-remove-awaiting-note")).toHaveTextContent("Anything paid to them afterwards still reaches Alby Hub; Ghostly just no longer sees it.");
+    expect(within(dialog).queryByTestId("wallet-remove-understood")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("wallet-remove-confirm")).toBeEnabled();
   });
 
   it("an unfinished payment stops it", async () => {

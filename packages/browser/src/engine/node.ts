@@ -112,6 +112,7 @@ import type {
   StoredMessage,
   StoredService,
   NetworkWalletsView,
+  WalletAwaitingView,
   WalletCreate,
   WalletRemove,
   WalletTestCoins,
@@ -124,6 +125,8 @@ import type {
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
+import { walletAwaiting } from "./walletAwaiting";
+import type { WalletRemoval } from "../shared/walletRemoval";
 import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
@@ -218,6 +221,22 @@ interface SpareInvite { mine: LinkParams; inviteKey: ReturnType<typeof identityF
 const SPARE_INVITE_WARM_EVERY_MS = 4 * 60_000;
 export const SPARE_INVITE_MIN_AGE_MS = 6_000;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
+
+/** How long a removal waits for a wallet's rail to claim what was already paid to it (tests shorten it). */
+export const removalTiming = { claimMs: 30_000 };
+
+/** Why a removal needs the person's confirmation: what it holds, what it still waits for, and what confirming means. */
+function lossRefusal(label: string, removal: WalletRemoval): string {
+  const { held, awaiting } = removal;
+  const holds = held === "unknown" ? `Ghostly could not read what the ${label} wallet holds.` : held.empty ? "" : `The ${label} wallet holds ${held.text}.`;
+  const listed = awaiting.slice(0, 3).map((i) => i.text.charAt(0).toLowerCase() + i.text.slice(1)).join("; ") + (awaiting.length > 3 ? `; and ${awaiting.length - 3} more` : "");
+  const waits = awaiting.length ? `${holds ? " It" : `The ${label} wallet`} still waits for money: ${listed}.` : "";
+  const lost = holds && awaiting.length
+    ? `${held === "unknown" ? "anything in it becomes" : "they become"} unreachable without its backup, and that what is paid to it afterwards is lost,`
+    : holds ? `${held === "unknown" ? "anything in it becomes" : "they become"} unreachable without its backup`
+    : "what is paid to it after it is removed is lost";
+  return `${holds}${waits} Confirm that ${lost} to remove it.`;
+}
 
 function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLinkFiles()): LiveLink {
   return {
@@ -463,6 +482,7 @@ export class GhostlyNode implements EngineImplementation {
         }
       }
       void this.groupPayments.sync().catch(() => {});
+      this.awaitingSoon();
       this.emitState();
     },
     defaultNetwork: () => "mainnet",
@@ -754,9 +774,38 @@ export class GhostlyNode implements EngineImplementation {
     this.transport.configure?.({ relays: this.settings.relays, readRelays: this.settings.readRelays === true });
   }
 
+  /**
+   * What each network's wallets still wait for (see `walletAwaiting`): open requests and invoices, paid invoices not
+   * claimed yet, ecash sent and not taken. Read from the Cashu quotes, the Lightning journals and the payments.
+   */
+  private async readAwaiting(): Promise<Record<WalletNetwork, WalletAwaitingView[]>> {
+    const quotes = await this.wallet.quotes(), payments = this.desk.records(), now = Date.now();
+    const out = {} as Record<WalletNetwork, WalletAwaitingView[]>;
+    for (const network of WALLET_NETWORKS) {
+      const lightning = this.lightnings[network];
+      out[network] = walletAwaiting({ network, mints: this.networkMints(network), quotes, lightningOps: await lightning.list(), lightningSource: lightning.view.providerId, payments, now });
+    }
+    return out;
+  }
+
+  private awaitingTimer?: ReturnType<typeof setTimeout>;
+  /** A payment changed (a request made, paid or closed): what the wallets wait for is read again, soon. */
+  private awaitingSoon(): void {
+    if (this.shuttingDown || !this.walletView.networks) return;
+    clearTimeout(this.awaitingTimer);
+    this.awaitingTimer = setTimeout(() => void this.readAwaiting().then((awaiting) => {
+      const networks = this.walletView.networks;
+      if (this.shuttingDown || !networks) return;
+      for (const network of WALLET_NETWORKS) networks[network] = { ...networks[network], awaiting: awaiting[network] };
+      this.walletView = { ...this.walletView, networks: { ...networks } };
+      this.emitState();
+    }).catch(() => {}), 250);
+  }
+
   private async refreshWallet(): Promise<void> {
     const networks = {} as Record<WalletNetwork, NetworkWalletsView>;
     let everything: WalletTx[] = [];
+    const awaiting = await this.readAwaiting();
     for (const network of WALLET_NETWORKS) {
       const view = await this.wallet.view(network);
       everything = view.history;
@@ -764,7 +813,7 @@ export class GhostlyNode implements EngineImplementation {
       const history = view.history.filter((tx) => !tx.mint || mintNetwork(tx.mint) === network);
       networks[network] = { mints: view.mints, balance: view.balance, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
         ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
-        usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, bitcoin: this.bitcoins[network].view };
+        usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, bitcoin: this.bitcoins[network].view, awaiting: awaiting[network] };
     }
     const wallets = walletInstances(networks);
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
@@ -876,6 +925,7 @@ export class GhostlyNode implements EngineImplementation {
     this.shuttingDown = true;
     if (this.relayRetry) clearTimeout(this.relayRetry);
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
+    clearTimeout(this.awaitingTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
@@ -1993,9 +2043,11 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Removes the `type` wallet of `network`, asked for by the person: its keys, its ecash and its config go, and so does
    * what every chat keeps about it (the network's place in its accepted ways of paying); every other wallet stays.
-   * What it holds is checked here again, whatever the page showed: money on this device (or a balance that could not
-   * be read) is removed only with `acceptLoss`, the person's own confirmation that it becomes unreachable without its
-   * backup. A payment through it that has not finished stops the removal. Never logs a seed or a key.
+   * What was already paid to it is claimed first, then what it holds and what it still waits for are checked here
+   * again, whatever the page showed: money on this device (or a balance that could not be read), and open requests or
+   * invoices whose money would come to this device, are removed only with `acceptLoss`, the person's own confirmation
+   * that it becomes unreachable. A payment through it that has not finished stops the removal. Its open requests are
+   * closed, and their contacts told, so nobody pays them afterwards. Never logs a seed or a key.
    */
   async walletRemove({ type, network, acceptLoss }: WalletRemove): Promise<void> {
     if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
@@ -2003,14 +2055,16 @@ export class GhostlyNode implements EngineImplementation {
     await this.refreshWallet();
     const label = `${networkLabel(network)} ${WALLET_NAMES[type]}`;
     if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network)) throw new Error(`There is no ${label} wallet to remove`);
-    const removal = walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents);
-    if (removal.comesWith) throw new Error(`Lightning through the Cashu mints comes with your ${networkLabel(network)} Cashu wallet: remove that wallet to remove it`);
+    const first = walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents);
+    if (first.comesWith) throw new Error(`Lightning through the Cashu mints comes with your ${networkLabel(network)} Cashu wallet: remove that wallet to remove it`);
+    // Ecash minted now is counted in what it holds, not deleted with its invoice.
+    if (first.awaiting.length) { await this.claimPaid(type, network); await this.refreshWallet(); }
+    const removal = first.awaiting.length ? walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents) : first;
     if (removal.pending) throw new Error(`A payment through this wallet is not finished yet (${removal.pending}). Cancel it or wait for it to settle, then remove the wallet.`);
-    if (removalRisksFunds(removal) && acceptLoss !== true) {
-      throw new Error(removal.held === "unknown"
-        ? `Ghostly could not read what the ${label} wallet holds. Confirm that anything in it becomes unreachable without its backup to remove it.`
-        : `The ${label} wallet holds ${removal.held.text}. Confirm that they become unreachable without its backup to remove it.`);
-    }
+    if (removalRisksFunds(removal) && acceptLoss !== true) throw new Error(lossRefusal(label, removal));
+    // Its open requests close first, while the chats still carry payment frames: once its last wallet goes, a chat
+    // may have no way of paying left, and the contact would never hear of it.
+    for (const item of removal.awaiting) if (item.kind === "request" && item.paymentId) await this.closeRequest(item.paymentId, `you removed the ${label} wallet it was paid to`).catch(() => {});
     try {
       if (type === "cashu") {
         const mints = this.networkMints(network);
@@ -2027,6 +2081,33 @@ export class GhostlyNode implements EngineImplementation {
       await this.refreshWallet();
     }
     await this.forgetChatNetwork(type as PaymentMethodName, network);
+  }
+
+  /**
+   * Before a wallet goes: its own rail is asked about what was paid to it (the mints about its quotes, the source about
+   * its invoices, the chain or server about its requests), so money already there is claimed. Bounded: a mint or a
+   * server that does not answer leaves what it holds as it was, still counted as awaited.
+   */
+  private async claimPaid(type: WalletType, network: WalletNetwork): Promise<void> {
+    const work = type === "cashu" ? this.wallet.checkQuotes(this.networkMints(network))
+      : type === "lightning" ? this.lightnings[network].reconcile()
+      : type === "fedimint" ? this.fedimintWallets[network].checkReceives()
+      : type === "bitcoin" ? this.desk.reconcileBitcoinReceipts()
+      : type === "arkade" ? this.desk.reconcileArkReceipts()
+      : type === "bark" ? this.desk.reconcileBarkReceipts()
+      : type === "spark" ? this.desk.reconcileSparkReceipts()
+      : this.desk.reconcileUsdtReceipts();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([work.catch(() => {}), new Promise((resolve) => { timer = setTimeout(resolve, removalTiming.claimMs); })]);
+    clearTimeout(timer);
+  }
+
+  /** A request of ours closes for good (its wallet was removed): never sent again, taken back from the contact's storage too. */
+  private async closeRequest(paymentId: string, reason: string): Promise<void> {
+    const request = this.desk.payment(paymentId);
+    if (!request || !(await this.desk.close(paymentId, reason, "your contact removed the wallet it was paid to"))) return;
+    const message = (await db.getMessages(request.linkId)).find((m) => m.paymentId === paymentId && m.sender === "me");
+    if (message) await this.hold.forget(request.linkId, message.id).catch(() => {});
   }
 
   /**

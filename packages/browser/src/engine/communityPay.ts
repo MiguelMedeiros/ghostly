@@ -102,7 +102,7 @@ export class CommunityPay {
     if (frame.t === "pay-req") await this.host.onPaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, ask: frame.a });
     else if (frame.t === "pay-ask") await this.host.onPaymentAsk(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, method: frame.m, memo: frame.memo });
     else if (frame.t === "pay") await this.host.onPayment(linkId, { id: frame.id, timestamp: frame.ts, requestId: frame.rid, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoint: frame.e });
-    else if (frame.t === "pay-res") await this.host.onPaymentResult(linkId, { id: frame.id, ok: frame.ok, credited: frame.v, error: frame.err });
+    else if (frame.t === "pay-res") await this.host.onPaymentResult(linkId, { id: frame.id, ok: frame.ok, credited: frame.v, error: frame.err, ...(frame.c ? { closed: true } : {}) });
   }
 
   /**
@@ -189,7 +189,7 @@ class PairLink implements PaymentLink {
   }
   sendPaymentResult(r: PaymentResult): void {
     if (!this.supportsPayments) return;
-    void this.send({ t: "pay-res", id: r.id, ok: r.ok, v: r.credited, err: r.error }).catch(() => {});
+    void this.send({ t: "pay-res", id: r.id, ok: r.ok, v: r.credited, err: r.error, ...(r.closed ? { c: true as const } : {}) }).catch(() => {});
   }
 }
 

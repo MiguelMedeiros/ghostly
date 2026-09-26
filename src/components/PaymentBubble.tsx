@@ -124,6 +124,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       }`}
       data-testid="payment-bubble"
       data-state={payment.state}
+      data-closed={payment.closed ? "" : undefined}
     >
       <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{title}<NetworkTag network={network} testId="payment-network" /></p>
       <p className="m-0 leading-tight">
@@ -141,17 +142,17 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         className={`text-[11px] m-0 mt-1 ${payment.state === "failed" ? "text-danger-ink" : payment.state === "settled" ? "text-accent-hover" : "text-text-primary/65"}`}
         data-testid="payment-state"
       >
-        {payment.lightningPending && payment.state === "pending" ? "Lightning payment pending…" : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? "Waiting for a confirmation…" : STATE_LABEL[payment.kind][payment.state]}
+        {payment.lightningPending && payment.state === "pending" ? "Lightning payment pending…" : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? "Waiting for a confirmation…" : payment.closed ? "Closed" : STATE_LABEL[payment.kind][payment.state]}
         {payment.error && payment.state !== "settled" ? ` · ${payment.error}` : ""}
       </p>
 
-      {isRequest && !outgoing && paymentsOff && (payment.state === "pending" || payment.state === "failed") && (
+      {isRequest && !outgoing && !payment.closed && paymentsOff && (payment.state === "pending" || payment.state === "failed") && (
         <p className="text-xs text-text-primary/65 mt-2" data-testid="payment-off">This way of paying is off in this chat.</p>
       )}
-      {isRequest && !outgoing && !paymentsOff && noWallet && (payment.state === "pending" || payment.state === "failed") && (
+      {isRequest && !outgoing && !payment.closed && !paymentsOff && noWallet && (payment.state === "pending" || payment.state === "failed") && (
         <p className="text-xs text-text-primary/65 mt-2" data-testid="payment-network-missing">{MONEY_LABEL[network]} is asked for ({tokenPayment ? payment.target?.asset : testSats ? "test sats" : "sats"}), and you have no {network === "testnet" ? "Testnet" : "Mainnet"} wallet to pay it from. Make one under Wallets, or ask for {MONEY_LABEL[network === "testnet" ? "mainnet" : "testnet"].toLowerCase()} instead.</p>
       )}
-      {isRequest && !outgoing && !paymentsOff && (payment.state === "pending" || payment.state === "failed") && !payment.lightningPending && (
+      {isRequest && !outgoing && !payment.closed && !paymentsOff && (payment.state === "pending" || payment.state === "failed") && !payment.lightningPending && (
         <div className="flex flex-col gap-2 mt-2">
           {/* Paying from here needs a wallet of the request's network; another wallet can still be pointed at it. */}
           {!noWallet && <>

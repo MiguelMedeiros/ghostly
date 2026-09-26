@@ -61,6 +61,14 @@ describe("what the bubble says", () => {
     expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
   });
 
+  it("says a request its maker closed is closed, and offers nothing to pay it, not even from another wallet", () => {
+    show(incomingRequest({ state: "failed", closed: true, error: "your contact removed the wallet it was paid to", invoice: MAINNET_INVOICE, amount: 2_100 }));
+    expect(status()).toHaveTextContent("Closed · your contact removed the wallet it was paid to");
+    expect(screen.getByTestId("payment-bubble")).toHaveAttribute("data-closed");
+    expect(screen.queryByRole("button", { name: "Review payment" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("payment-external")).not.toBeInTheDocument();
+  });
+
   it("says an on-chain payment waits for a confirmation", () => {
     show({ kind: "payment", direction: "in", state: "pending", target: target({ method: "bitcoin", network: "bitcoin", provider: "onchain" }) });
     expect(status()).toHaveTextContent("Waiting for a confirmation…");

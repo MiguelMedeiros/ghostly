@@ -204,6 +204,9 @@ export class PaymentDesk {
     for (const payment of stored) this.payments.set(payment.id, payment);
   }
 
+  /** Every payment as stored, tokens included: for the engine's own reading, never for a page. */
+  records(): StoredPayment[] { return [...this.payments.values()]; }
+
   views(): Record<string, PaymentView> {
     // The token is money: it stays with the peer and never reaches a page.
     return Object.fromEntries([...this.payments].map(([id, { token: _token, ...view }]) => [id, view]));
@@ -827,6 +830,9 @@ export class PaymentDesk {
       // Only the payee can declare a request paid, and only about a request it sent us. It says so once its
       // own wallet saw the money (its source, its chain, its Ark server), however the request was paid.
       if (payment.direction === "in" && result.ok) await this.save({ ...payment, state: "settled", lightningPending: undefined });
+      // Or closed, said so in as many words (`closed`, never a bare refusal): the wallet it was paid through is gone, so
+      // paying it now would lose the money. A Lightning payment already in flight is left to settle; its own answer decides.
+      else if (payment.direction === "in" && result.closed && !payment.lightningPending) await this.save({ ...payment, state: "failed", closed: true, error: result.error?.slice(0, 200) || "your contact closed it" });
       return;
     }
     // A payment with a target reconciles through its own adapter, never on the contact's word.
@@ -1391,6 +1397,24 @@ export class PaymentDesk {
     const payment = this.payments.get(id);
     if (payment?.kind !== "request" || payment.direction !== "out" || payment.state !== "pending") return;
     await this.save({ ...payment, state: "failed" });
+  }
+
+  /**
+   * A request of ours closed for good: the wallet it was paid through was removed. Nothing sends it again (replay,
+   * a group edge opening), and the contact is told now when the chat is open (a request to a group: every member
+   * reachable), so their app stops offering to pay it. `reason`: shown here; `told`: what the contact reads. Returns
+   * whether it was open.
+   */
+  async close(id: string, reason: string, told: string): Promise<boolean> {
+    const request = this.payments.get(id);
+    if (request?.kind !== "request" || request.direction !== "out" || request.state !== "pending") return false;
+    await this.save({ ...request, state: "failed", closed: true, error: reason });
+    const links = request.group ? this.host.groupLinks?.(request.group) ?? [] : [request.linkId];
+    for (const linkId of links) {
+      const link = this.host.getLink(linkId);
+      if (link?.supportsPayments) { try { link.sendPaymentResult({ id, ok: false, error: told, closed: true }); } catch { /* not reachable now */ } }
+    }
+    return true;
   }
 
   async replay(linkId: string): Promise<void> {
