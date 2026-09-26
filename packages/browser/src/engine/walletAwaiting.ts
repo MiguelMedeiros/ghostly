@@ -13,8 +13,11 @@ export interface AwaitingSources {
   quotes: readonly StoredQuote[];
   /** The Lightning journal (every network's). */
   lightningOps: readonly LightningOp[];
-  /** This network's active Lightning source: the Cashu mints unless the person chose another. */
+  /** This network's default Lightning card for receiving, and its source: the Cashu mints unless the person chose another. */
   lightningSource?: string;
+  lightningCard?: string;
+  /** The Lightning card an operation went through. */
+  lightningOwner?: (op: LightningOp) => string | undefined;
   payments: readonly StoredPayment[];
   now: number;
 }
@@ -28,7 +31,7 @@ const TARGETED = new Set<WalletType>(["arkade", "bark", "spark", "bitcoin", "usd
  * close. A request of ours counts only for the wallet it can be paid through, and only when there is one: a request a
  * Cashu mint and another Lightning source can both be paid through is not lost when one of them goes.
  */
-export function walletAwaiting({ network, mints, quotes, lightningOps, lightningSource, payments, now }: AwaitingSources): WalletAwaitingView[] {
+export function walletAwaiting({ network, mints, quotes, lightningOps, lightningSource, lightningCard, lightningOwner = (op) => op.card, payments, now }: AwaitingSources): WalletAwaitingView[] {
   const at = new Set(mints);
   const live = (expiresAt: number | null | undefined) => !expiresAt || expiresAt + GRACE_MS > now;
   const invoiceKey = (invoice: string) => invoice.trim().toLowerCase();
@@ -52,7 +55,11 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
   const openQuotes = cashuQuotes.filter((q) => !q.issuedUnclaimed && !q.paid && live(q.expiresAt));
   const cashuInvoices = new Set(openQuotes.map((q) => invoiceKey(q.invoice)));
   const openOps = lightningOps.filter((op) => op.direction === "in" && op.mode === network && op.state === "open" && !op.selfSettled && op.providerId !== CASHU_MINT_SOURCE && live(op.expiresAt));
-  const lightningInvoices = new Set(openOps.map((op) => invoiceKey(op.invoice)));
+  /** Each open invoice's Lightning card. */
+  const lightningInvoices = new Map(openOps.map((op) => [invoiceKey(op.invoice), lightningOwner(op)]));
+  const onCard = (card: string | undefined) => (card !== undefined ? { card } : {});
+  /** The Lightning card a request of ours goes through, when it is Lightning's. */
+  const cardOf = new Map<string, string | undefined>();
 
   /** The wallets a request of ours can still be paid through. */
   const ways = (p: StoredPayment): Set<WalletType> => {
@@ -62,11 +69,12 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
     if (p.invoice) {
       const key = invoiceKey(p.invoice);
       if (cashuInvoices.has(key)) through.add("cashu");
-      else if (lightningInvoices.has(key)) through.add("lightning");
+      else if (lightningInvoices.has(key)) { through.add("lightning"); cardOf.set(p.id, lightningInvoices.get(key)); }
       else {
         // Not in a journal (made before sources journaled their invoices): the source of the network makes them.
         const decoded = decodeBolt11(p.invoice);
-        if (decoded && live(decoded.expiresAt * 1000)) through.add((lightningSource ?? CASHU_MINT_SOURCE) === CASHU_MINT_SOURCE ? "cashu" : "lightning");
+        const mints = (lightningSource ?? CASHU_MINT_SOURCE) === CASHU_MINT_SOURCE;
+        if (decoded && live(decoded.expiresAt * 1000)) { through.add(mints ? "cashu" : "lightning"); if (!mints) cardOf.set(p.id, lightningCard); }
       }
     }
     if (p.mints?.some((m) => at.has(m))) through.add("cashu");
@@ -77,11 +85,12 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
     if (claimedBy.has(p.id)) continue;
     const through = ways(p);
     if (through.size !== 1) continue;
-    out.push({ type: [...through][0], kind: "request", amount: p.amount, paymentId: p.id });
+    const type = [...through][0];
+    out.push({ type, kind: "request", amount: p.amount, paymentId: p.id, ...(type === "lightning" ? onCard(cardOf.get(p.id)) : {}) });
   }
   // Invoices of no open request: made on the wallet's Receive, or of a request already closed.
   for (const q of openQuotes) { const owner = ownerOf(q); if (!owner || !requests.has(owner)) out.push({ type: "cashu", kind: "invoice", amount: q.amount, ...withOwner(owner) }); }
-  for (const op of openOps) { const owner = ownerOf(op); if (!owner || !requests.has(owner)) out.push({ type: "lightning", kind: "invoice", amount: op.amount, ...withOwner(owner) }); }
+  for (const op of openOps) { const owner = ownerOf(op); if (!owner || !requests.has(owner)) out.push({ type: "lightning", kind: "invoice", amount: op.amount, ...withOwner(owner), ...onCard(lightningOwner(op)) }); }
 
   // Ecash sent that the contact has not taken yet: only the wallet it came from can take it back.
   for (const p of payments) {

@@ -27,6 +27,11 @@ export interface LightningOp {
   createdAt: number;
   /** The source books and reports this itself (the Cashu wallet): the engine does not poll it. */
   selfSettled?: boolean;
+  /**
+   * The Lightning card it went through (see `lightningCards.ts`). Absent on operations journaled before a network could
+   * have several cards: those belong to the card that took over the network's one source (`legacyCard`).
+   */
+  card?: string;
   /** in: open → paid | expired. out: sending → paid | pending | failed | unknown (a lost answer). */
   state: "open" | "paid" | "expired" | "sending" | "pending" | "failed" | "unknown";
   maxFee?: number;
@@ -35,6 +40,17 @@ export interface LightningOp {
   settledAt?: number;
 }
 export type LightningOpView = Omit<LightningOp, "ref" | "note" | "selfSettled">;
+
+/** Options of one Lightning card's service. Without `card`, it is the network's only one (tests, older callers). */
+export interface LightningServiceOptions {
+  fetch?: typeof fetch;
+  /** The card this service is: its operations carry the id, and it reads only its own. */
+  card?: string;
+  /** Where its source is stored: `lightningSource-<network>-<key>`; absent, the network's one key. */
+  key?: string;
+  /** Whether a journaled operation is this card's. Default: one carrying its id, or one carrying none. */
+  owns?: (op: LightningOp) => boolean;
+}
 export interface LightningView extends SourceView {
   capabilities?: LightningProvider["capabilities"];
   /** This mode's latest operations, newest first. */
@@ -73,6 +89,8 @@ export interface LightningEvents {
 const PREFIX = "lightningOp-";
 const opKey = (direction: LightningOp["direction"], hash: string) => `${PREFIX}${direction}-${hash}`;
 const RANGE = () => IDBKeyRange.bound(PREFIX, `${PREFIX}\uffff`);
+/** Every Lightning operation journaled, of every network and card. */
+export async function readLightningJournal(): Promise<LightningOp[]> { return wrap<LightningOp[]>((await store(STORES.settings, "readonly")).getAll(RANGE())); }
 const IN_POLL_MS = 4_000;
 const OUT_POLL_MS = 15_000;
 const RECENT = 20;
@@ -97,14 +115,22 @@ export class LightningService {
   /** Lightning addresses and LNURLs resolved, until an amount is chosen for them. */
   private readonly lnurls = new Map<string, { params: LnurlPayParams; at: number }>();
 
-  constructor(readonly network: WalletMode, descriptors: () => readonly LightningProviderDescriptor[], host: () => Omit<ProviderHost, "mode" | "signal">, private readonly events: LightningEvents, defaultId?: string, private readonly options: { fetch?: typeof fetch } = {}) {
+  constructor(readonly network: WalletMode, descriptors: () => readonly LightningProviderDescriptor[], host: () => Omit<ProviderHost, "mode" | "signal">, private readonly events: LightningEvents, defaultId?: string, private readonly options: LightningServiceOptions = {}) {
     this.mode = network;
     this.sources = new ProviderSources<LightningProvider>({
-      kind: "lightning", network, descriptors, host, defaultId,
+      kind: "lightning", network, descriptors, host, defaultId, key: options.key,
       changed: () => { this.schedule(0); events.changed(); },
       refuseReplacing: (providerId, mode) => this.refusal(providerId, mode),
       refresh: async (provider) => (provider.capabilities.balance ? { balance: (await provider.info()).balance } : {}),
     });
+  }
+
+  /** The card this service is, when the network has several. */
+  get card(): string | undefined { return this.options.card; }
+  /** Whether a journaled operation went through this card (and this network). */
+  owns(op: LightningOp): boolean {
+    if (op.mode !== this.mode) return false;
+    return this.options.owns ? this.options.owns(op) : op.card === undefined || op.card === this.options.card;
   }
 
   get view(): LightningView {
@@ -126,7 +152,7 @@ export class LightningService {
     // What goes to a contact must be the invoice we asked for: this amount, this hash, the right chain.
     if (!decoded || decoded.amountSat !== amount || (decoded.paymentHash && decoded.paymentHash !== created.paymentHash) || created.amount !== amount) throw new Error(`${descriptor.label} returned an invoice that does not match the request`);
     this.checkNetwork(decoded.network);
-    await this.put({ direction: "in", providerId: descriptor.id, mode: this.mode, paymentHash: created.paymentHash, invoice: created.invoice, amount, paymentId: context.paymentId, ref: created.ref, expiresAt: created.expiresAt, createdAt: Date.now(), selfSettled: !!provider.settlesItself, state: "open" });
+    await this.put({ direction: "in", providerId: descriptor.id, mode: this.mode, ...this.cardField(), paymentHash: created.paymentHash, invoice: created.invoice, amount, paymentId: context.paymentId, ref: created.ref, expiresAt: created.expiresAt, createdAt: Date.now(), selfSettled: !!provider.settlesItself, state: "open" });
     this.schedule(IN_POLL_MS);
     return { ...created, source: descriptor.id };
   }
@@ -170,6 +196,9 @@ export class LightningService {
     return { invoice: invoice.invoice, successAction, note: entry.params.destination.text };
   }
 
+  /** Whether this card resolved that address (the invoice is asked where it was resolved). */
+  hasDestination(id: string) { return this.lnurls.has(id); }
+
   // -- paying --------------------------------------------------------------------
 
   /** What paying this invoice costs at most, from the active source. Nothing is spent. */
@@ -203,7 +232,7 @@ export class LightningService {
     this.quotes.delete(quoteId);
     const existing = await this.get("out", quote.paymentHash);
     if (existing && existing.state !== "failed") throw new Error(existing.state === "paid" ? "This invoice is already paid" : "This invoice is already being paid");
-    let op: LightningOp = { direction: "out", providerId: quote.providerId, mode: this.mode, paymentHash: quote.paymentHash, invoice: quote.invoice, amount: quote.amount, paymentId: context.paymentId, note: context.note?.slice(0, 140), expiresAt: 0, createdAt: Date.now(), selfSettled: !!quote.provider.settlesItself, state: "sending", maxFee: quote.maxFee };
+    let op: LightningOp = { direction: "out", providerId: quote.providerId, mode: this.mode, ...this.cardField(), paymentHash: quote.paymentHash, invoice: quote.invoice, amount: quote.amount, paymentId: context.paymentId, note: context.note?.slice(0, 140), expiresAt: 0, createdAt: Date.now(), selfSettled: !!quote.provider.settlesItself, state: "sending", maxFee: quote.maxFee };
     // Written down before the provider sees it: from here on the sats may be gone.
     await this.put(op);
     try {
@@ -243,7 +272,7 @@ export class LightningService {
     try {
       const provider = this.sources.active, providerId = this.sources.activeId;
       for (const op of await this.list()) {
-        if (op.selfSettled || op.mode !== this.mode) continue;
+        if (op.selfSettled || !this.owns(op)) continue;
         // `sending` is a spend under way in this process: its own answer decides. One left by a crash is
         // made `unknown` by `recover` at the next start, and only then asked about.
         const waiting = op.direction === "in" ? op.state === "open" : ["pending", "unknown"].includes(op.state);
@@ -286,9 +315,11 @@ export class LightningService {
 
   /** Changing the source is refused while a payment through it has not ended: only it can say how. */
   private async refusal(providerId: string, mode: WalletMode) {
-    const open = (await this.list()).filter((op) => op.direction === "out" && !op.selfSettled && op.providerId === providerId && op.mode === mode && ["sending", "pending", "unknown"].includes(op.state));
+    const open = (await this.list()).filter((op) => op.direction === "out" && !op.selfSettled && op.providerId === providerId && op.mode === mode && this.owns(op) && ["sending", "pending", "unknown"].includes(op.state));
     return open.length ? `A Lightning payment through this source has not ended yet (${open.length}). Wait for it before changing the source.` : undefined;
   }
+
+  private cardField(): Pick<LightningOp, "card"> { return this.options.card === undefined ? {} : { card: this.options.card }; }
 
   /** A Mainnet source refuses an invoice on a test chain; the reverse is harmless (test mints use lnbc). */
   private checkNetwork(network: string) {
@@ -297,16 +328,16 @@ export class LightningService {
 
   private async get(direction: LightningOp["direction"], hash: string) { return wrap<LightningOp | undefined>((await store(STORES.settings, "readonly")).get(opKey(direction, hash))); }
   private async put(op: LightningOp) { await transact([STORES.settings], (s) => { s[STORES.settings].put(op, opKey(op.direction, op.paymentHash)); }); }
-  async list(): Promise<LightningOp[]> { return wrap<LightningOp[]>((await store(STORES.settings, "readonly")).getAll(RANGE())); }
+  list(): Promise<LightningOp[]> { return readLightningJournal(); }
 
   /** Crash recovery: a spend journaled as `sending` never got its answer written, so its outcome is unknown. */
   async recover() {
-    for (const op of await this.list()) if (op.direction === "out" && op.state === "sending") await this.put({ ...op, state: "unknown", error: "Interrupted. It is being checked; nothing is paid again." });
+    for (const op of await this.list()) if (op.direction === "out" && op.state === "sending" && this.owns(op)) await this.put({ ...op, state: "unknown", error: "Interrupted. It is being checked; nothing is paid again." });
     this.schedule(0);
   }
 
   private async loadRecent() {
-    this.recent = (await this.list()).filter((op) => op.mode === this.mode).sort((a, b) => b.createdAt - a.createdAt).slice(0, RECENT)
+    this.recent = (await this.list()).filter((op) => this.owns(op)).sort((a, b) => b.createdAt - a.createdAt).slice(0, RECENT)
       .map(({ ref: _ref, note: _note, selfSettled: _self, ...view }) => view);
   }
 }

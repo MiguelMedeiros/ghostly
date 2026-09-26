@@ -61,7 +61,7 @@ describe("a payment never crosses networks", () => {
     expect(lightnings.mainnet.pay).not.toHaveBeenCalled();
     // Paid with no card named, it goes through the request's own network: Mainnet's Lightning, never Testnet's.
     await desk.payRequest({ linkId: "l", paymentId: "real-one", confirmedReal: true });
-    expect(lightnings.mainnet.quote).toHaveBeenCalledWith("lnbc100");
+    expect(lightnings.mainnet.quote).toHaveBeenCalledWith("lnbc100", undefined);
     expect(lightnings.testnet.quote).not.toHaveBeenCalled();
   });
 
@@ -116,7 +116,7 @@ describe("the wallets and their networks", () => {
     const mainnet = { ...empty(), mints: [{ url: REAL, name: "Minibits", balance: 5, info: null }], lightning: { providerId: "cashu-mint", label: "Cashu mints", mode: "mainnet", status: "ready", offered: [], recent: [] } } as NetworkWalletsView;
     const testnet = { ...empty(), ark: { configured: true, locked: true, balance: 0, network: "mutinynet", provider: "https://mutinynet.arkade.sh" }, usdt: { configured: false, locked: true, balance: "0", gasBalance: "0" }, lightning: { providerId: "cashu-mint", mode: "testnet", status: "connecting", offered: [], recent: [] } } as NetworkWalletsView;
     const list = walletInstances({ mainnet, testnet });
-    expect(list.map((w) => w.id)).toEqual(["cashu:mainnet", "lightning:mainnet", "arkade:testnet"]);
+    expect(list.map((w) => w.id)).toEqual(["cashu:mainnet", "lightning:mainnet:cashu", "arkade:testnet"]);
     expect(list[2]).toEqual({ id: "arkade:testnet", type: "arkade", network: "testnet", config: { chain: "mutinynet", provider: "https://mutinynet.arkade.sh" } });
     expect(paymentNetworksOf(list)).toEqual({ cashu: ["mainnet"], lightning: ["mainnet"], arkade: ["testnet"] });
   });

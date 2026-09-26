@@ -169,8 +169,8 @@ export interface EngineApi {
   walletSetPrimaryMint(params: { url: string }): void;
   walletRemoveMint(params: { url: string }): void;
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
-  walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
-  walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
+  walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
+  walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
   /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */
   walletPayQuote(params: { quote: string; mint: string; note?: string; confirmedReal?: true }): { paid: boolean };
@@ -181,13 +181,17 @@ export interface EngineApi {
   /** "I paid it from another wallet": the contact's app looks now. Only its wallet marks the request paid. */
   checkPayment(params: { linkId: string; paymentId: string }): void;
   /** Makes a provider a network's Lightning source. `values`: its form; secret fields are sealed, never returned. */
-  lightningSetSource(params: { providerId: string; values: Record<string, string>; network?:WalletNetwork }): void;
-  lightningClearSource(params?: { network?:WalletNetwork }): void;
+  /** `card`: a Lightning card of the network (its id); absent, the network's default for receiving. */
+  lightningSetSource(params: { providerId: string; values: Record<string, string>; network?:WalletNetwork; card?: string }): void;
+  lightningClearSource(params?: { network?:WalletNetwork; card?: string }): void;
   /** Tries a network's Lightning source again now, instead of after the wait between attempts. */
-  lightningRetrySource(params?: { network?:WalletNetwork }): void;
+  lightningRetrySource(params?: { network?:WalletNetwork; card?: string }): void;
   /** Changes the server of the saved Lightning source (its `changeable` fields), keeping its secrets. */
-  lightningReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork }): void;
-  lightningRefresh(params?: { network?:WalletNetwork }): void;
+  lightningReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork; card?: string }): void;
+  lightningRefresh(params?: { network?:WalletNetwork; card?: string }): void;
+  /** Makes a Lightning card its network's default for receiving. */
+  lightningSetReceive(params: { network: WalletNetwork; card: string }): void;
+  lightningRename(params: { network: WalletNetwork; card: string; name: string }): void;
   bitcoinSetSource(params: { providerId: string; values: Record<string, string>; network?:WalletNetwork }): void;
   bitcoinClearSource(params?: { network?:WalletNetwork }): void;
   bitcoinRetrySource(params?: { network?:WalletNetwork }): void;
@@ -202,9 +206,9 @@ export interface EngineApi {
   walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];
   /** `confirmedReal`: required on Mainnet (real money), refused without it. */
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork; confirmedReal?: true }): { paymentId: string };
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork }): { paymentId: string };
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork; card?: string }): { paymentId: string };
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */
-  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?:WalletNetwork }): { paymentId: string };
+  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?:WalletNetwork; card?: string }): { paymentId: string };
   /** The payment composer opened on a member of a community group: their app is asked what ways of paying it takes. */
   groupPaymentHello(params: { groupId: string; member: string }): void;
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
@@ -213,7 +217,7 @@ export interface EngineApi {
    * `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`.
    * `confirmedReal`: required for a Mainnet request (real money), refused without it.
    */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?:WalletNetwork; confirmedReal?: true }): void;
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?:WalletNetwork; confirmedReal?: true; card?: string }): void;
   reclaimPayment(params: { paymentId: string }): void;
   disconnect(params: { linkId: string }): void;
   addService(params: { name: string; target: string }): { serviceId: string };

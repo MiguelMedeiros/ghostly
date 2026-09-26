@@ -70,7 +70,7 @@ describe("one click makes a wallet of a type on a network", () => {
     const made = await node.walletCreate({ type: "cashu", network: "testnet" });
     expect(made).toMatchObject({ id: "cashu:testnet", type: "cashu", network: "testnet", config: { mint: TEST_MINT } });
     expect(node["settings"].mints).toEqual([TEST_MINT]);
-    expect(wallets()).toEqual(["cashu:testnet", "lightning:testnet"]);
+    expect(wallets()).toEqual(["cashu:testnet", "lightning:testnet:cashu"]);
 
     // Mainnet: two of its three mints are down; the one that answers is the wallet's, and the test mint stays Testnet's.
     const mainnet = await node.walletCreate({ type: "cashu", network: "mainnet" });
@@ -176,10 +176,10 @@ describe("one click makes a wallet of a type on a network", () => {
     await expect(node.walletCreate({ type: "lightning", network: "testnet", providerId: "nwc" })).rejects.toThrow("Choose a Lightning source that runs on Testnet");
     await expect(node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-lightning", values: {} })).rejects.toThrow("Enter access token");
     const ln = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-lightning", values: { token: "a-secret-token" } });
-    expect(ln).toMatchObject({ id: "lightning:testnet", config: { providerId: "fake-lightning" } });
+    expect(ln).toMatchObject({ id: expect.stringMatching(/^lightning:testnet:ln-[0-9a-f]{8}$/), config: { providerId: "fake-lightning" } });
     const chain = await node.walletCreate({ type: "bitcoin", network: "testnet", providerId: "fake-onchain", values: { token: "another-secret" } });
     expect(chain).toMatchObject({ id: "bitcoin:testnet" });
-    expect(wallets()).toEqual(["lightning:testnet", "bitcoin:testnet"]);
+    expect(wallets()).toEqual([ln.id, "bitcoin:testnet"]);
     expect(JSON.stringify(node.getState()), "a secret never reaches the pages").not.toMatch(/a-secret-token|another-secret/);
   });
 

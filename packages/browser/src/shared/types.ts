@@ -5,6 +5,7 @@ import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
 import type { FedimintWalletView } from "../engine/paymentAdapters/fedimintWallet";
 import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
+import type { LightningCardView } from "../engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
 import type { PaymentReview, PaymentTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
@@ -448,7 +449,10 @@ export interface NetworkWalletsView {
   fedimint?: FedimintWalletView;
   spark?: SparkWalletView;
   usdt?: UsdtWalletView;
+  /** The network's default Lightning card for receiving (what a caller from before cards reads as its Lightning). */
   lightning?: LightningView;
+  /** Every Lightning card of the network, in the order they were added: each its own source, balance and history. */
+  lightnings?: LightningCardView[];
   bitcoin?: BitcoinView;
   /** This network's Cashu mints (test mints and mints on this machine are Testnet's). */
   mints: MintView[];
@@ -475,17 +479,24 @@ export interface WalletAwaitingView {
   amount: number;
   /** The chat payment it belongs to, when it does. */
   paymentId?: string;
+  /** Lightning: the card it goes through. */
+  card?: string;
 }
 
 /**
- * A wallet the profile has: one type on one network, at most one of each. `id` is `<type>:<network>`. Its seed and
- * secrets stay in the engine; `config` holds only what can be shown (a server, a source).
+ * A wallet the profile has: one type on one network, one of each but Lightning, which a network can have several
+ * cards of. `id` is `<type>:<network>`, and `lightning:<network>:<card>` for a Lightning card. Its seed and secrets
+ * stay in the engine; `config` holds only what can be shown (a server, a source).
  */
 export interface WalletInstanceView {
   id: string;
   type: WalletType;
   network: WalletNetwork;
   config: Record<string, string>;
+  /** Lightning: the card's id on its network, its name, and whether it is the network's default for receiving. */
+  card?: string;
+  name?: string;
+  receive?: boolean;
 }
 
 /**
@@ -499,6 +510,8 @@ export interface WalletOffer {
   reason?: string;
   /** Already made: its card is in the deck. */
   exists?: boolean;
+  /** A network can have several of it (Lightning): New adds one more, whatever `exists` says. */
+  several?: boolean;
   needs?: "invite" | "provider";
   /** Lightning and on-chain: the sources that can be picked on this network. */
   providers?: ProviderDescriptorView[];
@@ -519,6 +532,8 @@ export interface WalletCreate {
 export interface WalletRemove {
   type: WalletType;
   network: WalletNetwork;
+  /** Lightning: the card to remove; absent, the network's default for receiving. */
+  card?: string;
   /** The person confirmed that what it holds on this device becomes unreachable without its backup. */
   acceptLoss?: boolean;
 }
@@ -527,6 +542,8 @@ export interface WalletRemove {
 export interface WalletTestCoins {
   type: WalletType;
   network: WalletNetwork;
+  /** Lightning: the card asking (only the Cashu mints' card has a faucet); absent, the default one. */
+  card?: string;
 }
 
 /** What the faucet gave: `amount` in the wallet's own unit ("test sats", "TEST-USDT"). */
@@ -554,6 +571,7 @@ export interface WalletView {
   usdt?: UsdtWalletView;
   /** The Lightning source of this mode (the Cashu mints by default) and its latest operations. */
   lightning?: LightningView;
+  lightnings?: LightningCardView[];
   /** The on-chain Bitcoin source of this mode, if one is set up. */
   bitcoin?: BitcoinView;
   intents?: PaymentReview[];

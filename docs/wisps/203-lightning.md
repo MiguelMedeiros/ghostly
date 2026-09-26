@@ -18,13 +18,19 @@ The current `btc-lightning-bolt11` endpoint carries an invoice; the application 
 
 ## Lightning sources
 
-The application reaches Lightning through one **active source** per profile and network (Mainnet,
-Testnet), behind a `LightningProvider` contract: `info` (network, alias, balance when it has one),
-`createInvoice`, `invoiceStatus`, `payInvoice` (with a fee ceiling) and `paymentStatus`. The Cashu mints are
-the default source and the only one shipped so far; node and remote-wallet sources (LND, Core Lightning,
-NWC, WebLN, Breez) are candidates, each a provider module with its own configuration. The Lightning card,
-the `btc-lightning-bolt11` endpoint of an outgoing request and paying a contact's invoice all use the
-active source; the wire format does not change.
+The application reaches Lightning through **Lightning cards**, several per profile and network (Mainnet,
+Testnet), each with its own **source** behind a `LightningProvider` contract: `info` (network, alias, balance
+when it has one), `createInvoice`, `invoiceStatus`, `payInvoice` (with a fee ceiling) and `paymentStatus`. The
+Cashu mints, Fedimint, Breez, NWC, Core Lightning, LND and WebLN are sources, each a provider module with its
+own configuration; the same source may back several cards (two NWC wallets, two LND nodes), never the same
+wallet twice.
+
+- **Paying** goes through the card the person picks (the payment sheet, a pasted invoice, a Lightning address).
+- **Receiving:** one card per network is the **default for receiving**. The `btc-lightning-bolt11` endpoint of an
+  outgoing request and Receive use it unless another card is picked for that request.
+- A chat's **Accept** side keeps one Lightning switch per network: it means "a request of mine carries an
+  invoice", and that invoice comes from the default card. A contact never learns which card; the wire format
+  does not change.
 
 - A source is accepted only if it reports a network of the mode (Bitcoin for Mainnet, any test network for
   Testnet). In Mainnet an invoice of a test network is refused.

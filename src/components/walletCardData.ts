@@ -34,7 +34,8 @@ export const networkState=(state:WalletState,network:WalletNetwork):WalletState=
  * on its network, in the deck's order.
  */
 export function walletCards(state:WalletState):InstanceCard[] {
- return (state.wallets??[]).map(w=>walletCard(w.type,w.network,networkState(state,w.network)));
+ // A network's Lightning shows as its default card for receiving (the one `state.lightning` describes).
+ return (state.wallets??[]).filter(w=>w.type!=='lightning'||w.receive!==false).map(w=>walletCard(w.type,w.network,networkState(state,w.network)));
 }
 
 /** Real money first, then test money, each network's cards in the deck's order: a deck that mixes both keeps them apart. */

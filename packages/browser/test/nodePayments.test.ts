@@ -417,9 +417,8 @@ describe("real money goes out only once confirmed as such, whatever screen asked
     expect(cashuPay).toHaveBeenCalledTimes(2);
 
     // A quote the Mainnet Lightning source made: its network decides, not the mint named with it.
-    const mainnet = node["lightnings"].mainnet;
-    vi.spyOn(mainnet, "hasQuote").mockImplementation((quote) => quote === "ln-quote");
-    const pay = vi.spyOn(mainnet, "pay").mockResolvedValue(true);
+    const pay = vi.fn(async () => true);
+    vi.spyOn(node["lightnings"].mainnet, "withQuote").mockImplementation((quote) => (quote === "ln-quote" ? { pay } as never : undefined));
     await expect(node.walletPayQuote({ quote: "ln-quote", mint: TEST_MINT })).rejects.toThrow(REAL_MONEY_UNCONFIRMED);
     expect(pay).not.toHaveBeenCalled();
     expect(await node.walletPayQuote({ quote: "ln-quote", mint: TEST_MINT, confirmedReal: true })).toEqual({ paid: true });

@@ -123,9 +123,11 @@ export function Wallet() {
   /** New made `made`: the dialog has closed; its card comes to the front of its network's tab, selected. */
   const created = (made: WalletInstanceView) => {
     setCreating(null);
-    select(made.id, false);
-    setBackup(backupFirst(made) ? made.id : null);
-    setDealt(made.id);
+    // Its card in the deck (a Lightning card's instance id names its card too).
+    const id = cardId(made.type, made.network);
+    select(id, false);
+    setBackup(backupFirst(made) ? id : null);
+    setDealt(id);
   };
   /** After a removal: the next card of the same network; with none left the tab stays, saying so. */
   const removed = (id: string) => {

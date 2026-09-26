@@ -156,14 +156,14 @@ describe("removing a wallet", () => {
     });
     fakeMints(node, () => "UNPAID");
     await node["refreshWallet"]();
-    expect(wallets()).toEqual(["cashu:mainnet", "cashu:testnet", "lightning:mainnet", "lightning:testnet"]);
+    expect(wallets()).toEqual(["cashu:mainnet", "cashu:testnet", "lightning:mainnet:cashu", "lightning:testnet:cashu"]);
     expect(walletRemoval("cashu", "mainnet", node.getState().wallet.networks?.mainnet)).toMatchObject({ held: { empty: false, text: "500 sats" }, backup: "tokens" });
     expect((await node.walletExport({ network: "mainnet" })).map((t) => [t.mint, t.amount])).toEqual([[real, 500]]);
 
     await expect(node.walletRemove({ type: "cashu", network: "mainnet" })).rejects.toThrow("holds 500 sats");
     await expect(node.walletRemove({ type: "lightning", network: "mainnet" })).rejects.toThrow("comes with your Mainnet Cashu wallet");
     await node.walletRemove({ type: "cashu", network: "mainnet", acceptLoss: true });
-    expect(wallets(), "Lightning through those mints went with them").toEqual(["cashu:testnet", "lightning:testnet"]);
+    expect(wallets(), "Lightning through those mints went with them").toEqual(["cashu:testnet", "lightning:testnet:cashu"]);
     expect(node["settings"].mints).toEqual([TEST_MINT]);
     expect(await proofsAt(real)).toEqual([]);
     expect((await proofsAt(TEST_MINT)).map((p) => p.amount)).toEqual([8]);
@@ -269,8 +269,8 @@ describe("removing a wallet", () => {
     expect(walletRemoval("lightning", "testnet", node.getState().wallet.networks?.testnet).custody).toBe("elsewhere");
     await node.walletRemove({ type: "lightning", network: "testnet" });
     expect(node.getState().wallet.networks?.testnet.lightning?.providerId).toBe("cashu-mint");
-    expect(wallets()).toEqual(["cashu:testnet", "lightning:testnet"]);
-    expect(await settingsKeys()).not.toContain("lightningSource-testnet");
+    expect(wallets()).toEqual(["cashu:testnet", "lightning:testnet:cashu"]);
+    expect((await settingsKeys()).filter((k) => k.startsWith("lightningSource-testnet")), "its source and sealed secrets went with it").toEqual([]);
   });
 
   it("Bark, Spark, Fedimint and on-chain each lose their record, and Fedimint its federations' databases", async () => {

@@ -5,8 +5,9 @@ import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "../persi
 import { describeProvider, networkMode, offeredIn, redact, sourceProblem, type ProviderDescriptor, type ProviderDescriptorView, type ProviderHost, type ProviderKind, type ProviderNetwork, type ProviderSettings, type SourceProblem } from "./types";
 
 /**
- * What is stored for a source, under `<kind>Source-<mode>` in the settings store: never in the Settings
- * object (which the UI sees), and its secrets sealed with a device key, like the Ark and USDT seeds.
+ * What is stored for a source, under `<kind>Source-<mode>` (or `<kind>Source-<mode>-<key>`, one Lightning card of
+ * several) in the settings store: never in the Settings object (which the UI sees), and its secrets sealed with a
+ * device key, like the Ark and USDT seeds.
  */
 interface StoredSource {
   providerId: string;
@@ -69,6 +70,8 @@ export interface SourcesOptions<P> {
   changed: () => void;
   /** Used while nothing is stored for the mode. */
   defaultId?: string;
+  /** One of several sources of this kind and mode (a Lightning card): its own storage keys. Absent: the mode's one. */
+  key?: string;
   /** Asked before the source of a mode changes: a refusal (money in flight through it) stops the change. */
   refuseReplacing?: (providerId: string, mode: WalletMode) => Promise<string | undefined>;
   /** Balance and the like, read after connecting and then every `refreshMs`. */
@@ -78,8 +81,9 @@ export interface SourcesOptions<P> {
   backoff?: (failures: number) => number;
 }
 
-const storageKey = (kind: ProviderKind, mode: WalletMode) => `${kind}Source-${mode}`;
-const seenKey = (kind: ProviderKind, mode: WalletMode) => `${kind}SourceSeen-${mode}`;
+/** Where a source is stored: the mode's one, or one of several (`key`). */
+export const sourceKey = (kind: ProviderKind, mode: WalletMode, key?: string) => `${kind}Source-${mode}${key ? `-${key}` : ""}`;
+const seenKey = (kind: ProviderKind, mode: WalletMode, key?: string) => `${kind}SourceSeen-${mode}${key ? `-${key}` : ""}`;
 
 /**
  * A source that does not answer is tried again by itself: 2 s, 4 s, 8 s… up to 5 minutes, ±20 % so
@@ -144,7 +148,7 @@ export class ProviderSources<P extends Connectable> {
   private offered() { return this.options.descriptors().filter((d) => offeredIn(d, this.options.host().platform, this.mode)).map((d) => describeProvider(d as ProviderDescriptor<unknown>)); }
   private async load(mode: WalletMode) {
     const settings = await store(STORES.settings, "readonly");
-    const [stored, seen] = await Promise.all([wrap<StoredSource | undefined>(settings.get(storageKey(this.options.kind, mode))), wrap<SeenBalance | undefined>(settings.get(seenKey(this.options.kind, mode)))]);
+    const [stored, seen] = await Promise.all([wrap<StoredSource | undefined>(settings.get(sourceKey(this.options.kind, mode, this.options.key))), wrap<SeenBalance | undefined>(settings.get(seenKey(this.options.kind, mode, this.options.key)))]);
     this.stored = stored; this.seen = seen;
     this.failures = 0; this.failingSince = undefined;
   }
@@ -246,19 +250,41 @@ export class ProviderSources<P extends Connectable> {
   set(providerId: string, values: Record<string, string>): Promise<void> {
     const interrupted = this.interrupt();
     return this.afterChange(interrupted, this.serial(async () => {
-      const descriptor = this.find(providerId);
-      if (!descriptor || !offeredIn(descriptor, this.options.host().platform, this.mode)) throw new Error("That source is not available here");
-      const settings: ProviderSettings = { config: {}, secrets: {} };
-      for (const field of descriptor.fields) {
-        const value = (values[field.name] ?? "").trim();
-        if (!value && !field.optional) throw new Error(`Enter ${field.label.toLowerCase()}`);
-        if (field.kind === "select" && value && !field.options?.some((o) => o.value === value)) throw new Error(`Choose ${field.label.toLowerCase()}`);
-        if (value) (field.kind === "secret" ? settings.secrets : settings.config)[field.name] = value;
-      }
-      descriptor.validate?.(settings, this.mode);
+      const { descriptor, settings } = this.settingsOf(providerId, values);
       await this.guard();
       await this.apply(descriptor, settings, false);
     }));
+  }
+
+  /** The form's values as a source's settings, checked: its secrets apart. Throws what to fix. */
+  settingsOf(providerId: string, values: Record<string, string>): { descriptor: ProviderDescriptor<P>; settings: ProviderSettings } {
+    const descriptor = this.find(providerId);
+    if (!descriptor || !offeredIn(descriptor, this.options.host().platform, this.mode)) throw new Error("That source is not available here");
+    const settings: ProviderSettings = { config: {}, secrets: {} };
+    for (const field of descriptor.fields) {
+      const value = (values[field.name] ?? "").trim();
+      if (!value && !field.optional) throw new Error(`Enter ${field.label.toLowerCase()}`);
+      if (field.kind === "select" && value && !field.options?.some((o) => o.value === value)) throw new Error(`Choose ${field.label.toLowerCase()}`);
+      if (value) (field.kind === "secret" ? settings.secrets : settings.config)[field.name] = value;
+    }
+    descriptor.validate?.(settings, this.mode);
+    return { descriptor, settings };
+  }
+
+  /**
+   * Whether the saved source is this provider with these very settings (the same wallet added twice). Its secrets are
+   * unsealed here to compare, and never leave.
+   */
+  async holds(providerId: string, settings: ProviderSettings): Promise<boolean> {
+    const stored = this.stored;
+    if (!stored || stored.providerId !== providerId) return false;
+    const same = (a: Record<string, string>, b: Record<string, string>) => {
+      const keys = Object.keys(a).sort();
+      return JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()) && keys.every((k) => a[k] === b[k]);
+    };
+    if (!same(stored.config, settings.config)) return false;
+    const secrets = stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
+    return same(secrets, settings.secrets);
   }
 
   /**
@@ -321,8 +347,8 @@ export class ProviderSources<P extends Connectable> {
     if (!same) this.seen = undefined;
     try {
       await transact([STORES.settings], (s) => {
-        if (plain) s[STORES.settings].delete(storageKey(this.options.kind, this.mode)); else s[STORES.settings].put(stored, storageKey(this.options.kind, this.mode));
-        if (!same) s[STORES.settings].delete(seenKey(this.options.kind, this.mode));
+        if (plain) s[STORES.settings].delete(sourceKey(this.options.kind, this.mode, this.options.key)); else s[STORES.settings].put(stored, sourceKey(this.options.kind, this.mode, this.options.key));
+        if (!same) s[STORES.settings].delete(seenKey(this.options.kind, this.mode, this.options.key));
       });
     }
     catch (error) { await opened.provider.close().catch(() => {}); throw error; }
@@ -340,12 +366,29 @@ export class ProviderSources<P extends Connectable> {
     this.interrupt();
     return this.serial(async () => {
       await this.guard();
-      await transact([STORES.settings], (s) => { s[STORES.settings].delete(storageKey(this.options.kind, this.mode)); s[STORES.settings].delete(seenKey(this.options.kind, this.mode)); });
+      await transact([STORES.settings], (s) => { s[STORES.settings].delete(sourceKey(this.options.kind, this.mode, this.options.key)); s[STORES.settings].delete(seenKey(this.options.kind, this.mode, this.options.key)); });
       await this.disconnect();
       this.stored = undefined; this.seen = undefined;
       this.failures = 0; this.failingSince = undefined;
       this.view = this.idle(); this.options.changed();
     }).then(() => this.ensureReady());
+  }
+
+  /**
+   * Forgets this source for good (its card is removed): its settings, sealed secrets and last balance go, it is
+   * closed, and nothing takes over. Refused while a payment through it has not ended.
+   */
+  forget(): Promise<void> {
+    this.interrupt();
+    return this.serial(async () => {
+      await this.guard();
+      await transact([STORES.settings], (s) => { s[STORES.settings].delete(sourceKey(this.options.kind, this.mode, this.options.key)); s[STORES.settings].delete(seenKey(this.options.kind, this.mode, this.options.key)); });
+      this.stopped = true;
+      this.gate.close();
+      await this.disconnect();
+      this.stored = undefined; this.seen = undefined;
+      this.view = { mode: this.mode, status: "none", offered: [] };
+    });
   }
 
   private async guard() {
@@ -393,7 +436,7 @@ export class ProviderSources<P extends Connectable> {
     if (!providerId || providerId === this.options.defaultId || (balance === undefined && unconfirmed === undefined)) return;
     const was = this.seen;
     if (was?.providerId === providerId && was.balance === balance && was.unconfirmed === unconfirmed) return;
-    const seen: SeenBalance = { providerId, balance, unconfirmed, at: Date.now() }, key = seenKey(this.options.kind, this.mode);
+    const seen: SeenBalance = { providerId, balance, unconfirmed, at: Date.now() }, key = seenKey(this.options.kind, this.mode, this.options.key);
     this.seen = seen;
     void transact([STORES.settings], (s) => { s[STORES.settings].put(seen, key); }).catch(() => {});
   }
