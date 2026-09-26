@@ -80,6 +80,16 @@
       "hint": "Questa chat è stata creata con un codice di Ghostly 0.4. Testo e chiamate continuano a funzionare in entrambe le direzioni; una nuova chat aggiunge file, pagamenti e messaggi trattenuti.",
       "continued": "Hai invitato il tuo contatto in una nuova chat.",
       "open": "Apri la nuova chat"
+    },
+    "rich": {
+      "spoiler": "Testo nascosto. Tocca per mostrarlo",
+      "copy": "Copia",
+      "copied": "Copiato",
+      "copyCode": "Copia codice",
+      "showAll": "Mostra tutto",
+      "showLess": "Mostra meno",
+      "localTime": "{{time}} nel tuo fuso orario",
+      "code": "Codice"
     }
   },
   "group": {

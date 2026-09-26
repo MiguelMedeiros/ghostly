@@ -8,6 +8,7 @@ import { VoiceBubble } from "./voice/VoiceBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
 import { PaymentBubble } from "./PaymentBubble";
+import { RichText } from "./rich/RichText";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { ChatMessage } from "../lib/types";
 
@@ -59,7 +60,6 @@ const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\//i;
 /** GeoCities GIFs from the Wayback Machine (the picker's "Retro" source): tiny pixel art. */
 const WAYBACK_GIF_RE = /^https:\/\/web\.archive\.org\/web\/(\d+[a-z_]*\/)?\S+\.gif$/i;
 const DATA_IMAGE_SAFE_RE = /^data:image\/(png|jpe?g|gif|webp);/i;
-const URL_RE = /https?:\/\/\S+/g;
 
 type ContentType = "text" | "image";
 
@@ -79,49 +79,6 @@ function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
     /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
   return emojiPattern.test(text.trim()) && text.trim().length <= 12;
-}
-
-/**
- * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.") and a
- * closing bracket or quote the link did not open ("(https://x.example/a)") are left as text.
- */
-function linkEnd(url: string): string {
-  const pairs: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
-  for (;;) {
-    const last = url[url.length - 1];
-    const opener = pairs[last];
-    const count = (c: string) => url.split(c).length - 1;
-    if (/[.,;:!?'"*_>]/.test(last) || (opener && count(last) > count(opener))) url = url.slice(0, -1);
-    else return url;
-  }
-}
-
-function renderTextWithLinks(text: string) {
-  const parts: (string | React.JSX.Element)[] = [];
-  let lastIndex = 0;
-
-  for (const match of text.matchAll(URL_RE)) {
-    if (match.index! > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-    const url = linkEnd(match[0]);
-    parts.push(
-      <a
-        key={match.index}
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-link underline hover:decoration-2 break-all"
-      >
-        {url}
-      </a>,
-    );
-    lastIndex = match.index! + url.length;
-  }
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-  return parts;
 }
 
 function TailSvg({ side }: { side: "left" | "right" }) {
@@ -524,9 +481,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           </div>
         ) : (
           <div className="clearfix">
-            <span data-testid="message-text" className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap">
-              {renderTextWithLinks(message.text)}
-            </span>
+            <RichText testId="message-text" text={message.text} sentAt={message.timestamp} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
             {timestampEl}
           </div>
         )}
