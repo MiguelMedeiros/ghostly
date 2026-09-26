@@ -17,7 +17,6 @@ export function UsdtWalletPanel({wallet,state}:{wallet:WalletPlatform;state:Wall
  const [action,setAction]=useState<Action>('receive');
  const [recipient,setRecipient]=useState(''),[amount,setAmount]=useState(''),[gas,setGas]=useState('0.001'),[review,setReview]=useState<Review|null>(null);
  const [password,setPassword]=useState('');
- const [faucetTx,setFaucetTx]=useState('');
  /** A network being set up that needs more than a click: a local chain has no well-known token. */
  const [pending,setPending]=useState<Network|null>(null),[provider,setProvider]=useState(''),[token,setToken]=useState('');
  const label=usdt?.chainId&&usdt.chainId!==1?'TEST-USDT':'USDT';
@@ -54,13 +53,7 @@ export function UsdtWalletPanel({wallet,state}:{wallet:WalletPlatform;state:Wall
   </div>}
   {error&&<Notice tone="error">{error}</Notice>}
   {usdt?.error&&ready&&<Notice tone="warning">{usdt.error}</Notice>}
-  {/* Testnet on Sepolia: test USDT from Aave's public faucet, paid with a little of this wallet's test ETH. */}
-  {ready&&usdt.chainId===11155111&&<Section title="Test tokens" testId="usdt-test-tokens">
-   <Row label="Get 1,000 TEST-USDT" hint={BigInt(usdt.gasBalance)===0n?'Needs a little Sepolia ETH for gas first: send some to the address above from any Sepolia faucet.':'From Aave\'s public faucet, to this wallet. Worth nothing.'}>
-    <Button data-testid="usdt-faucet" disabled={busy||BigInt(usdt.gasBalance)===0n} onClick={()=>void run(async()=>{setFaucetTx(await wallet.usdtGetTestTokens());})}>{busy?'Asking…':'Get test USDT'}</Button>
-   </Row>
-   {faucetTx&&<Block><Notice tone="success" testId="usdt-faucet-sent">Asked the faucet. The tokens show up here in a few seconds.</Notice></Block>}
-  </Section>}
+  {/* Test USDT from Aave's Sepolia faucet: "Get test coins" above the panel (wallet/TestCoins.tsx). */}
 
   {(ready||stuck)&&<Section title="Settings">
    {/* A Mainnet wallet is Ethereum only; a Testnet wallet may move between the test chains while empty. */}

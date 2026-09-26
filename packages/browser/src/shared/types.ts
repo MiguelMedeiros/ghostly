@@ -321,6 +321,13 @@ export interface StoredQuote {
    * only record of sats the user paid for.
    */
   issuedUnclaimed?: boolean;
+  /**
+   * The mint marks its invoices paid by itself (a test mint, `paysItsOwnInvoices`): its "paid" says nothing about a
+   * payer. Not polled, never minted by itself: a payer saying it paid (`CashuWallet.vouch`) lets it be minted.
+   */
+  held?: boolean;
+  /** Asked for on purpose, as test coins from a test mint ("Get test coins"): minted as soon as the mint says paid. */
+  testCoins?: boolean;
 }
 
 export type PaymentState =
@@ -488,6 +495,20 @@ export interface WalletRemove {
   network: WalletNetwork;
   /** The person confirmed that what it holds on this device becomes unreachable without its backup. */
   acceptLoss?: boolean;
+}
+
+/** "Get test coins" on a Testnet wallet: which one asks its faucet. */
+export interface WalletTestCoins {
+  type: WalletType;
+  network: WalletNetwork;
+}
+
+/** What the faucet gave: `amount` in the wallet's own unit ("test sats", "TEST-USDT"). */
+export interface TestCoinsResult {
+  amount: number;
+  unit: string;
+  /** Asked, and on its way (a transaction the chain has not confirmed): it shows up in a few seconds. */
+  pending?: boolean;
 }
 
 export interface WalletView {

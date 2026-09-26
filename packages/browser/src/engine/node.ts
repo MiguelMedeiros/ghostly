@@ -31,7 +31,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { TEST_USDT_FAUCET_AMOUNT, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { createTiming, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
@@ -112,6 +112,8 @@ import type {
   NetworkWalletsView,
   WalletCreate,
   WalletRemove,
+  WalletTestCoins,
+  TestCoinsResult,
   WalletInstanceView,
   WalletOffer,
   WalletTx,
@@ -120,6 +122,7 @@ import type {
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
+import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
 import { Groups } from "./groups";
@@ -466,7 +469,8 @@ export class GhostlyNode implements EngineImplementation {
     quote: async (invoice: string) => { const quote = await this.lightnings[network].quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
     pay: (quote: { quote: string }, note: string, paymentId: string) => this.lightnings[network].pay(quote.quote, { note, paymentId }),
     // "I paid": the source, the mints and the federations are asked now; the request is paid only once one of them saw it.
-    check: async () => { await Promise.all([this.lightnings[network].reconcile(), this.wallet.checkQuotes(), this.fedimintWallets[network].checkReceives()]); },
+    // A test mint's invoice waits for that word (StoredQuote `held`): the one the contact says it paid is let go.
+    check: async (paid?: string) => { await Promise.all([this.lightnings[network].reconcile(), paid ? this.wallet.vouch(paid) : this.wallet.checkQuotes(), this.fedimintWallets[network].checkReceives()]); },
   })), this.bitcoins, this.fedimintWallets, perNetwork((network) => ({
     ready: () => !!this.sparkWallets[network].adapter,
     requestTarget: (amount: number, memo?: string) => this.sparkWallets[network].target(amount, memo),
@@ -1918,6 +1922,29 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * "Get test coins", pressed by the person on a Testnet wallet: a small fixed amount from that wallet's own faucet.
+   * Cashu, and Lightning through the mints: the test mint pays an invoice asked of it on purpose. USDT: Aave's Sepolia
+   * faucet, paid with the wallet's own test ETH. Never Mainnet; nothing else asks a faucet, Receive included.
+   */
+  async walletTestCoins({ type, network }: WalletTestCoins): Promise<TestCoinsResult> {
+    if (network !== "testnet") throw new Error("Test coins are for Testnet wallets only");
+    if (type === "cashu" || (type === "lightning" && (this.lightnings.testnet.view.providerId ?? CASHU_MINT_SOURCE) === CASHU_MINT_SOURCE)) {
+      let got: { amount: number };
+      try { got = await this.wallet.testCoins(TEST_COINS_SATS, "testnet"); }
+      catch (error) { throw faucetError(error); }
+      await this.refreshWallet();
+      return { amount: got.amount, unit: "test sats" };
+    }
+    if (type === "usdt") {
+      try { await this.usdtWallets.testnet.getTestTokens(); }
+      catch (error) { throw faucetError(error); }
+      // Aave's test USDT has 6 decimals, like USDT.
+      return { amount: TEST_USDT_FAUCET_AMOUNT / 1e6, unit: "TEST-USDT", pending: true };
+    }
+    throw new Error("Ghostly cannot ask this wallet's faucet by itself: open it instead");
+  }
+
+  /**
    * Removes the `type` wallet of `network`, asked for by the person: its keys, its ecash and its config go, and so does
    * what every chat keeps about it (the network's place in its accepted ways of paying); every other wallet stays.
    * What it holds is checked here again, whatever the page showed: money on this device (or a balance that could not
@@ -2123,7 +2150,6 @@ export class GhostlyNode implements EngineImplementation {
   usdtReveal(params: { password?: string; network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].reveal(params?.password); }
   usdtLock(params?: { network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].lock(); }
   usdtRefresh(params?: { network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].refresh(); }
-  usdtGetTestTokens(params?: { network?: WalletNetwork }) { return this.usdtWallets[params?.network ?? "testnet"].getTestTokens(); }
   usdtExportBackup(params: { password: string; network?: WalletNetwork }) { return this.usdtWallets[this.net(params.network)].exportBackup(params.password); }
   async usdtRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.usdtWallets, params.network, (w) => w.restoreBackup(params.text, params.password)); await wallet.ensureReady(); }
   arkCreate(params: Parameters<EngineApi["arkCreate"]>[0]) { return this.arkWallets[arkMode(params.network)].create(params); }

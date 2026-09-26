@@ -79,8 +79,11 @@ export interface DeskLightning {
   quote(invoice: string): Promise<{ quote: string; mint?: string; amount: number; feeReserve: number }>;
   /** True once paid, false while pending. Throws only when the sats did not go out. */
   pay(quote: { quote: string; mint?: string }, note: string, paymentId: string): Promise<boolean>;
-  /** Asks the source (and the mints) about our open invoices now: a contact said it paid one from another wallet. */
-  check?(): Promise<void>;
+  /**
+   * Asks the source (and the mints) about our open invoices now: a contact said it paid one from another wallet.
+   * `paid`: the invoice it says it paid, so one a test mint holds for a payer's word (StoredQuote `held`) is let go.
+   */
+  check?(paid?: string): Promise<void>;
 }
 export const mintLightning = (wallet: CashuWallet, network?: WalletNetwork): DeskLightning => ({
   createInvoice: (amount, paymentId) => wallet.receiveLightning(amount, paymentId, network),
@@ -482,7 +485,20 @@ export class PaymentDesk {
       throw error;
     }
     // Still pending (or its answer lost): the source settles it later, through onLightningResolved.
-    if (paid) await this.save({ ...this.current(request), state: "settled", mint: quote.mint, lightningPending: undefined });
+    if (paid) {
+      await this.save({ ...this.current(request), state: "settled", mint: quote.mint, lightningPending: undefined });
+      this.sayPaid(link, request);
+    }
+  }
+
+  /**
+   * A test mint marks every invoice paid by itself, so the payee's wallet does not take its word on a Testnet invoice
+   * and waits for the payer's (StoredQuote `held`). Once a Testnet request is paid over Lightning, the payee is told,
+   * as "I paid from another wallet" does. Real money needs no word: the payee's own wallet sees it.
+   */
+  private sayPaid(link: PaymentLink | null, request: StoredPayment): void {
+    if (!link || !request.invoice || paymentNetwork(request) !== "testnet") return;
+    void link.sendPayment({ id: newId(), timestamp: Date.now(), requestId: request.id, amount: { value: String(request.amount), asset: UNIT }, endpoint: [ENDPOINT.bolt11, request.invoice] }).catch(() => {});
   }
 
   /** Takes back ecash the peer never redeemed. If they did redeem it, the mint says so and the payment is settled. */
@@ -877,7 +893,8 @@ export class PaymentDesk {
     if (now - (this.lastCheckFrom.get(request.id) ?? 0) < 3_000) return;
     this.lastCheckFrom.set(request.id, now);
     try {
-      if (rail === "lightning") await this.lightning[paymentNetwork(request)].check?.();
+      // The invoice it says it paid, when it is this request's: the only one a contact can speak for.
+      if (rail === "lightning") await this.lightning[paymentNetwork(request)].check?.(payment.endpoint[1].trim().toLowerCase() === request.invoice?.toLowerCase() ? request.invoice : undefined);
       else if (rail === "bitcoin") await this.reconcileBitcoinReceipts();
       else if (rail === "bark") await this.reconcileBarkReceipts();
       else if (rail === "spark") await this.reconcileSparkReceipts();
@@ -890,7 +907,10 @@ export class PaymentDesk {
     const found = op.paymentId ? this.payments.get(op.paymentId) : undefined;
     if (found?.kind !== "request" || found.direction !== "in") return;
     const request = { ...found, lightningPending: undefined };
-    if (paid) await this.save(request.state === "pending" ? { ...request, state: "settled", mint: op.mint } : request);
+    if (paid) {
+      await this.save(request.state === "pending" ? { ...request, state: "settled", mint: op.mint } : request);
+      this.sayPaid(this.host.getLink(request.linkId), request);
+    }
     else await this.save({ ...request, error: "The Lightning payment did not go through" });
   }
 

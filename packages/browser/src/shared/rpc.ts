@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
@@ -22,8 +22,6 @@ export interface EngineApi {
   usdtReveal(params:{password?:string;network?:WalletNetwork}):string;
   usdtLock(params?:{network?:WalletNetwork}):void;
   usdtRefresh(params?:{network?:WalletNetwork}):void;
-  /** Sepolia only: test USDT from a public faucet; returns the transaction hash. */
-  usdtGetTestTokens(params?:{network?:WalletNetwork}):string;
   usdtExportBackup(params:{password:string;network?:WalletNetwork}):string;
   usdtRestoreBackup(params:{text:string;password:string;network?:WalletNetwork}):void;
   arkCreate(params: ArkCreate): void;
@@ -146,6 +144,8 @@ export interface EngineApi {
   walletCreate(params: WalletCreate): WalletInstanceView;
   /** Removes one wallet, its keys and config; refused while it holds money on this device and `acceptLoss` is not set. */
   walletRemove(params: WalletRemove): void;
+  /** Testnet only: a small fixed amount from the wallet's own test faucet (the test mint, Sepolia's USDT faucet). */
+  walletTestCoins(params: WalletTestCoins): TestCoinsResult;
   /** The app is in front again: chats look now, and dropped ones reconnect at once. */
   wake(): void;
   /** The primary mint is where Lightning invoices are created. */

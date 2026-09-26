@@ -9,8 +9,8 @@ import type { FedimintFederationView, FedimintWalletView } from "@ghostly/browse
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { SparkCreate, SparkWalletView } from "@ghostly/browser/engine/paymentAdapters/sparkWallet";
 import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
-import type { NetworkWalletsView, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletType } from "@ghostly/browser/shared/types";
-export type { NetworkWalletsView, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletType, WalletNetwork };
+import type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletTestCoins, WalletType } from "@ghostly/browser/shared/types";
+export type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletTestCoins, WalletType, WalletNetwork };
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
@@ -231,14 +231,14 @@ export interface WalletPlatform {
   create(params: WalletCreate): Promise<WalletInstanceView>;
   /** Removes one wallet (its keys, its config, what chats keep about it); refused while it holds money on this device unless `acceptLoss`. */
   remove(params: WalletRemove): Promise<void>;
+  /** "Get test coins" (Testnet only): a small fixed amount from the wallet's own test faucet, pressed for on purpose. */
+  testCoins(params: WalletTestCoins): Promise<TestCoinsResult>;
   usdtCreate(params:UsdtCreate):Promise<void>;
   usdtUnlock(password:string):Promise<void>;
   /** The recovery phrase; a wallet that opens by itself needs no password. */
   usdtReveal(password?:string):Promise<string>;
   usdtLock():Promise<void>;
   usdtRefresh():Promise<void>;
-  /** Sepolia only: test USDT from a public faucet; returns the transaction hash. */
-  usdtGetTestTokens():Promise<string>;
   usdtExportBackup(password:string):Promise<string>;
   usdtRestoreBackup(text:string,password:string):Promise<void>;
   arkCreate(params: ArkCreate):Promise<void>;

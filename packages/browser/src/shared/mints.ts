@@ -38,6 +38,14 @@ export function isLocalMint(url: string): boolean {
  */
 export const isWorthlessMint = (url: string) => isTestMint(url) || isLocalMint(url);
 
+/**
+ * A mint whose word "this invoice is paid" proves nobody paid it. The public test mint runs a fake Lightning backend
+ * that marks every invoice paid by itself, and a mint on this machine is a test server that may do the same. Its
+ * invoices are still shown to be paid, but the wallet mints one only once a payer says it paid it (see `held` on
+ * StoredQuote); asking it for test coins on purpose is `CashuWallet.testCoins`.
+ */
+export const paysItsOwnInvoices = isWorthlessMint;
+
 /** Real money, or test networks: each wallet has its own (see WalletNetwork in @ghostly/core). */
 export type WalletMode = WalletNetwork;
 /** The network a Cashu mint's ecash belongs to: test mints and mints on this machine are Testnet. */
