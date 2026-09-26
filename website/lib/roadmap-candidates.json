@@ -83,7 +83,7 @@
     "level": "available",
     "range": "8xx",
     "section": "Transport, discovery and delivery",
-    "body": "**Provider or primitive; confirmed upstream source**\n\nCurrent invite parser and [admission draft 800](800-invite-join.md)\n\n**Signer / authentication**\n\nBearer bootstrap vs authenticated admission are distinct\n\n**Runtime/platform route**\n\nCurrent camera/image/paste where permissions allow\n\n**Ghostly status and next gate**\n\n**Available**: one bech32m `ghostly1` invite code ([801](801-invitation-profiles.md), #210), shown as a QR and as a ghostly.tools link that opens the app, typo-checked, pinning the inviter's participation key (`invite.code`, `invite.qr.*`, `invite.link`, `invite.pin`); older formats still read. The CLI does not read `ghostly1` codes. Future admission semantics are proposed. A QR carries a bounded invitation; it is neither a live transport nor proof of the person who displayed it.",
+    "body": "**Provider or primitive; confirmed upstream source**\n\nCurrent invite parser and [admission draft 800](800-invite-join.md)\n\n**Signer / authentication**\n\nBearer bootstrap vs authenticated admission are distinct\n\n**Runtime/platform route**\n\nCurrent camera/image/paste where permissions allow\n\n**Ghostly status and next gate**\n\n**Available**: one bech32m `ghostly1` invite code ([801](801-invitation-profiles.md), #210), shown as a QR and as a ghostly.tools link that opens the app, typo-checked, pinning the inviter's participation key (`invite.code`, `invite.qr.*`, `invite.link`, `invite.pin`); older formats still read. The Rust compatibility CLI does not read `ghostly1` codes; the headless `ghostly` CLI ([11xx](11xx-headless.md)) creates and joins them. Future admission semantics are proposed. A QR carries a bounded invitation; it is neither a live transport nor proof of the person who displayed it.",
     "sourceAnchor": "transport-discovery-and-delivery"
   },
   {
@@ -1093,7 +1093,7 @@
     "level": "planned",
     "range": "Unassigned",
     "section": "Plugins, apps, catalogs and GhostlyOS",
-    "body": "**Proposed deliverable**\n\nReact Native, improved PWA behavior, CLI/daemon tooling and plugin hosts\n\n**Dependencies / trust boundary**\n\n**Planned**: the CLI is a compatibility client today ([CLI.md](../CLI.md): the older DHT records, no `ghostly1` codes, no paired chats), and there is no mobile app beyond the web app's phone layout. Each advertises what it actually supports. Native SDK availability is not proof of a Ghostly mobile integration, background delivery, battery performance or App Store acceptance.",
+    "body": "**Proposed deliverable**\n\nReact Native, improved PWA behavior, CLI/daemon tooling and plugin hosts\n\n**Dependencies / trust boundary**\n\n**Planned** for React Native, the PWA and plugin hosts: there is no mobile app beyond the web app's phone layout. The CLI/daemon part has begun: the headless `ghostly` CLI ([draft 11xx](11xx-headless.md), `packages/cli`) runs the app's engine for bots, phase 1 on `dev` (chats, invites, community groups, events, hooks; `e2e/web/headless-chat.spec.ts` puts it in a chat with the web app), with payments (phase 2), files, identities and services (phase 3) and packaging (phase 4) to follow. The Rust `ghostly-cli` stays the compatibility client ([CLI.md](../CLI.md)). Each advertises what it actually supports. Native SDK availability is not proof of a Ghostly mobile integration, background delivery, battery performance or App Store acceptance.",
     "sourceAnchor": "plugins-apps-catalogs-and-ghostlyos"
   }
 ]

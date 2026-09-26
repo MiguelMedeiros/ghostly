@@ -1,0 +1,165 @@
+# WISP 11xx: Headless Runtime and Local Control API
+
+| Field | Value |
+|---|---|
+| Number assignment | 11xx; planned, number to be defined |
+| Status | Draft |
+| Revision | 0.2 |
+| Updated | 2026-09-26 |
+| Document kind | Contract (local API; nothing here goes on the wire between peers) |
+| Editors | Ghostly contributors; maintainer review pending |
+| Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
+| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phase 1 on `dev` |
+
+> This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
+
+## Purpose
+
+Bots talk through chats the way the Hermes agent does on Telegram: a process that stays online, reads what arrives, answers, pays and gets paid. For that, everything the app does has to be reachable without a screen. This document fixes how Ghostly runs headless (the **runtime**), how other programs on the same machine drive it (the **local control API**), and what it tells them (the **event stream**). It changes nothing between peers: a headless Ghostly is, to its contacts, one more client of [400](400-chat.md) and [401](401-paired-chat.md).
+
+## Decision: the app's engine on Node
+
+**Chosen.** The headless runtime runs the **same engine as the apps**, `GhostlyNode` from `@ghostly/browser`, compiled into one Node bundle with `@ghostly/core`. It is not a second implementation of the protocol. The web app, the extension and the Desktop are already a UI over the engine's calls (`EngineApi` in `packages/browser/src/shared/rpc.ts`) and its events; the daemon is one more host of that engine (`EngineServer`), and the CLI one more client.
+
+Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, two processes pair through a Pkarr relay, their chat goes live over native HyperDHT in about six seconds, and the Iroh wasm build starts its endpoint. Building phase 1 found one gap the spike did not: a community group's entry and edge links are WebRTC only in the engine, so WebRTC moved into phase 1 (below). With it, a bot and the web app go live over WebRTC between libdatachannel and Chromium.
+
+**Weighed and not chosen.**
+
+| Option | Why not |
+|---|---|
+| Extend the Rust `ghostly-cli` to v1.0 | Every v1.0 feature (one chat, groups, files/3, eight payment methods, identity providers) lives in TypeScript. A Rust port is a second implementation of all of it, forever behind the app. |
+| Drive the Desktop app over a local port | Needs a desktop session and a window; not a server process; one profile per app. |
+| A headless browser running the web app | Heavy (a Chromium per bot), no native HyperDHT, and scraping a UI instead of calling the engine. |
+
+## Runtime
+
+| Need | Browser/Desktop today | Headless (Node) |
+|---|---|---|
+| Storage (IndexedDB) | The browser's IndexedDB | fake-indexeddb for the exact semantics, made durable per profile: a snapshot plus an append-only journal, each committed read-write transaction fsynced before the engine hears `complete` (`packages/cli/src/runtime/storage.ts`). A SQLite-backed store can replace it behind the same module. |
+| Files | OPFS (web), native files through Rust (Desktop) | Files under the profile's folder (phase 3) |
+| DHT floor, Pkarr | HTTP relays (web); Mainline DHT direct (Desktop, [#289](https://github.com/MiguelMedeiros/ghostly/pull/289)) | HTTP relays, as the web app; DHT-direct is planned (phase 3) |
+| HyperDHT ([103](103-hyperdht.md)) | Through a relay (web); a Node sidecar (Desktop) | Native, in process: the Desktop sidecar's own endpoint (`native-transports/hyperdht/endpoint.mjs`) |
+| Iroh ([102](102-iroh.md)) | wasm, relay only (web); native (Desktop) | The wasm build, relay only, as the web app ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)). The native `iroh-peer` bridge is an option later. |
+| WebRTC ([101](101-webrtc.md)) | The browser's | libdatachannel through `node-datachannel`'s W3C polyfill (a native module with prebuilt binaries). Needed, not optional, for groups: the engine gives group links no native endpoints, so a group without WebRTC never joins. It is also how a bot goes live with a browser directly. Without the module (or with `GHOSTLY_WEBRTC=0`) the CLI still chats over HyperDHT, Iroh and the DHT, and says so. |
+| Calls and screen sharing | WebRTC media | Not applicable: no camera, microphone or screen. Call offers are reported as events only. |
+
+## Profiles and files
+
+- A profile is a folder: `$GHOSTLY_HOME/profiles/<name>/` (default `~/.ghostly`), mode 0700. Its files are 0600.
+- It holds the engine's store (`db/`), the daemon's socket (`daemon.sock`), its lock (`daemon.lock`), the event journal (`events.jsonl`) and later received files (`files/`).
+- Only one process opens a profile at a time. A command finds the daemon's socket and goes through it; with no daemon it takes the lock, runs the engine for the length of the command and leaves (a **one-shot**). Bots SHOULD run the daemon: a one-shot is offline between commands, so the contact sees it come and go.
+- Secrets (seeds, keys, wallet phrases, ecash tokens, backups) are never printed unless the command is given `--show-secret`.
+
+## Local control API
+
+**Transport.** A Unix domain socket at `<profile>/daemon.sock`, created 0600 inside the 0700 profile folder: only the account that owns the profile can connect. When that path is longer than a socket path may be (104 bytes on macOS), the socket is `/tmp/ghostly-<hash of the folder>.sock`, still 0600. There is no TCP listener. On Windows a named pipe takes its place (untested).
+
+**Framing.** Newline-delimited JSON, one object per line, UTF-8, at most 16 MiB per line.
+
+**Requests and responses.**
+
+```json
+{"id": 1, "method": "chat.send", "params": {"chat": "afptwgs37ya4m3eg", "text": "hi"}}
+{"id": 1, "result": {"messageId": "…", "delivery": "queued"}}
+{"id": 2, "error": {"code": "not_found", "message": "No chat afptwgs37ya4m3eg"}}
+```
+
+- `id` is chosen by the client (number or string) and echoed.
+- Methods are the CLI's own (`status`, `profile.*`, `settings.*`, `invite.*`, `chat.*`, `group.*`, `events.*`, `daemon.stop`, listed in [the CLI reference](../../packages/cli/README.md)) and **every engine call** through `engine.call` (`{"method": "walletCreate", "params": {…}, "confirmReal": false}`) with the engine's own parameters. The calls reachable are exactly the app's `EngineApi` (a test keeps the two lists equal) plus the reads `getState` and `getMessages`; nothing else on the engine object is. Nothing the app can do is out of reach.
+- Error `code`s: `bad_request`, `usage` (the CLI's arguments), `not_found`, `refused` (the engine declined: a cross-network payment, a text the chat cannot carry, the own invite), `unavailable` (not live, no session), `confirm` (needs `force`, `yes` or `confirmReal`), `timeout` (a wait ran out), `busy` (another process holds the profile), `engine` (anything else the engine threw), `internal`.
+
+**Mainnet.** Every spend on Mainnet needs the engine's `confirmedReal: true` ([#298](https://github.com/MiguelMedeiros/ghostly/pull/298)); the engine refuses without it. The CLI sets it only when the command is given `--confirm-real`. `engine.call` refuses (`confirm`) parameters that carry `confirmedReal` unless the request itself says `"confirmReal": true`, so a `confirmedReal` copied into parameters by mistake moves nothing. A program speaking to the socket directly is responsible for setting it only on a person's explicit confirmation.
+
+**Secrets over the socket.** Calls that return secrets (`exportLinks`, `takeInvite`, `walletExport`, the wallets' `*Backup`, `*Reveal` and `*ExportBackup`, Fedimint notes) are answered to the socket, which only the owner can reach; the CLI refuses to make them without `--show-secret`, and `settings.get` masks credentials unless asked.
+
+## Event stream
+
+`events.subscribe` turns the connection into a stream; `ghostly listen` prints it as JSON lines:
+
+```json
+{"seq": 42, "id": "message.received:afptwgs37ya4m3eg:1790449803535-3", "type": "message.received", "at": 1790449803601, "chat": "afptwgs37ya4m3eg", "message": {"id": "…", "text": "hello", "timestamp": 1790449803535, "from": "peer"}}
+```
+
+- `seq` grows by one per event in a profile, across restarts. `listen --since <seq>` replays what the journal still holds (the last 10,000 events) before following.
+- `id` is stable for the fact it reports: the same message received is the same id whenever the daemon derives it again, so a bot that restarts dedupes by `id`.
+- Types in phase 1: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `call.offer`; `events.gap` (a replay asked for more than the journal keeps). Later phases add `payment.*`, `file.*` and `identity.*`.
+- Which messages were reported is kept in the profile's own store (a database of the CLI's beside the engine's): a restart reports only what is new, a message that arrived while no process derived events (a crash) is reported at the next start, and a profile's first start reports none of the history it already had.
+- As the app's chat screen does, the side that joined says `👋 <name> joined` once the chat first goes live and the other side answers once; each is said once per chat, across restarts.
+- Hooks: `listen --exec "<command>"` runs the command once per event, in order, with the event on its stdin; `listen --webhook <url>` POSTs each event to a local bridge (loopback only); `listen --cursor <file>` records the last event handled (the acknowledgement), and a restarted listener resumes after it. With no daemon running, `listen` becomes the daemon, socket included, so a hook can answer with `ghostly send`.
+
+## Exit codes (CLI)
+
+| Code | Meaning |
+|---|---|
+| 0 | Done |
+| 1 | The engine or the network refused or failed; stdout has `{"error": {...}}` |
+| 2 | Usage: unknown command or bad arguments |
+| 3 | Not found (profile, chat, message) |
+| 4 | Timed out waiting (`--wait`) |
+| 5 | Needs confirmation (`--confirm-real`, `--force`) |
+
+## Parity with the app
+
+Status: **Phase 1** (in the first pull request), **Planned (phase n)**, or **Not applicable** with the reason. Every engine call is reachable from the first phase through `ghostly engine <method>`; a phase adds the commands, checks and tests that make the feature usable without knowing the engine.
+
+| Area | Feature | Status |
+|---|---|---|
+| Profiles | Create, list, use, remove; per-profile folder, files 0600 | Phase 1 |
+| Profiles | Name and picture shown to contacts | Phase 1 (`profile set --name`); picture phase 3 |
+| Profiles | Backup and restore (WISP 05 bundle) | Planned (phase 3) |
+| Invites | Create a `ghostly1` invite and its link; join one; the self-invite guard | Phase 1 |
+| Invites | Pairing progress | Phase 1 (`chat.pairing` events, `chat wait`) |
+| Invites | Join notices (`👋 <name> joined`) as the app's chat screen sends them | Phase 1 |
+| Chats | List, history (paged), send (argument or stdin), stream | Phase 1 |
+| Chats | Delivery states, retry, delete, rename | Phase 1 |
+| Chats | Transport per chat (auto, webrtc, iroh, hyperdht, dht) and fallback; connection status and history | Phase 1 |
+| Chats | Pin and mute | Not applicable: both are UI-only in the app (local display state); a bot filters for itself |
+| Chats | Message details | Phase 1 |
+| Chats | Secret guard | Phase 1: `send` refuses seeds, keys and ecash unless `--force` (the app's detector) |
+| Chats | Rich text | Not applicable: text is text; the bot formats it |
+| Chats | Link previews made by the sender | Planned (phase 3, `--preview`) |
+| Chats | Hold for an away contact (S3) | Planned (phase 3) |
+| Files | Send, receive into a folder, consent for large files (re-asked after expiry, #302), progress events; voice notes as files | Planned (phase 3) |
+| Groups | Create (community with its link, or a private mesh), join by link, leave, forget, accept or decline an invitation, list, send, history, @mentions in and out | Phase 1 (needs WebRTC) |
+| Groups | Admin: remove, make admin, rotate, link on/off, picture; invite a contact | Planned (phase 3) |
+| Payments | Wallet instances per network (the New flow types), list, balance, remove with the #303 protections | Planned (phase 2) |
+| Payments | Several Lightning cards, default for receiving | Planned (phase 2) |
+| Payments | Testnet faucet | Planned (phase 2) |
+| Payments | Pay and request in a chat, accept per chat per network, pay an invoice, LNURL or BIP 21, history | Planned (phase 2) |
+| Payments | Mainnet spends only with `--confirm-real`; cross-network refusal | Phase 1 for the passthrough (see Mainnet); commands in phase 2 |
+| Identities | Add proofs that need no browser (Nostr with a key or bunker, domain, OpenPGP, SSH, Bitcoin address, DID); list; share per contact; a contact's identities and checks; public profiles | Planned (phase 3) |
+| Identities | Proofs that need a browser or an approval app (OpenID, Bluesky, Pubky Ring) | Planned (phase 3): the URL or QR is printed and the command waits; where that cannot work headless, app only |
+| Services | Share a loopback web app with a contact; list what a contact shares; open one as a local port | Planned (phase 3) |
+| Calls | Voice, video, screen sharing | Not applicable (no media devices); `call.offer` events only |
+| Settings | Pkarr relays, Iroh relays, HyperDHT relay, ICE servers, public profiles, sharing the profile's name | Phase 1 through `settings set` and `profile set` |
+| Settings | DHT-direct (Mainline reached over UDP, as the Desktop) | Planned (phase 3) |
+
+## Wallet SDKs on Node (phase 2 checks)
+
+| Method | SDK | Expected on Node |
+|---|---|---|
+| Cashu | `@cashu/cashu-ts` | Pure JavaScript and `fetch`: works |
+| Lightning sources | LND REST, Core Lightning (Commando over WebSocket), NWC, LNURL, Breez/Spark | LND's pinned certificate needs Node's own TLS options (the Desktop uses a Rust command); WebSocket is global in Node 22; Breez ships a Node build |
+| Arkade | `@arkade-os/sdk` | JavaScript; its event streams may need an `EventSource` for Node |
+| Bark | `@secondts/bark` (wasm) | The wasm is imported with Vite's `?url`; on Node it must be read from disk |
+| Fedimint | web SDK (wasm in a worker, OPFS) | Gap: no OPFS or module worker on Node. Needs the SDK's Node transport or the Rust client |
+| Bitcoin (BDK) | `@bitcoindevkit/bdk-wallet-web` (wasm) | As Bark: wasm from disk |
+| USDT | `ethers`, WDK | JavaScript: works |
+
+## The Rust `ghostly-cli`
+
+It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md)): older DHT records, no `ghostly1` codes, no chat sessions. Its commands and its SKILL.md keep working for the bots that use them. New bots use `ghostly`. The Rust client is marked legacy in the docs; removing it is a separate decision, announced before it happens.
+
+## Security considerations
+
+- The socket is the profile: whoever can open it can spend from its wallets. It is owner-only and never on TCP. A webhook target must be loopback.
+- A one-shot command and a daemon never open one profile at once (the lock), so two engines never publish under the same keys or spend the same ecash.
+- Events carry message text and payment amounts, never keys or tokens. `--exec` runs the command with the event on stdin, never in its arguments (no shell injection from a contact's text).
+- The journal is fsynced per transaction: a crash loses at most a transaction whose `complete` the engine never saw.
+
+## Phases
+
+1. The runtime, the daemon and the API, profiles, invites, one chat (send, receive, stream, transports), basic groups, the event stream and hooks. End-to-end: two CLI peers; a CLI peer and the web app.
+2. Wallets and payments on the test networks of the shared regtest stack, with `--confirm-real` on Mainnet.
+3. Files, identities, services, advanced groups, settings and DHT-direct.
+4. Packaging (npm, then a single binary), the bot skill, examples (echo bot, payment bot), docs.

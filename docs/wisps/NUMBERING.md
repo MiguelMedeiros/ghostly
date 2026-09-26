@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 52 specifications have the document status Draft; what is implemented is in the [catalogue](README.md). Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 53 specifications have the document status Draft; what is implemented is in the [catalogue](README.md). Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -17,6 +17,7 @@ All 52 specifications have the document status Draft; what is implemented is in 
 | 800-899 | Invite and join (800), invitation profiles (801) |
 | 900-999 | Group session negotiation (900); group mesh, group community and optional GossipSub distribution (9xx, numbers to be defined) |
 | 1000-1099 | Storage contract (1000), local file storage (1001), S3-compatible storage (1002) |
+| 1100-1199 | Headless runtime and its local control API (11xx, number to be defined); local only, nothing on the wire |
 
 A document describing an adapter does not establish that an adapter is implemented. A vendor/plugin does not automatically require a WISP. These families are not a mandatory stack; DHT text has its own bounded delivery path and external identity remains optional.
 
@@ -78,6 +79,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | none | [1000](1000-storage.md) |
 | none | [1001](1001-local-storage.md) |
 | none | [1002](1002-s3-storage.md) |
+| none | [11xx · headless · number to be defined](11xx-headless.md) |
 
 ## Link compatibility
 

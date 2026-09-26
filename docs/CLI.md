@@ -1,5 +1,11 @@
 # ghostly-cli
 
+> **For a bot on today's Ghostly, use `ghostly`** (`packages/cli`): the app's own engine without a screen, with
+> `ghostly1` invites, one chat, groups, a JSON event stream and every engine call. Reference:
+> [packages/cli/README.md](../packages/cli/README.md); contract: [WISP 11xx](wisps/11xx-headless.md); agent skill:
+> [packages/cli/SKILL.md](../packages/cli/SKILL.md). `ghostly-cli`, below, stays the compatibility client for the bots
+> already built on it.
+
 For the terminal ghosts among us: `ghostly-cli` sends and receives encrypted messages from scripts and bots.
 
 It is a compatibility client. It speaks the v0.4 record format ([WISP 402](wisps/402-legacy-chat.md)): each side publishes a small encrypted packet under its own key, and the other side reads it. It reads only its own `ghost://` invites; an app invite (`ghostly1…`) is refused with a message saying to open it in the Ghostly app.

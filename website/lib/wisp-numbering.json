@@ -466,5 +466,14 @@
     "kind": "Adapter",
     "displayNumber": "1002",
     "numberAssignment": "defined"
+  },
+  {
+    "oldId": "none",
+    "id": "11xx-headless",
+    "oldFile": "11xx-headless.md",
+    "file": "11xx-headless.md",
+    "kind": "Contract",
+    "displayNumber": "11xx",
+    "numberAssignment": "unassigned"
   }
 ]
