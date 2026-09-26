@@ -3,6 +3,7 @@ import { decodeBolt11, parseLightningDestination, paymentUri, type PaymentReview
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
 import { PaymentReview } from "../PaymentReview";
+import { ConfirmRealMoney } from "../ConfirmRealMoney";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./ui";
 import { LightningAddressPay } from "./LightningAddressPay";
 import { useRun } from "./run";
@@ -47,6 +48,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [invoiceAt, setInvoiceAt] = useState(0);
   const [payInput, setPayInput] = useState("");
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
+  /** Real money: Pay opens the second step, and only it pays. */
+  const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState("");
   const [mintUrl, setMintUrl] = useState("");
   const [review, setReview] = useState<Review | null>(null);
@@ -70,6 +73,11 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const invoicePaid = invoice !== null && ((viaMint && mintPaid)
     || !!ln?.recent.some((op) => op.direction === "in" && op.paymentHash === paymentHash && op.state === "paid"));
   const isToken = /^cashu[AB]/i.test(payInput.trim());
+  const payQuote = (payable: { quote: string; mint: string }, confirmedReal: boolean) => void run(async () => {
+    const paid = await wallet.payQuote(payable.quote, payable.mint, undefined, confirmedReal);
+    setQuote(null); setConfirming(false); setPayInput("");
+    setNotice(paid ? "Paid." : viaMint ? "The payment is still pending at the mint." : "The payment is still pending. It is being checked; nothing is paid again.");
+  });
   const pasted = isToken ? null : decodeBolt11(payInput);
   /** A Lightning address or LNURL: resolved and paid step by step, through the same source. */
   const [destination, destinationError] = (() => {
@@ -77,7 +85,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, e instanceof Error ? e.message : String(e)] as const; }
   })();
 
-  const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); };
+  const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setConfirming(false); };
 
   return (
     <div className="space-y-6">
@@ -129,10 +137,12 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             {quote ? (
               <>
                 <p className="text-text-primary text-sm">Pay <b>{quote.amount.toLocaleString()} sats</b><span className="text-text-muted"> + up to {quote.feeReserve.toLocaleString()} in fees</span></p>
-                <ButtonGroup fill>
-                  <Button variant="primary" disabled={busy} onClick={() => void run(async () => { const paid = await wallet.payQuote(quote.quote, quote.mint); setQuote(null); setPayInput(""); setNotice(paid ? "Paid." : viaMint ? "The payment is still pending at the mint." : "The payment is still pending. It is being checked; nothing is paid again."); })}>{busy ? "Paying…" : "Pay"}</Button>
-                  <Button onClick={() => setQuote(null)}>Cancel</Button>
-                </ButtonGroup>
+                {confirming ? <ConfirmRealMoney what={`${quote.amount.toLocaleString()} sats (plus a fee of up to ${quote.feeReserve.toLocaleString()})`} busy={busy} onSend={() => payQuote(quote, true)} onBack={() => setConfirming(false)} /> : (
+                  <ButtonGroup fill>
+                    <Button variant="primary" data-testid="wallet-pay-confirm" disabled={busy} onClick={() => testnet ? payQuote(quote, false) : setConfirming(true)}>{busy ? "Paying…" : "Pay"}</Button>
+                    <Button onClick={() => setQuote(null)}>Cancel</Button>
+                  </ButtonGroup>
+                )}
               </>
             ) : (
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { if (isToken) { const received = await wallet.receiveToken(payInput); setPayInput(""); setNotice(`Redeemed ${received.toLocaleString()} sats.`); } else setQuote(await wallet.quoteInvoice(payInput, rail === "cashu" ? "cashu" : undefined)); }); }}>

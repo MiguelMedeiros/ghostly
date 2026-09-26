@@ -16,12 +16,14 @@ import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet"
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
 import { useCardFlip } from "./deck/useCardFlip";
 import { ChatPaymentAccept } from "./ChatPaymentAccept";
+import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import "./payment-composer.css";
 
 interface PaymentComposerProps {
   balance: number;
   /** `network`: the card's (a Cashu wallet of that network sends). */
-  onSend: (amount: number, memo: string, network?: WalletNetwork) => Promise<string | null>;
+  /** `confirmedReal`: the person confirmed a Mainnet send as real money (the engine refuses one without it). */
+  onSend: (amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => Promise<string | null>;
   /** `rail`: the card it was made on, for a request that must carry that way of paying only (groups). `network`: the card's. */
   onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: ChatRail, network?: WalletNetwork) => Promise<string | null>;
   onClose: () => void;
@@ -115,6 +117,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
   const [busy, setBusy] = useState<"send" | "request" | null>(null);
+  /** A send with no review on real money: the second step is open, and only it sends. */
+  const [confirmSend, setConfirmSend] = useState(false);
   const [error, setError] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
@@ -130,6 +134,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const unit = method === "usdt" ? (network === "testnet" || (usdt?.chainId && usdt.chainId !== 1) ? "TEST-USDT" : "USDT") : satsUnit(network ?? "mainnet");
   const decimals = method === "usdt" ? usdt?.decimals ?? 6 : 0;
   const value = Number(amount);
+  // What the second step names is what it sends: another amount or card asks again.
+  useEffect(() => setConfirmSend(false), [amount, selected]);
   // Ecash goes straight to the contact; Ark, Bark, Spark, on-chain and USDT ask the contact's app for an address first. Lightning
   // pays a request the contact sends.
   const canSend = rail !== "lightning" && !sendUnavailable;
@@ -175,7 +181,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   }, [side, flipped]);
   useSheetRoom(containerRef);
 
-  const send = async () => {
+  const send = async (confirmedReal = false) => {
     setError(""); setBusy("send");
     try {
       if (reviewContext && bound && (method === "arkade" || method === "bark" || method === "spark" || method === "bitcoin" || method === "usdt" || method === "fedimint")) {
@@ -189,7 +195,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
         if (!mint) throw new Error("Add a Cashu mint first");
         setReview(await bound.preparePayment({ target: { method: "cashu", network: network === "testnet" ? "cashu-test" : "bitcoin", provider: mint.url, address: reviewContext.peer, asset: "BTC", unit: "sat", expiresAt: Date.now() + 15 * 60 * 1000 }, amount: value, feeCap: CASHU_FEE_CAP, payee: reviewContext.peer, linkId: reviewContext.linkId, memo: memo || undefined }));
       } else {
-        const err = await onSend(value, memo, network);
+        // Ecash sent without a review: on real money, only once the second step confirms it (no network is Mainnet).
+        if (network !== "testnet" && !confirmedReal) { setConfirmSend(true); return; }
+        const err = await onSend(value, memo, network, confirmedReal || undefined);
         if (err) setError(err); else onClose();
       }
     } catch (e) { setError(e instanceof Error ? e.message : "Could not prepare payment"); }
@@ -264,7 +272,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
           </label>
           <input className="payment-back-memo" placeholder="What for? (optional)" aria-label="What for? (optional)" maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint">{blocked ?? (tooMuch ? `More than the ${spendable!.toLocaleString()} ${unit} on this card.` : how(rail))}</p>
-          <div className="payment-back-actions">
+          {confirmSend ? <ConfirmRealMoney what={`${value.toLocaleString()} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions">
             <button data-testid="payment-request" disabled={!value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
               {busy === "request" ? "Requesting…" : "Request"}
             </button>
@@ -272,7 +280,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
               title={canSend ? undefined : sendUnavailable ?? "To pay on this card, tap Pay on your contact's request"} className="payment-back-primary">
               {asking ? "Asking for an address…" : busy === "send" ? "Preparing…" : "Send"}
             </button>
-          </div>
+          </div>}
         </>}
         {error && <p role="alert" className="text-danger text-xs m-0">{error}</p>}
       </div>

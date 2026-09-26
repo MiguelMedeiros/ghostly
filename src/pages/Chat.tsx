@@ -235,12 +235,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
   const pay = useCallback(
-    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", network?: WalletNetwork): Promise<string | null> => {
+    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", network?: WalletNetwork, confirmedReal?: boolean): Promise<string | null> => {
       if (!wallet || !peerKey) return null;
       // The card's own wallet: the request or the ecash is of its network.
       const card = network ? wallet.forNetwork(network) : wallet;
       try {
-        const { timestamp, paymentId } = await (kind === "request" ? card.request(peerKey, amount, memo || undefined, method) : card.send(peerKey, amount, memo || undefined));
+        const { timestamp, paymentId } = await (kind === "request" ? card.request(peerKey, amount, memo || undefined, method) : card.send(peerKey, amount, memo || undefined, confirmedReal));
         const sats = network === "testnet" ? "test sats" : "sats";
         const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} ${sats}` : `⚡ Requested ${amount.toLocaleString()} ${sats}`;
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
@@ -252,7 +252,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     },
     [wallet, peerKey, addSystemMessage],
   );
-  const paySend = useCallback((amount: number, memo: string, network?: WalletNetwork) => pay("send", amount, memo, undefined, network), [pay]);
+  const paySend = useCallback((amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => pay("send", amount, memo, undefined, network, confirmedReal), [pay]);
   const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", _rail?: unknown, network?: WalletNetwork) => pay("request", amount, memo, method, network), [pay]);
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);

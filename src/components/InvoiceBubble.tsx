@@ -4,6 +4,7 @@ import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { lightningNetworkFor } from "./walletCardData";
 import { MONEY_LABEL, NetworkTag, satsOf } from "./NetworkTag";
+import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { CashuInspection } from "../lib/platform";
 import type { MoneyInText } from "../lib/money";
@@ -117,6 +118,8 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   // Handed to the mint, which has not settled it yet: paying again could pay twice.
   const [pending, setPending] = useState(false);
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
+  /** Real money: Pay opens the second step, and only it pays. */
+  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -139,6 +142,24 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
     }
   };
 
+  const pay = (payable: { quote: string; mint: string }, confirmedReal: boolean) =>
+    run(async () => {
+      try {
+        if (!(await wallet!.payQuote(payable.quote, payable.mint, undefined, confirmedReal))) {
+          // Pending at the mint: the wallet settles it, or gives the sats back, on its own.
+          setQuote(null);
+          setConfirming(false);
+          setPending(true);
+          return;
+        }
+      } catch (e) {
+        // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.
+        if (!/already paid/i.test(e instanceof Error ? e.message : String(e))) throw e;
+      }
+      markSettled(id);
+      setPaid(true);
+    });
+
   return (
     <Card
       testId="invoice-bubble"
@@ -153,30 +174,11 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
         <span className="text-accent-hover text-xs font-bold self-center" data-testid="invoice-paid">Paid ✓</span>
       ) : pending ? (
         <span className="text-xs self-center text-text-primary/80" data-testid="invoice-pending">Payment pending at the mint…</span>
+      ) : quote && confirming ? (
+        <ConfirmRealMoney what={`${quote.amount.toLocaleString()} sats (plus a fee of up to ${quote.feeReserve.toLocaleString()})`} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
       ) : quote ? (
         <>
-          <button
-            className={button}
-            disabled={busy}
-            data-testid="invoice-confirm"
-            onClick={() =>
-              run(async () => {
-                try {
-                  if (!(await wallet!.payQuote(quote.quote, quote.mint))) {
-                    // Pending at the mint: the wallet settles it, or gives the sats back, on its own.
-                    setQuote(null);
-                    setPending(true);
-                    return;
-                  }
-                } catch (e) {
-                  // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.
-                  if (!/already paid/i.test(e instanceof Error ? e.message : String(e))) throw e;
-                }
-                markSettled(id);
-                setPaid(true);
-              })
-            }
-          >
+          <button className={button} disabled={busy} data-testid="invoice-confirm" onClick={() => network === "mainnet" ? setConfirming(true) : pay(quote, false)}>
             {busy ? "Paying…" : `Pay ${quote.amount.toLocaleString()} + up to ${quote.feeReserve.toLocaleString()} fee`}
           </button>
           <button className={quiet} disabled={busy} onClick={() => setQuote(null)}>Cancel</button>
