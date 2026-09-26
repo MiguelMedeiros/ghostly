@@ -1,0 +1,122 @@
+/* Rich message text (RichText.tsx): code, spoilers, long blobs, times. Tints sit on either bubble colour and theme;
+   the syntax colours follow GitHub's, one set per light and dark. */
+.rich-code,
+.rich-codeblock pre,
+.rich-blob-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.rich-code {
+  font-size: 0.88em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.28);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+:root[data-theme="light"] .rich-code { background: rgb(0 0 0 / 0.06); }
+
+.rich-codeblock {
+  margin: 4px 0 2px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgb(0 0 0 / 0.3);
+  white-space: normal;
+}
+:root[data-theme="light"] .rich-codeblock { background: rgb(0 0 0 / 0.05); }
+.rich-codeblock-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid rgb(127 127 127 / 0.2);
+}
+.rich-codeblock pre {
+  margin: 0;
+  padding: 6px 8px 8px;
+  font-size: 12.5px;
+  line-height: 17px;
+  white-space: pre;
+  overflow-x: auto;
+  text-align: left;
+}
+
+.rich-action {
+  font-size: 12px;
+  color: var(--color-link);
+  cursor: pointer;
+  padding: 0 2px;
+}
+.rich-action:hover { text-decoration: underline; }
+
+.rich-spoiler {
+  border-radius: 3px;
+  background: var(--color-text-muted);
+  color: transparent;
+  cursor: pointer;
+  user-select: none;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.rich-spoiler * { color: transparent !important; background: transparent !important; text-decoration-color: transparent !important; }
+.rich-spoiler:hover { background: var(--color-text-secondary); }
+.rich-spoiler:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.rich-spoiler-shown {
+  border-radius: 3px;
+  background: rgb(127 127 127 / 0.18);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* A long blob: one line with its actions, or all of it wrapped anywhere. */
+.rich-blob {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.rich-blob-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+}
+.rich-blob-actions { flex: none; display: inline-flex; gap: 6px; }
+.rich-blob-open { flex-direction: column; gap: 2px; white-space: normal; }
+.rich-blob-open .rich-blob-text { overflow: visible; overflow-wrap: anywhere; word-break: break-all; white-space: normal; }
+
+.rich-time {
+  font: inherit;
+  color: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.rich-time-local { color: var(--color-text-secondary); font-size: 0.92em; }
+
+/* Syntax colours (highlight.js classes, from lowlight's tree). */
+.rich-codeblock .hljs-comment, .rich-codeblock .hljs-quote { color: #9ea7b3; font-style: italic; }
+.rich-codeblock .hljs-keyword, .rich-codeblock .hljs-selector-tag, .rich-codeblock .hljs-meta .hljs-keyword, .rich-codeblock .hljs-doctag { color: #ff7b72; }
+.rich-codeblock .hljs-string, .rich-codeblock .hljs-regexp, .rich-codeblock .hljs-meta .hljs-string { color: #a5d6ff; }
+.rich-codeblock .hljs-number, .rich-codeblock .hljs-literal, .rich-codeblock .hljs-attr, .rich-codeblock .hljs-attribute, .rich-codeblock .hljs-variable, .rich-codeblock .hljs-property, .rich-codeblock .hljs-selector-attr, .rich-codeblock .hljs-selector-class, .rich-codeblock .hljs-selector-id { color: #79c0ff; }
+.rich-codeblock .hljs-title, .rich-codeblock .hljs-section { color: #d2a8ff; }
+.rich-codeblock .hljs-built_in, .rich-codeblock .hljs-type, .rich-codeblock .hljs-symbol, .rich-codeblock .hljs-params, .rich-codeblock .hljs-meta { color: #ffa657; }
+.rich-codeblock .hljs-name, .rich-codeblock .hljs-tag { color: #7ee787; }
+.rich-codeblock .hljs-addition { color: #aff5b4; background: rgb(46 160 67 / 0.2); }
+.rich-codeblock .hljs-deletion { color: #ffdcd7; background: rgb(248 81 73 / 0.2); }
+:root[data-theme="light"] .rich-codeblock .hljs-comment, :root[data-theme="light"] .rich-codeblock .hljs-quote { color: #57606a; }
+:root[data-theme="light"] .rich-codeblock .hljs-keyword, :root[data-theme="light"] .rich-codeblock .hljs-selector-tag, :root[data-theme="light"] .rich-codeblock .hljs-meta .hljs-keyword, :root[data-theme="light"] .rich-codeblock .hljs-doctag { color: #cf222e; }
+:root[data-theme="light"] .rich-codeblock .hljs-string, :root[data-theme="light"] .rich-codeblock .hljs-regexp, :root[data-theme="light"] .rich-codeblock .hljs-meta .hljs-string { color: #0a3069; }
+:root[data-theme="light"] .rich-codeblock .hljs-number, :root[data-theme="light"] .rich-codeblock .hljs-literal, :root[data-theme="light"] .rich-codeblock .hljs-attr, :root[data-theme="light"] .rich-codeblock .hljs-attribute, :root[data-theme="light"] .rich-codeblock .hljs-variable, :root[data-theme="light"] .rich-codeblock .hljs-property, :root[data-theme="light"] .rich-codeblock .hljs-selector-attr, :root[data-theme="light"] .rich-codeblock .hljs-selector-class, :root[data-theme="light"] .rich-codeblock .hljs-selector-id { color: #0550ae; }
+:root[data-theme="light"] .rich-codeblock .hljs-title, :root[data-theme="light"] .rich-codeblock .hljs-section { color: #8250df; }
+:root[data-theme="light"] .rich-codeblock .hljs-built_in, :root[data-theme="light"] .rich-codeblock .hljs-type, :root[data-theme="light"] .rich-codeblock .hljs-symbol, :root[data-theme="light"] .rich-codeblock .hljs-params, :root[data-theme="light"] .rich-codeblock .hljs-meta { color: #953800; }
+:root[data-theme="light"] .rich-codeblock .hljs-name, :root[data-theme="light"] .rich-codeblock .hljs-tag { color: #116329; }
+:root[data-theme="light"] .rich-codeblock .hljs-addition { color: #116329; background: rgb(46 160 67 / 0.12); }
+:root[data-theme="light"] .rich-codeblock .hljs-deletion { color: #82071e; background: rgb(248 81 73 / 0.12); }

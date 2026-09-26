@@ -80,6 +80,16 @@
       "hint": "This chat was made with a Ghostly 0.4 code. Text and calls keep working both ways; a chat made with a current invite adds files, payments and held messages.",
       "continued": "You invited your contact to a new chat.",
       "open": "Open the new chat"
+    },
+    "rich": {
+      "spoiler": "Hidden text. Tap to show it",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyCode": "Copy code",
+      "showAll": "Show all",
+      "showLess": "Show less",
+      "localTime": "{{time}} your time",
+      "code": "Code"
     }
   },
   "group": {

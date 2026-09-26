@@ -80,6 +80,16 @@
       "hint": "Cette discussion a été créée avec un code Ghostly 0.4. Le texte et les appels continuent de fonctionner dans les deux sens ; une nouvelle discussion ajoute les fichiers, les paiements et les messages retenus.",
       "continued": "Vous avez invité votre contact dans une nouvelle discussion.",
       "open": "Ouvrir la nouvelle discussion"
+    },
+    "rich": {
+      "spoiler": "Texte masqué. Touchez pour l’afficher",
+      "copy": "Copier",
+      "copied": "Copié",
+      "copyCode": "Copier le code",
+      "showAll": "Tout afficher",
+      "showLess": "Afficher moins",
+      "localTime": "{{time}} chez vous",
+      "code": "Code"
     }
   },
   "group": {

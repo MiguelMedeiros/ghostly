@@ -80,6 +80,16 @@
       "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam a funcionar nos dois sentidos; uma nova conversa acrescenta ficheiros, pagamentos e mensagens guardadas.",
       "continued": "Convidou o seu contacto para uma nova conversa.",
       "open": "Abrir a nova conversa"
+    },
+    "rich": {
+      "spoiler": "Texto oculto. Toque para mostrar",
+      "copy": "Copiar",
+      "copied": "Copiado",
+      "copyCode": "Copiar código",
+      "showAll": "Mostrar tudo",
+      "showLess": "Mostrar menos",
+      "localTime": "{{time}} no seu horário",
+      "code": "Código"
     }
   },
   "group": {

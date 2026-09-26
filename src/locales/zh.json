@@ -80,6 +80,16 @@
       "hint": "此聊天使用 Ghostly 0.4 的代码创建。文字和通话仍可双向使用；新聊天还支持文件、付款和暂存消息。",
       "continued": "你已邀请联系人加入新聊天。",
       "open": "打开新聊天"
+    },
+    "rich": {
+      "spoiler": "隐藏的文字。点按显示",
+      "copy": "复制",
+      "copied": "已复制",
+      "copyCode": "复制代码",
+      "showAll": "显示全部",
+      "showLess": "收起",
+      "localTime": "你的时间 {{time}}",
+      "code": "代码"
     }
   },
   "group": {
