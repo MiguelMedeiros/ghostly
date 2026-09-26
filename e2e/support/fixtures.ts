@@ -228,10 +228,32 @@ export type WalletCardName = WalletKind | `${WalletKind}-${WalletNetwork}`;
 export const walletCard = (page: Page, card: WalletCardName): Locator =>
   card.includes("-") ? page.getByTestId(`wallet-card-${card}`) : page.locator(`[data-testid^="wallet-card-${card}-"]`).first();
 
-/** The wallet is a page beside the chat list, like Settings: opening it puts the chat away. */
+/**
+ * The Wallets page's tab of one network (Mainnet | Testnet): only that network's deck is on the page. Nothing to do
+ * when it is chosen already, or when the page has no tabs (a profile with no wallet yet).
+ */
+export async function showNetwork(page: Page, network: WalletNetwork): Promise<void> {
+  const tab = page.getByTestId(`wallet-network-${network}`);
+  if (!await tab.count() || await tab.getAttribute("aria-selected") === "true") return;
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+}
+
+/**
+ * The wallet is a page beside the chat list, like Settings: opening it puts the chat away. A card named with its
+ * network is chosen on that network's tab; a kind alone, on whichever tab has one.
+ */
 export async function openWallet(peer: Peer, card?: WalletCardName): Promise<void> {
-  if (!await peer.page.getByTestId("wallet").isVisible()) await peer.page.getByTestId("wallet-chip").click();
-  if (card) await walletCard(peer.page, card).click();
+  const page = peer.page;
+  if (!await page.getByTestId("wallet").isVisible()) await page.getByTestId("wallet-chip").click();
+  if (!card) return;
+  const network = card.split("-")[1] as WalletNetwork | undefined;
+  if (network) await showNetwork(page, network);
+  else if (!await walletCard(page, card).count()) {
+    const other = await page.getByTestId("wallet-network-panel").getAttribute("data-network") === "mainnet" ? "testnet" : "mainnet";
+    await showNetwork(page, other);
+  }
+  await walletCard(page, card).click();
 }
 
 export interface CreateWallet {
@@ -252,6 +274,7 @@ export interface CreateWallet {
 export async function createWallet(peer: Peer, kind: WalletKind, network: WalletNetwork = "testnet", options: CreateWallet = {}): Promise<void> {
   const page = peer.page;
   await openWallet(peer);
+  await showNetwork(page, network);
   const card = page.getByTestId(`wallet-card-${kind}-${network}`);
   if (await card.count() && kind !== "fedimint") return;
   await page.getByTestId("wallet-add").click();

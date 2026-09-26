@@ -26,7 +26,7 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 const cards = () => [...screen.getByRole("tablist", { name: "Testnet wallets" }).querySelectorAll<HTMLElement>("[role=tab]")];
-const panelOf = () => screen.getByRole("tabpanel").getAttribute("aria-labelledby");
+const panelOf = () => screen.getByTestId("wallet-panel").getAttribute("aria-labelledby");
 
 /** The mouse moves to the middle of card `i`'s strip, the part of it that shows with the chosen card on top. */
 function pointAt(i: number) {

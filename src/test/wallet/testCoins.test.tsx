@@ -11,10 +11,11 @@ import { arkReady, barkReady, bitcoinSource, lightningSource, mint, REAL_MINT, s
 
 // covers: wallet.test-coins
 
-/** Opens the Wallets page on one card. */
+/** Opens the Wallets page on one card, on its network's tab. */
 async function open(wallet: WalletView, card: string) {
   const app = renderApp(<Wallet />);
   app.engine.update({ wallet });
+  await app.user.click(await screen.findByTestId(`wallet-network-${card.split("-")[1]}`));
   await app.user.click(await screen.findByTestId(`wallet-card-${card}`));
   return app;
 }
@@ -26,7 +27,7 @@ describe("Get test coins", () => {
     expect(within(section).getByTestId("test-coins-network")).toHaveTextContent("Test money");
     expect(section).toHaveTextContent("10,000 test sats from the test mint, only when you press the button");
     expect(within(section).getByTestId("test-coins-get")).toHaveTextContent("Get test coins");
-    await user.click(screen.getByTestId("wallet-card-cashu-mainnet"));
+    await user.click(screen.getByTestId("wallet-network-mainnet"));
     await waitFor(() => expect(screen.getByTestId("wallet-panel")).toHaveAttribute("data-network", "mainnet"));
     await waitFor(() => expect(screen.queryByTestId("test-coins")).not.toBeInTheDocument());
     expect(screen.queryByTestId("test-coins-get")).not.toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, test, useFakeProviders, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, showNetwork, test, useFakeProviders, type Peer } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { closePayments, openPayments, paymentCard } from "../support/payments";
 
@@ -69,8 +69,10 @@ test("a Mainnet Cashu wallet (mints mocked) wears no Testnet tag, beside a Testn
   const mainnet = alice.page.getByTestId("wallet-card-cashu-mainnet"), testnet = alice.page.getByTestId("wallet-card-cashu-testnet");
   await expect(mainnet.getByTestId("wallet-card-network")).toHaveCount(0);
   await expect(testnet.getByTestId("wallet-card-network")).toHaveText("Testnet");
-  await expect(mainnet).not.toContainText("test sats");
   await expect(testnet).toContainText("test sats");
+  await showNetwork(alice.page, "mainnet");
+  await expect(mainnet.getByTestId("wallet-card-network")).toHaveCount(0);
+  await expect(mainnet).not.toContainText("test sats");
 });
 
 test("two people pay on the same network; a card of a network the contact has no wallet on is not offered", { tag: ["@network", "@feature:wallet.instances.networks", "@feature:payments.chat.networks", "@feature:payments.cashu.send"] }, async ({ peer }) => {

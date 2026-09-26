@@ -1,11 +1,11 @@
-import { chat, connect, createWallet, expect, link, openChat, openWallet, test, useFakeProviders, useTestnet, walletCard, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, showNetwork, test, useFakeProviders, useTestnet, walletCard, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 import { mockMainnetMints } from "../support/mint";
 import { paymentCard } from "../support/payments";
 
 /**
  * A wallet is removed from its details: Remove, a dialog that says what it holds and on which network, and a
- * confirmation. Real money and test money sit in their own decks. Test coins only: Mainnet runs against the suite's
+ * confirmation. Real money and test money sit under their own tabs. Test coins only: Mainnet runs against the suite's
  * own mint (mockMainnetMints), whose sats are worthless.
  */
 
@@ -13,13 +13,18 @@ test("the Wallets page keeps real money and test money apart, and an empty netwo
   const alice = await peer("remove-sections");
   await createWallet(alice, "cashu", "testnet");
   const page = alice.page;
-  const mainnet = page.getByTestId("wallet-section-mainnet"), testnet = page.getByTestId("wallet-section-testnet");
-  await expect(mainnet.getByRole("heading")).toHaveText(/Real money\s*· Mainnet/);
-  await expect(testnet.getByRole("heading")).toHaveText(/Test money\s*· Testnet/);
-  await expect(mainnet.getByTestId("wallet-section-mainnet-empty")).toHaveText(/No Mainnet wallets yet\./);
-  await expect(testnet.getByRole("tablist", { name: "Testnet wallets" }).getByRole("tab")).toHaveCount(2);
-  // New in the empty section opens on its network.
-  await mainnet.getByTestId("wallet-section-mainnet-new").click();
+  const mainnet = page.getByTestId("wallet-network-mainnet"), testnet = page.getByTestId("wallet-network-testnet");
+  // Test money only: its tab is the one open, with its two cards; Mainnet's says it has none.
+  await expect(mainnet).toHaveText(/Real money\s*Mainnet\s*· 0/);
+  await expect(testnet).toHaveText(/Test money\s*Testnet\s*· 2/);
+  await expect(testnet).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tablist", { name: "Testnet wallets" }).getByRole("tab")).toHaveCount(2);
+  await mainnet.click();
+  const empty = page.getByTestId("wallet-network-mainnet-empty");
+  await expect(empty).toHaveText(/No Mainnet wallets yet\./);
+  await expect(page.getByTestId("wallet-panel")).toHaveCount(0);
+  // New in the empty tab opens on its network.
+  await empty.getByTestId("wallet-network-mainnet-new").click();
   const dialog = page.getByTestId("new-wallet");
   await expect(dialog.getByTestId("new-wallet-network")).toHaveAttribute("data-network", "mainnet");
   await expect(dialog.getByTestId("new-wallet-network-mainnet")).toHaveAttribute("aria-checked", "true");
@@ -48,13 +53,17 @@ test("an empty Testnet wallet goes on one confirm, and is still gone after a rel
   await dialog.getByTestId("wallet-remove-confirm").click();
   await expect(dialog).toHaveCount(0);
   await expect(walletCard(page, "bitcoin-testnet")).toHaveCount(0);
-  await expect(page.getByTestId("wallet-section-testnet-empty")).toBeVisible();
+  // Its tab stays open, saying it has none now.
+  await expect(page.getByTestId("wallet-network-testnet")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("wallet-network-testnet-empty")).toBeVisible();
 
+  // After a reload the page opens where the wallets are: Mainnet's card, and Testnet still empty.
   await page.reload();
   await openWallet(alice);
   await expect(walletCard(page, "cashu-mainnet")).toBeVisible();
+  await showNetwork(page, "testnet");
   await expect(walletCard(page, "bitcoin-testnet")).toHaveCount(0);
-  await expect(page.getByTestId("wallet-section-testnet-empty")).toBeVisible();
+  await expect(page.getByTestId("wallet-network-testnet-empty")).toBeVisible();
   // It can be made again.
   await page.getByTestId("wallet-add").click();
   await page.getByTestId("new-wallet").getByRole("radio", { name: "Testnet" }).click();
@@ -91,10 +100,11 @@ test("a funded wallet says how much and on which network, offers its ecash, and 
 
   await page.reload();
   await openWallet(alice);
-  await expect(walletCard(page, "cashu-mainnet")).toHaveCount(0);
-  await expect(page.getByTestId("wallet-section-mainnet-empty")).toBeVisible();
-  // The Testnet Cashu wallet is untouched.
+  // The page opens where the wallets are now: Testnet, whose Cashu wallet is untouched; Mainnet has none.
   await expect(walletCard(page, "cashu-testnet")).toBeVisible();
+  await showNetwork(page, "mainnet");
+  await expect(walletCard(page, "cashu-mainnet")).toHaveCount(0);
+  await expect(page.getByTestId("wallet-network-mainnet-empty")).toBeVisible();
 });
 
 test("a wallet holding nothing with an open chat request lists it, asks in words, and the request closes on both sides", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {

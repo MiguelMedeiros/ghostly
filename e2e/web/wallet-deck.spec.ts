@@ -5,11 +5,11 @@ import { pointAt, stillness } from "../support/still";
 import { swipe } from "../support/swipe";
 
 /**
- * The wallet cards are decks, one per network: real money (Mainnet) and test money (Testnet) never share one. With a
- * mouse a deck is a stack, each card in its own place, and the one the pointer rests on comes up; on a touch screen it
- * is a snapping track and the card at rest in the centre is the chosen one. Either way the chosen card's panel shows
- * below, and the arrows under the deck and the keyboard move along it. The deck whose card is not the panel's rests:
- * the pointer crossing it chooses nothing, a click on it hands the panel over.
+ * The wallet cards are decks, one per network: real money (Mainnet) and test money (Testnet) never share one, and
+ * the page shows one at a time under its tab (Mainnet | Testnet), like two wallets apart. With a mouse a deck is a
+ * stack, each card in its own place, and the one the pointer rests on comes up; on a touch screen it is a snapping
+ * track and the card at rest in the centre is the chosen one. Either way the chosen card's panel shows below, and the
+ * arrows under the deck and the keyboard move along it.
  *
  * A new profile has no wallet: each test makes five cards first, none of which reaches a real service: Cashu on
  * both networks (the Mainnet mints answered by the suite's own mint), the Lightning that comes with each, and a fake
@@ -18,14 +18,14 @@ import { swipe } from "../support/swipe";
 
 /** The Testnet deck's order, the one these tests move along. */
 const CARDS = ["cashu-testnet", "lightning-testnet", "bitcoin-testnet"] as const;
-/** The Mainnet deck, resting while a Testnet card is chosen. */
+/** The Mainnet deck, under its own tab. */
 const MAINNET = ["cashu-mainnet", "lightning-mainnet"] as const;
 type Card = (typeof CARDS)[number] | (typeof MAINNET)[number];
 const PANELS: Record<string, string> = { cashu: "wallet-balance", lightning: "wallet-balance", bitcoin: "bitcoin-wallet" };
 
 /**
- * The five wallets, made with New. Testnet Cashu is made last, so the page opens on the Testnet deck's first card, as
- * a profile that has just made its wallets and comes back to them does.
+ * The five wallets, made with New. Testnet Cashu is made last, so the page opens on the Testnet tab (the one shown
+ * last) and its deck's first card, as a profile that has just made its wallets and comes back to them does.
  */
 async function wallets(peer: Peer): Promise<Page> {
   await mockMainnetMints(peer.context);
@@ -43,14 +43,19 @@ async function wallets(peer: Peer): Promise<Page> {
   return peer.page;
 }
 
-const section = (page: Page, network: "mainnet" | "testnet") => page.getByTestId(`wallet-section-${network}`);
-const deck = (page: Page, network: "mainnet" | "testnet" = "testnet") => section(page, network).locator(".wallet-deck");
+const tab = (page: Page, network: "mainnet" | "testnet") => page.getByTestId(`wallet-network-${network}`);
+/** The deck on the page: the chosen tab's (`network` says which that must be). */
+const deck = (page: Page, network: "mainnet" | "testnet" = "testnet") => page.getByTestId("wallet-network-panel").and(page.locator(`[data-network=${network}]`)).locator(".wallet-deck");
 const card = (page: Page, id: string) => page.getByTestId(`wallet-card-${id}`);
 const chosen = async (page: Page, id: Card) => {
+  const network = id.split("-")[1] as "mainnet" | "testnet";
+  await expect(tab(page, network)).toHaveAttribute("aria-selected", "true");
   await expect(card(page, id)).toHaveAttribute("aria-selected", "true");
-  for (const other of [...CARDS, ...MAINNET]) if (other !== id) await expect(card(page, other)).toHaveAttribute("aria-selected", "false");
-  await expect(page.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", `wallet-tab-${id.replace("-", ":")}`);
-  await expect(page.getByRole("tabpanel").getByTestId(PANELS[id.split("-")[0]])).toBeVisible();
+  for (const other of network === "mainnet" ? MAINNET : CARDS) if (other !== id) await expect(card(page, other)).toHaveAttribute("aria-selected", "false");
+  // The other network's cards are not on the page.
+  for (const other of network === "mainnet" ? CARDS : MAINNET) await expect(card(page, other)).toHaveCount(0);
+  await expect(page.getByTestId("wallet-panel")).toHaveAttribute("aria-labelledby", `wallet-tab-${id.replace("-", ":")}`);
+  await expect(page.getByTestId("wallet-panel").getByTestId(PANELS[id.split("-")[0]])).toBeVisible();
 };
 /** How far the card's centre is from its track's centre, in pixels. */
 const offCentre = (page: Page, id: string) => page.evaluate((id) => {
@@ -134,15 +139,15 @@ for (const height of [900, 560]) test(`the pointer passing over the cards moves 
   await page.goto("/#/wallet");
   await expect(deck(page)).toHaveAttribute("data-mode", "stack");
   await chosen(page, "cashu-testnet");
-  // The page opens without taking the focus: the amount is below the decks.
+  // The page opens without taking the focus: the amount is below the deck.
   const still = await stillness(page);
   expect(still.focus).toBe("body");
 
-  // Over each card, back and forth, and across the resting Mainnet deck: each Testnet card comes up with its panel
-  // (Cashu's and Lightning's with an amount), and nothing scrolls or takes the focus.
-  for (const id of ["lightning-testnet", "bitcoin-testnet", "cashu-testnet", "lightning-testnet", "cashu-mainnet", "bitcoin-testnet", "cashu-testnet"] as const) {
+  // Over each card, back and forth: each comes up with its panel (Cashu's and Lightning's with an amount), and
+  // nothing scrolls or takes the focus.
+  for (const id of ["lightning-testnet", "bitcoin-testnet", "cashu-testnet", "lightning-testnet", "bitcoin-testnet", "cashu-testnet"] as const) {
     await pointAt(card(page, id));
-    if (id !== "cashu-mainnet") await chosen(page, id);
+    await chosen(page, id);
     expect(await stillness(page), `over ${id}`).toEqual(still);
   }
 
@@ -154,41 +159,49 @@ for (const height of [900, 560]) test(`the pointer passing over the cards moves 
   expect((await stillness(page)).scroll).toEqual(still.scroll);
 });
 
-test("real money and test money are two decks: the one resting ignores the pointer crossing it, and a click hands it the panel", { tag: ["@feature:wallet.deck", "@feature:wallet.instances.sections"] }, async ({ peer }) => {
+test("real money and test money are two tabs, one deck at a time: the arrows move between them, New follows, and the tab is kept", { tag: ["@feature:wallet.deck", "@feature:wallet.instances.sections"] }, async ({ peer }) => {
   const page = await wallets(await peer("alice", { viewport: { width: 1280, height: 900 } }));
   await page.goto("/#/wallet");
+  // The tab shown last (Testnet, where the last wallet was made), its deck alone.
   await chosen(page, "cashu-testnet");
-  // Whose money, in words as well as colour, and each network's cards in its own deck.
-  await expect(section(page, "mainnet").getByRole("heading")).toHaveText(/Real money\s*· Mainnet/);
-  await expect(section(page, "testnet").getByRole("heading")).toHaveText(/Test money\s*· Testnet/);
-  await expect(page.getByRole("tablist", { name: "Mainnet wallets" }).getByRole("tab")).toHaveCount(MAINNET.length);
-  await expect(deck(page, "mainnet")).toHaveAttribute("data-resting", "true");
-  await expect(deck(page, "testnet")).not.toHaveAttribute("data-resting");
+  const tabs = page.getByRole("tablist", { name: "Networks" });
+  await expect(tabs.getByRole("tab")).toHaveText([/Real money\s*Mainnet\s*· 2/, /Test money\s*Testnet\s*· 3/]);
+  await expect(tab(page, "mainnet").getByTestId("wallet-network-mainnet-tag")).toHaveAttribute("data-network", "mainnet");
+  await expect(page.getByTestId("wallet-network-about")).toHaveText("Test coins, worth nothing: for trying things out.");
+  await expect(page.locator(".wallet-deck")).toHaveCount(1);
   await expect(page.getByTestId("wallet-panel-network")).toHaveText("Test money");
 
-  // The pointer crosses the Mainnet deck on its way somewhere: nothing is chosen.
-  const box = (await card(page, "lightning-mainnet").boundingBox())!;
-  await page.mouse.move(box.x + 4, box.y + box.height / 2);
-  await page.mouse.move(box.x + box.width - 4, box.y + box.height / 2, { steps: 6 });
-  await page.mouse.move(10, 10);
-  await chosen(page, "cashu-testnet");
-
-  // A click on it hands it the panel; the Testnet deck rests, its card still on top.
-  await card(page, "lightning-mainnet").click();
-  await chosen(page, "lightning-mainnet");
-  await expect(deck(page, "testnet")).toHaveAttribute("data-resting", "true");
-  await expect(deck(page, "mainnet")).not.toHaveAttribute("data-resting");
-  await expect(page.getByTestId("wallet-panel-network")).toHaveText("Real money");
-  // Now the Mainnet deck follows the pointer, and the keys stay in it.
-  await card(page, "cashu-mainnet").hover();
+  // The keyboard: the arrow moves to Mainnet and takes the focus; its deck and its first card's panel follow.
+  await tab(page, "testnet").focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(tab(page, "mainnet")).toBeFocused();
   await chosen(page, "cashu-mainnet");
-  await page.mouse.move(10, 10);
-  await card(page, "cashu-mainnet").focus();
+  await expect(page.getByTestId("wallet-network-about")).toHaveText("Money you own: spend it with care.");
+  await expect(page.getByTestId("wallet-panel-network")).toHaveText("Real money");
+  // Tab goes into its deck, where the keys move along the cards.
+  await page.keyboard.press("Tab");
+  await expect(card(page, "cashu-mainnet")).toBeFocused();
   await page.keyboard.press("ArrowRight");
   await chosen(page, "lightning-mainnet");
-  // A click on the resting Testnet deck's top card brings that deck back, on that card.
-  await card(page, "cashu-testnet").click();
+
+  // New opens on the tab's network, and can still switch.
+  await page.getByTestId("wallet-add").click();
+  const dialog = page.getByTestId("new-wallet");
+  await expect(dialog.getByTestId("new-wallet-network")).toHaveAttribute("data-network", "mainnet");
+  await dialog.getByTestId("new-wallet-network-testnet").click();
+  await expect(dialog.getByTestId("new-wallet-network")).toHaveAttribute("data-network", "testnet");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  // A click back on Testnet: its deck on the card it showed last. The tab is a view: the Mainnet one is kept for later.
+  await tab(page, "testnet").click();
   await chosen(page, "cashu-testnet");
+  await tab(page, "mainnet").click();
+  await chosen(page, "lightning-mainnet");
+  // Kept on this device: a reload opens on Mainnet.
+  await page.reload();
+  await expect(tab(page, "mainnet")).toHaveAttribute("aria-selected", "true");
+  await expect(deck(page, "mainnet").getByRole("tab")).toHaveCount(MAINNET.length);
 });
 
 test("on a phone the cards are a snapping track: a swipe chooses the card that comes to rest in the centre", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
@@ -200,7 +213,10 @@ test("on a phone the cards are a snapping track: a swipe chooses the card that c
   await chosen(page, "cashu-testnet");
   expect(await offCentre(page, "cashu-testnet")).toBeLessThan(3);
   await expect(deck(page).locator(".wallet-deck-marks span[data-on=true]")).toHaveCount(1);
-  await expect(deck(page, "mainnet").locator(".wallet-deck-marks span[data-on=true]")).toHaveCount(0);
+  // The two tabs share one row inside the phone's width.
+  const [mainnet, testnet] = await Promise.all([tab(page, "mainnet").boundingBox(), tab(page, "testnet").boundingBox()]);
+  expect(Math.abs(mainnet!.y - testnet!.y)).toBeLessThan(1);
+  expect(testnet!.x + testnet!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
 
   // A finger drags the track to the left, past half a card, and lets go: the next card settles in the centre and
   // becomes the chosen one.
@@ -232,9 +248,10 @@ test("on a phone the cards are a snapping track: a swipe chooses the card that c
   await expect.poll(() => offCentre(page, "cashu-testnet")).toBeLessThan(3);
   await chosen(page, "cashu-testnet");
 
-  // A tap on the resting Mainnet track hands it the panel.
-  await card(page, "cashu-mainnet").click();
+  // A tap on the Mainnet tab brings its track, on its first card.
+  await tab(page, "mainnet").click();
   await chosen(page, "cashu-mainnet");
+  await expect(deck(page, "mainnet")).toHaveAttribute("data-mode", "track");
   // Nothing scrolls sideways but the tracks themselves.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(await page.evaluate(() => { const body = document.querySelector("[data-page-body]")!; return body.scrollWidth <= body.clientWidth + 1; })).toBe(true);

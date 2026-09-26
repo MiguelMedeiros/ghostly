@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { createWallet, expect, test, useFakeProviders, useTestnet, walletCard } from "../support/fixtures";
+import { createWallet, expect, openWallet, test, useFakeProviders, useTestnet, walletCard } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { choose } from "../support/select";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
@@ -133,10 +133,10 @@ for (const width of WIDTHS) {
       await form.getByTestId("provider-save").click();
     } });
     for (const card of ["cashu-mainnet", "cashu-testnet", "lightning-mainnet", "lightning-testnet", "bitcoin-testnet"] as const) {
-      await walletCard(page, card).click();
+      await openWallet(alice, card);
       await expectTidy(page, "[data-testid=wallet]", `the ${card} wallet`);
     }
-    await walletCard(page, "cashu-testnet").click();
+    await openWallet(alice, "cashu-testnet");
     await expect(page.getByTestId("mint-row").first()).toBeVisible();
     for (const tab of ["wallet-send", "wallet-history"]) {
       await page.getByTestId(tab).click();

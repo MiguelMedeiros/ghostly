@@ -1,7 +1,7 @@
 import {Interface} from 'ethers';
 import {USDT_LOCAL} from '../support/usdt-local.mjs';
 import type {BrowserContext} from '@playwright/test';
-import {chat,connect,createWallet,expect,link,openChat,openWallet,test,walletCard,type Peer} from '../support/fixtures';
+import {chat,connect,createWallet,expect,link,openChat,openWallet,showNetwork,test,walletCard,type Peer} from '../support/fixtures';
 import {mockMainnetMints} from '../support/mint';
 import {paymentCard} from '../support/payments';
 import { composerRow } from "../support/composer";
@@ -105,9 +105,17 @@ test('wallet cards fit a narrow screen, keep keyboard focus and respect reduced 
  await createWallet(p,'usdt','mainnet');
  const cards=p.page.getByTestId('wallet').locator('.wallet-deck');
  const usdt=walletCard(p.page,'usdt-mainnet');
- // Cashu and Lightning through it on each network, and USDT: five cards on two snapping tracks (one per network), and the page itself never scrolls sideways at 390 px.
- await expect(cards.getByRole('tab')).toHaveCount(5);
- await walletCard(p.page,'cashu-testnet').click();
+ // Cashu and Lightning through it on each network, and USDT on Mainnet: one network's snapping track at a time,
+ // its tabs side by side, and the page itself never scrolls sideways at 390 px.
+ await expect(p.page.getByTestId('wallet-network-mainnet')).toHaveAttribute('aria-selected','true');
+ await expect(cards.getByRole('tab')).toHaveCount(3);
+ const [mainnetTab,testnetTab]=await Promise.all(['mainnet','testnet'].map(n=>p.page.getByTestId(`wallet-network-${n}`).boundingBox()));
+ expect(Math.abs(mainnetTab!.y-testnetTab!.y),'the two tabs on one row').toBeLessThan(1);
+ expect(testnetTab!.x+testnetTab!.width).toBeLessThanOrEqual(390);
+ await showNetwork(p.page,'testnet');
+ await expect(cards.getByRole('tab')).toHaveCount(2);
+ await showNetwork(p.page,'mainnet');
+ await walletCard(p.page,'cashu-mainnet').click();
  await usdt.focus();
  await expect(usdt).toBeFocused();
  await p.page.keyboard.press('Enter');
@@ -144,5 +152,6 @@ test('Testnet and Mainnet each have their own USDT wallet, open at once: Sepolia
  // The Mainnet one was never parked: the same wallet, still there.
  await openWallet(p,'usdt-mainnet');
  await expect(panel.getByTestId('usdt-address'),'the same wallet, not a new one').toHaveText(address,{timeout:60000});
+ await showNetwork(p.page,'testnet');
  await expect(walletCard(p.page,'usdt-testnet')).toContainText('TEST-USDT');
 });

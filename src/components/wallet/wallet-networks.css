@@ -1,0 +1,20 @@
+/* Wallets page (pages/Wallet.tsx): Mainnet | Testnet as two tabs over one deck, like two wallets apart. Each tab says
+   whose money it is in words (the NetworkTag) as well as colour (Mainnet the accent, Testnet yellow), and its count.
+   The chosen one is ringed and tinted in its network's colour. Two equal columns, so both fit a 375px phone. */
+.wallet-networks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:4px;border:1px solid var(--color-border);border-radius:16px;background:var(--color-surface)}
+.wallet-network{--net:var(--color-accent);display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 8px;min-width:0;min-height:44px;padding:6px 10px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--color-text-secondary);font-size:14px;font-weight:600;cursor:pointer;transition:border-color .2s,background-color .2s,color .2s}
+.wallet-network[data-network=testnet]{--net:#e0a800}
+.wallet-network .network-tag{color:var(--net)}
+.wallet-network:hover:not([aria-selected=true]){background:var(--color-surface-alt);color:var(--color-text-primary)}
+.wallet-network:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.wallet-network[aria-selected=true]{border-color:var(--net);background:color-mix(in srgb,var(--net) 10%,transparent);color:var(--color-text-primary)}
+.wallet-network-name{white-space:nowrap}
+
+/* A switch brings the other network's deck in from its side, a short fade and slide: transform and opacity only, on
+   one layer for its few frames, so the deck's own cost (deck/deck.css) is unchanged. None as the page opens, none with
+   reduced motion. */
+.wallet-network-view[data-swap]{animation:wallet-network-in .22s cubic-bezier(.2,.7,.3,1)}
+.wallet-network-view[data-swap=prev]{--from:-14px}
+@keyframes wallet-network-in{from{opacity:0;transform:translateX(var(--from,14px))}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.wallet-network-view[data-swap]{animation:none}}
+:root[data-reduce-motion=true] .wallet-network-view[data-swap]{animation:none}

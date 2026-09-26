@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator } from "@playwright/test";
-import { createWallet, expect, type CreateWallet, type Peer, type WalletKind, type WalletNetwork } from "../support/fixtures";
+import { createWallet, expect, showNetwork, type CreateWallet, type Peer, type WalletKind, type WalletNetwork } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
 
@@ -126,6 +126,10 @@ export async function wallet(actor: Actor, name?: string): Promise<void> {
   await go(actor, "#/wallet");
   await expect(actor.page.getByTestId("wallet")).toBeVisible();
   if (!name) return;
+  // One network's deck at a time: its tab first (a kind alone is on the tab showing, or the other one).
+  const network = name.split("-")[1] as WalletNetwork | undefined;
+  if (network) await showNetwork(actor.page, network);
+  else if (!await card(actor, "wallet-card", name).count()) await showNetwork(actor.page, await actor.page.getByTestId("wallet-network-panel").getAttribute("data-network") === "mainnet" ? "testnet" : "mainnet");
   const target = card(actor, "wallet-card", name);
   await expect(async () => {
     await target.click();
