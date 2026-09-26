@@ -15,6 +15,7 @@ import { useNow, type PairingProgressState } from "../hooks/usePairingProgress";
 import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed } from "../lib/pairingProgress";
 import { TransportOptions } from "./TransportOptions";
 import { ConnectionHistory } from "./TransportTimeline";
+import { DiscoveryHealth } from "./DiscoveryHealth";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -26,9 +27,10 @@ const ON_DHT = "On DHT · retrying live";
  * mark when live; otherwise DHT only, held for the contact, on its way, failed or offline), its state in the tooltip
  * and the accessible name. Its panel is short: the state and round trip, the choice (Automatic, a transport or DHT
  * only; the checked one is chosen, the one in use is marked, and they are not always the same), and Fallback. The rest
- * is under Details: what the chat waits for, discovery help, the live path and why, per-transport errors, contact
- * verification, both keys, the connection history and notes. A chat made with a v0.4 code (`paired` false) has no
- * choices: its status (`status`, as `contactStatus` says it) and the keys.
+ * is under Details: what the chat waits for, discovery help, how contacts are found (the DHT directly or a relay) and
+ * each relay's health, the live path and why, per-transport errors, contact verification, both keys, the connection
+ * history and notes. A chat made with a v0.4 code (`paired` false) has no choices: its status (`status`, as
+ * `contactStatus` says it) and the keys.
  *
  * It is the header's only connection element: while a first pairing is on its way (`pairing`), the icon is the
  * pairing scene in small, its name says the stage, and the panel says how far it got, with a way to the scene.
@@ -178,6 +180,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
               {summary.since !== undefined && <><dt>Live since</dt><dd className="text-text-primary">{new Date(summary.since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ({lasting(Date.now() - summary.since)})</dd></>}
               <dt>Why</dt><dd className="min-w-0 break-words text-text-primary">{summary.why}</dd>
             </dl>}
+            <DiscoveryHealth status={state?.transport.discovery} />
             {!dht && Object.entries(link?.transportErrors ?? {}).map(([t,reason]) => <p key={t}>{name(t as PairedTransport)}: {reason}</p>)}
             {(pinned || pair?.keyMismatch) && <div data-testid="pair-trust">
               {pair?.keyMismatch ? <p role="alert" className="text-danger">This key does not match the saved contact. No data was accepted; the saved key has not been replaced.</p> : <>

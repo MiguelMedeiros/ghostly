@@ -5,7 +5,7 @@ import { ChatConnection } from "../../components/ChatConnection";
 import { linkView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chat.paired.status, chat.paired.verify, chat.paired.reconnect, transport.indicator, transport.chat-switch, transport.wait, invite.delivery-mode
+// covers: chat.paired.discovery-health, chat.paired.status, chat.paired.verify, chat.paired.reconnect, transport.indicator, transport.chat-switch, transport.wait, invite.delivery-mode
 
 type Pairing = NonNullable<LinkView["pairing"]>;
 const ready = (patch: Partial<Pairing> = {}): Pairing => ({ status: "ready", transport: "webrtc/1", ...patch } as Pairing);
@@ -432,5 +432,35 @@ describe("ChatConnection: the connection history", () => {
   it("is not there before the chat has any", () => {
     banner({ pairing: ready() });
     expect(screen.queryByTestId("connection-history")).toBeNull();
+  });
+});
+
+describe("ChatConnection: how contacts are found", () => {
+  it("says DHT direct and each relay's health under Details", () => {
+    const until = new Date(2026, 8, 26, 14, 5).getTime();
+    banner({ pairing: ready() }, { transport: { direct: true, discovery: { path: { via: "dht" }, relays: [
+      { relay: "https://pkarr.pubky.org", state: "ok" },
+      { relay: "https://pkarr.pubky.app", state: "throttled", until, reason: "rate limited (429)" },
+      { relay: "https://relay.pkarr.org", state: "failing", until, reason: "no answer" },
+    ] } } });
+    const block = screen.getByTestId("connection-discovery");
+    expect(screen.getByTestId("connection-details")).toContainElement(block);
+    expect(screen.getByTestId("connection-discovery-path")).toHaveTextContent("DHT direct");
+    const time = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    expect(within(block).getAllByTestId("connection-relay").map(r => [r.dataset.state, r.textContent, r.title])).toEqual([
+      ["ok", "pkarr.pubky.org ok", ""],
+      ["throttled", `pkarr.pubky.app throttled until ${time}`, "rate limited (429)"],
+      ["failing", `relay.pkarr.org failing until ${time}`, "no answer"],
+    ]);
+  });
+
+  it("names the relay the last read went through on the web", () => {
+    banner({ pairing: ready() }, { transport: { discovery: { path: { via: "relay", relay: "https://pkarr.pubky.app" }, relays: [{ relay: "https://pkarr.pubky.app", state: "ok" }] } } });
+    expect(screen.getByTestId("connection-discovery-path")).toHaveTextContent("Relay: pkarr.pubky.app");
+  });
+
+  it("is not there when the app says nothing about discovery", () => {
+    banner({ pairing: ready() });
+    expect(screen.queryByTestId("connection-discovery")).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import {
   toBase64,
   toBase64Url,
   type Identity,
+  type DiscoveryStatus,
   type GhostRecord,
   type LocalFetch,
   type PkarrRequestOptions,
@@ -31,26 +32,56 @@ import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/file
  * apps on this machine, and give a contact's web app a window of its own.
  */
 
-/** Pkarr through the Rust client: the DHT directly, plus its default relays. */
-const tauriTransport: PkarrTransport = {
-  async publish(identity: Identity, records: GhostRecord[]) {
-    await invoke("publish_records", { seedB64: identity.seedB64, records });
-  },
-  async publishPayload(pubKeyZ32: string, payload: Uint8Array) {
-    await invoke("publish_signed_packet", { publicKeyZ32: pubKeyZ32, payloadB64: toBase64Url(payload) });
-  },
-  async resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null> {
-    // A look that can wait goes to the DHT alone; the relays' budget is kept for links that are signaling.
-    const packet = await invoke<{ timestamp_micros: string; records: GhostRecord[] } | null>("resolve_records", {
-      publicKeyZ32: pubKeyZ32,
-      background: !!options?.background,
-      urgent: !!options?.urgent,
-    });
-    // Rust verified the signature while resolving.
-    return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
-  },
-  describe: () => ({ protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [] }),
-};
+/** How often, at most, Rust is asked how Pkarr is doing: after reads and writes, which come in bursts. */
+const STATUS_EVERY_MS = 2_000;
+
+/**
+ * Pkarr through the Rust client: the Mainline DHT read directly, the relays in Settings written to (browser
+ * contacts read only relays), and read from too when "Also use Pkarr relays" is on.
+ */
+function createTauriTransport(): PkarrTransport {
+  let status: DiscoveryStatus | undefined;
+  let askedAt = 0;
+  const listeners = new Set<() => void>();
+  // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering.
+  const refresh = () => {
+    if (Date.now() - askedAt < STATUS_EVERY_MS) return;
+    askedAt = Date.now();
+    void invoke<DiscoveryStatus>("pkarr_status").then((next) => {
+      const health = (s?: DiscoveryStatus) => JSON.stringify(s?.relays.map((r) => [r.relay, r.state]) ?? []);
+      const changed = health(next) !== health(status);
+      status = next;
+      if (changed) for (const listener of listeners) listener();
+    }).catch(() => {});
+  };
+  return {
+    async publish(identity: Identity, records: GhostRecord[]) {
+      try { await invoke("publish_records", { seedB64: identity.seedB64, records }); } finally { refresh(); }
+    },
+    async publishPayload(pubKeyZ32: string, payload: Uint8Array) {
+      await invoke("publish_signed_packet", { publicKeyZ32: pubKeyZ32, payloadB64: toBase64Url(payload) });
+    },
+    async resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null> {
+      // A look that can wait goes to the DHT alone and waits for its lookup.
+      const packet = await invoke<{ timestamp_micros: string; records: GhostRecord[] } | null>("resolve_records", {
+        publicKeyZ32: pubKeyZ32,
+        background: !!options?.background,
+        urgent: !!options?.urgent,
+      }).finally(refresh);
+      // Rust verified the signature while resolving.
+      return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
+    },
+    describe: () => ({ protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [] }),
+    configure({ relays, readRelays }) {
+      void invoke("set_pkarr_relays", { relays, readRelays }).then(() => { askedAt = 0; refresh(); }).catch(() => {});
+    },
+    discovery: () => status ?? { path: null, relays: [] },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
 
 /**
  * The WebView may not talk to localhost (CSP, CORS); Rust may, and only to
@@ -147,7 +178,7 @@ export function createDesktopHost(version: string) {
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
-    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke },
+    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke },
     onServer: serveServiceWindows,
     oidc: desktopOidc,
     atproto: desktopAtproto,
