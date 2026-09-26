@@ -3,31 +3,59 @@ import { composerRow } from "../support/composer";
 import { chatPayments, closePayments, openPayments, paymentCard } from "../support/payments";
 
 /**
- * Bark (Second's Ark) beside Arkade. New makes no Mainnet Bark wallet yet; a Testnet one starts on Second's public
- * signet server. Bark is its own way of paying: a chat offers it only when both sides allow it, and it never
+ * Bark (Second's Ark) beside Arkade. A Mainnet wallet is made on Second's Bitcoin server (never reached from here: it
+ * is routed), a Testnet one on their public signet server. Bark is its own way of paying: a chat offers it only when both sides allow it, and it never
  * stands in for Arkade (different Ark servers do not pay each other). Money moving: wallet-providers.spec.ts.
  */
 const panel = (p: Peer) => p.page.getByTestId("bark-wallet");
 
-test("Bark is not on Mainnet yet: New says so, with its reason, instead of making a wallet", { tag: ["@feature:wallet.bark.mainnet-off", "@feature:wallet.instances.create"] }, async ({ peer }) => {
-  const alice = await peer("bark-mainnet");
-  await openWallet(alice);
-  await alice.page.getByTestId("wallet-add").click();
-  const dialog = alice.page.getByTestId("new-wallet");
+/**
+ * Second's Bitcoin server and its Esplora, never reached from a test: each request is counted and `answer` decides
+ * (refused, or passed to Second's signet server, which answers as signet).
+ */
+async function guardMainnetBark(p: Peer, answer: "refuse" | "signet") {
+  const seen: string[] = [];
+  await p.context.route(/^https:\/\/(ark|mempool)\.second\.tech\//, async (route) => {
+    const url = new URL(route.request().url());
+    seen.push(`${url.host}${url.pathname}`);
+    if (answer === "refuse") return route.abort("connectionrefused");
+    const to = url.host === "ark.second.tech" ? `https://ark.signet.2nd.dev${url.pathname}` : `https://esplora.signet.2nd.dev${url.pathname.replace(/^\/api/, "")}${url.search}`;
+    return route.fulfill({ response: await route.fetch({ url: to }) });
+  });
+  return seen;
+}
+/** New → Mainnet → Bark, one click; what the dialog says after. */
+async function createMainnetBark(p: Peer) {
+  await openWallet(p);
+  await p.page.getByTestId("wallet-add").click();
+  const dialog = p.page.getByTestId("new-wallet");
   await dialog.getByRole("radio", { name: "Mainnet" }).click();
-  const bark = dialog.getByTestId("new-wallet-type-bark");
-  await expect(bark).toHaveAttribute("aria-disabled", "true");
-  await expect(dialog.getByTestId("new-wallet-type-bark-status")).toHaveText("Not yet");
-  await expect(bark).toContainText("Bark on Mainnet is not available yet");
-  await expect(bark).toHaveAttribute("title", /not available yet/);
-  await bark.click({ force: true });
-  await expect(dialog.getByTestId("new-wallet-progress")).toHaveCount(0);
-  await expect(dialog).toBeVisible();
-  // Testnet offers it, in one click.
-  await dialog.getByRole("radio", { name: "Testnet" }).click();
   await expect(dialog.getByTestId("new-wallet-type-bark-status")).toHaveText("Create");
+  await expect(dialog.getByTestId("new-wallet-type-bark")).toContainText("Second's Ark on Bitcoin. Second's terms apply; start small.");
+  await dialog.getByTestId("new-wallet-type-bark").click();
+  return dialog;
+}
+
+test("Bark on Mainnet: New offers it in one click and checks Second's server first; one that does not answer leaves nothing", { tag: ["@feature:wallet.bark.mainnet", "@feature:wallet.instances.create"] }, async ({ peer }) => {
+  const alice = await peer("bark-mainnet");
+  const seen = await guardMainnetBark(alice, "refuse");
+  const dialog = await createMainnetBark(alice);
+  await expect(dialog.getByTestId("new-wallet-error")).toBeVisible({ timeout: 90_000 });
+  await expect(dialog.getByTestId("new-wallet-retry")).toBeVisible();
+  expect(seen.some((s) => s.startsWith("ark.second.tech/")), "the SDK asked for the server").toBe(true);
   await alice.page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
+  await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);
+});
+
+test("a Mainnet Bark wallet refuses a server on another network: a signet server where Second's Bitcoin one should be", { tag: ["@network", "@feature:wallet.bark.mainnet"] }, async ({ peer }) => {
+  test.slow();
+  const alice = await peer("bark-mainnet-signet");
+  const seen = await guardMainnetBark(alice, "signet");
+  const dialog = await createMainnetBark(alice);
+  await expect(dialog.getByTestId("new-wallet-error")).toContainText(/network|bitcoin/i, { timeout: 90_000 });
+  expect(seen.length).toBeGreaterThan(0);
+  await alice.page.keyboard.press("Escape");
   await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);
 });
 

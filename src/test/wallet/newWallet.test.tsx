@@ -4,17 +4,17 @@ import type { WalletInstanceView, WalletOffer, WalletView } from "@ghostly/brows
 import { NETWORK_KEY, Wallet } from "../../pages/Wallet";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { arkReady, mint, REAL_MINT, TEST_MINT, usdtReady } from "../payments/fixtures";
+import { arkReady, barkReady, mint, REAL_MINT, TEST_MINT, usdtReady } from "../payments/fixtures";
 import { offered } from "./descriptors";
 import { choose } from "../select";
 
 // covers: wallet.instances.create, wallet.instances.networks, wallet.instances.sections, wallet.deck
 
 const made = (type: WalletInstanceView["type"], network: WalletInstanceView["network"]): WalletInstanceView => ({ id: `${type}:${network}`, type, network, config: {} });
-/** What New offers when nothing is made yet: every kind, Bark, Spark and Fedimint Testnet only. */
+/** What New offers when nothing is made yet: every kind, Spark and Fedimint Testnet only. */
 const offers = (patch: Partial<Record<string, Partial<WalletOffer>>> = {}): WalletOffer[] =>
   (["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"] as const).flatMap((type) => (["mainnet", "testnet"] as const).map((network) => {
-    const base: WalletOffer = (type === "bark" || type === "spark" || type === "fedimint") && network === "mainnet"
+    const base: WalletOffer = (type === "spark" || type === "fedimint") && network === "mainnet"
       ? { type, network, available: false, reason: `${type} on Mainnet is not available yet: it has only been tried on test networks.` }
       : type === "fedimint" ? { type, network, available: true, needs: "invite" }
       : type === "lightning" ? { type, network, available: true, needs: "provider", providers: offered("lightning", network).filter((d) => d.id !== "cashu-mint") }
@@ -90,15 +90,18 @@ describe("New, in the header", () => {
     expect(within(dialog).getByTestId("new-wallet-type-lightning-status")).toHaveTextContent("Connect…");
     await user.click(within(dialog).getByTestId("new-wallet-network-mainnet"));
     expect(within(dialog).getByTestId("new-wallet-network")).toHaveAttribute("data-network", "mainnet");
-    expect(within(dialog).getByTestId("new-wallet-type-bark")).toHaveAttribute("aria-disabled", "true");
-    expect(within(dialog).getByTestId("new-wallet-type-bark")).toHaveTextContent("bark on Mainnet is not available yet");
-    expect(within(dialog).getByTestId("new-wallet-type-bark-status")).toHaveTextContent("Not yet");
+    expect(within(dialog).getByTestId("new-wallet-type-spark")).toHaveAttribute("aria-disabled", "true");
+    expect(within(dialog).getByTestId("new-wallet-type-spark")).toHaveTextContent("spark on Mainnet is not available yet");
+    expect(within(dialog).getByTestId("new-wallet-type-spark-status")).toHaveTextContent("Not yet");
     expect(within(dialog).getByTestId("new-wallet-type-cashu-status")).toHaveTextContent("Create");
+    // Bark on Bitcoin, one click, with its server's terms named.
+    expect(within(dialog).getByTestId("new-wallet-type-bark-status")).toHaveTextContent("Create");
+    expect(within(dialog).getByTestId("new-wallet-type-bark")).toHaveTextContent("Second's Ark on Bitcoin. Second's terms apply; start small.");
     // Why not, in one short line; the whole reason on hover.
-    expect(within(dialog).getByTestId("new-wallet-type-bark")).toHaveAttribute("title", expect.stringMatching(/not available yet: it has only been tried on test networks/));
+    expect(within(dialog).getByTestId("new-wallet-type-spark")).toHaveAttribute("title", expect.stringMatching(/not available yet: it has only been tried on test networks/));
     // A kind that is not there yet makes nothing when clicked.
-    engine.on("walletCreate", () => made("bark", "mainnet"));
-    await user.click(within(dialog).getByTestId("new-wallet-type-bark"));
+    engine.on("walletCreate", () => made("spark", "mainnet"));
+    await user.click(within(dialog).getByTestId("new-wallet-type-spark"));
     expect(engine.callsTo("walletCreate")).toEqual([]);
   });
 
@@ -122,6 +125,42 @@ describe("New, in the header", () => {
     expect(screen.getByTestId("wallet-network-testnet")).toHaveAttribute("aria-selected", "true");
     expect(within(screen.getByRole("tablist", { name: "Testnet wallets" })).getByTestId("wallet-card-arkade-testnet")).toBeInTheDocument();
     expect(await screen.findByTestId("ark-wallet", {}, { timeout: 5000 })).toBeInTheDocument();
+  });
+
+  it("a Mainnet Bark wallet, once made, offers its backup before its card is dealt; Done shows the card", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
+    engine.on("walletCreate", (params) => {
+      engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, bark: barkReady({ network: "bitcoin", provider: "https://ark.second.tech" }), offers: offers({ "bark:mainnet": { exists: true } }) }) });
+      return made(params.type, params.network);
+    });
+    engine.on("barkBackup", () => ({ mnemonic: "one two three four five six seven eight nine ten eleven twelve", config: { network: "bitcoin", provider: "https://ark.second.tech", explorer: "https://mempool.second.tech/api", serverKey: "03", walletId: "w" } }));
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-type-bark"));
+    expect(engine.callsTo("walletCreate")).toEqual([{ type: "bark", network: "mainnet" }]);
+    const backup = await screen.findByTestId("new-wallet-backup");
+    expect(backup).toHaveTextContent("It holds real bitcoin, and its recovery phrase lives only on this device.");
+    expect(within(backup).getByTestId("new-wallet-terms")).toHaveAttribute("href", "https://second.tech/terms");
+    // It stays open until the person is done: no card is dealt meanwhile, and the phrase shows only on Show.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(screen.getByTestId("new-wallet")).toBeInTheDocument();
+    expect(within(backup).queryByTestId("bark-recovery")).not.toBeInTheDocument();
+    await user.click(within(backup).getByRole("button", { name: "Show" }));
+    expect(await within(backup).findByTestId("bark-recovery")).toHaveTextContent(/^one two three/);
+    expect(engine.callsTo("barkBackup")).toEqual([{ network: "mainnet" }]);
+    await user.click(within(backup).getByTestId("new-wallet-backup-done"));
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
+    expect(await screen.findByTestId("wallet-card-bark-mainnet")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("a Testnet Bark wallet closes on Ready as the others do: no backup step for test coins", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, offers: offers({ "cashu:testnet": { exists: true } }) }) });
+    engine.on("walletCreate", (params) => made(params.type, params.network));
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-type-bark"));
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("new-wallet-backup")).not.toBeInTheDocument();
   });
 
   it("a creation that fails says why once, leaves the dialog open, and tries again on request", async () => {

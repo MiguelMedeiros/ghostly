@@ -17,6 +17,11 @@ export class FakeBarkServer {
   fee = 0;
   /** The server does not answer at all. */
   down = false;
+  /** The chain tip its Esplora reports, and how many blocks a coin lives (Second's Bitcoin server: 4032). */
+  tip = 900_000;
+  lifetime = 4032;
+  /** Bark addresses: `ark1p…` on Bitcoin, `tark1p…` on the test networks. */
+  get hrp() { return this.network === "bitcoin" ? "ark1p" : "tark1p"; }
   constructor(public key = "02" + "ab".repeat(32), public network: keyof typeof NETWORK = "signet", readonly tag = "srv") {}
   sdk(): BarkSdk {
     return {
@@ -26,7 +31,7 @@ export class FakeBarkServer {
         let wallet = this.wallets.get(params.database);
         if (!wallet) this.wallets.set(params.database, wallet = new FakeBarkWallet(this, params));
         wallet.freed = false; wallet.connected = false;
-        return { wallet, onchain: { newAddress: async () => `tb1q${params.database.slice(-8)}`, balance: async () => ({ confirmedSats: wallet!.onchain, pendingSats: 0, totalSats: wallet!.onchain }), sync: async () => 0, initialScan: async () => 0, free: () => {} } };
+        return { wallet, onchain: { newAddress: async () => `tb1q${params.database.slice(-8)}`, balance: async () => ({ confirmedSats: wallet!.onchain, pendingSats: 0, totalSats: wallet!.onchain }), sync: async () => 0, initialScan: async () => 0, tipHeight: async () => this.tip, free: () => {} } };
       },
       isArkAddress: (address) => address.startsWith("tark1p") || address.startsWith("ark1p"),
     };
@@ -38,23 +43,25 @@ export class FakeBarkWallet implements BarkWalletHandle {
   addresses: string[] = [];
   movements: BarkMovement[] = [];
   spendable = 0;
+  /** The height at which the first coin expires; none while the wallet holds no coin. */
+  firstExpiry?: number;
   onchain = 0;
   freed = false;
   constructor(private server: FakeBarkServer, readonly params: BarkOpen) {}
   private address(index: number) {
-    while (this.addresses.length <= index) this.addresses.push(`tark1p${this.server.tag}${this.params.database.slice(-6)}x${this.addresses.length}`);
+    while (this.addresses.length <= index) this.addresses.push(`${this.server.hrp}${this.server.tag}${this.params.database.slice(-6)}x${this.addresses.length}`);
     return this.addresses[index];
   }
   /** Like the real SDK, a wallet opened again has not reached its server yet: empty until asked to refresh. */
   connected = false;
-  async arkInfo() { return this.connected ? { network: NETWORK[this.server.network], serverPubkey: this.server.key } : undefined; }
+  async arkInfo() { return this.connected ? { network: NETWORK[this.server.network], serverPubkey: this.server.key, vtxoLifetime: this.server.lifetime } : undefined; }
   async refreshServer() { this.connected = !this.server.down; }
   async balance() { return { spendableSats: this.spendable, pendingInRoundSats: 0, pendingExitSats: 0, pendingLightningSendSats: 0, claimableLightningReceiveSats: 0, pendingBoardSats: 0 }; }
   async peekAddress(index: number) { if (index >= this.addresses.length) throw new Error(`VTXO key ${index} does not exist, please derive it first`); return this.addresses[index]; }
   async newAddressWithIndex() { const index = this.addresses.length; return { address: this.address(index), index }; }
   async validateArkoorAddress(address: string) {
     if (address.startsWith("tark1q")) throw new Error("invalid ark address: address is an Arkade address and cannot be used here");
-    return address.startsWith(`tark1p${this.server.tag}`);
+    return address.startsWith(`${this.server.hrp}${this.server.tag}`);
   }
   async estimateArkoorPaymentFee() { return { feeSats: this.server.fee }; }
   private record(m: Omit<BarkMovement, "id" | "status" | "createdAt" | "offchainFeeSats" | "sentToAddresses" | "receivedOnAddresses" | "outputVtxoIds"> & Partial<BarkMovement>) {
@@ -75,6 +82,7 @@ export class FakeBarkWallet implements BarkWalletHandle {
   async history() { return this.movements.map((m) => ({ ...m })); }
   async sync() {}
   async maintenance() {}
+  async getFirstExpiringVtxoBlockheight() { return this.firstExpiry; }
   async boardAll() { const amountSats = this.onchain; this.onchain = 0; this.spendable += amountSats; return { amountSats, txid: "b".repeat(64) }; }
   async stopDaemonWait() {}
   free() { this.freed = true; }

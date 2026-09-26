@@ -26,7 +26,7 @@
     "@hyperswarm/dht-relay": "0.4.3",
     "@scure/bip39": "2.4.0",
     "@scure/btc-signer": "2.4.1",
-    "@secondts/bark": "0.24.0",
+    "@secondts/bark": "0.25.0",
     "@synonymdev/pubky": "0.12.0",
     "@tetherto/wdk-wallet-evm": "1.0.0-beta.19",
     "ethers": "6.17.0",

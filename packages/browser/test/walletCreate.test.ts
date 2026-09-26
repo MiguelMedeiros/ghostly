@@ -5,7 +5,7 @@ import { DEFAULT_MINTS, TEST_MINT } from "../src/shared/mints";
 import { FakeBarkServer } from "./helpers/fakeBark";
 import { FakeBreezNetwork } from "./helpers/fakeBreez";
 import { FakeFedimintSdk } from "./helpers/fakeFedimint";
-// covers: wallet.instances.create, wallet.instances.networks, wallet.bark.mainnet-off, wallet.fedimint.mainnet-off, wallet.test-coins
+// covers: wallet.instances.create, wallet.instances.networks, wallet.bark.mainnet, wallet.fedimint.mainnet-off, wallet.test-coins
 
 // Every server is faked: these tests cover what one click makes, checks and saves, never a network.
 const info = vi.fn(async () => ({ network: "mutinynet", signerPubkey: `02${"ab".repeat(32)}` }));
@@ -24,7 +24,7 @@ vi.mock("../src/engine/paymentAdapters/usdt", () => ({
 const { GhostlyNode } = await import("../src/engine/node");
 const { cashuMint } = await import("../src/engine/paymentAdapters/providers/cashuMint");
 const { FakeLightningProvider, FakeOnchainProvider, fakeLightning, fakeOnchain } = await import("../src/engine/paymentAdapters/providers/testing");
-const { BARK_MAINNET_UNAVAILABLE, TESTNET_BARK } = await import("../src/engine/paymentAdapters/barkWallet");
+const { TESTNET_BARK } = await import("../src/engine/paymentAdapters/barkWallet");
 const { TESTNET_ARK, DEFAULT_ARK } = await import("../src/engine/paymentAdapters/arkWallet");
 const { FEDIMINT_MAINNET_UNAVAILABLE } = await import("../src/engine/paymentAdapters/fedimintWallet");
 const { SPARK_MAINNET_NOT_YET, createTiming } = await import("../src/engine/paymentAdapters/walletInstances");
@@ -140,16 +140,15 @@ describe("one click makes a wallet of a type on a network", () => {
     await expect(node.walletCreate({ type: "usdt", network: "testnet" })).rejects.toThrow("RPC unavailable. Nothing was saved");
   });
 
-  it("Bark and Spark: Testnet in one click; Mainnet is not offered yet, and says why", async () => {
+  it("Bark and Spark: Testnet in one click; Spark's Mainnet is not offered yet and says why, Bark's is (barkMainnet.test.ts)", async () => {
     const { node, wallets, started } = engine();
     await started;
     expect((await node.walletCreate({ type: "bark", network: "testnet" })).config).toEqual({ chain: "signet", provider: TESTNET_BARK.provider });
     expect((await node.walletCreate({ type: "spark", network: "testnet" })).config).toEqual({ chain: "regtest" });
-    await expect(node.walletCreate({ type: "bark", network: "mainnet" })).rejects.toThrow(BARK_MAINNET_UNAVAILABLE);
     await expect(node.walletCreate({ type: "spark", network: "mainnet" })).rejects.toThrow(SPARK_MAINNET_NOT_YET);
     expect(wallets()).toEqual(["bark:testnet", "spark:testnet"]);
     const offers = node.getState().wallet.offers ?? [];
-    expect(offers.find((o) => o.type === "bark" && o.network === "mainnet")).toMatchObject({ available: false, reason: BARK_MAINNET_UNAVAILABLE });
+    expect(offers.find((o) => o.type === "bark" && o.network === "mainnet")).toMatchObject({ available: true, exists: false });
     expect(offers.find((o) => o.type === "spark" && o.network === "mainnet")).toMatchObject({ available: false, reason: SPARK_MAINNET_NOT_YET });
     expect(offers.find((o) => o.type === "bark" && o.network === "testnet")).toMatchObject({ available: true, exists: true });
   });

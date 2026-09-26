@@ -58,7 +58,7 @@ function splitByNetwork(flat: WalletView, fallback: WalletNetwork): Record<Walle
 function offersFor(networks: Record<WalletNetwork, NetworkWalletsView>, wallets: WalletView["wallets"] = []): WalletOffer[] {
   return WALLET_TYPES.flatMap((type) => WALLET_NETWORKS.map((network): WalletOffer => {
     const exists = wallets.some((w) => w.type === type && w.network === network);
-    if ((type === "bark" || type === "spark" || type === "fedimint") && network === "mainnet") return { type, network, exists, available: false, reason: `${type} on Mainnet is not available yet` };
+    if ((type === "spark" || type === "fedimint") && network === "mainnet") return { type, network, exists, available: false, reason: `${type} on Mainnet is not available yet` };
     if (type === "fedimint") return { type, network, exists, available: true, needs: "invite" };
     if (type === "lightning" || type === "bitcoin") {
       const providers = (type === "lightning" ? networks[network].lightning : networks[network].bitcoin)?.offered?.filter((d) => d.id !== "cashu-mint") ?? [];

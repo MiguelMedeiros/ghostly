@@ -502,7 +502,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `wallet.ark.boarding` | 202 | WED | 1 | · | 1 | · | · | · |
 | `wallet.ark.send` | 202 | WED | 1 | · | · | · | · | 2 |
 | `wallet.ark.recover` | 202 | WED | 1 | · | · | · | · | · |
-| `wallet.bark.mainnet-off` | 204 | WED | 1 | · | 1 | · | · | · |
+| `wallet.bark.mainnet` | 204 | WED | 4 | · | 1 | · | · | · |
 | `wallet.bark.create` | 204 | WED | 2 | · | 1 | · | · | · |
 | `wallet.bark.send` | 204 | WED | 2 | · | · | · | · | 1 |
 | `wallet.bark.backup` | 204 | WED | 2 | · | · | · | · | · |

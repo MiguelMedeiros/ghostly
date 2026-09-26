@@ -3,7 +3,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { PaymentTarget, WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
 import type { WalletMode } from "../../shared/mints";
-import { BARK_NETWORKS, BarkAdapter, barkDatabase, serverInfo, type BarkConfig } from "./bark";
+import { BARK_NETWORKS, BarkAdapter, barkDatabase, serverInfo, type BarkConfig, type BarkExpiry } from "./bark";
 import { loadBarkSdk, type BarkNetwork, type BarkSdk } from "./barkSdk";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
@@ -12,9 +12,11 @@ import type { SavedIntent } from "./coordinator";
 
 export interface BarkWalletView {
   configured: boolean; locked: boolean;
-  /** Why there is no Bark wallet on this network (Mainnet today), shown instead of one. */
-  unavailable?: string;
   network?: BarkNetwork; provider?: string; address?: string; onchainAddress?: string;
+  /** The server's terms of service, when it publishes them (Second's Bitcoin server does). */
+  terms?: string;
+  /** Blocks until this wallet's first coin expires (none without coins), and a coin's whole life on this server. */
+  expiry?: BarkExpiry;
   /** Spendable now. */
   balance: number;
   /** In a round, a board or a Lightning send: this wallet's, not spendable yet. */
@@ -28,16 +30,17 @@ export interface BarkWalletView {
 interface StoredBark { config: BarkConfig; seed: EncryptedSeed; deviceKey: string }
 export interface BarkCreate { network: BarkNetwork; provider: string; explorer: string; mnemonic?: string }
 
-/** Second's public signet server and its Esplora (their docs ask not to swap the Esplora: it relays packages). */
-export const TESTNET_BARK = { network: "signet", provider: "https://ark.signet.2nd.dev", explorer: "https://esplora.signet.2nd.dev" } as const satisfies BarkCreate;
 /**
- * Second runs a Bitcoin server (https://ark.second.tech, since 2026-06), but Ghostly's Bark wallet has only
- * been exercised on signet and regtest, so Mainnet does not create one yet. Setting this is the whole switch.
+ * Second's public servers and their Esplora (https://second.tech/docs/connection-details; their docs ask not to swap
+ * the Esplora: it relays packages). Bitcoin since 2026-06-09.
  */
-export const DEFAULT_BARK: BarkCreate | undefined = undefined;
-export const BARK_MAINNET_UNAVAILABLE = "Bark on Mainnet is not available yet: it has only been tried on signet and regtest. Create a Testnet Bark wallet instead.";
-/** The defaults a new wallet of this network is made with, in one click; none where the network is not offered. */
-export const barkDefaults = (network: WalletNetwork): BarkCreate | undefined => network === "testnet" ? TESTNET_BARK : DEFAULT_BARK;
+export const TESTNET_BARK = { network: "signet", provider: "https://ark.signet.2nd.dev", explorer: "https://esplora.signet.2nd.dev" } as const satisfies BarkCreate;
+export const MAINNET_BARK = { network: "bitcoin", provider: "https://ark.second.tech", explorer: "https://mempool.second.tech/api" } as const satisfies BarkCreate;
+/** The terms Second's Bitcoin server links to from its own server information (`tos_link`). */
+export const SECOND_TERMS = "https://second.tech/terms";
+const TERMS: Record<string, string> = { [MAINNET_BARK.provider]: SECOND_TERMS };
+/** The defaults a new wallet of this network is made with, in one click. */
+export const barkDefaults = (network: WalletNetwork): BarkCreate => network === "testnet" ? TESTNET_BARK : MAINNET_BARK;
 export const barkMode = (network: BarkNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
 const forget = async (walletId: string) => {
   for (const name of [barkDatabase(walletId), `${barkDatabase(walletId)}-onchain`]) {
@@ -62,7 +65,7 @@ export class BarkWallet {
   /** Creating, replacing and restoring never interleave: two of them could each think the profile is empty. */
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
   private idle(config?: BarkConfig): BarkWalletView {
-    return { configured: !!config, locked: true, balance: 0, network: config?.network, provider: config?.provider, unavailable: !config && !barkDefaults(this.network) ? BARK_MAINNET_UNAVAILABLE : undefined };
+    return { configured: !!config, locked: true, balance: 0, network: config?.network, provider: config?.provider, terms: config && TERMS[config.provider] };
   }
   async start() { this.saved = await wrap<StoredBark | undefined>((await store(STORES.settings, "readonly")).get(this.key)); this.view = this.idle(this.saved?.config); }
   get configured() { return !!this.saved; }
@@ -76,11 +79,11 @@ export class BarkWallet {
     return this.startReady(create);
   }
   private startReady(create: boolean): Promise<void> { return this.readying ??= this.ready(create).finally(() => { this.readying = undefined; }); }
-  private needsReady(create: boolean) { return !this.stopped && (this.saved ? !this.adapter : create && !!barkDefaults(this.network)); }
+  private needsReady(create: boolean) { return !this.stopped && (this.saved ? !this.adapter : create); }
   private async ready(create: boolean) {
     clearTimeout(this.retry);
     try {
-      if (!this.saved) { if (create) await this.serial(async () => { const params = barkDefaults(this.network); if (!this.saved && params) await this.createNow({ ...params }); }); }
+      if (!this.saved) { if (create) await this.serial(async () => { if (!this.saved) await this.createNow({ ...barkDefaults(this.network) }); }); }
       else if (!this.adapter) await this.serial(() => this.stopped ? Promise.resolve() : this.open());
     } catch (error) {
       if (this.stopped || error instanceof ModeChanged) return;
@@ -91,17 +94,14 @@ export class BarkWallet {
   /** A wallet of this network on its default server, made now: it answers first, or nothing is saved. */
   createDefaultNow() {
     return this.serial(async () => {
-      const params = barkDefaults(this.network);
-      if (!params) throw new Error(BARK_MAINNET_UNAVAILABLE);
       if (this.saved) throw new Error(`There is already a ${networkLabel(this.network)} Bark wallet`);
-      await this.createNow({ ...params });
+      await this.createNow({ ...barkDefaults(this.network) });
     });
   }
   create(params: BarkCreate) { return this.serial(() => this.createNow(params)); }
   private async createNow(params: BarkCreate) {
     if (!BARK_NETWORKS.includes(params.network)) throw new Error("Unsupported Bark network");
     if (barkMode(params.network) !== this.network) throw new WrongNetworkError(barkMode(params.network), `${params.network === "bitcoin" ? "Bitcoin" : params.network} is a ${networkLabel(barkMode(params.network))} network: this is the ${networkLabel(this.network)} Bark wallet`);
-    if (params.network === "bitcoin" && !DEFAULT_BARK) throw new Error(BARK_MAINNET_UNAVAILABLE);
     const provider = params.provider.replace(/\/$/, ""), explorer = params.explorer.replace(/\/$/, "");
     BarkAdapter.checkConfig({ network: params.network, provider, explorer });
     const mnemonic = params.mnemonic?.trim() || generateMnemonic(wordlist);
@@ -175,6 +175,7 @@ export class BarkWallet {
     await read("sync", () => adapter.sync(), undefined);
     const balance = await read("balance", () => adapter.balance(), undefined);
     const onchain = await read("on-chain balance", () => adapter.onchainBalance(), undefined);
+    const expiry = await read("coin expiry", () => adapter.expiry(), this.view.expiry);
     // Renewing what is close to expiry keeps money left alone spendable: every few minutes is plenty.
     if (Date.now() - this.lastMaintenance > 5 * 60_000) { this.lastMaintenance = Date.now(); void adapter.maintain().catch((error) => console.warn("Bark maintenance:", error instanceof Error ? error.message : error)); }
     if (this.adapter !== adapter) return;
@@ -184,6 +185,7 @@ export class BarkWallet {
       pending: balance ? balance.pendingInRoundSats + balance.pendingBoardSats + balance.pendingLightningSendSats + balance.claimableLightningReceiveSats : this.view.pending,
       exiting: balance?.pendingExitSats ?? this.view.exiting,
       onchain: onchain?.totalSats ?? this.view.onchain,
+      expiry,
       error: failed.length ? `Could not read the ${failed.join(", ")} from the Bark server. Last values may be stale.` : undefined,
     };
     this.changed();
@@ -192,7 +194,7 @@ export class BarkWallet {
   /** On-chain coins into Ark: the board confirms on-chain, then they are spendable. */
   async board(): Promise<string> { const pending = await this.require().board(); await this.refresh(); return pending.txid; }
   async target(): Promise<PaymentTarget> { const adapter = this.require(); return { method: "bark", network: adapter.config.network, provider: adapter.config.provider, asset: "BTC", unit: "sat", address: await adapter.requestAddress(), expiresAt: Date.now() + 15 * 60 * 1000 }; }
-  require() { if (!this.adapter) throw new Error(this.view.unavailable ?? "Wait for your Bark wallet to connect"); return this.adapter; }
+  require() { if (!this.adapter) throw new Error("Wait for your Bark wallet to connect"); return this.adapter; }
   async backup() { if (!this.saved) throw new Error("No Bark wallet to back up"); return { mnemonic: await unsealSeed(this.saved.seed, this.saved.deviceKey), config: this.saved.config }; }
   /**
    * The phrase, the server and the payments, sealed with a password the person chooses. Bark keeps no copy of

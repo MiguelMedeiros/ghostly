@@ -6,6 +6,10 @@ export interface BarkConfig { network: BarkNetwork; provider: string; explorer: 
 export interface BarkPrepared { address: string; amount: number; fee: number; after: number }
 export const BARK_NETWORKS: BarkNetwork[] = ["bitcoin", "signet", "regtest"];
 const SDK_NETWORK: Record<BarkNetwork, string> = { bitcoin: "Bitcoin", signet: "Signet", regtest: "Regtest" };
+/** Bark addresses are bech32m with `ark` on Bitcoin and `tark` on the test networks: real and test money never share one. */
+export const barkAddressPrefix = (network: BarkNetwork) => network === "bitcoin" ? "ark1" : "tark1";
+/** The coin expiry the wallet page shows: blocks until the first coin expires, and a coin's whole life on this server. */
+export interface BarkExpiry { blocksLeft?: number; lifetime?: number }
 
 /** Movement addresses are JSON `{"type":"ark","value":…}`; older builds give the bare address. */
 const addressOf = (entry: string) => { try { const parsed = JSON.parse(entry); return typeof parsed?.value === "string" ? parsed.value : entry; } catch { return entry; } };
@@ -14,7 +18,7 @@ export const barkDatabase = (walletId: string) => `ghostly-bark-${walletId}`;
 /** How long a wallet just opened is given to reach its server, per attempt (tests shorten it). */
 export const barkTiming = { serverWaitMs: 1000 };
 /** What the server says it is. A wallet just opened has not reached it yet: ask it to, and wait a little. */
-export async function serverInfo(wallet: BarkWalletHandle, attempts = 10): Promise<{ network: string; serverPubkey: string }> {
+export async function serverInfo(wallet: BarkWalletHandle, attempts = 10): Promise<{ network: string; serverPubkey: string; vtxoLifetime?: number }> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     const info = await wallet.arkInfo();
     if (info) return info;
@@ -84,6 +88,16 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
   /** On-chain coins of this wallet into Ark. They show as pending until the board confirms. */
   board() { return this.serial(() => this.wallet.boardAll()); }
   sync() { return this.outside(() => this.wallet.sync()); }
+  /**
+   * How long until the first coin expires. A coin left past its expiry can be swept by the server, so the wallet
+   * renews coins near it (maintenance); this is what the page shows so the person knows to open Ghostly in time.
+   */
+  expiry(): Promise<BarkExpiry> { return this.outside(async () => {
+    const [first, info] = await Promise.all([this.wallet.getFirstExpiringVtxoBlockheight(), this.wallet.arkInfo()]);
+    const lifetime = info?.vtxoLifetime || undefined;
+    if (first === undefined) return { lifetime };
+    return { blocksLeft: Math.max(0, first - await this.onchain.tipHeight()), lifetime };
+  }); }
   /**
    * Refreshes VTXOs close to expiry (through a round) and settles what the daemon left, so money left alone
    * stays spendable. Not queued behind payments, nor they behind it: a round can take minutes, and the SDK
@@ -173,6 +187,7 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
   private async checkTarget(t: PaymentTarget) {
     if (t.method !== this.method || t.provider !== this.config.provider || t.network !== this.config.network || t.asset !== "BTC" || t.unit !== "sat") throw new Error("Payment method, network or provider does not match this wallet");
     if (!this.sdk.isArkAddress(t.address)) throw new Error("Not a Bark address. Bark cannot pay an Arkade address.");
+    if (!t.address.toLowerCase().startsWith(barkAddressPrefix(this.config.network))) throw new Error(this.config.network === "bitcoin" ? "This is a test network Bark address: a Mainnet wallet pays only real Bitcoin addresses" : "This is a Mainnet Bark address: a test wallet cannot pay it");
     const ours = await this.wallet.validateArkoorAddress(t.address).catch(() => false);
     if (!ours) throw new Error("This Bark address belongs to another Ark server or network");
   }

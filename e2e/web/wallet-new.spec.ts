@@ -27,7 +27,7 @@ test("a new profile has no wallet and says how to start; one choice makes Testne
   await expect(deck.locator("[role=tab]")).toHaveCount(3); // Cashu, Lightning through it, USDT
 });
 
-test("New makes a Testnet kind in one click, checked before its card appears, and says what Mainnet does not have yet", { tag: ["@feature:wallet.instances.create", "@feature:wallet.bark.mainnet-off", "@feature:wallet.fedimint.mainnet-off"] }, async ({ peer }) => {
+test("New makes a Testnet kind in one click, checked before its card appears, and says what Mainnet does not have yet", { tag: ["@feature:wallet.instances.create", "@feature:wallet.fedimint.mainnet-off"] }, async ({ peer }) => {
   const alice = await peer("new-one-click");
   await createWallet(alice, "cashu", "testnet");
   await expect(alice.page.getByTestId("wallet-card-cashu-testnet")).toHaveAttribute("aria-selected", "true");
@@ -38,17 +38,17 @@ test("New makes a Testnet kind in one click, checked before its card appears, an
   await dialog.getByRole("radio", { name: "Testnet" }).click();
   await expect(dialog.getByTestId("new-wallet-type-cashu-status")).toHaveText("Added");
   await dialog.getByRole("radio", { name: "Mainnet" }).click();
-  for (const kind of ["bark", "spark", "fedimint"]) {
+  for (const kind of ["spark", "fedimint"]) {
     await expect(dialog.getByTestId(`new-wallet-type-${kind}`), kind).toHaveAttribute("aria-disabled", "true");
     await expect(dialog.getByTestId(`new-wallet-type-${kind}-status`), kind).toHaveText("Not yet");
     // Its reason, in place of what it is: Mainnet has not been tried with real funds.
     await expect(dialog.getByTestId(`new-wallet-type-${kind}`), kind).toContainText(/not available yet|not been tried/);
   }
-  await dialog.getByTestId("new-wallet-type-bark").click({ force: true });
+  await dialog.getByTestId("new-wallet-type-spark").click({ force: true });
   await expect(dialog).toBeVisible();
   await alice.page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);
+  await expect(alice.page.locator("[data-testid^=wallet-card-spark-]")).toHaveCount(0);
 });
 
 test("a source that needs its form: New asks only for it, and a fake Lightning wallet becomes Testnet's Lightning card", { tag: ["@feature:wallet.instances.create", "@feature:wallet.lightning.sources"] }, async ({ peer }) => {
