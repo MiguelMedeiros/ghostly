@@ -11,9 +11,16 @@ metadata:
         "install":
           [
             {
+              "id": "npm",
+              "kind": "node",
+              "package": "@ghostly/cli",
+              "bins": ["ghostly"],
+              "label": "Install ghostly (npm, once published)",
+            },
+            {
               "id": "source",
               "kind": "shell",
-              "command": "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w @ghostly/cli && npm link -w @ghostly/cli",
+              "command": "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w @ghostly/cli && npm pack -w @ghostly/cli && npm install -g ./ghostly-cli-*.tgz",
               "bins": ["ghostly"],
               "label": "Build ghostly from source (Node 22.12+)",
             },
@@ -125,7 +132,7 @@ ghostly pay <lightning invoice> --max-fee 10       # from the Testnet Lightning 
 ```
 
 A payment bot listens for `payment.created` (a request or a payment arrived) and `payment.updated` (it settled or
-failed). Mainnet moves real bitcoin: add `--network mainnet --confirm-real` only when the wallet's owner asked for
+failed); a complete one is in the package's `examples/payment-bot.mjs`. Mainnet moves real bitcoin: add `--network mainnet --confirm-real` only when the wallet's owner asked for
 that exact payment.
 
 ## Rules the CLI enforces

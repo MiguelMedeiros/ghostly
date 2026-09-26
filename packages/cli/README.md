@@ -5,24 +5,31 @@ the extension and the Desktop, on Node. A bot keeps a profile online with `ghost
 `ghostly listen` (JSON lines), and acts with the other commands (JSON answers). The contract behind it, and why it
 is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md).
 
-> Status: phases 1 to 3 (profiles, pictures and backups, invites, one chat, groups with their admin tools, the
-> event stream and hooks, wallets and payments, files and voice notes, identity proofs, shared web apps). Packaging
-> comes next; every engine call is already
+> Status: phases 1 to 4 (profiles, pictures and backups, invites, one chat, groups with their admin tools, the
+> event stream and hooks, wallets and payments, files and voice notes, identity proofs, shared web apps; an npm
+> package, not yet published); every engine call is already
 > reachable through `ghostly engine <method>`. The older Rust `ghostly-cli` (the `cli/` folder) stays as the
 > compatibility client for v0.4 chats.
 
 ## Install
 
-From this repository (publishing to npm is the maintainer's):
+The package is ready for npm but not published (that is the maintainer's; `"private": true` in package.json keeps it
+from going out by accident). From this repository:
 
 ```bash
 npm install
 npm run build -w @ghostly/cli
-node packages/cli/dist/ghostly.mjs --version
+npm pack -w @ghostly/cli              # ghostly-cli-<version>.tgz: the bundle, its WebAssembly, README and SKILL.md
+npm install -g ./ghostly-cli-*.tgz    # the `ghostly` command, with its dependencies from npm
+ghostly --version
 ```
 
-Node 22.12 or newer. WebRTC comes from `node-datachannel` (a native module with prebuilt binaries for Linux,
-macOS and Windows); without it the CLI still runs, over HyperDHT, Iroh and the DHT, and groups are unavailable.
+Once published: `npm install -g @ghostly/cli`. Node 22.12 or newer. WebRTC comes from `node-datachannel` (a native
+module with prebuilt binaries for Linux, macOS and Windows); without it the CLI still runs, over HyperDHT, Iroh and
+the DHT, and groups are unavailable.
+
+The bundle holds the app's engine (`@ghostly/browser`, `@ghostly/core`, Iroh's and Breez's WebAssembly); every other
+package it imports is a dependency in package.json, which `test/packageDeps.test.ts` keeps true.
 
 ## Five minutes
 
@@ -44,7 +51,8 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   printf "echo: %s" "$(jq -r .message.text <<<"$event")" | ghostly send "$(jq -r .chat <<<"$event")" --stdin'
 ```
 
-The same bot on the socket, without jq: [examples/echo-bot.mjs](examples/echo-bot.mjs).
+The same bot on the socket, without jq: [examples/echo-bot.mjs](examples/echo-bot.mjs). A payment bot that takes
+requests, tips and "balance" in a chat, with test coins: [examples/payment-bot.mjs](examples/payment-bot.mjs).
 
 ## Profiles
 
