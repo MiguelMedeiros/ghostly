@@ -64,7 +64,7 @@ test("the payment sheet's Mainnet | Testnet tabs: one network's cards on Pay and
   await page.getByTestId("payment-request").click();
   await expect(sheet).toHaveCount(0);
   await expect(page.getByPlaceholder("Message…")).toBeFocused();
-  for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: /\b5\s*test sats/ })).toBeVisible({ timeout: 60_000 });
+  for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: /(?<!\d)5\s*test sats/ })).toBeVisible({ timeout: 60_000 });
 
   // A request that fails (the mint does not answer) keeps the sheet, with the error, to try again.
   const refuse = /^https:\/\/testnut\.cashu\.space\/v1\/mint\/quote/;

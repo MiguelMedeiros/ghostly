@@ -302,7 +302,7 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await composer(alice, "usdt", "1");
   await alice.page.getByTestId("payment-request").click();
   // The chat Send above left the request Alice's app made for it; this is the new one, for 1.
-  const request = chat(bob).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
+  const request = chat(bob).getByTestId("payment-bubble").filter({ hasText: "Requests" }).filter({ hasText: /(?<![\d.])1\s*TEST-USDT/ });
   await request.getByTestId("payment-pay").click();
   await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
