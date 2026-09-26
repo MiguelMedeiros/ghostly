@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "../support/fixtures";
+import { createWallet, expect, test, useFakeProviders, useTestnet, walletCard } from "../support/fixtures";
+import { mockMainnetMints } from "../support/mint";
 import { choose } from "../support/select";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
@@ -106,19 +107,36 @@ async function expectTidy(page: Page, root: string, what: string): Promise<void>
 
 for (const width of WIDTHS) {
   test(`the right-hand pages hold together: ${width.name}`, { tag: ["@feature:app.responsive"] }, async ({ peer }) => {
-    const { page } = await peer("alice", "mobile" in width ? { mobile: true } : { viewport: width.viewport });
+    const alice = await peer("alice", "mobile" in width ? { mobile: true } : { viewport: width.viewport });
+    const { page } = alice;
+    await mockMainnetMints(alice.context);
+    await useFakeProviders(alice);
 
     await page.goto("/#/wallet");
     await expect(page.getByTestId("wallet")).toBeVisible();
-    // The Mainnet/Testnet switch stays inside the header bar.
+    // A new profile has no wallet: the first-run choice holds together, and New stays inside the header bar.
+    await expect(page.getByTestId("wallet-first")).toBeVisible();
+    await expectTidy(page, "[data-testid=wallet]", "the first-run wallet page");
     const header = await page.getByTestId("wallet").locator("header").boundingBox();
-    const mode = await page.getByTestId("wallet-mode").boundingBox();
-    expect(mode!.x + mode!.width).toBeLessThanOrEqual(header!.x + header!.width + 1);
-    for (const card of ["cashu", "lightning", "arkade", "bark", "spark", "usdt", "bitcoin", "fedimint"] as const) {
-      await page.getByTestId(`wallet-card-${card}`).click();
+    const add = await page.getByTestId("wallet-add").boundingBox();
+    expect(add!.x + add!.width).toBeLessThanOrEqual(header!.x + header!.width + 1);
+    await page.getByTestId("wallet-add").click();
+    await expectTidy(page, "[data-testid=new-wallet]", "the New wallet dialog");
+    await page.keyboard.press("Escape");
+    // The wallets that need no outside service: Cashu on both networks (the Mainnet mints answered by the suite's
+    // own), the Lightning of each, and a fake Testnet Bitcoin wallet. Ark, Bark, Spark, USDT and Fedimint need
+    // their servers (public test networks, or the gated regtest stack): their own specs cover their panels.
+    await createWallet(alice, "cashu", "testnet");
+    await createWallet(alice, "cashu", "mainnet");
+    await createWallet(alice, "bitcoin", "testnet", { provider: "fake-onchain", fill: async (form) => {
+      await form.getByLabel("Access token").fill("token");
+      await form.getByTestId("provider-save").click();
+    } });
+    for (const card of ["cashu-mainnet", "cashu-testnet", "lightning-mainnet", "lightning-testnet", "bitcoin-testnet"] as const) {
+      await walletCard(page, card).click();
       await expectTidy(page, "[data-testid=wallet]", `the ${card} wallet`);
     }
-    await page.getByTestId("wallet-card-cashu").click();
+    await walletCard(page, "cashu-testnet").click();
     await expect(page.getByTestId("mint-row").first()).toBeVisible();
     for (const tab of ["wallet-send", "wallet-history"]) {
       await page.getByTestId(tab).click();
@@ -217,6 +235,7 @@ test("the page keeps a phone's width however wide the chat list is dragged", { t
   await injectNostrSigner(alice);
   await addNostrIdentity(alice);
   await page.goto("/#/wallet");
+  await useTestnet(alice);
   const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;
   await page.mouse.move(handle.x + 1, handle.y + 100);
   await page.mouse.down();
@@ -226,7 +245,7 @@ test("the page keeps a phone's width however wide the chat list is dragged", { t
   expect(column.width).toBeGreaterThanOrEqual(319);
   // Too narrow for a stack of readable cards, even with a mouse: the snapping track, one card whole in the centre.
   await expect(page.getByTestId("wallet").locator(".wallet-deck")).toHaveAttribute("data-mode", "track");
-  await page.getByTestId("wallet-card-cashu").click();
+  await walletCard(page, "cashu-testnet").click();
   await expect(page.getByTestId("mint-row").first()).toBeVisible();
   await expectTidy(page, "[data-testid=wallet]", "the wallet beside the widest list");
   await page.goto("/#/identities");
@@ -243,6 +262,8 @@ test("the page keeps a phone's width however wide the chat list is dragged", { t
 test("the chat's pickers stay inside the chat's column beside the widest list, their cards readable", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive", "@feature:payments.chat.cards", "@feature:proofs.composer"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice", { viewport: { width: 900, height: 900 } }), peer("bob")]);
   await injectNostrSigner(alice);
+  // Cards to pay with: a Testnet Cashu wallet each (a new profile has none), made before they pair.
+  for (const p of [alice, bob]) await useTestnet(p);
   await pair(alice, bob);
   const { page } = alice;
   const chat = page.url();
@@ -275,6 +296,8 @@ const reachable = (page: Page, testId: string) => page.getByTestId(testId).evalu
 
 test("the payment sheet fits a short window: its head in view, Use and Save in reach, the rest scrolls", { tag: ["@feature:app.responsive", "@feature:payments.chat.cards", "@feature:payments.chat.methods"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice", { viewport: { width: 1100, height: 900 } }), peer("bob")]);
+  // Cards to pay with and accept: Testnet Cashu and its Lightning each (a new profile has none), made before they pair.
+  for (const p of [alice, bob]) await useTestnet(p);
   await pair(alice, bob);
   const { page } = alice;
   // A laptop split in two, then a narrow side panel the height of the extension's.

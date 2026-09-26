@@ -2,31 +2,36 @@ import { execFileSync } from "node:child_process";
 import { Interface } from "ethers";
 import { USDT_LOCAL } from "../support/usdt-local.mjs";
 import { strangerInvoice } from "../support/bolt11";
-import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer, type PeerOptions } from "../support/fixtures";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer, type PeerOptions, type WalletKind } from "../support/fixtures";
 import { composerRow } from "../support/composer";
-import { chatPayments } from "../support/payments";
+import { chatPayments, paymentCard } from "../support/payments";
 
 /**
- * Every wallet provider receiving and sending, on test networks only (the Testnet mode):
+ * Every wallet provider receiving and sending, on test networks only: each person makes the Testnet wallets the test
+ * needs with New (nothing is made by itself), then moves an Ark, Bark or USDT one to the local test chain.
  *  - Cashu and Lightning: the public test mint, or the local one E2E_MINT_URL answers for (@network).
- *  - Ark: arkd on e2e/infra's regtest chain (GHOSTLY_ARK_REGTEST=1).
- *  - Bark (Second's Ark): captaind on e2e/infra's regtest chain (GHOSTLY_BARK_REGTEST=1).
- *  - USDT: e2e/infra's local EVM chain with a test token (GHOSTLY_USDT_LOCAL=1).
+ *  - Ark: arkd on e2e/infra's regtest chain (GHOSTLY_ARK_REGTEST=1). New makes it on Mutinynet first (@network).
+ *  - Bark (Second's Ark): captaind on e2e/infra's regtest chain (GHOSTLY_BARK_REGTEST=1). New makes it on signet first (@network).
+ *  - USDT: e2e/infra's local EVM chain with a test token (GHOSTLY_USDT_LOCAL=1). New makes it on Sepolia first (@network).
  * For each: money in, a Send in the chat (reviewed, approved), a Request paid in the chat, and a Send
  * from the wallet page where the provider has one. Balances are checked on both sides.
  */
 
-async function twoInTestnet(peer: (name: string, options?: PeerOptions) => Promise<Peer>, names: [string, string]): Promise<[Peer, Peer]> {
-  // Test networks only: the Mainnet wallets a new profile makes by itself never get a server to wait on.
-  const [alice, bob] = await Promise.all([peer(names[0], { offlineMainnet: true }), peer(names[1], { offlineMainnet: true })]);
+/** Two people in a chat, each with these Testnet wallets, made with New (a new profile has none). */
+async function twoInTestnet(peer: (name: string, options?: PeerOptions) => Promise<Peer>, names: [string, string], kinds: WalletKind[] = ["cashu"]): Promise<[Peer, Peer]> {
+  const [alice, bob] = await Promise.all([peer(names[0]), peer(names[1])]);
   await link(alice, bob);
   await connect(alice, bob);
-  for (const p of [alice, bob]) { await useTestnet(p); await openChat(p); }
+  for (const p of [alice, bob]) {
+    for (const kind of kinds) await createWallet(p, kind, "testnet");
+    await openChat(p);
+  }
   return [alice, bob];
 }
+/** The payment composer on one Testnet card (`cashu`: the Testnet Cashu wallet's), with an amount. */
 const composer = async (p: Peer, card: string, amount: string) => {
   await (await composerRow(p.page, "payment-button")).click();
-  await p.page.getByTestId(`payment-card-${card}`).click();
+  await paymentCard(p.page, `${card}-testnet`).click();
   await p.page.getByTestId("payment-amount").fill(amount);
 };
 /** Lightning off in this chat for the payee: the test mint pays a request's own invoice by itself. */
@@ -34,7 +39,7 @@ async function ecashOnly(p: Peer) {
   await chatPayments(p.page, { lightning: false });
 }
 async function receiveOverLightning(p: Peer, sats: number) {
-  await openWallet(p, "cashu");
+  await openWallet(p, "cashu-testnet");
   await p.page.getByTestId("wallet-receive").click();
   await p.page.getByTestId("wallet-receive-amount").fill(String(sats));
   await p.page.getByTestId("wallet-create-invoice").click();
@@ -48,7 +53,7 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   test("Cashu: in over Lightning, a Send in the chat, and a Request paid in the chat", { tag: ["@feature:wallet.cashu.receive-lightning", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["cashu-alice", "cashu-bob"]);
     await receiveOverLightning(alice, 100);
-    await expect(testSats(alice)).toHaveText(/^100\s*sats/);
+    await expect(testSats(alice)).toHaveText(/^100\s*test sats/);
 
     await openChat(alice);
     await composer(alice, "cashu", "21");
@@ -65,8 +70,8 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
     await request.getByTestId("payment-pay").click();
     await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
     await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
-    await openWallet(bob, "cashu");
-    await expect(testSats(bob)).toHaveText(/^31\s*sats/, { timeout: 30_000 });
+    await openWallet(bob, "cashu-testnet");
+    await expect(testSats(bob)).toHaveText(/^31\s*test sats/, { timeout: 30_000 });
   });
 
   // A test mint marks its own invoices paid by itself: one peer paying the other's invoice at the same
@@ -75,24 +80,24 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   test("Lightning: in through an invoice, out by paying someone else's invoice from Send", { tag: ["@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["ln-alice", "ln-bob"]);
     await receiveOverLightning(alice, 100);
-    await expect(testSats(alice)).toHaveText(/^100\s*sats/);
+    await expect(testSats(alice)).toHaveText(/^100\s*test sats/);
 
-    await openWallet(bob, "lightning");
+    await openWallet(bob, "lightning-testnet");
     await bob.page.getByTestId("wallet-receive").click();
     await bob.page.getByTestId("wallet-receive-amount").fill("25");
     await bob.page.getByTestId("wallet-create-invoice").click();
     await expect(bob.page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbc/);
     await expect(bob.page.getByTestId("wallet-paid")).toContainText("25 sats received", { timeout: 60_000 });
-    await openWallet(bob, "cashu");
-    await expect(testSats(bob)).toHaveText(/^25\s*sats/);
+    await openWallet(bob, "cashu-testnet");
+    await expect(testSats(bob)).toHaveText(/^25\s*test sats/);
 
-    await openWallet(alice, "lightning");
+    await openWallet(alice, "lightning-testnet");
     await alice.page.getByTestId("wallet-send").click();
     await alice.page.getByTestId("wallet-pay-input").fill(strangerInvoice(25));
     await alice.page.getByRole("button", { name: "Pay 25 sats" }).click();
     await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
     await expect(alice.page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 60_000 });
-    await openWallet(alice, "cashu");
+    await openWallet(alice, "cashu-testnet");
     // The balance counts down to its new value (useCountUp, 0.7 s): read once, it can be anywhere on the way.
     await expect(async () => {
       const left = Number((await testSats(alice).innerText()).match(/^(\d+)/)![1]);
@@ -102,15 +107,16 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   });
 });
 
-test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.ark.send", "@feature:payments.arkade.send", "@feature:payments.arkade.request"] }, async ({ peer }) => {
+test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.ark.send", "@feature:payments.arkade.send", "@feature:payments.arkade.request"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_ARK_REGTEST=1");
   test.setTimeout(6 * 60_000);
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
-  const [alice, bob] = await twoInTestnet(peer, ["ark-p-alice", "ark-p-bob"]);
+  const [alice, bob] = await twoInTestnet(peer, ["ark-p-alice", "ark-p-bob"], ["arkade"]);
   const panel = (p: Peer) => p.page.getByTestId("ark-wallet");
   const balance = (p: Peer) => panel(p).getByTestId("ark-balance");
   for (const p of [alice, bob]) {
-    await openWallet(p, "arkade");
+    await openWallet(p, "arkade-testnet");
+    // New made it on Mutinynet; an empty wallet moves to the local regtest server.
     await panel(p).getByRole("radio", { name: "Regtest", exact: true }).click({ timeout: 60_000 });
     await expect(balance(p)).toContainText("Regtest", { timeout: 60_000 });
     if (p === alice) {
@@ -121,7 +127,7 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
     await expect(panel(p).getByTestId("ark-address")).toBeVisible();
   }
   // In: the funded wallet shows its sats.
-  await expect(balance(alice)).toHaveText(/^9,900\s*sats/, { timeout: 30_000 });
+  await expect(balance(alice)).toHaveText(/^9,900\s*test sats/, { timeout: 30_000 });
 
   // A Send from the wallet page, to Bob's address.
   const bobAddress = (await panel(bob).getByTestId("ark-address").innerText()).trim();
@@ -131,7 +137,7 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
   await panel(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(panel(alice).getByTestId("review-status")).toHaveText("settled", { timeout: 60_000 });
-  await expect(balance(bob)).toHaveText(/^500\s*sats/, { timeout: 60_000 });
+  await expect(balance(bob)).toHaveText(/^500\s*test sats/, { timeout: 60_000 });
 
   // A Send in the chat: Bob's app asks Alice's for an address, Bob approves.
   for (const p of [alice, bob]) await openChat(p);
@@ -149,7 +155,7 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   await request.getByTestId("payment-pay").click();
   await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
-  await openWallet(bob, "arkade");
+  await openWallet(bob, "arkade-testnet");
   // On regtest a batch expires within minutes: what outlived its batch is recovered, never lost.
   const recoverable = panel(bob).getByTestId("ark-recoverable");
   await expect.poll(async () => (await recoverable.isVisible()) || /^400/.test(await balance(bob).innerText()), { timeout: 60_000 }).toBe(true);
@@ -165,18 +171,18 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   expect(await sats()).toBeLessThanOrEqual(400);
 });
 
-test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.bark.send", "@feature:payments.bark.send"] }, async ({ peer }) => {
+test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.bark.send", "@feature:payments.bark.send"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_BARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_BARK_REGTEST=1");
   test.setTimeout(6 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bark-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
   regtest("ready");
-  const [alice, bob] = await twoInTestnet(peer, ["bark-p-alice", "bark-p-bob"]);
+  const [alice, bob] = await twoInTestnet(peer, ["bark-p-alice", "bark-p-bob"], ["bark"]);
   const panel = (p: Peer) => p.page.getByTestId("bark-wallet");
   const balance = (p: Peer) => panel(p).getByTestId("bark-balance");
   const address: Record<string, string> = {};
   for (const p of [alice, bob]) {
-    await openWallet(p, "bark");
-    // Testnet starts on signet; an empty wallet makes way for the local regtest server.
+    await openWallet(p, "bark-testnet");
+    // New made it on signet; an empty wallet makes way for the local regtest server.
     await panel(p).getByRole("radio", { name: "Regtest", exact: true }).click({ timeout: 90_000 });
     await expect(balance(p)).toContainText("Regtest", { timeout: 90_000 });
     address[p.name] = (await panel(p).getByTestId("bark-address").innerText()).trim();
@@ -185,7 +191,7 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
   // In over Ark: a Bark wallet of the same server (the funder) pays Alice's address.
   const funded = JSON.parse(regtest("pay", address[alice.name], "20000"));
   expect(funded).toMatchObject({ status: "successful", kind: "send", sat: -20000 });
-  await expect(balance(alice)).toHaveText(/^20,000\s*sats/, { timeout: 60_000 });
+  await expect(balance(alice)).toHaveText(/^20,000\s*test sats/, { timeout: 60_000 });
 
   // In on-chain: coins to Bob's on-chain address, then moved into Ark (a board, confirmed on regtest).
   await panel(bob).getByRole("radio", { name: "Bitcoin on-chain" }).click();
@@ -236,14 +242,14 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
 
   // Payments between Bark wallets cost nothing on this server: 20,000 in, 5,000 out, 2,000 in, 1,000 out;
   // what was boarded, 5,000 in, 2,000 out, 1,000 in.
-  await openWallet(alice, "bark");
-  await expect(balance(alice)).toHaveText(/^16,000\s*sats/, { timeout: 60_000 });
-  await openWallet(bob, "bark");
+  await openWallet(alice, "bark-testnet");
+  await expect(balance(alice)).toHaveText(/^16,000\s*test sats/, { timeout: 60_000 });
+  await openWallet(bob, "bark-testnet");
   await expect.poll(() => sats(bob), { timeout: 60_000 }).toBe(boarded + 4_000);
   console.log("Bark regtest evidence:", JSON.stringify({ funded, onchainTxid, boarded, walletSend, alice: await sats(alice), bob: await sats(bob), funder: JSON.parse(regtest("balance")).spendable_sat }));
 });
 
-test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.usdt.send", "@feature:payments.usdt.send"] }, async ({ peer }) => {
+test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.usdt.send", "@feature:payments.usdt.send"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_USDT_LOCAL !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_USDT_LOCAL=1");
   test.setTimeout(6 * 60_000);
   const config = USDT_LOCAL;
@@ -253,17 +259,17 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
     const result = await response.json(); if (result.error) throw new Error("Local EVM operation failed"); return result.result;
   };
   expect(await rpc("eth_chainId")).toBe("0x7a69");
-  const [alice, bob] = await twoInTestnet(peer, ["usdt-p-alice", "usdt-p-bob"]);
+  const [alice, bob] = await twoInTestnet(peer, ["usdt-p-alice", "usdt-p-bob"], ["usdt"]);
   const panel = (p: Peer) => p.page.getByTestId("usdt-wallet");
   const tokens = (p: Peer) => panel(p).getByTestId("usdt-balance");
   const address: Record<string, string> = {};
   for (const p of [alice, bob]) {
-    await openWallet(p, "usdt");
+    await openWallet(p, "usdt-testnet");
     await panel(p).getByRole("radio", { name: "Local test chain", exact: true }).click({ timeout: 60_000 });
     await panel(p).getByLabel("Token contract", { exact: true }).fill(config.token);
     await panel(p).getByRole("button", { name: "Switch network", exact: true }).click();
-    // Testnet starts on Sepolia, also "TEST-USDT": wait for the local chain itself before reading the address.
-    await expect(p.page.getByTestId("wallet-card-usdt")).toContainText("EVM local", { timeout: 60_000 });
+    // New made it on Sepolia, also "TEST-USDT": wait for the local chain itself before reading the address.
+    await expect(p.page.getByTestId("wallet-card-usdt-testnet")).toContainText("EVM local", { timeout: 60_000 });
     await expect(tokens(p)).toHaveText("0 TEST-USDT", { timeout: 60_000 });
     address[p.name] = (await panel(p).getByTestId("usdt-address").innerText()).trim();
     await rpc("anvil_setBalance", [address[p.name], "0xde0b6b3a7640000"]);
@@ -272,7 +278,7 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   const accounts = await rpc("eth_accounts");
   await rpc("eth_sendTransaction", [{ from: accounts[0], to: config.token, data: new Interface(["function mint(address,uint256)"]).encodeFunctionData("mint", [address[alice.name], 10_000_000n]) }]);
   await rpc("evm_mine");
-  await openWallet(alice, "usdt");
+  await openWallet(alice, "usdt-testnet");
   await expect(tokens(alice)).toHaveText("10 TEST-USDT", { timeout: 30_000 });
 
   // A Send from the wallet page, to Bob's address.
@@ -282,7 +288,7 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
   await panel(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(panel(alice).getByTestId("review-status")).toHaveText("confirmed", { timeout: 60_000 });
-  await openWallet(bob, "usdt");
+  await openWallet(bob, "usdt-testnet");
   await expect(tokens(bob)).toHaveText("2 TEST-USDT", { timeout: 30_000 });
 
   // A Send in the chat: Bob's app asks Alice's for her address, Bob approves.
@@ -302,8 +308,8 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await request.getByTestId("payment-pay").click();
   await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
-  await openWallet(alice, "usdt");
+  await openWallet(alice, "usdt-testnet");
   await expect(tokens(alice), "10 in, 2 out, 0.5 in, 1 in").toHaveText("9.5 TEST-USDT", { timeout: 30_000 });
-  await openWallet(bob, "usdt");
+  await openWallet(bob, "usdt-testnet");
   await expect(tokens(bob), "2 in, 0.5 out, 1 out").toHaveText("0.5 TEST-USDT", { timeout: 30_000 });
 });

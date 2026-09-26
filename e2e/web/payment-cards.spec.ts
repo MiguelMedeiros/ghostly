@@ -1,24 +1,44 @@
-import { connect, expect, link, test } from "../support/fixtures";
+import { connect, createWallet, expect, link, test, useFakeProviders, useTestnet, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 
 /**
  * Paying in a chat starts from the wallet's cards: a stack in the composer, where the card the pointer rests on
  * comes up and says what it would do. The card clicked turns over, and its back is where the amount and what it
- * is for are written. A card that cannot be used here comes up to say why, and does not turn over.
+ * is for are written. A card that cannot be used here comes up to say why, and does not turn over. The cards are
+ * the wallets Alice made (a new profile has none): Testnet Cashu, the Lightning that comes with it, and a fake
+ * Testnet Bitcoin wallet (in memory, no chain) that Bob has no counterpart of.
  */
+
+/** Testnet Cashu and its Lightning card and, with `bitcoin`, a fake Testnet Bitcoin wallet: made before the chat. */
+async function wallets(p: Peer, { bitcoin = false } = {}): Promise<void> {
+  if (bitcoin) await useFakeProviders(p);
+  // The Wallets page by its address: a phone has no wallet chip, it is a tab there.
+  await p.page.goto("/#/wallet");
+  await useTestnet(p);
+  if (bitcoin) await createWallet(p, "bitcoin", "testnet", { provider: "fake-onchain", fill: async (form) => {
+    await form.getByLabel("Access token").fill("token");
+    await form.getByTestId("provider-save").click();
+  } });
+  // Back to the chat list, where a chat starts (on a phone the wallet page covers it).
+  await p.page.goBack();
+  await expect(p.page.getByTitle("New Chat")).toBeVisible();
+}
+
 test("the chat's payment cards: flip through them, turn one over, and back to the cards", { tag: ["@feature:payments.chat.cards"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice", { viewport: { width: 1280, height: 900 } }), peer("bob")]);
+  await wallets(alice, { bitcoin: true });
+  await wallets(bob);
   await link(alice, bob);
   await connect(alice, bob);
   const { page } = alice;
-  const card = (id: string) => page.getByTestId(`payment-card-${id}`);
+  const card = (id: string) => page.getByTestId(`payment-card-${id}-testnet`);
   const composer = page.getByTestId("payment-composer");
   await expect(await composerRow(page, "payment-button")).toBeEnabled({ timeout: 60_000 });
   await (await composerRow(page, "payment-button")).click();
 
   // The cards first, as a choice of how to pay, the remembered one chosen and focused.
   const cards = composer.getByRole("radiogroup", { name: "Pay with" }).getByRole("radio");
-  await expect(cards).toHaveCount(8);
+  await expect(cards).toHaveCount(3);
   await expect(card("cashu")).toHaveAttribute("aria-checked", "true");
   await expect(card("cashu")).toBeFocused();
   await expect(composer).toHaveAttribute("data-side", "cards");
@@ -32,11 +52,11 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await expect(page.getByTestId("payment-use")).toHaveText(/Use Lightning/);
   await expect(composer).toHaveAttribute("data-side", "cards");
 
-  // A card that cannot be used here comes up greyed, says why, and cannot be turned over.
+  // A card that cannot be used here comes up greyed, says why, and cannot be turned over: Bob has no Testnet Bitcoin wallet.
   await card("bitcoin").hover();
   await expect(card("bitcoin")).toHaveAttribute("aria-checked", "true");
   await expect(card("bitcoin")).toBeDisabled();
-  await expect(card("bitcoin")).toHaveAttribute("title", /Bitcoin is not set up yet/);
+  await expect(card("bitcoin")).toHaveAttribute("title", /Your contact has no Testnet Bitcoin wallet/);
   await expect(page.getByTestId("payment-use")).toBeDisabled();
   await card("bitcoin").click({ force: true });
   await expect(composer).toHaveAttribute("data-side", "cards");
@@ -44,11 +64,10 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   // The arrows and the keyboard move along the cards too.
   await page.mouse.move(5, 5);
   await page.getByTestId("payment-deck-prev").click();
-  await expect(card("spark")).toHaveAttribute("aria-checked", "true");
+  await expect(card("lightning")).toHaveAttribute("aria-checked", "true");
   await page.getByTestId("payment-deck-next").click();
-  await page.getByTestId("payment-deck-next").click();
-  await expect(card("fedimint")).toHaveAttribute("aria-checked", "true");
-  await card("fedimint").focus();
+  await expect(card("bitcoin")).toHaveAttribute("aria-checked", "true");
+  await card("bitcoin").focus();
   await page.keyboard.press("Home");
   await expect(card("cashu")).toHaveAttribute("aria-checked", "true");
 
@@ -83,6 +102,7 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
 
 test("on a phone the payment cards are a track, and a tap turns one over", { tag: ["@feature:payments.chat.cards"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice", { mobile: true }), peer("bob")]);
+  for (const p of [alice, bob]) await wallets(p);
   await link(alice, bob);
   await connect(alice, bob);
   const { page } = alice;
@@ -92,7 +112,7 @@ test("on a phone the payment cards are a track, and a tap turns one over", { tag
   const composer = page.getByTestId("payment-composer");
   await expect(composer.locator(".wallet-deck")).toHaveAttribute("data-mode", "track");
   await page.getByTestId("payment-deck-next").click();
-  await expect(page.getByTestId("payment-card-lightning")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("payment-card-lightning-testnet")).toHaveAttribute("aria-checked", "true");
   await page.getByTestId("payment-use").click();
   await expect(page.getByTestId("payment-back")).toContainText("Lightning");
   await expect(page.getByTestId("payment-amount")).toBeVisible();

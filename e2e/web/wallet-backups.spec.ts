@@ -1,19 +1,22 @@
 import { readFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
-import { expect, openWallet, test, type Peer } from "../support/fixtures";
+import { emptyMainnetExplorer, mockMainnetArk } from "../support/ark-mainnet";
+import { createWallet, expect, openWallet, test, type Peer, type WalletNetwork } from "../support/fixtures";
 
 /**
  * The self-custodial wallets' backups: the recovery phrase shown only on request, and a backup
- * file sealed with a password. Talks to the real default providers (arkade.computer, an Ethereum
- * RPC) for the wallets to be ready, but moves no funds.
+ * file sealed with a password. The wallets are made with New on Testnet, with the public test servers
+ * (Mutinynet's Ark server, a Sepolia RPC); the boarding tests' Mainnet Ark wallet has a recorded server
+ * (support/ark-mainnet.ts) and never reaches arkade.computer. No funds move.
  *
  * The phrase is money. These tests count its words and compare it with the file inside the test;
  * it is never printed, logged or put in an assertion message.
  */
 
-/** Waits until the wallet is ready: an address to receive on. */
-async function ready(p: Peer, card: "arkade" | "usdt"): Promise<Locator> {
-  await openWallet(p, card);
+/** Makes the wallet with New (Testnet unless said), and waits until it is ready: an address to receive on. */
+async function ready(p: Peer, card: "arkade" | "usdt", network: WalletNetwork = "testnet"): Promise<Locator> {
+  await createWallet(p, card, network, { timeout: 120_000 });
+  await openWallet(p, `${card}-${network}`);
   const panel = p.page.getByTestId(card === "arkade" ? "ark-wallet" : "usdt-wallet");
   await expect(panel.getByTestId(card === "arkade" ? "ark-address" : "usdt-address")).toBeVisible({ timeout: 90_000 });
   return panel;
@@ -83,7 +86,7 @@ test.use({ trace: "off", screenshot: "off", video: "off" });
 test.describe("wallet backups", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
 
-  test("Ark: the phrase shows on request, and the backup file is sealed", { tag: ["@feature:wallet.ark.backup"] }, async ({ peer }) => {
+  test("Ark: the phrase shows on request, and the backup file is sealed", { tag: ["@feature:wallet.ark.backup", "@feature:wallet.instances.create"] }, async ({ peer }) => {
     const alice = await peer("ark-backup");
     const panel = await ready(alice, "arkade");
     const words = await phraseWords(panel, "ark");
@@ -94,7 +97,7 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     expect((await phraseWords(panel, "ark")).join(" ") === words.join(" "), "the same phrase").toBe(true);
   });
 
-  test("USDT: the phrase shows on request, and the backup file is sealed", { tag: ["@feature:wallet.usdt.backup"] }, async ({ peer }) => {
+  test("USDT: the phrase shows on request, and the backup file is sealed", { tag: ["@feature:wallet.usdt.backup", "@feature:wallet.instances.create"] }, async ({ peer }) => {
     const alice = await peer("usdt-backup");
     const panel = await ready(alice, "usdt");
     const words = await phraseWords(panel, "usdt");
@@ -111,12 +114,13 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     expect(ark.join(" ") === usdt.join(" "), "one phrase for both wallets").toBe(false);
   });
 
-  test("Ark on-chain receive shows a Bitcoin boarding address", { tag: ["@feature:wallet.ark.boarding"] }, async ({ peer }) => {
+  test("Ark on-chain receive shows a Bitcoin boarding address", { tag: ["@feature:wallet.ark.boarding", "@feature:wallet.instances.create"] }, async ({ peer }) => {
     const alice = await peer("ark-boarding");
-    // The explorer (mempool.space) is often slow to answer from CI and from here; it only reads the
-    // on-chain balance. It answers "nothing there" at once, so the test is about the address.
-    await alice.context.route(/^https:\/\/mempool\.space\/api\/address\/[^/]+\/(utxo|txs)/, (route) => route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: "[]" }));
-    const panel = await ready(alice, "arkade");
+    // A Mainnet Ark wallet with a recorded server, and an explorer that answers "nothing there" at once: the test
+    // is about the address.
+    await mockMainnetArk(alice.context);
+    await emptyMainnetExplorer(alice.context);
+    const panel = await ready(alice, "arkade", "mainnet");
     const via = panel.getByRole("radiogroup", { name: "Receive on" });
     await expect(via.getByRole("radio", { name: "Ark (instant)" })).toHaveAttribute("aria-checked", "true");
     await via.getByRole("radio", { name: "Bitcoin on-chain" }).click();
@@ -130,20 +134,33 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     // The QR code of that same address, named as this wallet's own address (PayExternally names its box `<testId>-qr`).
     await expect(panel.getByTestId("ark-boarding-address-qr").getByRole("img", { name: "Receiving address" })).toBeVisible();
     await expect(panel.getByText("Send from any Bitcoin wallet.", { exact: false })).toBeVisible();
-    // Mainnet by default: a real Bitcoin address, and a Taproot one.
+    // A Mainnet wallet: a real Bitcoin address, and a Taproot one.
     await expect(address).toHaveText(/^\s*bc1p/);
     // And back: the Ark address again.
     await via.getByRole("radio", { name: "Ark (instant)" }).click();
     await expect(panel.getByTestId("ark-address")).toHaveText(/^\s*ark1/);
   });
 
+  test("a Testnet Ark wallet's boarding address is a test network's", { tag: ["@feature:wallet.ark.boarding"] }, async ({ peer }) => {
+    const alice = await peer("ark-boarding-testnet");
+    const panel = await ready(alice, "arkade");
+    await panel.getByRole("radiogroup", { name: "Receive on" }).getByRole("radio", { name: "Bitcoin on-chain" }).click();
+    // Mutinynet is a signet: tb1p, never a Bitcoin address.
+    await expect(panel.getByTestId("ark-boarding-address")).toHaveText(/^\s*tb1p/, { timeout: 60_000 });
+  });
+
   // The boarding address is this wallet's own: it shows before the explorer answers, however slow.
   test("the boarding address does not wait for a slow explorer", { tag: ["@feature:wallet.ark.boarding"] }, async ({ peer }) => {
     const alice = await peer("ark-boarding-slow");
-    // mempool.space never answers.
+    await mockMainnetArk(alice.context);
+    await emptyMainnetExplorer(alice.context);
+    await ready(alice, "arkade", "mainnet");
+    // Then mempool.space never answers (the route added last is asked first), and the wallet opens again.
     await alice.context.route(/^https:\/\/mempool\.space\//, () => new Promise<void>(() => {}));
-    const panel = await ready(alice, "arkade");
-    await panel.getByRole("radiogroup", { name: "Receive on" }).getByRole("radio", { name: "Bitcoin on-chain" }).click();
+    await alice.page.reload();
+    await openWallet(alice, "arkade-mainnet");
+    const panel = alice.page.getByTestId("ark-wallet");
+    await panel.getByRole("radiogroup", { name: "Receive on" }).getByRole("radio", { name: "Bitcoin on-chain" }).click({ timeout: 30_000 });
     await expect(panel.getByTestId("ark-boarding-address")).toHaveText(/^\s*bc1p/, { timeout: 15_000 });
   });
 });

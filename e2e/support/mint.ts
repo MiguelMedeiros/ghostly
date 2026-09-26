@@ -34,6 +34,27 @@ const requests = /^https:\/\/testnut\.cashu\.space(\/|$)/;
  */
 export const mintEndpoint = (): string => (process.env.E2E_MINT_URL || TEST_MINT).replace(/\/+$/, "");
 
+/** The mints a Mainnet Cashu wallet starts with (packages/browser/src/shared/mints.ts DEFAULT_MINTS). */
+export const MAINNET_MINTS = ["https://mint.minibits.cash/Bitcoin", "https://21mint.me", "https://mint.mountainlake.io"];
+
+/**
+ * Mainnet creation without Mainnet: the default mints are answered by the suite's own mint (fake Lightning,
+ * worthless sats), so a Mainnet Cashu wallet can be made and shown with no real mint, and no real money, reached.
+ * The first one answers; the others are refused, as mints that are down.
+ */
+export async function mockMainnetMints(context: BrowserContext): Promise<void> {
+  const endpoint = mintEndpoint();
+  const [first, ...others] = MAINNET_MINTS;
+  const base = new URL(first);
+  await context.route((url) => url.origin === base.origin && url.pathname.startsWith(base.pathname), async (route) => {
+    const { pathname, search } = new URL(route.request().url());
+    const response = await route.fetch({ url: `${endpoint}${pathname.slice(base.pathname.length)}${search}`, timeout: 60_000 }).catch(() => null);
+    if (response) await route.fulfill({ response }).catch(() => {});
+    else await route.abort("timedout").catch(() => {});
+  });
+  for (const mint of others) await context.route((url) => url.origin === new URL(mint).origin, (route) => route.abort("connectionrefused"));
+}
+
 /** Answers this context's requests to the public test mint, when one of ours is running. */
 export async function attachMint(context: BrowserContext): Promise<void> {
   const endpoint = mintEndpoint();

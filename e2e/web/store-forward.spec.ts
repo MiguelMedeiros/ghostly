@@ -1,7 +1,7 @@
-import { chat, connect, expect, GIF, link, openProfilePage, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, GIF, link, openProfilePage, say, test, useTestnet, type Peer } from "../support/fixtures";
 import { signS3 } from "../../packages/browser/src/backup/s3";
 import { composerRow } from "../support/composer";
-import { chatPayments } from "../support/payments";
+import { chatPayments, paymentCard } from "../support/payments";
 
 /**
  * Store-and-forward for an away contact (WISP 4xx, `hold/1`): what Alice sends while Bob's page is
@@ -45,6 +45,8 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   test.setTimeout(6 * 60_000);
   expect((await s3("PUT", "")).ok, "test bucket").toBe(true);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  // A request needs a wallet on both sides (a new profile has none): Testnet Cashu, made before they meet.
+  for (const p of [alice, bob]) await useTestnet(p);
   await link(alice, bob);
   await connect(alice, bob);
 
@@ -70,7 +72,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
     await expect(dialog.getByTestId("chat-hold-storage")).toContainText("your S3 storage");
     await alice.page.keyboard.press("Escape");
   }).toPass({ timeout: 30_000 });
-  // Ecash only in Alice's requests: a Lightning invoice would need a mint on the network.
+  // Ecash only in Alice's requests: with Lightning on, the test mint would pay the request's own invoice by itself.
   await chatPayments(alice.page, { lightning: false });
 
   // Bob leaves. Alice sends text, a picture and a request: each is held, and the chat says how much waits.
@@ -80,7 +82,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await alice.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
   await expect(held(alice, "ghost.gif").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
   await (await composerRow(alice.page, "payment-button")).click();
-  await alice.page.getByTestId("payment-card-cashu").click();
+  await paymentCard(alice.page, "cashu-testnet").click();
   await alice.page.getByTestId("payment-amount").fill("10");
   await alice.page.getByTestId("payment-request").click();
   await expect(held(alice, "You requested").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });

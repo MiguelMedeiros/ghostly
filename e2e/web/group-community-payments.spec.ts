@@ -1,5 +1,6 @@
-import { expect, openProfilePage, openWallet, test, type Peer } from "../support/fixtures";
+import { expect, openProfilePage, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
+import { paymentCard } from "../support/payments";
 
 /**
  * Payments in a community group (WISP 9xx · Group Community § Payments), three browsers that never pair and a real
@@ -22,16 +23,16 @@ test.describe("community payments", { tag: "@network" }, () => {
     await expect(peer.page.getByTitle("New Chat")).toBeVisible();
   }
 
-  /** Testnet (the test mint is primary), and, for a payer, test sats from the mint's own invoice. */
+  /** A Testnet Cashu wallet made with New (the test mint is primary), and, for a payer, test sats from the mint's own invoice. */
   async function testnet(peer: Peer, fund = 0): Promise<void> {
-    await openWallet(peer, "cashu");
-    await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
+    await useTestnet(peer);
+    await openWallet(peer, "cashu-testnet");
     await expect(peer.page.getByTestId("wallet-balance")).toBeVisible();
     if (fund) {
       await peer.page.getByTestId("wallet-receive").click();
       await peer.page.getByTestId("wallet-receive-amount").fill(String(fund));
       await peer.page.getByTestId("wallet-create-invoice").click();
-      await expect(peer.page.getByTestId("wallet-balance")).toHaveText(new RegExp(`^${fund}\\s*sats`), { timeout: 60_000 });
+      await expect(peer.page.getByTestId("wallet-balance")).toHaveText(new RegExp(`^${fund}\\s*test sats`), { timeout: 60_000 });
     }
     await peer.page.goBack();
   }
@@ -52,7 +53,7 @@ test.describe("community payments", { tag: "@network" }, () => {
     await (await composerRow(peer.page, "payment-button")).click();
     if (whom === "group") await peer.page.getByTestId("group-pay-everyone").click();
     else await peer.page.getByTestId("group-pay-recipient").filter({ hasText: whom }).click();
-    await peer.page.getByTestId("payment-card-cashu").click();
+    await paymentCard(peer.page, "cashu-testnet").click();
     await peer.page.getByTestId("payment-amount").fill(String(amount));
     await peer.page.getByPlaceholder("What for? (optional)").fill(memo);
     await peer.page.getByTestId("payment-request").click();
@@ -122,11 +123,11 @@ test.describe("community payments", { tag: "@network" }, () => {
     await expect(timeline(bob).getByTestId("payment-bubble").filter({ hasText: "tip jar" }).getByTestId("payment-pay")).toHaveCount(0);
 
     // The money moved only once: Alice got 21 + 10, Carol paid 10 (and fees), Bob 21.
-    await openWallet(alice, "cashu");
-    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^31\s*sats/, { timeout: 60_000 });
-    await openWallet(bob, "cashu");
-    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^(7[5-9])\s*sats/);
-    await openWallet(carol, "cashu");
-    await expect(carol.page.getByTestId("wallet-balance")).toHaveText(/^(8[5-9])\s*sats/);
+    await openWallet(alice, "cashu-testnet");
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^31\s*test sats/, { timeout: 60_000 });
+    await openWallet(bob, "cashu-testnet");
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^(7[5-9])\s*test sats/);
+    await openWallet(carol, "cashu-testnet");
+    await expect(carol.page.getByTestId("wallet-balance")).toHaveText(/^(8[5-9])\s*test sats/);
   });
 });

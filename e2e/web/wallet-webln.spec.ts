@@ -1,19 +1,46 @@
 import { decodeBolt11 } from "@ghostly/core";
 import { FakeWebln, FakeWeblnLedger } from "../../packages/browser/test/helpers/fakeWebln";
 import { lndWebln } from "../../packages/browser/test/helpers/lndWebln";
-import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
-import { connectWebln, installWebln } from "../support/webln";
-import { choose, optionsOf } from "../support/select";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer, type WalletNetwork } from "../support/fixtures";
+import { installWebln } from "../support/webln";
+import { choose, close, optionsOf } from "../support/select";
 import { composerRow } from "../support/composer";
-import { chatPayments } from "../support/payments";
+import { paymentCard } from "../support/payments";
 
 /**
  * Lightning through a browser wallet (WebLN, like Alby): the test puts `window.webln` in the page, backed
  * by a wallet in the test process. Without GHOSTLY_WEBLN_REGTEST that wallet is an in-memory fake (regtest
- * invoices, no network); with it, a real regtest LND node per person (e2e/support/webln-regtest).
+ * invoices, no network); with it, a real regtest LND node per person (e2e/support/webln-regtest). The Testnet
+ * Lightning wallet is made with New, the browser wallet picked as its source there.
  */
 
-const lightningCard = async (p: Peer) => { await openWallet(p, "lightning"); return p.page.getByTestId("lightning-source"); };
+const lightningCard = async (p: Peer) => { await openWallet(p, "lightning-testnet"); return p.page.getByTestId("lightning-source"); };
+
+/** Wallets → New → a network → Lightning, the browser wallet picked as its source: the dialog, its form open. */
+async function newWebln(p: Peer, network: WalletNetwork) {
+  await openWallet(p);
+  await expect(p.page.getByTestId("wallet")).toBeVisible();
+  await p.page.getByTestId("wallet-add").click();
+  const dialog = p.page.getByTestId("new-wallet");
+  await dialog.getByRole("radio", { name: network === "testnet" ? "Testnet" : "Mainnet" }).click();
+  await dialog.getByTestId("new-wallet-type-lightning").click();
+  const picker = dialog.getByTestId("new-wallet-provider-select");
+  await expect((await optionsOf(picker)).filter({ hasText: "Browser wallet (WebLN)" })).toHaveCount(1);
+  await close(picker);
+  await choose(picker, "webln");
+  return dialog;
+}
+
+/** A Testnet Lightning wallet through the browser wallet in the page, made with New; its card's panel open. */
+async function connectWebln(p: Peer) {
+  await createWallet(p, "lightning", "testnet", { provider: "webln", timeout: 30_000, fill: async (form) => {
+    await expect(form.getByTestId("webln-found")).toBeVisible();
+    await form.getByRole("button", { name: "Connect browser wallet" }).click();
+  } });
+  const source = await lightningCard(p);
+  await expect(source.getByTestId("lightning-source-status")).toContainText("Connected");
+  return source;
+}
 const invoiceShown = async (p: Peer) => (await p.page.getByTestId("wallet-invoice").innerText()).trim();
 
 async function receive(p: Peer, sats: number) {
@@ -32,14 +59,13 @@ async function pay(p: Peer, invoice: string, sats: number) {
 }
 
 /**
- * Bob requests over Lightning only (Cashu off in the chat, so the request carries just his wallet's
- * invoice); Alice reviews it in the bubble and pays it through her source. Both bubbles end up Paid.
+ * Bob requests over Lightning only (his one wallet, so the request carries just his wallet's invoice); Alice
+ * reviews it in the bubble and pays it through her source. Both bubbles end up Paid.
  */
 async function requestPaidInChat(alice: Peer, bob: Peer, sats: number, aliceSource: string) {
   await openChat(bob);
-  await chatPayments(bob.page, { cashu: false });
   await (await composerRow(bob.page, "payment-button")).click();
-  await bob.page.getByTestId("payment-card-lightning").click();
+  await paymentCard(bob.page, "lightning-testnet").click();
   await bob.page.getByTestId("payment-amount").fill(String(sats));
   await bob.page.getByTestId("payment-request").click();
   await openChat(alice);
@@ -56,23 +82,25 @@ async function requestPaidInChat(alice: Peer, bob: Peer, sats: number, aliceSour
   await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
 }
 
-test("the browser wallet is offered on the web, and says when there is none or it refuses", { tag: ["@feature:wallet.lightning.webln.connect"] }, async ({ peer }) => {
+test("the browser wallet is offered on the web, and says when there is none or it refuses", { tag: ["@feature:wallet.lightning.webln.connect", "@feature:wallet.instances.create"] }, async ({ peer }) => {
   const alice = await peer("webln-missing");
-  const source = await lightningCard(alice);
-  await expect((await optionsOf(source.getByTestId("lightning-source-select"))).filter({ hasText: "Browser wallet (WebLN)" })).toHaveCount(1);
-  await choose(source.getByTestId("lightning-source-select"), "webln");
-  await expect(source.getByTestId("webln-missing")).toBeVisible();
-  await source.getByRole("button", { name: "Connect browser wallet" }).click();
-  await expect(source.getByTestId("lightning-source-error")).toContainText("No WebLN wallet in this browser");
-  await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
+  // On Mainnet, where a browser wallet holds real money: nothing moves here, it is refused before anything is saved.
+  let dialog = await newWebln(alice, "mainnet");
+  await expect(dialog.getByTestId("webln-missing")).toBeVisible();
+  await dialog.getByRole("button", { name: "Connect browser wallet" }).click();
+  await expect(dialog.getByTestId("new-wallet-error")).toContainText("No WebLN wallet in this browser");
+  await alice.page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(alice.page.locator("[data-testid^=wallet-card-lightning-]")).toHaveCount(0);
 
   await installWebln(alice, new FakeWebln(undefined, { refuseEnable: true }));
-  await lightningCard(alice);
-  await choose(source.getByTestId("lightning-source-select"), "webln");
-  await expect(source.getByTestId("webln-found")).toBeVisible();
-  await source.getByRole("button", { name: "Connect browser wallet" }).click();
-  await expect(source.getByTestId("lightning-source-error")).toContainText("refused the connection");
-  await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
+  dialog = await newWebln(alice, "mainnet");
+  await expect(dialog.getByTestId("webln-found")).toBeVisible();
+  await dialog.getByRole("button", { name: "Connect browser wallet" }).click();
+  await expect(dialog.getByTestId("new-wallet-error")).toContainText("refused the connection");
+  await alice.page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(alice.page.locator("[data-testid^=wallet-card-lightning-]")).toHaveCount(0);
 });
 
 test("a browser wallet as the Lightning source: invoices, payments reviewed first, and a refused prompt spends nothing", { tag: ["@feature:wallet.lightning.webln.pay"] }, async ({ peer }) => {
@@ -81,12 +109,10 @@ test("a browser wallet as the Lightning source: invoices, payments reviewed firs
   const wallet = new FakeWebln(ledger, { alias: "Alice's Alby" }), stranger = new FakeWebln(ledger);
   await stranger.enable();
   await installWebln(alice, wallet);
-  await useTestnet(alice);
-  const source = await lightningCard(alice);
-  await connectWebln(alice);
+  const source = await connectWebln(alice);
   await expect(source.getByTestId("lightning-source-status")).toContainText("Alice's Alby · regtest");
   const page = alice.page;
-  await expect(page.getByTestId("wallet-card-lightning")).toContainText("Via Alice's Alby");
+  await expect(page.getByTestId("wallet-card-lightning-testnet")).toContainText("Via Alice's Alby");
   await expect(page.getByTestId("wallet-balance")).toContainText("100,000");
 
   // In: the wallet's own invoice, seen paid by asking the wallet.
@@ -115,7 +141,7 @@ test("a chat request paid between two browser wallets: Lightning only, reviewed 
   await installWebln(bob, bobWallet);
   await link(alice, bob);
   await connect(alice, bob);
-  for (const p of [alice, bob]) { await useTestnet(p); await lightningCard(p); await connectWebln(p); }
+  for (const p of [alice, bob]) await connectWebln(p);
   await requestPaidInChat(alice, bob, 40, "Alice's wallet");
   expect([aliceWallet.balance, bobWallet.balance]).toEqual([99_960, 100_040]);
 });
@@ -135,8 +161,6 @@ test.describe("on a regtest Lightning network", () => {
     await link(alice, bob);
     await connect(alice, bob);
     for (const p of [alice, bob]) {
-      await useTestnet(p);
-      await lightningCard(p);
       await connectWebln(p);
       await expect(p.page.getByTestId("lightning-source-status")).toContainText(`ghostly-webln-${p === alice ? "alice" : "bob"} · regtest`);
     }

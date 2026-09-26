@@ -1,4 +1,5 @@
-import { chat, connect, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
+import { paymentCard } from "../support/payments";
 import { LocalLnurlServer } from "../support/lnurl";
 import { endpoints } from "../infra/env.mjs";
 import { composerRow } from "../support/composer";
@@ -12,14 +13,8 @@ import { composerRow } from "../support/composer";
 test.describe("another wallet", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
 
-  async function switchToTestMint(peer: Peer): Promise<void> {
-    await openWallet(peer, "cashu");
-    await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-    await expect(peer.page.getByTestId("wallet-balance")).toBeVisible();
-  }
-
   async function receive(peer: Peer, sats: number): Promise<string> {
-    await openWallet(peer, "cashu");
+    await openWallet(peer, "cashu-testnet");
     await peer.page.getByTestId("wallet-receive").click();
     await peer.page.getByTestId("wallet-receive-amount").fill(String(sats));
     await peer.page.getByTestId("wallet-create-invoice").click();
@@ -28,16 +23,17 @@ test.describe("another wallet", { tag: "@network" }, () => {
 
   test("a request is paid with another wallet, and the bubble turns Paid by itself on both sides", { tag: ["@feature:payments.external", "@feature:wallet.lightning.cashu-mint.receive"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+    // Both on test sats: a Testnet Cashu wallet each (Lightning through its mints comes with it), made before they meet.
+    for (const p of [alice, bob]) await useTestnet(p);
     await link(alice, bob);
     await connect(alice, bob);
-    for (const p of [alice, bob]) await switchToTestMint(p);
     // Alice holds sats in her own wallet: the "other wallet" that will pay Bob's invoice.
     await receive(alice, 100);
     await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
     for (const p of [alice, bob]) await openChat(p);
 
     // The wallet page's receive side shows the same thing a contact gets: QR, text, Copy, a lightning: link.
-    await openWallet(bob, "lightning");
+    await openWallet(bob, "lightning-testnet");
     await bob.page.getByTestId("wallet-receive").click();
     await bob.page.getByTestId("wallet-receive-amount").fill("7");
     await bob.page.getByTestId("wallet-create-invoice").click();
@@ -48,7 +44,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
 
     // Bob asks for 10 sats. Alice never presses Pay: she pays the invoice from her own wallet page instead.
     await (await composerRow(bob.page, "payment-button")).click();
-    await bob.page.getByTestId("payment-card-cashu").click();
+    await paymentCard(bob.page, "cashu-testnet").click();
     await bob.page.getByTestId("payment-amount").fill("10");
     await bob.page.getByTestId("payment-request").click();
     const bubble = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "10" });
@@ -67,7 +63,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
     await expect(panel.getByTestId("payment-external-checking")).toBeVisible();
 
     // Alice pays the invoice from her wallet, as any other wallet would.
-    await openWallet(alice, "cashu");
+    await openWallet(alice, "cashu-testnet");
     await alice.page.getByTestId("wallet-send").click();
     await alice.page.getByTestId("wallet-pay-input").fill(invoice);
     await expect(alice.page.getByTestId("wallet-pay-preview")).toContainText("10 sats");
@@ -91,9 +87,9 @@ test.describe("another wallet", { tag: "@network" }, () => {
     await server.start();
     try {
       const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+      await useTestnet(alice);
       await link(alice, bob);
       await connect(alice, bob);
-      await switchToTestMint(alice);
       await receive(alice, 100);
       await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
 

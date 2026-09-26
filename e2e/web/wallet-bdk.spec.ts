@@ -1,15 +1,16 @@
 import { execFileSync } from "node:child_process";
-import type { BrowserContext, Route } from "@playwright/test";
+import type { BrowserContext, Locator, Route } from "@playwright/test";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
-import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, test, useFakeProviders, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { FakeEsplora } from "../../packages/browser/test/helpers/fakeEsplora";
 import { composerRow } from "../support/composer";
+import { closePayments, openPayments, paymentCard } from "../support/payments";
 
 /**
- * The BDK wallet (bitcoindevkit in WebAssembly) as the on-chain Bitcoin source, Testnet only:
- *  - offline: the picker offers it in Testnet only, a new wallet shows its 12 words once, a bad phrase or an
- *    unreachable Esplora server is refused before anything is saved, and the chat shows the Bitcoin card;
+ * The BDK wallet (bitcoindevkit in WebAssembly) as the on-chain Bitcoin source, Testnet only, made with New:
+ *  - offline: New offers it on Testnet only, a new wallet shows its 12 words once, a bad phrase or an unreachable
+ *    Esplora server is refused before anything is saved, and the chat offers a Bitcoin card once there is a wallet;
  *  - offline, against an in-memory Esplora the test switches on and off: a saved wallet whose server is down
  *    when the app starts shows Connecting… with its last balance and connects by itself once the server is
  *    back; Change server moves it to another server, the same wallet;
@@ -20,43 +21,64 @@ import { composerRow } from "../support/composer";
 const ESPLORA = BDK_REGTEST.esplora;
 const panel = (p: Peer) => p.page.getByTestId("bitcoin-wallet");
 
-async function chooseBdk(p: Peer) {
-  await openWallet(p, "bitcoin");
-  await choose(panel(p).getByTestId("onchain-source-select"), "bdk");
-  return panel(p).getByTestId("provider-form-bdk");
+/** Wallets → New → Testnet → Bitcoin: BDK is the one source offered on the web (no select), its form left open. */
+async function newBdk(p: Peer, network: "mainnet" | "testnet" = "testnet") {
+  await openWallet(p);
+  await expect(p.page.getByTestId("wallet")).toBeVisible();
+  await p.page.getByTestId("wallet-add").click();
+  const dialog = p.page.getByTestId("new-wallet");
+  await dialog.getByRole("radio", { name: network === "testnet" ? "Testnet" : "Mainnet" }).click();
+  return dialog;
 }
 
-test("the BDK wallet is offered in Testnet only, shows a new wallet's words once, and refuses what it cannot use", { tag: ["@feature:wallet.onchain.bdk.create"] }, async ({ peer }) => {
+/** A Testnet BDK wallet on regtest, through New, with the words written down and this Esplora server. */
+async function makeBdk(p: Peer, esplora: string) {
+  await createWallet(p, "bitcoin", "testnet", { timeout: 60_000, fill: async (form: Locator) => {
+    await form.getByTestId("bdk-written").check();
+    await choose(form.getByTestId("provider-form-bdk").getByLabel("Network"), "regtest");
+    await form.getByLabel("Esplora server").fill(esplora);
+    await form.getByTestId("provider-save").click();
+  } });
+  await openWallet(p, "bitcoin-testnet");
+}
+
+test("the BDK wallet is offered on Testnet only, shows a new wallet's words once, and refuses what it cannot use", { tag: ["@feature:wallet.onchain.bdk.create", "@feature:wallet.instances.create"] }, async ({ peer }) => {
   const alice = await peer("bdk-offline");
-  await openWallet(alice, "bitcoin");
-  // Mainnet: not offered (no provider runs there yet).
-  await expect(panel(alice).getByTestId("onchain-source-none-offered")).toBeVisible();
-  await useTestnet(alice);
-  const form = await chooseBdk(alice);
-  const words = (await panel(alice).getByTestId("bdk-new-phrase").innerText()).trim().split(/\s+/).filter((w) => !/^\d+$/.test(w));
+  const dialog = await newBdk(alice, "mainnet");
+  // Mainnet: not offered (no on-chain source runs in a browser there yet).
+  await expect(dialog.getByTestId("new-wallet-type-bitcoin")).toHaveAttribute("aria-disabled", "true");
+  await expect(dialog.getByTestId("new-wallet-type-bitcoin-status")).toHaveText("Not yet");
+  await dialog.getByRole("radio", { name: "Testnet" }).click();
+  await dialog.getByTestId("new-wallet-type-bitcoin").click();
+  const area = dialog.getByTestId("new-wallet-provider"), form = area.getByTestId("provider-form-bdk"), error = dialog.getByTestId("new-wallet-error");
+  const words = (await area.getByTestId("bdk-new-phrase").innerText()).trim().split(/\s+/).filter((w) => !/^\d+$/.test(w));
   expect(words).toHaveLength(12);
   // Not before the words are written down.
   await form.getByTestId("provider-save").click();
-  await expect(panel(alice)).toContainText("Write the 12 words down first");
-  await panel(alice).getByTestId("bdk-written").check();
+  await expect(area).toContainText("Write the 12 words down first");
+  await area.getByTestId("bdk-written").check();
   await choose(form.getByLabel("Network"), "regtest");
   // Regtest has no public server.
   await form.getByTestId("provider-save").click();
-  await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("Regtest needs the address of your own Esplora server");
+  await expect(error).toContainText("Regtest needs the address of your own Esplora server");
   // A server that does not answer (nothing listens on port 1): nothing is saved, and it says why.
   await form.getByLabel("Esplora server").fill("http://127.0.0.1:1");
   await form.getByTestId("provider-save").click();
-  await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("nothing answers at 127.0.0.1:1: the local Esplora server is not running", { timeout: 30_000 });
-  await expect(panel(alice).getByTestId("onchain-source-current")).toContainText("No source");
+  await expect(error).toContainText("nothing answers at 127.0.0.1:1: the local Esplora server is not running", { timeout: 30_000 });
+  await expect(error).toContainText("Nothing was saved");
+  await expect(alice.page.locator("[data-testid^=wallet-card-bitcoin-]")).toHaveCount(0);
 
   // Restoring: a phrase that is not BIP39 is refused.
-  await panel(alice).getByRole("radio", { name: "Restore" }).click();
-  const restore = panel(alice).getByTestId("provider-form-bdk");
+  await area.getByRole("radio", { name: "Restore" }).click();
+  const restore = area.getByTestId("provider-form-bdk");
   await restore.getByLabel("Recovery phrase").fill("these are not twelve valid words at all no no no");
   await restore.getByTestId("provider-save").click();
-  await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("not valid");
+  await expect(error).toContainText("not valid");
   // The phrase is not echoed back in the error.
-  await expect(panel(alice).getByTestId("onchain-source-error")).not.toContainText("twelve valid");
+  await expect(error).not.toContainText("twelve valid");
+  await alice.page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(alice.page.locator("[data-testid^=wallet-card-bitcoin-]")).toHaveCount(0);
 });
 
 /**
@@ -84,12 +106,7 @@ test("a BDK wallet whose Esplora is down at start-up shows Connecting…, connec
   const alice = await peer("bdk-reconnect");
   const servers = await serveEsplora(alice.context, esplora, ["esplora-a.ghostly.test", "esplora-b.ghostly.test"]);
   const status = panel(alice).getByTestId("onchain-source-status");
-  await useTestnet(alice);
-  const form = await chooseBdk(alice);
-  await panel(alice).getByTestId("bdk-written").check();
-  await choose(form.getByLabel("Network"), "regtest");
-  await form.getByLabel("Esplora server").fill("https://esplora-a.ghostly.test/api");
-  await form.getByTestId("provider-save").click();
+  await makeBdk(alice, "https://esplora-a.ghostly.test/api");
   await expect(status).toContainText(/Connected · BDK BIP84 · [0-9a-f]{8} · regtest/, { timeout: 60_000 });
   const wallet = (await status.innerText()).match(/BDK BIP84 · [0-9a-f]{8}/)![0];
   await panel(alice).getByTestId("bitcoin-new-address").click();
@@ -99,17 +116,17 @@ test("a BDK wallet whose Esplora is down at start-up shows Connecting…, connec
   // Quit and reopen while the server is down: not "Unavailable", but Connecting… with the last balance read.
   servers.set("esplora-a.ghostly.test", false);
   await alice.page.reload();
-  await openWallet(alice, "bitcoin");
+  await openWallet(alice, "bitcoin-testnet");
   const connecting = panel(alice).getByTestId("bitcoin-connecting");
   await expect(connecting).toHaveAttribute("data-status", "connecting");
   await expect(connecting).toContainText("Connecting to BDK wallet…");
-  await expect(panel(alice).getByTestId("bitcoin-last-balance")).toContainText("Last known balance: 50,000 sats");
+  await expect(panel(alice).getByTestId("bitcoin-last-balance")).toContainText("Last known balance: 50,000 test sats");
   await expect(panel(alice).getByTestId("bitcoin-connect-error")).toContainText("the Esplora server at esplora-a.ghostly.test did not answer", { timeout: 30_000 });
   await expect(status).toContainText("trying again by itself");
   await expect(panel(alice).getByTestId("bitcoin-retry")).toBeVisible();
   await expect(connecting).toHaveAttribute("data-status", "connecting");
   // The wallet card says so too: the last balance, Connecting…
-  await expect(alice.page.getByTestId("wallet-card-bitcoin")).toContainText("50,000");
+  await expect(alice.page.getByTestId("wallet-card-bitcoin-testnet")).toContainText("50,000");
 
   // The server comes back: connected by itself, nothing pressed.
   servers.set("esplora-a.ghostly.test", true);
@@ -129,17 +146,35 @@ test("a BDK wallet whose Esplora is down at start-up shows Connecting…, connec
 
   // And it is what the next start uses.
   await alice.page.reload();
-  await openWallet(alice, "bitcoin");
+  await openWallet(alice, "bitcoin-testnet");
   await expect(status).toContainText(`Connected · ${wallet} · regtest`, { timeout: 60_000 });
 });
 
-test("the chat offers on-chain Bitcoin, off until a source is set up", { tag: ["@feature:payments.bitcoin.offer"] }, async ({ peer }) => {
+test("the chat offers on-chain Bitcoin once a wallet is made, and only where the contact has one of its network", { tag: ["@feature:payments.bitcoin.offer", "@feature:wallet.instances.networks"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("bdk-chat-a"), peer("bdk-chat-b")]);
+  // The fake on-chain source (regtest, in memory) stands in for BDK: this is about the chat's cards.
+  await useFakeProviders(alice);
   await link(alice, bob);
   await connect(alice, bob);
+  // No wallet yet: no card to pay with, and the composer says how to make one.
+  const composer = alice.page.getByTestId("payment-composer");
   await (await composerRow(alice.page, "payment-button")).click({ timeout: 60_000 });
-  await expect(alice.page.getByTestId("payment-card-bitcoin")).toBeDisabled();
-  await expect(alice.page.getByTestId("payment-card-bitcoin")).toHaveAttribute("title", /Bitcoin is not set up yet/);
+  await expect(composer.getByTestId("payment-no-wallet")).toBeVisible();
+  await expect(alice.page.locator("[data-testid^=payment-card-]")).toHaveCount(0);
+  await composer.press("Escape");
+  await expect(composer).toHaveCount(0);
+
+  await createWallet(alice, "bitcoin", "testnet", { provider: "fake-onchain", fill: async (form) => {
+    await form.getByLabel("Access token").fill("token");
+    await form.getByTestId("provider-save").click();
+  } });
+  await openChat(alice);
+  await openPayments(alice.page);
+  // Bob has no wallet at all: the card is there, and says why it cannot be used.
+  const card = paymentCard(alice.page, "bitcoin-testnet");
+  await expect(card).toHaveAttribute("aria-disabled", "true");
+  await expect(card).toHaveAttribute("title", /Your contact has no wallet yet/);
+  await closePayments(alice.page);
 });
 
 test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.onchain.bdk.send", "@feature:payments.bitcoin.send", "@feature:wallet.onchain.sources"] }, async ({ peer }) => {
@@ -156,13 +191,7 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   const confirmed = (p: Peer, n: number) => expect.poll(async () => { regtest("mine", "1"); await panel(p).getByRole("button", { name: "Refresh now" }).click(); return sats(p); }, { timeout: 90_000, intervals: [3_000] }).toBe(n);
   const address: Record<string, string> = {};
   for (const p of [alice, bob]) {
-    await useTestnet(p);
-    const form = await chooseBdk(p);
-    await panel(p).getByTestId("bdk-written").check();
-    await choose(form.getByLabel("Network"), "regtest");
-    await form.getByLabel("Esplora server").fill(ESPLORA);
-    await form.getByTestId("provider-save").click();
-    await expect(panel(p).getByTestId("onchain-source-saved")).toBeVisible({ timeout: 60_000 });
+    await makeBdk(p, ESPLORA);
     await expect(panel(p).getByTestId("onchain-source-status")).toContainText(/Connected · BDK BIP84 · [0-9a-f]{8} · regtest/);
     await expect(balance(p)).toContainText("0");
     await panel(p).getByTestId("bitcoin-new-address").click();
@@ -200,7 +229,7 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   // A Send in the chat: Bob's app asks Alice's for a fresh address, Bob approves.
   for (const p of [alice, bob]) await openChat(p);
   await (await composerRow(bob.page, "payment-button")).click();
-  await bob.page.getByTestId("payment-card-bitcoin").click();
+  await paymentCard(bob.page, "bitcoin-testnet").click();
   await bob.page.getByTestId("payment-amount").fill("5000");
   await bob.page.getByTestId("payment-send").click();
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
@@ -217,7 +246,7 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
 
   // A Request paid in the chat: Bob asks, Alice pays from the bubble.
   await (await composerRow(bob.page, "payment-button")).click();
-  await bob.page.getByTestId("payment-card-bitcoin").click();
+  await paymentCard(bob.page, "bitcoin-testnet").click();
   await bob.page.getByTestId("payment-amount").fill("3000");
   await bob.page.getByTestId("payment-request").click();
   const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
@@ -236,10 +265,10 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   // Balances on both sides, and each txid on the chain paying what was asked.
   for (const txid of [chatSend, chatRequest]) expect(JSON.parse(regtest("tx", txid)).confirmations).toBeGreaterThan(0);
   // Everything confirmed: nothing left in the mempool on either side.
-  await openWallet(bob, "bitcoin");
+  await openWallet(bob, "bitcoin-testnet");
   await expect.poll(async () => [await refreshed(bob), await balance(bob).innerText()], { timeout: 60_000 }).toEqual([expect.any(Number), expect.not.stringContaining("unconfirmed")]);
   const bobSats = await sats(bob);
-  await openWallet(alice, "bitcoin");
+  await openWallet(alice, "bitcoin-testnet");
   await expect.poll(async () => [await refreshed(alice), await balance(alice).innerText()], { timeout: 60_000 }).toEqual([expect.any(Number), expect.not.stringContaining("unconfirmed")]);
   const aliceSats = await sats(alice);
   // Bob: 20,000 in, 5,000 out (plus its fee), 3,000 in. Alice: the rest, less her two fees.

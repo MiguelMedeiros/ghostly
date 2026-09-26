@@ -1,14 +1,14 @@
-import { chat, connect, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
-import { TEST_MINT, mintEndpoint } from "../support/mint";
+import { chat, connect, createWallet, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { TEST_MINT, mintEndpoint, mockMainnetMints } from "../support/mint";
 import { composerRow } from "../support/composer";
-import { chatPayments } from "../support/payments";
+import { chatPayments, paymentCard } from "../support/payments";
 
 /**
  * Sats move through a real Cashu mint: the test mint, whose sats are worthless
  * and whose invoices pay themselves. That is the public one unless
  * `E2E_MINT_URL` names another — CI runs its own, see support/mint.ts — so
  * these tests need the internet only when nobody gave them a mint.
- * Wallets start with real mints too; the tests never touch them.
+ * A new profile has no wallet: each test makes the Testnet Cashu wallets it needs with New, before the two meet.
  */
 test.describe("wallet", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
@@ -19,18 +19,11 @@ test.describe("wallet", { tag: "@network" }, () => {
   };
   async function showCashu(peer: Peer): Promise<void> {
     if (await peer.page.getByTestId("wallet-balance").isVisible()) return;
-    await openWallet(peer, "cashu");
-  }
-
-  async function switchToTestMint(peer: Peer): Promise<void> {
-    await openWallet(peer, "cashu");
-    await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-    await expect(peer.page.getByTestId("wallet-balance")).toBeVisible();
-    await openChat(peer);
+    await openWallet(peer, "cashu-testnet");
   }
 
   async function receive(peer: Peer, sats: number): Promise<string> {
-    await openWallet(peer, "cashu");
+    await openWallet(peer, "cashu-testnet");
     await peer.page.getByTestId("wallet-receive").click();
     await peer.page.getByTestId("wallet-receive-amount").fill(String(sats));
     await peer.page.getByTestId("wallet-create-invoice").click();
@@ -39,28 +32,28 @@ test.describe("wallet", { tag: "@network" }, () => {
 
   test("Lightning in, ecash between two people, requests, history and fees", { tag: ["@feature:wallet.cashu.receive-lightning", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.history"] }, async ({ peer }, testInfo) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+    for (const p of [alice, bob]) await useTestnet(p);
     await link(alice, bob);
     await connect(alice, bob);
-    for (const p of [alice, bob]) await switchToTestMint(p);
 
     const invoice = await receive(alice, 100);
     expect(invoice.startsWith("lnbc"), "the mint issued a Lightning invoice").toBe(true);
-    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^100\s*sats/);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^100\s*test sats/);
     await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
 
     await openChat(alice);
     await (await composerRow(alice.page, "payment-button")).click();
-    await alice.page.getByTestId("payment-card-cashu").click();
+    await paymentCard(alice.page, "cashu-testnet").click();
     await alice.page.getByTestId("payment-amount").fill("21");
     // The Cashu card turned over; the mint that holds the sats pays, so there is no mint to pick.
     await alice.page.getByTestId("payment-send").click();
     const directReview = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
     await expect(directReview).toContainText("cashu-test");
     await showCashu(bob);
-    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^0\s*sats/);
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^0\s*test sats/);
     await directReview.getByRole("button", { name: "Approve payment" }).click();
     const sent = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state");
-    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^21\s*sats/);
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^21\s*test sats/);
     await openChat(bob);
     await expect(sent(bob)).toHaveText(/Received/);
     await expect(sent(alice)).toHaveText(/Received/);
@@ -70,7 +63,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     // itself, racing Alice (it is a faucet), and the request could be paid before she gets to it.
     await chatPayments(bob.page, { lightning: false });
     await (await composerRow(bob.page, "payment-button")).click();
-    await bob.page.getByTestId("payment-card-cashu").click();
+    await paymentCard(bob.page, "cashu-testnet").click();
     await bob.page.getByTestId("payment-amount").fill("10");
     await bob.page.getByTestId("payment-request").click();
     await alice.page.getByTestId("payment-pay").click();
@@ -79,7 +72,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await requestReview.getByRole("button", { name: "Approve payment" }).click();
     for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);
     await showCashu(bob);
-    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^31\s*sats/);
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^31\s*test sats/);
 
     await showCashu(alice);
     await alice.page.getByTestId("wallet-history").click();
@@ -90,21 +83,25 @@ test.describe("wallet", { tag: "@network" }, () => {
     expect(txs[1]).toMatch(/fee \d/);
     expect(txs[0]).toMatch(/fee \d/);
     const fees = Number((await alice.page.getByTestId("wallet-fees-paid").textContent())!.match(/(\d+) sats/)![1]);
-    expect(await balance(alice), "balance = received - sent - fees, to the sat").toBe(100 - 21 - 10 - fees);
+    await expect.poll(() => balance(alice), "balance = received - sent - fees, to the sat").toBe(100 - 21 - 10 - fees);
     await alice.page.screenshot({ path: testInfo.outputPath("cashu-chat-history.png"), fullPage: true });
     await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" })).toBeVisible();
   });
 
-  test("test-mint ecash reaches a contact who never turned test sats on", { tag: ["@feature:payments.cashu.test-sats", "@feature:payments.cashu.send"] }, async ({ peer }) => {
+  test("test-mint ecash reaches the contact's Testnet wallet and never their Mainnet one", { tag: ["@feature:payments.cashu.test-sats", "@feature:payments.cashu.send", "@feature:wallet.instances.networks"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+    // Bob has real money and test sats side by side (his Mainnet mints answered by the suite's own mint).
+    await mockMainnetMints(bob.context);
+    await useTestnet(alice);
+    await createWallet(bob, "cashu", "mainnet");
+    await createWallet(bob, "cashu", "testnet");
     await link(alice, bob);
     await connect(alice, bob);
-    await switchToTestMint(alice);
     await receive(alice, 50);
-    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*sats/);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*test sats/);
     await openChat(alice);
     await (await composerRow(alice.page, "payment-button")).click();
-    await alice.page.getByTestId("payment-card-cashu").click();
+    await paymentCard(alice.page, "cashu-testnet").click();
     await alice.page.getByTestId("payment-amount").fill("10");
     await alice.page.getByTestId("payment-send").click();
     const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
@@ -112,22 +109,21 @@ test.describe("wallet", { tag: "@network" }, () => {
     const sent = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "10" }).getByTestId("payment-state");
     await expect(sent(bob)).toHaveText(/Received/, { timeout: 60000 });
     await expect(sent(alice)).toHaveText(/Received/);
-    // Bob is on Mainnet: the test sats wait in Testnet, and the wallet says where they are.
-    await openWallet(bob, "cashu");
-    await expect(bob.page.getByTestId("wallet-balance")).toContainText(/^0\s*sats/);
-    await expect(bob.page.getByTestId("wallet-waiting-test-sats")).toContainText("10 test sats are waiting in Testnet");
-    await bob.page.getByTestId("wallet-waiting-test-sats").getByRole("button", { name: "Switch to Testnet" }).click();
-    await expect(bob.page.getByTestId("testnet-badge")).toBeVisible();
-    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^10\s*sats/);
+    // Each network's wallet shows its own balance: the test sats are in Testnet, the Mainnet wallet got nothing.
+    await openWallet(bob, "cashu-testnet");
+    await expect.poll(async () => (await bob.page.getByTestId("wallet-balance").innerText()).trim(), { timeout: 15_000 }).toMatch(/^10\s*test sats/);
+    await openWallet(bob, "cashu-mainnet");
+    await expect.poll(async () => (await bob.page.getByTestId("wallet-balance").innerText()).trim()).toMatch(/^0\s*sats/);
+    await expect(bob.page.getByTestId("wallet-waiting-test-sats")).toHaveCount(0);
   });
 
   test("an invoice pasted into the chat is a card that can be paid", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+    for (const p of [alice, bob]) await useTestnet(p);
     await link(alice, bob);
     await connect(alice, bob);
-    for (const p of [alice, bob]) await switchToTestMint(p);
     await receive(alice, 50);
-    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*sats/);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*test sats/);
 
     const pasted = await receive(bob, 12);
     await openChat(bob);
@@ -149,9 +145,11 @@ test.describe("wallet", { tag: "@network" }, () => {
 
   test("an ecash token pasted into the chat can be redeemed", { tag: ["@feature:payments.cashu.token-card"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+    for (const p of [alice, bob]) await useTestnet(p);
     await link(alice, bob);
     await connect(alice, bob);
-    for (const p of [alice, bob]) await switchToTestMint(p);
+    await openChat(alice);
+    await openChat(bob);
 
     // Minted outside Ghostly, pasted like any other text.
     const { Wallet, getEncodedToken } = await import("@cashu/cashu-ts");

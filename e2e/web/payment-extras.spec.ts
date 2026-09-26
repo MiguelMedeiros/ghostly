@@ -1,8 +1,8 @@
 import type { Page } from "@playwright/test";
-import { chat, connect, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
 import { mintEndpoint } from "../support/mint";
 import { composerRow } from "../support/composer";
-import { chatPayments } from "../support/payments";
+import { chatPayments, paymentCard } from "../support/payments";
 
 /**
  * Payments in a chat beyond the happy path: memos, a payment the contact refuses, ecash that was
@@ -16,37 +16,35 @@ test.beforeEach(() => {
   test.skip(!local(), "Requires an explicitly local fake mint (E2E_MINT_URL=http://127.0.0.1:…)");
 });
 
-/** Two people in one chat, connected. */
-async function chatting(peer: (name: string) => Promise<Peer>, a: string, b: string): Promise<[Peer, Peer]> {
+/**
+ * Two people in one chat, connected. With `testnet`, each first makes a Testnet Cashu wallet with New (a new
+ * profile has none), so the chat knows from its first packet that both can take test sats.
+ */
+async function chatting(peer: (name: string) => Promise<Peer>, a: string, b: string, { testnet = true } = {}): Promise<[Peer, Peer]> {
   const [alice, bob] = await Promise.all([peer(a), peer(b)]);
+  if (testnet) for (const p of [alice, bob]) await useTestnet(p);
   await link(alice, bob);
   await connect(alice, bob);
   return [alice, bob];
 }
 
-async function testMint(p: Peer): Promise<void> {
-  await openWallet(p, "cashu");
-  await p.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-  await expect(p.page.getByTestId("wallet-balance")).toBeVisible();
-}
-
 /** Fills the wallet over Lightning at its primary mint; the local mint pays its own invoices. */
 async function fund(p: Peer, sats: number): Promise<void> {
-  await openWallet(p, "cashu");
+  await openWallet(p, "cashu-testnet");
   await p.page.getByTestId("wallet-receive").click();
   await p.page.getByTestId("wallet-receive-amount").fill(String(sats));
   await p.page.getByTestId("wallet-create-invoice").click();
   await expect(p.page.getByTestId("wallet-paid")).toBeVisible();
 }
 
-/** The Cashu panel's balance: in Testnet, every sat there is a test sat (the page's badge says so). */
+/** The Testnet Cashu panel's balance: every sat there is a test sat, and it says so. */
 const balanceOf = async (page: Page) =>
   Number(((await page.getByTestId("wallet-balance").textContent()) ?? "").replace(/,/g, "").match(/(\d+)/)![1]);
 
 /** Opens the composer, fills it and stops at the review. */
 async function prepareSend(p: Peer, sats: number, memo?: string) {
   await (await composerRow(p.page, "payment-button")).click();
-  await p.page.getByTestId("payment-card-cashu").click();
+  await paymentCard(p.page, "cashu-testnet").click();
   const composer = p.page.getByTestId("payment-composer");
   await p.page.getByTestId("payment-amount").fill(String(sats));
   if (memo) await composer.getByPlaceholder("What for? (optional)").fill(memo);
@@ -60,13 +58,12 @@ const bubble = (p: Peer, text: string | RegExp) => chat(p).getByTestId("payment-
 
 test("a request's memo shows on both sides, and test-mint payments say test sats", { tag: ["@feature:payments.chat.memo", "@feature:payments.cashu.test-sats", "@feature:payments.cashu.send", "@feature:payments.chat.review"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "memo-alice", "memo-bob");
-  for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 100);
   for (const p of [alice, bob]) await openChat(p);
 
   // A request with a memo: both bubbles carry it, in test sats.
   await (await composerRow(bob.page, "payment-button")).click();
-  await bob.page.getByTestId("payment-card-cashu").click();
+  await paymentCard(bob.page, "cashu-testnet").click();
   await bob.page.getByTestId("payment-amount").fill("12");
   await bob.page.getByTestId("payment-composer").getByPlaceholder("What for? (optional)").fill("half the pizza");
   await bob.page.getByTestId("payment-request").click();
@@ -94,7 +91,6 @@ test("a request's memo shows on both sides, and test-mint payments say test sats
 // The composer's "What for?" goes with a direct send: it is kept on the review and sent with the ecash.
 test("a sent payment's memo shows in both bubbles", { tag: ["@feature:payments.chat.memo", "@feature:payments.cashu.send"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "send-memo-alice", "send-memo-bob");
-  for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 100);
   for (const p of [alice, bob]) await openChat(p);
   const review = await prepareSend(alice, 21, "for the tickets");
@@ -109,10 +105,10 @@ test("a sent payment's memo shows in both bubbles", { tag: ["@feature:payments.c
 
 test("a payment the contact refuses comes back, and is never shown as paid", { tag: ["@feature:payments.chat.refused", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage", "@feature:wallet.history"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "refused-alice", "refused-bob");
-  // Both are in Testnet, where Bob's test mint is the public one. Alice keeps her test sats at a mint
-  // Bob has not chosen: the local mint under its own address (a mint on this machine belongs to Testnet
+  // Both have a Testnet Cashu wallet, where Bob's test mint is the public one. Alice keeps her test sats at a
+  // mint Bob has not chosen: the local mint under its own address (a mint on this machine belongs to Testnet
   // too, and is never added by itself). Bob's wallet only takes ecash from mints he picked, and refuses.
-  for (const p of [alice, bob]) await testMint(p);
+  await openWallet(alice, "cashu-testnet");
   const own = mintEndpoint();
   await alice.page.getByTestId("wallet-mint-url").fill(own);
   await alice.page.getByTestId("wallet-add-mint").click();
@@ -149,7 +145,7 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
   await expect(chat(alice).getByText("no worries")).toBeVisible();
 
   // The sats are Alice's again, less the mint's fee for swapping them twice.
-  await openWallet(alice, "cashu");
+  await openWallet(alice, "cashu-testnet");
   await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(56);
   expect(await balanceOf(alice.page)).toBeLessThan(60);
   await alice.page.getByTestId("wallet-history").click();
@@ -159,7 +155,6 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
 
 test("a contact who turns Cashu off stops a reviewed payment before anything is spent", { tag: ["@feature:payments.chat.method-off", "@feature:payments.chat.review"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "off-alice", "off-bob");
-  for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 50);
   await expect.poll(() => balanceOf(alice.page)).toBe(50);
   await openChat(alice);
@@ -178,14 +173,13 @@ test("a contact who turns Cashu off stops a reviewed payment before anything is 
   await expect(chat(alice).getByTestId("payment-bubble")).toHaveCount(0);
   await expect(chat(bob).getByTestId("payment-bubble")).toHaveCount(0);
   await review.getByRole("button", { name: "Cancel" }).click();
-  await openWallet(alice, "cashu");
-  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*sats/);
+  await openWallet(alice, "cashu-testnet");
+  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*test sats/);
 });
 
 // Every send from the chat is reviewed; ecash the contact never picks up can still be taken back.
 test("ecash the contact never picks up can be taken back", { tag: ["@feature:payments.cashu.reclaim"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "unredeemed-alice", "unredeemed-bob");
-  for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 50);
   await expect.poll(() => balanceOf(alice.page)).toBe(50);
   for (const p of [alice, bob]) await openChat(p);
@@ -199,7 +193,7 @@ test("ecash the contact never picks up can be taken back", { tag: ["@feature:pay
   await review.getByRole("button", { name: "Close", exact: true }).click().catch(() => {});
   await sent.getByRole("button", { name: "Take it back" }).click();
   await expect(sent.getByTestId("payment-state")).toHaveText(/^Taken back/);
-  await openWallet(alice, "cashu");
+  await openWallet(alice, "cashu-testnet");
   await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(47);
 });
 
