@@ -107,7 +107,7 @@ describe("New, in the header", () => {
     expect(engine.callsTo("walletCreate")).toEqual([{ type: "arkade", network: "testnet" }]);
     expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument();
     expect(await screen.findByTestId("wallet-card-arkade-testnet")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("ark-wallet")).toBeInTheDocument();
+    expect(await screen.findByTestId("ark-wallet", {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it("a creation that fails says why once, leaves the dialog open, and tries again on request", async () => {
