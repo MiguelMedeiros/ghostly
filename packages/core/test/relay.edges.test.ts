@@ -3,7 +3,7 @@ import { createIdentity } from "../src/identity";
 import { createRelayPayload } from "../src/pkarr";
 import { didDhtDocument, encodeDidDhtPacket, signDidDhtPacket } from "../src/didDht";
 import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl } from "../src/relay";
-import { DiscoveryBudgetError } from "../src/transport";
+import { DiscoveryBudgetError, isDiscoveryBudgetError } from "../src/transport";
 
 // covers: core.relay-client
 
@@ -151,5 +151,122 @@ describe("resolving", () => {
     vi.setSystemTime(Date.now() + 60_000);
     await relay.resolve(id.pubKeyZ32);
     expect(requests).toBe(31);
+  });
+});
+
+describe("publishing past a slow relay", () => {
+  /** A fetch whose answers are held on the hosts in `slow` until `release` hands each one its response. */
+  function gated(answer: (host: string, init: RequestInit, attempt: number) => Response, slow: string[]) {
+    const held: { host: string; resolve: (response: Response) => void; init: RequestInit }[] = [];
+    const attempts = new Map<string, number>();
+    const fetchFn = ((url: RequestInfo | URL, init?: RequestInit) => {
+      const host = new URL(String(url)).host;
+      const attempt = (attempts.get(host) ?? 0) + 1;
+      attempts.set(host, attempt);
+      if (!slow.includes(host)) return Promise.resolve(answer(host, init!, attempt));
+      return new Promise<Response>((resolve, reject) => {
+        held.push({ host, init: init!, resolve: (response) => resolve(response) });
+        init!.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    }) as typeof fetch;
+    const release = (answerFor: (init: RequestInit) => Response) => { for (const h of held.splice(0)) h.resolve(answerFor(h.init)); };
+    return { fetchFn, attempts, release, held };
+  }
+  const settleSoon = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("returns once one relay took the packet, while a slow one is still answering", async () => {
+    const { fetchFn, held, release } = gated(() => new Response(null, { status: 204 }), ["slow.test"]);
+    const relay = new RelayTransport({ relays: ["https://slow.test", "https://fast.test"], fetch: fetchFn });
+    await relay.publish(id, []);
+    // Out on fast.test; slow.test still holds its request.
+    expect(held.map((h) => h.host)).toEqual(["slow.test"]);
+    release(() => new Response(null, { status: 204 }));
+  });
+
+  it("keeps the slow relay's put going: its 412 is retried without If-Match after the publish returned", async () => {
+    const { fetchFn, attempts, held, release } = gated(() => new Response(null, { status: 204 }), ["slow.test"]);
+    const relay = new RelayTransport({ relays: ["https://slow.test", "https://fast.test"], fetch: fetchFn });
+    await relay.publish(id, []);
+    release(() => new Response(null, { status: 204 }));
+    await settleSoon();
+    // The next publish replaces the first one: slow.test never got it and says 412.
+    await relay.publish(id, []);
+    expect((held[0].init.headers as Record<string, string>)["If-Match"]).toBeDefined();
+    release(() => new Response(null, { status: 412 }));
+    await settleSoon();
+    expect(attempts.get("slow.test")).toBe(3);
+    expect(held[0].init.headers).toBeUndefined();
+    release(() => new Response(null, { status: 204 }));
+  });
+
+  it("counts a slow relay's timeout after the publish returned: it is left alone for the next one", async () => {
+    const { fetchFn, attempts } = gated(() => new Response(null, { status: 204 }), ["slow.test"]);
+    const relay = new RelayTransport({ relays: ["https://slow.test", "https://fast.test"], timeoutMs: 5, fetch: fetchFn });
+    await relay.publish(id, []);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await relay.publish(id, []);
+    // The first PUT to slow.test timed out after the publish returned; the second publish skipped it.
+    expect(attempts.get("slow.test")).toBe(1);
+    expect(attempts.get("fast.test")).toBe(2);
+  });
+
+  it("lets reads go on a relay that refused the write as soon as another took it, the slow one still answering", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const gets: string[] = [];
+    const { fetchFn, release } = gated((host, init) => {
+      if (init.method === "PUT") return new Response(null, { status: 204 });
+      gets.push(host); return packet(3n);
+    }, ["slow.test"]);
+    const relay = new RelayTransport({ relays: ["https://a.test", "https://fast.test", "https://slow.test"], requestsPerMinute: 1, fetch: fetchFn });
+    const start = Date.now();
+    // A read fills a's minute; near its end a refuses a link's packet, fast.test takes it, slow.test holds it.
+    await relay.resolve(id.pubKeyZ32);
+    vi.setSystemTime(start + 58_000);
+    await relay.publish(id, []);
+    // a's minute frees up while slow.test still answers: the packet is out, so a has no write to let go first.
+    vi.setSystemTime(start + 60_500);
+    await relay.resolve(id.pubKeyZ32);
+    expect(gets).toEqual(["a.test", "a.test"]);
+    release(() => new Response(null, { status: 204 }));
+  });
+
+  it("fails when every relay fails, waiting for the slow one to say why", async () => {
+    const { fetchFn, release } = gated(() => new Response(null, { status: 503 }), ["slow.test"]);
+    const relay = new RelayTransport({ relays: ["https://slow.test", "https://fast.test"], fetch: fetchFn });
+    let outcome: unknown = "pending";
+    const publishing = relay.publish(id, []).then(() => "published", (error: unknown) => error);
+    void publishing.then((value) => { outcome = value; });
+    await settleSoon();
+    // fast.test failed at once, but slow.test may still take it.
+    expect(outcome).toBe("pending");
+    release(() => new Response(null, { status: 500 }));
+    const error = await publishing;
+    expect(error).toBeInstanceOf(Error);
+    expect(isDiscoveryBudgetError(error)).toBe(false);
+    expect((error as Error).message).toMatch(/Publish failed on every relay: .*slow\.test responded 500.*fast\.test responded 503/);
+  });
+
+  it("is a wait for the soonest relay when every one held it back for its budget", async () => {
+    const limited = (seconds: number) => new Response(null, { status: 429, headers: { "retry-after": String(seconds) } });
+    const { fetchFn, release } = gated(() => limited(40), ["slow.test"]);
+    const relay = new RelayTransport({ relays: ["https://slow.test", "https://fast.test"], fetch: fetchFn });
+    const publishing = relay.publish(id, []).then(() => null, (error: unknown) => error);
+    await settleSoon();
+    release(() => limited(25));
+    const error = await publishing;
+    expect(error).toBeInstanceOf(DiscoveryBudgetError);
+    expect((error as DiscoveryBudgetError).retryInMs).toBe(25_000);
+    expect((error as Error).message).toContain("Publish held back on every relay");
+  });
+
+  it("is a failure, not a wait, when a slow relay fails where the other held it back", async () => {
+    const { fetchFn, release } = gated(() => new Response(null, { status: 429, headers: { "retry-after": "20" } }), ["slow.test"]);
+    const relay = new RelayTransport({ relays: ["https://slow.test", "https://fast.test"], fetch: fetchFn });
+    const publishing = relay.publish(id, []).then(() => null, (error: unknown) => error);
+    await settleSoon();
+    release(() => new Response(null, { status: 502 }));
+    const error = await publishing;
+    expect(isDiscoveryBudgetError(error)).toBe(false);
+    expect((error as Error).message).toContain("Publish failed on every relay");
   });
 });
