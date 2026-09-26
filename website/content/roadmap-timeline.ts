@@ -4,7 +4,7 @@ import type { Level } from "@/lib/status";
 /**
  * The roadmap as a timeline: columns in the order things happen, rows by area.
  * No dates: a column is a stage, not a quarter. "Today" is where Ghostly
- * stands (the 0.5.0 release on `dev`); every column after it is future work,
+ * stands (the 1.0.0 release on `dev`); every column after it is future work,
  * checked against the code (see content/roadmap.ts).
  */
 export const PHASES = ["now", "planned", "later"] as const;

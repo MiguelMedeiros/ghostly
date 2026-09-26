@@ -3,7 +3,7 @@ import type { Localized } from "./i18n";
 
 /**
  * The pieces of the architecture, as blocks for the composer on /developers
- * and the map on /roadmap. Levels were checked in the code on `dev` (the 0.5.0
+ * and the map on /roadmap. Levels were checked in the code on `dev` (the 1.0.0
  * release): what runs there is "available"; see lib/wisp-editorial.ts for the
  * same rule. `wisps` point at the drafts by
  * file slug so a renumbering follows; `refs` at other reference documents.

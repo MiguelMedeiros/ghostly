@@ -15,7 +15,7 @@ Open **https://app.ghostly.tools** in any modern browser.
 
 **From the release zip** (the newest version, or a browser without store access):
 
-1. Download [ghostly-browser-extension-0.4.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-browser-extension-0.4.0.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
+1. Download [ghostly-browser-extension-1.0.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/ghostly-browser-extension-1.0.0.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
@@ -27,12 +27,12 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 
 | Platform | File |
 |---|---|
-| macOS, Apple silicon | [Ghostly_0.4.0_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_aarch64.dmg) |
-| macOS, Intel | [Ghostly_0.4.0_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64.dmg) |
-| Windows x64, installer | [Ghostly_0.4.0_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64-setup.exe) |
-| Windows x64, MSI | [Ghostly_0.4.0_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64_en-US.msi) |
-| Linux x64, AppImage | [Ghostly_0.4.0_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.AppImage) |
-| Linux x64, Debian/Ubuntu | [Ghostly_0.4.0_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.deb) |
+| macOS, Apple silicon | [Ghostly_1.0.0_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_aarch64.dmg) |
+| macOS, Intel | [Ghostly_1.0.0_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64.dmg) |
+| Windows x64, installer | [Ghostly_1.0.0_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64-setup.exe) |
+| Windows x64, MSI | [Ghostly_1.0.0_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64_en-US.msi) |
+| Linux x64, AppImage | [Ghostly_1.0.0_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_amd64.AppImage) |
+| Linux x64, Debian/Ubuntu | [Ghostly_1.0.0_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_amd64.deb) |
 
 - **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings, Updates** allows it, and nothing installs without your OK.
 - **Linux has no calls and no WebRTC** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT.

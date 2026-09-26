@@ -2,7 +2,7 @@ import type { Localized } from "@/lib/i18n";
 
 /**
  * Homepage copy. Every capability claim was checked against the code on `dev`,
- * the 0.5.0 release: the page says what the app does, and states each limit
+ * the 1.0.0 release: the page says what the app does, and states each limit
  * (test networks, missing features) in the line it applies to.
  */
 

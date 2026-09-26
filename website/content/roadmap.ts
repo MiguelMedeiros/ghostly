@@ -3,7 +3,7 @@ import type { Level } from "@/lib/status";
 
 /**
  * The public roadmap: tracks in dependency order, never dates. It starts after
- * 0.5.0: "Now" is a short baseline of what the app already does, and "Next" is
+ * 1.0.0: "Now" is a short baseline of what the app already does, and "Next" is
  * only work that is not built. Checked against the code on `dev`.
  */
 type Track = {
@@ -21,7 +21,7 @@ const en = {
   meta: {
     title: "Roadmap",
     description:
-      "Where Ghostly goes after 0.5.0, in order and with dependencies: richer chats, more ways to pay, optional identities, groups, storage, SDKs and plugins, independent apps and a self-hosted runtime. No invented dates.",
+      "Where Ghostly goes after 1.0.0, in order and with dependencies: richer chats, more ways to pay, optional identities, groups, storage, SDKs and plugins, independent apps and a self-hosted runtime. No invented dates.",
   },
   eyebrow: "Public roadmap",
   title: "The ghost keeps learning.",
@@ -202,7 +202,7 @@ const ptBr: RoadmapCopy = {
   meta: {
     title: "Roadmap",
     description:
-      "Para onde o Ghostly vai depois da 0.5.0, em ordem e com dependências: chats mais ricos, mais formas de pagar, identidades opcionais, grupos, armazenamento, SDKs e plugins, apps independentes e um runtime auto-hospedado. Sem datas inventadas.",
+      "Para onde o Ghostly vai depois da 1.0.0, em ordem e com dependências: chats mais ricos, mais formas de pagar, identidades opcionais, grupos, armazenamento, SDKs e plugins, apps independentes e um runtime auto-hospedado. Sem datas inventadas.",
   },
   eyebrow: "Roadmap público",
   title: "O fantasma continua aprendendo.",

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.0.0
+
+Ghostly 1.0 brings private conversations, groups, calls, files, payments and optional identities together on your phone, in your browser and on your desktop. There is no account to create and no phone number to hand over. Invite someone and talk peer to peer.
+
+### Added
+
+- **One invitation, one chat.** Share a `ghostly1` code, link or QR. Contacts find each other through the DHT, then connect over WebRTC, Iroh or HyperDHT. Short texts can still travel over the DHT when a live connection is unavailable. The connection panel shows the route and lets you choose it.
+- **Groups and communities.** Private groups and communities with invitation links, member roles, admin controls, pictures and @mentions.
+- **Richer conversations.** Voice messages, formatted text, sender-generated link previews, location cards, identity and invitation cards, delivery details and per-chat mute. Large files stream to storage, resume after interruption and are checked before completion.
+- **More ways to pay.** A wallet deck with separate Mainnet and Testnet tabs: Cashu, Lightning, Arkade, Bark, Spark, Fedimint, on-chain Bitcoin and USDT. Each rail states the networks and sources it supports. Several Lightning cards can coexist on each network. Pay or request inside a chat, with an explicit confirmation before spending real money.
+- **Optional identities.** Separate local profiles, each with a `did:dht`, and proofs for Nostr, Bluesky, Pubky, DIDs, domains, SSH, OpenPGP and Bitcoin addresses. Share an identity with a chosen contact; its card shows the public profile where supported.
+- **Bots and integrations.** The Node `ghostly` CLI runs the app's own engine with chats, groups, files, payments, identities, backups and JSON events. Build and install it from source; the npm package is not yet published. The adapter SDK lets integrations register their own providers.
+- **A new website and reference.** Guided introductions, current app screenshots, the WISP catalogue, the roadmap and developer documentation in English and Brazilian Portuguese.
+
+### Fixed
+
+- Pairing and reconnecting recover from relay delays, transport changes and temporary disconnects. Desktop can read the Mainline DHT directly; browsers can use relayed Iroh and HyperDHT.
+- Voice messages play on Desktop, macOS call signaling works across WebKit peers, and macOS notifications explain missing permission and open the relevant chat.
+- Payment sheets, wallet selection and identity sharing close or return to the right view after an action. Removing a wallet preserves money still in flight.
+- The browser extension starts even when notification permission is unavailable.
+
+### Security
+
+- A copied invitation cannot stop an established paired chat. An expired file offer needs consent again.
+- Community members cannot undo an administrator's removal, role change or invitation rotation.
+- Peer messages and Pkarr relay responses have bounded processing costs; Pubky profile checks reject private network targets.
+- Ecash network checks, Mainnet confirmations and USDT payment acceptance enforce the intended payment boundary.
+
+### Upgrading
+
+- Existing v0.4 conversations remain available as compatibility chats. New `ghostly1` invitations require an updated client; use **Continue in a new chat** to move a conversation to the new protocol.
+- The downloadable Rust `ghostly-cli` remains the v0.4 compatibility client. The new Node `ghostly` CLI speaks the current app protocol.
+- Linux Desktop supports chat over native transports. Voice/video calls and screen sharing remain unavailable there because its WebKitGTK does not provide WebRTC.
+
 ## 0.4.0
 
 From here on Ghostly tells you when there is a new version, and installs it where it can — so this is the last one you have to go and fetch yourself. Calls gained video and screen sharing without calling again, and any single message can now be deleted from this device. Nothing changes on the wire: older clients keep working, they just cannot turn their camera on mid-call until they update.

@@ -48,6 +48,8 @@ for (const file of [
   "packages/browser/package.json",
   "packages/react/package.json",
   "packages/sdk/package.json",
+  "packages/cli/package.json",
+  "packages/iroh-web/package.json",
   "src-tauri/tauri.conf.json",
 ]) {
   edit(file, jsonVersion);
@@ -59,6 +61,7 @@ edit("cli/Cargo.toml", crateVersion);
 edit("Cargo.lock", (text) => text.replace(/(name = "ghostly(?:-cli)?"\nversion = ")[^"]+(")/g, `$1${next}$2`));
 
 edit("website/lib/release.ts", (text) => text.replace(/(export const VERSION = ")[^"]+(")/, `$1${next}$2`));
+edit("website/lib/status.ts", (text) => text.replace(/(export const NEXT_VERSION = ")[^"]+(")/, `$1${next}$2`));
 edit("docs/INSTALLATION.md", (text) =>
   text
     .replace(/releases\/download\/v\d+\.\d+\.\d+\//g, `releases/download/v${next}/`)

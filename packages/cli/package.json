@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/cli",
   "private": true,
-  "version": "0.4.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Ghostly for bots and terminals: the app's own engine, headless on Node, behind a daemon and a `ghostly` command with JSON output.",
   "license": "MIT",

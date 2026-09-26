@@ -4,7 +4,7 @@ import type { Localized } from "./i18n";
 /**
  * Editorial layer over the WISP drafts: the family a draft is presented in, a
  * one-line benefit, and its availability as checked in the code on `dev` (the
- * 0.5.0 release): "available" when the app runs it. Numbers, titles, status
+ * 1.0.0 release): "available" when the app runs it. Numbers, titles, status
  * and dependencies come from the documents, never from here.
  */
 export type GroupId =
