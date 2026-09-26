@@ -42,20 +42,23 @@ export function rememberNetwork(chat: string | undefined, network: WalletNetwork
 }
 
 /**
- * The tab a chat's payment sheet opens on, among the networks you have wallets on (`mine`):
- * - the one this chat used last (its tab, or the network of its last card), while you still have a wallet there;
+ * The tab a chat's payment sheet opens on, among the networks of your wallets (`cards`, in the deck's order):
+ * - the one this chat used last (its tab, or the network of its last card; a rail from before networks, the network
+ *   of that rail's first card), while you still have a wallet there;
  * - else the one network the contact takes that you have a wallet on (`theirs`: for each way of paying, the contact's
  *   networks; `accepted`: the ways it takes in this chat, when known);
  * - else Mainnet when you have a Mainnet wallet, else Testnet.
  */
-export function startNetwork(chat: string | undefined, mine: readonly WalletNetwork[], theirs?: Partial<Record<string, readonly WalletNetwork[]>>, accepted?: Partial<Record<string, boolean>>): WalletNetwork {
-  let last: string | null = null;
-  if (chat) try { last = localStorage.getItem(networkKey(chat)); } catch { /* storage unavailable */ }
-  last ??= rememberedRail(chat)?.split(":")[1] ?? null;
-  const used = mine.find((n) => n === last);
+export function startNetwork(chat: string | undefined, cards: readonly { rail: string; network: WalletNetwork }[], theirs?: Partial<Record<string, readonly WalletNetwork[]>>, accepted?: Partial<Record<string, boolean>>): WalletNetwork {
+  const mine = new Set(cards.map((c) => c.network));
+  let tab: string | null = null;
+  if (chat) try { tab = localStorage.getItem(networkKey(chat)); } catch { /* storage unavailable */ }
+  const [rail, network] = rememberedRail(chat)?.split(":") ?? [];
+  const last = tab ?? network ?? cards.find((c) => c.rail === rail)?.network;
+  const used = [...mine].find((n) => n === last);
   if (used) return used;
   const taken = new Set(Object.entries(theirs ?? {}).filter(([method]) => accepted?.[method] !== false).flatMap(([, networks]) => networks ?? []));
-  const both = mine.filter((n) => taken.has(n));
+  const both = [...mine].filter((n) => taken.has(n));
   if (both.length === 1) return both[0];
-  return mine.includes("mainnet") ? "mainnet" : "testnet";
+  return mine.has("mainnet") ? "mainnet" : "testnet";
 }

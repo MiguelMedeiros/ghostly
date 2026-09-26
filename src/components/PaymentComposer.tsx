@@ -96,7 +96,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const [tab, setTab] = useState<WalletNetwork | null>(null);
   const mine = WALLET_NETWORKS.filter((n) => cards.some((c) => c.network === n));
   const open = peer?.dataLink === "open";
-  const net: WalletNetwork = tab ?? startNetwork(chat, mine, open ? peer.capabilities?.networks : undefined, open ? peer.capabilities?.methods : undefined);
+  const net: WalletNetwork = tab ?? startNetwork(chat, cards, open ? peer.capabilities?.networks : undefined, open ? peer.capabilities?.methods : undefined);
   const netPayCards = payCards.filter((c) => c.network === net);
   // How the last switch went, for the deck's way in (none as the sheet opens).
   const [swap, setSwap] = useState<"next" | "prev" | null>(null);

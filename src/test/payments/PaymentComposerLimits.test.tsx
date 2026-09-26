@@ -51,7 +51,7 @@ it("says Lightning through the Cashu mints has to be set up when there is no min
 
 it("still says where a card on its way is", () => {
   // An Ark wallet whose provider has not answered yet: it has no address to be paid at.
-  open(everyWallet({ ark: undefined, wallets: [instance("cashu", "mainnet"), instance("arkade", "testnet")] }));
+  open(everyWallet({ ark: undefined, wallets: [instance("arkade", "testnet")] }));
   expect(screen.getByTestId("payment-card-arkade-testnet").getAttribute("title")).toBe("Ark is connecting…");
 });
 
