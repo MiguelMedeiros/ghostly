@@ -54,7 +54,7 @@ export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState):
   }
   case 'bark': {
    const bark=s.bark,ready=!!bark?.configured&&!bark.locked&&!!bark.address;
-   return {...base,name:'Bark',balance:ready?`${bark!.balance.toLocaleString()} ${unit}`:bark?.unavailable?'Testnet only':'Connecting…',detail:`Second's Ark · ${bark?.network==='regtest'?'regtest':bark?.network==='bitcoin'?'Bitcoin':'signet'}`,status:ready?'Ready':bark?.unavailable?'Not on Mainnet yet':'Experimental',ready};
+   return {...base,name:'Bark',balance:ready?`${bark!.balance.toLocaleString()} ${unit}`:'Connecting…',detail:`Second's Ark · ${bark?.network==='regtest'?'regtest':bark?.network==='bitcoin'||network==='mainnet'?'Bitcoin':'signet'}`,status:ready?(network==='mainnet'?'Real bitcoin':'Ready'):'Experimental',ready};
   }
   case 'spark': {
    const spark=s.spark,ready=!!spark?.configured&&!spark.locked&&!!spark.address;

@@ -4,14 +4,14 @@ import { PaymentPreflightError, type PaymentReview, type PaymentTarget } from "@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { BarkAdapter, barkTiming, type BarkConfig } from "../src/engine/paymentAdapters/bark";
-import { BARK_MAINNET_UNAVAILABLE, BarkWallet, TESTNET_BARK } from "../src/engine/paymentAdapters/barkWallet";
+import { BarkWallet, MAINNET_BARK, SECOND_TERMS, TESTNET_BARK, readableBarkError } from "../src/engine/paymentAdapters/barkWallet";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { FakeBarkServer } from "./helpers/fakeBark";
 import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
-// covers: wallet.bark.mainnet-off, wallet.bark.create, wallet.bark.send, wallet.bark.backup, payments.chat.reconcile
+// covers: wallet.bark.mainnet, wallet.bark.create, wallet.bark.send, wallet.bark.backup, payments.chat.reconcile
 
 // The wallet draws its own phrase; a test that looks for it in storage has it draw TEST_PHRASE.
 vi.mock("@scure/bip39", async (original) => { const bip39 = await original<typeof import("@scure/bip39")>(); return { ...bip39, generateMnemonic: vi.fn(bip39.generateMnemonic) }; });
@@ -66,6 +66,24 @@ describe("the Bark adapter", () => {
     await expect(alice.prepare(target(address, { network: "regtest" }), 100, 100)).rejects.toThrow("does not match this wallet");
     await expect(alice.prepare(target(address, { method: "arkade" }), 100, 100)).rejects.toThrow("does not match this wallet");
     expect(server.sent).toBe(0);
+  });
+
+  it("never pays across networks: a Mainnet wallet refuses a test address, a test wallet a Mainnet one", async () => {
+    const main = new FakeBarkServer("03" + "cd".repeat(32), "bitcoin", "main");
+    const mainConfig: BarkConfig = { network: "bitcoin", provider: MAINNET_BARK.provider, explorer: MAINNET_BARK.explorer, serverKey: main.key, walletId: crypto.randomUUID() };
+    const real = await BarkAdapter.connect(mainConfig, generateMnemonic(wordlist), { sdk: main.sdk() });
+    main.wallets.get(`ghostly-bark-${mainConfig.walletId}`)!.fund(10_000);
+    const mainTarget = (address: string, over: Partial<PaymentTarget> = {}) => target(address, { network: "bitcoin", provider: MAINNET_BARK.provider, ...over });
+    expect(await real.address()).toMatch(/^ark1p/);
+    await expect(real.prepare(mainTarget("tark1pmainx1"), 100, 100)).rejects.toThrow("test network Bark address");
+    await expect(real.prepare(mainTarget(await real.requestAddress(), { network: "signet" }), 100, 100)).rejects.toThrow("does not match this wallet");
+
+    const testConfig = config(), test = await connect(testConfig);
+    walletOf(testConfig).fund(10_000);
+    await expect(test.prepare(target("ark1psrvx1"), 100, 100)).rejects.toThrow("Mainnet Bark address");
+    await expect(test.prepare(target(await test.requestAddress(), { network: "bitcoin" }), 100, 100)).rejects.toThrow("does not match this wallet");
+    expect(main.sent + server.sent).toBe(0);
+    await real.dispose(); await test.dispose();
   });
 
   it("refuses a fee over the cap, more than the balance, and a fee that grew after the review", async () => {
@@ -158,21 +176,76 @@ describe("the Bark adapter", () => {
 describe("the Bark wallet", () => {
   const make = (network: "mainnet" | "testnet" = "testnet") => new BarkWallet(network, vi.fn(), async () => server.sdk());
 
-  it("is Testnet only: the Mainnet wallet says so and makes no wallet, and the Testnet one refuses Bitcoin", async () => {
-    const wallet = make("mainnet");
+  const barkDatabases = async () => (await indexedDB.databases()).map((d) => d.name ?? "").filter((n) => n.startsWith("ghostly-bark-")).sort();
+
+  it("Mainnet makes a Bitcoin wallet on Second's server in one click: key pinned, terms and coin expiry shown", async () => {
+    const main = new FakeBarkServer("03" + "cd".repeat(32), "bitcoin", "main");
+    const wallet = new BarkWallet("mainnet", vi.fn(), async () => main.sdk());
     await wallet.start();
-    await wallet.ensureReady(true);
-    expect(wallet.view).toMatchObject({ configured: false, unavailable: BARK_MAINNET_UNAVAILABLE });
-    expect(() => wallet.require()).toThrow(BARK_MAINNET_UNAVAILABLE);
-    await expect(wallet.createDefaultNow()).rejects.toThrow(BARK_MAINNET_UNAVAILABLE);
-    const mainnet = { network: "bitcoin", provider: "https://ark.second.tech", explorer: "https://mempool.second.tech/api" } as const;
-    await expect(wallet.create(mainnet)).rejects.toThrow(BARK_MAINNET_UNAVAILABLE);
-    const testnet = make("testnet");
+    await wallet.ensureReady();
+    expect(wallet.configured, "opening makes nothing").toBe(false);
+    await wallet.createDefaultNow();
+    expect(wallet.view).toMatchObject({ configured: true, locked: false, network: "bitcoin", provider: MAINNET_BARK.provider, terms: SECOND_TERMS, balance: 0, expiry: { lifetime: 4032 } });
+    expect(wallet.view.address).toMatch(/^ark1p/);
+    expect(wallet.view.error).toBeUndefined();
+    const saved = await wrap<{ config: BarkConfig }>((await store(STORES.settings, "readonly")).get("barkWallet-mode-mainnet"));
+    expect(saved.config).toMatchObject({ network: "bitcoin", provider: MAINNET_BARK.provider, explorer: MAINNET_BARK.explorer, serverKey: main.key });
+    expect(await wallet.target()).toMatchObject({ method: "bark", network: "bitcoin", provider: MAINNET_BARK.provider });
+    await expect(wallet.createDefaultNow()).rejects.toThrow("already a Mainnet Bark wallet");
+
+    // Coins: how long until the first one expires, read from the wallet and the chain tip.
+    const coins = [...main.wallets.values()][0];
+    coins.fund(20_000); coins.firstExpiry = main.tip + 300;
+    await wallet.refresh();
+    expect(wallet.view).toMatchObject({ balance: 20_000, expiry: { blocksLeft: 300, lifetime: 4032 } });
+    await wallet.stop();
+  });
+
+  it("an SDK failure reads as its own words, without the WebAssembly's quoted values and stack", async () => {
+    const raw = "Failed to create chain source: error sending request: JsValue(TypeError: Failed to fetch TypeError: Failed to fetch at __wbg_fetch_9dad (http://localhost/assets/bark_ffi_wasm.js:1:21609) at http://localhost/assets/bark_ffi_wasm_bg.wasm:wasm-function[3134]:0x339313)";
+    expect((readableBarkError(new Error(raw)) as Error).message).toBe("Failed to create chain source: error sending request");
+    expect((readableBarkError(raw) as Error).message).toBe("Failed to create chain source: error sending request");
+    expect((readableBarkError(new Error("x".repeat(500))) as Error).message).toHaveLength(240);
+    const wrong = new WrongNetworkError("mainnet", "Bitcoin is a Mainnet network");
+    expect(readableBarkError(wrong), "short errors and their kind are kept").toBe(wrong);
+    // Through a creation: the server's chain source refuses, and what the person reads is short.
+    const main = new FakeBarkServer("03" + "cd".repeat(32), "bitcoin", "main");
+    const sdk = main.sdk();
+    const failing = new BarkWallet("mainnet", vi.fn(), async () => ({ ...sdk, open: async () => { throw new Error(raw); } }));
+    await failing.start();
+    await expect(failing.createDefaultNow()).rejects.toThrow(/^Failed to create chain source: error sending request$/);
+  });
+
+  it("networks never mix: Mainnet refuses a test server or backup, Testnet refuses Bitcoin, and nothing is half made", async () => {
+    const before = await barkDatabases();
+    // Something at the Mainnet address that answers as signet: refused before anything is saved.
+    const impostor = new FakeBarkServer("03" + "ef".repeat(32), "signet", "fake");
+    const mainnet = new BarkWallet("mainnet", vi.fn(), async () => impostor.sdk());
+    await mainnet.start();
+    await expect(mainnet.createDefaultNow()).rejects.toThrow("does not run on bitcoin");
+    const signet = await mainnet.create({ ...TESTNET_BARK }).catch((e: unknown) => e);
+    expect(signet).toBeInstanceOf(WrongNetworkError);
+    expect(signet).toMatchObject({ network: "testnet", message: "signet is a Testnet network: this is the Mainnet Bark wallet" });
+
+    const main = new FakeBarkServer("03" + "cd".repeat(32), "bitcoin", "main");
+    const testnet = new BarkWallet("testnet", vi.fn(), async () => main.sdk());
     await testnet.start();
-    const wrong = await testnet.create(mainnet).catch((e: unknown) => e);
+    const wrong = await testnet.create({ ...MAINNET_BARK }).catch((e: unknown) => e);
     expect(wrong).toBeInstanceOf(WrongNetworkError);
     expect(wrong).toMatchObject({ network: "mainnet", message: "Bitcoin is a Mainnet network: this is the Testnet Bark wallet" });
+    await expect(testnet.createDefaultNow(), "a Bitcoin server at the signet address").rejects.toThrow("does not run on signet");
+
+    // The Mainnet server down: nothing saved, no database left, and it can be tried again.
+    main.down = true;
+    const down = new BarkWallet("mainnet", vi.fn(), async () => main.sdk());
+    await down.start();
+    await expect(down.createDefaultNow()).rejects.toThrow("not answering");
     expect(await settingsKeys()).toEqual([]);
+    expect(await barkDatabases(), "the drafts' databases are gone").toEqual(before);
+    main.down = false;
+    await down.createDefaultNow();
+    expect(down.view).toMatchObject({ configured: true, network: "bitcoin" });
+    await down.stop();
   });
 
   it("Testnet makes a signet wallet when asked, pins the server key, and each network's wallet is its own", async () => {
@@ -193,8 +266,8 @@ describe("the Bark wallet", () => {
 
     // The Mainnet wallet, open beside it, has none and touches nothing of the Testnet one.
     const mainnet = make("mainnet");
-    await mainnet.start(); await mainnet.ensureReady(true);
-    expect(mainnet.view).toMatchObject({ configured: false, unavailable: BARK_MAINNET_UNAVAILABLE });
+    await mainnet.start(); await mainnet.ensureReady();
+    expect(mainnet.view).toMatchObject({ configured: false });
     expect(await settingsKeys()).toEqual(["barkWallet-mode-testnet"]);
     expect(wallet.view).toMatchObject({ configured: true, locked: false, network: "signet" });
     const address = wallet.view.address;

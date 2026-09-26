@@ -28,7 +28,7 @@ export interface BarkMovement {
 }
 export interface BarkWalletHandle {
   /** Empty until the wallet has reached its server (right after an open, for a few seconds). */
-  arkInfo(): Promise<{ network: string; serverPubkey: string } | undefined>;
+  arkInfo(): Promise<{ network: string; serverPubkey: string; vtxoLifetime?: number } | undefined>;
   refreshServer(): Promise<void>;
   balance(): Promise<BarkBalance>;
   peekAddress(index: number): Promise<string>;
@@ -40,6 +40,8 @@ export interface BarkWalletHandle {
   sync(): Promise<void>;
   maintenance(): Promise<void>;
   boardAll(): Promise<{ amountSats: number; txid: string }>;
+  /** The block height at which this wallet's first coin (VTXO) expires; none without coins. */
+  getFirstExpiringVtxoBlockheight(): Promise<number | undefined>;
   stopDaemonWait(): Promise<void>;
   free(): void;
 }
@@ -48,6 +50,8 @@ export interface BarkOnchainHandle {
   balance(): Promise<{ confirmedSats: number; pendingSats: number; totalSats: number }>;
   sync(): Promise<number>;
   initialScan(birthdayHeight?: number | null): Promise<number>;
+  /** The chain tip, from the wallet's chain source. */
+  tipHeight(): Promise<number>;
   free(): void;
 }
 export interface BarkOpen {
@@ -65,6 +69,12 @@ export interface BarkSdk {
 }
 
 const NETWORK = { bitcoin: "Bitcoin", signet: "Signet", regtest: "Regtest" } as const;
+/**
+ * On Bitcoin, coins are renewed from 264 blocks (about 44 hours) before they expire, not Bark's default 144: Second
+ * charges nothing for a refresh under 288 blocks (https://second.tech/pricing), and the renewal only happens while
+ * Ghostly is open, so a wider free window gives the person twice the chance to be there. Test networks keep Bark's.
+ */
+export const MAINNET_REFRESH_THRESHOLD = 264;
 let loading: Promise<BarkSdk> | undefined;
 
 /** Loads the WebAssembly once, on first use: profiles that never open a Bark wallet never fetch its 7.7 MB. */
@@ -74,7 +84,7 @@ export function loadBarkSdk(): Promise<BarkSdk> {
     await bark.default({ module_or_path: wasm.default });
     const sdk: BarkSdk = {
       async open({ network, mnemonic, server, esplora, database }) {
-        const config = { serverAddress: server, esploraAddress: esplora };
+        const config = { serverAddress: server, esploraAddress: esplora, ...(network === "bitcoin" ? { vtxoRefreshExpiryThreshold: MAINNET_REFRESH_THRESHOLD } : {}) };
         const onchain = await bark.OnchainWallet.default({ network: NETWORK[network], mnemonic, config, dbName: `${database}-onchain` });
         try {
           // The daemon receives Ark payments (mailbox), follows rounds and syncs while Ghostly is open.

@@ -48,6 +48,15 @@ it("opens the on-chain part next to the Ark wallet, on the named network, with t
   expect(bark.openWallet).toHaveBeenCalledWith("Signet", "m", config, bark.onchain, { runDaemon: true, indexedDbName: "ghostly-bark-w1", createIfNotExists: true });
 });
 
+it("on Bitcoin, renews coins inside Second's free refresh window (under 288 blocks), wider than Bark's default day", async () => {
+  const sdk = await load();
+  await sdk.open({ ...params, network: "bitcoin" });
+  const config = { serverAddress: params.server, esploraAddress: params.esplora, vtxoRefreshExpiryThreshold: 264 };
+  expect(bark.openOnchain).toHaveBeenCalledWith({ network: "Bitcoin", mnemonic: "m", config, dbName: "ghostly-bark-w1-onchain" });
+  expect(bark.openWallet).toHaveBeenCalledWith("Bitcoin", "m", config, bark.onchain, { runDaemon: true, indexedDbName: "ghostly-bark-w1", createIfNotExists: true });
+  expect(config.vtxoRefreshExpiryThreshold).toBeLessThan(288);
+});
+
 it("frees the on-chain wallet when the Ark wallet fails to open", async () => {
   bark.openWallet.mockRejectedValueOnce(new Error("server unreachable"));
   const sdk = await load();

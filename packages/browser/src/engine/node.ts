@@ -2,7 +2,7 @@ import { UsdtWallet, usdtMode } from "./paymentAdapters/usdtWallet";
 import { iceServerProblem } from "../shared/ice";
 import type { UsdtPrepared } from "./paymentAdapters/usdt";
 import { ArkWallet, arkMode } from "./paymentAdapters/arkWallet";
-import { BARK_MAINNET_UNAVAILABLE, BarkWallet, barkDefaults, barkMode } from "./paymentAdapters/barkWallet";
+import { BarkWallet, barkMode } from "./paymentAdapters/barkWallet";
 import { FEDIMINT_MAINNET, FEDIMINT_MAINNET_UNAVAILABLE, FedimintWallet } from "./paymentAdapters/fedimintWallet";
 import { FedimintAdapter, type FedimintPrepared } from "./paymentAdapters/fedimint";
 import { loadFedimintSdk, type FedimintSdk } from "./paymentAdapters/fedimintSdk";
@@ -2158,8 +2158,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const type of WALLET_TYPES) for (const network of WALLET_NETWORKS) {
       const view = networks[network];
       const base = { type, network, exists: has(type, network) };
-      if (type === "bark" && !barkDefaults(network)) offers.push({ ...base, available: false, reason: BARK_MAINNET_UNAVAILABLE });
-      else if (type === "spark" && network === "mainnet") offers.push({ ...base, available: false, reason: SPARK_MAINNET_NOT_YET });
+      if (type === "spark" && network === "mainnet") offers.push({ ...base, available: false, reason: SPARK_MAINNET_NOT_YET });
       else if (type === "fedimint") offers.push(network === "mainnet" && !FEDIMINT_MAINNET ? { ...base, available: false, reason: FEDIMINT_MAINNET_UNAVAILABLE } : { ...base, available: true, needs: "invite" });
       else if (type === "lightning" || type === "bitcoin") {
         // Lightning through the Cashu mints comes with a Cashu wallet: New offers the other sources.

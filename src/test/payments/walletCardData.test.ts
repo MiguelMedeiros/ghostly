@@ -177,12 +177,12 @@ describe("Bark", () => {
   it("is ready once it has an address", () => {
     expect(cardOf("bark:testnet", { bark: barkReady({ network: "regtest", balance: 3_000 }) }))
       .toEqual({ name: "Bark", balance: "3,000 test sats", detail: "Second's Ark · regtest", status: "Ready", ready: true });
-    expect(cardOf("bark:mainnet", { bark: barkReady({ network: "bitcoin", balance: 3 }) })).toMatchObject({ balance: "3 sats", detail: "Second's Ark · Bitcoin" });
+    expect(cardOf("bark:mainnet", { bark: barkReady({ network: "bitcoin", balance: 3 }) })).toMatchObject({ balance: "3 sats", detail: "Second's Ark · Bitcoin", status: "Real bitcoin" });
   });
 
-  it("says it is not on Mainnet yet where it is unavailable", () => {
-    expect(faceOf("bark", "testnet", { bark: { configured: false, locked: false, balance: 0, unavailable: "Mainnet" } }))
-      .toMatchObject({ balance: "Testnet only", status: "Not on Mainnet yet", detail: "Second's Ark · signet", ready: false });
+  it("on Mainnet, says Bitcoin while it connects", () => {
+    expect(faceOf("bark", "mainnet", { bark: { configured: true, locked: true, balance: 0, network: "bitcoin" } }))
+      .toMatchObject({ balance: "Connecting…", status: "Experimental", detail: "Second's Ark · Bitcoin", ready: false });
   });
 });
 

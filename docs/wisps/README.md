@@ -43,7 +43,7 @@ The implementation column is independent of document status. Existing features c
 | [201](201-cashu.md) | Cashu | Draft | Existing application integration |
 | [202](202-arkade.md) | Ark via Arkade | Draft | Experimental test-network adapter; regtest verified; encrypted restore tested; exits pending |
 | [203](203-lightning.md) | Lightning | Draft | Existing invoice integration |
-| [204](204-bark.md) | Ark via Bark | Draft | Experimental, Testnet only; regtest verified; not compatible with Arkade; exits pending |
+| [204](204-bark.md) | Ark via Bark | Draft | Experimental, Mainnet and Testnet; regtest verified; not compatible with Arkade; exits pending |
 | [205](205-lnurl.md) | Lightning Addresses and LNURL-pay | Draft | Paying an address or LNURL through the Lightning source; strict checks; no receiving |
 | [Fedimint · 2xx planned](2xx-fedimint.md) | Fedimint ecash and Lightning through a federation | Draft | Experimental, Testnet only; web SDK canary; regtest verified (ecash in chats, Lightning through the gateway); Mainnet off |
 | [Spark · 2xx planned](2xx-spark.md) | Spark payments | Draft | Experimental: Spark to Spark (addresses and invoices) through the Breez SDK; Testnet on Breez's regtest; Mainnet behind a Breez API key |
