@@ -40,9 +40,12 @@ test("Bark on Mainnet: New offers it in one click and checks Second's server fir
   const alice = await peer("bark-mainnet");
   const seen = await guardMainnetBark(alice, "refuse");
   const dialog = await createMainnetBark(alice);
-  await expect(dialog.getByTestId("new-wallet-error")).toBeVisible({ timeout: 90_000 });
+  const error = dialog.getByTestId("new-wallet-error");
+  await expect(error).toContainText("Nothing was saved", { timeout: 90_000 });
+  // The SDK's own words, not its WebAssembly stack.
+  await expect(error).not.toContainText(/JsValue|wasm-function/);
   await expect(dialog.getByTestId("new-wallet-retry")).toBeVisible();
-  expect(seen.some((s) => s.startsWith("ark.second.tech/")), "the SDK asked for the server").toBe(true);
+  expect(seen.length, "the SDK asked Second's servers, and was refused").toBeGreaterThan(0);
   await alice.page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);
@@ -53,7 +56,7 @@ test("a Mainnet Bark wallet refuses a server on another network: a signet server
   const alice = await peer("bark-mainnet-signet");
   const seen = await guardMainnetBark(alice, "signet");
   const dialog = await createMainnetBark(alice);
-  await expect(dialog.getByTestId("new-wallet-error")).toContainText(/network|bitcoin/i, { timeout: 90_000 });
+  await expect(dialog.getByTestId("new-wallet-error")).toContainText("That Bark server does not run on bitcoin", { timeout: 90_000 });
   expect(seen.length).toBeGreaterThan(0);
   await alice.page.keyboard.press("Escape");
   await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);

@@ -4,7 +4,7 @@ import { PaymentPreflightError, type PaymentReview, type PaymentTarget } from "@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { BarkAdapter, barkTiming, type BarkConfig } from "../src/engine/paymentAdapters/bark";
-import { BarkWallet, MAINNET_BARK, SECOND_TERMS, TESTNET_BARK } from "../src/engine/paymentAdapters/barkWallet";
+import { BarkWallet, MAINNET_BARK, SECOND_TERMS, TESTNET_BARK, readableBarkError } from "../src/engine/paymentAdapters/barkWallet";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
@@ -199,6 +199,21 @@ describe("the Bark wallet", () => {
     await wallet.refresh();
     expect(wallet.view).toMatchObject({ balance: 20_000, expiry: { blocksLeft: 300, lifetime: 4032 } });
     await wallet.stop();
+  });
+
+  it("an SDK failure reads as its own words, without the WebAssembly's quoted values and stack", async () => {
+    const raw = "Failed to create chain source: error sending request: JsValue(TypeError: Failed to fetch TypeError: Failed to fetch at __wbg_fetch_9dad (http://localhost/assets/bark_ffi_wasm.js:1:21609) at http://localhost/assets/bark_ffi_wasm_bg.wasm:wasm-function[3134]:0x339313)";
+    expect((readableBarkError(new Error(raw)) as Error).message).toBe("Failed to create chain source: error sending request");
+    expect((readableBarkError(raw) as Error).message).toBe("Failed to create chain source: error sending request");
+    expect((readableBarkError(new Error("x".repeat(500))) as Error).message).toHaveLength(240);
+    const wrong = new WrongNetworkError("mainnet", "Bitcoin is a Mainnet network");
+    expect(readableBarkError(wrong), "short errors and their kind are kept").toBe(wrong);
+    // Through a creation: the server's chain source refuses, and what the person reads is short.
+    const main = new FakeBarkServer("03" + "cd".repeat(32), "bitcoin", "main");
+    const sdk = main.sdk();
+    const failing = new BarkWallet("mainnet", vi.fn(), async () => ({ ...sdk, open: async () => { throw new Error(raw); } }));
+    await failing.start();
+    await expect(failing.createDefaultNow()).rejects.toThrow(/^Failed to create chain source: error sending request$/);
   });
 
   it("networks never mix: Mainnet refuses a test server or backup, Testnet refuses Bitcoin, and nothing is half made", async () => {

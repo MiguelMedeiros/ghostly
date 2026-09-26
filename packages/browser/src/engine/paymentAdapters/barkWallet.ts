@@ -42,6 +42,17 @@ const TERMS: Record<string, string> = { [MAINNET_BARK.provider]: SECOND_TERMS };
 /** The defaults a new wallet of this network is made with, in one click. */
 export const barkDefaults = (network: WalletNetwork): BarkCreate => network === "testnet" ? TESTNET_BARK : MAINNET_BARK;
 export const barkMode = (network: BarkNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
+/**
+ * An SDK error as a person reads it: the WebAssembly's own words up to where it starts quoting JavaScript values and
+ * stack frames ("…: JsValue(TypeError: Failed to fetch at __wbg_fetch… wasm-function[3134]…"), bounded.
+ */
+export function readableBarkError(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : undefined;
+  if (message === undefined) return error;
+  const text = message.split(/:?\s*JsValue\(|\s+at\s+\S+\s+\(/)[0].trim();
+  if (error instanceof Error && text === message && text.length <= 240) return error;
+  return new Error(text.length > 240 ? `${text.slice(0, 239)}…` : text || "The Bark SDK failed");
+}
 const forget = async (walletId: string) => {
   for (const name of [barkDatabase(walletId), `${barkDatabase(walletId)}-onchain`]) {
     await new Promise<void>((resolve) => { try { const request = indexedDB.deleteDatabase(name); request.onsuccess = request.onerror = request.onblocked = () => resolve(); } catch { resolve(); } });
@@ -87,7 +98,8 @@ export class BarkWallet {
       else if (!this.adapter) await this.serial(() => this.stopped ? Promise.resolve() : this.open());
     } catch (error) {
       if (this.stopped || error instanceof ModeChanged) return;
-      this.view = { ...this.view, error: `Connecting to Bark… ${error instanceof Error ? error.message : ""}`.trim() }; this.changed();
+      const readable = readableBarkError(error);
+      this.view = { ...this.view, error: `Connecting to Bark… ${readable instanceof Error ? readable.message : ""}`.trim() }; this.changed();
       this.retry = setTimeout(() => void this.ensureReady(create), 30000);
     }
   }
@@ -123,7 +135,7 @@ export class BarkWallet {
       // Never saved, never shown: its local database goes, or every retry while the server is away leaves one.
       if (this.saved?.config.walletId !== draft.walletId) await forget(draft.walletId);
       if (replaced) void this.ensureReady();
-      throw error;
+      throw readableBarkError(error);
     }
     this.adapter = adapter; this.view = { ...this.idle(this.saved.config), locked: false }; await this.refresh();
   }
