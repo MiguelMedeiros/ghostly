@@ -34,7 +34,7 @@ test("paired extension and web exchange verified files and local-mint sats", { t
   // Every send is reviewed first: nothing leaves before the approval.
   await web.page.getByTestId("payment-composer").getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   for (const p of [web, ext]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "12" }).getByTestId("payment-state")).toHaveText(/Received/);
-  await web.page.keyboard.press("Escape");
+  // The sheet closed once the payment went out.
   await expect(web.page.getByTestId("payment-composer")).toHaveCount(0);
   // Ecash only: the request is paid in ecash, reviewed.
   await chatPayments(ext.page, { lightning: false });

@@ -124,12 +124,10 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
   const sent = bubble(alice, "You sent");
   await expect(sent.getByTestId("payment-state")).toHaveText(/^Taken back · .*not accepted/);
   await expect(sent).toHaveAttribute("data-state", "reclaimed");
-  await expect(review.getByTestId("review-status")).toHaveText("failed");
-  await expect(review).toContainText(/Refused: .*The sats came back\./);
-  await expect(review.getByRole("button", { name: "Approve payment" })).toHaveCount(0);
+  // The sheet closed once the payment went out: the bubble is where it is followed.
+  await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
   // Nothing left to take back.
   await expect(sent.getByRole("button", { name: "Take it back" })).toHaveCount(0);
-  await review.getByRole("button", { name: "Close", exact: true }).click();
 
   // Still never "Received" or "Paid", even after a reload.
   await alice.page.reload();
@@ -184,7 +182,7 @@ test("ecash the contact never picks up can be taken back", { tag: ["@feature:pay
   await review.getByRole("button", { name: "Approve payment" }).click();
   const sent = bubble(alice, "You sent");
   await expect(sent.getByTestId("payment-state")).toHaveText(/Waiting for your contact/);
-  await review.getByRole("button", { name: "Close", exact: true }).click().catch(() => {});
+  await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
   await sent.getByRole("button", { name: "Take it back" }).click();
   await expect(sent.getByTestId("payment-state")).toHaveText(/^Taken back/);
   await openWallet(alice, "cashu-testnet");

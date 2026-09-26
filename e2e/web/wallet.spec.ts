@@ -63,7 +63,8 @@ test.describe("wallet", { tag: "@network" }, () => {
     await openChat(bob);
     await expect(sent(bob)).toHaveText(/Received/);
     await expect(sent(alice)).toHaveText(/Received/);
-    await directReview.getByRole("button", { name: "Close", exact: true }).click();
+    // The sheet closed once the payment went out.
+    await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
 
     // Bob asks for ecash only: the request is paid in ecash, reviewed.
     await chatPayments(bob.page, { lightning: false });

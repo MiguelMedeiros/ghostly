@@ -122,8 +122,8 @@ test("Fedimint on regtest: join by invite, ecash in over the gateway, notes out 
   await expect(review).toContainText("fedimint", { timeout: 60_000 });
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "Sent you" }).last().getByTestId("payment-state")).toHaveText("Received", { timeout: 90_000 });
-  await expect(review.getByTestId("review-status")).toHaveText("settled", { timeout: 60_000 });
-  await alice.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+  // Gone out: the sheet closed, back to the chat.
+  await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
   // The request Bob's app made for that ask is paid by the ecash his wallet redeemed.
   await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
 
