@@ -29,8 +29,10 @@
    would cost every face at rest a layer, see deck.css), its mark dimmed. */
 .wallet-deck-card-switch{grid-row:3;grid-column:2;align-self:end;justify-self:end}
 .wallet-deck-card-switch[data-on=true]{background:rgb(var(--card-rgb))}
+.wallet-deck-card-switch[data-on=false]{background:rgba(255,255,255,.16)}
 .wallet-deck-face[data-checked=false]{--card-rgb:150,158,166;--from:#2c3136;--to:#15181b;--ghost-eye:#15181b;color:rgba(255,255,255,.72)}
 .wallet-deck-face[data-checked=false] :is(.wallet-deck-card-glyph,.wallet-deck-card-glyph-end){opacity:.45}
+.wallet-deck-face[data-checked=false] .wallet-deck-card-ghost{color:rgb(var(--card-rgb))}
 /* A test wallet's card says so, discreetly, before its status: the network is the card's own. */
 .wallet-deck-card-network{display:inline-block;margin-right:6px;padding:0 5px;border:1px solid currentColor;border-radius:999px;line-height:1.35;text-transform:uppercase;opacity:.85}
 .wallet-deck-card-network[data-network=testnet]{color:#f5c542}
