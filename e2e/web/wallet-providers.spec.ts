@@ -295,8 +295,10 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await bob.page.getByTestId("payment-send").click();
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
   await direct.getByRole("button", { name: "Approve payment" }).click({ timeout: 60_000 });
-  // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
+  // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest. Bob's next USDT payment goes once this
+  // transfer is confirmed: Alice's request for it reads Paid.
   await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 60_000 });
+  await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
 
   // A Request paid in the chat.
   await composer(alice, "usdt", "1");
