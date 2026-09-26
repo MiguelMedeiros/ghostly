@@ -1,5 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": { "allowJs": true, "types": ["vite/client"] },
-  "include": ["film", "timeline.js", "../../vite-env.d.ts"]
-}
