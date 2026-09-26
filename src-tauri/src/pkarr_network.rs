@@ -1226,6 +1226,76 @@ mod live {
         line("missing key, after", &after);
     }
 
+    /// DHT-direct timings, the numbers behind native's default: a publish, a reader's first answer and its
+    /// full lookup, for a key another node published, and for a key nobody has; a relay read beside them.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches the real DHT and relays"]
+    async fn live_dht_direct_latency() {
+        use pkarr::dht::{DhtClient, DhtConfig};
+        let publisher = DhtClient::build(DhtConfig::default()).unwrap();
+        let reader = DhtClient::build(DhtConfig::default()).unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await; // the DHT nodes bootstrap
+        let http = reqwest::Client::new();
+        let (mut put, mut first, mut full, mut relay) = (vec![], vec![], vec![], vec![]);
+        for round in 0..6 {
+            let keypair = Keypair::random();
+            let started = Instant::now();
+            publisher
+                .publish(&packet(&keypair, &round.to_string()))
+                .await
+                .unwrap();
+            put.push(started.elapsed().as_secs_f64());
+            let started = Instant::now();
+            let response = reader.resolve(&keypair.public_key(), None).await;
+            first.push(started.elapsed().as_secs_f64());
+            let found = response.first().is_some();
+            let outcome = response.complete().await;
+            full.push(started.elapsed().as_secs_f64());
+            println!(
+                "round {round}: first answer {found}, most recent {}",
+                outcome.most_recent.is_ok()
+            );
+            // The same key from a relay, which reads it off the DHT on a miss.
+            let started = Instant::now();
+            let status = http
+                .get(format!(
+                    "https://pkarr.pubky.app/{}",
+                    keypair.public_key().to_z32()
+                ))
+                .send()
+                .await
+                .map(|r| r.status().as_u16())
+                .unwrap_or(0);
+            relay.push(started.elapsed().as_secs_f64());
+            println!("round {round}: relay {status}");
+        }
+        line("DHT publish", &put);
+        line("DHT read, first answer", &first);
+        line("DHT read, complete", &full);
+        line("relay read (pkarr.pubky.app)", &relay);
+        let mut missing = vec![];
+        for _ in 0..3 {
+            let started = Instant::now();
+            let response = reader.resolve(&Keypair::random().public_key(), None).await;
+            assert!(response.first().is_none());
+            missing.push(started.elapsed().as_secs_f64());
+        }
+        line("DHT read, missing key", &missing);
+
+        // A link publishes one key again and again (presence, offer, answer): the closest nodes are known by then.
+        let keypair = Keypair::random();
+        let mut again = vec![];
+        for round in 0..5 {
+            let started = Instant::now();
+            publisher
+                .publish(&packet(&keypair, &format!("again {round}")))
+                .await
+                .unwrap();
+            again.push(started.elapsed().as_secs_f64());
+        }
+        line("DHT publish, same key again", &again);
+    }
+
     /// The newest timestamp a reader sees: before (`old`) or after.
     async fn read(old: &Client, new: &Pkarr, after: bool, key: &PublicKey) -> Option<u64> {
         let packet = if after {
