@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { WALLET_NETWORKS, type PaymentMethodName } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { ALL_METHODS_ON, cardOn, type ChatAccepts, type ChatPaymentNetworks } from "../lib/chatPayments";
-import type { PeerLinkState } from "../lib/platform";
+import type { PeerLinkState, WalletNetwork } from "../lib/platform";
 import { CardDeck } from "./WalletDeck";
 import { SwitchLook } from "./wallet/ui";
 import type { InstanceCard } from "./walletCardData";
@@ -22,13 +22,18 @@ export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(":"
  * It edits the engine's per-chat lists (`paymentMethods`, and `paymentNetworks` for each way's networks): a way works
  * only when both sides have it on, on a network both have, so one turned off here is not used to pay the contact
  * either, and the hints say so.
+ *
+ * The deck shows one network's cards (the sheet's Mainnet | Testnet tab); the switches of both are kept while the tab
+ * changes, and Save saves them all, each on its own network.
  */
-export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
+export function ChatPaymentAccept({ peer, contact, cards, network, onSave }: {
   peer: PeerLinkState | null | undefined;
   /** Who the chat is with, as the chat shows them. */
   contact: string;
   /** Every card of the wallet, in its order. */
   cards: InstanceCard[];
+  /** The network whose cards the deck shows; every network's without one. */
+  network?: WalletNetwork;
   onSave: (accepts: ChatAccepts) => Promise<void>;
 }) {
   const { t } = useI18n();
@@ -37,7 +42,9 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
   /** The cards turned on, by id: what the deck shows checked. */
   const [draft, setDraft] = useState<Record<string, boolean>>(() => Object.fromEntries(cards.map((c) => [c.id, on(c, saved)])));
   // The deck starts on the first card that is on: the ones this chat uses come first to the eye.
-  const [active, setActive] = useState<string>(() => cards.find((c) => on(c, saved))?.id ?? cards[0]?.id ?? "");
+  const [chosen, setActive] = useState<string>("");
+  const here = network ? cards.filter((c) => c.network === network) : cards;
+  const active = here.find((c) => c.id === chosen)?.id ?? here.find((c) => on(c, saved))?.id ?? here[0]?.id ?? "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -50,7 +57,7 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
     return peer.capabilities.methods[card.rail] && (!networks || (networks[card.rail] ?? []).includes(card.network)) ? "on" : "off";
   };
 
-  const shown = cards.map((card) => ({
+  const shown = here.map((card) => ({
     ...card,
     status: t(draft[card.id] ? "payments.accept.on" : "payments.accept.off"),
     detail: theirs(card) === "on" ? t("payments.accept.contactOn") : theirs(card) === "off" ? t("payments.accept.contactOff") : card.detail,
@@ -105,7 +112,7 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
   };
 
   return <>
-    <CardDeck<string> compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
+    <CardDeck<string> key={network} compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
       onSelect={setActive} onChoose={toggle} checked={(c) => !!draft[c.id]} cardLabel={(c) => label(c as InstanceCard)} testId={acceptCardTestId} size={{ max: 250, share: .62 }}
       corner={(c) => <SwitchLook checked={!!draft[c.id]} className="wallet-deck-card-switch" testId={`payment-accept-switch-${c.id.replace(":", "-")}`} />} />
     <p className="composer-sheet-hint" data-testid="payment-accept-hint">{card && hint(card)}</p>

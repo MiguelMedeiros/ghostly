@@ -1,8 +1,8 @@
-import { formatPaymentAmount, parsePaymentAmount } from "@ghostly/core";
+import { WALLET_NETWORKS, formatPaymentAmount, parsePaymentAmount } from "@ghostly/core";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
-import { cardOn, rememberRail, rememberedRail, type ChatAccepts } from "../lib/chatPayments";
+import { cardOn, rememberNetwork, rememberRail, rememberedRail, startNetwork, type ChatAccepts } from "../lib/chatPayments";
 import type { WalletNetwork, WalletPlatform } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { PaymentReview as Review } from "@ghostly/core";
@@ -17,6 +17,8 @@ import { CardFlip, FlipTurnButton } from "./deck/Flip";
 import { useCardFlip } from "./deck/useCardFlip";
 import { ChatPaymentAccept } from "./ChatPaymentAccept";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
+import { NetworkTabs } from "./wallet/NetworkTabs";
+import { NETWORK_NAME } from "./wallet/names";
 import "./payment-composer.css";
 
 interface PaymentComposerProps {
@@ -87,27 +89,39 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const offHere = (c: InstanceCard) => !!peer && !cardOn(peer, c.rail, c.network);
   const payCards = onSaveMethods ? cards.filter((c) => !offHere(c)) : cards;
   /**
-   * The card Pay starts on: the one this chat used last (a wallet's id, or a rail from before networks), while it can
-   * still be used, else the first one that can, in the deck's order.
+   * Mainnet | Testnet: the sheet shows one network's cards at a time, on Pay and on Accept. The tab chosen here; before
+   * that, the one this chat used last, else the one the contact takes, else real money when there is some
+   * (lib/chatPayments.ts `startNetwork`). The tab only filters: every card pays on its own network.
    */
-  const firstUsable = (): string | undefined => {
+  const [tab, setTab] = useState<WalletNetwork | null>(null);
+  const mine = WALLET_NETWORKS.filter((n) => cards.some((c) => c.network === n));
+  const open = peer?.dataLink === "open";
+  const net: WalletNetwork = tab ?? startNetwork(chat, mine, open ? peer.capabilities?.networks : undefined, open ? peer.capabilities?.methods : undefined);
+  const netPayCards = payCards.filter((c) => c.network === net);
+  // How the last switch went, for the deck's way in (none as the sheet opens).
+  const [swap, setSwap] = useState<"next" | "prev" | null>(null);
+  /**
+   * The card Pay starts on, among a network's cards: the one this chat used last (a wallet's id, or a rail from before
+   * networks), while it can still be used, else the first one that can, in the deck's order.
+   */
+  const firstUsable = (among = netPayCards): string | undefined => {
     const last = rememberedRail(chat);
-    return payCards.find((c) => (c.id === last || c.rail === last) && !unavailable(c))?.id ?? payCards.find((c) => !unavailable(c))?.id;
+    return among.find((c) => (c.id === last || c.rail === last) && !unavailable(c))?.id ?? among.find((c) => !unavailable(c))?.id;
   };
-  const [selected, setSelected] = useState<string>(() => firstUsable() ?? payCards[0]?.id ?? "");
+  const [selected, setSelected] = useState<string>(() => firstUsable() ?? netPayCards[0]?.id ?? "");
   // Until a card is picked, the deck follows the wallet as it comes up (a mint still loading, Ark connecting): it
   // moves to the first card that can be used, and never rests on one Pay does not show.
   const picked = useRef(false);
   const pick = (id: string) => { picked.current = true; setSelected(id); };
-  const shownHere = payCards.some((c) => c.id === selected);
-  const selectedBlocked = !!payCards.find((c) => c.id === selected && unavailable(c));
+  const shownHere = netPayCards.some((c) => c.id === selected);
+  const selectedBlocked = !!netPayCards.find((c) => c.id === selected && unavailable(c));
   const usable = firstUsable();
   useEffect(() => {
     if (shownHere && (picked.current || !selectedBlocked)) return;
-    const next = usable ?? (shownHere ? undefined : payCards[0]?.id);
+    const next = usable ?? (shownHere ? undefined : netPayCards[0]?.id);
     if (next && next !== selected) setSelected(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownHere, selectedBlocked, usable, payCards.length]);
+  }, [shownHere, selectedBlocked, usable, netPayCards.length]);
   // Pay, or Accept: which ways this chat takes. A chat that has every way off opens on Accept, to turn one on.
   const [mode, setMode] = useState<Mode>(() => onSaveMethods && cards.length && !payCards.length ? "accept" : "pay");
   // The cards, then the chosen one turned over (deck/Flip.tsx). Without a wallet platform, only the back; with one but
@@ -142,7 +156,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const [asking, setAsking] = useState<string | null>(null);
   const blocked = card ? unavailable(card) : undefined;
   // A card that cannot be used says so on its face, briefly; its title says why in full.
-  const shown = payCards.map((c) => { const why = unavailable(c); return !why || !c.ready ? c : { ...c, status: why.startsWith("Your contact") ? "Not accepted" : "Off here" }; });
+  const shown = netPayCards.map((c) => { const why = unavailable(c); return !why || !c.ready ? c : { ...c, status: why.startsWith("Your contact") ? "Not accepted" : "Off here" }; });
 
   /** Turn the chosen card over, and back to the cards. */
   const use = (next: string) => {
@@ -288,6 +302,16 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   );
 
   const switchMode = (next: Mode) => { setMode(next); setError(""); };
+  /** Another network's cards: Pay starts on its usable card, as the sheet does, and the chat remembers the tab. */
+  const showNetwork = (next: WalletNetwork) => {
+    if (next === net) return;
+    setSwap(WALLET_NETWORKS.indexOf(next) > WALLET_NETWORKS.indexOf(net) ? "next" : "prev");
+    setTab(next); setError("");
+    rememberNetwork(chat, next);
+    const among = payCards.filter((c) => c.network === next);
+    picked.current = false;
+    setSelected(firstUsable(among) ?? among[0]?.id ?? selected);
+  };
   const MODES: Mode[] = ["pay", "accept"];
   const modeKeys = (e: KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -322,14 +346,27 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
         <ComposerSheetHead title={modes || (sendUnavailable ? "Request" : "Pay or request")} who={`with ${who}`} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>} />
-        {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={cards} onSave={onSaveMethods} />
-          : !cards.length && state ? <div className="payment-none" data-testid="payment-no-wallet">
+        {!cards.length && state ? <div className="payment-none" data-testid="payment-no-wallet">
             <p className="composer-sheet-hint">You have no wallet yet. Create one to pay {who} and be paid: it takes one click.</p>
             <button type="button" data-testid="payment-no-wallet-create" className="composer-sheet-action" onClick={() => { onClose(); nav.place("/wallet"); }}>
               Create a wallet
               <ForwardArrow />
             </button>
+          </div> : cards.length > 0 && <>
+          <NetworkTabs compact network={net} onChange={showNetwork} label="Networks" testId="payment-tabs" tabTestId="payment-tab" idPrefix="payment-tab" controls="payment-tab-panel"
+            counts={{ mainnet: (accepting ? cards : payCards).filter((c) => c.network === "mainnet").length, testnet: (accepting ? cards : payCards).filter((c) => c.network === "testnet").length }} />
+          {/* Not keyed by the network: Accept keeps both networks' switches while the tab changes. Each deck is. */}
+          <div role="tabpanel" id="payment-tab-panel" aria-labelledby={`payment-tab-${net}`} data-testid="payment-tab-panel" data-network={net}
+            className="payment-tab-panel wallet-network-view" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
+          {/* No wallet of this network: say so, and where to make one, rather than an empty deck. */}
+          {!mine.includes(net) ? <div className="payment-none" data-testid="payment-network-empty">
+            <p className="composer-sheet-hint">No {NETWORK_NAME[net]} wallets</p>
+            <button type="button" data-testid="payment-network-new" className="payment-network-new" onClick={() => { onClose(); nav.place("/wallet", { newWallet: { network: net } }); }}>
+              New {NETWORK_NAME[net]} wallet
+              <ForwardArrow />
+            </button>
           </div>
+          : accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={cards} network={net} onSave={onSaveMethods} />
           : !shown.length && onSaveMethods ? <div className="payment-none" data-testid="payment-none">
             <p className="composer-sheet-hint">{t("payments.none.text")}</p>
             <button type="button" data-testid="payment-none-accept" className="composer-sheet-action" data-variant="secondary" onClick={() => switchMode("accept")}>
@@ -337,7 +374,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
             </button>
           </div>
           : <>
-            <CardDeck<string> compact tagAll kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
+            <CardDeck<string> key={net} compact tagAll kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
               testId={paymentCardTestId} blocked={(c) => unavailable(c as InstanceCard)} size={{ max: 250, share: .62 }} />
             <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
             <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked || !card} onClick={() => use(selected)}>
@@ -345,6 +382,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
               <ForwardArrow />
             </button>
           </>}
+          </div>
+        </>}
       </> : card ? <CardFlip className="payment" flipped={flipped} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={card} tagAll />} back={back} /> : back}
     </ComposerSheet>
   );
