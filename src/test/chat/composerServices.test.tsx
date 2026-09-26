@@ -148,6 +148,7 @@ describe("the composer's Shared services row", () => {
     const view = renderApp(<ChatWithAna />, { language: "pt" });
     act(() => view.engine.update({ links: [live()], services: [app({ sharedWith: ["peer"] })] }));
     const row = await openPlus(view.user);
-    await waitFor(() => expect(row).toHaveTextContent("Apps compartilhados1 compartilhado(s) nesta conversa"));
+    await waitFor(() => expect(row).toHaveTextContent(/^Serviços compartilhados$/));
+    expect(row).toHaveAttribute("title", "1 compartilhado(s) nesta conversa");
   });
 });
