@@ -13,8 +13,9 @@ import type { BreezSdkModule, BreezWallet } from "../../packages/browser/src/eng
  * Lightspark's hosted Spark regtest: no API key, nothing to run locally, worthless sats.
  *
  * The counterpart is funded from Lightspark's public regtest faucet (the one behind
- * https://app.lightspark.com/regtest-faucet, no login), only when it runs low. Set
- * GHOSTLY_BREEZ_COUNTERPART to a recovery phrase to reuse one wallet across runs; it is never printed.
+ * https://app.lightspark.com/regtest-faucet), only when it runs low. That faucet asks for a reCAPTCHA
+ * now, so set GHOSTLY_BREEZ_COUNTERPART to the recovery phrase of a wallet a person funded there, to
+ * reuse it across runs; it is never printed (see e2e/README.md).
  */
 export const BREEZ_TESTNET = process.env.GHOSTLY_BREEZ_TESTNET === "1";
 const FAUCET = "https://app.lightspark.com/graphql/frontend?n=RequestRegtestFunds";
@@ -58,7 +59,7 @@ export async function faucet(address: string, sats = FAUCET_SATS): Promise<void>
       query: "mutation RequestRegtestFunds($address: String!, $amount_sats: Long!) { request_regtest_funds(input: {address: $address, amount_sats: $amount_sats}) { transaction_hash } }" }),
   });
   const body = await response.json().catch(() => ({})) as { errors?: { message: string }[] };
-  if (!response.ok || body.errors?.length) throw new Error(`The regtest faucet refused: ${body.errors?.map((e) => e.message).join(", ") ?? response.status}`);
+  if (!response.ok || body.errors?.length) throw new Error(`The regtest faucet refused: ${body.errors?.map((e) => e.message).join(", ") ?? response.status}. Fund a wallet at https://app.lightspark.com/regtest-faucet and set GHOSTLY_BREEZ_COUNTERPART to its phrase (e2e/README.md)`);
 }
 
 /** A regtest wallet outside Ghostly, holding at least `floor` sats (funded from the faucet when it has fewer). */
