@@ -40,6 +40,11 @@ export interface AppSettings {
    * so it is the user's to allow; off, updates are only looked for on demand.
    */
   checkForUpdates: boolean;
+  /**
+   * Link previews (WISP 401 § Link previews): when a message has a link, this app reads the page's title and picture
+   * and sends them with it. Only the sender's app ever contacts the site; off, links go as plain text.
+   */
+  linkPreviews: boolean;
   /** WISP 1000: this profile's random storage space, chosen on first backup. */
   backupSpace?: string;
   /** WISP 1002: where backups go, if S3-compatible storage is set up. Never copied into a backup. */
@@ -67,6 +72,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   reduceMotion: false,
   chatListDensity: "compact",
   checkForUpdates: true,
+  linkPreviews: true,
 };
 
 export function loadSettings(): AppSettings {
@@ -98,6 +104,7 @@ export function loadSettings(): AppSettings {
       },
       defaultNickname: parsed.defaultNickname ?? DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
+      linkPreviews: parsed.linkPreviews !== false,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

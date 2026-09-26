@@ -11,6 +11,7 @@ mod diagnostics;
 mod e2e_driver;
 mod file_store;
 mod hyperdht;
+mod link_preview;
 mod lnd;
 mod local_fetch;
 mod notifications;
@@ -88,6 +89,8 @@ macro_rules! commands {
             commands::open_pubky_passport,
             commands::pubky_session_fetch,
             commands::pubky_session_close,
+            commands::link_preview_fetch,
+            commands::open_web_link,
             share::share_text,
             clipboard::read_clipboard_text,
             oidc::oidc_loopback_start,
@@ -264,7 +267,7 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 52, "{declared:?}");
+        assert_eq!(declared.len(), 54, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

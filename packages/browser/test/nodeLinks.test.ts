@@ -401,6 +401,21 @@ describe("text in a chat", () => {
     expect(await db.getMessages(chat.id)).toHaveLength(1);
   });
 
+  // covers: chat.link-preview.wire
+  it("a link preview is kept with the message and goes with it; one of a link the text lacks is dropped", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const preview = { u: "https://news.example/a", t: "A story" };
+    expect(await node.sendMessage({ linkId: chat.id, text: "see https://news.example/a?utm_source=x", timestamp: 5, preview })).toEqual({ error: null });
+    const [message] = await db.getMessages(chat.id);
+    expect(message.preview).toEqual(preview);
+    expect(linkOf(chat.id).sendMessage).toHaveBeenCalledWith("see https://news.example/a?utm_source=x", 5, message.wireId, preview);
+    expect(await node.sendMessage({ linkId: chat.id, text: "no link here", timestamp: 6, preview })).toEqual({ error: null });
+    const second = (await db.getMessages(chat.id)).find(m => m.text === "no link here")!;
+    expect(second.preview).toBeUndefined();
+    expect(linkOf(chat.id).sendMessage).toHaveBeenLastCalledWith("no link here", 6, second.wireId);
+  });
+
   it("a legacy chat refuses what the DHT cannot carry before keeping it, and a delivered message moves the read mark", async () => {
     const chat = row({ profile: undefined, participationSeed: undefined });
     const { node, linkOf } = await started(chat);

@@ -129,6 +129,27 @@ describe("paired chat messages from the peer", () => {
     expect(onMessageReceipt).toHaveBeenCalledOnce();
   });
 
+  // covers: chat.link-preview.wire
+  it("carries a link preview with the message, and delivers the message without a preview that does not check", async () => {
+    const onMessageReceipt = vi.fn();
+    const t = linkedPair([{ events: { onMessageReceipt } }, {}]);
+    await t.ready();
+    const id = newId(), text = "read https://news.example/a?utm_source=x";
+    const preview = { u: "https://news.example/a", t: "A story", s: "News", i: jpegAvatar };
+    expect(await t.a.sendMessage(text, 42, id, preview)).toBeNull();
+    await vi.waitFor(() => expect(onMessageReceipt).toHaveBeenCalledWith(id));
+    expect(t.onMessageB).toHaveBeenCalledWith({ id, text, timestamp: 42, via: "datalink", preview });
+    // A preview of a link the text does not have, or of the wrong shape: the text still arrives, and is acknowledged.
+    const send = vi.spyOn(t.cb, "send");
+    const other = newId(), shape = newId();
+    t.toB({ t: "paired-message", id: other, ts: 43, m: text, pv: { ...preview, u: "https://bank.example/" } });
+    t.toB({ t: "paired-message", id: shape, ts: 44, m: text, pv: "https://news.example/a" });
+    await t.settle("b");
+    expect(t.onMessageB).toHaveBeenCalledWith({ id: other, text, timestamp: 43, via: "datalink" });
+    expect(t.onMessageB).toHaveBeenCalledWith({ id: shape, text, timestamp: 44, via: "datalink" });
+    expect(sentFrames(send).filter(f => f.t === "paired-received").map(f => f.id)).toEqual(expect.arrayContaining([other, shape]));
+  });
+
   it("acknowledges a resent id again, so a sender whose receipt was lost settles it without a second message", async () => {
     const onMessageReceipt = vi.fn();
     const t = linkedPair([{ events: { onMessageReceipt } }, {}]);

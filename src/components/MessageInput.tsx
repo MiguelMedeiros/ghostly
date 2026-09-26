@@ -4,7 +4,7 @@ import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
 import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
-import type { VoiceMeta } from "@ghostly/core";
+import type { LinkPreview, VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
@@ -16,12 +16,17 @@ import { CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, Se
 import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
 import type { GroupMention } from "@ghostly/core";
+import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
+import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import "./composer/composer.css";
 
 interface MessageInputProps {
   draftId?: string;
-  /** `mentions`: in a group, the places of the text that name members (see `mentions` below). */
-  onSend: (text: string, mentions?: GroupMention[]) => Promise<string | null>;
+  /**
+   * `mentions`: in a group, the places of the text that name members (see `mentions` below). `extra.preview`: in a
+   * paired chat, the link preview shown in the composer when it was sent (`linkPreviews`).
+   */
+  onSend: (text: string, mentions?: GroupMention[], extra?: { preview?: LinkPreview }) => Promise<string | null>;
   disabled?: boolean;
   disabledPlaceholder?: string;
   maxLength?: number;
@@ -64,6 +69,8 @@ interface MessageInputProps {
   recipient?: string;
   /** A group's members: "@" opens a picker of them, and a choice names the member by key. */
   mentions?: ComposerMentions;
+  /** A link in the draft gets a preview made here, sent with the message (a paired chat, with the setting on). */
+  linkPreviews?: boolean;
 }
 
 const DEFAULT_MAX = 500;
@@ -91,6 +98,7 @@ export function MessageInput({
   fileUnavailable,
   paymentsUnavailable,
   recipient,
+  linkPreviews = false,
 }: MessageInputProps) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -116,6 +124,7 @@ export function MessageInput({
   const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
   const hasCamera = useHasCamera();
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
+  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -151,11 +160,12 @@ export function MessageInput({
     const found = confirmed ? null : findSecret(text);
     if (found) { setSecret(found); return; }
     const named = picker.compose(text);
-    const err = await (named.length ? onSend(text, named) : onSend(text));
+    const err = await (named.length ? onSend(text, named) : linkPreview.preview ? onSend(text, undefined, { preview: linkPreview.preview }) : onSend(text));
     if (err) {
       showToast(err);
     } else {
       picker.reset();
+      linkPreview.reset();
       setText("");
       if(draftId) setSessionDraft(draftId, "");
       if (textareaRef.current) {
@@ -284,6 +294,7 @@ export function MessageInput({
           </div>
         </div>
       )}
+      {linkPreview.draft && <LinkPreviewDraftCard draft={linkPreview.draft} onRemove={linkPreview.remove} />}
       <div className="composer-row flex items-end gap-2 relative">
         {/* One rounded field: the +, the emoji/GIF panel's smiley and the message. */}
         <div ref={fieldRef} className="composer-field" data-disabled={disabled || undefined}>

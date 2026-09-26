@@ -33,6 +33,7 @@ interface SettingsContextValue {
   updateReduceMotion: (reduce: boolean) => void;
   updateChatListDensity: (density: ChatListDensity) => void;
   updateCheckForUpdates: (check: boolean) => void;
+  updateLinkPreviews: (on: boolean) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
   /** Where this profile's backups go (WISP 1000). */
@@ -100,6 +101,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, checkForUpdates: check }));
   }, []);
 
+  const updateLinkPreviews = useCallback((linkPreviews: boolean) => {
+    setSettings((prev) => ({ ...prev, linkPreviews }));
+  }, []);
+
   useEffect(() => {
     document.documentElement.dataset.reduceMotion = String(settings.reduceMotion);
   }, [settings.reduceMotion]);
@@ -133,6 +138,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateReduceMotion,
         updateChatListDensity,
         updateCheckForUpdates,
+        updateLinkPreviews,
         randomizeNickname,
         resetSettings,
         updateBackupStorage,

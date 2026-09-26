@@ -39,6 +39,8 @@ const COMMANDS: &[&str] = &[
     "open_pubky_passport",
     "pubky_session_fetch",
     "pubky_session_close",
+    "link_preview_fetch",
+    "open_web_link",
     "share_text",
     "read_clipboard_text",
     "oidc_loopback_start",

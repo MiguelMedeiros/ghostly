@@ -419,7 +419,8 @@ export function useChat(params: ChatParams | null) {
   }, [params?.sessionId, params?.seedB64, params?.peerPubKeyB64, params?.encKeyB64, params?.nick]);
 
   const sendMessage = useCallback(
-    async (text: string): Promise<string | null> => {
+    // A preview needs a paired chat (WISP 401): these DHT-only messages go as plain text.
+    async (text: string, _extra?: { preview?: import("@ghostly/core").LinkPreview }): Promise<string | null> => {
       if (burnedRef.current) return "Chat has been burned";
       if (!text.trim()) return null;
 

@@ -11,7 +11,7 @@ import type { SparkCreate } from "../engine/paymentAdapters/sparkWallet";
 import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
-import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
+import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
 import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 
@@ -120,7 +120,8 @@ export interface EngineApi {
   renameLink(params: { linkId: string; label: string }): void;
   setActiveLink(params: { linkId: string | null }): void;
   /** `refused`: the text was not kept (it cannot be sent this way); any other error leaves it to be sent later. */
-  sendMessage(params: { linkId: string; text: string; timestamp?: number }): { error: string | null; refused?: boolean };
+  /** `preview`: a link preview made by this app (WISP 401 § Link previews); checked against the text, dropped if off. */
+  sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview }): { error: string | null; refused?: boolean };
   retryMessage(params: { linkId: string; messageId: string }): void;
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;

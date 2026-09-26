@@ -39,6 +39,8 @@ export interface ChatMessage {
   paymentId?: string;
   /** A group message's mentions, with the names they show now (src/lib/parse/mentions.ts). */
   mentions?: import("./parse/mentions").MentionView[];
+  /** A link preview made by the sender's app and carried with the text (WISP 401 § Link previews). */
+  preview?: import("@ghostly/core").LinkPreview;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

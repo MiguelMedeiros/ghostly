@@ -10,7 +10,7 @@ import {
   saveSession,
   sessionLinkParams,
 } from "../../../../src/lib/storage";
-import type { LinkParams } from "@ghostly/core";
+import type { LinkParams, LinkPreview } from "@ghostly/core";
 import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../src/lib/types";
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
@@ -123,6 +123,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
         linkId: id,
         text: message.text,
         timestamp: message.timestamp,
+        ...(profile && message.preview && { preview: message.preview }),
       });
       // Refused: the copy kept here for a legacy chat goes too, so it never shows as sent.
       if (refused && !profile) {
@@ -169,7 +170,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [canAnnounce, linkId, sessionId, messages, announce]);
 
   const sendMessage = useCallback(
-    async (text: string): Promise<string | null> => {
+    async (text: string, extra?: { preview?: LinkPreview }): Promise<string | null> => {
       if (isBurned) return "Chat has been burned";
       const trimmed = text.trim();
       if (!trimmed) return null;
@@ -183,6 +184,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
           sender: "me",
           timestamp,
           nick: nickRef.current,
+          // Only a paired chat carries a preview; a compatibility chat's text goes as it is.
+          ...(profile && extra?.preview && { preview: extra.preview }),
           meta: {
             dhtKey: engine.state?.links.find((l) => l.id === linkIdRef.current)?.myPubKeyZ32 ?? "",
             encryptedPayloadLength: 0,
@@ -196,7 +199,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
         setIsSending(false);
       }
     },
-    [isBurned, publish],
+    [isBurned, publish, profile],
   );
 
   const burn = useCallback(() => setIsBurned(true), []);

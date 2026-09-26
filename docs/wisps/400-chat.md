@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2.3 |
+| Revision | 0.2.4 |
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
@@ -117,6 +117,7 @@ sequenceDiagram
 | Text up to 256 UTF-8 bytes | Yes | Yes ([403](403-dht-text.md)) | Sends; one text awaits a receipt at a time, the rest queue |
 | Text of 257 bytes to 16 KiB | Yes | Held ([4xx](4xx-store-and-forward.md)) if both allow; otherwise queued for layer 1 (new) | "Sends when live" on the bubble; the byte count turns amber past 256 |
 | Receipts ("Received by peer") | Yes | Yes, for DHT text and held items | Same states as live |
+| Link previews ([401](401-paired-chat.md#link-previews)) | Yes, with the text | No; the text goes without it | The link shows as a link |
 | Name | Yes (`paired-nick`) | Yes, in the capability record (new, at most 64 bytes) | Unchanged |
 | Picture | Yes (`paired-avatar`) | No; waits for layer 1 | The last picture stays |
 | Files and voice messages | Yes (`files/2`, [501](501-paired-files.md)) | Held if both allow (8 MiB each); otherwise queued for layer 1 (new) | Attach stays enabled; the bubble says "Sends when live" or "Held for <contact>" |
@@ -125,6 +126,8 @@ sequenceDiagram
 | Calls, voice and video | Yes (`calls/1`, [601](601-webrtc-media.md#paired-profile)): signals on the session, media on a WebRTC connection of its own | No | Call buttons disabled: "Calls need a live connection" |
 | Hosted local services | Yes (`services/1`, [701](701-http-services.md#paired-profile)) | No | The chat's Services dialog says "Shared apps open while you are connected live" |
 | Identity proofs shared with the contact | Yes | No; they wait for layer 1 | Unchanged |
+
+A place is text too: a `geo:` URI (RFC 5870) or a Google Maps, Apple Maps or OpenStreetMap link that carries its coordinates shows as a location card, read from the text alone. Its map is not loaded until the person asks for it, because loading map tiles tells the tile server the device's address; the card says so. Short map links that hide their coordinates stay plain links.
 
 A Lightning invoice pasted as text is text: it fits the DHT when short enough, and sending it starts no payment. Cashu tokens are refused as DHT text.
 
@@ -193,6 +196,7 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
+- 0.2.4 (2026-09-25): link previews ride layer 1 only; places in a text show as a location card whose map loads on request.
 - 0.2.3 (2026-09-25): transport rows record what matters (first connection, a change of transport, choices, a failed switch, an outage when it ends), not every reconnect or restart; everything else goes to the connection history.
 - 0.2.2 (2026-09-25): calls (`calls/1`) and hosted services (`services/1`) on layer 1, both live only.
 - 0.2.1 (2026-09-25): hosted local services run in the chat session today; only calls are the gap. Implementation status updated.

@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.4 |
+| Revision | 0.5 |
 | Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
@@ -37,6 +37,26 @@ Both sides send both frames on every ready session, the first one after an invit
 
 Each local profile ([04](04-profiles.md)) decides whether contacts are told its name and picture (on by default). Off, it sends an empty `n` and an empty `a` on every session and on the switch itself, and its join notice names nobody; the name and picture stay on the device, and switching back on sends them again.
 
+### Link previews
+
+A `paired-message` MAY carry `pv`, a preview of one of its text's links, made by the **sender's** app when the message was written (revision 0.5). The reader shows it from the message and MUST NOT contact the site for it: not for the page, not for its picture. Older apps ignore the field and show the text.
+
+`pv` is an object:
+
+| Field | Meaning |
+|---|---|
+| `u` | The link, as it appears in the text without tracking parameters (`utm_*`, `fbclid`, `gclid`, `si` and similar). At most 2,048 characters, http(s) only. |
+| `t` | The page's title, at most 200 characters. Optional. |
+| `d` | Its description, at most 300 characters. Optional. |
+| `s` | The site's name ("YouTube"), at most 80 characters. Optional. |
+| `i` | A thumbnail: a `data:image/jpeg;base64,` URL of at most 20,000 bytes of JPEG whose frame header declares no side over 640 pixels. Optional. |
+
+A receiver MUST drop `pv` (and keep the message) when it is not an object, when `u` is not an http(s) URL, when `u` without tracking parameters matches none of the text's links compared the same way (so a card never points somewhere the text does not), or when it has no `t`, `d` or `i`. It MUST drop a thumbnail in any other format, over the size, or declaring a larger picture, and keep the rest. It shows texts as plain text on one line, cut to the limits above, and never renders HTML from them. The card opens `u` outside the app; a video site (YouTube, Vimeo) is a card with its thumbnail and a play mark, never an embedded player.
+
+The sender reads the page's Open Graph and Twitter card tags (for YouTube and Vimeo, the provider's own oEmbed endpoint), with no cookies and no referrer, and SHOULD redraw the picture itself (at most 320 pixels wide, as a fresh JPEG), so nothing of the site's file but its pixels travels. It MUST NOT read a page on this machine or the local network (`localhost`, `.local`, private and link-local addresses), nor follow a page's picture or redirect there: a page must not make the sender's app carry a local device's picture to the contact. Ghostly's desktop app fetches through the system (no CORS), resolving every name itself and refusing any non-public address; the web app and the extension can only read sites that allow it (CORS), and make no preview otherwise. No Ghostly-run proxy is involved. The person sees the preview in the composer before sending and can remove it; previews can be turned off (Settings → Security → Link previews).
+
+The frame with `pv` stays under 56 KiB, below the 60 KiB a session takes: a sender leaves `pv` out rather than send a larger frame. `pv` travels only on this session. The DHT ([403](403-dht-text.md)) and held items ([4xx](4xx-store-and-forward.md)) carry the text without it. Groups ([900](900-group-sessions.md)) do not carry previews yet: their sealed boxes are bounded for 16 KiB of text, and a larger box would make older members drop the frame.
+
 ### Liveness and reconnection
 
 A connection can die without either side being told (a laptop asleep, an app suspended in the background, a network change). While a session is ready, each side sends `{"t":"paired-ping"}` every 15 seconds and answers each one with `{"t":"paired-pong"}`. Any frame from the peer counts as a sign of life. Three pings in a row with nothing back close the session and its connection, and the dialling side tries again. This counts from the open for a peer whose `pair-offer` lists `ping/1` in `extensions`, so a contact that freezes before the first ping (a laptop closed right after connecting) is noticed too; for a peer that does not say so, it counts once that peer has answered a ping, and a peer that never answers one (an older app) is never cut off for it. Missed pings are counted, not timed, so a throttled background tab is not mistaken for a dead peer.
@@ -65,6 +85,7 @@ Initial pairing currently uses WebRTC; revision 0.2 proposes first contact on th
 
 ## Revision log
 
+- 0.5 (2026-09-25): link previews (`pv` on `paired-message`), made by the sender and never fetched by the reader.
 - 0.4 (2026-09-25): `files/3` announced in `paired-capabilities` too ([501](501-paired-files.md) 0.3).
 - 0.3 (2026-09-25): `calls/1` and `services/1` announced after the handshake in `paired-capabilities`; both need a live session. Shared apps now need `services/1` on both sides.
 - 0.2.1 (2026-09-25): hosted local services already run on this session (`ph` frames); only calls are the gap. Implementation status updated.
