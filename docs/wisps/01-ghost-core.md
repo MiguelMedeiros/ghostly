@@ -46,6 +46,8 @@ Keep the current wire profile unchanged until a migration is specified. Pkarr re
 
 ## Open decisions
 
+Revision 0.3: native clients read the DHT directly. Desktop and the CLI resolve on the Mainline DHT and publish to the DHT and the relays; relay reads are an opt-in. They still write to the relays because a relay keeps serving the copy it holds for minutes, and browser contacts read only relays. Every client keeps a circuit breaker per relay. Records, sequence numbers and the relays' compare-and-swap (409, `If-Match`) are unchanged. The relay list and how one is chosen: [RELAYS.md](../RELAYS.md).
+
 Revision 0.2: the read budget. Every chat now reads its contact's mailbox, and the relays' per-IP limit (50 requests a minute on pkarr.pubky.org) is shared by all of them; the pace table of [403](403-dht-text.md#poll-pace) slows reads while a chat is live. Whether a Ghostly-operated relay is needed for launch is a deployment question, not a protocol one.
 
 Fix the extensible Core version envelope, record budget per future capability, replay watermark persistence, expiry/clock-skew rules and publication/poll budgets across platforms. Specify what happens when mandatory signaling alone exceeds the packet budget; do not split arbitrary heavy data across DHT records as a workaround.

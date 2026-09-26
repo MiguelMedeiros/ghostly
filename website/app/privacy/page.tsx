@@ -150,13 +150,16 @@ export default function PrivacyPage() {
                 STUN/TURN server in Settings.
               </li>
               <li>
-                <strong className="text-gray-200">Pkarr relays.</strong> Where a
-                browser cannot reach the DHT directly, records are published and
-                resolved through public relays at{" "}
+                <strong className="text-gray-200">Pkarr relays.</strong> A
+                browser cannot reach the DHT directly, so it publishes and
+                resolves records through public relays at{" "}
                 <code className="text-cyan-400 text-sm">pkarr.pubky.app</code>{" "}
                 and{" "}
                 <code className="text-cyan-400 text-sm">pkarr.pubky.org</code>.
-                They observe your IP address and the public keys you look up.
+                Ghostly Desktop reads the DHT directly and publishes to those
+                relays too, so contacts in a browser can read its records.
+                The relays observe your IP address and the public keys you
+                publish or look up.
                 Record contents are signed and readable, as DHT records are by
                 design.
               </li>

@@ -43,11 +43,7 @@ use crate::diagnostics;
 /// The relays written to before Settings named any: the browser clients' defaults
 /// (`DEFAULT_RELAYS` in packages/core/src/relay.ts). The app hands over the list
 /// in Settings as it starts, so a relay is added there, not here.
-pub const DEFAULT_RELAYS: [&str; 3] = [
-    "https://pkarr.pubky.org",
-    "https://pkarr.pubky.app",
-    "https://relay.pkarr.org",
-];
+pub const DEFAULT_RELAYS: [&str; 2] = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
 /// Reads this client allows itself per relay and minute; past it, a read
 /// returns the newest seen and leaves the relays to the DHT lookup. Relays
@@ -2051,6 +2047,93 @@ mod live {
             again.push(started.elapsed().as_secs_f64());
         }
         line("DHT publish, same key again", &again);
+    }
+
+    /// Reads `key` every 700 ms (Desktop's `fast` poll while signaling) until a packet at least as new as
+    /// `want` arrives; seconds taken, 30 when it never did.
+    async fn seen_after(pkarr: &Pkarr, key: &PublicKey, want: pkarr::Timestamp) -> f64 {
+        let started = Instant::now();
+        loop {
+            let poll = Instant::now();
+            let got = pkarr.resolve_with(key, false, true).await;
+            if got.is_some_and(|p| p.timestamp() >= want)
+                || started.elapsed() > Duration::from_secs(30)
+            {
+                return started.elapsed().as_secs_f64();
+            }
+            tokio::time::sleep(Duration::from_millis(700).saturating_sub(poll.elapsed())).await;
+        }
+    }
+
+    /// A first contact's path between two Desktops, as the app runs it: the joiner reads the inviter's key, puts
+    /// its offer on a key of its own, the inviter sees it and answers, the joiner sees the answer. Timed with relay
+    /// reads off (DHT direct, the default) and on ("Also use Pkarr relays"); writes reach the relays either way.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches the real DHT and relays"]
+    async fn live_first_contact_latency() {
+        let relays: Vec<Url> = DEFAULT_RELAYS.map(|url| url.parse().unwrap()).to_vec();
+        for read_relays in [false, true] {
+            let (inviter, joiner) = (Pkarr::desktop().unwrap(), Pkarr::desktop().unwrap());
+            for app in [&inviter, &joiner] {
+                app.configure(relays.clone(), read_relays);
+            }
+            tokio::time::sleep(Duration::from_secs(3)).await; // the DHT nodes bootstrap
+            let mut steps: [Vec<f64>; 6] = Default::default();
+            for round in 0..4 {
+                let (invite, offer) = (Keypair::random(), Keypair::random());
+                inviter.publish(&packet(&invite, "presence")).await.unwrap();
+                // The invite travels to the joiner meanwhile.
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let started = Instant::now();
+                let presence =
+                    seen_after(&joiner, &invite.public_key(), pkarr::Timestamp::from(0)).await;
+                let at = Instant::now();
+                let offered = packet(&offer, "offer");
+                joiner.publish(&offered).await.unwrap();
+                let put_offer = at.elapsed().as_secs_f64();
+                let seen_offer =
+                    seen_after(&inviter, &offer.public_key(), offered.timestamp()).await;
+                let at = Instant::now();
+                let answer = packet(&invite, "answer");
+                inviter.publish(&answer).await.unwrap();
+                let put_answer = at.elapsed().as_secs_f64();
+                let seen_answer =
+                    seen_after(&joiner, &invite.public_key(), answer.timestamp()).await;
+                let total = started.elapsed().as_secs_f64();
+                println!("relay reads {read_relays}, round {round}: {presence:.2} + {put_offer:.2} + {seen_offer:.2} + {put_answer:.2} + {seen_answer:.2} = {total:.2} s");
+                for (i, t) in [
+                    presence,
+                    put_offer,
+                    seen_offer,
+                    put_answer,
+                    seen_answer,
+                    total,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    steps[i].push(t);
+                }
+            }
+            let mode = if read_relays {
+                "relay reads on"
+            } else {
+                "DHT direct"
+            };
+            for (name, times) in [
+                "joiner reads the invite's key",
+                "joiner publishes its offer",
+                "inviter sees the offer",
+                "inviter publishes its answer",
+                "joiner sees the answer",
+                "first contact, in all",
+            ]
+            .iter()
+            .zip(&steps)
+            {
+                line(&format!("{mode}: {name}"), times);
+            }
+        }
     }
 
     /// A web contact reads a DHT-direct peer through a relay: how long a relay that holds an older packet of

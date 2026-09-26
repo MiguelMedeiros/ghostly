@@ -11,9 +11,12 @@ import { DiscoveryBudgetError, isDiscoveryBudgetError, type PkarrRequestOptions,
  * packets) and reads from it only when "Also use Pkarr relays" is on. Adding a
  * relay is one line here; see docs/RELAYS.md for how one is chosen.
  */
-export const DEFAULT_RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app", "https://relay.pkarr.org"];
-/** Relay lists that were the defaults once: a profile that still has one gets today's defaults. */
-export const PREVIOUS_DEFAULT_RELAYS = [["https://pkarr.pubky.org", "https://pkarr.pubky.app"]];
+export const DEFAULT_RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
+/**
+ * Relay lists that were the defaults once: a profile that still has one gets today's defaults. When a relay
+ * joins `DEFAULT_RELAYS`, the list as it was goes here, so profiles on the old defaults move with it.
+ */
+export const PREVIOUS_DEFAULT_RELAYS: string[][] = [];
 
 /** The defaults for `relays` when it is one of the old default lists, `relays` itself otherwise. */
 export function currentRelays(relays: string[]): string[] {
@@ -44,7 +47,8 @@ export const WRITE_FIRST_MS = 5_000;
 const NETWORK_ERROR_COOLDOWN_MS = 20_000;
 /**
  * Relays that allow far fewer requests per address than the others: this client's share of theirs, a minute.
- * relay.pkarr.org allows 10 (`x-ratelimit-limit`), which a browser cannot read without CORS exposing it.
+ * relay.pkarr.org (not a default, see docs/RELAYS.md) allows 10 (`x-ratelimit-limit`), which a browser cannot
+ * read without CORS exposing it.
  */
 export const RELAY_REQUESTS_PER_MINUTE: Record<string, number> = { "https://relay.pkarr.org": 5 };
 

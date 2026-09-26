@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BREAKER_BASE_MS, BREAKER_MAX_MS, BREAKER_THRESHOLD, DEFAULT_RELAYS, RelayBreaker, RelayTransport, createIdentity, createRelayPayload, currentRelays } from "../src";
+import { BREAKER_BASE_MS, BREAKER_MAX_MS, BREAKER_THRESHOLD, DEFAULT_RELAYS, PREVIOUS_DEFAULT_RELAYS, RelayBreaker, RelayTransport, createIdentity, createRelayPayload, currentRelays } from "../src";
 // covers: core.relay-breaker
 
 describe("relay breaker", () => {
@@ -197,12 +197,18 @@ describe("relay transport with a breaker", () => {
 
 describe("the default relays", () => {
   it("a profile still on an old default list gets today's; one of its own keeps it", () => {
-    expect(currentRelays(["https://pkarr.pubky.org", "https://pkarr.pubky.app"])).toEqual(DEFAULT_RELAYS);
-    expect(currentRelays(["https://pkarr.pubky.app"])).toEqual(["https://pkarr.pubky.app"]);
-    expect(currentRelays(["https://relay.example.org", "https://pkarr.pubky.org"])).toEqual(["https://relay.example.org", "https://pkarr.pubky.org"]);
+    PREVIOUS_DEFAULT_RELAYS.push(["https://pkarr.pubky.org"]);
+    try {
+      expect(currentRelays(["https://pkarr.pubky.org"])).toEqual(DEFAULT_RELAYS);
+      expect(currentRelays(["https://pkarr.pubky.app"])).toEqual(["https://pkarr.pubky.app"]);
+      expect(currentRelays(["https://relay.example.org", "https://pkarr.pubky.org"])).toEqual(["https://relay.example.org", "https://pkarr.pubky.org"]);
+      expect(currentRelays(DEFAULT_RELAYS)).toEqual(DEFAULT_RELAYS);
+    } finally {
+      PREVIOUS_DEFAULT_RELAYS.pop();
+    }
   });
 
-  it("relay.pkarr.org, which allows 10 requests a minute, gets 5 of ours", async () => {
+  it("relay.pkarr.org, added by hand, allows 10 requests a minute and gets 5 of ours", async () => {
     const calls: string[] = [];
     const id = createIdentity();
     const relay = new RelayTransport({

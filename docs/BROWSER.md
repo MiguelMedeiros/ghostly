@@ -39,7 +39,7 @@ Use two Chrome profiles (or two machines), each with the extension loaded.
 2. Paste it in the browser. `_msgs`, `_ack`, `_nick` and `_call` are unchanged, so released Desktop builds interoperate. Text is verified against the Rust implementation by `npm run test:interop`. Calls run the same hook and signaling on both sides, but have so far only been exercised Browser ↔ Browser.
 3. Services need a peer that understands `_svc` and `_rtc`. Desktop ignores them today and shows up in the browser as a peer without advertised services. See [Desktop](#desktop).
 
-Desktop reaches the DHT directly, the browser goes through relays; both are views of the same DHT. `pkarr.pubky.org` is in the default relay set of both, which makes the common case fast.
+Desktop reads the DHT directly and writes to both the DHT and the relays; the browser goes through relays. Both are views of the same DHT. Desktop writes to the relays so a browser contact sees its packets at once: a relay keeps serving the copy it holds. See [RELAYS.md](RELAYS.md).
 
 ### Automated
 

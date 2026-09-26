@@ -5,7 +5,7 @@ import { renderApp } from "../render";
 
 // covers: settings.network.native-dht, settings.network.relays
 
-const RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app", "https://relay.pkarr.org"];
+const RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
 describe("Settings, Network: Pkarr relays", () => {
   it("on the Desktop, relay reads are off until switched on, at once, with the relays as saved", async () => {

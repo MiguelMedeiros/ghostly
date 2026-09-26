@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { chat, connect, expect, link, test, type Peer } from "../support/fixtures";
 
-const DEFAULT_RELAYS = "https://pkarr.pubky.org\nhttps://pkarr.pubky.app\nhttps://relay.pkarr.org";
+const DEFAULT_RELAYS = "https://pkarr.pubky.org\nhttps://pkarr.pubky.app";
 
 /** The network section of Settings: relays, TURN address, username and credential. */
 function network(page: Page) {
