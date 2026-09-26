@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { IMAGE_HOSTS, IMAGE_REDIRECTS } from "@ghostly/browser/profiles/public";
@@ -59,6 +59,17 @@ describe("the Content-Security-Policy of every shell", () => {
     if (connect === "anything") return;
     const hosts = [...IMAGE_HOSTS, ...Object.values(IMAGE_REDIRECTS).flatMap(s => [...s])];
     for (const host of hosts) expect(connect.includes("https:") || connect.includes(`https://${host}`), `${shell} connect-src reaches ${host}`).toBe(true);
+  });
+
+  // covers: app.attention.sounds, app.attention.cues
+  it.each(Object.keys(policies) as (keyof typeof policies)[])("%s fetches the app's own sounds (Web Audio decodes what fetch brings, so connect-src, not media-src)", (shell) => {
+    const connect = allowed(policies[shell](), "connect-src");
+    if (connect !== "anything") expect(connect).toContain("'self'");
+  });
+
+  it("keeps every sound a file of its own: Vite inlines an asset under 4 KiB as a data: URL, which connect-src 'self' refuses", () => {
+    const folder = join(import.meta.dirname, "../../assets/sounds");
+    for (const name of readdirSync(folder).filter(f => f.endsWith(".mp3"))) expect(statSync(join(folder, name)).size, name).toBeGreaterThan(4096);
   });
 
   it("names media-src on Desktop, rather than leaning on default-src", () => {

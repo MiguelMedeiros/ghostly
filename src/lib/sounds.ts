@@ -47,7 +47,7 @@ export const SOUNDS = {
   ],
   /*
    * The finer cues (src/lib/cues.ts), each in a category of Settings. Every note below is played by that sound
-   * alone, so a test that hears the fallback knows which cue it was from any one of its notes.
+   * alone, and its first note once, so a test that hears the fallback counts a cue by its first note.
    */
   /** My payment went out and settled: a coin whooshing away. */
   paid: [
@@ -79,7 +79,7 @@ export const SOUNDS = {
   /** The contact came with my invite: knock-knock. */
   knock: [
     { frequency: 392, at: 0, duration: 0.06, gain: 0.12 },
-    { frequency: 392, at: 0.14, duration: 0.06, gain: 0.12 },
+    { frequency: 415, at: 0.14, duration: 0.06, gain: 0.12 },
   ],
   /** A chat moved to another transport: a faint swoosh. */
   switched: [{ frequency: 698, at: 0, duration: 0.14, gain: 0.04 }],
