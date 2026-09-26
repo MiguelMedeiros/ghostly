@@ -11,12 +11,12 @@
 .new-wallet-network[data-network=mainnet]{--net:var(--color-accent)}
 .new-wallet-network .network-tag{color:var(--net)}
 .new-wallet-network[aria-checked=true]{border-color:var(--net);background:color-mix(in srgb,var(--net) 9%,transparent);box-shadow:inset 0 0 0 1px var(--net)}
-.new-wallet-network-dot{flex:none;width:16px;height:16px;margin-top:2px;border:2px solid var(--color-border);border-radius:999px;transition:border-color .2s,box-shadow .2s}
+.new-wallet-network-dot{flex:none;width:16px;height:16px;margin-top:2px;border:2px solid var(--color-text-muted);border-radius:999px;transition:border-color .2s,box-shadow .2s}
 .new-wallet-network[aria-checked=true] .new-wallet-network-dot{border-color:var(--net);box-shadow:inset 0 0 0 3px var(--color-panel-header),inset 0 0 0 8px var(--net)}
 
 /* The kinds: cards in a grid that wraps with the dialog's width. */
 .new-wallet-kinds{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))}
-.new-wallet-kind{position:relative;display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 12px;overflow:hidden;border:1px solid var(--color-border);border-radius:14px;background:var(--color-surface);text-align:left;cursor:pointer;transition:border-color .2s,background-color .2s,transform .2s,opacity .2s}
+.new-wallet-kind{position:relative;display:flex;align-items:flex-start;gap:12px;min-height:64px;padding:10px 12px;overflow:hidden;border:1px solid var(--color-border);border-radius:14px;background:var(--color-surface);text-align:left;cursor:pointer;transition:border-color .2s,background-color .2s,transform .2s,opacity .2s}
 .new-wallet-kind:hover:not(:disabled):not([aria-disabled=true]){border-color:var(--color-border-bright,var(--color-border));background:var(--color-surface-alt)}
 .new-wallet-kind:hover:not(:disabled):not([aria-disabled=true]) .new-wallet-action{transform:translateX(2px)}
 .new-wallet-kind:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
@@ -29,7 +29,7 @@
 
 /* What clicking does, on the right: a small button-like pill for what can be done, a check for what is there,
    a grey "Not yet" for what is not. */
-.new-wallet-action{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;transition:transform .2s}
+.new-wallet-action{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;transition:transform .2s}
 .new-wallet-action[data-kind=create],.new-wallet-action[data-kind=connect],.new-wallet-action[data-kind=join],.new-wallet-action[data-kind=join-another]{background:var(--color-accent);color:var(--color-on-accent)}
 .new-wallet-action[data-kind=connect],.new-wallet-action[data-kind=join],.new-wallet-action[data-kind=join-another]{background:transparent;color:var(--color-accent);box-shadow:inset 0 0 0 1.5px var(--color-accent)}
 .new-wallet-action[data-kind=added],.new-wallet-action[data-kind=done]{color:var(--color-success,#34a853);background:color-mix(in srgb,var(--color-success,#34a853) 12%,transparent)}

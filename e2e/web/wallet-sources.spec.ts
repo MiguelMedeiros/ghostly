@@ -44,8 +44,11 @@ test("a Cashu wallet's Lightning card starts on its mints, and each network offe
     await close(select);
 
     // New offers the other sources, for a Lightning wallet of their own: never the mints (they come with Cashu), never a fake.
-    const dialog = await newDialog(alice, network, "lightning");
+    const dialog = await newDialog(alice, network);
     await expect(dialog.getByTestId("new-wallet-type-lightning-status")).toHaveText("Connect…");
+    // Connect… opens the source's own step: its form, and a way back to every kind.
+    await dialog.getByTestId("new-wallet-type-lightning").click();
+    await expect(dialog.getByTestId("new-wallet-back")).toBeVisible();
     const picker = dialog.getByTestId("new-wallet-provider-select");
     const offered = await optionsOf(picker);
     expect(await offered.count()).toBeGreaterThan(0);

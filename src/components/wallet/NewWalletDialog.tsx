@@ -187,15 +187,18 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
                     aria-disabled={off || undefined} aria-busy={mine === "busy" || undefined} disabled={(busy || phase?.state === "done") && !mine} title={action === "off" ? o?.reason : undefined}
                     onClick={() => mine === "error" ? void create(type) : pick(type)} className="new-wallet-kind">
                     <Mark type={type} />
+                    {/* The name and what clicking does on one line (the action wraps under the name when narrow), what it is below. */}
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-text-primary">{WALLET_NAME[type]}</span>
-                      <span className="block text-xs text-text-secondary mt-0.5">{action === "off" && o?.reason ? shortReason(o.reason) : ABOUT[type](network)}</span>
-                    </span>
-                    <span className="new-wallet-action" data-testid={`new-wallet-type-${type}-status`} data-kind={mine ?? action}>
-                      {mine === "busy" ? <><span className="new-wallet-spinner" aria-hidden="true" />{BUSY_LABEL[type]}</>
-                        : mine === "done" ? <><Check />Ready</>
-                        : mine === "error" ? "Try again"
-                        : action === "added" ? <><Check />Added</> : ACTION_LABEL[action]}
+                      <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                        <span className="text-sm font-semibold text-text-primary">{WALLET_NAME[type]}</span>
+                        <span className="new-wallet-action" data-testid={`new-wallet-type-${type}-status`} data-kind={mine ?? action}>
+                          {mine === "busy" ? <><span className="new-wallet-spinner" aria-hidden="true" />{BUSY_LABEL[type]}</>
+                            : mine === "done" ? <><Check />Ready</>
+                            : mine === "error" ? "Try again"
+                            : action === "added" ? <><Check />Added</> : ACTION_LABEL[action]}
+                        </span>
+                      </span>
+                      <span className="block text-xs text-text-secondary mt-1">{action === "off" && o?.reason ? shortReason(o.reason) : ABOUT[type](network)}</span>
                     </span>
                     {mine === "busy" && <span className="new-wallet-shimmer" aria-hidden="true" />}
                   </button>
