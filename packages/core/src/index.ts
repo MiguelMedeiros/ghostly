@@ -52,6 +52,7 @@ export * from "./bitcoinAddress";
 export * from "./sparkAddress";
 
 export * from "./identityProofs";
+export * from "./identityTimeline";
 export * from "./didDht";
 export * from "./did";
 export * from "./atprotoRepo";
