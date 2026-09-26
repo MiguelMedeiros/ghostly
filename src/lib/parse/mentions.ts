@@ -18,6 +18,11 @@ export interface MentionView { o: number; l: number; key: string; name: string; 
 
 /** How much of a name the picker is asked about. */
 const QUERY_CHARS = 32;
+/**
+ * A key is matched from this many characters on, by its start or the piece the picker shows: two letters are found
+ * somewhere in most 52-character keys, and "@Bo" must not offer Carol.
+ */
+const KEY_QUERY_CHARS = 3;
 /** Rows the picker shows. */
 export const PICKER_ROWS = 8;
 
@@ -35,7 +40,8 @@ const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCas
 
 /**
  * The members that fit what was typed, best first: a name starting with it, then a word of the name starting with
- * it, then a key containing it. An empty query lists everyone, in the order given.
+ * it, then a key starting with it or a shown piece of key containing it (three characters or more). An empty query
+ * lists everyone, in the order given.
  */
 export function filterCandidates(candidates: readonly MentionCandidate[], query: string): MentionCandidate[] {
   const q = fold(query);
@@ -44,7 +50,7 @@ export function filterCandidates(candidates: readonly MentionCandidate[], query:
     const name = fold(c.name);
     if (name.startsWith(q)) return 0;
     if (name.split(/[\s._-]+/u).some(word => word.startsWith(q))) return 1;
-    return c.key.toLowerCase().includes(q) || fold(c.tag).includes(q) ? 2 : 3;
+    return q.length >= KEY_QUERY_CHARS && (c.key.toLowerCase().startsWith(q) || fold(c.tag).includes(q)) ? 2 : 3;
   };
   return candidates.map(c => ({ c, r: rank(c) })).filter(x => x.r < 3).sort((a, b) => a.r - b.r).map(x => x.c).slice(0, PICKER_ROWS);
 }

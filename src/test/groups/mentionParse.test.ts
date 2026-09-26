@@ -42,6 +42,10 @@ describe("which members fit", () => {
     expect(filterCandidates(people, "EMI").map(p => p.name)).toEqual(["Émile"]);
     // The key: its tag, or the key itself.
     expect(filterCandidates(people, "zzz9").map(p => p.name)).toEqual(["Member ybndrf...yyyyyy"]);
+    expect(filterCandidates(people, "ay").map(p => p.name)).toEqual([]);
+    expect(filterCandidates([{ key: "ybndrf".padEnd(52, "q"), name: "Kim", tag: "…qqqqqq" }], "ybn").map(p => p.name)).toEqual(["Kim"]);
+    // Two letters found somewhere inside someone's key are not them.
+    expect(filterCandidates([{ key: "x".repeat(20) + "bo" + "x".repeat(30), name: "Carol", tag: "…xxxxxx" }], "bo")).toEqual([]);
     expect(filterCandidates(people, "q").map(p => p.name)).toEqual([]);
   });
   it("ranks a name's start before a word's", () => {
