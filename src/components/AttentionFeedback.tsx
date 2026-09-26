@@ -5,6 +5,7 @@ import {installAudioGestures,playSound} from "../lib/sounds";
 import {showPrivateNotification} from "../lib/notifications";
 import {loadSettings} from "../lib/settings";
 import {attentionOutcome,chatOfLink,mutedFor} from "../lib/chatMute";
+import {eventSound,playCue} from "../lib/cues";
 import {useI18n} from "../contexts/I18nContext";
 
 const seen=new Set<string>();
@@ -27,8 +28,11 @@ export function AttentionFeedback(){
       const chat=chatOfLink(event.linkId,engine.state?.links);
       const muted=mutedFor(chat,!!event.mention);
       const background=document.visibilityState==="hidden" || !document.hasFocus();
-      const outcome=attentionOutcome(event.type,muted,loadSettings().notifications,background);
-      if(outcome.sound) playSound(event.type);
+      // A fact that had no sound before the categories: its cue alone, under the cue's own rules (src/lib/cues.ts).
+      if(event.type==="cue"){ if(event.cue) playCue(event.cue,{chat,key:event.id}); return; }
+      const notifications=loadSettings().notifications;
+      const outcome=attentionOutcome(event.type,muted,notifications,background);
+      if(outcome.sound) playSound(eventSound({...event,type:event.type},notifications));
       if(outcome.notice) await showPrivateNotification(event.id,t("settings.privateNotice"));
     };
     if(navigator.locks) void navigator.locks.request("ghostly-feedback",run);

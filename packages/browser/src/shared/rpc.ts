@@ -262,15 +262,27 @@ export interface RpcResponse {
   error?: string;
 }
 
+/**
+ * The finer sounds the engine can name (src/lib/cues.ts plays them, each in its category of Settings > Notifications
+ * and sounds). On a "cue" event, the only sound of that event; on another event, the sound played instead of the
+ * event's own when its category is on (a mention instead of a message, test coins instead of a coin).
+ */
+export type AttentionCue =
+  | "request" | "failed" | "testcoins"
+  | "shared" | "checked" | "sealed"
+  | "knock" | "switched" | "back"
+  | "downloaded" | "group";
 /** Ephemeral UI feedback, never part of history or the initial snapshot. No private content. */
 export interface AttentionEvent {
   id: string;
-  type: "message" | "sent" | "coin" | "confirmed";
+  /** "cue": an event that had no sound before the categories; `cue` names it. */
+  type: "message" | "sent" | "coin" | "confirmed" | "cue";
   at: number;
-  /** The chat a message event belongs to (its link id, `group:<id>` for a group), so a page can mute one chat. */
+  /** The chat the event belongs to (its link id, `group:<id>` for a group), so a page can mute one chat. */
   linkId?: string;
   /** A group message that names me (or everyone): it may still notify in a muted group. */
   mention?: true;
+  cue?: AttentionCue;
 }
 export type EngineEvent =
   | { kind: "attention"; event: AttentionEvent }

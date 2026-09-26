@@ -1,5 +1,6 @@
 import React, { useMemo, useState, type ComponentType } from "react";
 import { useI18n } from "../../contexts/I18nContext";
+import { playCue, useCueChat } from "../../lib/cues";
 import { parseMessage, type Segment } from "../../lib/parse";
 import { markMentions, type MentionView } from "../../lib/parse/mentions";
 import { CodeBlock } from "./CodeBlock";
@@ -10,6 +11,8 @@ import "./rich-text.css";
 function Spoiler({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   const [shown, setShown] = useState(false);
+  const chat = useCueChat();
+  const reveal = () => { setShown(true); playCue("spoiler", { chat }); };
   if (shown) return <span data-testid="rich-spoiler" data-shown="" className="rich-spoiler-shown">{children}</span>;
   return (
     <span
@@ -18,8 +21,8 @@ function Spoiler({ children }: { children: React.ReactNode }) {
       tabIndex={0}
       aria-label={t("chat.rich.spoiler")}
       className="rich-spoiler"
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShown(true); }}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShown(true); } }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); reveal(); }}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); reveal(); } }}
     >
       <span aria-hidden="true" inert>{children}</span>
     </span>

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { MONEY_LABEL } from "./NetworkTag";
+import { playCue } from "../lib/cues";
 
 const button = "rounded-lg px-3 py-2 max-md:min-h-11 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40";
 
@@ -18,7 +19,7 @@ export function ConfirmRealMoney({ what, busy, onSend, onBack }: { what: string;
     <div className="rounded-lg border border-danger/50 p-2 space-y-2 basis-full" data-testid="review-mainnet-confirm" role="group" aria-label="Confirm real money">
       <p className="text-xs text-text-primary m-0"><strong>{MONEY_LABEL.mainnet}.</strong> This sends {what} that cannot be taken back once it settles. Nothing has gone out yet.</p>
       <div className="flex gap-2 flex-wrap">
-        <button className={`${button} !bg-accent !text-on-accent`} data-testid="review-confirm-send" disabled={busy} onClick={onSend}>Send real money</button>
+        <button className={`${button} !bg-accent !text-on-accent`} data-testid="review-confirm-send" disabled={busy} onClick={() => { playCue("realmoney"); onSend(); }}>Send real money</button>
         <button ref={back} className={button} data-testid="review-confirm-back" disabled={busy} onClick={onBack}>Back</button>
       </div>
     </div>

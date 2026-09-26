@@ -1,6 +1,7 @@
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent,type PointerEvent,type ReactNode} from 'react';
 import {stackLayout,stackStrips,stepCard,stripAt} from './stack';
 import {playSwitch,switchDirection} from './motion';
+import {playCue} from '../../lib/cues';
 import './deck.css';
 
 /**
@@ -101,7 +102,11 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  const [shown,setShown]=useState({id:chosen,from:undefined as string|undefined,n:0});
  if(shown.id!==chosen)setShown({id:chosen,from:shown.id,n:shown.n+1});
  const glow=useRef<HTMLDivElement>(null);
+ /** The card the deck itself last chose (a key, a click, a swipe, the pointer): any other change came from outside. */
+ const own=useRef(chosen);
  useLayoutEffect(()=>{
+  // The person moved to another card: a quiet slide (Interface sounds), with or without the motion.
+  if(shown.n&&own.current===shown.id)playCue('slide');
   if(!shown.n||reducedMotion())return;
   const ids=cards.map(card=>card.id),to=ids.indexOf(shown.id!),from=shown.from?ids.indexOf(shown.from):-1;
   playSwitch({glow:glow.current,incoming:tabs.current[to],outgoing:from<0?null:tabs.current[from],dir:switchDirection(from,to)});
@@ -138,8 +143,6 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
   * tap): the end of an earlier scroll, cut off by a quick second key, chooses nothing. Touching the track ends it.
   */
  const steer=useRef<{id:string;until:number;resnap:boolean}|null>(null);
- /** The card the deck itself last chose (a key, a click, a swipe, the pointer): any other change came from outside. */
- const own=useRef(chosen);
  const select=(i:number)=>{
   const id=cards[i]?.id;if(!id)return;own.current=id;if(id!==selected)onSelect(id);
   // Already at rest there: no scroll, so no end to wait for.

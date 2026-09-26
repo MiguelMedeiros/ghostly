@@ -98,6 +98,8 @@ const toStored = (mint: string, p: Proof, reserved?: boolean): StoredProof => ({
   ...(reserved ? { reserved } : {}),
 });
 
+/** The note of the ecash "Get test coins" brought (the engine plays its own sound for it). */
+export const TEST_COINS_NOTE = "Test coins from the test mint";
 const walletTx = (mint: string, kind: WalletTxKind, amount: number, fee: number, note?: string): WalletTx => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
   timestamp: Date.now(),
@@ -374,7 +376,7 @@ export class CashuWallet {
     if (!quote.paid) await wrap((await store(STORES.quotes, "readwrite")).put({ ...quote, paid: true } satisfies StoredQuote));
     const proofs = await wallet.mintProofsBolt11(quote.amount, quote.quote);
     const minted = sats(proofs);
-    const tx = walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? "Test coins from the test mint" : undefined);
+    const tx = walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? TEST_COINS_NOTE : undefined);
     await transact([STORES.proofs, STORES.walletTx, STORES.quotes], (stores) => {
       for (const p of proofs) stores[STORES.proofs].put(toStored(quote.mint, p));
       stores[STORES.walletTx].put(tx);

@@ -18,9 +18,18 @@ export interface LockScreenSettings {
   timeoutMinutes: number;
 }
 
+/** The kinds of finer sounds (src/lib/cues.ts), each turned on or off on its own, under the Sounds switch. */
+export const CUE_CATEGORIES = ["payments", "identities", "connection", "chat", "interface"] as const;
+export type CueCategory = (typeof CUE_CATEGORIES)[number];
+export type CueSwitches = Record<CueCategory, boolean>;
+/** Interface sounds (cards, a new wallet or group) are for those who ask for them: off until turned on. */
+export const DEFAULT_CUES: Readonly<CueSwitches> = { payments: true, identities: true, connection: true, chat: true, interface: false };
+
 export interface NotificationSettings {
   soundEnabled: boolean;
   systemEnabled: boolean;
+  /** Which categories of finer sounds play. Absent (settings from before them): `DEFAULT_CUES`. */
+  cues?: Partial<CueSwitches>;
 }
 
 export interface AppSettings {
@@ -67,6 +76,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   notifications: {
     soundEnabled: true,
     systemEnabled: false,
+    cues: { ...DEFAULT_CUES },
   },
   defaultNickname: "",
   reduceMotion: false,
@@ -101,6 +111,7 @@ export function loadSettings(): AppSettings {
       notifications: {
         ...DEFAULT_SETTINGS.notifications,
         ...parsed.notifications,
+        cues: { ...DEFAULT_CUES, ...parsed.notifications?.cues },
       },
       defaultNickname: parsed.defaultNickname ?? DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
