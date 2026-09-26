@@ -1,7 +1,7 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { WALLET_NETWORKS, assertTokenUnits, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { WALLET_NETWORKS, assertTokenUnits, decodeBolt11, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { eachNetwork, perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
+import { assertConfirmedReal, crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
 import { networkLabel } from "./paymentAdapters/modeGate";
 import type { ArkWallet } from "./paymentAdapters/arkWallet";
 import type { BarkWallet } from "./paymentAdapters/barkWallet";
@@ -420,8 +420,11 @@ export class PaymentDesk {
     return undefined;
   }
 
-  /** Pays a contact's request: ecash when we share a mint with funds, Lightning from any of our mints otherwise. */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork }): Promise<void> {
+  /**
+   * Pays a contact's request: ecash when we share a mint with funds, Lightning from any of our mints otherwise.
+   * `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused.
+   */
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean }): Promise<void> {
     const key = `${params.linkId}:${params.paymentId}`;
     const running = this.paying.get(key);
     if (running) return running;
@@ -430,7 +433,7 @@ export class PaymentDesk {
     return operation;
   }
 
-  private async payRequestOnce(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork }): Promise<void> {
+  private async payRequestOnce(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean }): Promise<void> {
     const request = this.payments.get(params.paymentId);
     if (!request || request.kind !== "request" || request.direction !== "in" || request.linkId !== params.linkId) {
       throw new Error("Unknown payment request");
@@ -438,6 +441,7 @@ export class PaymentDesk {
     // Paid only by a wallet of the request's own network: a test card never settles a request for real money.
     const network = paymentNetwork(request);
     if (params.network && params.network !== network) throw new Error(crossNetwork(params.network, network));
+    assertConfirmedReal(network, params.confirmedReal);
     if (request.target) throw new Error("Review and explicitly approve this payment before sending");
     if (request.state !== "pending") throw new Error("This request is no longer open");
     if (request.lightningPending) throw new Error("A Lightning payment for this request is still pending");
@@ -644,8 +648,12 @@ export class PaymentDesk {
     if (federations && !this.accepts(linkId, "fedimint", network)) { federations = undefined; target = undefined; }
     // Keep only the ways of paying this chat allows; a request with none left is dropped.
     const allowed = (method: "lightning" | "cashu") => (held ? !!link?.paymentEnabled(method) : !!link?.allowsPayment(method)) && this.accepts(linkId, method, network);
-    const invoice = allowed("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
-    const mints = allowed("cashu") ? parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? "") : [];
+    // And only what is of that network: a Testnet request naming a real mint never has real ecash spent on it. A
+    // test mint's invoice reads like a Bitcoin one, so only an invoice of a test chain is known to be test money.
+    const bolt11 = allowed("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
+    const chain = bolt11 ? decodeBolt11(bolt11)?.network : undefined;
+    const invoice = bolt11 && !(network === "mainnet" && chain && chain !== "bitcoin") ? bolt11 : undefined;
+    const mints = allowed("cashu") ? parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? "").filter((mint) => mintNetwork(mint) === network) : [];
     if (!target && !invoice && !mints.length && !federations) return;
     await this.save({
       target,
@@ -923,8 +931,11 @@ export class PaymentDesk {
     try {target=validatePaymentTarget(JSON.parse(findEndpoint(request.endpoints,ENDPOINT.usdt)!));}catch{return;}
     const unit=target.asset==='USDT'?'usdt':'testusdt';
     if(target.method!=='usdt'||request.amount.asset!==unit||!/^[1-9]\d{0,15}$/.test(request.amount.value))return;
+    // Its chain says its network; a request saying another is not what it carries. Off here on that network: dropped, as any way that is off.
+    const network=walletNetworkOf(target.network);
+    if((request.network&&request.network!==network)||!this.accepts(linkId,'usdt',network))return;
     const amount=Number(request.amount.value);if(!Number.isSafeInteger(amount))return;
-    await this.save({id:request.id,linkId,kind:'request',direction:'in',amount,unit,target,memo:request.memo,state:'pending',createdAt:request.timestamp,ask:this.answering(linkId,request,'usdt',amount)});
+    await this.save({id:request.id,linkId,kind:'request',direction:'in',amount,unit,target,memo:request.memo,state:'pending',createdAt:request.timestamp,ask:this.answering(linkId,request,'usdt',amount),network});
     await this.host.storeMessage({linkId,id:`peer_${request.timestamp}`,text:`Requested ${formatPaymentAmount(amount,target.decimals)} ${target.asset}`,sender:'peer',timestamp:request.timestamp,via:'datalink',paymentId:request.id});
   }
   async recordUsdt(review:PaymentReview) {

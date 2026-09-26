@@ -34,7 +34,7 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
-import { createTiming, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
+import { assertConfirmedReal, createTiming, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
@@ -2135,9 +2135,12 @@ export class GhostlyNode implements EngineImplementation {
     return via === "cashu" ? this.wallet.quoteInvoice(invoice, n) : this.lightnings[n].quote(invoice);
   }
 
-  async walletPayQuote({ quote, mint, note }: { quote: string; mint: string; note?: string }) {
+  /** `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused. */
+  async walletPayQuote({ quote, mint, note, confirmedReal }: { quote: string; mint: string; note?: string; confirmedReal?: boolean }) {
     // A quote of a network's Lightning source (it knows its own), or a melt quote the Cashu card asked the mints for.
-    const lightning = WALLET_NETWORKS.map((n) => this.lightnings[n]).find((l) => l.hasQuote(quote));
+    const network = WALLET_NETWORKS.find((n) => this.lightnings[n].hasQuote(quote));
+    const lightning = network && this.lightnings[network];
+    assertConfirmedReal(network ?? mintNetwork(mint), confirmedReal);
     return { paid: lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note) };
   }
 
@@ -2268,6 +2271,8 @@ export class GhostlyNode implements EngineImplementation {
       if(params.target.method==="bitcoin" && !link.supportsBitcoinPayments)throw new Error("This peer does not take on-chain Bitcoin in this chat");
       if(params.target.method==="fedimint" && !link.supportsFedimintPayments)throw new Error("This peer does not take Fedimint in this chat");
       if(params.target.method==="spark" && !link.supportsSparkPayments)throw new Error("This peer does not take Spark in this chat");
+      // A way this chat has off on that network (its Accept side) pays nothing here, as it takes nothing.
+      if(!this.acceptsNetwork(this.links.get(params.linkId)?.stored, params.target.method, paying))throw new Error(`${networkLabel(paying)} ${WALLET_NAMES[params.target.method]} is off in this chat`);
       const request=params.requestId ? this.desk.payment(params.requestId) : undefined;
       if(params.requestId){
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
@@ -2288,8 +2293,10 @@ export class GhostlyNode implements EngineImplementation {
     const network = review.method === "cashu" ? mintNetwork(review.provider) : walletNetworkOf(review.network);
     await this.arkWallets[network].refresh(); await this.barkWallets[network].refresh(); await this.sparkWallets[network].refresh(); await this.usdtWallets[network].refresh();
   }
-  async approvePayment(params: {id:string}) {
+  /** `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused. */
+  async approvePayment(params: {id:string;confirmedReal?:boolean}) {
     const intent=await intentRepository.get(params.id);
+    if(intent)assertConfirmedReal(intent.review.method==="cashu" ? mintNetwork(intent.review.provider) : walletNetworkOf(intent.review.network), params.confirmedReal);
     if(intent?.review.linkId) {
       const link=this.paymentLink(intent.review.linkId);
       if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
@@ -2326,12 +2333,13 @@ export class GhostlyNode implements EngineImplementation {
   }
   cancelPayment(params: {id:string}) { return this.paymentCoordinator.cancel(params.id); }
 
-  /** `network`: the Cashu card of that network sends (its mints). */
-  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork }) {
+  /** `network`: the Cashu card of that network sends (its mints). `confirmedReal`: required on Mainnet. */
+  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork; confirmedReal?: boolean }) {
+    assertConfirmedReal(this.net(params.network), params.confirmedReal);
     const live = this.links.get(params.linkId);
     // Ecash is a bearer token: it is never held for an away contact, only a request for it is.
     if (live && this.holdingFor(live)) throw new Error("Ecash is not held for an away contact. Send a request instead, or wait until they are back.");
-    return this.desk.send({ ...params, network: this.net(params.network) });
+    return this.desk.send({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, network: this.net(params.network) });
   }
 
   /** `network`: the card's network; the request is paid only by a wallet of that network. */
@@ -2354,8 +2362,8 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.ask({ ...params, network: this.net(params.network) });
   }
 
-  /** `network`: the card chosen to pay; a request of the other network is refused, nothing spent. */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork }) {
+  /** `network`: the card chosen to pay; a request of the other network is refused, nothing spent. `confirmedReal`: required on Mainnet. */
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean }) {
     return this.desk.payRequest(params);
   }
 

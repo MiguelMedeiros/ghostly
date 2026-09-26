@@ -22,6 +22,19 @@ const erc20 = new Interface(['function decimals() view returns(uint8)', 'functio
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const CONFIRMATIONS = 2;
 
+/** Each chain's public RPC, which needs no key: the defaults, and what a request names as its `provider`. */
+export const PUBLIC_USDT_RPC = { ethereum: 'https://ethereum.publicnode.com', sepolia: 'https://ethereum-sepolia-rpc.publicnode.com' } as const;
+
+/**
+ * The `provider` a request carries to the contact. Which RPC pays is the payer's own choice, so it names none of
+ * this wallet's: a typed RPC URL may hold an API key (`/v3/<key>`), and every contact would read it. Older apps
+ * require a URL here and pay only when it equals their own RPC, so it is the chain's public RPC (the default both
+ * start with), and a local test chain's origin, without its path.
+ */
+export function wireProvider(config: Pick<UsdtConfig, 'network' | 'provider'>): string {
+  return config.network === 'evm-local' ? new URL(config.provider).origin : PUBLIC_USDT_RPC[config.network];
+}
+
 /** WDK signs locally. Every network call uses the configured RPC, never a peer-supplied URL. */
 export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
   readonly method = 'usdt' as const;
@@ -102,11 +115,12 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
   }
   async target(): Promise<PaymentTarget> {
     const now = Date.now();
-    return {method:'usdt',network:this.config.network,provider:this.config.provider,asset:this.config.chainId === 1 ? 'USDT':'TEST-USDT',unit:'token-base',address:await this.address(),chainId:this.config.chainId,token:this.config.token,decimals:this.config.decimals,issuedAt:now,expiresAt:now+15*60*1000};
+    return {method:'usdt',network:this.config.network,provider:wireProvider(this.config),asset:this.config.chainId === 1 ? 'USDT':'TEST-USDT',unit:'token-base',address:await this.address(),chainId:this.config.chainId,token:this.config.token,decimals:this.config.decimals,issuedAt:now,expiresAt:now+15*60*1000};
   }
+  /** The request is for this wallet's token on its chain. Its `provider` is not compared: this wallet's own RPC pays. */
   private matches(target: PaymentTarget) {
     validatePaymentTarget(target);
-    if (target.method !== 'usdt' || target.network !== this.config.network || target.chainId !== this.config.chainId || !same(target.token!,this.config.token) || target.decimals !== this.config.decimals || target.provider !== this.config.provider) throw new Error('Request does not match the configured token, network and RPC');
+    if (target.method !== 'usdt' || target.network !== this.config.network || target.chainId !== this.config.chainId || !same(target.token!,this.config.token) || target.decimals !== this.config.decimals) throw new Error('Request does not match the configured token and network');
   }
   prepare(target: PaymentTarget, amount: number, feeCap: number) { return this.serial(async () => {
     this.matches(target);

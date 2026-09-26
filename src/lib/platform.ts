@@ -284,7 +284,8 @@ export interface WalletPlatform {
   /** The Spark wallet becomes the Breez Lightning source too (one seed). */
   sparkUseForLightning():Promise<void>;
   preparePayment(params:{target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}):Promise<PaymentReview>;
-  approvePayment(id:string):Promise<PaymentReview>;
+  /** `confirmedReal`: the person confirmed a Mainnet review as real money (ConfirmRealMoney); the engine refuses one without it. */
+  approvePayment(id:string,confirmedReal?:boolean):Promise<PaymentReview>;
   reconcilePayment(id:string):Promise<PaymentReview>;
   cancelPayment(id:string):Promise<PaymentReview>;
 
@@ -300,8 +301,11 @@ export interface WalletPlatform {
   /** An invoice from the active Lightning source; `via: "cashu"` asks the Cashu mints whatever the source. */
   receiveLightning(amount: number, via?: "cashu"): Promise<{ invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
   quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
-  /** True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record. */
-  payQuote(quote: string, mint: string, note?: string): Promise<boolean>;
+  /**
+   * True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record.
+   * `confirmedReal`: the person confirmed a Mainnet payment as real money; the engine refuses one without it.
+   */
+  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean): Promise<boolean>;
   /**
    * Reads a Lightning address (`name@domain`) or an LNURL and fetches what it asks for. The address's
    * domain learns of the request: say so before calling.
@@ -332,15 +336,19 @@ export interface WalletPlatform {
   /** Null when the text is neither an ecash token nor a Cashu payment request. */
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;
-  send(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
+  /** `confirmedReal`: required on Mainnet, as for `payQuote`. */
+  send(peerPubKeyZ32: string, amount: number, memo?: string, confirmedReal?: boolean): Promise<{ timestamp: number; paymentId: string }>;
   /** `rail`: a request carrying only ecash, or only an invoice. */
   request(peerPubKeyZ32: string, amount: number, memo?: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: "cashu" | "lightning"): Promise<{ timestamp: number; paymentId: string }>;
   /** Paying on Ark, Bark, Spark or USDT without a request: asks the contact's app for one. */
   askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", memo?: string): Promise<{ askId: string }>;
   /** The contact's request answering an ask, once it arrived. */
   answerTo(askId: string): ChatPayment | null;
-  /** Pays a contact's request. `via: "lightning"`: its invoice through the Lightning source, as reviewed, within `maxFee`. */
-  payRequest(peerPubKeyZ32: string, paymentId: string, options?: { via?: "lightning"; maxFee?: number }): Promise<void>;
+  /**
+   * Pays a contact's request. `via: "lightning"`: its invoice through the Lightning source, as reviewed, within `maxFee`.
+   * `confirmedReal`: required for a Mainnet request, as for `payQuote`.
+   */
+  payRequest(peerPubKeyZ32: string, paymentId: string, options?: { via?: "lightning"; maxFee?: number; confirmedReal?: boolean }): Promise<void>;
   reclaim(paymentId: string): Promise<void>;
   getPayment(paymentId: string): ChatPayment | null;
 }

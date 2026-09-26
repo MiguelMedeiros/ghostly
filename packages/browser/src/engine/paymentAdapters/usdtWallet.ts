@@ -5,7 +5,7 @@ import type { WalletMode } from '../../shared/mints';
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from './modeGate';
 import { walletKey } from './walletNetworks';
 import { STORES, store, transact, wrap } from '../../shared/idb';
-import { UsdtAdapter, type UsdtConfig } from './usdt';
+import { PUBLIC_USDT_RPC, UsdtAdapter, type UsdtConfig } from './usdt';
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
 import type { SavedIntent } from './coordinator';
 
@@ -16,9 +16,9 @@ export interface UsdtWalletView {
 }
 export interface UsdtCreate {network:UsdtConfig['network'];provider:string;token:string;password?:string;mnemonic?:string}
 /** Every new profile starts with this wallet: an address to receive on, nothing to set up. */
-export const DEFAULT_USDT = {network:'ethereum',provider:'https://ethereum.publicnode.com',token:ETHEREUM_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
+export const DEFAULT_USDT = {network:'ethereum',provider:PUBLIC_USDT_RPC.ethereum,token:ETHEREUM_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
 /** A Testnet USDT wallet starts on Sepolia, with Aave's test USDT (anyone can mint it from their faucet). */
-export const TESTNET_USDT = {network:'sepolia',provider:'https://ethereum-sepolia-rpc.publicnode.com',token:SEPOLIA_TEST_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
+export const TESTNET_USDT = {network:'sepolia',provider:PUBLIC_USDT_RPC.sepolia,token:SEPOLIA_TEST_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
 /** Ethereum carries real USDT; Sepolia and a local chain carry worthless test tokens. */
 export const usdtMode=(network:UsdtConfig['network']):WalletMode=>network==='ethereum'?'mainnet':'testnet';
 /** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
