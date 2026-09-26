@@ -244,7 +244,12 @@ mod tests {
         ] {
             assert!(!is_public(private.parse().unwrap()), "{private}");
         }
-        for public in ["93.184.215.14", "1.1.1.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"] {
+        for public in [
+            "93.184.215.14",
+            "1.1.1.1",
+            "2606:4700:4700::1111",
+            "::ffff:8.8.8.8",
+        ] {
             assert!(is_public(public.parse().unwrap()), "{public}");
         }
     }
