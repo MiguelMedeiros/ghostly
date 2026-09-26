@@ -88,6 +88,9 @@ export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
   // Loaded after IndexedDB is in place: nothing of the engine may open its database first.
   const iroh = await import("@ghostly/iroh-web");
   iroh.initSync({ module: irohWasmBytes() });
+  // Files sent and received are real files in the profile's folder, as on the Desktop.
+  const [{ registerFileBytes }, { NodeFileBytes }] = await Promise.all([import("@ghostly/browser/shared/fileBytes"), import("./fileBytes")]);
+  registerFileBytes("native", async () => new NodeFileBytes(paths.files), true);
   const [{ EngineServer }, { createHyperEndpoint }] = await Promise.all([
     import("@ghostly/browser/engine/server"),
     import("../../../../native-transports/hyperdht/endpoint.mjs"),

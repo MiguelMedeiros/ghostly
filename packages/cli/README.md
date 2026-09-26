@@ -5,8 +5,8 @@ the extension and the Desktop, on Node. A bot keeps a profile online with `ghost
 `ghostly listen` (JSON lines), and acts with the other commands (JSON answers). The contract behind it, and why it
 is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md).
 
-> Status: phase 2 (profiles, invites, one chat, basic groups, the event stream and hooks; wallets and payments).
-> Files, identities, shared services and advanced groups come in the next phases; every engine call is already
+> Status: phases 1 to 3a (profiles and pictures, invites, one chat, groups with their admin tools, the event stream
+> and hooks, wallets and payments, files and voice notes). Identities and shared services come next; every engine call is already
 > reachable through `ghostly engine <method>`. The older Rust `ghostly-cli` (the `cli/` folder) stays as the
 > compatibility client for v0.4 chats.
 
@@ -85,6 +85,12 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `group leave <group>`, `group forget <group> --yes`, `group accept\|decline <group>` | Membership |
 | `listen [--since seq] [--cursor file] [--type t]… [--exec cmd] [--webhook url] [--print]` | The event stream |
 | `events [--since seq]` | What the event journal holds, without following |
+| `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
+| `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin |
+| `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link; the picture |
+| `file send <chat> <path> [--name n] [--mime t] [--voice <ms> [--peaks …]]` | A file, or a voice note |
+| `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel <chat> <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3) |
+| `file save <file> [--dir d \| --path p] [--force]` | Write a received file to disk (never over one without `--force`) |
 | `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
 | `wallet create <type> [--network testnet] [--provider id] [--value name=value]…` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark`, `bitcoin` (BDK), `usdt` |
 | `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
@@ -143,7 +149,8 @@ refused without it.
   announced itself; not a message), `chat.announced`, `message.received`, `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.deleted`, `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.message` (`message.mentioned` when it names this
-  profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`, `payment.created` and
+  profile), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
+  `file.stage`, `file.done`, `file.failed`, `group.deleted`, `group.removed`, `payment.created` and
   `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
   settled|failed, network, method), `call.offer` (a call came; headless
   Ghostly has no media), `events.gap` (the journal no longer holds what `--since` asked for).
@@ -172,6 +179,7 @@ Methods: `status`, `profile.get|set`, `settings.get|set`, `invite.create|join`, 
 delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|request|payRequest|accept`,
 `group.create|join|list|get|history|send|leave|forget|accept|decline`, `wallet.list|create|remove|faucet|history|
 receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `payment.list|check|reclaim`,
+`file.send|list|action|save`, `group.invite|remove|admin|rotate|link|picture`, `profile.picture`,
 `events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
 `{"method":"<engine call>","params":{…},"confirmReal":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.

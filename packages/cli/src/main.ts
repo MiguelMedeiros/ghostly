@@ -367,7 +367,7 @@ export async function main(input: string[]): Promise<number> {
   if (argv[0] === "--version" || argv[0] === "version") { print({ version: VERSION }); return 0; }
   const [first, second] = argv;
   const two = second && !second.startsWith("-") ? `${first} ${second}` : "";
-  if (first === "profile") { await profileCommand(second, argv.slice(2)); return 0; }
+  if (first === "profile" && !COMMANDS[two]) { await profileCommand(second, argv.slice(2)); return 0; }
   if (first === "daemon") { await daemonCommand(argv.slice(1)); return -1; }
   if (first === "listen") { await listenCommand(argv.slice(1)); return -1; }
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }

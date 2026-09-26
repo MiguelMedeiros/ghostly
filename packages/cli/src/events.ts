@@ -40,6 +40,7 @@ export class EventHub {
   private chats = new Map<string, ChatShape>();
   private groups = new Map<string, GroupShape>();
   private payments = new Map<string, string>();
+  private transfers = new Map<string, string>();
   private baselined = false;
   private db!: IDBDatabase;
   state: EngineState | null = null;
@@ -196,6 +197,17 @@ export class EventHub {
       const json = paymentJson(payment);
       if (before === undefined) this.emit("payment.created", `payment.created:${id}`, { chat: payment.linkId, payment: json });
       else this.emit("payment.updated", `payment.updated:${id}:${payment.state}:${this.now()}`, { chat: payment.linkId, payment: json });
+    }
+    for (const [id, transfer] of Object.entries(state.transfers ?? {})) {
+      const shape = `${transfer.state}|${transfer.stage ?? ""}`, before = this.transfers.get(id);
+      this.transfers.set(id, shape);
+      if (quiet || before === shape) continue;
+      const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
+      const fields = { chat, file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
+      if (transfer.state === "done") this.emit("file.done", `file.done:${id}`, fields);
+      else if (transfer.state === "failed") this.emit("file.failed", `file.failed:${id}:${this.now()}`, { ...fields, retry: !!transfer.retry });
+      else if (transfer.stage === "asking" && fields.direction === "in") this.emit("file.offered", `file.offered:${id}:${this.now()}`, { ...fields, room: transfer.room ?? null });
+      else if (transfer.stage) this.emit("file.stage", `file.stage:${id}:${transfer.stage}:${this.now()}`, { ...fields, stage: transfer.stage, ...(transfer.pausedBy ? { pausedBy: transfer.pausedBy } : {}) });
     }
     this.state = state;
     for (const listener of this.stateListeners) {

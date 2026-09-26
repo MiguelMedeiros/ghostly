@@ -488,6 +488,8 @@
     {"id":"headless.web-interop","wisp":"11xx-headless","kind":"protocol","clients":["web","cli"],"infra":["pkarr-relay"],"title":"A headless bot and the web app in one chat, invites both ways, live over WebRTC (libdatachannel and Chromium)"},
     {"id":"headless.wallets","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["cashu-mint"],"title":"Headless wallets: list with balances, create (Bark and Fedimint refused on Node), remove with acceptLoss, faucet, receive, Lightning cards"},
     {"id":"headless.payments","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["cashu-mint"],"title":"Headless payments: pay and request in a chat, pay a request, pay an invoice or address, payment events; Mainnet only with --confirm-real"},
+    {"id":"headless.files","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless files: send (and voice notes), consent over 25 MiB with file accept, save byte for byte, transfer events"},
+    {"id":"headless.group-admin","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless group admin and pictures: picture (admin only, JPEG checked), link reset, rotate, profile picture"},
     {"id":"headless.groups","wisp":"11xx-headless","kind":"feature","clients":["cli"],"infra":["pkarr-relay"],"title":"Headless community groups: create with a link, join, send with @mentions, mention flag on receipt"}
   ],
   "paths": {

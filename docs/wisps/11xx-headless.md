@@ -4,12 +4,12 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.3 |
+| Revision | 0.4 |
 | Updated | 2026-09-26 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
-| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 and 2 on `dev` |
+| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1, 2 and 3a on `dev` |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -36,7 +36,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 | Need | Browser/Desktop today | Headless (Node) |
 |---|---|---|
 | Storage (IndexedDB) | The browser's IndexedDB | fake-indexeddb for the exact semantics, made durable per profile: a snapshot plus an append-only journal, each committed read-write transaction fsynced before the engine hears `complete` (`packages/cli/src/runtime/storage.ts`). A SQLite-backed store can replace it behind the same module. |
-| Files | OPFS (web), native files through Rust (Desktop) | Files under the profile's folder (phase 3) |
+| Files | OPFS (web), native files through Rust (Desktop) | Real files under the profile's folder (`files/<space>/<id>`, 0600), registered as the engine's `native` backend (`src/runtime/fileBytes.ts`) |
 | DHT floor, Pkarr | HTTP relays (web); Mainline DHT direct (Desktop, [#289](https://github.com/MiguelMedeiros/ghostly/pull/289)) | HTTP relays, as the web app; DHT-direct is planned (phase 3) |
 | HyperDHT ([103](103-hyperdht.md)) | Through a relay (web); a Node sidecar (Desktop) | Native, in process: the Desktop sidecar's own endpoint (`native-transports/hyperdht/endpoint.mjs`) |
 | Iroh ([102](102-iroh.md)) | wasm, relay only (web); native (Desktop) | The wasm build, relay only, as the web app ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)). The native `iroh-peer` bridge is an option later. |
@@ -82,7 +82,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 - `seq` grows by one per event in a profile, across restarts. `listen --since <seq>` replays what the journal still holds (the last 10,000 events) before following.
 - `id` is stable for the fact it reports: the same message received is the same id whenever the daemon derives it again, so a bot that restarts dedupes by `id`.
-- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.offer`; `events.gap` (a replay asked for more than the journal keeps). Later phases add `file.*` and `identity.*`.
+- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.offer`; `events.gap` (a replay asked for more than the journal keeps). `file.offered`, `file.stage`, `file.done`, `file.failed` (transfers, by file id). A later phase adds `identity.*`.
 - Which messages were reported is kept in the profile's own store (a database of the CLI's beside the engine's): a restart reports only what is new, a message that arrived while no process derived events (a crash) is reported at the next start, and a profile's first start reports none of the history it already had.
 - As the app's chat screen does, the side that joined says `👋 <name> joined` once the chat first goes live and the other side answers once; each is said once per chat, across restarts.
 - Hooks: `listen --exec "<command>"` runs the command once per event, in order, with the event on its stdin; `listen --webhook <url>` POSTs each event to a local bridge (loopback only); `listen --cursor <file>` records the last event handled (the acknowledgement), and a restarted listener resumes after it. With no daemon running, `listen` becomes the daemon, socket included, so a hook can answer with `ghostly send`.
@@ -105,7 +105,7 @@ Status: **Phase 1** (in the first pull request), **Planned (phase n)**, or **Not
 | Area | Feature | Status |
 |---|---|---|
 | Profiles | Create, list, use, remove; per-profile folder, files 0600 | Phase 1 |
-| Profiles | Name and picture shown to contacts | Phase 1 (`profile set --name`); picture phase 3 |
+| Profiles | Name and picture shown to contacts | Phase 1 (`profile set --name`), picture phase 3a (a JPEG within the bounds contacts check; no image library on Node to scale one) |
 | Profiles | Backup and restore (WISP 05 bundle) | Planned (phase 3) |
 | Invites | Create a `ghostly1` invite and its link; join one; the self-invite guard | Phase 1 |
 | Invites | Pairing progress | Phase 1 (`chat.pairing` events, `chat wait`) |
@@ -119,9 +119,9 @@ Status: **Phase 1** (in the first pull request), **Planned (phase n)**, or **Not
 | Chats | Rich text | Not applicable: text is text; the bot formats it |
 | Chats | Link previews made by the sender | Planned (phase 3, `--preview`) |
 | Chats | Hold for an away contact (S3) | Planned (phase 3) |
-| Files | Send, receive into a folder, consent for large files (re-asked after expiry, #302), progress events; voice notes as files | Planned (phase 3) |
+| Files | Send, save to a folder, consent for files over 25 MiB (files/3; the engine re-asks after expiry, #302), pause, resume, cancel, events; voice notes (`--voice <ms>`) | Phase 3a |
 | Groups | Create (community with its link, or a private mesh), join by link, leave, forget, accept or decline an invitation, list, send, history, @mentions in and out | Phase 1 (needs WebRTC) |
-| Groups | Admin: remove, make admin, rotate, link on/off, picture; invite a contact | Planned (phase 3) |
+| Groups | Admin: remove, make admin, rotate, link on/off/reset, picture; invite a contact | Phase 3a |
 | Payments | Wallet instances per network (the New flow types), list, balance, remove with the #303 protections | Phase 2 (Bark and Fedimint: app only, see below) |
 | Payments | Several Lightning cards, default for receiving | Phase 2 |
 | Payments | Testnet faucet | Phase 2 |

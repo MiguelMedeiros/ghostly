@@ -89,6 +89,17 @@ ghostly group send Support "hi @Ana" --mention Ana # the mentioned member is wri
 ghostly group history Support
 ```
 
+## Files
+
+```bash
+ghostly file send alice ./report.pdf               # a file (paths are this machine's)
+ghostly file send alice ./note.ogg --voice 4200    # a voice note of 4.2 s
+ghostly file save <file id> --dir ./inbox          # a received file (message.received carries message.file.id)
+ghostly file accept alice <file id>                # a file over 25 MiB waits for this (file.offered event)
+```
+
+Only accept and save files you expect: they come from other people.
+
 ## Pay and get paid
 
 ```bash
