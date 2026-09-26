@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, type ComponentType } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { parseMessage, type Segment } from "../../lib/parse";
 import { CodeBlock } from "./CodeBlock";
-import { VIEWS } from "./views";
+import { VIEWS, type AtomViewProps } from "./views";
 import "./rich-text.css";
 
 /** `||spoiler||`: covered until tapped (or Enter/Space), and read out as hidden text until then. */
@@ -41,7 +41,7 @@ function segments(list: Segment[], sentAt: number | undefined, key = ""): React.
         return <Spoiler key={k}>{inner}</Spoiler>;
       }
       case "atom": {
-        const View = VIEWS[segment.kind];
+        const View = VIEWS[segment.kind] as ComponentType<AtomViewProps> | undefined;
         return View ? <View key={k} atom={segment} sentAt={sentAt} /> : segment.text;
       }
     }

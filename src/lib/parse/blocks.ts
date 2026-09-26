@@ -40,9 +40,10 @@ export function parseMessage(text: string, ctx: ParseContext = {}, detectors: re
     // The line break before the fence belongs to the block.
     paragraph(cursor, found.index);
     blocks.push({ type: "codeblock", code, ...(lang ? { lang } : {}) });
+    // The next fence may start on the very next line: look from the line break, which the pattern needs.
+    fence.lastIndex = close + 3;
     cursor = close + 3;
     if (text[cursor] === "\n") cursor++;
-    fence.lastIndex = cursor;
   }
   paragraph(cursor, text.length);
   return blocks;

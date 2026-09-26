@@ -37,7 +37,7 @@ export interface ParseContext {
 
 /**
  * An inline detector: recognises atoms in the text outside code. Adding one is one line in `detectors.ts`
- * (and, for a custom look, one line in `src/components/rich/views.tsx`).
+ * (and, for a custom look, one line in `src/components/rich/views.ts`).
  */
 export interface Detector<K extends string = string, D = unknown> {
   kind: K;

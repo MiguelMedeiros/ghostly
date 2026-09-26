@@ -1,10 +1,10 @@
-import { useState, type ComponentType } from "react";
+import { useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import type { Atom, TimeData } from "../../lib/parse";
 import { CopyButton } from "./CopyButton";
 
 /** A web address: a new tab, with no opener and no referrer. */
-function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
+export function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
   return (
     <a href={atom.data.url} target="_blank" rel="noopener noreferrer" className="text-link underline hover:decoration-2 break-all">
       {atom.text}
@@ -13,7 +13,7 @@ function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
 }
 
 /** A long key or token: one line until "Show all", and Copy either way. */
-function BlobView({ atom }: { atom: Atom<"blob", null> }) {
+export function BlobView({ atom }: { atom: Atom<"blob", null> }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   return (
@@ -40,7 +40,7 @@ function localLabel(at: number, sameDay: boolean): string {
 }
 
 /** A time with its zone: the reader's local time on hover (the title) or on a tap, next to what was written. */
-function TimeView({ atom, sentAt }: { atom: Atom<"time", TimeData>; sentAt?: number }) {
+export function TimeView({ atom, sentAt }: { atom: Atom<"time", TimeData>; sentAt?: number }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const sent = new Date(sentAt ?? Date.now());
@@ -55,19 +55,3 @@ function TimeView({ atom, sentAt }: { atom: Atom<"time", TimeData>; sentAt?: num
     </span>
   );
 }
-
-export interface AtomViewProps<A extends Atom = Atom> {
-  atom: A;
-  /** When the message was sent (ms). */
-  sentAt?: number;
-}
-
-/**
- * How each kind of atom looks, by the detector's `kind` (src/lib/parse/detectors.ts). A kind with no view here shows
- * as the text it matched, so a new detector works before it has a look of its own.
- */
-export const VIEWS: Record<string, ComponentType<AtomViewProps<any>>> = {
-  link: LinkView,
-  blob: BlobView,
-  time: TimeView,
-};
