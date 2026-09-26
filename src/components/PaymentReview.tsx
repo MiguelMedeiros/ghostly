@@ -7,17 +7,19 @@ import {ConfirmRealMoney} from './ConfirmRealMoney';
 /**
  * A payment before it goes out, and its status after: the amount, the fee, the destination, and which money it is.
  * Test money says so and goes on Approve; real money says so, and Approve first asks once more, in words, before
- * anything is sent. Nothing leaves the wallet until that confirmation.
+ * anything is sent. Nothing leaves the wallet until that confirmation. `onSent`, when given, is called once an approved
+ * payment has gone out (submitted or settled), so a chat's sheet can close and leave its status to the chat's bubble;
+ * one that failed, or whose outcome is not known, stays here with its error.
  */
-export function PaymentReview({review:initial,wallet,onClose}:{review:Review;wallet:WalletPlatform;onClose:()=>void}) {
+export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void}) {
  const [saved,setReview]=useState(initial),[busy,setBusy]=useState(false),[error,setError]=useState(''),[confirming,setConfirming]=useState(false);
  const review=wallet.getState()?.intents?.find(i=>i.id===saved.id)??saved;
  const token=review.method==='usdt';
  const network=walletNetworkOf(review.network),real=network==='mainnet',unit=token?review.asset:satsOf(network);
  const shown=token?formatPaymentAmount(review.amount,review.decimals):review.amount.toLocaleString();
- const run=async(action:()=>Promise<Review>)=>{setBusy(true);setError('');try{setReview(await action());}catch(e){setError(e instanceof Error?e.message:'Could not update this payment. Check its saved status.');}finally{setBusy(false);}};
+ const run=async(action:()=>Promise<Review>):Promise<Review|null>=>{setBusy(true);setError('');try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?e.message:'Could not update this payment. Check its saved status.');return null;}finally{setBusy(false);}};
  // Only the real-money step says so: the engine refuses a Mainnet approval without it.
- const approve=()=>void run(()=>wallet.approvePayment(review.id,real)).then(()=>setConfirming(false));
+ const approve=()=>void run(()=>wallet.approvePayment(review.id,real)).then(next=>{setConfirming(false);if(next&&(next.state==='submitted'||next.state==='settled'))onSent?.();});
  const button='rounded-lg px-3 py-2 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40';
  return <section aria-label="Payment review" className="rounded-xl border border-border p-3 space-y-3" data-testid="payment-review" data-network={network}>
   <h3 className="text-text-primary text-sm font-semibold flex items-center gap-2 flex-wrap">{review.state==='pending'?'Review payment':'Payment status'}<NetworkTag network={network} testId="review-network"/></h3>

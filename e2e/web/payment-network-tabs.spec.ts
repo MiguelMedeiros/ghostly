@@ -4,7 +4,7 @@ import { closePayments, openPayments, paymentCard, paymentNetwork } from "../sup
 
 /**
  * The chat's payment sheet shows one network's cards at a time, under Mainnet | Testnet tabs (the Wallets page's):
- * on Pay and on Accept. Alice has Cashu on both networks (her Mainnet mints answered by the suite's own mint, so no
+ * on Pay and on Accept. A payment sent or a request made closes it, back to the chat; one that fails keeps it. Alice has Cashu on both networks (her Mainnet mints answered by the suite's own mint, so no
  * real money moves); Bob has Testnet Cashu only. The tab only filters: Alice pays test sats on the Testnet card, and
  * her Accept switches are saved per network.
  */
@@ -12,7 +12,7 @@ import { closePayments, openPayments, paymentCard, paymentNetwork } from "../sup
 const mainnetCards = "[data-testid^=payment-card-][data-testid$=-mainnet]", testnetCards = "[data-testid^=payment-card-][data-testid$=-testnet]";
 
 test("the payment sheet's Mainnet | Testnet tabs: one network's cards on Pay and Accept, a Testnet payment, switches kept per network", {
-  tag: ["@network", "@feature:payments.chat.cards", "@feature:payments.chat.networks", "@feature:payments.chat.methods", "@feature:payments.cashu.send"],
+  tag: ["@network", "@feature:payments.chat.cards", "@feature:payments.chat.networks", "@feature:payments.chat.methods", "@feature:payments.cashu.send", "@feature:payments.cashu.request"],
 }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("tabs-alice", { viewport: { width: 1280, height: 900 } }), peer("tabs-bob")]);
   await mockMainnetMints(alice.context);
@@ -51,10 +51,35 @@ test("the payment sheet's Mainnet | Testnet tabs: one network's cards on Pay and
   const review = sheet.getByTestId("payment-review");
   await expect(review.getByTestId("review-network")).toHaveText("Test money");
   await review.getByRole("button", { name: "Approve payment" }).click();
-  await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state")).toHaveText(/Received/, { timeout: 60_000 });
-  // The review is where the card was: Escape closes the sheet.
-  await page.keyboard.press("Escape");
+  // Sent: the sheet closes, back to the chat with the keyboard on the message field; the bubble tells the rest.
   await expect(sheet).toHaveCount(0);
+  await expect(page.getByPlaceholder("Message…")).toBeFocused();
+  await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "21" })).toBeVisible();
+  await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state")).toHaveText(/Received/, { timeout: 60_000 });
+
+  // A request made closes the sheet too, and its bubble is in both chats.
+  await openPayments(page);
+  await paymentCard(page, "cashu-testnet").click();
+  await page.getByTestId("payment-amount").fill("5");
+  await page.getByTestId("payment-request").click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByPlaceholder("Message…")).toBeFocused();
+  for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: /\b5 test sats/ })).toBeVisible({ timeout: 60_000 });
+
+  // A request that fails (the mint does not answer) keeps the sheet, with the error, to try again.
+  const refuse = /^https:\/\/testnut\.cashu\.space\/v1\/mint\/quote/;
+  await alice.context.route(refuse, (route) => route.abort("connectionrefused"));
+  await openPayments(page);
+  await paymentCard(page, "cashu-testnet").click();
+  await page.getByTestId("payment-amount").fill("6");
+  await page.getByTestId("payment-request").click();
+  await expect(sheet.getByRole("alert")).toBeVisible({ timeout: 60_000 });
+  await expect(sheet).toBeVisible();
+  await expect(page.getByTestId("payment-request")).toBeEnabled();
+  await alice.context.unroute(refuse);
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveAttribute("data-side", "cards");
+  await closePayments(page);
 
   // Accept: Lightning off on Testnet, Cashu off on Mainnet, one Save for both tabs.
   await openPayments(page, "accept");

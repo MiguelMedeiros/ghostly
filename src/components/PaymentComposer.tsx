@@ -29,6 +29,11 @@ interface PaymentComposerProps {
   /** `rail`: the card it was made on, for a request that must carry that way of paying only (groups). `network`: the card's. */
   onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: ChatRail, network?: WalletNetwork) => Promise<string | null>;
   onClose: () => void;
+  /**
+   * A payment sent or a request made: the sheet is done, and the chat's bubble shows the rest. Without it, `onClose`.
+   * A failure never calls it: the sheet stays with its error.
+   */
+  onDone?: () => void;
   reviewContext?:{wallet:WalletPlatform;peer:string;linkId:string};
   /** Who the chat is with, as the chat shows them. */
   contact?: string;
@@ -59,7 +64,7 @@ const CASHU_FEE_CAP = 10;
  * written, then Request or Send. Each card is one wallet on one network; every send still stops at a review, and a
  * card is offered only where the contact has a wallet of its network.
  */
-export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewContext, contact, rails, sendUnavailable, onBack, describe, payUnavailable, onSaveMethods }: PaymentComposerProps) {
+export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = onClose, reviewContext, contact, rails, sendUnavailable, onBack, describe, payUnavailable, onSaveMethods }: PaymentComposerProps) {
   const { t } = useI18n();
   const nav = useAppNavigation();
   const wallet = reviewContext?.wallet;
@@ -212,7 +217,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
         // Ecash sent without a review: on real money, only once the second step confirms it (no network is Mainnet).
         if (network !== "testnet" && !confirmedReal) { setConfirmSend(true); return; }
         const err = await onSend(value, memo, network, confirmedReal || undefined);
-        if (err) setError(err); else onClose();
+        if (err) setError(err); else onDone();
       }
     } catch (e) { setError(e instanceof Error ? e.message : "Could not prepare payment"); }
     finally { setBusy(null); }
@@ -247,7 +252,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     setError(""); setBusy("request");
     try {
       const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method, rail, network);
-      if (err) setError(err); else onClose();
+      if (err) setError(err); else onDone();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not prepare request"); }
     finally { setBusy(null); }
   };
@@ -278,7 +283,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
             <span className="payment-back-meta">{card ? `${card.balance} · with ${who}` : `With ${who}`}</span>
           </span>
         </div>
-        {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} /> : <>
+        {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} onSent={onDone} /> : <>
           <label className="payment-back-amount" data-over={tooMuch || undefined}>
             <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={`Amount in ${unit}`}
               value={amount} onChange={(e) => setAmount(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
