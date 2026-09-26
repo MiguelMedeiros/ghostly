@@ -668,6 +668,7 @@
     "src/components/wallet/RemoveWallet.tsx": ["wallet.instances.remove"],
     "src/components/wallet/TestCoins.tsx": ["wallet.test-coins"],
     "src/components/wallet/names.ts": ["wallet.instances.*"],
+    "src/components/wallet/{NetworkTabs.tsx,wallet-networks.css}": ["wallet.deck", "wallet.instances.*", "payments.chat.*"],
     "src/components/wallet/providers/**/*": ["wallet.lightning.sources","wallet.onchain.sources","sdk.plugin.lightning"],
     "src/components/wallet/providers/BdkForm.tsx": ["wallet.onchain.bdk.*"],
     "src/components/wallet/providers/BreezForm.tsx": ["wallet.lightning.breez.*"],
