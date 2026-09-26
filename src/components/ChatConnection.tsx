@@ -172,7 +172,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
               <p className="font-medium text-text-primary">{notLive.label}</p>
               {notLive.lines.map(line => <p key={line} className="mt-0.5 break-words">{line}</p>)}
             </div>}
-            {discoveryFailure && <p data-testid="discovery-help">{awaitingJoin && "No contact yet. "}Discovery will retry automatically. You can still share this invite or choose a delivery mode. If this persists, check your internet connection or <Link className={`text-accent underline ${focus}`} to="/settings" onClick={(e) => { e.preventDefault(); nav.open("/settings"); }}>review relay settings</Link>. DHT-only also needs discovery.</p>}
+            {discoveryFailure && <p data-testid="discovery-help">{awaitingJoin && "No contact yet. "}Discovery will retry automatically. You can still share this invite or choose a delivery mode. If this persists, check your internet connection or <Link className={`text-accent underline ${focus}`} to="/settings/advanced" onClick={(e) => { e.preventDefault(); nav.open("/settings/advanced"); }}>review relay settings</Link>. DHT-only also needs discovery.</p>}
             {summary && <dl data-testid="connection-summary" className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5">
               <dt>Transport</dt><dd className="min-w-0 text-text-primary">{summary.name}</dd>
               {summary.relays && <><dt>Path</dt><dd data-testid="connection-relayed" className="min-w-0 text-text-primary break-words">Relayed{summary.relays.length ? ` via ${summary.relays.join(", ")}` : ""}</dd></>}

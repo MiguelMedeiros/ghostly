@@ -5,8 +5,9 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { listSessions } from "../lib/storage";
-import { COLOR_THEME_OPTIONS, type ColorScheme } from "../lib/settings";
-import { createProfile, currentProfile, listProfiles, renameProfile, switchProfile, THEME_COLOR, type ProfileEntry } from "../lib/profiles";
+import { type ColorScheme } from "../lib/settings";
+import { ColorSwatches } from "../components/ColorSwatches";
+import { createProfile, currentProfile, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
 import { useEngineState, useIdentityAttention } from "../lib/identities";
@@ -34,7 +35,7 @@ function useProfiles() {
 export function Profile() {
   const nav = useAppNavigation();
   const { t } = useI18n();
-  const { settings, updateColorTheme, updateColorScheme, updateDefaultNickname, randomizeNickname } = useSettings();
+  const { settings, updateColorScheme, updateDefaultNickname, randomizeNickname } = useSettings();
   const platform = useServicesPlatform();
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
@@ -77,16 +78,7 @@ export function Profile() {
       {error && <Notice tone="error">{error}</Notice>}
 
       <Section title="Look">
-        <Row label="Color">
-          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Profile color">
-            {COLOR_THEME_OPTIONS.map((option) => (
-              <button key={option.value} type="button" role="radio" aria-checked={settings.colorTheme === option.value} aria-label={t(option.labelKey as Parameters<typeof t>[0])} title={option.description} data-testid={`profile-theme-${option.value}`}
-                onClick={() => updateColorTheme(option.value)}
-                className={`w-8 h-8 rounded-full border-2 transition-transform cursor-pointer ${settings.colorTheme === option.value ? "border-text-primary scale-110" : "border-transparent hover:scale-105"}`}
-                style={{ background: THEME_COLOR[option.value] }} />
-            ))}
-          </div>
-        </Row>
+        <Row label="Color"><ColorSwatches label="Profile color" testIdPrefix="profile-theme" /></Row>
         <Row label="Mode"><Segmented label="Mode" value={settings.colorScheme} options={schemes} onChange={updateColorScheme} /></Row>
         <Row label="Name in chats">
           <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} value={settings.defaultNickname} maxLength={20} placeholder="Anonymous" onChange={(e) => updateDefaultNickname(e.target.value)} />

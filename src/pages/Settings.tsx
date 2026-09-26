@@ -7,14 +7,15 @@ import { notificationPermission, requestNotifications, type NoticePermission } f
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
 import { DomainProofSettings } from "../components/DomainProofSettings";
-import { Block, ButtonGroup, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
+import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
+import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { currentProfile, listProfiles } from "../lib/profiles";
 import { openProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { Switch } from "../components/wallet/ui";
+import { Button, Switch } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { Select } from "../components/ui/Select";
 import {
@@ -25,11 +26,9 @@ import {
   clearAllData,
   LANGUAGE_OPTIONS,
   COLOR_SCHEME_OPTIONS,
-  COLOR_THEME_OPTIONS,
   APP_WEBSITE,
   APP_LICENSE,
   type ColorScheme,
-  type ColorTheme,
   type Language,
 } from "../lib/settings";
 import { deleteAllSessions, listSessions } from "../lib/storage";
@@ -37,7 +36,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 
 export function Settings() {
   const nav = useAppNavigation();
-  const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
+  const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
     updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
@@ -92,10 +91,6 @@ export function Settings() {
 
   const handleColorSchemeChange = (scheme: ColorScheme) => {
     updateColorScheme(scheme);
-  };
-
-  const handleColorThemeChange = (theme: ColorTheme) => {
-    updateColorTheme(theme);
   };
 
   const handleLanguageChange = (language: Language) => {
@@ -191,9 +186,25 @@ export function Settings() {
   };
 
   const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
-  const button = "px-4 py-2 min-h-10 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
   const lockOn = lockEnabled && hasPassword;
   const systemOn = settings.notifications.systemEnabled && noticePermission === "granted";
+  const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); };
+  const deleteChats = () => {
+    deleteAllSessions();
+    setConfirmDeleteChats(false);
+    setChatCount(0);
+    setStorageInfo(getStorageUsage());
+    window.dispatchEvent(new Event("session-updated"));
+    setMessage({ type: "success", text: t("sidebar.deleteAllChats") });
+  };
+  const clearData = async () => {
+    setConfirmClearData(false);
+    setMessage({ type: "success", text: t("settings.dataCleared") });
+    await clearAllData();
+    setStorageInfo(getStorageUsage());
+    // The running peer still holds what was just deleted; start it over.
+    window.location.replace(window.location.pathname);
+  };
 
   return (
     <Page title={t("settings.title")} width="md" testId="settings-page">
@@ -214,50 +225,26 @@ export function Settings() {
           <LinkRow testId="settings-profile-switch" label={t("profileSwitcher.title")} hint={t("profileSwitcher.holdHint")}
             value={listProfiles().length > 1 ? listProfiles().length : undefined} onClick={openProfileSwitcher} />
         )}
-        <Block>
-          <div>
-            <label htmlFor="settings-nickname" className="text-text-primary text-sm block">{t("settings.defaultNickname")}</label>
-            <p className="text-text-muted text-xs mt-0.5">{t("settings.defaultNicknameHint")}</p>
-          </div>
+        <Field label={t("settings.defaultNickname")} hint={t("settings.defaultNicknameHint")} htmlFor="settings-nickname">
           <InputGroup>
             <input id="settings-nickname" type="text" value={settings.defaultNickname} onChange={(e) => updateDefaultNickname(e.target.value)}
               placeholder={t("settings.nicknamePlaceholder")} maxLength={20} className={field} />
             <button onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")}
-              className="grid place-items-center w-10 h-10 bg-surface-alt hover:bg-surface-hover border border-border rounded-lg text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
+              className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt transition-colors cursor-pointer">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
           </InputGroup>
-        </Block>
+        </Field>
       </Section>
 
       <Section title={t("settings.appearance")}>
-        <Block>
-          <p className="text-text-primary text-sm">{t("settings.colorTheme")}</p>
-          <FieldGrid min="10.5rem">
-            {COLOR_THEME_OPTIONS.map((option) => (
-              <button key={option.value} onClick={() => handleColorThemeChange(option.value)}
-                className={`flex items-center gap-3 min-w-0 p-3 rounded-xl border-2 transition-all cursor-pointer ${settings.colorTheme === option.value ? "border-accent bg-accent/10" : "border-border hover:border-border-bright bg-surface-alt"}`}>
-                <div className={`w-10 h-10 shrink-0 rounded-lg flex items-center justify-center ${option.value === "classic" ? "bg-[#00a884]" : option.value === "monochrome" ? "bg-gradient-to-br from-white to-gray-400" : option.value === "cyan" ? "bg-[#22d3ee]" : "bg-[#a78bfa]"}`}>
-                  <svg width="20" height="20" viewBox="0 0 64 64" className="text-white drop-shadow-sm" aria-hidden="true">
-                    <g transform="translate(12, 8)">
-                      <path d="M20 4C10.059 4 2 12.059 2 22v18c0 1.5 1.2 2 2 1.2l4-3.2 4 3.2c.8.6 1.6.6 2.4 0L18 38l3.6 3.2c.8.6 1.6.6 2.4 0L28 38l4 3.2c.8.8 2 .3 2-1.2V22C34 12.059 25.941 4 20 4z" fill="currentColor" />
-                      <circle cx="13" cy="20" r="3" fill={option.value === "monochrome" ? "#666" : "#0008"} />
-                      <circle cx="27" cy="20" r="3" fill={option.value === "monochrome" ? "#666" : "#0008"} />
-                    </g>
-                  </svg>
-                </div>
-                <div className="text-left min-w-0">
-                  <span className="text-text-primary text-sm font-medium block truncate">{t(`settings.colorThemes.${option.value}` as const)}</span>
-                  <span className="text-text-muted text-xs block truncate">{option.description}</span>
-                </div>
-              </button>
-            ))}
-          </FieldGrid>
-        </Block>
-        <Row label={t("settings.colorScheme")} hint={t("settings.colorSchemeDescription")}>
-          <div className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
+        <Row label={t("settings.colorTheme")}>
+          <ColorSwatches label={t("settings.colorTheme")} testIdPrefix="settings-theme" />
+        </Row>
+        <Row label={t("settings.colorScheme")}>
+          <div role="group" aria-label={t("settings.colorScheme")} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {COLOR_SCHEME_OPTIONS.map((option) => (
               <button key={option.value} onClick={() => handleColorSchemeChange(option.value)} aria-pressed={settings.colorScheme === option.value}
                 className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
@@ -282,7 +269,7 @@ export function Settings() {
             ))}
           </div>
         </Row>
-        <Row label={t("settings.chatListDensity")} hint={t("settings.chatListDensityDescription")}>
+        <Row label={t("settings.chatListDensity")}>
           <div role="group" aria-label={t("settings.chatListDensity")} data-testid="chat-list-density" className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {(["compact", "comfortable"] as const).map((density) => (
               <button key={density} onClick={() => updateChatListDensity(density)} aria-pressed={settings.chatListDensity === density} data-density={density}
@@ -296,17 +283,38 @@ export function Settings() {
           <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
             options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />
         </Row>
+        <Row label={t("settings.reduceMotion")} hint={t("settings.reduceMotionHint")}>
+          <Switch testId="settings-reduce-motion" label={t("settings.reduceMotion")} checked={settings.reduceMotion} onChange={(on) => updateReduceMotion(on)} />
+        </Row>
+      </Section>
+
+      <Section title={t("settings.notifications")}>
+        <Row label={t("settings.notificationSounds")} hint={t("settings.notificationSoundsDescription")}>
+          <Switch testId="settings-sounds" label={t("settings.notificationSounds")} checked={settings.notifications.soundEnabled} onChange={(on) => updateNotifications({ soundEnabled: on })} />
+        </Row>
+        <Row label={t("settings.systemNotifications")}
+          hint={<span role="status">{noticePermission === "denied" ? t("settings.noticesDenied") : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : t("settings.noticesRunning")}</span>}>
+          <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
+        </Row>
       </Section>
 
       <Section title={t("settings.security")}>
+        <Row label={t("settings.linkPreviews")} hint={t("settings.linkPreviewsHint")} info={t("settings.linkPreviewsInfo")} testId="settings-link-previews-row">
+          <Switch testId="settings-link-previews" label={t("settings.linkPreviews")} checked={settings.linkPreviews} onChange={(on) => updateLinkPreviews(on)} />
+        </Row>
+        <Row label={t("settings.publicProfiles")} hint={t("settings.publicProfilesHint")} info={t("settings.publicProfilesInfo")} testId="settings-public-profiles-row">
+          <Switch testId="settings-public-profiles" label={t("settings.publicProfiles")} checked={loadPublicProfiles} onChange={(on) => void setLoadPublicProfiles(on).catch(() => {})} />
+        </Row>
         <Row label={t("settings.lockScreen")} hint={t("settings.lockScreenDescription")}>
-          <Switch label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
-        </Row>
-        <Row label="Link previews" hint="When you send a link, Ghostly reads the page's title and picture on this device and sends them with the message, so your contact's app never contacts the site. Off: links go as plain text.">
-          <Switch label="Link previews" checked={settings.linkPreviews} onChange={(on) => updateLinkPreviews(on)} />
-        </Row>
-        <Row label="Load public profiles" hint="Identity cards show the picture, name, bio and followers of a verified Nostr, Pubky or Bluesky identity, read from that network (your Nostr relays, nexus.pubky.app, Bluesky's public.api.bsky.app) when the card is on screen. Those servers see your IP address and which identity was looked at. Off: cards show only what the proof carries, and what was loaded is deleted.">
-          <Switch testId="settings-public-profiles" label="Load public profiles" checked={loadPublicProfiles} onChange={(on) => void setLoadPublicProfiles(on).catch(() => {})} />
+          {lockOn && (
+            <Button data-testid="settings-lock-now" onClick={() => { lock(); nav.home(); }} className="inline-flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              {t("settings.lockNow")}
+            </Button>
+          )}
+          <Switch testId="settings-lock" label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
         </Row>
         {hasPassword && (
           <Row label={t("settings.timeout")}>
@@ -314,136 +322,60 @@ export function Settings() {
               options={([1, 5, 15, 30, 60] as const).map((m) => ({ value: String(m), label: t(`settings.timeoutOptions.${m}`) }))} />
           </Row>
         )}
-        {(showPasswordForm || hasPassword) && (
-          <Block>
+        {hasPassword && (
+          <Row label={t("settings.password")}>
+            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : setShowPasswordForm(true))}>
+              {showPasswordForm ? t("common.close") : t("settings.passwordEdit")}
+            </Button>
+          </Row>
+        )}
+        {showPasswordForm && (
+          <Block testId="settings-password-form">
             {hasPassword && (
               <label className="block text-sm text-text-secondary">
                 {t("settings.currentPassword")}
                 <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className={`${field} mt-1`} />
               </label>
             )}
-            <label className="block text-sm text-text-secondary">
-              {t("settings.newPassword")}
-              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`${field} mt-1`} />
-            </label>
-            <label className="block text-sm text-text-secondary">
-              {t("settings.confirmPassword")}
-              <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`${field} mt-1`} />
-            </label>
-            <ButtonGroup fill>
-              <button onClick={handleSetPassword} className={`${button} bg-accent hover:bg-accent-hover text-on-accent`}>
+            <FieldGrid>
+              <label className="block text-sm text-text-secondary">
+                {t("settings.newPassword")}
+                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`${field} mt-1`} />
+              </label>
+              <label className="block text-sm text-text-secondary">
+                {t("settings.confirmPassword")}
+                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`${field} mt-1`} />
+              </label>
+            </FieldGrid>
+            <ButtonGroup>
+              <Button variant="primary" onClick={() => void handleSetPassword()}>
                 {hasPassword ? t("settings.changePassword") : t("settings.setPassword")}
-              </button>
-              {hasPassword && (
-                <button onClick={handleRemovePassword} className={`${button} bg-danger/10 hover:bg-danger/20 text-danger`}>
-                  {t("settings.removePassword")}
-                </button>
-              )}
-              {!hasPassword && showPasswordForm && (
-                <button onClick={() => { setShowPasswordForm(false); setNewPassword(""); setConfirmPassword(""); }} className={`${button} bg-surface-alt hover:bg-surface-hover text-text-secondary`}>
-                  {t("common.cancel")}
-                </button>
-              )}
+              </Button>
+              {hasPassword && <Button variant="danger" onClick={() => void handleRemovePassword()}>{t("settings.removePassword")}</Button>}
+              {!hasPassword && <Button onClick={closePasswordForm}>{t("common.cancel")}</Button>}
             </ButtonGroup>
           </Block>
         )}
-        {hasPassword && lockEnabled && (
-          <Block>
-            <button onClick={() => { lock(); nav.home(); }} className={`${button} w-full flex items-center justify-center gap-2 bg-surface-alt hover:bg-surface-hover text-text-primary`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-              {t("settings.lockNow")}
-            </button>
-          </Block>
-        )}
       </Section>
-
-      <Section title={t("settings.notifications")}>
-        <Row label={t("settings.notificationSounds")} hint={t("settings.notificationSoundsDescription")}>
-          <Switch label={t("settings.notificationSounds")} checked={settings.notifications.soundEnabled} onChange={(on) => updateNotifications({ soundEnabled: on })} />
-        </Row>
-        <Row label={t("settings.systemNotifications")}
-          hint={<span role="status">{noticePermission === "denied" ? t("settings.noticesDenied") : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : t("settings.noticesRunning")}</span>}>
-          <Switch label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
-        </Row>
-        <Row label="Reduce motion" hint="Turn off animations for messages, payments and calls. Your system's setting is respected either way.">
-          <Switch label="Reduce motion" checked={settings.reduceMotion} onChange={(on) => updateReduceMotion(on)} />
-        </Row>
-      </Section>
-
-      <NetworkSettings />
-
-      <DomainProofSettings />
 
       <Section title={t("settings.data")}>
-        <Row label={t("settings.storageUsed")} value={`${formatBytes(storageInfo.used)} (${storageInfo.keys} items)`} />
-        <Block>
-          <div>
-            <p className="text-text-primary text-sm">{t("sidebar.deleteAllChats")}</p>
-            <p className="text-xs text-text-muted mt-0.5">
-              Every conversation on this device goes, along with its messages and files. Your settings and your wallet stay.
-            </p>
-          </div>
-          {confirmDeleteChats ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 animate-fade-in">
-              <span className="text-text-muted text-sm flex-[1_1_10rem]">Delete all {chatCount} chats?</span>
-              <ButtonGroup>
-                <button data-testid="delete-all-chats-confirm"
-                  onClick={() => {
-                    deleteAllSessions();
-                    setConfirmDeleteChats(false);
-                    setChatCount(0);
-                    setStorageInfo(getStorageUsage());
-                    window.dispatchEvent(new Event("session-updated"));
-                    setMessage({ type: "success", text: t("sidebar.deleteAllChats") });
-                  }}
-                  className={`${button} bg-danger/10 hover:bg-danger/20 text-danger`}>
-                  {t("common.confirm")}
-                </button>
-                <button onClick={() => setConfirmDeleteChats(false)} className={`${button} bg-surface-alt hover:bg-surface-hover text-text-secondary`}>
-                  {t("common.cancel")}
-                </button>
-              </ButtonGroup>
-            </div>
-          ) : (
-            <button data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => setConfirmDeleteChats(true)} className={`${button} w-full bg-danger/10 hover:bg-danger/20 text-danger`}>
-              {t("sidebar.deleteAllChats")}
-            </button>
+        <Row label={t("settings.storageUsed")} value={formatBytes(storageInfo.used)} />
+        <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
+          {confirmDeleteChats ? <>
+            <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
+            <Button onClick={() => setConfirmDeleteChats(false)}>{t("common.cancel")}</Button>
+          </> : (
+            <Button variant="danger" data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => setConfirmDeleteChats(true)}>{t("common.delete")}</Button>
           )}
-        </Block>
-        <Block>
-          <div>
-            <p className="text-text-primary text-sm">{t("settings.clearAllData")}</p>
-            <p className="text-xs text-text-muted mt-0.5">{t("settings.clearAllDataDescription")}</p>
-          </div>
-          {confirmClearData ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 animate-fade-in">
-              <span className="text-text-muted text-sm flex-[1_1_10rem]">{t("settings.clearAllDataConfirm")}</span>
-              <ButtonGroup>
-                <button
-                  onClick={async () => {
-                    setConfirmClearData(false);
-                    setMessage({ type: "success", text: t("settings.dataCleared") });
-                    await clearAllData();
-                    setStorageInfo(getStorageUsage());
-                    // The running peer still holds what was just deleted; start it over.
-                    window.location.replace(window.location.pathname);
-                  }}
-                  className={`${button} bg-danger/10 hover:bg-danger/20 text-danger`}>
-                  {t("common.confirm")}
-                </button>
-                <button onClick={() => setConfirmClearData(false)} className={`${button} bg-surface-alt hover:bg-surface-hover text-text-secondary`}>
-                  {t("common.cancel")}
-                </button>
-              </ButtonGroup>
-            </div>
-          ) : (
-            <button onClick={() => setConfirmClearData(true)} className={`${button} w-full bg-danger/10 hover:bg-danger/20 text-danger`}>
-              {t("settings.clearAllData")}
-            </button>
+        </Row>
+        <Row label={t("settings.clearAllData")} hint={confirmClearData ? t("settings.clearAllDataConfirm") : t("settings.clearAllDataDescription")} info={t("settings.clearAllDataInfo")}>
+          {confirmClearData ? <>
+            <Button variant="danger" data-testid="clear-all-data-confirm" onClick={() => void clearData()}>{t("common.confirm")}</Button>
+            <Button onClick={() => setConfirmClearData(false)}>{t("common.cancel")}</Button>
+          </> : (
+            <Button variant="danger" data-testid="clear-all-data" onClick={() => setConfirmClearData(true)}>{t("settings.clear")}</Button>
           )}
-        </Block>
+        </Row>
       </Section>
 
       {update.supported && (
@@ -463,21 +395,26 @@ export function Settings() {
             </span>}
             hint={update.lastCheckedAt ? t("updates.lastChecked", { when: new Date(update.lastCheckedAt).toLocaleTimeString() }) : undefined}>
             {update.update && update.update.apply === "manual" ? (
-              <a href={update.downloadUrl} target="_blank" rel="noopener noreferrer" className={`${button} inline-flex items-center bg-accent hover:bg-accent-hover text-on-accent font-semibold`}>
+              <a href={update.downloadUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent hover:bg-accent-hover text-on-accent font-semibold">
                 {t("updates.download")}
               </a>
             ) : update.update ? (
-              <button onClick={() => void update.install()} disabled={update.stage === "installing"} className={`${button} bg-accent hover:bg-accent-hover text-on-accent font-semibold`}>
+              <Button variant="primary" onClick={() => void update.install()} disabled={update.stage === "installing"}>
                 {update.stage === "installing" ? t("updates.installing") : t(update.update.apply === "restart" ? "updates.restart" : "updates.reload")}
-              </button>
+              </Button>
             ) : (
-              <button onClick={() => void update.check()} disabled={update.stage === "checking"} className={`${button} bg-surface-alt hover:bg-surface-hover text-text-primary`}>
+              <Button onClick={() => void update.check()} disabled={update.stage === "checking"}>
                 {update.stage === "checking" ? t("updates.checking") : t("updates.checkNow")}
-              </button>
+              </Button>
             )}
           </Row>
         </Section>
       )}
+
+      {/* Network and identity checks: rarely changed, and the most to read, on a page of their own. */}
+      <div className="bg-surface rounded-xl">
+        <LinkRow testId="settings-advanced" label={t("settings.advanced")} hint={t("settings.advancedHint")} onClick={() => nav.open("/settings/advanced")} />
+      </div>
 
       <Section title={t("settings.about")}>
         <Row label={t("settings.version")} value={<span className="font-mono">{appVersion}</span>} />
@@ -491,6 +428,17 @@ export function Settings() {
         } />
         <Row label={t("settings.license")} value={APP_LICENSE} />
       </Section>
+    </Page>
+  );
+}
+
+/** Settings → Advanced: how this client reaches the network, and how it checks contacts' domain proofs. */
+export function AdvancedSettings() {
+  const { t } = useI18n();
+  return (
+    <Page title={t("settings.advanced")} width="md" testId="settings-advanced-page">
+      <NetworkSettings />
+      <DomainProofSettings />
     </Page>
   );
 }

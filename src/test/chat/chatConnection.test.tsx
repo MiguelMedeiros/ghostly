@@ -85,7 +85,7 @@ describe("ChatConnection: what the header says", () => {
     banner({ dataLink: "idle", peerOnline: false, discoveryError: "Could not read discovery: timeout" });
     const help = screen.getByTestId("discovery-help");
     expect(help).toHaveTextContent(/^No contact yet\. Discovery will retry automatically/);
-    expect(within(help).getByRole("link", { name: "review relay settings" })).toHaveAttribute("href", "/settings");
+    expect(within(help).getByRole("link", { name: "review relay settings" })).toHaveAttribute("href", "/settings/advanced");
   });
 
   it("shows only an icon in the header: its name and tooltip carry the state", () => {

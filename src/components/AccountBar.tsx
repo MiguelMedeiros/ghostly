@@ -190,7 +190,7 @@ export function AccountBar() {
         <button
           data-testid="account-settings"
           aria-label={t("sidebar.settings")}
-          aria-current={location.pathname === "/settings" ? "page" : undefined}
+          aria-current={location.pathname === "/settings" || location.pathname.startsWith("/settings/") ? "page" : undefined}
           onClick={() => nav.place("/settings")}
           className="account-action text-text-muted hover:text-text-primary hover:bg-surface-alt"
           title={t("sidebar.settings")}
