@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { useI18n } from "../../contexts/I18nContext";
+import { usePublicProfileRequest } from "../../hooks/usePublicProfileRequest";
 import { providerIcon } from "./ProviderIcons";
 import { ProviderMark } from "./ProviderMark";
 import { machineLine, type IdCardContent } from "./idCard";
@@ -31,11 +33,14 @@ export function IdCardMark({ provider, subject }: { provider?: string; subject?:
  * trailing edge, where the provider's mark comes up in the band beside the seal. In a chat's picker, a card shared
  * with that contact wears a check seal (`shared`): on the photo's corner, and beside the mark on the trailing edge.
  * The profile's own Ghostly identity is one of these too (idCard.ts `ghostlyCard`): the profile's picture, or the
- * name's initial, in the photo slot, and "Default" for a status.
+ * name's initial, in the photo slot, and "Default" for a status. An identity with a public profile (a Nostr, Pubky or
+ * Bluesky account) asks for it once its card is on screen, and wears its picture and name.
  */
 export function IdCardFace({ card, after, shared }: { card: IdCardContent; after?: boolean; shared?: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  usePublicProfileRequest(ref, card.lookup);
   return (
-    <span className="id-card-face" data-deck="face" data-after={after || undefined} data-status={card.status} data-shared={shared || undefined}>
+    <span ref={ref} className="id-card-face" data-deck="face" data-profile={card.profile?.found ? "found" : undefined} data-after={after || undefined} data-status={card.status} data-shared={shared || undefined}>
       <span className="id-card-band">
         <span className="id-card-issuer">Ghostly<span className="id-card-issuer-kind"> · Identity</span></span>
         <span className="id-card-status" data-testid={card.status === "expiring" ? "identity-proof-expiring" : undefined}><StatusIcon status={card.status} /><span className="id-card-status-text">{card.statusLabel}</span></span>

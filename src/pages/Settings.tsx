@@ -15,6 +15,7 @@ import { currentProfile, listProfiles } from "../lib/profiles";
 import { openProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Switch } from "../components/wallet/ui";
+import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { Select } from "../components/ui/Select";
 import {
   hashPassword,
@@ -46,6 +47,7 @@ export function Settings() {
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
   const canSwitch = !!useServicesPlatform()?.features.profiles;
+  const loadPublicProfiles = useLoadPublicProfiles();
 
   const [lockEnabled, setLockEnabled] = useState(settings.lockScreen.enabled);
   const [newPassword, setNewPassword] = useState("");
@@ -302,6 +304,9 @@ export function Settings() {
         </Row>
         <Row label="Link previews" hint="When you send a link, Ghostly reads the page's title and picture on this device and sends them with the message, so your contact's app never contacts the site. Off: links go as plain text.">
           <Switch label="Link previews" checked={settings.linkPreviews} onChange={(on) => updateLinkPreviews(on)} />
+        </Row>
+        <Row label="Load public profiles" hint="Identity cards show the picture, name, bio and followers of a verified Nostr, Pubky or Bluesky identity, read from that network (your Nostr relays, nexus.pubky.app, Bluesky's public.api.bsky.app) when the card is on screen. Those servers see your IP address and which identity was looked at. Off: cards show only what the proof carries, and what was loaded is deleted.">
+          <Switch testId="settings-public-profiles" label="Load public profiles" checked={loadPublicProfiles} onChange={(on) => void setLoadPublicProfiles(on).catch(() => {})} />
         </Row>
         {hasPassword && (
           <Row label={t("settings.timeout")}>
