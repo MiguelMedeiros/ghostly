@@ -5,8 +5,8 @@ the extension and the Desktop, on Node. A bot keeps a profile online with `ghost
 `ghostly listen` (JSON lines), and acts with the other commands (JSON answers). The contract behind it, and why it
 is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md).
 
-> Status: phase 1 (profiles, invites, one chat, basic groups, the event stream and hooks). Wallets and payments,
-> files, identities, shared services and advanced groups come in the next phases; every engine call is already
+> Status: phase 2 (profiles, invites, one chat, basic groups, the event stream and hooks; wallets and payments).
+> Files, identities, shared services and advanced groups come in the next phases; every engine call is already
 > reachable through `ghostly engine <method>`. The older Rust `ghostly-cli` (the `cli/` folder) stays as the
 > compatibility client for v0.4 chats.
 
@@ -85,6 +85,17 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `group leave <group>`, `group forget <group> --yes`, `group accept\|decline <group>` | Membership |
 | `listen [--since seq] [--cursor file] [--type t]… [--exec cmd] [--webhook url] [--print]` | The event stream |
 | `events [--since seq]` | What the event journal holds, without following |
+| `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
+| `wallet create <type> [--network testnet] [--provider id] [--value name=value]…` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark`, `bitcoin` (BDK), `usdt` |
+| `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
+| `wallet faucet <type>`, `wallet add-mint <url> [--primary]` | Test coins; another Cashu mint |
+| `wallet receive <sats>`, `wallet address <type>`, `wallet redeem <token>`, `wallet history` | Receive, and what came and went |
+| `lightning default <card>`, `lightning rename <card> <name>` | Lightning cards: which receives by default |
+| `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
+| `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact |
+| `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
+| `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
+| `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, … |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 
@@ -101,6 +112,15 @@ It is the app's own detector.
 
 A spend on Mainnet needs the engine's `confirmedReal` (the app asks the person). The CLI sets it only with
 `--confirm-real`, and refuses a `confirmedReal` it was not given that flag for. Test networks need nothing.
+
+### Wallets on Node
+
+Cashu (and Lightning through the mints), Lightning cards (NWC, LND, Core Lightning, Breez, LNURL), Arkade, Spark,
+BDK and USDT run as in the app. Two do not yet: **Bark** (its SDK ships a browser build only) and **Fedimint** (its
+client needs the origin-private file system and a module worker); `wallet list` offers them as unavailable, with
+the reason. No wallet is made by itself: a bot has exactly the wallets it created. A Cashu test mint's invoice (from
+`wallet receive`) is credited once its payer vouches for it in a chat, as in the app (a test mint says every invoice
+is paid); on a real mint, the mint's answer decides.
 
 ### Secrets
 
@@ -123,7 +143,9 @@ refused without it.
   announced itself; not a message), `chat.announced`, `message.received`, `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.deleted`, `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.message` (`message.mentioned` when it names this
-  profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`, `call.offer` (a call came; headless
+  profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`, `payment.created` and
+  `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
+  settled|failed, network, method), `call.offer` (a call came; headless
   Ghostly has no media), `events.gap` (the journal no longer holds what `--since` asked for).
 - `--type message.received` keeps one type; `--type message.` (or `message.*`) a family.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
@@ -147,8 +169,10 @@ when the folder's path is too long for a socket). One JSON object per line each 
 ```
 
 Methods: `status`, `profile.get|set`, `settings.get|set`, `invite.create|join`, `chat.list|get|history|send|retry|
-delete|details|rename|remove|transport|connect|disconnect|verify|wait`, `group.create|join|list|get|history|send|leave|
-forget|accept|decline`, `events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
+delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|request|payRequest|accept`,
+`group.create|join|list|get|history|send|leave|forget|accept|decline`, `wallet.list|create|remove|faucet|history|
+receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `payment.list|check|reclaim`,
+`events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
 `{"method":"<engine call>","params":{…},"confirmReal":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.
 
