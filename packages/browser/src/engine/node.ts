@@ -31,7 +31,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { WALLET_NETWORKS, walletNetworkOf, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { createTiming, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
@@ -297,15 +297,15 @@ export class GhostlyNode implements EngineImplementation {
   private readonly feedbackIds = new Set<string>();
   private walletFeedbackReady = false;
   private readonly walletFeedbackIds = new Set<string>();
-  private feedback(type: AttentionEvent["type"], id: string, linkId?: string) {
+  private feedback(type: AttentionEvent["type"], id: string, linkId?: string, mention = false) {
     const key = type + ":" + id;
     if (this.feedbackIds.has(key)) return;
     this.feedbackIds.add(key);
-    this.events.onAttention?.({type, id:key, at:Date.now(), ...(linkId ? {linkId} : {})});
+    this.events.onAttention?.({type, id:key, at:Date.now(), ...(linkId ? {linkId} : {}), ...(mention ? {mention:true} : {})});
   }
   private messageFeedback(type: "message" | "sent", message: StoredMessage) {
     if (message.timestamp < this.feedbackStartedAt || message.file || message.paymentId || /^👋 (?:.+ )?joined$/.test(message.text)) return;
-    this.feedback(type, message.linkId + ":" + message.id, message.linkId);
+    this.feedback(type, message.linkId + ":" + message.id, message.linkId, type === "message" && !!message.mentioned);
   }
   /** The next chat's keys, warmed on the network ahead of time (`takeInvite`). */
   private spare: SpareInvite | null = null;
@@ -1819,9 +1819,9 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.settings.online) throw new Error("Go online to join a group");
     return { groupId: await this.groups.joinByLink(link) };
   }
-  sendGroupMessage({ groupId, text }: { groupId: string; text: string }): Promise<{ error: string | null }> {
+  sendGroupMessage({ groupId, text, mentions }: { groupId: string; text: string; mentions?: GroupMention[] }): Promise<{ error: string | null }> {
     if (typeof text !== "string") return Promise.resolve({ error: "Nothing to send" });
-    return this.groups.send(groupId, text);
+    return this.groups.send(groupId, text, Array.isArray(mentions) ? mentions : []);
   }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
   leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }

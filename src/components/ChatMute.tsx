@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
-import { MUTE_CHOICES, muteEnd, muteEndText, setChatMute, useChatMute, type MutedUntil } from "../lib/chatMute";
-import { Menu, MenuItem } from "./Menu";
+import { MUTE_CHOICES, mentionsNotify, muteEnd, muteEndText, setChatMute, setMentionsNotify, useChatMute, type MutedUntil } from "../lib/chatMute";
+import { Menu, MenuItem, MenuSeparator } from "./Menu";
 
 /*
  * A chat's notifications, muted for a while or until turned back on (src/lib/chatMute.ts): the row in the
@@ -45,12 +45,23 @@ export function MuteMenuItem({ chat, onChoose, onDone }: { chat: string; onChoos
   );
 }
 
+/** A menu checkbox's box, ticked when on. */
+function CheckGlyph({ on }: { on: boolean }) {
+  return (
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      {on && <path d="M7 12.5l3.2 3.2L17 9" />}
+    </svg>
+  );
+}
+
 /**
  * How long to mute the chat for, each choice with the time it ends. Once muted (opened from the list row's bell),
- * until when, and the way back. `portal`: for an opener in the chat list (Menu's `portal`).
+ * until when, and the way back. `portal`: for an opener in the chat list (Menu's `portal`). `mentions`: a group,
+ * which also offers "Still notify me when I'm mentioned" (on by default; src/lib/chatMute.ts).
  */
-export function MuteMenu({ chat, open, onClose, anchorRef, align, portal }: {
-  chat: string; open: boolean; onClose(): void; anchorRef: RefObject<HTMLElement | null>; align?: "start" | "end"; portal?: boolean;
+export function MuteMenu({ chat, open, onClose, anchorRef, align, portal, mentions }: {
+  chat: string; open: boolean; onClose(): void; anchorRef: RefObject<HTMLElement | null>; align?: "start" | "end"; portal?: boolean; mentions?: boolean;
 }) {
   const { t, language } = useI18n();
   const until = useChatMute(chat);
@@ -74,6 +85,12 @@ export function MuteMenu({ chat, open, onClose, anchorRef, align, portal }: {
           </MenuItem>
         ))
         : <MenuItem testId="mute-off" icon={<BellIcon />} onClick={() => { setChatMute(chat, undefined); onClose(); }}>{t("mute.unmute")}</MenuItem>}
+      {mentions && <>
+        <MenuSeparator />
+        {/* Stays open: it changes what the mute lets through, not the mute. */}
+        <MenuItem testId="mute-mentions" checked={mentionsNotify(chat)} icon={<CheckGlyph on={mentionsNotify(chat)} />}
+          onClick={() => setMentionsNotify(chat, !mentionsNotify(chat))}>{t("mute.mentions")}</MenuItem>
+      </>}
     </Menu>
   );
 }

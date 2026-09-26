@@ -8,6 +8,7 @@ import {
   type SealedSecret,
 } from "./groupCrypto";
 import { GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
+import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import {
   encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaFrame,
@@ -269,7 +270,7 @@ export interface CommunityState {
   meta?: GroupMeta;
 }
 
-export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string }
+export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[] }
 /**
  * What an application sends through the group rather than as text: `frame` for everyone in the epoch (the group
  * reads it, as it reads text), or, in `pair`, a payload only `to` can open. Delivered once, like a message: the
@@ -848,15 +849,20 @@ export class CommunitySession {
     this.waiting = []; this.waitingBytes = 0; this.pendingCommits.clear(); this.pendingSecrets.clear();
   }
 
-  sendText(text: string, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
+  /**
+   * `mentions`: places of the text that name members, sealed with it (`m`). Never everyone in a community. They
+   * count against the text's 16 KiB, so the box stays within what older apps accept.
+   */
+  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = []): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       const trimmed = text.trim();
       if (!trimmed) return { error: "Nothing to send" };
-      if (utf8Encode(trimmed).length > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
-      const sent = await this.sendPayload(() => ({ text: trimmed }), nick, now);
+      const named = validMentions(wireMentions(mentions), trimmed, false);
+      if (utf8Encode(trimmed).length + mentionsBytes(named) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
+      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}) }), nick, now);
       if ("error" in sent) return sent;
-      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed });
+      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}) });
       await this.persist();
       this.hooks.broadcast(sent.frame);
       return { id: sent.id };
@@ -1002,7 +1008,7 @@ export class CommunitySession {
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
     if (payload === null) return false;
-    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown };
+    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown };
     try { parsed = JSON.parse(payload) as typeof parsed; } catch { return false; }
     if (!isObject(parsed)) return false;
     const text = typeof parsed.text === "string" ? parsed.text.slice(0, COMMUNITY_LIMITS.textBytes) : undefined;
@@ -1011,7 +1017,10 @@ export class CommunitySession {
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
     const id = communityMessageId(raw.s, raw.e, raw.h, raw.n);
-    if (text !== undefined) await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text });
+    if (text !== undefined) {
+      const mentions = validMentions(parsed.m, text, false);
+      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}) });
+    }
     else if (isObject(parsed.x)) await this.hooks.app?.({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x });
     else {
       // Someone else's is carried and kept for them, never opened; mine opens only if its sender sealed it to me here.

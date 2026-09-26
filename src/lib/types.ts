@@ -37,6 +37,8 @@ export interface ChatMessage {
   file?: ChatFile;
   /** A payment or payment request; its live state is kept by the platform under this id. */
   paymentId?: string;
+  /** A group message's mentions, with the names they show now (src/lib/parse/mentions.ts). */
+  mentions?: import("./parse/mentions").MentionView[];
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

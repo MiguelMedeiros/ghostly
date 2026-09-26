@@ -116,7 +116,8 @@
     "muted": "Muted",
     "bell": "Notifications muted",
     "bellUntil": "Notifications muted until {{time}}",
-    "stillArrive": "Messages still arrive. Calls still ring."
+    "stillArrive": "Messages still arrive. Calls still ring.",
+    "mentions": "Still notify me when I'm mentioned"
   },
   "invite": {
     "copy": "Copy invite",
@@ -555,5 +556,10 @@
     "thisChat": "this chat",
     "send": "Send",
     "sendAnyway": "Send anyway"
+  },
+  "mentions": {
+    "label": "Members to mention",
+    "everyoneHint": "Notify everyone",
+    "unread": "You were mentioned"
   }
 }

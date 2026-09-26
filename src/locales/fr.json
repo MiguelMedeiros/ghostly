@@ -116,7 +116,8 @@
     "muted": "Coupées",
     "bell": "Notifications coupées",
     "bellUntil": "Notifications coupées jusqu'à {{time}}",
-    "stillArrive": "Les messages arrivent. Les appels sonnent."
+    "stillArrive": "Les messages arrivent. Les appels sonnent.",
+    "mentions": "Me notifier quand même si on me mentionne"
   },
   "invite": {
     "copy": "Copier l’invitation",
@@ -555,5 +556,10 @@
     "thisChat": "cette conversation",
     "send": "Envoyer",
     "sendAnyway": "Envoyer quand même"
+  },
+  "mentions": {
+    "label": "Membres à mentionner",
+    "everyoneHint": "Notifier tout le monde",
+    "unread": "Vous avez été mentionné"
   }
 }

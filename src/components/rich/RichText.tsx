@@ -1,6 +1,7 @@
 import React, { useMemo, useState, type ComponentType } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { parseMessage, type Segment } from "../../lib/parse";
+import { markMentions, type MentionView } from "../../lib/parse/mentions";
 import { CodeBlock } from "./CodeBlock";
 import { VIEWS, type AtomViewProps } from "./views";
 import "./rich-text.css";
@@ -53,8 +54,9 @@ function segments(list: Segment[], sentAt: number | undefined, key = ""): React.
  * sent as typed; this is only how it shows. A message with a code block is a block itself; otherwise it stays
  * inline, so the time can sit at the end of its last line.
  */
-export function RichText({ text, sentAt, className, testId }: { text: string; sentAt?: number; className?: string; testId?: string }) {
-  const blocks = useMemo(() => parseMessage(text, { sentAt }), [text, sentAt]);
+export function RichText({ text, sentAt, className, testId, mentions }: { text: string; sentAt?: number; className?: string; testId?: string; mentions?: readonly MentionView[] }) {
+  // A group message's mentions: their places marked, for the `member-mention` detector (src/lib/parse/mentions.ts).
+  const blocks = useMemo(() => mentions?.length ? parseMessage(markMentions(text, mentions), { sentAt, mentions }) : parseMessage(text, { sentAt }), [text, sentAt, mentions]);
   const content = blocks.map((block, i) =>
     block.type === "codeblock"
       ? <CodeBlock key={i} code={block.code} lang={block.lang} />

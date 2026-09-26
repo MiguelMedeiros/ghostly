@@ -116,7 +116,8 @@
     "muted": "ミュート中",
     "bell": "通知はミュート中",
     "bellUntil": "{{time}}まで通知はミュート中",
-    "stillArrive": "メッセージは届きます。通話は鳴ります。"
+    "stillArrive": "メッセージは届きます。通話は鳴ります。",
+    "mentions": "メンションされたときは通知する"
   },
   "invite": {
     "copy": "招待をコピー",
@@ -555,5 +556,10 @@
     "thisChat": "このチャット",
     "send": "送信",
     "sendAnyway": "それでも送信"
+  },
+  "mentions": {
+    "label": "メンションするメンバー",
+    "everyoneHint": "全員に通知",
+    "unread": "あなたがメンションされました"
   }
 }

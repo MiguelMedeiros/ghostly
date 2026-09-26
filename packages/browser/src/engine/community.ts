@@ -1,11 +1,11 @@
 import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
-  mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  type CommunityFrame, type CommunityState, type GroupEntryLink, type Hub, type Roster,
+  mentionsMember, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
+  type CommunityFrame, type GroupMention, type CommunityState, type GroupEntryLink, type Hub, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
-import type { GroupStore, GroupsHost } from "./groups";
+import { mentionAt, mentionFields, type GroupStore, type GroupsHost } from "./groups";
 import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
@@ -186,6 +186,7 @@ export class Communities {
   private readonly stored = new Map<string, StoredGroup>();
   private readonly live = new Map<string, Live>();
   private readonly lastMessageAt = new Map<string, number>();
+  private readonly lastMentionAt = new Map<string, number>();
   private readonly refused = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
   /** Joiners: groups whose knock is out (published), and the knock record it is in. */
@@ -218,6 +219,8 @@ export class Communities {
       if (group.community) this.attach(group.community);
       const history = await this.store.getMessages(MESSAGE_LINK(group.id)), last = history[history.length - 1];
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
+      const mention = [...history].reverse().find(m => m.mentioned);
+      if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
     }
@@ -226,7 +229,7 @@ export class Communities {
   views(): GroupView[] {
     return [...this.stored.values()].flatMap((group): GroupView[] => {
       const live = this.live.get(group.id);
-      const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, invited: [], memberLinks: {} };
+      const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
       if (group.joining && (!live || live.session.status === "lost")) {
         return [{ ...base, name: group.joining.name || live?.session.name || "", isAdmin: false, members: [], canSend: false,
           invitation: { linkId: group.joining.linkId, contact: "", admin: group.joining.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group) } }];
@@ -293,10 +296,10 @@ export class Communities {
     void this.knock(group, since).catch(() => {});
   }
 
-  async send(groupId: string, text: string): Promise<{ error: string | null }> {
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = []): Promise<{ error: string | null }> {
     const live = this.live.get(groupId);
     if (!live) return { error: "You are not in this group yet" };
-    const result = await live.session.sendText(text, this.host.myNick?.());
+    const result = await live.session.sendText(text, this.host.myNick?.(), Date.now(), mentions);
     return "error" in result ? { error: result.error } : { error: null };
   }
 
@@ -373,6 +376,7 @@ export class Communities {
     this.live.delete(groupId);
     this.stored.delete(groupId);
     this.lastMessageAt.delete(groupId);
+    this.lastMentionAt.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     this.host.emit();
@@ -927,7 +931,10 @@ export class Communities {
         for (const [key, linkId] of edges) if (hubs.has(key) || live?.myHubs.includes(key)) this.sendTo(linkId, frame);
       },
       message: async m => {
-        await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp: m.timestamp, via: "datalink" });
+        const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
+        if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, m.timestamp));
+        await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp: m.timestamp, via: "datalink",
+          ...mentionFields(m.mentions, mentioned) });
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, m.timestamp));
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.

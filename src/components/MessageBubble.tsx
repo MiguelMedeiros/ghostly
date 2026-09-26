@@ -482,7 +482,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           </div>
         ) : (
           <div className="clearfix">
-            <RichText testId="message-text" text={message.text} sentAt={message.timestamp} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            <RichText testId="message-text" text={message.text} sentAt={message.timestamp} mentions={message.mentions} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
             <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
             {timestampEl}
           </div>

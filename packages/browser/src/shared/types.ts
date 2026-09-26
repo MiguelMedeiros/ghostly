@@ -1,5 +1,5 @@
 import type { WalletMode } from "./mints";
-import type { PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
+import type { GroupMention, PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -186,6 +186,8 @@ export interface GroupView {
   /** Contact chats that are members, by chat id → member key. */
   memberLinks: Record<string, string>;
   lastMessageAt: number;
+  /** When the latest message that names me arrived; absent for none. */
+  lastMentionAt?: number;
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
@@ -543,6 +545,10 @@ export interface StoredMessage {
   event?: GroupEvent;
   /** Group history: a payment between members, as the group knows it (WISP 9xx § Payments). */
   groupPay?: GroupPayNote;
+  /** Group messages: the places of the text that name members, by member key (WISP 9xx § Mentions). */
+  mentions?: GroupMention[];
+  /** A group message someone else sent that names me (or everyone). */
+  mentioned?: true;
   /** How this message travelled, as the engine saw it go or come (the message's details view). */
   details?: MessageDetails;
 }

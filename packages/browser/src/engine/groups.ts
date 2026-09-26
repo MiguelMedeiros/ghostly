@@ -1,7 +1,7 @@
 import {
   GroupSession, MAX_GROUP_CHAIN, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  knockIdentity, knockRecords, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
+  knockIdentity, knockRecords, mentionsMember, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
+  type GhostRecord, type GroupMention, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { db } from "./db";
@@ -68,6 +68,15 @@ export interface GroupStore {
 
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
 
+/** A group message's mentions as the history keeps them, and whether they name me (`mentioned`). */
+export const mentionFields = (mentions: GroupMention[] | undefined, mentioned: boolean): Pick<StoredMessage, "mentions" | "mentioned"> =>
+  ({ ...(mentions?.length ? { mentions } : {}), ...(mentioned ? { mentioned: true as const } : {}) });
+/** The view's `lastMentionAt`, when there is one. */
+export const mentionAt = (map: Map<string, number>, groupId: string): { lastMentionAt?: number } => {
+  const at = map.get(groupId);
+  return at ? { lastMentionAt: at } : {};
+};
+
 /**
  * How often a group's link is looked at (`warmPollMs` for `warmMs` after it was handed out or someone
  * knocked: people open a link in the minutes after it is shared, and in bursts), and a joiner knocks;
@@ -98,6 +107,8 @@ export class Groups {
   private readonly invited = new Map<string, Set<string>>();
   private readonly lastRoster = new Map<string, Roster>();
   private readonly lastMessageAt = new Map<string, number>();
+  /** The latest message that names me, per group (the chat list's "@" while it is unread). */
+  private readonly lastMentionAt = new Map<string, number>();
   private reconciling = Promise.resolve();
   /** Admin side: joiners with an entry session open, per group: member key → since when. */
   private readonly pendingEntries = new Map<string, Map<string, number>>();
@@ -127,6 +138,8 @@ export class Groups {
       if (group.state) this.attach(group.state);
       const history = await this.store.getMessages(MESSAGE_LINK(group.id)), last = history[history.length - 1];
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
+      const mention = [...history].reverse().find(m => m.mentioned);
+      if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
     // An admission in flight did not survive the restart: its joiner knocks again. A joiner keeps its side.
@@ -145,7 +158,7 @@ export class Groups {
       const edges = this.host.edges(group.id);
       // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
       const contacts = Object.entries(group.contacts ?? {}).filter(([key]) => !session || rosterHas(session.roster, key));
-      const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, invited: [...(this.invited.get(group.id) ?? [])],
+      const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
         memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
       if (!session) {
         const invitation = group.invitation!;
@@ -225,11 +238,11 @@ export class Groups {
     await this.forget(groupId);
   }
 
-  async send(groupId: string, text: string): Promise<{ error: string | null }> {
-    if (this.isCommunity(groupId)) return this.communities.send(groupId, text);
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = []): Promise<{ error: string | null }> {
+    if (this.isCommunity(groupId)) return this.communities.send(groupId, text, mentions);
     const session = this.sessions.get(groupId);
     if (!session) return { error: "You are not in this group yet" };
-    const result = await session.sendText(text);
+    const result = await session.sendText(text, Date.now(), mentions);
     return "error" in result ? { error: result.error } : { error: null };
   }
 
@@ -270,6 +283,7 @@ export class Groups {
     this.invited.delete(groupId);
     this.pendingEntries.delete(groupId);
     this.lastMessageAt.delete(groupId);
+    this.lastMentionAt.delete(groupId);
     await this.store.deleteGroup(groupId);
     await this.store.putGroup(group);
     for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
@@ -667,7 +681,10 @@ export class Groups {
         try { this.host.sendOnLink(edge, frame); } catch { /* down: the sync on reopening carries it */ }
       },
       message: async m => {
-        await this.host.storeMessage({ linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp: m.timestamp, via: "datalink" });
+        const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
+        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, m.timestamp));
+        await this.host.storeMessage({ linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp: m.timestamp, via: "datalink",
+          ...mentionFields(m.mentions, mentioned) });
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, m.timestamp));
       },
       changed: () => { void this.membershipChanged(state.id); },

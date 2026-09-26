@@ -1,5 +1,6 @@
 import { blob } from "./blob";
 import { link } from "./links";
+import { mention } from "./mentions";
 import { time } from "./time";
 import type { Detector } from "./types";
 
@@ -12,4 +13,5 @@ export const DETECTORS: readonly Detector[] = [
   link,
   blob,
   time,
+  mention,
 ];

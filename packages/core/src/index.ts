@@ -60,6 +60,7 @@ export * from './sshsig';
 export * from "./groupCrypto";
 export * from "./groupCommits";
 export * from "./groupSession";
+export * from "./groupMentions";
 export * from "./groupEntry";
 export * from "./groupCommunity";
 export * from "./communityRendezvous";

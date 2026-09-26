@@ -14,11 +14,14 @@ import { ExpressionPanel } from "./composer/ExpressionPanel";
 import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
 import { CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon } from "./composer/icons";
 import type { ComposerServices } from "./composer/servicesRow";
+import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
+import type { GroupMention } from "@ghostly/core";
 import "./composer/composer.css";
 
 interface MessageInputProps {
   draftId?: string;
-  onSend: (text: string) => Promise<string | null>;
+  /** `mentions`: in a group, the places of the text that name members (see `mentions` below). */
+  onSend: (text: string, mentions?: GroupMention[]) => Promise<string | null>;
   disabled?: boolean;
   disabledPlaceholder?: string;
   maxLength?: number;
@@ -59,6 +62,8 @@ interface MessageInputProps {
   services?: ComposerServices;
   /** Who reads what is sent here, for the secret guard's Cashu question (a group's name); the contact otherwise. */
   recipient?: string;
+  /** A group's members: "@" opens a picker of them, and a choice names the member by key. */
+  mentions?: ComposerMentions;
 }
 
 const DEFAULT_MAX = 500;
@@ -82,6 +87,7 @@ export function MessageInput({
   paymentComposer,
   identities,
   services,
+  mentions,
   fileUnavailable,
   paymentsUnavailable,
   recipient,
@@ -109,6 +115,7 @@ export function MessageInput({
   const [canRecord] = useState(canRecordVoice);
   const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
   const hasCamera = useHasCamera();
+  const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -143,10 +150,12 @@ export function MessageInput({
     if (maxBytes && bytes > maxBytes) { showToast(`This text is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}; shorten it or use a live connection. Your draft is kept.`); return; }
     const found = confirmed ? null : findSecret(text);
     if (found) { setSecret(found); return; }
-    const err = await onSend(text);
+    const named = picker.compose(text);
+    const err = await (named.length ? onSend(text, named) : onSend(text));
     if (err) {
       showToast(err);
     } else {
+      picker.reset();
       setText("");
       if(draftId) setSessionDraft(draftId, "");
       if (textareaRef.current) {
@@ -156,6 +165,7 @@ export function MessageInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (picker.onKeyDown(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -166,6 +176,7 @@ export function MessageInput({
     const value = e.target.value;
     if (value.length <= Math.max(maxLength, 16_384)) {
       setText(value);
+      picker.onCaret();
     } else if (value.length - text.length > 1) {
       showToast(
         maxLength > DEFAULT_MAX
@@ -299,6 +310,8 @@ export function MessageInput({
               value={text}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onSelect={picker.onCaret}
+              {...picker.inputProps}
               onFocus={() => { setShowMenu(false); setShowIdentities(false); if (phone) setShowPanel(false); }}
               placeholder={disabled ? disabledPlaceholder : "Message…"}
               disabled={disabled}
@@ -340,6 +353,8 @@ export function MessageInput({
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
           </svg>
         </button>}
+
+        {picker.element}
 
         {/* What the + opens */}
         {showPayment && paymentComposer && !paymentsUnavailable && !disabled && paymentComposer(() => setShowPayment(false))}
