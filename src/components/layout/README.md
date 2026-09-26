@@ -8,10 +8,11 @@ and a new card or panel holds together at every width for free.
 
 | Primitive | Use it for |
 | --- | --- |
-| `Page` (`title`, `trailing`, `width`, `testId`) | A whole right-column page: header with Back, title and `trailing` controls (these wrap under the title when they do not fit), and a scrolling body that is a size container named `page`, so `@sm/page:` / `@md/page:` variants work anywhere inside. |
+| `Page` (`title`, `trailing`, `width`, `testId`) | A whole right-column page: header with Back, title and `trailing` controls (these wrap under the title when they do not fit), and a scrolling body that is a size container named `page`, so `@sm/page:` / `@md/page:` variants work anywhere inside. `PageHeader` is that header alone. |
 | `PageAction` (`label`, `testId`, button props) | The page's primary action in `trailing`: an accent button with a plus and a short label, like New on Identities and Wallets. The page creates things there, not with an add card in its list. |
 | `Section` (`title`) | A titled card of rows. |
-| `Row` (`label`, `hint`, `value`, `leading`, children) | One option: text on the left, `value` (a balance, a size) and controls (children) on the right. When they do not fit beside at least 12rem of text (8rem without a hint), they wrap **under** the text, aligned with it. Buttons wrap among themselves. Text never collapses into a one-letter column. |
+| `Row` (`label`, `hint`, `info`, `value`, `leading`, children) | One option: text on the left, `value` (a balance, a size) and controls (children) on the right. When they do not fit beside at least 12rem of text (8rem without a hint), they wrap **under** the text, aligned with it. Buttons wrap among themselves. Text never collapses into a one-letter column. `info` is the longer story (a privacy trade-off, what a server sees) behind an ⓘ beside the label: keep `label` short and `hint` to one line. |
+| `Field` (`label`, `hint`, `info`, `htmlFor`, `trailing`) | A field that takes the card's whole width (a list of relays, an address): the same label, hint and ⓘ as a `Row`, `trailing` beside the label (a Reset), the field under them. |
 | `LinkRow` (`label`, `hint`, `value`, `leading`, `onClick`) | A row that opens another page: the whole line is a button, ending in a chevron. |
 | `Block` | Anything in a section that is not a label/control pair: a form, a list, a paragraph. |
 | `ButtonGroup` (`fill`) | Buttons side by side that wrap. `fill` makes them share the line equally. |
@@ -25,17 +26,17 @@ and a new card or panel holds together at every width for free.
 
 | Level | What | Opened with | Back |
 | --- | --- | --- | --- |
-| home | `/`: the chat list, New and Join | `nav.home()` | — |
+| home | `/`: the chat list, New and Join | `nav.home()` | (none) |
 | conversation | `/chat/…`, `/group/…` | `nav.conversation(path)`: always on home | home |
 | place | Wallet, Identities, Services, Settings, Profile | `nav.place(path)` (account bar, tab bar): on home, or over the chat open now; places replace each other | home |
-| sub-page | a page opened from inside another (Settings → Profile, Profile → Wallets, a chat's "Manage identities") | `nav.open(path)`: pushed on its parent; a page already below is gone back to | its parent |
+| sub-page | a page opened from inside another (Settings → Profile, Profile → Wallets, the composer's identity picker → Manage) | `nav.open(path)`: pushed on its parent; a page already below is gone back to | its parent |
 
 Going home is going *back* (each entry records what is under it), so the browser's Back from a place is home
 and from home it leaves the app's pages. A deep link gets home put under it. On a phone the header's Back
 shows only on a sub-page: the tab bar is the way home. Never `navigate(-1)` or push `/` from a page.
 
 `wallet/ui.tsx` re-exports `Section`, `Row` and `Block`, and keeps the controls (`Button`, `Switch`,
-`Segmented` — `compact` for a header —, `Amount`, `Address`, `input`).
+`Segmented` (`compact` for a header), `Amount`, `Address`, `input`).
 
 A choice among several options is `Select` (`ui/Select.tsx`; `fit` in a `Row`, `size="sm"` in a chat bubble), never a
 native `<select>` (lint refuses one): options take a `description` (a second, dimmer line) and an `icon`, and the list

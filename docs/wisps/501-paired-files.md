@@ -8,13 +8,13 @@
 | Updated | 2026-09-26 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
-| Implementation | Negotiated paired data links; WebRTC and supported native adapters. |
+| Implementation | Every chat session: `files/3` (any size, consent, resume) and `files/2` for older apps; WebRTC and supported native adapters |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
 ## Place in the one chat (revision 0.2)
 
-Formerly "Paired Files". This is how files travel in every chat of [400](400-chat.md) while it is `live`. The wire (`files/2`, `pf-*` frames) is unchanged. While the chat is `on-dht` or `dht-chosen`, files are held ([4xx](4xx-store-and-forward.md)) or wait in the outbox for layer 1 ([500](500-files.md#files-in-the-one-chat-revision-02)); a transfer cut by a drop to the DHT fails as today and is retried whole when layer 1 is back, under its original ID.
+Formerly "Paired Files". This is how files travel in every chat of [400](400-chat.md) while it is `live`. The wire (`files/2`, `pf-*` frames) is unchanged. While the chat is `on-dht` or `dht-chosen`, files are held ([4xx](4xx-store-and-forward.md)) or wait in the outbox for layer 1 ([500](500-files.md#files-in-the-one-chat-revision-02)); a `files/2` transfer cut by a drop to the DHT fails and is retried whole when layer 1 is back, under its original ID; a `files/3` transfer resumes from what was stored (below).
 
 ## files/3: files of any size (revision 0.3)
 

@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
-| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade (decided 2026-09-25; being implemented); calls (`calls/1`) and shared apps (`services/1`) on the live session. |
+| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`) and `files/3` on the live session. |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
@@ -18,7 +18,7 @@ This is the **layer-1 session** of the one chat of [400](400-chat.md). Formerly 
 
 What changes around this session:
 
-- **First contact** can complete on the DHT ([403](403-dht-text.md#first-contact)) before any stream exists. When it does, this session later opens with the participation key already pinned: the handshake verifies against the pin exactly as a reconnect does today, and no comparison is asked again. When the stream wins the race instead, pinning happens here as today. Either way both paths MUST carry the same participation key; a mismatch is a security rejection on both layers. (New: today first contact needs this session.)
+- **First contact** can complete on the DHT ([403](403-dht-text.md#first-contact)) before any stream exists. When it does, this session later opens with the participation key already pinned: the handshake verifies against the pin exactly as a reconnect does today, and no comparison is asked again. When the stream wins the race instead, pinning happens here as today. Either way both paths MUST carry the same participation key; a mismatch is a security rejection on both layers.
 - **Losing the session is not losing the chat.** When this session closes or its liveness gives up, the chat moves to `on-dht` ([400](400-chat.md#states-of-a-chat)) and the outbox sends unconfirmed text over the DHT under the same ids. This already happens today for a paired chat whose contact has announced DHT support; revision 0.2 makes it the rule, because every contact announces it from the first contact.
 - **Coming back.** The dialling side redials with the backoff of [100](100-transports.md#background-retry-and-upgrade); when this session is ready again, everything queued goes in order, oldest first ([automatic resend](PAIRED-CHAT-INCREMENT.md#automatic-resend)).
 - **The transcript label.** The selection tuple of the transcript ends with the constant `"no-dht-payload"` ([exact profile](PAIRED-CHAT-INCREMENT.md#exact-experimental-wire-profile)). It stays byte for byte, so proofs keep verifying with every app that pairs today. It means that *this session* carries no DHT payload; it does not mean the chat has no DHT fallback. Whether a contact accepts DHT text is said by `dht-text/1` in its capability record ([03](03-capabilities.md#layer-0-capability-record)).
@@ -65,19 +65,19 @@ The side that dials waits 20 seconds after a failed attempt, doubling up to 3 mi
 
 ## Capabilities on this session
 
-The `pair-offer` lists what this session can carry: `chat/1`, `signed-signal/1`, and, when both apps offer them, `tofu/1`, `files/2`, `payments/1` with its per-method entries, `transport-switch/1`, `transport-fallback/1`, `hold/1`, proof and identity entries. Apps before 0.5 cap `capabilities` at 16 entries, so behaviour that grants nothing goes in `extensions` ([liveness](#liveness-and-reconnection)). The layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)) repeats the same identifiers so the DHT side knows them before this session exists; once this session is ready, its transcript-bound offer is authoritative for what the session carries.
+The `pair-offer` lists what this session can carry: `chat/1`, `signed-signal/1`, and, when both apps offer them, `tofu/1`, `files/2`, `payments/1` with its per-method entries, `transport-switch/1`, `transport-fallback/1`, `hold/1`, proof and identity entries. Older apps cap `capabilities` at 16 entries, so behaviour that grants nothing goes in `extensions` ([liveness](#liveness-and-reconnection)). The layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)) repeats the same identifiers so the DHT side knows them before this session exists; once this session is ready, its transcript-bound offer is authoritative for what the session carries.
 
 ### Calls and shared apps
 
 Calls ([600](600-media.md)) and hosted local services ([700](700-local-services.md)) are what the one chat needs to do everything a compatibility chat ([402](402-legacy-chat.md)) did ([400](400-chat.md#what-each-state-can-carry)). Once the session is ready, each side sends `{"t":"paired-capabilities","c":[...]}` with what it offers on this session beyond the offer: `calls/1` (voice and video calls, [601](601-webrtc-media.md#paired-profile)) and `services/1` (shared local web apps, [701](701-http-services.md#paired-profile)), and `files/3` (files of any size, offered, resumed and checked, [501](501-paired-files.md#files3-files-of-any-size-revision-03)). It sends the frame on every ready session, a transport switch included, and again when what it offers changes. A capability is on only while both sides list it on the current session. A peer that never sends the frame (an older app) offers nothing here. A receiver MUST ignore a malformed frame (not a list, more than 32 entries, an entry that is not 1 to 40 characters of `a-z`, `0-9`, `/` and `-`) and keep what the peer said before; it MUST keep identifiers it does not know, and enable nothing for them. The frame carries no message ID; older apps drop it.
 
-These are not in the offer's `capabilities`, which are full at 16 for apps before 0.5. The frame grants no more than an offer entry would: it travels on the authenticated session, after the transcript is signed and bound to this connection. An app offers `calls/1` only where it can place a call (WebRTC and capture exist; Desktop on Linux has no WebRTC), and `services/1` only where it can serve granted apps and open a contact's (not the web app).
+These are not in the offer's `capabilities`, which are full at 16 for older apps. The frame grants no more than an offer entry would: it travels on the authenticated session, after the transcript is signed and bound to this connection. An app offers `calls/1` only where it can place a call (WebRTC and capture exist; Desktop on Linux has no WebRTC), and `services/1` only where it can serve granted apps and open a contact's (not the web app).
 
 Both need a live session. On the DHT ([403](403-dht-text.md)), or while connecting, there is no call and no shared app, and an app SHOULD say so where the action is ("Calls need a live connection"), and why when the contact's app is the reason.
 
 ## Runtime boundary and compatibility
 
-Initial pairing currently uses WebRTC; revision 0.2 proposes first contact on the DHT in parallel and native transports tried from their descriptors in the capability record ([100](100-transports.md)). Compatibility chats use [402](402-legacy-chat.md) and never this session. DHT text uses [403](403-dht-text.md), preserving conversation/history without treating DHT as a stream adapter. Files and payments are negotiated in the offer; calls and shared apps after it ([above](#calls-and-shared-apps)).
+First contact runs on the DHT and on a stream in parallel, and native transports are tried from their descriptors in the capability record ([100](100-transports.md)). Compatibility chats use [402](402-legacy-chat.md) and never this session. DHT text uses [403](403-dht-text.md), preserving conversation/history without treating DHT as a stream adapter. Files and payments are negotiated in the offer; calls and shared apps after it ([above](#calls-and-shared-apps)).
 
 ## Evidence and checks
 

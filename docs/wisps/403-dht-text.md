@@ -8,7 +8,7 @@
 | Updated | 2026-09-26 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
-| Implementation | Existing envelope, limits and DHT-only mode (`pair2d/` chats and paired fallback); as the floor and first contact of every chat (decided 2026-09-25; being implemented). Native DHT versus browser relays differ. |
+| Implementation | The floor and first contact of every new chat (web, extension, desktop); DHT only per chat; pinned mailboxes. Native clients read the Mainline DHT directly; browsers go through Pkarr relays. |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
@@ -36,11 +36,11 @@ The envelope's `mode` field (`"stream"` or `"dht"`) is unchanged. In revision 0.
 
 ## First contact
 
-(Exists for `pair2d/` invites; proposed for every invite.)
+(Every new chat, since revision 0.2.)
 
 1. The invite's secret and the ordered pair of rendezvous keys derive the envelope key and the two directional mailboxes ([DHT delivery](../DHT-DELIVERY.md#invitation-bootstrap-and-encryption)).
 2. The joiner generates and stores its participation key, then publishes a first-contact envelope in its mailbox: intended recipient `invite`, signed by its participation key, sealed with the invitation-derived key. It carries the joiner's `mode` and MAY carry a first text. At the same moment the joiner publishes its capability record ([03](03-capabilities.md#layer-0-capability-record)) and starts a stream attempt ([100](100-transports.md)).
-3. The inviter reads the joiner's mailbox at the signaling pace (every 4 s) from the moment the invite exists until it pins a contact or the invite is withdrawn (new: today the inviter of a streams-first invite reads it every 30 s). It verifies the signature, durably pins the participation key, stores any text, and answers with its own envelope (its key hint in `_dmk`, sealed with the post-pin key) and a receipt.
+3. The inviter reads the joiner's mailbox at the signaling pace (every 4 s) for two minutes once the joiner shows up (a fresh presence packet), and at the chat's pace otherwise, so an invite nobody opened spends no relay budget. The joiner reads at 4 s for its first two minutes. It verifies the signature, durably pins the participation key, stores any text, and answers with its own envelope (its key hint in `_dmk`, sealed with the post-pin key) and a receipt.
 4. The joiner already pinned the inviter's participation key from the invite ([801](801-invitation-profiles.md#exact-layout)); it verifies the answer against that pin, and refuses an answer signed by any other key as a security rejection. The chat is now `on-dht`, or `live` if the stream attempt verified first. Every later envelope uses the post-pin key. (Codes made before revision 0.2 carry no participation key; for them the joiner pins from the first answer, as today.)
 5. If the stream path pins first, the DHT path MUST find the same participation key when its envelope arrives. An envelope signed by a different key is ignored, not a security rejection: this mailbox's key comes from the invite, so anyone holding a copy can publish there (revision 0.3; [400](400-chat.md#candidate-requirements-for-the-one-chat), requirement 8). It is never stored, never remembered as a stop, and never replaces the pin. Possession of the invite is enough to compete for first admission, as before; the comparison code shown on both sides verifies the pin independently.
 
@@ -67,7 +67,7 @@ The move costs one extra read per poll only while it is under way (the contact s
 
 A text already sent on layer 1 that loses its session before the receipt is sent again over the DHT under the same id, when it fits (exists today). A text first sent over the DHT whose layer 1 comes back goes again on layer 1 at once; the first receipt on either path ends the other path's retries, and the receiver shows it once.
 
-**Queueing (new; Q4 of [400](400-chat.md#compatibility-security-and-decisions)).** Only one DHT text per direction may await a receipt. Today a second text stays in the composer until then. In this revision it goes to the outbox as `queued`, in order, and is published when the previous one is confirmed or expires, or sent on layer 1 when that comes back. The wire rule does not change.
+**Queueing (Q4 of [400](400-chat.md#compatibility-security-and-decisions)).** Only one DHT text per direction may await a receipt. A second text goes to the outbox, in order, and is published when the previous one is confirmed or expires, or sent on layer 1 when that comes back. The wire rule does not change.
 
 **Expiry.** A DHT text that expires unconfirmed is queued for layer 1 in `on-dht` (exists today for `pair1/` chats), and becomes **Delivery unconfirmed** at once in `dht-chosen` (exists today for DHT-only chats), because nothing else would carry it.
 
@@ -75,19 +75,22 @@ A text already sent on layer 1 that loses its session before the receipt is sent
 
 Either side choosing DHT only keeps both off layer 1, so leaving it takes both, and each learns the other's choice from its envelopes. The new mode goes out in an envelope at once, not after the usual spacing between publications. After this side leaves DHT only, it reads a contact still on DHT only every 4 s for two more minutes. A DHT-only contact runs no stream discovery, so as soon as it advertises itself on the link's Pkarr record again, its mailbox is read right away; once neither side is blocked, the link is dialled or answered at once. All of this exists today ([DHT delivery](../DHT-DELIVERY.md#one-conversation-two-delivery-methods)).
 
-What changes is where the choice is made: not in the invite, but in the chat's Connection menu, as the **DHT only** entry beside Automatic, WebRTC, Iroh and HyperDHT ([400](400-chat.md#pairing-progress-and-transport-rows)). Store-and-forward still works while DHT only is chosen: it dials nobody (new: today holding stops in DHT-only mode).
+What changes is where the choice is made: not in the invite, but in the chat's Connection menu, as the **DHT only** entry beside Automatic, WebRTC, Iroh and HyperDHT ([400](400-chat.md#pairing-progress-and-transport-rows)). Store-and-forward still works while DHT only is chosen: it dials nobody.
 
 ## Poll pace
 
-| Situation | Today | Proposed |
-|---|---|---|
-| This side DHT only, or the contact just left it | 4 s | 4 s |
-| Inviter waiting for a first contact | 30 s (streams-first invite), 4 s (`pair2d/`) | 4 s until pinned or withdrawn |
-| `on-dht`, chat open and app in front | 30 s | 4 s |
-| `on-dht`, in the background | 30 s | 30 s |
-| `live` | 30 s | 5 min, and at once when layer 1 is lost |
+| Situation | Pace |
+|---|---|
+| This side DHT only, or it left DHT only less than two minutes ago while the contact is still there | 4 s |
+| Inviter: the joiner just showed up (fresh presence packet); joiner: its first two minutes | 4 s, for two minutes |
+| A text of ours awaits its receipt | 4 s |
+| `on-dht`, chat open and app in front | 10 s |
+| `on-dht`, in the background | 30 s |
+| `live` | 5 min, and at once when layer 1 is lost |
 
-With every chat running this profile, reads multiply by the number of chats. The relays' per-IP budget (50 requests a minute on pkarr.pubky.org) is the binding limit, which is why reads slow down while layer 1 carries the chat ([400](400-chat.md#compatibility-security-and-decisions), Q7).
+`on-dht` with the chat open was 4 s in the proposal; 10 s leaves room in the relays' budget for presence reads and hold pointers while layer 1 is redialled.
+
+With every chat running this profile, reads multiply by the number of chats. The relays' per-IP budget (50 requests a minute on pkarr.pubky.org; a browser client keeps its own budget of 30 a minute per relay) is the binding limit, which is why reads slow down while layer 1 carries the chat. A request over the budget waits for it to free; it is never a pairing or delivery error, and a held-back envelope is not one of the eight publication attempts ([400](400-chat.md#compatibility-security-and-decisions), Q7).
 
 ## What never enters this path
 
@@ -95,7 +98,7 @@ Financial envelopes, files, pictures, calls and service bodies never enter this 
 
 ## Runtime and conformance
 
-DHT only avoids stream discovery/dialing. Native uses Pkarr; browser/extension use HTTP relays. A security rejection never triggers this path. See [implementation](../../packages/core/src/dhtDelivery.ts). Check exact packet budgets, restart/expiry, pin substitution, rejected publication, duplicate receipts and cross-path message deduplication. For revision 0.2 add: first contact with every stream blocked; first contact where the stream and the DHT pin different keys (rejected on both); the second text of a burst queued, not lost; `live` to `on-dht` to `live` with no duplicate or reordered text.
+DHT only avoids stream discovery/dialing. Native clients read the Mainline DHT directly and publish to the DHT and the relays; browser/extension use HTTP relays ([01](01-ghost-core.md#open-decisions)). A security rejection never triggers this path. See [implementation](../../packages/core/src/dhtDelivery.ts). Check exact packet budgets, restart/expiry, pin substitution, rejected publication, duplicate receipts and cross-path message deduplication. For revision 0.2 add: first contact with every stream blocked; first contact where the stream and the DHT pin different keys (rejected on both); the second text of a burst queued, not lost; `live` to `on-dht` to `live` with no duplicate or reordered text.
 
 ## Revision log
 

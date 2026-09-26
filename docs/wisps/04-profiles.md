@@ -23,14 +23,14 @@ Number note: legacy reader paths once used `04` for capability negotiation (now 
 | Linked to the profile | Where it lives |
 |---|---|
 | Chats and their keys, messages, files, drafts, read and pin state | Profile storage namespace and peer database |
-| Wallets: Cashu proofs, Ark and USDT seeds and configuration, payment-intent journal ([200](200-payments.md)) | Peer database |
+| Wallets: Cashu proofs, wallet seeds and configuration, payment-intent journal ([200](200-payments.md)) | Peer database |
 | Ways of paying chosen per chat | That chat's record, inside the profile |
 | Shared local web apps and per-contact grants ([700](700-local-services.md)) | Peer database |
 | Wallet backups and restores | A backup is made from, and restored into, the active profile |
 | Settings: color theme, light/dark mode, language, nickname, notifications, lock screen, network | Profile settings record |
-| Wallet mode (Mainnet or Testnet) and each mode's wallets ([200](200-payments.md)) | Peer database |
+| Wallets per network: Mainnet and Testnet wallets side by side, each one created on its own ([200](200-payments.md)) | Peer database |
 | Profile picture, shown to paired contacts with the nickname ([401](401-paired-chat.md)), and whether contacts are told either (on unless switched off); the names and pictures contacts sent, with their chats | Peer database |
-| Optional identity proofs (300 series) | Planned; disabled in this release |
+| Optional identity proofs (300 series) | Peer database |
 
 Nothing crosses profiles. A contact of one profile cannot reach an app, a wallet or a chat of another.
 
@@ -69,4 +69,4 @@ The web, desktop and browser extension clients implement the registry, the names
 
 ## Open decisions and conformance
 
-Running two profiles at once in separate windows; moving a chat between profiles; binding identity proofs per profile. Conformance: an implementation MUST keep every linked item above within its profile, MUST NOT disclose profiles on the wire, and MUST restart (or fully stop) the previous profile's peer on switching.
+Running two profiles at once in separate windows; moving a chat between profiles. Conformance: an implementation MUST keep every linked item above within its profile, MUST NOT disclose profiles on the wire, and MUST restart (or fully stop) the previous profile's peer on switching.

@@ -5,7 +5,7 @@
 | Candidate number | 301; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
 | Revision | 0.1 |
-| Updated | 2026-09-23 |
+| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Nostr identity-proof provider; see [2026-09-23](#implementation-2026-09-23) |
@@ -14,7 +14,7 @@
 
 ## Scope and baseline
 
-Optional Nostr proof of a Ghost participation. No implementation was found. [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) defines Nostr's signed event structure; it does not define this Ghost proof or reserve a Ghost event kind.
+Optional Nostr proof of a Ghost participation, implemented as the `nostr` identity provider ([below](#implementation-2026-09-23)). [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) defines Nostr's signed event structure; it does not define this Ghost proof or reserve a Ghost event kind.
 
 ## Candidate adapter
 
@@ -36,7 +36,7 @@ Verify identical proof bytes in two independent verifiers; reject a valid Nostr 
 
 ## Implementation follow-up (2026-09-20)
 
-The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.
+The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical. (Superseded by the identity proofs below; the local imports were retired.)
 
 ## Implementation (2026-09-23)
 
@@ -45,7 +45,7 @@ Nostr is the first provider of the [identity proofs](300-peer-proofs.md#implemen
 - **Signers.** NIP-07 (the page's `window.nostr`: web and desktop pages, never assumed inside the extension) and NIP-46 (a `bunker://` link, 1 to 3 `wss://` relays, loopback `ws://` only for tests, permission `sign_event:30078`, auth URLs shown as links and never opened, two-minute time-out; the ephemeral client key is discarded). No private key is ever entered in Ghostly.
 - **Evidence.** One event: kind 30078 (existing NIP-78 application data; no kind is claimed), `created_at` = issue time, content = the exact statement, tags exactly `[["d","ghostly-identity-proof"],["expiration","<expires>"]]`. The verifier recomputes the NIP-01 id from the serialized event, requires `pubkey` = subject, and checks the BIP-340 signature itself, never trusting an id or verification flag it received. Signed once per profile; never published to a relay by Ghostly.
 - **Validity.** 90 days by default, at most 365. Nothing is fetched to verify.
-- **Profile.** A kind-0 name/picture is looked up only when the contact asks ("Show public profile"), from two fixed relays, signature-checked, name sanitized as plain text, picture from fixed hosts re-encoded to a small JPEG; labelled self-described.
+- **Profile.** A kind-0 name/picture, signature-checked, name sanitized as plain text, picture from fixed hosts re-encoded to a small JPEG; labelled self-described. Since 2026-09-26 the identity card reads it by itself while the card is on screen, from the person's relays, under Settings → Security → Load public profiles (on by default): see [PUBLIC-PROFILES](PUBLIC-PROFILES.md#public-profiles-on-identity-cards-2026-09-26).
 
 Tests: the contract suite, template tampering, a real NIP-46 WebSocket exchange with an isolated disposable bunker, a NIP-07 signer injected into the page in e2e. No real Nostr account was used.
 

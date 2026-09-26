@@ -5,16 +5,16 @@
 | Candidate number | 300; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
 | Revision | 0.1 |
-| Updated | 2026-09-23 |
+| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md) |
-| Implementation | Identity proofs with a provider contract; Nostr first. See [2026-09-23](#implementation-2026-09-23-identity-proofs) |
+| Implementation | Identity proofs with a provider contract: Nostr, Pubky, domain, OpenPGP, Bitcoin address, SSH, DID, AT Protocol (Bluesky); OpenID Connect built but not offered (no client ID). See [2026-09-23](#implementation-2026-09-23-identity-proofs) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
 ## Purpose and baseline
 
-External identity is an optional attestation about a participation, not the session's transport or its per-message signer. No external proof adapter was found in current core/browser code. A participant may offer multiple proofs or none; local/channel policy decides whether any are required.
+External identity is an optional attestation about a participation, not the session's transport or its per-message signer. The providers in use are listed under [Providers](#providers). A participant may offer multiple proofs or none; local/channel policy decides whether any are required.
 
 ## Candidate proof semantics
 
@@ -42,11 +42,11 @@ Valid proof plus participation possession succeeds; wrong audience/key/channel, 
 
 ## References
 
-[Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md), [Domain](3xx-domain.md), [OpenPGP](3xx-openpgp.md), [Bitcoin address](3xx-bitcoin.md).
+[Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md), [Domain](3xx-domain.md), [OpenPGP](3xx-openpgp.md), [Bitcoin address](3xx-bitcoin.md), [SSH](3xx-ssh.md), [DIDs](3xx-did.md), [OpenID Connect](3xx-oidc-proofs.md), [AT Protocol](3xx-atproto.md), [public profiles](PUBLIC-PROFILES.md).
 
 ## Implementation follow-up (2026-09-20)
 
-The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.
+The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical. (Superseded: those local imports were retired with the per-chat proof dialog; Pubky Ring and Pubky Passport approval shipped as the `pubky` provider, see [302](302-pubky.md).)
 
 ## Implementation (2026-09-23): identity proofs
 
@@ -78,14 +78,15 @@ One line of UTF-8, no trailing newline, space-free fields in a fixed order (inje
 
 Providers under the [provider contract](../../packages/browser/src/proofs/PROOFS.md), one line each:
 
+- **Nostr** (`nostr`, [301](301-nostr.md)): a kind-30078 event over the statement, signed once through NIP-07 or NIP-46; checked on the device. The profile, follows and notes are the separate [social layer](3xx-nostr-social.md).
 - **Pubky** (`pubky`, [draft 3xx](302-pubky.md)): proven by publication, since Pubky Ring and Pubky Passport only approve Pubky auth requests: one request for write access to one fresh folder (`/pub/ghostly.app/proofs/<random>/`), approved in Passport (a button, the popup opened from the click) or Ring (a QR code of the same request), then the statement is written there. Contacts read it from the homeserver the key's own signed Pkarr records name; re-checked after a day. Removing it asks for one more approval to delete the file.
 - **Domain** (`domain`, experimental, [draft 3xx](3xx-domain.md)): a DNS TXT record at `_ghostly.<domain>` or `/.well-known/ghostly.json` names the proof key and the statement id, published once; NIP-05 users can instead sign with the Nostr key their `nostr.json` names for `_`. Looked up through a DNS-over-HTTPS resolver the contact chooses; web servers on private addresses are never contacted; re-checked after a day, so removing the record withdraws the proof.
 - **OpenPGP** (`openpgp`, [draft 3xx](3xx-openpgp.md)): the person clearsigns the statement once with their own gpg (a YubiKey or OpenPGP card works unchanged) and pastes it with their public key; the contact verifies locally, with expiry and revocation checked at signing and at verification. The key's user ID is shown with the warning that its holder wrote it; keys.openpgp.org is asked, on request only, which emails it confirmed.
 - **Bitcoin address** (`bitcoin`, experimental, [draft 3xx](3xx-bitcoin.md)): the address's own signature over the binding statement, made once in the person's wallet and pasted back: BIP-322 2.0.0 simple/full (P2WPKH, P2TR key path, P2SH-P2WPKH, P2PKH) or legacy `signmessage` for P2PKH only. Checked on the device with no blockchain lookup; multisig and script paths are inconclusive, proof of funds refused. Proves no balance, past payment or willingness to pay, and says so.
 - **SSH keys** (`ssh`, `ssh-github`, `ssh-gitlab`, experimental, [draft 3xx](3xx-ssh.md)): three providers (`packages/browser/src/proofs/providers/ssh.ts`) that sign the binding statement once with OpenSSH's `ssh-keygen -Y sign -n ghostly`: `ssh` (subject: the key's SHA-256 fingerprint, verified on the device), and `ssh-github` / `ssh-gitlab` (subject: an account whose published SSH keys must include the signing key; looked up through the engine's bounded fetch and re-checked after ten minutes, no OAuth). Ed25519, ECDSA P-256/384/521, RSA and FIDO security keys (`sk-ssh-ed25519`, `sk-ecdsa`) are verified against real `ssh-keygen` vectors.
 - **Decentralized identifiers** (`did`, experimental, [draft 3xx](3xx-did.md)): a DID vouches for the binding statement through a key its document lists under `authentication` or `assertionMethod` (a compact JWS, EdDSA/ES256K/ES256, or a raw signature, pasted back), or, for a did:web, by publishing the statement beside its did.json (a file or a `GhostlyIdentityProof` service). did:key and did:jwk are checked on the device; did:web is fetched over bounded HTTPS without redirects, never from a private address; did:dht is read from Pkarr relays. Each contact resolves the DID again and re-checks after a day, so a key, file or service removed stops counting. The profile's own Ghostly did:dht is refused.
-- **Accounts at an OpenID Connect provider** (`oidc`, in development, [draft 3xx](3xx-oidc-proofs.md)): the person signs in once with Google, Microsoft, Apple, GitLab or Twitch using the binding's statement id as the `nonce`; the provider's signed ID token is the evidence, checked by each contact against the provider's published keys. **Attested** by the provider, not a key the person holds. No client registered yet ([checklist](../OIDC-PROVIDERS.md)).
-- **AT Protocol accounts (Bluesky)** (`atproto`, in development, [draft 3xx](3xx-atproto.md)): the person approves once on their own server through AT Protocol OAuth, asking only to create and delete records of Ghostly's collection; Ghostly writes one `tools.ghostly.proof` record carrying the statement, keyed by the proof key, in the account's public repository. Each contact checks it from the repository without logging in: the DID document's key signs the commit, the Merkle Search Tree leads to the record, and the handle is shown only when it resolves back to the DID. Removing the proof deletes the record after a fresh approval.
+- **Accounts at an OpenID Connect provider** (`oidc`, built, not offered, [draft 3xx](3xx-oidc-proofs.md)): the person signs in once with Google, Microsoft, Apple, GitLab or Twitch using the binding's statement id as the `nonce`; the provider's signed ID token is the evidence, checked by each contact against the provider's published keys. **Attested** by the provider, not a key the person holds. No client ID is configured yet, so it is neither offered nor accepted ([checklist](../OIDC-PROVIDERS.md)).
+- **AT Protocol accounts (Bluesky)** (`atproto`, experimental, [draft 3xx](3xx-atproto.md)): the person approves once on their own server through AT Protocol OAuth, asking only to create and delete records of Ghostly's collection; Ghostly writes one `tools.ghostly.proof` record carrying the statement, keyed by the proof key, in the account's public repository. Each contact checks it from the repository without logging in: the DID document's key signs the commit, the Merkle Search Tree leads to the record, and the handle is shown only when it resolves back to the DID. Removing the proof deletes the record after a fresh approval.
 
 ## Implementation follow-up (2026-09-23): OpenPGP
 

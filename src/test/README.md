@@ -1,8 +1,9 @@
 # Component tests
 
 Tests for the shared UI (`src/`) and the hooks in `packages/react`, with Vitest, Testing Library and
-happy-dom. `npm run test:ui` runs them alone; `npm test` runs them after the packages' own tests, and CI
-runs `npm test`. Config: `vitest.ui.config.ts`.
+happy-dom. `npm run test:ui` runs them alone; `npm run test:app` (part of `npm test`) runs them too, and so
+does CI's "Frontend tests (app)" job. Config: `vitest.ui.config.ts`. `npm run test:affected` runs only the ones
+your change can break ([docs/TESTING.md](../../docs/TESTING.md#testing-only-what-changed)).
 
 They render the UI as the **web app** builds it: `ghostlyPlatformModules()` swaps `src/lib/platform.ts` and
 the other platform modules for the browser peer's (`packages/browser/src/platform/`), exactly as
@@ -30,7 +31,7 @@ it("reconnects from the connection menu", async () => {
 });
 ```
 
-What they are for: what a component says and does for a given state — labels, which buttons are enabled,
+What they are for: what a component says and does for a given state: labels, which buttons are enabled,
 what a click asks the engine, validation messages. Not layout, CSS or animation: happy-dom has no layout
 (sizes are 0, container queries do not apply), so anything about how the UI looks stays in the Playwright
 suites (`e2e/`).

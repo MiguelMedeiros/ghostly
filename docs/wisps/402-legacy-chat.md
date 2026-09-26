@@ -9,7 +9,7 @@
 | Document kind | Profile |
 | Disposition | Retained for compatibility: existing chats and v0.4 codes only; no new chat is created with it |
 | Dependencies | [400](400-chat.md) |
-| Implementation | Existing legacy 1:1 clients (v0.4 and earlier, the Rust CLI) and the read/write path kept in current apps |
+| Implementation | Legacy 1:1 clients (v0.4 and earlier, the Rust CLI) and the read/write path kept in current apps; the compatibility header and **Continue in a new chat** in current apps |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
@@ -43,11 +43,11 @@ Deduplication/high-water marks use timestamps, not collision-free sender message
 
 ## Moving a compatibility chat to the one chat
 
-There is no in-place upgrade: this profile has no participation keys to pin, and guessing that a contact runs a newer app would be a silent conversion. Proposed:
+There is no in-place upgrade: this profile has no participation keys to pin, and guessing that a contact runs a newer app would be a silent conversion. Current apps do this instead:
 
 1. A current app marks a compatibility chat as such in its header ("Compatibility chat · older Ghostly").
 2. Its menu offers **Continue in a new chat**: the app creates a one-chat invite and sends it as a message in this chat. A contact on a current app opens it and a new chat pairs as in [400](400-chat.md); a contact still on 0.4 sees a code its app cannot read ([801](801-invitation-profiles.md#reading-an-invite)) and a line explaining that it needs an update.
-3. Once the new chat is paired, the old one says so and stays readable. Whether the two histories are shown as one thread is a UI decision, not a wire one.
+3. The old chat then says so ("You invited your contact to a new chat", with a link to it) and stays readable. Whether the two histories are shown as one thread is a UI decision, not a wire one.
 
 ## Compatibility and limitations
 
@@ -55,5 +55,5 @@ Keep legacy parsing separate from [the chat session 401](401-paired-chat.md) and
 
 ## Revision log
 
-- 0.2 (2026-09-25): renamed Compatibility Chat; retained, not withdrawn; scope narrowed to existing chats and v0.4 codes; layer mapping; proposed move to the one chat.
+- 0.2 (2026-09-25): renamed Compatibility Chat; retained, not withdrawn; scope narrowed to existing chats and v0.4 codes; layer mapping; the move to the one chat.
 - 0.1 (2026-09-22): legacy timestamp chat profile.

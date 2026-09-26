@@ -3,6 +3,8 @@
 > Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.
 >
 > 2026-09-23: new Nostr proofs use the rebuilt [identity proofs](300-peer-proofs.md#implementation-2026-09-23-identity-proofs) instead; this `proof-*` protocol stays disabled.
+>
+> **State on `dev` (2026-09-26):** this whole document is history. Identity proofs are made once per profile through one provider contract: Nostr, Pubky (approved in Pubky Ring or Pubky Passport, #246), domain, OpenPGP, Bitcoin address, SSH and DID; AT Protocol and OpenID Connect are built but blocked outside the code; Keet is blocked on a Keet API. Public profiles are back on identity cards ([PUBLIC-PROFILES.md](PUBLIC-PROFILES.md), #292). This `proof-*` protocol, its local imports and the modified-Ring adapter stay off (`EXTERNAL_IDENTITIES_ENABLED = false`).
 
 2026-09-20. Experimental implementation of Nostr and authorized local-import profiles for WISP 300-303; all WISPs remain Draft. This is not an independent interoperability certification or a security audit.
 
@@ -52,7 +54,7 @@ Proof failures do not replace pins, clear history, weaken transport policy, or d
 | NIP-46 bunker signer | Yes | Real local WebSocket/NIP-44 exchange with separate ephemeral signer/user keys; two native Tauri UIs over HyperDHT and web → native over WebRTC accepted scoped proofs; withdrawal acknowledged both native sides | Fixture is not an independent commercial signer; no user's real account was used |
 | NIP-07 injected browser signer | Yes, availability detected in current window | API fixture tests for refusal and late cancellation; browser/extension builds | No installed real NIP-07 extension was exercised; a signer injected into ordinary websites is not assumed available inside another extension or native WebView |
 | Pubky local import | Retired (2026-09-25) | Old evidence still verifies; nothing makes it | Replaced by the `pubky` identity provider ([302](302-pubky.md)) |
-| Keet-compatible local import | Experimental | SDK derivation/attestData/verify and browser/native compatibility regression | Not evidence of an existing Keet app account |
+| Keet-compatible local import | Off since 2026-09-21 | SDK derivation/attestData/verify and browser/native compatibility regression | Not evidence of an existing Keet app account |
 | Multiple proofs | One record per adapter/direction | Coexistence and independent withdrawal tests | Same Ghostly implementation; no independent-client certification |
 
 Nostr signer requests time out after two minutes; peer challenge requests after 15 seconds. Cancellation ignores late signer results. The app never auto-opens signer auth URLs and only displays validated HTTPS approval links. Bunker input accepts 1 to 3 secure WebSocket relays; insecure WebSocket is limited to loopback for isolated development tests. It does not resolve NIP-05 or silently switch relays. Signer permission is restricted to `sign_event:30078`. Accounts already configured at a signer remain entirely external.
@@ -69,7 +71,7 @@ The Pear tutorial derives a mnemonic-backed identity inside an application worke
 
 ## Source revisions
 
-- Nostr NIPs at `46f8e9501c32f506d07b5de67f414d4f92928cd5`: [01](https://github.com/nostr-protocol/nips/blob/46f8e9501c32f506d07b5de67f414d4f92928cd5/01.md), [102](https://github.com/nostr-protocol/nips/blob/46f8e9501c32f506d07b5de67f414d4f92928cd5/07.md), [46](https://github.com/nostr-protocol/nips/blob/46f8e9501c32f506d07b5de67f414d4f92928cd5/46.md), [78](https://github.com/nostr-protocol/nips/blob/46f8e9501c32f506d07b5de67f414d4f92928cd5/78.md). Runtime SDK pinned to `nostr-tools` 2.25.2; core independently checks the event with its existing noble Schnorr primitive.
+- Nostr NIPs at `46f8e9501c32f506d07b5de67f414d4f92928cd5`: [01](https://github.com/nostr-protocol/nips/blob/46f8e9501c32f506d07b5de67f414d4f92928cd5/01.md), [07](https://github.com/nostr-protocol/nips/blob/46f8e9501c32f506d07b5de67f414d4f92928cd5/07.md), [46](https://github.com/nostr-protocol/nips/blob/46f8e9501c32f506d07b5de67f414d4f92928cd5/46.md), [78](https://github.com/nostr-protocol/nips/blob/46f8e9501c32f506d07b5de67f414d4f92928cd5/78.md). Runtime SDK pinned to `nostr-tools` 2.25.2; core independently checks the event with its existing noble Schnorr primitive.
 - [Pubky Ring](https://github.com/pubky/pubky-ring/tree/f142436883b4f41a599da37993a9635225f008fa), [Pubky core auth](https://github.com/pubky/pubky-core/tree/ce5bf6b7ec89f4d14d39c1c49b6fd8adb625785d/pubky-common/src/auth).
 - [Pear tutorial](https://docs.pears.com/p2p/how-to/manage-identity/add-keet-identity-to-a-chat-app/) inspected 2026-09-20; [identity library](https://github.com/holepunchto/keet-identity-key/tree/85c8e08eedc4269a2612d8eaacf4e258b6814b07).
 
@@ -89,9 +91,9 @@ See the latest local validation section for observed peer UI results and exact r
 
 ## Compact identity UI and public profiles
 
-The subsequent [identity presentation and local public-profile increment](PUBLIC-PROFILES.md) adds compact ecosystem cards, status badges and progressive disclosure. It can display public Nostr/Pubky metadata for a presented key; those self-described names/photos never replace proof verification or participation pins. Keet-compatible imports do not imply an existing Keet profile. The protocol and proof formats above remain unchanged.
+The subsequent [identity presentation and local public-profile increment](PUBLIC-PROFILES.md) adds compact ecosystem cards, status badges and progressive disclosure. It could display public Nostr/Pubky metadata for a presented key (today's identity cards: [PUBLIC-PROFILES.md](PUBLIC-PROFILES.md#public-profiles-on-identity-cards-2026-09-26)); those self-described names/photos never replace proof verification or participation pins. Keet-compatible imports do not imply an existing Keet profile. The protocol and proof formats above remain unchanged.
 
 
 ### Modified Ring follow-up
 
-A separate `pubky-ring/1` experimental adapter now implements an identity-only delegation with fresh client proof of possession and a ten-minute conversation binding. It requires a locally modified Ring, not the unchanged official app. It does not export or forward a homeserver Grant/session secret. Local Pubky imports remain available as Advanced; Nostr/Keet and Ghostly participation are unchanged. See [WISP11](302-pubky.md), [source and build provenance](../../integrations/pubky-ring/README.md), and the final validation entry for what was actually tested.
+A separate `pubky-ring/1` experimental adapter now implements an identity-only delegation with fresh client proof of possession and a ten-minute conversation binding. It requires a locally modified Ring, not the unchanged official app. It does not export or forward a homeserver Grant/session secret. Local Pubky imports were then available as Advanced (off since 2026-09-21, retired 2026-09-25); Nostr/Keet and Ghostly participation were unchanged. See [WISP 302](302-pubky.md) and the final validation entry for what was actually tested. The modified-Ring overlay (`integrations/pubky-ring/`) was removed in #246.

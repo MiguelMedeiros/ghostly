@@ -8,13 +8,13 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md) |
-| Implementation | Experimental native adapter of the chat session (desktop); browsers through a HyperDHT relay (web app, extension); descriptors on the DHT (decided 2026-09-25; being implemented) |
+| Implementation | Experimental: native adapter of the chat session (desktop); browsers through a HyperDHT relay (web app, extension; off until a relay is set); public key in the layer-0 capability record |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
 ## Place in the one chat (revision 0.2)
 
-HyperDHT is a native layer-1 candidate of the one chat ([400](400-chat.md), [100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)). Its DHT is not the chat's layer 0: layer 0 is Pkarr on the Mainline DHT, and a HyperDHT lookup is part of dialling this transport. Proposed: its public key is published in the layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), so it can be tried without a WebRTC session first. A failed attempt leaves the chat `on-dht`; a dropped session sends it there until a transport is back.
+HyperDHT is a native layer-1 candidate of the one chat ([400](400-chat.md), [100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)). Its DHT is not the chat's layer 0: layer 0 is Pkarr on the Mainline DHT, and a HyperDHT lookup is part of dialling this transport. Its public key is published in the layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), so it can be tried without a WebRTC session first. A failed attempt leaves the chat `on-dht`; a dropped session sends it there until a transport is back.
 
 ## Browser profile: through a HyperDHT relay (revision 0.3)
 
@@ -35,7 +35,7 @@ A browser has no UDP, so it cannot run HyperDHT itself. It can reach it through 
 
 **Browser crypto.** HyperDHT's Noise curve needs libsodium's `crypto_scalarmult_ed25519_noclamp`, which the browser build of sodium-universal lacks. A browser client supplies the same function (a canonical point of the prime-order subgroup, never the identity, the scalar taken modulo the group order) and MUST refuse the inputs libsodium refuses.
 
-**First contact.** A browser learns a contact's HyperDHT key inside an authenticated session, so a first pairing still needs WebRTC (or both sides' keys on layer 0, [03](03-capabilities.md#layer-0-capability-record), once implemented).
+**First contact.** A browser learns a contact's HyperDHT key (and the relay a browser contact goes through) from the layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), so a first pairing can dial it before WebRTC has failed.
 
 **Implementation found and fixed (dht-relay 0.4.3, its latest release).** Relayed listening could not sign announcements on hyperdht 6.x; a failed incoming stream made the relay throw out of an event handler (one client could stop the process); a relay closing a gone browser's server waited forever for its signature. Ghostly's relay fixes all three.
 
@@ -68,5 +68,5 @@ Demonstrate chat over HyperDHT and another adapter without changing application 
 ## Revision log
 
 - 0.3 (2026-09-25): browser profile through a non-custodial HyperDHT relay; the `relayed` descriptor field.
-- 0.2 (2026-09-25): place in the one chat; not the chat's layer 0; public key in the layer-0 capability record (proposed).
+- 0.2 (2026-09-25): place in the one chat; not the chat's layer 0; public key in the layer-0 capability record.
 - 0.1 (2026-09-20): initial review draft.

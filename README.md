@@ -1,161 +1,142 @@
 <p align="center">
-  <img src="hero-banner.png" alt="Ghostly - Encrypted Ephemeral Chat" width="100%">
+  <img src="docs/assets/ghostly-app.webp" alt="Ghostly: a chat with a contact, the wallet deck with its Mainnet and Testnet tabs, and the identity cards" width="100%">
 </p>
 
 <p align="center">
-  <strong>Boo! Find each other through the DHT. Connect peer to peer.</strong><br>
-  <em>No central Ghostly message server. No account required.</em>
+  <strong>Boo! Find each other through the DHT. Talk peer to peer.</strong><br>
+  <em>No Ghostly server. No account. Your keys, your history, your money.</em>
 </p>
 
 <p align="center">
   <a href="https://ghostly.tools">Website</a> •
-  <a href="#download">Download</a> •
-  <a href="#features">Features</a> •
+  <a href="https://app.ghostly.tools">Web app</a> •
+  <a href="#get-ghostly">Download</a> •
   <a href="#documentation">Docs</a> •
-  <a href="#troubleshooting">Troubleshooting</a> •
+  <a href="docs/wisps/README.md">WISPs</a> •
   <a href="CONTRIBUTING.md">Contributing</a> •
   <a href="SECURITY.md">Security</a>
 </p>
 
 <p align="center">
+  <a href="https://github.com/MiguelMedeiros/ghostly/releases/latest"><img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?style=for-the-badge&label=Download&color=22d3ee" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
   <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
-  <img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="MIT License">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="MIT License"></a>
 </p>
-
----
-
-## 📥 Download
-
-[![Latest Release](https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?style=for-the-badge&label=Download&color=22d3ee)](https://github.com/MiguelMedeiros/ghostly/releases)
-
-Nothing to install: **[app.ghostly.tools](https://app.ghostly.tools)**, on a computer or a phone. Or the desktop app for macOS, Windows and Linux, or the browser extension: see the [Installation Guide](docs/INSTALLATION.md).
-
-**CLI:**
-
-```bash
-cargo install ghostly-cli
-```
-
-<details>
-<summary><strong>Verifying Downloads (SHA256)</strong></summary>
-
-Each release includes SHA256 checksums to verify file integrity. After downloading:
-
-**macOS / Linux:**
-
-```bash
-shasum -a 256 Ghostly_x.x.x_aarch64.dmg
-# Compare with the checksum in the release notes
-```
-
-**Windows (PowerShell):**
-
-```powershell
-Get-FileHash Ghostly_x.x.x_x64-setup.exe -Algorithm SHA256 | Format-List
-# Compare the Hash value with the checksum in the release notes
-```
-
-The generated hash should match exactly with the one published in the release notes.
-
-</details>
 
 ---
 
 ## What is Ghostly?
 
-**Ghostly** is the reference app for Ghost, a small Pkarr/DHT rendezvous and record-exchange primitive. Peers exchange encrypted small messages and signaling, then move live conversations, files and services onto WebRTC. History stays local; network expiry does not guarantee deletion of retained copies.
+Ghostly is an end-to-end encrypted, peer-to-peer messenger with a wallet and verifiable identities built in.
 
-## Your services exist while you are online
+- Two people meet on the public Mainline DHT (Pkarr records), then talk directly over WebRTC, Iroh or HyperDHT.
+- If no direct path works, short texts keep flowing over the DHT itself.
+- History and keys stay on your device. There is no Ghostly message server and no account.
 
-Ghostly started as a messenger and is growing into an ephemeral peer-to-peer service layer: a peer advertises what it offers right now (chat, voice, video, a local web app) under its Ghostly identity, and linked peers reach it over WebRTC. Close Ghostly and live access ends; local history and keys remain. No central Ghostly message server is required.
+The protocol is specified in the open, one small document at a time: the [WISPs](docs/wisps/README.md).
 
-```
-expose localhost:3400   →   your peer clicks "Open"   →   HTTP over WebRTC   →   your localhost
-```
+## Get Ghostly
 
-This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension that speaks the same protocol as the desktop app.
+| Platform | How |
+|---|---|
+| **Web** (any browser, installs on a phone) | Open **[app.ghostly.tools](https://app.ghostly.tools)**. Nothing to install. |
+| **Desktop** (macOS, Windows, Linux) | `.dmg`, `.exe` / `.msi`, `.AppImage` / `.deb` from the **[latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest)**. The app updates itself. |
+| **Browser extension** (Chrome, Brave, Edge) | The [Chrome Web Store](https://chromewebstore.google.com/detail/ghostly/nbedaagicniejlmfcncndfjcejaidbcf), or the newest `ghostly-browser-extension-<version>.zip` from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest), loaded unpacked. |
+| **CLI** for scripts and bots (macOS, Linux, Windows) | `ghostly-cli-<platform>` binaries from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest). A compatibility client: it talks to other CLIs over the v0.4 record format, not to `ghostly1` app chats. See [CLI](docs/CLI.md). |
+| **Self-hosted web** | `docker compose up -d` serves the web app on `localhost:8080`. See [WEB.md](docs/WEB.md). |
+
+Step by step, checksums and signatures: [Installation](docs/INSTALLATION.md).
 
 ## Features
 
-- **E2E Encrypted** — 256-bit NaCl secretbox encryption
-- **Ephemeral presence** — Records stop being refreshed when offline; local history and retained network copies can remain
-- **No account required** — Optional connectivity infrastructure has explicit privacy and availability tradeoffs
-- **One chat** — Meets on the DHT, talks peer to peer over WebRTC (or Iroh and HyperDHT between desktops), and keeps short texts going over the DHT when the direct link drops ([WISP 400](docs/wisps/400-chat.md))
-- **Calls** — Voice, video and screen sharing, peer to peer, in a window you can put aside (in development builds, with Ghostly 0.4 contacts until calls reach every chat)
-- **Share localhost** — A contact opens a web app running on your machine, while you are online
-- **Files** — Up to 100 MiB, straight to your contact
-- **Sats** — An ecash wallet with Lightning in and out; pasted invoices and tokens become cards you can pay or redeem
-- **Everywhere** — Desktop, browser extension and [a web app](https://app.ghostly.tools) that installs on a phone like a native one
-- **Open Source** — All code is open for audit
+**Chat**
+- One chat type and one invite: a `ghostly1…` code, link or QR code.
+- Live peer to peer over WebRTC, Iroh or HyperDHT, with the DHT as the fallback. The chat header's connection icon shows how you are connected, and you can pick a transport or "DHT only" per chat.
+- Rich text, @mentions in groups, link previews made by the sender, location cards, and cards for invites, Nostr keys, identities and payment codes.
+- Voice messages, GIFs, emoji, message details, per-chat mute.
+- Files of any size, resumable and checked by digest. Large files ask the receiver first.
+- Voice and video calls, with screen sharing inside the call (not on Linux Desktop, whose WebKitGTK has no WebRTC).
+- Private groups and larger communities, joined by a link.
 
-## Screenshots
+**Money**
+- Wallets per network: **Mainnet** (real money) and **Testnet** (test coins) side by side, in tabs.
+- Cashu ecash, Lightning, Spark, Ark (Arkade and Bark), Fedimint, on-chain Bitcoin and USDT. Which rail runs on which network: [Wallets](docs/WALLETS.md).
+- Several Lightning cards per network, each backed by a source you choose (a Cashu mint, Fedimint, Breez, NWC, LND, Core Lightning or a WebLN wallet). Pays invoices, Lightning addresses and LNURL.
+- Pay or request in a chat from the composer: **+ → Payment**.
+- Mainnet spends ask for a clear confirmation. A wallet with money still on its way cannot be removed by accident. Testnet coins come from **Get test coins**, only when you ask.
 
-<p align="center">
-  <img src="screenshots/02-welcome-cyan.png" alt="Home Screen" width="45%">
-  <img src="screenshots/05-chat-messages-glimmer.png" alt="Chat Conversation" width="45%">
-</p>
+**Identity**
+- A profile per person, each with its own keys and a `did:dht`.
+- Prove you also hold another identity: Nostr, Bluesky (AT Protocol), Pubky, a DID, a domain, SSH, OpenPGP or a Bitcoin address.
+- Share an identity with one chat at a time. Contacts see it as an ID card with its public profile.
 
-<p align="center">
-  <img src="screenshots/08-video-call-incoming.png" alt="Incoming Call" width="45%">
-  <img src="screenshots/09-settings-themes.png" alt="Settings" width="45%">
-</p>
+**Shared apps**
+- Share a web app running on your machine (`localhost`) with a contact while you are online, over the chat's live connection. Desktop and the extension can share and open them; the web app cannot.
 
-<details>
-<summary><strong>More screenshots</strong></summary>
+## How it works
 
-| Theme Variants | Chat Flow |
-|:---:|:---:|
-| ![Purple Theme](screenshots/01-welcome-purple.png) | ![New Chat](screenshots/03-new-chat-invite.png) |
-| ![User Joined](screenshots/04-user-joined.png) | ![Messages](screenshots/06-chat-messages-midnight.png) |
+```
+ Alice                    Mainline DHT (Pkarr)                     Bob
+   │── signed, encrypted record ──▶  rendezvous  ◀── signed, encrypted record ──│
+   │◀══════════ live link: WebRTC · Iroh · HyperDHT (end-to-end encrypted) ═════▶│
+   │               no live path? short texts keep going over the DHT            │
+```
 
-| Video Calls | Settings |
-|:---:|:---:|
-| ![Outgoing Call](screenshots/07-video-call-outgoing.png) | ![Security](screenshots/10-settings-security.png) |
-| ![Incoming Call](screenshots/08-video-call-incoming.png) | ![About](screenshots/11-settings-about.png) |
+- **Keys:** a fresh key pair per chat, so no key ties your chats together.
+- **Encryption:** every message is end-to-end encrypted. Relays and DHT nodes can see ciphertext, timing and IP addresses, never what you say.
+- **Relays are helpers**, not servers that hold your chats. Desktop reads the DHT directly; a browser cannot, so the web app and the extension go through public Pkarr relays. A relay that misbehaves is skipped for a while (a circuit breaker per relay).
+- **Local first:** history, keys and wallets live on the device, optionally behind a password.
 
-</details>
+More in [Architecture](docs/ARCHITECTURE.md), [Transports](docs/TRANSPORTS.md) and [Protocol](docs/PROTOCOL.md). The threat model and past audit fixes: [SECURITY.md](SECURITY.md) and [Security review](docs/SECURITY-REVIEW.md).
+
+## Quick start
+
+1. Open [app.ghostly.tools](https://app.ghostly.tools) or the Desktop app.
+2. **New** → copy the invite link (or show its QR code) and send it to a friend.
+3. They open it, or paste it under **Join**. The chat goes live as soon as you find each other.
+
+## Build from source
+
+Requirements: Node.js 22, Rust (stable) and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for Desktop.
+
+```bash
+git clone https://github.com/MiguelMedeiros/ghostly.git
+cd ghostly
+npm install
+```
+
+| Build | Command |
+|---|---|
+| Desktop, development | `npm run tauri dev` |
+| Desktop, release bundle | `npm run tauri build` |
+| Web app | `npm run build:web` (output in `web/dist`) |
+| Browser extension | `npm run build:extension` |
+| CLI | `cargo build --release -p ghostly-cli` |
+
+Tests and the rest of the workflow: [Contributing](CONTRIBUTING.md) and [Testing](docs/TESTING.md).
 
 ## Documentation
 
-- [Installation](docs/INSTALLATION.md) — Web app, extension, desktop downloads, CLI, build from source
-- [Architecture](docs/ARCHITECTURE.md) — How it works, tech stack, security model
-- [Experimental native transports](docs/wisps/TRANSPORT-INCREMENT.md) — Chats over Iroh and HyperDHT, exact scope and validation
-- [WISP drafts](docs/wisps/README.md) — The protocol catalogue: one chat, one `ghostly1` invite, what is implemented and what is being built
-- [Protocol](docs/PROTOCOL.md) — Records, service advertisements, WebRTC data link, HTTP over WebRTC
-- [SDK](docs/SDK.md) — Build a wallet source, an identity proof or a client outside the app: contracts, contract tests, plugins
-- [Ghostly Browser](docs/BROWSER.md) — Run the extension, share a local app, limitations
-- [Ghostly on the web](docs/WEB.md) — The same client in a tab or on a phone: `docker compose up`
-- [Releasing](docs/RELEASING.md) — Version, tag, publish, deploy
-- [CLI Guide](docs/CLI.md) — Command reference and usage examples
-- [AI Agents](docs/AI-AGENTS.md) — Integration with OpenClaw, Cursor, bot examples
-- [Contributing](CONTRIBUTING.md) — How to contribute to the project
+| Topic | Docs |
+|---|---|
+| Getting it | [Installation](docs/INSTALLATION.md) · [On the web](docs/WEB.md) · [Browser extension](docs/BROWSER.md) · [CLI](docs/CLI.md) |
+| Using it | [Chat](docs/CHAT.md) · [Wallets](docs/WALLETS.md) · [Identities](docs/IDENTITIES.md) |
+| How it works | [Architecture](docs/ARCHITECTURE.md) · [Transports](docs/TRANSPORTS.md) · [Protocol](docs/PROTOCOL.md) · [WISPs](docs/wisps/README.md) |
+| Building on it | [SDK](docs/SDK.md) · [AI agents and bots](docs/AI-AGENTS.md) |
+| Working on it | [Contributing](CONTRIBUTING.md) · [Testing](docs/TESTING.md) · [Releasing](docs/RELEASING.md) · [Security review](docs/SECURITY-REVIEW.md) |
 
 ## Troubleshooting
 
-### macOS: "Ghostly.app is damaged and can't be opened"
-
-This error occurs because macOS quarantines apps downloaded from outside the App Store. To fix it, run the following command in Terminal:
+**macOS: "Ghostly.app is damaged and can't be opened".** macOS quarantines apps downloaded outside the App Store. Clear the flag, then open the app again:
 
 ```bash
 sudo xattr -cr /Applications/Ghostly.app
 ```
 
-Enter your password when prompted, then try opening the app again.
+Something else? [Open an issue](https://github.com/MiguelMedeiros/ghostly/issues). For a vulnerability, never open an issue: follow [SECURITY.md](SECURITY.md).
 
----
+## License
 
-<p align="center">
-  <strong>Built with 👻 by <a href="https://github.com/miguelmedeiros">@miguelmedeiros</a></strong>
-</p>
-
-<p align="center">
-  <em>"The end. Now go haunt someone!"</em>
-</p>
-
-<p align="center">
-  <a href="https://ghostly.tools">Website</a> •
-  <a href="https://github.com/MiguelMedeiros/ghostly/issues">Issues</a> •
-  <a href="https://github.com/MiguelMedeiros/ghostly/releases">Releases</a>
-</p>
+[MIT](LICENSE). Built with 👻 by [@miguelmedeiros](https://github.com/miguelmedeiros).

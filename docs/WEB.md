@@ -8,7 +8,7 @@ The same peer and the same UI as [Ghostly Browser](BROWSER.md), running in a tab
 docker compose up --build -d
 ```
 
-Then open <http://localhost:8080>. `docker compose down` stops it. GIF search uses GIFCities without an API key.
+Then open <http://localhost:8080>. `docker compose down` stops it. Releases also publish the image (`ghcr.io/miguelmedeiros/ghostly-web`): `docker compose pull && docker compose up -d` runs it without building. GIF search uses GifCities (Internet Archive) without an API key.
 
 Without Docker:
 
@@ -20,7 +20,7 @@ serves it on <http://localhost:5180> with hot reload, and `npm run build:web` wr
 
 To put it behind a tunnel or a reverse proxy, choose where it listens with `GHOSTLY_WEB_BIND` (for example `GHOSTLY_WEB_BIND=0.0.0.0:8090 docker compose up --build -d`) and terminate HTTPS in front of it.
 
-What is served is static files (nginx, `web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC, and keeps its state in that browser's IndexedDB and localStorage. It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
+What is served is static files (nginx, `web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC or Iroh through a relay (HyperDHT too, once a HyperDHT relay is set), and keeps its state in that browser's IndexedDB and localStorage. It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
 
 `npm run test:e2e` checks every feature of the web app in real browsers, and the web app against the extension ([e2e/README.md](../e2e/README.md)). `E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.config.ts --project=web` runs the same tests against a deployed copy.
 
@@ -30,18 +30,18 @@ What is served is static files (nginx, `web/nginx.conf`). There is no Ghostly ba
 src/                 the UI (Desktop's, unchanged)
 packages/core        the protocol
 packages/react       hooks shared by every client
-packages/browser     the browser peer: engine, wallet, IndexedDB, and the stand-ins
-                     for the five Desktop modules that touch the platform
+packages/browser     the peer: engine, wallets, IndexedDB, and the stand-ins
+                     for the six Desktop modules that touch the platform
 extension/           host: peer in an offscreen document, Chrome permissions, viewer tabs
 web/                 host: peer in the page, one tab at a time
-src/desktop + src-tauri   host: peer in the WebView, Rust for the DHT, local apps and viewer windows
+src/desktop + src-tauri   host: peer in the WebView, Rust for the DHT, native Iroh, the HyperDHT sidecar, local apps, viewer windows
 ```
 
-A host (`packages/browser/src/host.ts`) is the small part that differs: how a page reaches the peer, whether the user can grant access to local addresses, how a contact's web app is opened. Both clients build `src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`).
+A host (`packages/browser/src/host.ts`) is the small part that differs: how a page reaches the peer, whether the user can grant access to local addresses, how a contact's web app is opened. All three build `src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`).
 
 ## On a phone
 
-Below 768px the app shows one screen at a time, like a messenger: the chat list, then the conversation with a back arrow, and a bottom bar for Chats, Wallet, Share and Settings. Emoji, GIFs and payments open as bottom sheets, calls take the whole screen, and the layout follows the visible viewport so the message input stays above the keyboard.
+Below 768px the app shows one screen at a time, like a messenger: the chat list, then the conversation with a back arrow, and a bottom bar for Chats, Wallets, Identities, Services and Settings. Emoji, GIFs and payments open as bottom sheets, calls take the whole screen, and the layout follows the visible viewport so the message input stays above the keyboard.
 
 It installs to the home screen (`manifest.json`, `display: standalone`, Apple metas). There is deliberately no service worker: a cached copy of the app would keep running after the server's copy changed, and the app is small.
 
@@ -51,7 +51,10 @@ Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the ca
 
 | | Web | Extension | Desktop |
 |---|---|---|---|
-| Chat, calls, files, sats | ✅ | ✅ | ✅ |
+| Chat, files, payments | ✅ | ✅ | ✅ |
+| Calls | ✅ | ✅ | ✅ (not on Linux: no WebRTC) |
+| Mainline DHT | through relays | through relays | directly |
+| Iroh, HyperDHT | through a relay (HyperDHT only when one is set) | same as web | native |
 | Runs while no window is open | no, the peer is the tab | yes, until the browser closes | yes, until the app closes |
 | Share a local web app | ❌ | ✅ | ✅ |
 | Open a contact's web app | ❌ for now | ✅ | ✅ |
@@ -63,6 +66,6 @@ Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the ca
 
 ## Keeping up to date
 
-The build writes `/version.json` next to the app, and a tab asks for it on load, every four hours and whenever it comes back to the foreground. Different version, or the same version from a different commit, and the sidebar offers a reload — never on its own, because reloading ends the peer and every call it holds. The question goes to the origin serving the app and to nobody else, and **Settings → Updates** turns it off.
+The build writes `/version.json` next to the app, and a tab asks for it on load, every four hours and whenever it comes back to the foreground. Different version, or the same version from a different commit, and the app offers a reload, never on its own, because reloading ends the peer and every call it holds. The question goes to the origin serving the app and to nobody else, and **Settings → Updates** turns it off.
 
 Self-hosting works the same way: `/version.json` is whatever you built, so your visitors are told about your deploys, not about ours.

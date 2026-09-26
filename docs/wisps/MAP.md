@@ -1,23 +1,23 @@
 # Composable Ghost architecture
 
-This map is a design map, not a claim that every box exists or that every combination works. Candidate numbers refer to the [working catalogue](README.md).
+This map is a design map, not a claim that every box exists or that every combination works. Candidate numbers refer to the [working catalogue](README.md). Implementation notes reviewed against `dev` on 2026-09-26.
 
 | Common base | Identity | Per-connection data transport | Group rules | Group distribution | Per-operation payments | Combinable applications |
 |---|---|---|---|---|---|---|
-| Ghost records / rendezvous (02) | None | WebRTC (101; existing baseline) | Admission / roles (800 and 900) | Bounded mesh (9xx group mesh; implemented, text only) | Cashu (201; app integration exists) | Chat (400) |
-| Peer Keys (03) | Nostr (301; experimental implementation) | Iroh (102; proposed) | Membership and epoch security (900; first profile implemented) | GossipSub (901; candidate) | Lightning (203; app integration exists) | Files (500) |
-| Capability / transport negotiation (03 and 100; proposed) | Pubky (302; approved in Ring or Passport) | HyperDHT (103; proposed) | Removal / recovery / history policy (900) | Other adapters, including Pear components: investigate only | Ark integration planned (202); on-chain / Spark research | Voice / video (600) |
-| Current record profile exists; modular agreement is new | Keet (303; compatible local import experimental) | Runtime availability differs | Does not select an overlay by itself | Keet distribution API not assumed | External component executes authorized payment | Local services (700) |
+| Ghost records / rendezvous (01; the DHT floor of every chat) | None needed: Ghostly participation by default | WebRTC (101; every client but Linux Desktop) | Admission / roles (800 and 900) | Group mesh (9xx; implemented, up to eight) | Cashu (201; default rail) | Chat (400) |
+| Peer Keys (02) | Nostr, Pubky, domain, OpenPGP, Bitcoin address, SSH, DID (300 to 3xx; experimental providers) | Iroh (102; native on Desktop, relayed in browsers) | Membership and epoch security (900; two profiles implemented) | Group community (9xx; implemented, up to 256, hubs) | Lightning (203; several cards per network) | Files (500) |
+| Capability / transport negotiation (03 and 100; implemented in every chat, general negotiation proposed) | OpenID Connect and AT Protocol (3xx; built, blocked outside the code) | HyperDHT (103; native on Desktop, browsers only through a relay) | Removal / recovery / history policy (900) | GossipSub (901; candidate, no code); Pear components: investigate only | Arkade (202), Bark (204), Fedimint and Spark (2xx), on-chain and USDT: experimental rails | Voice / video (600) |
+| Current record profile exists; modular agreement is new | Keet (303; blocked on a Keet API) | Runtime availability differs | Does not select an overlay by itself | Keet distribution API not assumed | External component executes authorized payment | Local services (700) |
 
 ```mermaid
 flowchart TB
     Base["Ghost base: records, rendezvous, Peer Keys; the floor of every chat (DHT text)"]
     Agree["Capabilities, versions and policy agreement"]
     Base --> Agree
-    Agree --> Proof["Identity: Ghostly participation; optional external peer proofs / Nostr / Pubky local / Keet-compatible local"]
+    Agree --> Proof["Identity: Ghostly participation; optional identity proofs: Nostr / Pubky / domain / OpenPGP / Bitcoin / SSH / DID"]
     Agree --> Edge["Per-edge transport: WebRTC / Iroh / HyperDHT"]
     Agree --> Rules["Group admission, permissions and epoch security"]
-    Rules --> Overlay["Common distribution profile: mesh prototype / GossipSub / future adapters"]
+    Rules --> Overlay["Common distribution profile: group mesh / group community / GossipSub / future adapters"]
     Edge --> Path["Compatible authenticated data path"]
     Edge -. none connects or it drops .-> Base
     Overlay --> Path
@@ -35,17 +35,17 @@ flowchart TB
 
 See [group contract](900-group-sessions.md), [GossipSub candidate](901-gossipsub.md), [platform matrix](IMPLEMENTATION.md) and [validation gates](INTEROP.md).
 
-The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.
+History: the 2026-09-20 [proof increment](PROOF-INCREMENT.md) (external-signer Nostr, local imports of Pubky and Keet-compatible keys) stays off. The rebuilt identity proofs (2026-09-23, [300](300-peer-proofs.md#implementation-2026-09-23-identity-proofs)) replaced it: made once per profile, shared per contact by choice. Ghostly participation remains the default. All WISPs remain Draft.
 
 ## Contracts and implemented profiles
 
 | Contract | Concrete profiles | Current scope |
 |---|---|---|
-| [400 Chat](400-chat.md) | [401 chat session](401-paired-chat.md) (layer 1), [403 DHT text](403-dht-text.md) (layer 0, the floor), [4xx store-and-forward](4xx-store-and-forward.md); [402 compatibility](402-legacy-chat.md) for v0.4 | Decided 2026-09-25: one chat on two layers; today new chats still pick an invite mode, and 0.4 chats use the compatibility profile |
-| [500 Files](500-files.md) | [501 files/2](501-paired-files.md), [502 compatibility](502-legacy-files.md) | Layer 1 or a hold; never DHT records; no resume |
-| [600 Media](600-media.md) | [601 WebRTC media](601-webrtc-media.md) | Compatibility chats only today; calls in every chat being implemented; runtime capture limits |
+| [400 Chat](400-chat.md) | [401 chat session](401-paired-chat.md) (layer 1), [403 DHT text](403-dht-text.md) (layer 0, the floor), [4xx store-and-forward](4xx-store-and-forward.md); [402 compatibility](402-legacy-chat.md) for v0.4 | One chat on two layers in every new chat (#209, #229); 0.4 chats use the compatibility profile |
+| [500 Files](500-files.md) | [501 files/2 and files/3](501-paired-files.md), [502 compatibility](502-legacy-files.md) | Layer 1 or a hold; never DHT records; `files/3` of any size with resume (#233) |
+| [600 Media](600-media.md) | [601 WebRTC media](601-webrtc-media.md) | Calls in every chat while live (`calls/1`, #207) and in compatibility chats; screen sharing inside a call; not on Linux Desktop |
 | [700 Local Services](700-local-services.md) | [701 HTTP](701-http-services.md) | Hosting with selected contact access, in every chat (desktop and extension) |
-| [800 Invite/Join](800-invite-join.md) | [801 implemented invitations](801-invitation-profiles.md) | Bearer bootstrap exists; one bech32m `ghostly1…` invite (being implemented) and global consumable admission proposed |
-| [900 Groups](900-group-sessions.md) | [9xx Group Mesh](9xx-group-mesh.md), [9xx Group Community](9xx-group-community.md), [901 GossipSub](901-gossipsub.md) | Mesh profile (text, eight members) and community profile (a link, 256 members, hubs) implemented; GossipSub proposed |
+| [800 Invite/Join](800-invite-join.md) | [801 implemented invitations](801-invitation-profiles.md) | One bech32m `ghostly1…` invite for every new chat (#210); global consumable admission proposed |
+| [900 Groups](900-group-sessions.md) | [9xx Group Mesh](9xx-group-mesh.md), [9xx Group Community](9xx-group-community.md), [901 GossipSub](901-gossipsub.md) | Mesh profile (eight members) and community profile (a link, 256 members, hubs) implemented, with text, a picture and payments between members; GossipSub proposed |
 
-Transport100 already separates101/102/103. Payment200 separates201Cashu and203Lightning via Cashu; Ark202 remains implementation work until its substantive contract and evidence are ready. Identity300 separates301/302/303 external proof bindings, currently disabled. Document kinds describe responsibilities, not feature availability.
+Transport 100 separates 101, 102 and 103. Payment 200 separates its rails: 201 Cashu, 203 Lightning, 202 Arkade, 204 Bark, 205 Lightning addresses and the 2xx drafts, each its own method. Identity 300 separates its providers (301, 302, 303 and the 3xx drafts) behind one contract. Document kinds describe responsibilities, not feature availability.

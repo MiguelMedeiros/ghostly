@@ -26,7 +26,7 @@ Desktop uses native local fetch; extension can host permitted local services. An
 
 In the chat session ([401](401-paired-chat.md#calls-and-shared-apps)) shared apps are on while both sides offer `services/1` on the live session. The host tells the contact which apps it granted that contact with `{"t":"paired-services","s":<list>}`, the same list as `hello.svc`, once the contact said `services/1` and again whenever a grant changes; the list is never published. HTTP travels as `{"t":"ph","c":"<control frame>"}` (the `req`, `res` and `rst` frames above) and `{"t":"ph","b":"<chunk>"}` (a body chunk, base64url), since application data on this session is text on every transport. Both sides MUST drop `paired-services` and `ph` frames unless both offer `services/1` on this session, and a request made without a live session fails without reaching the host. The host checks the grant on every request, not only when listing: an app the contact was not granted answers 404 whatever it asks.
 
-The web app offers nothing here: a tab can neither reach a local address nor open a contact's app. A contact's app then says so in the chat's Services dialog, as it does on the DHT ("Shared apps open while you are connected live").
+The web app offers nothing here: a tab can neither reach a local address nor open a contact's app. A contact's app then says so in the chat's Shared apps dialog (composer +): "<contact>'s app cannot open or share apps". On the DHT the same dialog says "Shared services open while you are connected live".
 
 ## Evidence
 

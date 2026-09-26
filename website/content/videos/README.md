@@ -20,7 +20,7 @@ only when a WISP has `video` metadata (see "Wiring a finished video").
 
 Rules for every lesson:
 
-- Say the availability out loud: *available in v0.4.0*, *in development for 0.5.0*, *being built*, *planned* or *research*. "Draft" is about the document, not the feature.
+- Say the availability out loud, with the site's levels (`lib/status.ts`): *available* (and in which release), *planned* or *research*. "Draft" is about the document, not the feature.
 - Show real screens for scene 4. If a feature can't be recorded, say so and use the site illustration, labelled "illustration".
 - Name limits in scene 5 (sizes, time windows, both-online requirements, which clients).
 - No invented users, partners, metrics or dates.
@@ -35,7 +35,7 @@ Copy this block to `wisp-<id>-<slug>.md`.
 wisp: "<id>"
 slug: "<file slug>"
 title: "<WISP title>"
-availability: released | development | building | planned | research
+availability: available | planned | research
 duration: "~4:30"
 status: script | recorded | edited | published
 ---

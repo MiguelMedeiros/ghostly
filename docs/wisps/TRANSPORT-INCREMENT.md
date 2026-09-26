@@ -2,13 +2,22 @@
 
 > **Revision 0.2 of the chat family (2026-09-25).** The transports here are layer 1 of the one chat ([400](400-chat.md)); the DHT underneath is its rendezvous and floor ([100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)). "No DHT message fallback" below is about the **Allow fallback** toggle between adapters: that toggle never picks the DHT. When no adapter connects, the chat falls to DHT text regardless of the toggle, as it already does after a drop, unless the contact refuses DHT text.
 
+> **State on `dev` (2026-09-26):**
+>
+> - Web app and extension: Iroh relay-only, on by default through n0's relays (#225); HyperDHT only through a HyperDHT relay the person sets (#231). A web chat reaches a Desktop over relayed Iroh (#270).
+> - First contact: native descriptors travel in the layer-0 capability record, so two Desktop apps go live on Iroh or HyperDHT with no WebRTC first (#209, #229, #235, #244).
+> - Desktop reads the Mainline DHT directly (#289).
+> - Files, payments and shared apps run on every transport; calls signal on the session and carry media on a WebRTC connection of their own (#207).
+>
+> The sections below describe the 2026-09-20 increment; where they say otherwise, this note wins.
+
 Implemented locally on 2026-09-20, after the [paired-chat base](PAIRED-CHAT-INCREMENT.md). All WISPs remain Draft. This is the exact bounded implementation profile, not full conformance to every candidate requirement in WISPs 100 to 103.
 
 ## What runs
 
-The same `GhostLink`, participation proofs, chat framing, IndexedDB history, receipt handling and outbox now run over `webrtc/1`, `iroh/1` and `hyperdht/1`. Native adapters are injected by the desktop host. Browser and extension hosts inject neither native adapter and advertise only available WebRTC. This does not establish that upstream Iroh can never support browsers.
+The same `GhostLink`, participation proofs, chat framing, IndexedDB history, receipt handling and outbox now run over `webrtc/1`, `iroh/1` and `hyperdht/1`. Native adapters are injected by the desktop host. In this increment, browser and extension hosts injected neither native adapter and advertised only available WebRTC; relay-only browser adapters came later (note above).
 
-The product's **initial pairing still uses WebRTC**. Once both people confirm, native descriptors are exchanged inside the authenticated session and saved locally. Later native reconnects use those descriptors; they do not need a fresh WebRTC connection or new invite. Headless integration tests explicitly provision initial native descriptors as fixtures rather than claiming a new public invite format.
+In this increment, the product's **initial pairing used WebRTC**. Once both people confirm, native descriptors are exchanged inside the authenticated session and saved locally. Later native reconnects use those descriptors; they do not need a fresh WebRTC connection or new invite. Headless integration tests explicitly provision initial native descriptors as fixtures rather than claiming a new public invite format.
 
 Each adapter gets a separate random, persistent seed per conversation, distinct from the participation seed and the other transport's seed. Switching adapters leaves the conversation ID, participation pins, message IDs and history untouched. There is a controlled close/reconnect and fresh authentication, not seamless migration of an in-flight stream.
 
@@ -75,4 +84,4 @@ Manual validation in two separate Tauri bundles used the public default infrastr
 
 ## Deliberate limits
 
-Only paired text chat is exposed on these adapters. Files, media, payments, localhost services, external proofs and groups are not added. Existing legacy features remain separate. Bootstrap credentials are still retained; signed discovery and pinned participation prevent invite reuse from impersonating the paired participant but do not prevent DHT suppression or erase old records. Receipts mean remote local persistence; device loss and deleted history limit deduplication. No distributed exactly-once, global revocation, erasure, independent crypto audit or uninterrupted hot migration is claimed.
+This increment exposed only paired text chat on these adapters; files, payments, shared apps and call signals followed (note above). External proofs and groups are not part of this profile. Existing legacy features remain separate. Bootstrap credentials are still retained; signed discovery and pinned participation prevent invite reuse from impersonating the paired participant but do not prevent DHT suppression or erase old records. Receipts mean remote local persistence; device loss and deleted history limit deduplication. No distributed exactly-once, global revocation, erasure, independent crypto audit or uninterrupted hot migration is claimed.

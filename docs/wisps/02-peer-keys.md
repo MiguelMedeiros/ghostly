@@ -27,10 +27,10 @@ Give each participation its own key and distinguish its lifetime from an individ
 | Object | Scope and lifetime | Rotation/loss behavior |
 |---|---|---|
 | Channel ID | Logical relationship or group; not a credential | Remains stable through reconnects; no authority by itself |
-| Invite secret | Admission attempt or explicitly bounded multiuse policy | Consume/revoke via 20; never treat a channel ID as an invite |
+| Invite secret | Admission attempt or explicitly bounded multiuse policy | Consume/revoke via [800](800-invite-join.md); never treat a channel ID as an invite |
 | Participation key | One local persona's participation in a channel | Persist until explicit removal/rotation; never reuse across channels by default |
 | Session keys/ID | One authenticated connection attempt | Fresh context on reconnect; old transcript cannot authorize a new attempt |
-| Group epoch state | One accepted membership state | Changes through the reviewed group security protocol in 21 |
+| Group epoch state | One accepted membership state | Changes through the reviewed group security protocol in [900](900-group-sessions.md) |
 | External identity | Optional proof provider | Does not replace participation authorization or recover it automatically |
 
 Participants SHOULD generate their own participation keys after bootstrap rather than inherit the legacy invite seed. Bind replacement keys to the authenticated old context, peer approval and fresh handshake. Exact key agreement, derivation, erasure and wire encoding remain blockers; this draft does not invent a ratchet or claim forward secrecy.
@@ -45,7 +45,7 @@ Legacy invites disclose one seed and the symmetric key; hiding the invite UI is 
 
 ## Conformance
 
-Restart/reconnect without reopening an invite; rotate without accepting replayed old bindings; lose state without silently creating continuity; test crash during rotation and external-proof revocation. Negative cases include a copied invite and a replaced participation key. See 800 and 21 for admission/removal cases.
+Restart/reconnect without reopening an invite; rotate without accepting replayed old bindings; lose state without silently creating continuity; test crash during rotation and external-proof revocation. Negative cases include a copied invite and a replaced participation key. See [800](800-invite-join.md) and [900](900-group-sessions.md) for admission/removal cases.
 
 ## References
 

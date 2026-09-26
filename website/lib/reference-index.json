@@ -23,8 +23,8 @@
     "slug": "01-ghost-core",
     "title": "WISP 01: Ghost Core Protocol",
     "status": "Draft",
-    "updated": "2026-09-25",
-    "implementation": "Existing rendezvous and DHT text; the DHT as rendezvous and floor of every chat (decided 2026-09-25; being implemented)",
+    "updated": "2026-09-26",
+    "implementation": "Rendezvous and DHT text in every client; the DHT as rendezvous and floor of every chat; native clients (Desktop, CLI) read the Mainline DHT directly; a circuit breaker per Pkarr relay in every client",
     "dependencies": [
       "00-process.md"
     ],
@@ -58,7 +58,7 @@
     "title": "WISP 03: Capability Negotiation",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing advertisements and the paired pair-offer; the layer-0 capability record (decided 2026-09-25; being implemented)",
+    "implementation": "Existing advertisements and the paired pair-offer; the layer-0 capability record in every new chat",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -93,7 +93,7 @@
     "title": "WISP 05: Profile Backups",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental: web and desktop clients",
+    "implementation": "Experimental: web, desktop and browser extension clients",
     "dependencies": [
       "04-profiles.md",
       "200-payments.md",
@@ -112,7 +112,7 @@
     "title": "WISP 100: Transport Negotiation",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental rank-sum negotiation in every new chat; the DHT floor, background retry and upgrade (decided 2026-09-25; being implemented)",
+    "implementation": "Experimental: rank-sum negotiation, the DHT floor, background retry and upgrade in every new chat; relayed transports; a choice made while not live travels in the capability record",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -146,7 +146,7 @@
     "title": "WISP 1001: Local File Storage",
     "status": "Draft",
     "updated": "2026-09-23",
-    "implementation": "Experimental: web and desktop clients",
+    "implementation": "Experimental: web, desktop and browser extension clients",
     "dependencies": [
       "1000-storage.md",
       "05-backups.md"
@@ -180,11 +180,11 @@
     "title": "WISP 101: WebRTC",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing adapter behavior; WISP binding proposed",
+    "implementation": "Existing adapter in every client; WISP binding proposed",
     "dependencies": [
       "100-transports.md"
     ],
-    "summary": "WebRTC is one layer-1 candidate of the one chat (400, 100), and the only one in browsers and the extension. Its rtc signaling rides layer 0, in the link's own signed record, as today. A WebRTC attempt that does not connect (no ICE path, no TURN, a blocked network) no longer fails a first pairing: the chat stays on-dht and retries in the background. A WebRTC session that drops sends the chat to on-dht until it or anot",
+    "summary": "WebRTC is one layer-1 candidate of the one chat (400, 100), and the only direct one in browsers and the extension (they reach Iroh, and HyperDHT when a relay is set, only through a relay: 102, 103). Its rtc signaling rides layer 0, in the link's own signed record, as today. A WebRTC attempt that does not connect (no ICE path, no TURN, a blocked network) no longer fails a first pairing: the chat stays on-dht and retri",
     "notices": []
   },
   {
@@ -197,11 +197,11 @@
     "title": "WISP 102: Iroh",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental native adapter of the chat session (desktop); relay-only browser build in the web app and the extension (2026-09-25); descriptors on the DHT (decided 2026-09-25; being implemented)",
+    "implementation": "Experimental: native adapter of the chat session (desktop); relay-only browser build in the web app and the extension; endpoint id and home relay in the layer-0 capability record",
     "dependencies": [
       "100-transports.md"
     ],
-    "summary": "Iroh is a native layer-1 candidate of the one chat (400, 100). Proposed: its endpoint id is published in the layer-0 capability record (03), so two desktops can try Iroh without a WebRTC session first (today its descriptor is exchanged only inside an authenticated session). The endpoint id is dialled through Iroh's own discovery; no address goes into the record. An Iroh attempt that fails leaves the chat on-dht, and ",
+    "summary": "Iroh is a native layer-1 candidate of the one chat (400, 100). Its endpoint id is published in the layer-0 capability record (03), so two desktops try Iroh without a WebRTC session first. The endpoint id is dialled through Iroh's own discovery; no address goes into the record. An Iroh attempt that fails leaves the chat on-dht, and a dropped Iroh session sends it there until a transport is back.",
     "notices": []
   },
   {
@@ -214,11 +214,11 @@
     "title": "WISP 103: HyperDHT",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental native adapter of the chat session (desktop); browsers through a HyperDHT relay (web app, extension); descriptors on the DHT (decided 2026-09-25; being implemented)",
+    "implementation": "Experimental: native adapter of the chat session (desktop); browsers through a HyperDHT relay (web app, extension; off until a relay is set); public key in the layer-0 capability record",
     "dependencies": [
       "100-transports.md"
     ],
-    "summary": "HyperDHT is a native layer-1 candidate of the one chat (400, 100). Its DHT is not the chat's layer 0: layer 0 is Pkarr on the Mainline DHT, and a HyperDHT lookup is part of dialling this transport. Proposed: its public key is published in the layer-0 capability record (03), so it can be tried without a WebRTC session first. A failed attempt leaves the chat on-dht; a dropped session sends it there until a transport is",
+    "summary": "HyperDHT is a native layer-1 candidate of the one chat (400, 100). Its DHT is not the chat's layer 0: layer 0 is Pkarr on the Mainline DHT, and a HyperDHT lookup is part of dialling this transport. Its public key is published in the layer-0 capability record (03), so it can be tried without a WebRTC session first. A failed attempt leaves the chat on-dht; a dropped session sends it there until a transport is back.",
     "notices": []
   },
   {
@@ -231,12 +231,12 @@
     "title": "WISP 200: Payment Negotiation",
     "status": "Draft",
     "updated": "2026-09-24",
-    "implementation": "Existing payment frames; generic integration proposed",
+    "implementation": "Payment frames with wallets per network (Mainnet and Testnet side by side); experimental rails: Cashu, Lightning cards, Ark (Arkade, Bark), Spark, Fedimint, USDT, on-chain Bitcoin",
     "dependencies": [
       "03-capabilities.md",
       "100-transports.md"
     ],
-    "summary": "Ghost negotiates payment methods and carries requests/results; it does not mandate a new wallet. Current pay-req, pay, pay-res frames use request/payment IDs, decimal-text amounts, an asset and ordered endpoints. Initial identifiers are cashu and btc-lightning-bolt11. Frames run only over the data link. The application currently includes Cashu wallet code; that is a reference integration, not a Core requirement.",
+    "summary": "Ghost negotiates payment methods and carries requests/results; it does not mandate a new wallet. Current pay-req, pay, pay-res frames use request/payment IDs, decimal-text amounts, an asset and ordered endpoints. Initial identifiers are cashu and btc-lightning-bolt11; the other rails add their own endpoints (btc-arkade/1, btc-bark/1, btc-spark/1, fedimint-ecash/1, btc-onchain/1, USDT). Frames run only over the data l",
     "notices": []
   },
   {
@@ -248,8 +248,8 @@
     "slug": "201-cashu",
     "title": "WISP 201: Cashu",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Existing application integration",
+    "updated": "2026-09-26",
+    "implementation": "Cashu wallet per network (Mainnet and Testnet); shared reviewed-payment coordinator",
     "dependencies": [
       "200-payments.md"
     ],
@@ -263,8 +263,8 @@
     "slug": "202-arkade",
     "title": "WISP 202: Ark payments via Arkade",
     "status": "Draft",
-    "updated": "2026-09-22",
-    "implementation": "Experimental browser adapter, Arkade SDK 0.4.74; regtest evidence below. Every new profile starts with a Bitcoin mainnet wallet on arkade.computer.",
+    "updated": "2026-09-26",
+    "implementation": "Experimental browser adapter, Arkade SDK 0.4.74; regtest evidence below. New makes a Mainnet wallet on arkade.computer or a Testnet one on Mutinynet, in one click.",
     "documentKind": "Adapter",
     "dependencies": [
       "200-payments.md",
@@ -282,12 +282,12 @@
     "slug": "203-lightning",
     "title": "WISP 203: Lightning",
     "status": "Draft",
-    "updated": "2026-09-24",
-    "implementation": "Existing invoice integration; Lightning sources (the Cashu mints by default)",
+    "updated": "2026-09-26",
+    "implementation": "Several Lightning cards per network, each on its own source (Cashu mints, Fedimint, Breez, NWC, Core Lightning, LND, WebLN)",
     "dependencies": [
       "200-payments.md"
     ],
-    "summary": "The current btc-lightning-bolt11 endpoint carries an invoice; the application supports Lightning through its Cashu component and invoice UI. This is not evidence of a universal external-wallet adapter or a locally operated Lightning node. BOLT 11 is the invoice format reference.",
+    "summary": "The current btc-lightning-bolt11 endpoint carries an invoice; the application reaches Lightning through the sources below. This is not evidence of a universal external-wallet adapter. BOLT 11 is the invoice format reference.",
     "notices": []
   },
   {
@@ -297,8 +297,8 @@
     "slug": "204-bark",
     "title": "WISP 204: Ark payments via Bark",
     "status": "Draft",
-    "updated": "2026-09-23",
-    "implementation": "Experimental browser adapter, Second's Bark SDK @secondts/bark 0.24.0 (bark 0.7.1, WebAssembly). Testnet only (New offers no Mainnet Bark yet): New makes a signet wallet on Second's server; Mainnet makes none yet. Regtest evidence below.",
+    "updated": "2026-09-26",
+    "implementation": "Experimental browser adapter, Second's Bark SDK @secondts/bark 0.25.0 (bark 0.7.1, WebAssembly). New makes a Mainnet wallet on Second's Bitcoin server and a Testnet one on their signet server, each in one click. Regtest evidence below; no Ghostly test has moved real money.",
     "documentKind": "Adapter",
     "dependencies": [
       "200-payments.md",
@@ -314,8 +314,8 @@
     "slug": "205-lnurl",
     "title": "WISP 205: Lightning Addresses and LNURL-pay",
     "status": "Draft",
-    "updated": "2026-09-24",
-    "implementation": "Paying a Lightning address or LNURL through the active Lightning source; no wire format",
+    "updated": "2026-09-26",
+    "implementation": "Paying a Lightning address or LNURL through a Lightning card; no wire format",
     "dependencies": [
       "200-payments.md",
       "203-lightning.md"
@@ -330,8 +330,8 @@
     "slug": "2xx-fedimint",
     "title": "WISP 2xx: Fedimint ecash and Lightning through a federation",
     "status": "Draft",
-    "updated": "2026-09-25",
-    "implementation": "Experimental browser adapter on the Fedimint web SDK (@fedimint/core canary, pinned). Testnet only (New offers no Mainnet Fedimint yet); regtest evidence below.",
+    "updated": "2026-09-26",
+    "implementation": "Experimental browser adapter on the Fedimint web SDK (@fedimint/core canary, pinned). Testnet only: New shows Mainnet Fedimint as \"Not yet\" (FEDIMINTMAINNET); regtest evidence below.",
     "documentKind": "Adapter",
     "dependencies": [
       "200-payments.md",
@@ -348,8 +348,8 @@
     "slug": "2xx-spark",
     "title": "WISP 2xx: Spark payments",
     "status": "Draft",
-    "updated": "2026-09-24",
-    "implementation": "Experimental browser adapter, Breez SDK Spark @breeztech/breez-sdk-spark 0.26.0 (WebAssembly, nodeless). Every Testnet profile opens a wallet on Breez and Lightspark's hosted regtest. Mainnet makes one only after the person enters a Breez API key.",
+    "updated": "2026-09-26",
+    "implementation": "Experimental browser adapter, Breez SDK Spark @breeztech/breez-sdk-spark 0.26.0 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click. Mainnet is not offered yet (\"Not yet\" in New: never tried with real funds).",
     "documentKind": "Adapter",
     "dependencies": [
       "200-payments.md",
@@ -367,13 +367,13 @@
     "slug": "300-peer-proofs",
     "title": "WISP 300: Identity Proofs",
     "status": "Draft",
-    "updated": "2026-09-23",
-    "implementation": "Identity proofs with a provider contract; Nostr first. See 2026-09-23",
+    "updated": "2026-09-26",
+    "implementation": "Identity proofs with a provider contract: Nostr, Pubky, domain, OpenPGP, Bitcoin address, SSH, DID, AT Protocol (Bluesky); OpenID Connect built but not offered (no client ID). See 2026-09-23",
     "dependencies": [
       "02-peer-keys.md",
       "03-capabilities.md"
     ],
-    "summary": "External identity is an optional attestation about a participation, not the session's transport or its per-message signer. No external proof adapter was found in current core/browser code. A participant may offer multiple proofs or none; local/channel policy decides whether any are required.",
+    "summary": "External identity is an optional attestation about a participation, not the session's transport or its per-message signer. The providers in use are listed under Providers. A participant may offer multiple proofs or none; local/channel policy decides whether any are required.",
     "notices": []
   },
   {
@@ -385,12 +385,12 @@
     "slug": "301-nostr",
     "title": "WISP 301: Nostr",
     "status": "Draft",
-    "updated": "2026-09-23",
+    "updated": "2026-09-26",
     "implementation": "Nostr identity-proof provider; see 2026-09-23",
     "dependencies": [
       "300-peer-proofs.md"
     ],
-    "summary": "Optional Nostr proof of a Ghost participation. No implementation was found. NIP-01 defines Nostr's signed event structure; it does not define this Ghost proof or reserve a Ghost event kind.",
+    "summary": "Optional Nostr proof of a Ghost participation, implemented as the nostr identity provider (below). NIP-01 defines Nostr's signed event structure; it does not define this Ghost proof or reserve a Ghost event kind.",
     "notices": []
   },
   {
@@ -402,8 +402,8 @@
     "slug": "302-pubky",
     "title": "WISP 3xx: Pubky identity (approved in Pubky Ring or Pubky Passport)",
     "status": "Draft",
-    "updated": "2026-09-25",
-    "implementation": "Identity provider pubky: packages/browser/src/proofs/providers/pubky.ts, proofs/pubky.ts; core pubkyProofs.ts, pkdns.ts",
+    "updated": "2026-09-26",
+    "implementation": "Identity provider pubky (web, extension, desktop): packages/browser/src/proofs/providers/pubky.ts, proofs/pubky.ts; core pubkyProofs.ts, pkdns.ts",
     "dependencies": [
       "300-peer-proofs.md"
     ],
@@ -436,8 +436,8 @@
     "slug": "3xx-atproto",
     "title": "WISP 3xx: AT Protocol identity (Bluesky)",
     "status": "Draft",
-    "updated": "2026-09-25",
-    "implementation": "In development: packages/core/src/atprotoRepo.ts, atprotoIdentity.ts, packages/browser/src/proofs/atproto/, proofs/providers/atproto.ts; the client metadata goes live with the website",
+    "updated": "2026-09-26",
+    "implementation": "Experimental provider atproto: packages/core/src/atprotoRepo.ts, atprotoIdentity.ts, packages/browser/src/proofs/atproto/, proofs/providers/atproto.ts. Real servers need the client metadata served at ghostly.tools (it ships with the website)",
     "dependencies": [
       "300-peer-proofs.md"
     ],
@@ -516,7 +516,7 @@
     "slug": "3xx-nostr-social",
     "title": "WISP 3xx: Nostr social layer",
     "status": "Draft",
-    "updated": "2026-09-23",
+    "updated": "2026-09-26",
     "implementation": "Experimental: packages/browser/src/nostr/, packages/browser/src/engine/nostrSocial.ts; see below",
     "dependencies": [
       "300-peer-proofs.md",
@@ -532,8 +532,8 @@
     "slug": "3xx-oidc-proofs",
     "title": "WISP 3xx: Provider-attested identity (OpenID Connect)",
     "status": "Draft",
-    "updated": "2026-09-23",
-    "implementation": "In development: packages/browser/src/proofs/oidc/; provider clients not yet registered (checklist)",
+    "updated": "2026-09-26",
+    "implementation": "Built, not offered: packages/browser/src/proofs/oidc/, provider oidc. Every client ID in oidc/providers.ts is empty, so no provider is offered or accepted until the maintainer registers them (checklist)",
     "dependencies": [
       "300-peer-proofs.md"
     ],
@@ -579,8 +579,8 @@
     "slug": "400-chat",
     "title": "WISP 400: Chat Messaging",
     "status": "Draft",
-    "updated": "2026-09-25",
-    "implementation": "Existing 1:1 messages; DHT text after a live link drops. The single layered chat of revision 0.2 (decided 2026-09-25; being implemented)",
+    "updated": "2026-09-26",
+    "implementation": "The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, on-dht, self-upgrade, DHT only per chat; compatibility chats for v0.4",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -599,7 +599,7 @@
     "title": "WISP 401: Chat Session",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade (decided 2026-09-25; being implemented); calls (calls/1) and shared apps (services/1) on the live session.",
+    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (calls/1, screen sharing inside a call), shared apps (services/1) and files/3 on the live session.",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md",
@@ -617,7 +617,7 @@
     "title": "WISP 402: Compatibility Chat (v0.4 Timestamp Profile)",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing legacy 1:1 clients (v0.4 and earlier, the Rust CLI) and the read/write path kept in current apps",
+    "implementation": "Legacy 1:1 clients (v0.4 and earlier, the Rust CLI) and the read/write path kept in current apps; the compatibility header and Continue in a new chat in current apps",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md"
@@ -632,8 +632,8 @@
     "slug": "403-dht-text",
     "title": "WISP 403: DHT Text",
     "status": "Draft",
-    "updated": "2026-09-25",
-    "implementation": "Existing envelope, limits and DHT-only mode (pair2d/ chats and paired fallback); as the floor and first contact of every chat (decided 2026-09-25; being implemented). Native DHT versus browser relays differ.",
+    "updated": "2026-09-26",
+    "implementation": "The floor and first contact of every new chat (web, extension, desktop); DHT only per chat; pinned mailboxes. Native clients read the Mainline DHT directly; browsers go through Pkarr relays.",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md",
@@ -662,7 +662,7 @@
       "1002-s3-storage.md",
       "200-payments.md"
     ],
-    "summary": "Today a message for a contact who is away reaches them only as short text through bounded DHT records (403); a picture or a payment request waits until both are online (401). This profile lets what is sent meanwhile be held (text, a small file, a payment request) and delivered when the contact is back, with bounds that are stated rather than implied. Nothing here replaces the paired session or the DHT text path; a ch",
+    "summary": "Without this profile, a message for a contact who is away reaches them only as short text through bounded DHT records (403); a picture or a payment request waits until both are online (401). This profile lets what is sent meanwhile be held (text, a small file, a payment request) and delivered when the contact is back, with bounds that are stated rather than implied. Nothing here replaces the paired session or the DHT",
     "notices": []
   },
   {
@@ -675,12 +675,12 @@
     "title": "WISP 500: File Transfer",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing 1:1 transfer",
+    "implementation": "1:1 transfer in every chat: files/3 (any size) and files/2 on the chat session (501), held files while not live (4xx), 502 frames in compatibility chats",
     "dependencies": [
       "03-capabilities.md",
       "100-transports.md"
     ],
-    "summary": "In the one chat of 400, a file (a voice message included) travels over layer 1 with 501, or, while the chat is not live, in a hold (4xx, at most 8 MiB) when both sides allow it. It never travels in DHT records, split or whole: the floor of 403 carries text only. With neither available, the file waits in the sender's outbox with a cancel (\"Sends when live\") and goes when layer 1 is back (new; today attaching is refuse",
+    "summary": "In the one chat of 400, a file (a voice message included) travels over layer 1 with 501, or, while the chat is not live, in a hold (4xx, at most 8 MiB) when both sides allow it. It never travels in DHT records, split or whole: the floor of 403 carries text only. With neither available, the file waits in the sender's outbox with a cancel (\"Sends when live\") and goes when layer 1 is back. Queued files count against the",
     "notices": []
   },
   {
@@ -690,13 +690,13 @@
     "slug": "501-paired-files",
     "title": "WISP 501: Chat Files",
     "status": "Draft",
-    "updated": "2026-09-25",
-    "implementation": "Negotiated paired data links; WebRTC and supported native adapters.",
+    "updated": "2026-09-26",
+    "implementation": "Every chat session: files/3 (any size, consent, resume) and files/2 for older apps; WebRTC and supported native adapters",
     "documentKind": "Profile",
     "dependencies": [
       "500-files.md"
     ],
-    "summary": "Formerly \"Paired Files\". This is how files travel in every chat of 400 while it is live. The wire (files/2, pf- frames) is unchanged. While the chat is on-dht or dht-chosen, files are held (4xx) or wait in the outbox for layer 1 (500); a transfer cut by a drop to the DHT fails as today and is retried whole when layer 1 is back, under its original ID.",
+    "summary": "Formerly \"Paired Files\". This is how files travel in every chat of 400 while it is live. The wire (files/2, pf- frames) is unchanged. While the chat is on-dht or dht-chosen, files are held (4xx) or wait in the outbox for layer 1 (500); a files/2 transfer cut by a drop to the DHT fails and is retried whole when layer 1 is back, under its original ID; a files/3 transfer resumes from what was stored (below).",
     "notices": []
   },
   {
@@ -725,7 +725,7 @@
     "title": "WISP 600: Voice and Video",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "1:1 calls and screen sharing in every chat: compatibility chats (call) and the chat session (calls/1, live only)",
+    "implementation": "1:1 calls, with screen sharing from inside a call, in every chat: compatibility chats (call) and the chat session (calls/1, live only)",
     "dependencies": [
       "03-capabilities.md",
       "100-transports.md"
@@ -793,7 +793,7 @@
     "title": "WISP 800: Invite and Join",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing bearer invite; admission protocol proposed",
+    "implementation": "One bearer invite (ghostly1…) for every new chat, which pins the inviter's participation key; consumable admission protocol proposed",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md"
@@ -809,7 +809,7 @@
     "title": "WISP 801: Implemented Invitation Profiles",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Today: pair1/ and pair2d/ creation plus v0.4 imports. One bech32m format, ghostly1…, and the reading rules below (decided 2026-09-25; being implemented)",
+    "implementation": "Every current app creates only ghostly1… codes and links, and reads by the rules below (pair1/, pair2d/ and v0.4 codes still accepted as input)",
     "documentKind": "Profile",
     "dependencies": [
       "800-invite-join.md",
@@ -829,7 +829,7 @@
     "title": "WISP 900: Group Session Negotiation",
     "status": "Draft",
     "updated": "2026-09-24",
-    "implementation": "Two profiles: group-mesh/1 (private, up to eight) and group-community/1 (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text only",
+    "implementation": "Two profiles: group-mesh/1 (private, up to eight) and group-community/1 (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members",
     "dependencies": [
       "02-peer-keys.md",
       "03-capabilities.md",
@@ -866,7 +866,7 @@
     "slug": "9xx-group-community",
     "title": "WISP 9xx: Group Community Distribution Profile",
     "status": "Draft",
-    "updated": "2026-09-25",
+    "updated": "2026-09-26",
     "implementation": "group-community/1: core protocol in groupCommunity.ts and communityRendezvous.ts; engine in community.ts, payments in communityPay.ts; UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test",
     "documentKind": "Profile",
     "dependencies": [

@@ -5,10 +5,10 @@
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
 | Revision | 0.1 |
-| Updated | 2026-09-23 |
+| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
-| Implementation | In development: `packages/browser/src/proofs/oidc/`; provider clients not yet registered ([checklist](../OIDC-PROVIDERS.md)) |
+| Implementation | Built, not offered: `packages/browser/src/proofs/oidc/`, provider `oidc`. Every client ID in `oidc/providers.ts` is empty, so no provider is offered or accepted until the maintainer registers them ([checklist](../OIDC-PROVIDERS.md)) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee.
 

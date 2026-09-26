@@ -6,10 +6,32 @@ BDK wallet, a Bitcoin Core wallet. Each profile has one **active source** of on-
 
 | Kind | Contract | Default | Used by |
 |---|---|---|---|
-| Lightning | `LightningProvider` ([providers/lightning.ts](providers/lightning.ts)) | the Cashu mints ([providers/cashuMint.ts](providers/cashuMint.ts)) | the Lightning card, the invoice a chat request carries, paying a contact's invoice, invoices pasted in a chat |
+| Lightning | `LightningProvider` ([providers/lightning.ts](providers/lightning.ts)) | the Cashu mints' card ([providers/cashuMint.ts](providers/cashuMint.ts)), which comes with a network's Cashu wallet | the Lightning cards, the invoice a chat request carries, paying a contact's invoice, invoices pasted in a chat, Lightning addresses |
 | On-chain | `OnchainProvider` ([providers/onchain.ts](providers/onchain.ts)) | none: the Bitcoin card says "No Bitcoin source configured" | the Bitcoin card, the `bitcoin` payment method of the `PaymentCoordinator` |
 
-The Cashu card always uses the mints directly, whatever the Lightning source.
+The Cashu card always uses the mints directly, whatever the Lightning cards.
+
+## Built-in providers
+
+The order of [providers/registry.ts](providers/registry.ts) is the order of New's source picker. A provider is
+offered on a wallet network when one of its chains belongs to it (`bitcoin` is Mainnet, every other chain is
+Testnet) and on the platforms listed. "Experimental" is the descriptor's `experimental` flag; "not flagged" means it has none.
+
+| id | Kind | Module | Mainnet | Testnet chains | Platforms | Status |
+|---|---|---|---|---|---|---|
+| `cashu-mint` | Lightning | [cashuMint.ts](providers/cashuMint.ts) | yes | the test mints | web, extension, desktop | not flagged |
+| `fedimint` | Lightning | [fedimint.ts](providers/fedimint.ts) | no (`FEDIMINT_MAINNET`) | signet, testnet, regtest, mutinynet | web, extension, desktop | experimental |
+| `breez` | Lightning | [breez.ts](providers/breez.ts) | no (`BREEZ_NETWORKS`) | regtest (Breez and Lightspark's, no API key) | web, extension, desktop | experimental |
+| `nwc` | Lightning | [nwc.ts](providers/nwc.ts) | yes | testnet, signet, mutinynet, regtest | web, extension, desktop | not flagged |
+| `core-lightning` | Lightning | [coreLightning.ts](providers/coreLightning.ts) | yes | testnet, signet, regtest | web, extension, desktop | not flagged |
+| `webln` | Lightning | [webln.ts](providers/webln.ts) | yes | testnet, signet, mutinynet, regtest | web | experimental |
+| `lnd` | Lightning | [lnd.ts](providers/lnd.ts) | yes | testnet, signet, regtest | web, extension, desktop | experimental |
+| `bitcoind` | On-chain | [bitcoind.ts](providers/bitcoind.ts) | yes | testnet, signet, regtest | desktop | experimental |
+| `bdk` | On-chain | [bdk.ts](providers/bdk.ts) | no (no phrase backup or fee bump yet) | signet, mutinynet, regtest | web, extension, desktop | experimental |
+
+The ways of paying that are not sources (Cashu, Ark through Arkade or Bark, Spark, Fedimint ecash, USDT) are
+wallets of their own, one per network, made with New; their networks are in
+[WISP 200](../../../../../docs/wisps/200-payments.md#wallet-networks-mainnet-and-testnet).
 
 In a chat, on-chain Bitcoin is the `bitcoin` way of paying (endpoint `btc-onchain/1`): a request carries a fresh
 address of the payee's source, a Send asks the contact's app for one, the payer's review is a transaction signed
@@ -19,12 +41,12 @@ has it, else the hint checked against `history`. It is allowed only through the 
 session, never offered in the handshake (a full offer already has the 16 capabilities older apps accept).
 
 Everything that is not specific to a provider is shared and already written: storage, sealed secrets,
-per-mode sources, the source picker and config form, the Lightning journal and reconciliation, the
+per-network sources, the source picker and config form, the Lightning journal and reconciliation, the
 on-chain review/approve/reconcile flow. A provider is one module and one line.
 
 A provider written **outside the app** needs no line here: it is a plugin registered through the SDK
 (`@ghostly/sdk`, `registerAdapters` or `GHOSTLY_PLUGINS` at build time), listed after the built-ins
-under the same platform and mode rules. See [docs/SDK.md](../../../../../docs/SDK.md) and
+under the same platform and network rules. See [docs/SDK.md](../../../../../docs/SDK.md) and
 `packages/browser/src/plugins/registry.ts`; the contracts, fakes and contract suites below are what it
 exports.
 
@@ -40,7 +62,7 @@ exports.
      label: "Nostr Wallet Connect",
      kind: "lightning",
      description: "A wallet you connect with an NWC URI. That wallet holds the sats.",
-     networks: ["bitcoin", "signet", "regtest", "mutinynet"],   // offered in the modes of these networks
+     networks: ["bitcoin", "signet", "regtest", "mutinynet"],   // offered on the wallet networks of these chains
      platforms: ["web", "extension", "desktop"],               // where it can run
      fields: [{ name: "uri", label: "Connection URI", kind: "secret", placeholder: "nostr+walletconnect://…" }],
      custodial: true,
@@ -61,9 +83,9 @@ exports.
    them) against your provider (mocked transport in unit tests; a real regtest counterpart in a gated
    test), plus your own unit tests. See "Testing" below.
 
-The engine then: lists it in the picker when the platform and the mode fit, renders its form, splits the
+The engine then: lists it in the picker when the platform and the wallet network fit, renders its form, splits the
 values into `config` (shown back) and `secrets` (sealed), calls `create`, asks `info()` and **refuses a
-network of the other mode** before saving anything, and closes it on a mode switch, a replacement or
+chain of the other wallet network** before saving anything, and closes it on removal, a replacement or
 shutdown (`close()`, and `host.signal` aborts).
 
 ## Connecting, and when it cannot
@@ -71,7 +93,7 @@ shutdown (`close()`, and `host.signal` aborts).
 A saved source is connected in the background when the app starts, and **kept trying** while it cannot be
 reached: every failed attempt waits longer before the next (2 s, doubling up to 5 minutes, ±20 %), and an
 attempt starts at once on **Retry** or when the app wakes (back online, back in front: the engine's `wake`).
-Meanwhile the card says "Connecting…" with the last balance the source read (`<kind>SourceSeen-<mode>`),
+Meanwhile the card says "Connecting…" with the last balance the source read (`<kind>SourceSeen-<network>`),
 and it becomes "Unavailable" only once the failure is sustained (3 attempts over at least 30 s), or at once
 for a wrong setting. It connects by itself as soon as the server answers again.
 
@@ -111,7 +133,9 @@ values under a field, filtered by the other fields (`when`): public servers per 
   throw "failed" for something that may still settle.
 - **Checks you do not write.** The engine checks what a provider returns: an invoice decodes and has the
   amount and hash asked for; the fee is within the cap; the prepared transaction pays the reviewed address
-  and amount; the txid broadcast is the one reviewed; in Mainnet, an invoice of a test network is refused.
+  and amount; the txid broadcast is the one reviewed; a Mainnet card refuses an invoice of a test network; a
+  Mainnet spend without the person's "Send real money" confirmation (`confirmedReal`) is refused before anything
+  is spent.
   Still validate everything your backend returns, and bound what you read (sizes, time-outs).
 - Amountless invoices are refused for now.
 - When the backend has no fee limit of its own to pass (NWC's `pay_invoice` carries none), say so in the
@@ -120,20 +144,20 @@ values under a field, filtered by the other fields (`when`): public servers per 
 ## Secrets
 
 - Declare every credential (NWC URI, macaroon, rune, API key, RPC password) as a `secret` field. It is
-  sealed with a device key (`sealSeed`, like the Ark and USDT seeds) under `<kind>Source-<mode>` in the
+  sealed with a device key (`sealSeed`, like the Ark and USDT seeds) under `<kind>Source-<network>` in the
   settings store: never in the `Settings` object, never in the engine state (the view lists only the
   names of the saved secret fields), never shown again.
 - Never log a secret, and do not put one in an error message. Errors shown to the person pass through
   `redact()` with the source's secrets, but that is a safety net, not a licence.
 - A provider gets its secrets in `create()` and keeps them in memory only.
 
-## Per mode
+## Per network
 
 - Mainnet and Testnet keep separate sources (`onchainSource-mainnet`, `onchainSource-testnet`, and the
   Lightning cards of each network). Both are open at once; nothing is replaced.
-- `info().network` must be a network of the mode: `bitcoin` is Mainnet, every other network is Testnet.
-  A provider on the wrong one is closed and refused.
-- The journal and the on-chain intents carry their mode and provider: another source's operations wait
+- `info().network` must be a chain of the card's wallet network: `bitcoin` is Mainnet, every other chain is
+  Testnet. A provider on the wrong one is closed and refused.
+- The journal and the on-chain intents carry their network and provider: another source's operations wait
   until it is active again (only it can answer about them).
 
 ## Lightning cards
@@ -211,7 +235,7 @@ wallet is in the page. Connecting calls `enable()` (the wallet's own approval pr
 [providers/fedimint.ts](providers/fedimint.ts) is a source over a wallet the engine already holds: the Fedimint
 card's federations (`FedimintWallet`, handed over as `host.fedimint`, reserved like `host.cashu`). Its one field is
 the federation's id; its form (`FedimintForm`) lists the joined federations with a Lightning module instead of
-asking for it, and the Fedimint card's **Use for Lightning** sets it directly. Invoices are paid into the
+asking for it, and the Fedimint card's **Use for Lightning** adds it as a Lightning card and makes it the default for receiving. Invoices are paid into the
 federation's ecash through its gateway; paying funds a contract the gateway claims, for the fee it advertises
 (estimated before paying and held to the reviewed maximum; the client passes no limit of its own). Refused before a
 contract is funded is `NothingSpentError`; after, `pending` until the client's operation says paid (a preimage) or
@@ -245,8 +269,8 @@ the QR code are always there as the fallback.
 ## Lightning addresses and LNURL-pay
 
 Paying `name@domain` (LUD-16) or an `lnurl1…` / `lnurlp://` (LUD-01, LUD-17) is resolving a `payRequest`
-(LUD-06) and paying the invoice it hands out through the **active Lightning source**, with the same review as
-any invoice. The parsing and every check live in `packages/core/src/lnurl.ts`; `LightningService.resolveDestination`
+(LUD-06) and paying the invoice it hands out through the **Lightning card** chosen (**Pay with**, when the network
+has several), with the same review as any invoice. The parsing and every check live in `packages/core/src/lnurl.ts`; `LightningService.resolveDestination`
 and `destinationInvoice` do the fetching (bounded, no credentials) and keep a resolution while the amount is
 chosen. The person is told which domain learns of the request before anything is fetched. The invoice must
 be for the exact amount and commit to the metadata shown (`h` = sha256 of it, or the metadata as its

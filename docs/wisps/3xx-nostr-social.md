@@ -5,7 +5,7 @@
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
 | Revision | 0.1 |
-| Updated | 2026-09-23 |
+| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md), [301](301-nostr.md) |
 | Implementation | Experimental: `packages/browser/src/nostr/`, `packages/browser/src/engine/nostrSocial.ts`; see [below](#implementation-2026-09-23) |
@@ -65,7 +65,15 @@ A contact without the shared proof loads nothing and sees no Nostr card, and no 
 Experimental, web, extension and desktop. Code: `packages/browser/src/nostr/relay.ts` (bounded NIP-01 client: read one filter from the person's relays, send one signed event), `nostr/social.ts` (parsing of kinds 0, 3, 1 and 10000, mute rules, follow hints, the three unsigned templates), `nostr/types.ts` (settings, caches, views), `engine/nostrSocial.ts` (permissions, caches, drafts), engine RPC `nostrLoadContact`, `nostrForgetContact`, `nostrLoadOwn`, `nostrDraft`, `nostrPublish`; UI `src/components/nostr/` (the contact card inside the chat's Identities, the Identities → Nostr section, the publish dialog), signing in `src/lib/nostr.ts`.
 
 - **Settings** (`settings.nostr`): `relays` (default `relay.damus.io`, `nos.lol`, shown and editable), `autoLoadProfiles` (off), `publish` (off). Shown in Identities → Nostr once the profile has a Nostr key or a contact shared one.
-- **Contact card**, in the chat's Identities under a verified Nostr proof: Load profile / follows / notes, "Load mine" for the hints, Older notes, Forget what was loaded; with publication on, Follow / Unfollow on Nostr. The proof's card takes the loaded name and picture with the source "Nostr profile (kind 0, signed by this key, self-described)"; the old provider `lookupDisplay` route for Nostr now goes through this layer, so it uses the person's relays.
+- **Contact card**, on the back of a verified Nostr card in the contact's identities panel: Load profile / follows / notes, "Load mine" for the hints, Older notes, Forget what was loaded; with publication on, Follow / Unfollow on Nostr. The proof's card takes the loaded name and picture with the source "Nostr profile (kind 0, signed by this key, self-described)"; the old provider `lookupDisplay` route for Nostr now goes through this layer, so it uses the person's relays.
 - **Own keys**, in Identities → Nostr: profile, follow count and mute-list summary per proven key, Post a note, Update profile.
 - **Tests.** Unit: `packages/browser/test/nostrSocial.test.ts` (parsing, bounds, mute rules, templates, relay client against a relay in the test process: EOSE, oversize frame, no EOSE, budget, abort, OK and refusals) and `nostrSocialEngine.test.ts` (refused without a verified proof or offline, cache with provenance and staleness, hints, pagination, mute, dropped when the proof goes, auto-load only with the setting, publication gating, draft binding, follow/unfollow/profile rebuilt from the current event). End-to-end `e2e/web/nostr-social.spec.ts`: three people, a relay inside the test process (`e2e/support/nostrRelay.ts`, Playwright routes the WebSocket), a NIP-07 signer injected in the page with a disposable key; the contact without the proof sees nothing and asks nothing; the other loads profile with picture, follows with hints, notes with one hidden by the mute list, then turns publication on and posts a note, updates the profile and unfollows/follows through the signer, with the relay receiving exactly those events.
-- **Not done.** Reactions, replies, DMs, deletion, NIP-65 relay lists, the mute list's private part, publishing a mute list. The profile name is never used as the chat's name.
+- **Not done.** Reactions, replies, DMs, deletion, NIP-65 relay lists, the mute list's private part, publishing a mute list.
+
+## Update (2026-09-26): identity cards
+
+Beside this layer, the identity cards now read a verified identity's public profile, posts and follows by themselves ([PUBLIC-PROFILES](PUBLIC-PROFILES.md)), for Nostr, Pubky and Bluesky alike:
+
+- The card face shows the kind-0 name and picture once the card is on screen; the contact's panel shows the chosen card's profile, follows and last notes while it is open. Both read from the person's relays, and only for a currently verified proof.
+- One setting governs them: Settings → Security → **Load public profiles**, on by default. This layer's own `autoLoadProfiles` stays off by default.
+- The profile name stands in for the chat's name only when the person picks it with **Show as** in the contact's panel; a nickname still wins.

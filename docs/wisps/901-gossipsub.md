@@ -22,15 +22,15 @@ Evaluate GossipSub as an off-DHT distribution layer for group sessions. No Ghost
 
 ## Candidate mapping
 
-21 selects the routing/security profile through an authenticated descriptor. Admission delivers topic/routing credentials over an authenticated off-DHT path. A topic name is a routing hint, not a secret key or an authorization proof. Avoid directly encoding stable external identities/group names in public topics. Topic secrecy is not anonymity; connected peers can observe subscriptions and traffic.
+[900](900-group-sessions.md) selects the routing/security profile through an authenticated descriptor. Admission delivers topic/routing credentials over an authenticated off-DHT path. A topic name is a routing hint, not a secret key or an authorization proof. Avoid directly encoding stable external identities/group names in public topics. Topic secrecy is not anonymity; connected peers can observe subscriptions and traffic.
 
 Group-security-protected application envelopes are the payload. Bound message size and verification/queue work. Define a stable deduplication identifier over the exact authenticated envelope/profile before Proposed; don't assume default libp2p sender IDs equal Ghost participants. Verify membership/epoch and inner authentication before application acceptance. Forwarding policy must distinguish nodes that can verify membership from blind delivery nodes; neither may invent admission decisions.
 
-Specify outer pubsub signature policy, libp2p identity-to-participation binding where needed, topic rotation on removal, bootstrap peers, mesh/scoring parameters and address/relay policies. Group signing/encryption keys MUST NOT be distributed in a public topic or DHT record. Removal changes group keys via 21, not merely a topic rename.
+Specify outer pubsub signature policy, libp2p identity-to-participation binding where needed, topic rotation on removal, bootstrap peers, mesh/scoring parameters and address/relay policies. Group signing/encryption keys MUST NOT be distributed in a public topic or DHT record. Removal changes group keys via [900](900-group-sessions.md), not merely a topic rename.
 
 ## Delivery, failure and limits
 
-GossipSub does not promise total ordering, exactly-once processing or offline recovery. Use 13 message IDs/receipts and 21 epoch handling. Missing history requires an explicitly negotiated peer storage/sync mechanism; no DHT fallback for group traffic. Media and file bodies must use separately negotiated bulk paths unless a bounded profile has been validated.
+GossipSub does not promise total ordering, exactly-once processing or offline recovery. Use [400](400-chat.md) message IDs/receipts and [900](900-group-sessions.md) epoch handling. Missing history requires an explicitly negotiated peer storage/sync mechanism; no DHT fallback for group traffic. Media and file bodies must use separately negotiated bulk paths unless a bounded profile has been validated.
 
 Benchmark against the small full-mesh prototype before choosing a routing profile. Report topology, bandwidth, latency, churn and message loss at stated member counts. Score tuning and bounded queues help constrain abuse but do not prove Sybil resistance. Public lobby spam controls need separate evaluation.
 

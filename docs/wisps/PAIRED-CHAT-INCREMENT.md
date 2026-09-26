@@ -1,14 +1,16 @@
 # Experimental paired chat increment
 
-> **Revision 0.2 of the chat family (2026-09-25).** This increment is now the layer-1 session of the one chat ([401](401-paired-chat.md)); "paired chat" is no longer a kind of chat the person picks. The DHT is the rendezvous and floor of every chat ([400](400-chat.md), [403](403-dht-text.md)). The transcript constant `"no-dht-payload"` below stays byte for byte: it says the *session* carries no DHT payload, not that the chat has no DHT fallback. Statements below that pairing needs WebRTC describe today's code; revision 0.2 proposes a first contact on the DHT in parallel.
+> **Revision 0.2 of the chat family (2026-09-25).** This increment is now the layer-1 session of the one chat ([401](401-paired-chat.md)); "paired chat" is no longer a kind of chat the person picks. The DHT is the rendezvous and floor of every chat ([400](400-chat.md), [403](403-dht-text.md)). The transcript constant `"no-dht-payload"` below stays byte for byte: it says the *session* carries no DHT payload, not that the chat has no DHT fallback. Revision 0.2 is implemented (#209, #229): first contact goes over the DHT and a live link at once, and the chat upgrades by itself. Statements below that pairing needs WebRTC describe the 2026-09-20 base, not `dev` today.
 
-**Subsequent implementation:** the [native transport increment](TRANSPORT-INCREMENT.md) extends this base to Iroh and HyperDHT on desktop. WebRTC-only statements below describe the initial base; initial product pairing still requires WebRTC.
+**Subsequent implementation:** the [native transport increment](TRANSPORT-INCREMENT.md) extends this base to Iroh and HyperDHT on desktop, and Iroh and HyperDHT later reached browsers through relays (#225, #231). WebRTC-only statements below describe the initial base. Two Desktop apps now go live natively from the DHT with no WebRTC (#235, #244).
 
-Status: local experimental implementation, not a Final WISP or security audit. This additive profile exercises parts of candidates 02-03, 100-101, 400 and 800. It does not implement their entire proposed lifecycle or a general multi-adapter framework. Existing chats keep the legacy profile unchanged.
+> **State on `dev` (2026-09-26):** every new chat is this session, made from one `ghostly1…` invite (#210; the `pair1/` code below is still read). Files, payments, calls (`calls/1`) and shared apps (`services/1`) run on it ([PAIRED-CAPABILITIES.md](PAIRED-CAPABILITIES.md), #207).
+
+Status: experimental implementation, not a Final WISP or security audit. This additive profile exercises parts of candidates 02-03, 100-101, 400 and 800. It does not implement their entire proposed lifecycle or a general multi-adapter framework. Chats with Ghostly 0.4 contacts keep the compatibility profile ([402](402-legacy-chat.md)).
 
 ## What is implemented
 
-The **New** panel and Home action **Try paired chat · experimental** creates a distinct `pair1/` bootstrap invitation. Both peers generate a separate participation Ed25519 key locally and persist it before connecting. Once WebRTC DTLS is established, they agree on the only implemented profile: version 1, `webrtc/1`, `chat/1`, with no DHT application payload fallback. Required overlap is validated; no compatible version/transport/chat capability produces an explicit failure.
+History (2026-09-20): the **New** panel and Home action **Try paired chat · experimental** created a distinct `pair1/` bootstrap invitation; today every new chat is a chat session from a `ghostly1…` code. Both peers generate a separate participation Ed25519 key locally and persist it before connecting. Once WebRTC DTLS is established, they agree on the only implemented profile: version 1, `webrtc/1`, `chat/1`, with no DHT application payload fallback. Required overlap is validated; no compatible version/transport/chat capability produces an explicit failure.
 
 Each peer proves possession of its participation key by signing a transcript bound to this WebRTC connection. Before first admission, both users compare a code through a trusted channel and explicitly confirm. Confirmation atomically pins the other participation key in local IndexedDB before sending readiness. New attempts with a different participation key fail against that pin. Reconnection reuses the stored participation, uses fresh nonces/DTLS context and automatically verifies the stored peer; the invite is not needed again.
 
@@ -61,7 +63,7 @@ The policy lives in `RESEND_POLICY` ([outbox.ts](../../packages/browser/src/engi
 - **When it truly fails.** Queued for 7 days since it was first queued (the same week a held item lasts), or sent 8 times without a receipt: it becomes `failed`, **Delivery unconfirmed**, with **Retry message**. Retry starts a new window and a new count. In a DHT-only chat, a DHT text that expires unconfirmed is `failed` at once. Queuing it would publish it again every few minutes for as long as the contact is away.
 - **Compatibility chats** ([402](402-legacy-chat.md), Ghostly 0.4 contacts) have no per-message receipts and are unchanged: a message is sent once, and nothing is resent.
 
-At first, calls, files, payments and localhost were unavailable in this profile. Files and payments came with [files and sats](PAIRED-CAPABILITIES.md), hosted localhost with `ph` frames ([701](701-http-services.md)); calls still work only in compatibility chats ([402](402-legacy-chat.md)) and are being brought here. Runtime availability of WebRTC is a precondition; no extension UDP assumption or automatic transport/identity bridge is introduced. General implemented/available/allowed capability negotiation beyond this fixed chat profile remains Draft.
+At first, calls, files, payments and localhost were unavailable in this profile. Files and payments came with [files and sats](PAIRED-CAPABILITIES.md), hosted localhost with `ph` frames ([701](701-http-services.md)); calls (`calls/1`) came with #207, alongside the compatibility chats' own calls ([402](402-legacy-chat.md)). Runtime availability of WebRTC is a precondition; no extension UDP assumption or automatic transport/identity bridge is introduced. General implemented/available/allowed capability negotiation beyond this fixed chat profile remains Draft.
 
 ## Failure and restart behavior
 
@@ -80,7 +82,7 @@ This reduces forged ICE/DTLS signaling and timestamp poisoning by a copied-invit
 ## Source and validation
 
 - [Session state machine](../../packages/core/src/pairedSession.ts), [data-link binding](../../packages/core/src/datalink.ts), [application gate](../../packages/core/src/ghostlink.ts).
-- [Durable admission/message storage](../../packages/browser/src/engine/db.ts), [shared engine](../../packages/browser/src/engine/node.ts), [confirmation UI](../../src/components/PairingBanner.tsx).
+- [Durable admission/message storage](../../packages/browser/src/engine/db.ts), [shared engine](../../packages/browser/src/engine/node.ts), [confirmation UI](../../src/components/ChatConnection.tsx) (the connection panel's Details; the banner went in #264).
 - [Session tests](../../packages/core/test/pairedSession.test.ts), [invite tests](../../packages/core/test/pairedInvite.test.ts), [policy boundary test](../../packages/core/test/pairedLink.test.ts), [storage races/deduplication](../../packages/browser/test/pairedStorage.test.ts).
 
 Cross-platform clients share code and are not two independent implementations of this profile.

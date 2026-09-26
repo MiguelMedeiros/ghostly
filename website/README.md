@@ -10,8 +10,13 @@ npm ci
 npm run dev -- -p 4330     # sync:references runs on build, run it by hand for dev
 npm run sync:references
 npm run build && npm run lint
+npm run test:e2e           # the browser checks, against a build
 npm run capture            # re-shoot every app screenshot (scripts/capture/README.md)
 ```
+
+`npm run lint` is ESLint, then `scripts/check-dashes.mjs`: no em or en dash in the site's copy
+(`app/`, `components/`, `content/`, `lib/`, `scripts/`) or in the repository documents it renders
+(below). Use a period, a comma, a colon or parentheses, and a hyphen or "to" in a range.
 
 After `npm run build`, restart a running dev server: reader routes are static
 (`dynamicParams = false`) and new ones 404 until it restarts.
@@ -21,7 +26,7 @@ After `npm run build`, restart a running dev server: reader routes are static
 | Path | What |
 |---|---|
 | `app/` | Routes. English at the root, Brazilian Portuguese under `app/pt-br/` (thin wrappers around the same page components). |
-| `components/home/` | Homepage: the hero, the four story chapters, the product section (one phone beside each window), your space, the wallet deck, the architecture stack and the finale with its download panel. |
+| `components/home/` | Homepage: the hero and four story chapters in two acts (invite, DHT; agree, alive), the app screenshots, your space with the wallet deck, the open layer stack and the finale with its download panel. |
 | `components/story/` | The film's machinery. `Act` pins one full-bleed backdrop behind its chapters and keeps one Boo and one Casper in it; `SceneFrame` is a chapter (full-bleed stage, floating copy panel, step mapping); `poses.ts` is the blocking table (actors, camera, focal point per chapter, landscape and portrait); `Statement` is the sentence between the acts. |
 | `components/dev/` | `/developers`: protocol loop, composition board, negotiation demo, path, availability table. |
 | `components/catalog/`, `components/reader/`, `components/roadmap/` | Catalog (with the six-word glossary at `#glossary`, linked from the reader), WISP reader, roadmap. |
@@ -70,17 +75,36 @@ fractions), `.spine.mjs` (each chapter at chosen sub-progress values),
 `.modes2.mjs` (reduced motion and no-JS renders with a console-error check).
 They need the dev server on :4330 and Chrome.
 
+## Repository docs the site renders
+
+`npm run sync:references` (also run by `npm run build`) copies these into
+`public/reference/` (not committed) and indexes them in `lib/reference-index.json`;
+the reader shows each one under `/developers/wisps/<slug>`:
+
+- `docs/wisps/*.md`, except the forwarding stubs of renumbered WISPs and the
+  `HANDOFF-CLAUDE*` / `QA-CLAUDE*` notes;
+- `docs/PROTOCOL.md`, `docs/SDK.md`, `docs/USDT-INTEGRATION.md`, `docs/DHT-DELIVERY.md`;
+- `CONTRIBUTING.md` and `SECURITY.md`.
+
+It also writes `docs/wisps/NUMBERING.md` and the forwarding stubs,
+`lib/wisp-numbering.json`, `lib/roadmap-candidates.json` (from
+`docs/wisps/ADAPTER-ROADMAP.md`) and `lib/code-snippets.json`, the two excerpts
+`/developers` quotes from `packages/core/src/invite.ts` and
+`packages/core/src/pairedTransports.ts`. Other repository docs (`docs/TESTING.md`,
+`docs/CLI.md`, ...) are not on the site.
+
+A pull request that changes any of these inputs runs the Website jobs in CI
+(`WEBSITE_INPUTS` in `scripts/ci-changes.mjs`); one that does not skips them.
+
 ## Availability, checked against code
 
-Four levels, separate from a document's Draft status:
+Three levels (`lib/status.ts`), separate from a document's Draft status:
 
-- **released**: in the public release (`lib/release.ts`, built from `main`);
-- **development**: merged on `dev`, going to the next release;
-- **building**: work in progress, not merged;
-- **planned** / **research**.
+- **available**: what the app on `dev` does today;
+- **planned** and **research**: only for what is not built.
 
-Before changing a level, check the code of both branches. Copy that names a
-limit (sizes, windows, clients) must match the constants in the source.
+Before changing a level, check the code. Copy that names a limit (sizes,
+windows, clients) must match the constants in the source.
 
 ## Adding or renumbering a WISP
 

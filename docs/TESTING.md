@@ -13,7 +13,7 @@ npm run test:affected         # before pushing: only the tests your change can b
 
 ## What fails the check
 
-- a feature with no test at all that is not on [`e2e/allow-untested.json`](../e2e/allow-untested.json) — a list of today's real gaps, each with a one-line reason. It only shrinks: when a feature on it gets a test, the check fails until the line is taken off.
+- a feature with no test at all that is not on [`e2e/allow-untested.json`](../e2e/allow-untested.json): a list of today's real gaps, each with a one-line reason. It only shrinks: when a feature on it gets a test, the check fails until the line is taken off.
 - a tag or a `covers` comment naming an id that is not in the inventory (a typo, or a feature nobody added);
 - an allow-list entry that is not a feature, or has no reason;
 - a malformed inventory entry: duplicate id, a WISP not in [`docs/wisps/numbering.json`](wisps/numbering.json), an unknown client or infrastructure.
@@ -29,7 +29,7 @@ test("two people chat", { tag: ["@feature:chat.paired.pair", "@feature:chat.pair
 test("LND pays a chat request", { tag: ["@feature:wallet.lightning.lnd.pay", "@gated"] }, async ({ peer }) => { … });
 ```
 
-- `@gated` — the test runs only when its infrastructure is there (`GHOSTLY_*_REGTEST`, `GHOSTLY_S3_*`, …; `test.skip` otherwise). It counts in the Gated column, not in its client's. `@network` alone (the Cashu mint, which CI runs) is not gated.
+- `@gated`: the test runs only when its infrastructure is there (`GHOSTLY_*_REGTEST`, `GHOSTLY_S3_*`, …; `test.skip` otherwise). It counts in the Gated column, not in its client's. `@network` alone (the Cashu mint, which CI runs) is not gated.
 - The folder decides the client: `e2e/web/` web, `e2e/extension/` extension, `e2e/desktop/` desktop. A spec elsewhere (a combination matrix, say) names its clients with `@client:web`, `@client:extension`, `@client:desktop` in the same tag array.
 - Tags are plain string literals in `tag: [...]`: the check reads them without running Playwright. `npx playwright test --grep @feature:chat.paired.send` runs every test of one feature.
 
@@ -52,7 +52,7 @@ A new source file gets a line in the file's `paths` too (see below), or a glob t
 
 ## Testing only what changed
 
-Before pushing, run what your change can break, not everything: **CI runs the whole suite on every push** (lint, typecheck, every unit test, the builds; the E2E workflow runs every spec).
+Before pushing, run what your change can break, not everything: CI runs the rest on the pull request (see [What CI runs](#what-ci-runs)).
 
 ```bash
 npm run test:affected                     # vs origin/dev + your working tree: unit, lint, typecheck, Rust
@@ -95,6 +95,35 @@ It never starts, stops, resets or seeds a stack, here or on one, and never falls
 - serve e2e builds only on your session's port range (`--port`); `test:affected` stops the preview it started, and you stop every other server or container you started when you finish;
 - a known flaky or load-sensitive test failing locally is not a reason to rerun the whole suite: rerun that file, and let CI judge.
 
+## What CI runs
+
+**CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main` and on every push to them. A new push to a pull request cancels the run it replaces. It takes about 3.5 minutes.
+
+| Job | What it runs | When |
+|---|---|---|
+| Changed paths | [`scripts/ci-changes.mjs`](../scripts/ci-changes.mjs): which path-gated jobs below this pull request needs | pull requests (pushes run everything) |
+| Frontend lint and types | `npm run lint`, `npm run typecheck`, `npm run test:map` | always |
+| Frontend tests (packages, app) | `npm run test:packages` and `npm run test:app`, one runner each (together they are `npm test`) | always |
+| Frontend builds | `npm run build`, `check:desktop-bundle`, `build:extension`, `build:web`, `test:sdk-example` | always |
+| Tauri Backend, CLI | `cargo fmt --check`, `clippy -D warnings`, `build`, `test` for `src-tauri` (+ `native-transports`) and `cli` | a draft skips them unless it changed `src-tauri/`, `cli/`, `native-transports/`, `Cargo.*` or `ci.yml`; leaving draft runs them |
+| Website, Website browser checks (1/4 to 4/4) | the site's deck check, lint and types; its Playwright checks in 4 shards balanced by time (`website/e2e/shard.mjs`, `website/e2e/durations.json`) | only when something the site reads changed (`WEBSITE_INPUTS` in `ci-changes.mjs`) |
+| Desktop media, Desktop on macOS | voice recordings in WKWebView; two Desktop apps on a Mac call and share an app (`desktop-macos.yml`) | skipped only when every change is under `website/` or `docs/` |
+| CI Success | the required check: fails if any job failed, or was skipped without the gate saying so | always |
+
+The gates are tested in `scripts/test/ci-changes.test.ts`. If the file lookup fails, CI Success fails: nothing is skipped by accident.
+
+Other workflows:
+
+| Workflow | What | When |
+|---|---|---|
+| Security (`security.yml`) | known advisories in the lock files (OSV, `scripts/security-scan.mjs`) | pull requests, pushes, every morning |
+| E2E (`e2e.yml`) | web and extension e2e, the Desktop specs on Linux, compatibility with v0.4.0 | before every release (`release.yml` calls it) and by hand |
+| E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
+| E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0 | nightly, before every release, by hand |
+| Desktop on macOS (`desktop-macos.yml`) | as in CI | also nightly, and by hand with `repeat` |
+
+The app's e2e suites do not run on pull requests: they would hold up every merge. See [e2e/README.md](../e2e/README.md#when-they-run).
+
 ## Coverage
 
 `npm run coverage` runs each package's unit tests with V8 coverage and writes the table below. There is no threshold in CI yet.
@@ -106,7 +135,7 @@ Unit tests only, measured on 2026-09-24 with `npm run coverage` (gated suites sk
 | Package | Lines | Statements | Functions | Branches |
 |---|---:|---:|---:|---:|
 | core (`packages/core`) | 99.27% | 97.74% | 96.76% | 96.61% |
-| browser (`packages/browser`) — some tests failed | 75.12% | 70.08% | 64.17% | 64.17% |
+| browser (`packages/browser`) (some tests failed) | 75.12% | 70.08% | 64.17% | 64.17% |
 | sdk (`packages/sdk`) | n/a | n/a | n/a | n/a |
 | ui (`.`) | 2.87% | 2.52% | 1.97% | 2.25% |
 
@@ -118,15 +147,15 @@ n/a: the package only re-exports code that lives (and is counted) elsewhere.
 
 <!-- test-map:start (generated by `npm run test:map:write`; do not edit by hand) -->
 
-**322 features**, 316 covered by at least one test (98%), 6 on the [allow-untested list](../e2e/allow-untested.json).
+**437 features**, 433 covered by at least one test (99%), 4 on the [allow-untested list](../e2e/allow-untested.json).
 
 | | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---:|---:|---:|---:|---:|---:|
-| features with one | 260 | 19 | 213 | 54 | 2 | 95 |
+| features with one | 379 | 29 | 300 | 64 | 22 | 128 |
 
-E2E in any client: 220. Unit tests only: 62. Gated suites only: 2. User-visible features of a client with no E2E test in that client: web 40, extension 192, desktop 243.
+E2E in any client: 313. Unit tests only: 71. Gated suites only: 2. User-visible features of a client with no E2E test in that client: web 62, extension 278, desktop 319.
 
-Tests read: 102 E2E specs (102 tagged), 275 unit test files (275 tagged), 14 Rust files with `// covers:`.
+Tests read: 153 E2E specs (153 tagged), 410 unit test files (407 tagged), 19 Rust files with `// covers:`.
 
 ### Gaps
 
@@ -135,9 +164,7 @@ Tests read: 102 E2E specs (102 tagged), 275 unit test files (275 tagged), 14 Rus
 | `app.updates.desktop` |  | desktop | update-feed | The Tauri updater needs a signed release feed; the Desktop harness only has a boot smoke test |
 | `settings.storage-used` |  | web, extension, desktop |  | Nothing asserts the storage figure in Settings; a component test (npm run test:ui) can |
 | `storage.local` | 1001 | web, extension, desktop |  | The local file storage adapter (WISP 1001) is exercised only through backup.profile.file, never on its own |
-| `core.dht-direct` | 01 | desktop, cli | mainline-dht | src-tauri/src/pkarr_client.rs is tested against an in-process relay (commands.rs); nothing reaches the Mainline DHT over UDP |
 | `desktop.bundle-wiring` |  | desktop |  | Guarded by npm run check:desktop-bundle in PR CI, a build assertion the test map does not read |
-| `desktop.notifications` |  | desktop |  | Native notifications need the Desktop harness (Linux only) and no spec drives them |
 
 ### Matrix
 
@@ -148,7 +175,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `app.home` |  | WED | · | · | 5 | · | · | · |
+| `app.home` |  | WED | 1 | · | 5 | · | · | · |
 | `app.navigation` |  | WED | 1 | · | 4 | · | · | · |
 | `app.navigation.back` |  | WED | 1 | · | 1 | · | · | · |
 | `app.offline-switch` |  | WED | 1 | · | 2 | 1 | · | 1 |
@@ -157,20 +184,26 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `app.project-links` |  | WED | · | 1 | 1 | · | · | · |
 | `app.tech-info` | 01 | WED | · | · | 2 | · | · | · |
 | `app.clear-data` | 04 | WED | 3 | · | 1 | · | · | · |
-| `app.mobile-layout` |  | W | 1 | · | 7 | 1 | · | 1 |
+| `app.mobile-layout` |  | W | 1 | · | 8 | 1 | · | 1 |
 | `app.responsive` |  | WED | 2 | · | 2 | 1 | · | 1 |
 | `app.sidebar-resize` |  | WED | · | · | 3 | · | · | · |
 | `app.popovers` |  | WED | · | · | 4 | · | · | · |
 | `app.select` |  | WED | 1 | · | · | · | · | · |
-| `app.menus` |  | WED | 1 | · | 1 | · | · | · |
-| `app.emoji-picker` |  | WED | · | · | 1 | · | · | · |
+| `app.menus` |  | WED | 1 | · | 2 | · | · | · |
+| `app.emoji-picker` |  | WED | 1 | · | 1 | · | · | · |
+| `app.composer.attach` |  | WED | 2 | · | 1 | · | · | · |
+| `app.composer.secret-guard` |  | WED | 2 | · | 1 | · | · | · |
+| `app.composer.expressions` |  | WED | 1 | · | 1 | · | · | · |
 | `app.i18n` |  | WED | 4 | · | 3 | 2 | 1 | 1 |
 | `app.theme` |  | WED | · | · | 2 | · | · | · |
+| `app.theme.bubbles` |  | WED | 1 | · | 1 | · | · | · |
+| `app.theme.on-accent` |  | WED | 1 | · | · | · | · | · |
 | `app.reduce-motion` |  | WED | · | · | 1 | · | · | · |
 | `app.version` |  | WED | · | · | 1 | · | · | · |
 | `app.error-boundary` |  | WED | 1 | · | · | · | · | · |
-| `app.attention.notifications` |  | WED | · | · | 1 | · | · | · |
-| `app.attention.sounds` |  | WED | 1 | · | 2 | · | · | · |
+| `app.attention.notifications` |  | WED | 1 | · | 2 | · | 1 | · |
+| `app.attention.sounds` |  | WED | 3 | · | 5 | · | · | · |
+| `app.attention.cues` |  | WED | 3 | · | 4 | · | · | · |
 | `app.attention.unread` |  | WED | · | · | 1 | · | · | · |
 
 #### chats
@@ -196,8 +229,11 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `settings.lock.idle` | 04 | WED | · | · | 1 | · | · | · |
 | `settings.lock.now` | 04 | WED | · | · | 2 | · | · | · |
 | `settings.lock.startup` | 04 | WED | · | · | 1 | · | · | · |
-| `settings.network.relays` | 01 | WED | 1 | · | 2 | · | · | · |
+| `settings.network.relays` | 01 | WED | 2 | · | 2 | · | · | · |
+| `settings.network.native-dht` | 01 | D | 1 | 1 | · | · | 1 | · |
+| `settings.network.iroh-relays` | 102 | WE | · | · | 1 | · | · | · |
 | `settings.network.turn` | 101 | WED | 2 | · | 1 | · | · | · |
+| `settings.network.hyperdht-relay` | 103 | WE | 1 | · | · | · | · | 1 |
 | `settings.storage-used` |  | WED | · | · | · | · | · | · |
 
 #### profiles
@@ -205,14 +241,14 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `profiles.create` | 04 | WED | 2 | · | 4 | 1 | · | · |
-| `profiles.switch` | 04 | WED | 3 | · | 6 | 2 | · | 1 |
+| `profiles.switch` | 04 | WED | 3 | · | 7 | 2 | · | 1 |
 | `profiles.switcher` | 04 | WED | 1 | · | 2 | 1 | · | · |
 | `profiles.delete` | 04 | WED | 1 | · | 3 | 1 | · | · |
 | `profiles.lock` | 04 | WED | 1 | · | 2 | · | · | · |
 | `profiles.name-optional` | 04 | WED | · | · | 2 | · | · | · |
 | `profiles.picture` | 04 | WED | 1 | · | 2 | · | · | · |
 | `profiles.share` | 401 | WED | 1 | · | 1 | · | · | · |
-| `profiles.picture.sanitize` (protocol) | 04 | WEDC | 4 | · | 1 | · | · | · |
+| `profiles.picture.sanitize` (protocol) | 04 | WEDC | 6 | · | 1 | · | · | · |
 | `profiles.public` | 04 | WED | 3 | · | · | · | · | · |
 
 #### backup
@@ -238,16 +274,16 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `core.records` (protocol) | 01 | WEDC | 5 | · | · | · | · | 1 |
-| `core.relay-client` (protocol) | 01 | WEDC | 2 | · | · | · | · | 2 |
-| `core.dht-direct` (protocol) | 01 | DC | · | · | · | · | · | · |
+| `core.relay-breaker` (protocol) | 01 | WED | 1 | 1 | 1 | · | · | · |
+| `core.relay-client` (protocol) | 01 | WEDC | 3 | · | · | · | · | 2 |
+| `core.dht-direct` (protocol) | 01 | DC | · | 1 | · | · | 1 | · |
 | `core.crypto` (protocol) | 01 | WEDC | 2 | · | · | · | · | · |
-| `core.peer-keys` (protocol) | 02 | WEDC | 9 | · | 1 | · | · | 1 |
+| `core.peer-keys` (protocol) | 02 | WEDC | 10 | · | 1 | · | · | 1 |
 | `core.capabilities` (protocol) | 03 | WED | 5 | · | · | · | · | · |
 | `core.version` (protocol) | 03 | WEDC | 4 | · | · | · | · | · |
 | `core.frames` (protocol) | 400 | WED | 4 | · | · | · | · | · |
 | `core.text-limits` (protocol) | 400 | WEDC | 4 | · | · | · | · | · |
 | `core.liveness` (protocol) | 401 | WED | 2 | · | 1 | · | · | · |
-| `core.ring-link` (protocol) | 302 | WED | 4 | · | · | · | · | 1 |
 | `core.keet-identity` (protocol) | 303 | WED | 1 | · | · | · | · | · |
 | `core.bitcoin-address` (protocol) | 200 | WEDC | 4 | · | · | · | · | · |
 
@@ -256,29 +292,40 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `transport.webrtc` (protocol) | 101 | WED | 6 | · | 4 | 1 | · | 1 |
-| `transport.iroh` (protocol) | 102 | D | 2 | 2 | · | · | · | 2 |
-| `transport.hyperdht` (protocol) | 103 | D | · | 1 | · | · | · | 1 |
-| `transport.switch` (protocol) | 100 | WED | 5 | · | 1 | 1 | · | 2 |
-| `transport.preference` | 100 | D | 7 | · | · | · | · | 1 |
-| `transport.native-pool` (protocol) | 100 | D | 1 | 2 | · | · | · | · |
+| `transport.iroh` (protocol) | 102 | D | 3 | 2 | · | · | · | 3 |
+| `transport.iroh-web` (protocol) | 102 | WE | 3 | · | 3 | 1 | · | 1 |
+| `transport.relayed` (protocol) | 100 | WED | 4 | · | 2 | 1 | · | 1 |
+| `transport.hyperdht` (protocol) | 103 | D | 2 | 1 | · | · | · | 2 |
+| `transport.hyperdht-relay` (protocol) | 103 | WE | 3 | · | · | · | · | 1 |
+| `transport.switch` (protocol) | 100 | WED | 8 | · | 1 | 1 | · | 2 |
+| `transport.preference` | 100 | D | 11 | · | 1 | · | · | 2 |
+| `transport.timeline` | 100 | WED | 4 | · | 2 | · | · | · |
+| `transport.indicator` | 100 | WED | 4 | · | 4 | · | · | · |
+| `transport.chat-switch` | 100 | WED | 7 | · | 3 | 1 | · | · |
+| `transport.wait` | 100 | WED | 7 | · | 1 | · | · | · |
+| `transport.native-pool` (protocol) | 100 | D | 2 | 2 | · | · | · | · |
 
 #### invite
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `invite.create` | 801 | WED | · | · | 3 | 1 | · | 1 |
-| `invite.delivery-mode` | 801 | WED | 1 | · | 3 | 1 | · | 1 |
+| `invite.delivery-mode` | 801 | WED | 4 | · | 5 | 1 | · | 1 |
 | `invite.copy` | 801 | WED | · | · | 2 | 1 | · | 1 |
 | `invite.share` | 801 | WED | · | · | 1 | · | · | · |
 | `invite.qr.show` | 801 | WED | · | · | 1 | · | · | · |
 | `invite.qr.camera` | 801 | WED | · | · | 1 | · | · | · |
-| `invite.qr.image` | 801 | WED | · | · | 2 | 1 | · | · |
-| `invite.clipboard` | 801 | WED | 2 | 1 | 2 | 1 | · | 1 |
-| `invite.link` | 801 | WD | 1 | · | 1 | · | · | · |
-| `invite.invalid` | 801 | WED | 2 | · | 4 | · | · | · |
-| `invite.formats` (protocol) | 801 | WEDC | 3 | · | · | · | · | · |
+| `invite.qr.image` | 801 | WED | · | · | 3 | 1 | · | · |
+| `invite.clipboard` | 801 | WED | 2 | 1 | 3 | 1 | · | 1 |
+| `invite.link` | 801 | WD | 1 | · | 2 | · | · | · |
+| `invite.invalid` | 801 | WED | 4 | · | 5 | · | · | · |
+| `invite.formats` (protocol) | 801 | WEDC | 4 | · | · | · | · | · |
+| `invite.code` (protocol) | 801 | WED | 5 | 1 | 3 | · | · | · |
+| `invite.pin` (protocol) | 801 | WED | 2 | · | 1 | · | · | · |
 | `invite.dht` | 801 | WED | · | · | 3 | 2 | · | 1 |
 | `invite.discovery-errors` | 801 | WED | 1 | · | 1 | · | · | · |
+| `invite.own` | 801 | WED | 4 | · | 2 | · | · | · |
+| `invite.rejoin` | 801 | WED | 3 | · | 2 | · | · | · |
 
 #### chats
 
@@ -291,7 +338,8 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `chats.list.delete-all` | 400 | WED | · | · | 1 | · | · | · |
 | `chats.list.pin` |  | WED | 1 | · | 2 | · | · | · |
 | `chats.list.key-label` |  | WED | 1 | · | · | · | · | · |
-| `chats.list.rows` |  | WED | 1 | · | 1 | · | · | · |
+| `chats.list.rows` |  | WED | 4 | · | 1 | · | · | · |
+| `chats.mute` |  | WED | 1 | · | 3 | · | · | · |
 
 #### settings
 
@@ -303,32 +351,57 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `chat.paired.pair` | 401 | WED | 1 | 1 | 5 | 1 | · | 1 |
-| `chat.paired.send` | 401 | WED | 2 | · | 7 | 1 | · | 1 |
-| `chat.paired.receipts` | 401 | WED | 4 | · | 2 | · | · | 1 |
+| `chat.paired.pair` | 401 | WED | 2 | 1 | 8 | 1 | · | 1 |
+| `chat.paired.pairing-progress` |  | WED | 2 | · | 1 | · | · | · |
+| `chat.paired.send` | 401 | WED | 2 | · | 8 | 1 | · | 1 |
+| `chat.paired.receipts` | 401 | WED | 5 | · | 2 | · | · | 1 |
 | `chat.paired.verify` | 401 | WED | 5 | · | 2 | · | · | · |
+| `chat.paired.discovery-health` | 01 | WED | 1 | · | 1 | · | 1 | · |
 | `chat.paired.status` | 401 | WED | 4 | · | 5 | · | · | · |
-| `chat.paired.reconnect` | 401 | WED | 7 | · | 3 | · | · | 1 |
+| `chat.paired.reconnect` | 401 | WED | 10 | · | 4 | · | · | 1 |
 | `chat.paired.offline-send` | 401 | WED | 1 | · | 3 | 1 | · | 2 |
-| `chat.paired.delete-message` | 400 | WED | 4 | · | 1 | · | · | · |
-| `chat.paired.message-details` | 400 | WED | 1 | · | 1 | · | · | · |
-| `chat.paired.links` | 400 | WED | 2 | · | 1 | · | · | · |
+| `chat.paired.delete-message` | 400 | WED | 4 | · | 2 | · | · | · |
+| `chat.paired.message-details` | 400 | WED | 3 | · | 3 | · | · | · |
+| `chat.paired.links` | 400 | WED | 5 | · | 1 | · | · | · |
+| `chat.rich.format` |  | WED | 2 | · | 1 | · | · | · |
+| `chat.rich.code` |  | WED | 4 | · | 1 | · | · | · |
+| `chat.rich.spoiler` |  | WED | 2 | · | 1 | · | · | · |
+| `chat.rich.blob` |  | WED | 2 | · | 1 | · | · | · |
+| `chat.rich.time` |  | WED | 4 | · | 1 | · | · | · |
+| `chat.cards.invite` | 801 | WED | 2 | · | 1 | · | · | · |
+| `chat.cards.group` | 900 | WED | 2 | · | · | · | · | · |
+| `chat.cards.nostr` | 400 | WED | 3 | · | 1 | · | · | · |
+| `chat.cards.identity` | 311 | WED | 2 | · | · | · | · | · |
+| `chat.link-preview.wire` (protocol) | 401 | WED | 4 | · | 1 | · | · | · |
+| `chat.link-preview.compose` | 401 | WED | 2 | 1 | 1 | · | · | · |
+| `chat.link-preview.render` | 401 | WED | 2 | · | 1 | · | · | · |
+| `chat.location.card` | 400 | WED | 4 | 1 | 1 | · | · | · |
 | `chat.paired.image-links` | 400 | WED | 1 | · | 1 | · | · | · |
-| `chat.paired.emoji` |  | WED | · | · | 2 | · | · | · |
-| `chat.paired.gifs` |  | WED | · | · | 1 | · | · | · |
+| `chat.paired.emoji` |  | WED | 1 | · | 2 | · | · | · |
+| `chat.paired.gifs` |  | WED | 1 | · | 1 | · | · | · |
+| `chat.paired.gifs.categories` |  | WED | 1 | · | 1 | · | · | · |
+| `chat.paired.gifs.busy` |  | WED | 2 | · | 1 | · | · | · |
 | `chat.paired.nickname-sync` | 401 | WED | 4 | · | 3 | · | · | · |
 | `chat.paired.join-notice` | 401 | WED | 3 | · | · | · | · | · |
 | `chat.paired.draft` |  | WED | · | · | 2 | · | · | · |
 | `chat.paired.session` (protocol) | 401 | WED | 6 | · | · | · | · | · |
+| `chat.paired.progress` | 401 | WED | 3 | · | 3 | · | · | · |
+| `chat.paired.pair-timing` | 401 | WED | 2 | · | 1 | · | · | · |
 | `chat.paired.storage` (protocol) | 401 | WED | 3 | · | 1 | · | · | · |
 | `chat.legacy.send` | 402 | WEDC | 2 | · | 1 | · | · | · |
 | `chat.legacy.limits` | 402 | WED | · | · | 1 | · | · | · |
-| `chat.dht.send` | 403 | WED | 5 | · | 2 | 2 | · | 1 |
+| `chat.dht.send` | 403 | WED | 5 | · | 3 | 2 | · | 1 |
 | `chat.dht.offline` | 403 | WED | 1 | · | 2 | 1 | · | 2 |
-| `chat.dht.fallback` | 403 | WED | 1 | · | 1 | · | · | · |
-| `chat.dht.errors` | 403 | WED | 2 | · | 1 | · | · | · |
-| `chat.dht.key-change` | 403 | WED | 1 | · | 1 | · | · | · |
+| `chat.dht.fallback` | 403 | WED | 2 | · | 2 | · | · | · |
+| `chat.dht.errors` | 403 | WED | 3 | · | 1 | · | · | · |
+| `chat.dht.key-change` | 403 | WED | 4 | · | 1 | · | · | · |
 | `chat.dht.delivery` (protocol) | 403 | WEDC | 3 | 3 | · | · | · | 1 |
+| `chat.one-chat` | 400 | WED | 4 | · | 1 | · | 1 | 1 |
+| `chat.native-upgrade` | 03 | D | · | · | · | · | 1 | 1 |
+| `chat.compat` | 402 | WED | 1 | · | 2 | · | · | · |
+| `chat.compat.v04` | 402 | W | · | · | 1 | · | · | · |
+| `chat.waiting` | 400 | WED | 5 | · | 2 | · | · | · |
+| `chat.caps-record` (protocol) | 03 | WED | 2 | · | · | · | · | · |
 
 #### delivery
 
@@ -348,29 +421,41 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `files.paired.send` | 501 | WED | 3 | · | 4 | 2 | · | 2 |
+| `files.paired.send` | 501 | WED | 4 | · | 6 | 2 | · | 2 |
 | `files.paired.images` | 501 | WED | · | · | 2 | 1 | · | 1 |
 | `files.legacy.send` | 502 | WED | 2 | · | 1 | 1 | · | · |
 | `files.size-limit` | 500 | WED | 4 | · | 1 | · | · | · |
-| `files.size-label` |  | WED | 1 | · | · | · | · | · |
+| `files.size-label` |  | WED | 2 | · | · | · | · | · |
+| `files.storage` (protocol) | 500 | WED | 2 | 1 | 1 | · | · | · |
+| `files.large.offer` | 501 | WED | 3 | · | 1 | · | · | · |
+| `files.large.resume` (protocol) | 501 | WED | 3 | · | 1 | · | · | · |
+| `files.large.integrity` (protocol) | 501 | WED | 2 | · | 1 | · | · | · |
+| `files.large.limits` (protocol) | 501 | WED | 1 | · | · | · | · | · |
 | `files.persistence` (protocol) | 500 | WED | 2 | · | 1 | · | · | · |
+| `files.voice.meta` (protocol) | 501 | WED | 3 | · | 1 | · | · | · |
+| `files.voice.record` |  | WED | 1 | · | 2 | 1 | · | · |
+| `files.voice.play` |  | WED | 4 | · | 3 | 1 | 1 | · |
+| `files.voice.autoplay` |  | WED | 1 | · | 1 | · | · | · |
 
 #### calls
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `calls.video` | 601 | WED | 1 | · | 2 | 1 | · | · |
-| `calls.audio` | 601 | WED | 1 | · | 2 | · | · | · |
-| `calls.screen-share` | 601 | WED | 1 | · | 1 | · | · | · |
-| `calls.upgrade` | 601 | WED | 1 | · | 1 | · | · | · |
-| `calls.decline` | 601 | WED | 1 | · | 2 | · | · | · |
+| `calls.video` | 601 | WED | 2 | · | 3 | 1 | 1 | · |
+| `calls.audio` | 601 | WED | 2 | · | 4 | 1 | 1 | 1 |
+| `calls.screen-share` | 601 | WED | 3 | · | 1 | · | 1 | · |
+| `calls.upgrade` | 601 | WED | 2 | · | 1 | · | 1 | · |
+| `calls.decline` | 601 | WED | 1 | · | 3 | · | · | · |
 | `calls.cancel` | 601 | WED | 2 | · | 1 | · | · | · |
 | `calls.ring-elsewhere` | 601 | WED | · | · | 1 | · | · | · |
 | `calls.self-view` | 601 | WED | · | · | 1 | · | · | · |
-| `calls.mini-window` | 601 | WED | · | · | 2 | · | · | · |
+| `calls.mini-window` | 601 | WED | 1 | · | 2 | · | · | · |
 | `calls.route-keep` | 601 | WED | 1 | · | · | · | · | · |
 | `calls.lock` | 601 | WED | · | · | 1 | · | · | · |
-| `calls.signal` (protocol) | 600 | WED | 2 | · | · | · | · | · |
+| `calls.signal` (protocol) | 600 | WED | 4 | · | 1 | · | · | · |
+| `calls.paired` | 601 | WED | · | · | 3 | 2 | 1 | 1 |
+| `calls.paired.live-only` | 601 | WED | · | · | 1 | · | 1 | 1 |
+| `calls.paired.negotiate` (protocol) | 401 | WED | 2 | · | 2 | 2 | 1 | 1 |
 
 #### groups
 
@@ -386,7 +471,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `groups.leave` | 900 | WED | 5 | · | 2 | · | · | · |
 | `groups.forget` | 900 | WED | 3 | · | · | · | · | · |
 | `groups.link.enable` | 900 | WED | 3 | · | 3 | 1 | · | 1 |
-| `groups.link.join` | 900 | WED | 4 | · | 3 | 1 | · | 2 |
+| `groups.link.join` | 900 | WED | 5 | · | 3 | 1 | · | 2 |
 | `groups.link.replace` | 900 | WED | 3 | · | 1 | · | · | · |
 | `groups.picture.protocol` (protocol) | 900 | WED | 2 | · | · | · | · | · |
 | `groups.picture.set` | 900 | WED | 4 | · | 1 | · | · | · |
@@ -394,6 +479,9 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `groups.payments.member` | 900 | WED | 3 | · | 1 | · | · | · |
 | `groups.payments.group-request` | 900 | WED | 3 | · | 1 | · | · | · |
 | `groups.payments.notes` (protocol) | 900 | WED | 2 | · | 1 | · | · | · |
+| `groups.mentions` | 900 | WED | 3 | · | 1 | · | · | · |
+| `groups.mentions.notify` | 900 | WED | 1 | · | 1 | · | · | · |
+| `groups.protocol.mentions` (protocol) | 900 | WED | 2 | · | 1 | · | · | · |
 | `groups.connection` | 900 | WED | 2 | · | 1 | · | · | · |
 | `groups.protocol.commits` (protocol) | 900 | WED | 3 | · | · | · | · | · |
 | `groups.protocol.crypto` (protocol) | 900 | WED | 2 | · | · | · | · | · |
@@ -401,7 +489,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `groups.protocol.link-frames` (protocol) | 900 | WED | 2 | · | · | · | · | · |
 | `groups.link.share` | 900 | WED | 1 | · | 2 | · | · | · |
 | `groups.community.create` | 903 | WED | · | · | 1 | · | · | · |
-| `groups.community.join` | 903 | WED | 4 | · | 2 | · | · | · |
+| `groups.community.join` | 903 | WED | 5 | · | 2 | · | · | · |
 | `groups.community.send` | 903 | WED | 1 | · | 1 | · | · | · |
 | `groups.community.catch-up` | 903 | WED | 1 | · | 1 | · | · | · |
 | `groups.community.remove` | 903 | WED | 2 | · | 1 | · | · | · |
@@ -417,43 +505,54 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `services.add` | 701 | ED | 2 | · | · | 3 | · | · |
-| `services.share` | 701 | ED | 4 | · | · | 3 | · | · |
-| `services.open` | 701 | ED | 3 | · | · | 3 | · | · |
+| `services.add` | 701 | ED | 2 | · | · | 3 | 1 | · |
+| `services.share` | 701 | ED | 6 | · | · | 3 | 1 | · |
+| `services.open` | 701 | ED | 3 | · | · | 4 | 1 | · |
 | `services.stop` | 701 | ED | 1 | · | · | 3 | · | · |
-| `services.web-unavailable` | 700 | W | · | · | 2 | · | · | · |
-| `services.http` (protocol) | 701 | WED | 5 | · | · | 2 | · | · |
-| `services.desktop-viewer` | 701 | D | · | 2 | · | · | · | · |
+| `services.web-unavailable` | 700 | W | 1 | · | 2 | · | · | · |
+| `services.http` (protocol) | 701 | WED | 6 | · | · | 2 | · | · |
+| `services.paired.negotiate` (protocol) | 701 | WED | 4 | · | · | 1 | 1 | · |
+| `services.desktop-viewer` | 701 | D | · | 2 | · | · | 1 | · |
 
 #### payments
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `payments.chat.methods` | 200 | WED | 5 | · | 2 | · | · | · |
-| `payments.chat.review` | 200 | WED | 5 | · | 6 | 1 | · | 4 |
+| `payments.chat.methods` | 200 | WED | 8 | · | 5 | · | · | · |
+| `payments.chat.review` | 200 | WED | 7 | · | 6 | 1 | · | 5 |
 | `payments.chat.refused` | 200 | WED | 2 | · | 1 | · | · | · |
-| `payments.chat.method-off` | 200 | WED | 2 | · | 2 | · | · | 1 |
+| `payments.chat.method-off` | 200 | WED | 2 | · | 1 | · | · | 1 |
 | `payments.chat.memo` | 200 | WED | · | · | 1 | · | · | · |
-| `payments.chat.cards` | 200 | WED | 3 | · | 3 | 1 | · | 1 |
-| `payments.chat.reconcile` (protocol) | 200 | WED | 12 | · | · | · | · | 4 |
-| `payments.chat.frames` (protocol) | 200 | WED | 4 | · | · | · | · | · |
-| `payments.targets` (protocol) | 200 | WEDC | 5 | · | · | · | · | · |
-| `payments.cashu.send` | 201 | WED | 5 | · | 6 | 1 | · | 2 |
-| `payments.cashu.request` | 201 | WED | 4 | · | 4 | 1 | · | 1 |
+| `payments.chat.cards` | 200 | WED | 6 | · | 5 | 1 | · | 1 |
+| `payments.chat.reconcile` (protocol) | 200 | WED | 13 | · | · | · | · | 4 |
+| `payments.chat.frames` (protocol) | 200 | WED | 5 | · | · | · | · | · |
+| `payments.targets` (protocol) | 200 | WEDC | 7 | · | · | · | · | · |
+| `payments.cashu.send` | 201 | WED | 6 | · | 9 | 1 | · | 2 |
+| `payments.cashu.request` | 201 | WED | 5 | · | 5 | 1 | · | 1 |
 | `payments.cashu.reclaim` | 201 | WED | 3 | · | 1 | · | · | · |
-| `payments.cashu.test-sats` | 201 | WED | 3 | · | 2 | · | · | · |
+| `payments.cashu.test-sats` | 201 | WED | 4 | · | 2 | · | · | · |
 | `payments.cashu.token-card` | 201 | WED | 2 | · | 1 | · | · | · |
-| `payments.lightning.request` | 203 | WED | 3 | · | 2 | · | · | 5 |
-| `payments.lightning.invoice-card` | 203 | WED | 3 | · | 2 | · | · | · |
+| `payments.lightning.request` | 203 | WED | 3 | · | 2 | · | · | 6 |
+| `payments.lightning.invoice-card` | 203 | WED | 5 | · | 2 | · | · | · |
 | `payments.arkade.send` | 202 | WED | 3 | · | · | · | · | 3 |
 | `payments.arkade.request` | 202 | WED | 2 | · | · | · | · | 3 |
+| `payments.fedimint.chat` | 207 | WED | 2 | · | · | · | · | 1 |
+| `payments.fedimint.lightning` | 207 | WED | 1 | · | · | · | · | 1 |
 | `payments.bark.offer` | 204 | WED | 2 | · | 1 | · | · | · |
 | `payments.bark.send` | 204 | WED | 5 | · | · | · | · | 2 |
-| `payments.usdt.send` | 200 | WED | 6 | · | · | · | · | 3 |
+| `payments.spark.offer` | 206 | WED | 2 | · | · | · | · | 1 |
+| `payments.spark.send` | 206 | WED | 1 | · | · | · | · | 1 |
+| `payments.usdt.send` | 200 | WED | 7 | · | · | · | · | 3 |
 | `payments.bitcoin.send` | 200 | WED | 5 | · | · | · | · | 2 |
 | `payments.bitcoin.offer` | 200 | WED | 2 | · | 1 | · | · | · |
 | `payments.external` | 205 | WED | 7 | · | 1 | · | · | · |
-| `payments.lnurl.card` | 205 | WED | · | · | 1 | · | · | · |
+| `payments.lnurl.card` | 205 | WED | 1 | · | 1 | · | · | · |
+| `payments.money.onchain-card` | 200 | WED | 3 | · | 1 | · | · | 1 |
+| `payments.money.bolt12-card` | 203 | WED | 2 | · | 1 | · | · | · |
+| `payments.money.ark-card` | 202 | WED | 2 | · | 1 | · | · | · |
+| `payments.money.usdt-card` | 200 | WED | 2 | · | · | · | · | · |
+| `payments.money.network` | 200 | WED | 2 | · | 1 | · | · | 1 |
+| `payments.mainnet-confirm` | 200 | WED | 4 | · | 1 | · | · | · |
 | `payments.uri` (protocol) | 205 | WEDC | 2 | · | · | · | · | · |
 | `payments.bolt11` (protocol) | 203 | WEDC | 2 | · | · | · | · | · |
 | `payments.amounts` (protocol) | 200 | WEDC | 4 | · | · | · | · | · |
@@ -462,50 +561,79 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `wallet.mode` | 200 | WED | 7 | · | 4 | 1 | · | 1 |
-| `wallet.ready` | 200 | WED | 2 | · | 1 | · | · | · |
+| `wallet.mode` | 200 | WED | 8 | · | 4 | 1 | · | 1 |
+| `wallet.instances.migration` | 200 | WED | 2 | · | · | · | · | · |
+| `wallet.instances.create` | 200 | WED | 4 | · | 14 | · | · | 6 |
+| `wallet.instances.remove` | 200 | WED | 4 | · | 2 | · | · | · |
+| `wallet.instances.sections` | 200 | WED | 2 | · | 2 | · | · | · |
+| `wallet.instances.networks` | 200 | WED | 8 | · | 7 | 1 | · | 1 |
+
+#### payments
+
+| Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
+|---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `payments.chat.networks` (protocol) | 200 | WED | 9 | · | 2 | · | · | · |
+
+#### wallet
+
+| Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
+|---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `wallet.ready` | 200 | WED | 2 | · | 2 | · | · | · |
 | `wallet.badge` | 200 | WED | · | · | 1 | · | · | · |
-| `wallet.deck` |  | WED | 5 | · | 4 | 1 | · | 1 |
+| `wallet.deck` |  | WED | 7 | · | 4 | 1 | · | 1 |
 | `wallet.history` | 200 | WED | 1 | · | 3 | · | · | · |
 | `wallet.cashu.mint.add` | 201 | WED | 1 | · | 3 | 1 | · | 1 |
 | `wallet.cashu.mint.manage` | 201 | WED | 2 | · | 2 | 1 | · | · |
 | `wallet.cashu.receive-lightning` | 201 | WED | 2 | · | 4 | · | · | 1 |
-| `wallet.cashu.pay-invoice` | 201 | WED | 2 | · | 1 | · | · | · |
+| `wallet.cashu.pay-invoice` | 201 | WED | 3 | · | 2 | · | · | · |
 | `wallet.cashu.receive-token` | 201 | WED | 1 | · | · | · | · | · |
+| `wallet.test-coins` | 200 | WED | 3 | · | 3 | · | · | · |
+| `wallet.testnet.receive-held` | 201 | WED | 2 | · | 2 | · | · | · |
 | `wallet.cashu.test-sats` | 201 | WED | 3 | · | 1 | · | · | · |
 | `wallet.cashu.export` | 201 | WED | 1 | · | · | · | · | · |
-| `wallet.lightning.sources` | 203 | WED | 7 | · | 2 | · | · | 1 |
+| `wallet.lightning.sources` | 203 | WED | 8 | · | 3 | · | · | 1 |
+| `wallet.lightning.cards` | 203 | WED | 2 | · | 1 | · | · | 2 |
 | `wallet.lightning.card` | 203 | WED | · | · | 1 | · | · | · |
 | `wallet.lightning.cashu-mint.receive` | 203 | WED | 2 | · | 2 | · | · | 1 |
 | `wallet.lightning.cashu-mint.pay` | 203 | WED | 2 | · | 1 | · | · | 1 |
+| `wallet.lightning.fedimint` | 203 | WED | 1 | · | 1 | · | · | 1 |
 | `wallet.lightning.breez.connect` | 203 | WED | 2 | · | 1 | · | · | 3 |
 | `wallet.lightning.breez.pay` | 203 | WED | 1 | · | · | · | · | 4 |
-| `wallet.lightning.nwc.connect` | 203 | WED | 1 | · | 1 | · | · | 2 |
-| `wallet.lightning.nwc.pay` | 203 | WED | 1 | · | 1 | · | · | 3 |
+| `wallet.lightning.nwc.connect` | 203 | WED | 1 | · | 2 | · | · | 3 |
+| `wallet.lightning.nwc.pay` | 203 | WED | 1 | · | 1 | · | · | 4 |
 | `wallet.lightning.cln.connect` | 203 | WED | 2 | · | · | · | · | 3 |
 | `wallet.lightning.cln.pay` | 203 | WED | 2 | · | · | · | · | 3 |
 | `wallet.lightning.cln.commando` (protocol) | 203 | WED | 1 | · | · | · | · | 1 |
 | `wallet.lightning.webln.connect` | 203 | WE | 2 | · | 2 | · | · | · |
 | `wallet.lightning.webln.pay` | 203 | WE | 1 | · | 2 | · | · | 2 |
 | `wallet.lightning.lnd.connect` | 203 | WED | 2 | 1 | · | · | · | 4 |
-| `wallet.lightning.lnd.pay` | 203 | WED | 1 | 1 | · | · | · | 3 |
+| `wallet.lightning.lnd.pay` | 203 | WED | 1 | 1 | · | · | · | 4 |
 | `wallet.lightning.provider-contract` (protocol) | 203 | WED | 11 | · | · | · | · | 4 |
 | `wallet.lnurl.address` | 205 | WED | 1 | · | 1 | · | · | · |
-| `wallet.lnurl.protocol` (protocol) | 205 | WEDC | 3 | · | · | · | · | · |
+| `wallet.lnurl.protocol` (protocol) | 205 | WEDC | 4 | · | · | · | · | · |
 | `wallet.onchain.sources` | 200 | WED | 7 | · | 2 | · | · | 2 |
 | `wallet.onchain.bdk.create` | 200 | WED | 2 | · | 1 | · | · | · |
 | `wallet.onchain.bdk.send` | 200 | WE | 1 | · | · | · | · | 3 |
 | `wallet.onchain.bitcoind` | 200 | D | 2 | 1 | · | · | · | 1 |
 | `wallet.onchain.provider-contract` (protocol) | 200 | WED | 5 | · | · | · | · | 2 |
-| `wallet.ark.create` | 202 | WED | 2 | · | 1 | · | · | · |
+| `wallet.ark.create` | 202 | WED | 2 | · | 2 | · | · | · |
 | `wallet.ark.backup` | 202 | WED | 5 | · | 1 | · | · | 1 |
 | `wallet.ark.boarding` | 202 | WED | 1 | · | 1 | · | · | · |
 | `wallet.ark.send` | 202 | WED | 1 | · | · | · | · | 2 |
 | `wallet.ark.recover` | 202 | WED | 1 | · | · | · | · | · |
+| `wallet.fedimint.mainnet-off` | 207 | WED | 3 | · | 2 | · | · | · |
+| `wallet.fedimint.join` | 207 | WED | 2 | · | · | · | · | 1 |
+| `wallet.fedimint.notes` | 207 | WED | 1 | · | · | · | · | 1 |
+| `wallet.fedimint.backup` | 207 | WED | 1 | · | · | · | · | · |
 | `wallet.bark.mainnet` | 204 | WED | 4 | · | 1 | · | · | · |
-| `wallet.bark.create` | 204 | WED | 2 | · | 1 | · | · | · |
+| `wallet.bark.create` | 204 | WED | 3 | · | 1 | · | · | · |
 | `wallet.bark.send` | 204 | WED | 2 | · | · | · | · | 1 |
 | `wallet.bark.backup` | 204 | WED | 2 | · | · | · | · | · |
+| `wallet.spark.mainnet-key` | 206 | WED | 2 | · | 1 | · | · | · |
+| `wallet.spark.create` | 206 | WED | 1 | · | 1 | · | · | · |
+| `wallet.spark.send` | 206 | WED | 2 | · | · | · | · | 1 |
+| `wallet.spark.backup` | 206 | WED | 1 | · | 1 | · | · | · |
+| `wallet.spark.lightning` | 206 | WED | 3 | · | · | · | · | · |
 | `wallet.usdt.create` | 200 | WED | 3 | · | 2 | · | · | 1 |
 | `wallet.usdt.backup` | 200 | WED | 3 | · | 1 | · | · | 1 |
 | `wallet.usdt.send` | 200 | WED | 1 | · | · | · | · | 2 |
@@ -516,19 +644,22 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `proofs.page` | 300 | WED | 1 | · | 4 | · | · | · |
-| `proofs.deck` | 300 | WED | 3 | · | 2 | · | · | · |
-| `proofs.picker` | 300 | WED | 3 | · | 2 | 1 | · | 1 |
-| `proofs.composer` | 300 | WED | 1 | · | 2 | · | · | · |
-| `proofs.badges` | 300 | WED | 2 | · | 1 | · | · | · |
-| `proofs.share` | 300 | WED | 6 | · | 11 | 1 | · | 1 |
-| `proofs.withdraw` | 300 | WED | 6 | · | 2 | · | · | · |
-| `proofs.revoke` | 300 | WED | 5 | · | 1 | · | · | · |
+| `proofs.deck` | 300 | WED | 5 | · | 2 | · | · | · |
+| `proofs.ghostly-card` | 300 | WED | 3 | · | 1 | · | · | · |
+| `proofs.picker` | 300 | WED | 3 | · | 3 | 1 | · | 1 |
+| `proofs.composer` | 300 | WED | 2 | · | 2 | · | · | · |
+| `proofs.badges` | 300 | WED | 5 | · | 2 | · | · | · |
+| `proofs.timeline` | 300 | WED | 2 | · | 1 | · | · | · |
+| `proofs.contact-face` | 300 | WED | 1 | · | 1 | · | · | · |
+| `proofs.share` | 300 | WED | 6 | · | 14 | 1 | · | 2 |
+| `proofs.withdraw` | 300 | WED | 6 | · | 3 | · | · | · |
+| `proofs.revoke` | 300 | WED | 5 | · | 1 | · | · | 1 |
 | `proofs.expiry` | 300 | WED | 8 | · | 2 | · | · | · |
-| `proofs.recheck` | 300 | WED | 2 | · | 2 | · | · | · |
+| `proofs.recheck` | 300 | WED | 2 | · | 3 | · | · | · |
 | `proofs.unverifiable` | 300 | WED | 1 | · | 1 | · | · | · |
 | `proofs.binding` (protocol) | 300 | WED | 4 | · | 2 | 1 | · | 1 |
-| `proofs.contract` (protocol) | 300 | WED | 10 | · | · | · | · | · |
-| `proofs.nostr` | 301 | WED | 3 | · | 4 | 1 | · | 1 |
+| `proofs.contract` (protocol) | 300 | WED | 12 | · | · | · | · | · |
+| `proofs.nostr` | 301 | WED | 3 | · | 5 | 1 | · | 1 |
 | `proofs.domain.dns` | 304 | WED | 5 | · | 2 | · | · | 1 |
 | `proofs.domain.https` | 304 | WED | 4 | · | 1 | · | · | · |
 | `proofs.domain.resolver` | 304 | WED | 1 | · | 1 | · | · | · |
@@ -543,9 +674,34 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `proofs.oidc.callback.web` | 308 | W | 2 | · | 1 | · | · | · |
 | `proofs.oidc.callback.desktop` | 308 | WD | 1 | 1 | 1 | · | · | · |
 | `proofs.oidc.callback.extension` | 308 | E | 1 | · | · | · | · | · |
-| `proofs.pubky` | 302 | WED | 3 | · | · | · | · | · |
+| `proofs.did` | 311 | WED | 3 | · | 1 | · | · | · |
+| `proofs.atproto` | 312 | WED | 3 | · | · | · | · | 2 |
+| `proofs.atproto.repo` (protocol) | 312 | WED | 2 | · | · | · | · | · |
+| `proofs.atproto.oauth` | 312 | WED | 1 | · | · | · | · | 1 |
+| `proofs.atproto.remove` | 312 | WED | 1 | · | · | · | · | 1 |
+| `proofs.pubky` | 302 | WED | 7 | 2 | · | · | · | 2 |
 | `proofs.keet` | 303 | WED | 2 | · | · | · | · | · |
+| `proofs.public-profile` | 300 | WED | 3 | · | 1 | · | · | · |
+| `proofs.public-profile.nostr` | 300 | WED | 1 | · | 2 | · | · | · |
+| `proofs.public-profile.pubky` | 300 | WED | 1 | · | · | · | · | 1 |
+| `proofs.public-profile.atproto` | 300 | WED | 1 | · | · | · | · | 1 |
+| `proofs.public-profile.picture` | 300 | WED | 5 | · | 1 | · | · | 1 |
+| `proofs.public-profile.setting` | 300 | WED | 5 | · | 2 | · | · | · |
+| `proofs.public-activity` | 300 | WED | 5 | · | 1 | · | · | 1 |
+| `proofs.public-activity.nostr` | 300 | WED | 1 | · | 1 | · | · | · |
+| `proofs.public-activity.pubky` | 300 | WED | 1 | · | · | · | · | 1 |
+| `proofs.public-activity.atproto` | 300 | WED | 1 | · | · | · | · | 1 |
+| `proofs.public-activity.graph` | 300 | WED | 3 | · | 1 | · | · | · |
 | `proofs.peer-proofs` (protocol) | 300 | WED | 7 | · | · | · | · | · |
+
+#### did
+
+| Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
+|---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `did.dht.document` (protocol) | 310 | WED | 2 | · | · | · | · | · |
+| `did.dht.profile` | 310 | WED | 2 | · | 1 | · | · | · |
+| `did.dht.public-links` | 310 | WED | 2 | · | 1 | · | · | · |
+| `did.dht.interop` (protocol) | 310 | WED | 1 | · | 1 | · | · | · |
 
 #### nostr
 
@@ -573,7 +729,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `extension.engine` |  | E | 7 | · | 1 | 1 | · | 2 |
-| `extension.interop` | 401 | WE | · | · | 2 | 3 | · | · |
+| `extension.interop` | 401 | WE | · | · | 3 | 5 | · | · |
 
 #### desktop
 
@@ -581,10 +737,11 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `desktop.boot` |  | D | · | · | · | · | 1 | · |
 | `desktop.bundle-wiring` |  | D | · | · | · | · | · | · |
-| `desktop.notifications` |  | D | · | · | · | · | · | · |
+| `desktop.notifications` |  | D | 1 | 1 | · | · | 1 | · |
 | `desktop.payment-links` | 205 | D | · | 1 | · | · | · | · |
 | `desktop.local-fetch` | 701 | D | · | 1 | · | · | · | · |
 | `desktop.crypto` (protocol) | 01 | D | · | 1 | · | · | · | · |
+| `desktop.diagnostics` |  | D | · | 1 | · | · | · | · |
 
 #### cli
 
@@ -595,6 +752,12 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `cli.send` | 402 | C | · | 2 | · | · | · | · |
 | `cli.recv` | 402 | C | · | 1 | · | · | · | · |
 | `cli.interop` (protocol) | 402 | WC | 1 | · | · | · | · | 1 |
+
+### Test files that declare no feature
+
+- `scripts/test/affected-stack.test.ts`
+- `scripts/test/affected.test.ts`
+- `scripts/test/ci-changes.test.ts`
 
 <!-- test-map:end -->
 
@@ -616,8 +779,8 @@ npm run e2e:matrix -- --docs                # and write the table below
 
 What the first full run found (2026-09-24, dev at `8fd41d4`, a local mint and MinIO, the regtest stacks down):
 
-- **Restoring a backup in the extension leads nowhere.** The extension has one profile only, and the restore adds a new profile it cannot switch to, so the restored chats are out of reach (on the web, Ghostly switches to the restored profile). This is all 20 failures: every scenario where B is the extension and restores.
-- **Leaving DHT-only after the contact reloaded was slow to go live again.** WebRTC came back after about 70 s in one repro, and not within 3 minutes once (`mx-656deae3`, which passed when run again). Fixed since. Each side learned the other's switch only at its next 30 s mailbox read, and the switch itself could wait for that read before it went out. An offer that arrived while one side was still blocked was dropped for good, so the dialler waited out its 90 s connect timeout. Measured with `E2E_DHT_BACK_RUNS=20 npx playwright test e2e/web/dht-back-timing.spec.ts`: 33–128 s before, seconds after (see [DHT delivery](DHT-DELIVERY.md)).
+- **Restoring a backup in the extension leads nowhere.** The extension has one profile only, and the restore adds a new profile it cannot switch to, so the restored chats are out of reach (on the web, Ghostly switches to the restored profile). This is all 20 failures: every scenario where B is the extension and restores. Fixed since: the extension keeps several profiles and switches to the restored one (#171, `e2e/extension/profiles.spec.ts`).
+- **Leaving DHT-only after the contact reloaded was slow to go live again.** WebRTC came back after about 70 s in one repro, and not within 3 minutes once (`mx-656deae3`, which passed when run again). Fixed since. Each side learned the other's switch only at its next 30 s mailbox read, and the switch itself could wait for that read before it went out. An offer that arrived while one side was still blocked was dropped for good, so the dialler waited out its 90 s connect timeout. Measured with `E2E_DHT_BACK_RUNS=20 npx playwright test e2e/web/dht-back-timing.spec.ts`: 33 to 128 s before, seconds after (see [DHT delivery](DHT-DELIVERY.md)).
 - A message sent while the contact's old session is still closing ended "Delivery unconfirmed" with a Retry button, and was not sent again by itself once the link was back. Fixed: it is `queued` and sent again by itself under the same id ([automatic resend](wisps/PAIRED-CHAT-INCREMENT.md#automatic-resend)). The `restore` block now writes at once, and `e2e/web/auto-resend.spec.ts` covers it.
 - The harness had to learn a few things the app does on purpose:
   - NIP-07 is never offered in the extension.
@@ -633,22 +796,22 @@ What the second full run found (2026-09-24, dev at `145aef7` with the payment bl
 
 | rail | scenarios with Testnet payments | payments passed | where the others stopped |
 |---|---|---|---|
-| Lightning · LND | `mx-a5a6a591`, `mx-b0ef6dcb` | 2 (one after the harness fix) | — |
-| Lightning · Core Lightning | `mx-5157e729`, `mx-645445f7`, `mx-81f3e761` | 3 | — |
-| Lightning · NWC | `mx-1935a65f`, `mx-6f03ddb7` | 2 | — |
-| Lightning · Breez | 6 scenarios | skipped: Breez's hosted regtest, no counterpart wallet | — |
+| Lightning · LND | `mx-a5a6a591`, `mx-b0ef6dcb` | 2 (one after the harness fix) | |
+| Lightning · Core Lightning | `mx-5157e729`, `mx-645445f7`, `mx-81f3e761` | 3 | |
+| Lightning · NWC | `mx-1935a65f`, `mx-6f03ddb7` | 2 | |
+| Lightning · Breez | 6 scenarios | skipped: Breez's hosted regtest, no counterpart wallet | |
 | Ark · Arkade | `mx-3baa1439`, `mx-9acd4293`, `mx-be9c550d`, `mx-c9cc118b`, `mx-d6f3c59a` | 0 | expired coins that cannot be recovered (below) |
-| Ark · Bark | `mx-341a13bf`, `mx-d905a954` | 2 (both then stop at the extension restore) | — |
-| Bitcoin · BDK | `mx-337ad5a9`, `mx-7e9761e0`, `mx-d182760c` | 3 (one then stops at the extension restore) | — |
-| USDT | `mx-3fdf6123`, `mx-7ce4862a`, `mx-afa22259`, `mx-e5939806` | 4 (one then stops at the extension restore) | — |
+| Ark · Bark | `mx-341a13bf`, `mx-d905a954` | 2 (both then stop at the extension restore) | |
+| Bitcoin · BDK | `mx-337ad5a9`, `mx-7e9761e0`, `mx-d182760c` | 3 (one then stops at the extension restore) | |
+| USDT | `mx-3fdf6123`, `mx-7ce4862a`, `mx-afa22259`, `mx-e5939806` | 4 (one then stops at the extension restore) | |
 
 New failures, each reproducible with `npm run e2e:matrix -- --only <id>` (or `--combo` with the values, since ids change with the table):
 
-- **Arkade: coins past their expiry are shown as recoverable, but cannot be recovered or spent** (`mx-be9c550d`, `mx-c9cc118b`, `mx-d6f3c59a`, `mx-3baa1439`, `mx-9acd4293`; also `--combo client=web-web,transport=webrtc,delivery=live,wallet=testnet,rail=ark-arkade,identity=none,group=none,profile=fresh,locale=en,viewport=desktop`). About three minutes after A is funded (arkd's regtest expiry, `ARKD_VTXO_TREE_EXPIRY: 180`), the wallet says "… test sats expired before they were renewed … recover them", **Recover** answers "No recoverable VTXOs found", and paying says "Insufficient Ark balance". The SDK counts a coin recoverable once its expiry time has passed (`isExpired`), while `recoverVtxos` takes only coins the server has swept, and the sweep waits for the chain's time to pass the expiry — on an idle regtest chain no block moves it. With blocks mined (the block mines while it recovers) the coins are recovered, but the balance does not come back within two minutes. On a real network the window is shorter, but it is the same gap: a balance the wallet shows, cannot spend and cannot recover.
+- **Arkade: coins past their expiry are shown as recoverable, but cannot be recovered or spent** (`mx-be9c550d`, `mx-c9cc118b`, `mx-d6f3c59a`, `mx-3baa1439`, `mx-9acd4293`; also `--combo client=web-web,transport=webrtc,delivery=live,wallet=testnet,rail=ark-arkade,identity=none,group=none,profile=fresh,locale=en,viewport=desktop`). About three minutes after A is funded (arkd's regtest expiry, `ARKD_VTXO_TREE_EXPIRY: 180`), the wallet says "… test sats expired before they were renewed … recover them", **Recover** answers "No recoverable VTXOs found", and paying says "Insufficient Ark balance". The SDK counts a coin recoverable once its expiry time has passed (`isExpired`), while `recoverVtxos` takes only coins the server has swept, and the sweep waits for the chain's time to pass the expiry, and on an idle regtest chain no block moves it. With blocks mined (the block mines while it recovers) the coins are recovered, but the balance does not come back within two minutes. On a real network the window is shorter, but it is the same gap: a balance the wallet shows, cannot spend and cannot recover.
 - **USDT (and Ark): after a chat Send, the payer's composer shows a fresh review of the same payment**, status "pending", with **Approve payment** again, once the payee's request turns Paid (`--combo client=web-web,transport=webrtc,delivery=live,wallet=testnet,rail=usdt,identity=none,group=none,profile=fresh,locale=en,viewport=desktop` three runs out of three; `mx-3fdf6123` and `mx-7ce4862a` on a second pass after dev's new Select, though not in the full run: it depends on timing). Approving it again is refused ("This payment was already submitted or could not be saved"), so nothing is paid twice, but the person is asked to pay again. The block records it as a soft failure and goes on.
 - **USDT: a second payment approved while the first is unconfirmed fails with "This payment was already submitted or could not be saved"** instead of saying to wait for the first one (one unconfirmed payment per EVM account, `persistence.ts` `pendingNonce`).
 - **BDK: a chat Send cannot raise its fee cap.** It is a fixed 2,000 sats (`ONCHAIN_FEE_CAP`); a request's bubble has a "Maximum fee" field, the composer has none. On the shared regtest chain (about 10 sat/vB) a two-input Send is refused with "The fee (2294 sats) is above your limit of 2000" and the person has no way past it.
-- **The extension restore gap from the first run is unchanged**: every scenario where B is the extension and restores still ends at "the restored profile is the one in use" (18 of the 27 failures). Their payment steps ran first and passed.
+- **The extension restore gap from the first run is unchanged**: every scenario where B is the extension and restores still ends at "the restored profile is the one in use" (18 of the 27 failures). Their payment steps ran first and passed. Fixed since (#171).
 - Intermittent, store-and-forward with a restored web profile: `mx-ece0bc5f` failed in a different place on each run, and `mx-d182760c` (which passed in the full run) failed on a second pass after its payments had passed: "welcome back" not received by the restored profile within 2 min, then A's hold indicator staying after B had picked the held items up.
 
 The harness learned, in this run: the extension's offscreen engine is not covered by a context's `ignoreHTTPSErrors` (it gets Chromium's `--ignore-certificate-errors`); two workers must not pay over one pair of Lightning nodes at once, nor mine next to an Ark payment (`rails.ts` locks); a slow local mint must not fail whatever test is running when the app polls it.
@@ -703,16 +866,16 @@ What it found:
 
 Last full run: 2026-09-24.
 
-**82 scenarios**: 50 passed (5 of them with blocks skipped), 27 failed, 5 skipped · 63 min · seed 20260924 — 25 failed after the two reruns marked in the table, once the harness was fixed
+**82 scenarios**: 50 passed (5 of them with blocks skipped), 27 failed, 5 skipped · 63 min · seed 20260924; 25 failed after the two reruns marked in the table, once the harness was fixed
 
 | id | clients (A↔B) | transport | delivery | wallet network | rail · source | identity proof | group | B's profile | B's language | B's screen | result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `mx-00812e0d` | web-web | webrtc | dht | testnet | ln-breez | domain | link | restored | en | phone | ✅ partial — payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
+| `mx-00812e0d` | web-web | webrtc | dht | testnet | ln-breez | domain | link | restored | en | phone | ✅ partial; payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
 | `mx-01bfacbf` | web-web | webrtc | store-forward | testnet | cashu | ssh | mesh | restored | pt | phone | ✅ |
 | `mx-049fe697` | web-web | webrtc-strict | dht | testnet | ln-mint | domain | mesh | fresh | pt | phone | ✅ |
 | `mx-04ceb838` | web-web | webrtc-strict | store-forward | mainnet | ln-lnd | nostr | mesh | restored | en | desktop | ✅ |
 | `mx-0cbf88d2` | web-web | webrtc-strict | dht | mainnet | usdt | oidc | link | restored | en | desktop | ✅ |
-| `mx-117f3606` | web-web | webrtc-strict | live | testnet | ln-breez | oidc | mesh | fresh | pt | desktop | ✅ partial — payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
+| `mx-117f3606` | web-web | webrtc-strict | live | testnet | ln-breez | oidc | mesh | fresh | pt | desktop | ✅ partial; payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
 | `mx-11cbc491` | web-extension | webrtc | dht | mainnet | ln-nwc | nostr | mesh | fresh | pt | desktop | ✅ |
 | `mx-124526e9` | extension-web | webrtc-strict | dht | mainnet | ln-lnd | pgp | none | restored | pt | phone | ✅ |
 | `mx-13ebe93c` | web-web | webrtc-strict | live | mainnet | btc-bdk | domain | none | fresh | en | phone | ✅ |
@@ -734,7 +897,7 @@ Last full run: 2026-09-24.
 | `mx-41eb51f3` | desktop-web | webrtc-strict | live | mainnet | cashu | none | none | fresh | en | desktop | ⏭️ needs a Desktop peer: the Linux harness drives one app and has no pairing adapter yet (Linux + tauri-driver only) |
 | `mx-4b821dc6` | desktop-web | native-fallback | live | mainnet | cashu | none | none | fresh | en | desktop | ⏭️ needs a Desktop peer: the Linux harness drives one app and has no pairing adapter yet (Linux + tauri-driver only) |
 | `mx-5157e729` | web-web | webrtc-strict | store-forward | testnet | ln-cln | domain | mesh | restored | pt | desktop | ✅ |
-| `mx-51a33a14` | extension-web | webrtc-strict | dht | testnet | ln-breez | ssh | mesh | restored | pt | desktop | ✅ partial — payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
+| `mx-51a33a14` | extension-web | webrtc-strict | dht | testnet | ln-breez | ssh | mesh | restored | pt | desktop | ✅ partial; payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
 | `mx-55192bc3` | extension-web | webrtc-strict | live | mainnet | ln-webln | none | mesh | fresh | pt | desktop | ✅ |
 | `mx-58b78852` | web-extension | webrtc | live | mainnet | ln-cln | nostr | mesh | restored | pt | phone | ❌ the restored profile is the one in use: Error: the restored profile is the one in use |
 | `mx-5e6df188` | web-web | webrtc-strict | dht | mainnet | cashu | oidc | none | restored | en | phone | ✅ |
@@ -762,17 +925,17 @@ Last full run: 2026-09-24.
 | `mx-87b4fede` | web-extension | webrtc-strict | store-forward | testnet | ln-mint | none | none | restored | pt | desktop | ❌ the restored profile is the one in use: Error: the restored profile is the one in use |
 | `mx-87f6b54a` | extension-web | webrtc | store-forward | mainnet | bark | bitcoin | link | restored | pt | phone | ✅ |
 | `mx-9acd4293` | web-extension | webrtc | dht | testnet | ark-arkade | nostr | mesh | restored | en | desktop | ❌ Expect "toHaveCount": Error: bob's expired coins are recovered |
-| `mx-9d9c0dda` | extension-extension | webrtc | store-forward | mainnet | ln-mint | pgp | mesh | restored | pt | desktop | ❌ environment — Chromium did not launch within 3 min under load; the rerun failed on `gpgconf --launch gpg-agent` (the known gpg-agent flake on the Mac) |
+| `mx-9d9c0dda` | extension-extension | webrtc | store-forward | mainnet | ln-mint | pgp | mesh | restored | pt | desktop | ❌ environment: Chromium did not launch within 3 min under load; the rerun failed on `gpgconf --launch gpg-agent` (the known gpg-agent flake on the Mac) |
 | `mx-9da39cc9` | extension-extension | webrtc-strict | live | mainnet | ln-cln | none | none | fresh | en | phone | ✅ |
 | `mx-a0dc2a7b` | web-web | webrtc | live | testnet | cashu | domain | none | restored | pt | phone | ✅ |
 | `mx-a1e06ffb` | web-extension | webrtc | dht | mainnet | btc-bdk | nostr | mesh | fresh | pt | phone | ✅ |
-| `mx-a5a6a591` | extension-extension | webrtc | live | testnet | ln-lnd | bitcoin | link | fresh | en | desktop | ✅ rerun — first run: LND refused from the extension (the harness trusted its self-signed certificate in pages only); passed once the extension was launched trusting it too |
-| `mx-af79be02` | web-extension | webrtc | store-forward | testnet | ln-breez | none | link | fresh | pt | phone | ✅ partial — payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
+| `mx-a5a6a591` | extension-extension | webrtc | live | testnet | ln-lnd | bitcoin | link | fresh | en | desktop | ✅ rerun. First run: LND refused from the extension (the harness trusted its self-signed certificate in pages only); passed once the extension was launched trusting it too |
+| `mx-af79be02` | web-extension | webrtc | store-forward | testnet | ln-breez | none | link | fresh | pt | phone | ✅ partial; payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
 | `mx-afa22259` | web-extension | webrtc | store-forward | testnet | usdt | ssh | none | restored | pt | phone | ❌ the restored profile is the one in use: Error: the restored profile is the one in use |
 | `mx-b0ef6dcb` | web-web | webrtc | dht | testnet | ln-lnd | oidc | none | fresh | pt | phone | ✅ |
 | `mx-b6684fa6` | web-web | webrtc | live | testnet | ln-mint | bitcoin | none | fresh | pt | desktop | ✅ |
 | `mx-b69daf69` | web-web | webrtc-strict | live | mainnet | ln-mint | oidc | mesh | restored | pt | phone | ✅ |
-| `mx-b9a59a32` | web-extension | webrtc-strict | live | testnet | ln-breez | nostr | mesh | fresh | pt | desktop | ✅ partial — payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
+| `mx-b9a59a32` | web-extension | webrtc-strict | live | testnet | ln-breez | nostr | mesh | fresh | pt | desktop | ✅ partial; payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
 | `mx-bc34cb3d` | web-web | webrtc-strict | live | mainnet | ark-arkade | bitcoin | none | restored | pt | phone | ✅ |
 | `mx-be9c550d` | web-web | webrtc-strict | live | testnet | ark-arkade | domain | link | fresh | en | phone | ❌ bob's recovered coins are back: Error: bob's recovered coins are back |
 | `mx-beb1331c` | web-web | webrtc | dht | mainnet | ln-lnd | domain | none | fresh | en | phone | ✅ |
@@ -781,13 +944,13 @@ Last full run: 2026-09-24.
 | `mx-c9cc118b` | web-web | webrtc | store-forward | testnet | ark-arkade | oidc | mesh | restored | pt | desktop | ❌ bob's recovered coins are back: Error: bob's recovered coins are back |
 | `mx-d0daad6e` | extension-web | webrtc-strict | live | mainnet | ln-webln | ssh | link | restored | pt | desktop | ✅ |
 | `mx-d182760c` | web-web | webrtc | store-forward | testnet | btc-bdk | oidc | none | restored | pt | phone | ✅ |
-| `mx-d24c674a` | web-web | webrtc-strict | store-forward | mainnet | bark | domain | mesh | restored | pt | phone | ✅ rerun — first run: the hash navigation raced the reload after the restore switched profiles (harness); passed once it waits the reload out |
+| `mx-d24c674a` | web-web | webrtc-strict | store-forward | mainnet | bark | domain | mesh | restored | pt | phone | ✅ rerun. First run: the hash navigation raced the reload after the restore switched profiles (harness); passed once it waits the reload out |
 | `mx-d6f3c59a` | web-web | webrtc | dht | testnet | ark-arkade | none | link | restored | pt | desktop | ❌ bob's recovered coins are back: Error: bob's recovered coins are back |
 | `mx-d905a954` | web-extension | webrtc | live | testnet | bark | nostr | none | restored | pt | phone | ❌ the restored profile is the one in use: Error: the restored profile is the one in use |
 | `mx-e22ae62d` | extension-extension | webrtc | dht | testnet | ln-breez | pgp | mesh | restored | en | desktop | ❌ the restored profile is the one in use: Error: the restored profile is the one in use |
 | `mx-e4f0c268` | web-extension | webrtc-strict | dht | testnet | cashu | nostr | none | restored | pt | phone | ❌ the restored profile is the one in use: Error: the restored profile is the one in use |
 | `mx-e5939806` | extension-web | webrtc-strict | live | testnet | usdt | none | mesh | restored | en | desktop | ✅ |
-| `mx-ece0bc5f` | web-web | webrtc | store-forward | mainnet | ln-nwc | oidc | link | restored | pt | phone | ❌ intermittent — first run: the restored web profile did not receive "welcome back" within 2 min; rerun: A's hold indicator stayed after B picked the held items up |
+| `mx-ece0bc5f` | web-web | webrtc | store-forward | mainnet | ln-nwc | oidc | link | restored | pt | phone | ❌ intermittent. First run: the restored web profile did not receive "welcome back" within 2 min; rerun: A's hold indicator stayed after B picked the held items up |
 | `mx-fab5c587` | web-extension | webrtc | store-forward | mainnet | bark | ssh | none | fresh | en | desktop | ✅ |
 
 Reproduce one: `npm run e2e:matrix -- --only <id>`.
