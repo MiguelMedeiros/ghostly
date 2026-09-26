@@ -137,6 +137,33 @@ export async function decodeAvatar(bytes: Uint8Array, side = AVATAR_SIDE): Promi
     } finally { bitmap.close(); }
   } catch { return { miss: 'it could not be decoded' }; }
 }
+/** A post's picture, shown on the reader's tap: at most this many pixels on its longer side, at most this many bytes. */
+export const POST_IMAGE_SIDE = 640;
+const POST_IMAGE_KEPT_BYTES = 160 * 1024;
+
+/**
+ * Downloaded picture bytes → a JPEG data URL that fits in `side`×`side` (the whole picture, not a crop), or the reason
+ * there is none. The same checks as an avatar: PNG, JPEG and WebP only, dimensions read and bounded before decoding.
+ */
+export async function decodeFitted(bytes: Uint8Array, side = POST_IMAGE_SIDE): Promise<AvatarResult & { width?: number; height?: number }> {
+  if (bytes.length > AVATAR_MAX_BYTES) return { miss: `it is larger than ${AVATAR_MAX_BYTES / 1024 / 1024} MiB` };
+  if (typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') return { miss: 'this app cannot resize pictures here' };
+  const shape=rasterDimensions(bytes);
+  if (!shape) return { miss: `it is ${formatName(bytes)}; only PNG, JPEG and WebP pictures are shown` };
+  if (shape.width<1 || shape.height<1 || shape.width>AVATAR_MAX_SIDE || shape.height>AVATAR_MAX_SIDE || shape.width*shape.height>AVATAR_MAX_PIXELS) return { miss: `it is ${shape.width} × ${shape.height} pixels, more than this app decodes` };
+  try {
+    const bitmap=await createImageBitmap(new Blob([new Uint8Array(bytes)],{type:shape.mime}));
+    try {
+      const w0=bitmap.width || shape.width, h0=bitmap.height || shape.height;
+      const scale=Math.min(1, side/Math.max(w0,h0));
+      const width=Math.max(1,Math.round(w0*scale)), height=Math.max(1,Math.round(h0*scale));
+      const canvas=new OffscreenCanvas(width,height); const ctx=canvas.getContext('2d'); if(!ctx) return { miss: 'this app cannot resize pictures here' };
+      ctx.drawImage(bitmap,0,0,w0,h0,0,0,width,height);
+      for (const quality of [0.8,0.6,0.45]) { const blob=await canvas.convertToBlob({type:'image/jpeg',quality}); if (blob.size<=POST_IMAGE_KEPT_BYTES) return { avatar: await toDataUrl(blob), width, height }; }
+      return { miss: 'it stays too large once resized' };
+    } finally { bitmap.close(); }
+  } catch { return { miss: 'it could not be decoded' }; }
+}
 export async function smallAvatar(bytes: Uint8Array, side = AVATAR_SIDE): Promise<string | undefined> {
   return (await decodeAvatar(bytes, side)).avatar;
 }
@@ -160,7 +187,7 @@ export function avatarSource(url: string, hosts: ReadonlySet<string> = IMAGE_HOS
  * and no redirects, except the fixed ones of IMAGE_REDIRECTS (the answer must then come from a host listed there).
  * `hosts` are the hosts asked, for the card's "Loaded from".
  */
-export async function fetchAvatar(url: string, { fetcher = fetch, hosts = IMAGE_HOSTS, side = AVATAR_SIDE, signal }: { fetcher?: typeof fetch; hosts?: ReadonlySet<string>; side?: number; signal?: AbortSignal } = {}): Promise<AvatarResult & { hosts: string[] }> {
+export async function fetchAvatar(url: string, { fetcher = fetch, hosts = IMAGE_HOSTS, side = AVATAR_SIDE, signal, decode = bytes => decodeAvatar(bytes, side) }: { fetcher?: typeof fetch; hosts?: ReadonlySet<string>; side?: number; signal?: AbortSignal; decode?: (bytes: Uint8Array) => Promise<AvatarResult> } = {}): Promise<AvatarResult & { hosts: string[] }> {
   const source = avatarSource(url, hosts);
   if ('miss' in source) return { miss: source.miss, hosts: [] };
   const redirects = IMAGE_REDIRECTS[source.host];
@@ -179,7 +206,7 @@ export async function fetchAvatar(url: string, { fetcher = fetch, hosts = IMAGE_
   if (!response.ok) { await response.body?.cancel().catch(() => {}); return { miss: `${asked[asked.length - 1]} answered ${response.status}`, hosts: asked }; }
   let bytes: Uint8Array;
   try { bytes = await boundedBytes(response, AVATAR_MAX_BYTES); } catch { return { miss: `it is larger than ${AVATAR_MAX_BYTES / 1024 / 1024} MiB, or could not be downloaded`, hosts: asked }; }
-  return { ...(await decodeAvatar(bytes, side)), hosts: asked };
+  return { ...(await decode(bytes)), hosts: asked };
 }
 export async function cacheAvatar(url?: string, fetcher: typeof fetch = fetch, hosts: ReadonlySet<string> = IMAGE_HOSTS): Promise<string | undefined> {
   if (!url) return;

@@ -902,6 +902,8 @@ export interface PublicProfileView {
   handle?: string;
   /** A short bio, plain text. */
   about?: string;
+  /** The website the account names: an https address, shown as a plain link. */
+  website?: string;
   /** A sanitized `data:image/jpeg;base64,…` URL, never a remote one. */
   avatar?: string;
   /** The profile names a picture that is not shown: which rule refused it, in words ("it is a GIF; …"). */
@@ -916,6 +918,60 @@ export interface PublicProfileView {
   /** The last attempt failed (a copy read before, if any, is still shown). */
   error?: string;
 }
+
+/**
+ * A verified identity's recent posts (docs/wisps/PUBLIC-PROFILES.md, "Posts and follows"): `loadPublicPosts`, asked
+ * when its card is chosen in a contact's identities panel. Plain text, bounded, never markup.
+ */
+export interface PublicPostView {
+  id: string;
+  /** Seconds. */
+  createdAt: number;
+  text: string;
+  /** Opens the post in its network's app or site. */
+  url?: string;
+  reply?: boolean;
+  /** Its pictures, loaded only on a tap (`loadPublicPostImage` with the index here). `host`: who is asked. */
+  images: { host?: string; alt?: string }[];
+}
+
+export interface PublicPostsView {
+  posts: PublicPostView[];
+  /** More can be asked for (`more: true`). */
+  more: boolean;
+  /** The hosts asked, which saw this device's IP address. */
+  hosts: string[];
+  /** Seconds. */
+  fetchedAt: number;
+  /** Notes the person's own Nostr mute list hides. */
+  hidden?: number;
+  /** The identity's profile in its network's app or site. */
+  profileUrl?: string;
+}
+
+/**
+ * Who a verified identity follows and who follows it, only as far as it touches people the reader knows: the reader's
+ * own identities and the identities contacts shared. Computed on this device from lists read from the same hosts as
+ * the profile; the lists themselves are never shown or stored.
+ */
+export interface PublicGraphView {
+  /** False when there was nobody to compare with (no identity of the reader's, no contact, on this network): nothing was read. */
+  compared: boolean;
+  /** Its follow list names one of the reader's identities. */
+  followsYou: boolean;
+  /** One of the reader's identities follows it (their followers list, or the reader's own follow list). */
+  youFollow: boolean;
+  /** Contacts whose shared identity it follows (`follows`) or who follow it (`followedBy`). */
+  contacts: { linkId: string; follows: boolean; followedBy: boolean }[];
+  /** A list was longer than this app reads: someone may be missing, never added. */
+  partial?: boolean;
+  hosts: string[];
+  /** Seconds; 0 when nothing was read. */
+  fetchedAt: number;
+}
+
+/** A post's picture, on the reader's tap: a re-encoded `data:image/jpeg` URL, or why there is none. */
+export interface PublicPostImageView { src?: string; miss?: string; hosts: string[]; width?: number; height?: number }
 
 /** The profile's did:dht (WISP 3xx-did-dht): its own key, public to everyone, never tied to a chat. */
 export interface ProfileDidView {

@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
@@ -95,6 +95,16 @@ export interface EngineApi {
    * network is on; a copy younger than a day is not asked again (`force`: after five minutes).
    */
   loadPublicProfile(params: { provider: string; subject: string; force?: boolean }): void;
+  /**
+   * A contact's verified identity's recent posts, when its card is chosen in the chat's identities panel; `more` adds the
+   * next page. Null when the proof is not current and verified, the provider has none, or Load public profiles is off.
+   * Kept in memory for a few minutes, never on disk.
+   */
+  loadPublicPosts(params: { provider: string; subject: string; more?: boolean; force?: boolean }): PublicPostsView | null;
+  /** Who that identity follows and who follows it, as far as it touches the reader's identities and contacts (compared on this device). */
+  loadPublicGraph(params: { provider: string; subject: string; force?: boolean }): PublicGraphView | null;
+  /** One picture of a post already loaded, on the reader's tap. */
+  loadPublicPostImage(params: { provider: string; subject: string; postId: string; index: number }): PublicPostImageView;
   /** Lists one of the profile's identities in its public DID document (`alsoKnownAs`), or takes it out. */
   setDidListed(params: { id: string; listed: boolean }): void;
   /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */

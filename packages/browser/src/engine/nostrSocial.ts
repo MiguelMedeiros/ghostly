@@ -114,6 +114,15 @@ export class NostrSocial {
     return this.muteLists().some(m => !!mutedBecause(note, author, m));
   }
 
+  /** Every key the person's own follow lists name, as far as they were loaded (for "You follow them" elsewhere). */
+  ownFollows(): string[] {
+    return [...new Set(this.host.ownSubjects().flatMap(s => this.own[s]?.follows?.follows ?? []))];
+  }
+  /** The person's own mute lists hide this note by `author`. */
+  hides(note: { id: string; text: string; mentions: string[] }, author: string): boolean {
+    return this.muted({ id: note.id, createdAt: 0, content: note.text, reply: false, mentions: note.mentions }, author);
+  }
+
   linkView(linkId: string): NostrContactView[] | undefined {
     const subjects = this.host.contactSubjects(linkId);
     if (subjects.length === 0) return undefined;
