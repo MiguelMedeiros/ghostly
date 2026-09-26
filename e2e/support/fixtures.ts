@@ -86,7 +86,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
 
 /** Points this peer's Iroh at `relay` (Settings → Network), before it has a chat to start an endpoint for. */
 export async function setIrohRelay(page: Page, relay: string): Promise<void> {
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/advanced");
   await page.getByTestId("network-iroh-relays").fill(relay);
   await page.getByTestId("network-save").click();
   await expect(page.getByTestId("network-saved")).toBeVisible();

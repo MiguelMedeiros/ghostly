@@ -47,7 +47,7 @@ describe("Settings on a phone", () => {
     expect(link).toHaveTextContent("Name, picture, backups and other profiles");
     // First in the section, above the default nickname.
     expect(link.parentElement?.firstElementChild).toBe(link);
-    expect(link.closest("section")).toContainElement(screen.getByLabelText("Default Nickname"));
+    expect(link.closest("section")).toContainElement(screen.getByLabelText("Name in chats"));
 
     await user.click(link);
     expect(screen.getByText("Profile page")).toBeInTheDocument();
@@ -77,6 +77,6 @@ describe("Settings on a wide screen", () => {
     windowIs(false);
     renderSettings();
     expect(screen.queryByTestId("settings-profile-link")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Default Nickname")).toBeInTheDocument();
+    expect(screen.getByLabelText("Name in chats")).toBeInTheDocument();
   });
 });

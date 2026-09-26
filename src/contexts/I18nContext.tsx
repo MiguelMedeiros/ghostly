@@ -100,6 +100,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** The translator where there may be no provider (layout primitives rendered on their own): null there. */
+export function useOptionalI18n(): I18nContextValue | null {
+  return useContext(I18nContext);
+}
+
 export function useI18n(): I18nContextValue {
   const context = useContext(I18nContext);
   if (!context) {

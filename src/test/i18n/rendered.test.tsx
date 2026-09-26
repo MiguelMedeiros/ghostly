@@ -1,11 +1,14 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
+import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { UpdateProvider } from "../../contexts/UpdateContext";
 import { GroupChat } from "../../pages/GroupChat";
+import { AdvancedSettings, Settings } from "../../pages/Settings";
 import { groupView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { LANGUAGES, SECTIONS, lookup } from "./locales";
+import { LANGUAGES, LOCALES, SECTIONS, flatten, lookup } from "./locales";
 
 // covers: app.i18n
 
@@ -79,5 +82,28 @@ describe.each(LANGUAGES)("in %s", (language) => {
     expect(await screen.findByText("Hi all")).toBeInTheDocument();
     expect(screen.getByTestId("group-name")).toHaveTextContent("Friends");
     expect(rawKeys(container)).toEqual([]);
+  });
+
+  it("Settings and Settings → Advanced, with every ⓘ open, show no raw key and no English left behind", async () => {
+    const { engine, user, container } = renderApp(
+      <LockScreenProvider><UpdateProvider><Settings /><AdvancedSettings /></UpdateProvider></LockScreenProvider>,
+      { route: "/settings", language },
+    );
+    act(() => engine.update({
+      transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true },
+      settings: { relays: ["https://pkarr.pubky.org"] },
+    }));
+    const infos = await screen.findAllByTestId("row-info");
+    expect(infos.length).toBeGreaterThanOrEqual(7);
+    for (const more of infos) await user.click(more);
+
+    expect(screen.getByRole("switch", { name: t(language, "settings.linkPreviews") })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: t(language, "network.title") })).toBeInTheDocument();
+    expect(rawKeys(container)).toEqual([]);
+    if (language === "en") return;
+    // A string that differs from English in this language must not show in English.
+    const texts = new Set(visibleStrings(container).map((s) => s.trim()));
+    const english = [...flatten(LOCALES.en)].filter(([key]) => /^(settings|network)\./.test(key) && lookup(language, key) !== lookup("en", key));
+    expect(english.map(([, text]) => text).filter((text) => texts.has(text as string))).toEqual([]);
   });
 });

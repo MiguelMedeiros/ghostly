@@ -222,7 +222,7 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
         await expect(alert).not.toContainText("Could not read discovery");
         await expect(page.getByTestId("discovery-help")).toContainText("No contact yet");
       }
-      await expect(page.getByRole("link", {name:"review relay settings"})).toHaveAttribute("href", "#/settings");
+      await expect(page.getByRole("link", {name:"review relay settings"})).toHaveAttribute("href", "#/settings/advanced");
     }
     await expect(page.getByRole("radio", {name:"DHT only", exact:true})).toBeEnabled();
     await expect(page.getByRole("radio", {name:"WebRTC", exact:true})).toBeEnabled();

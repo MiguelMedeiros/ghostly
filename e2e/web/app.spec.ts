@@ -179,9 +179,9 @@ test("clear all data leaves nothing behind", { tag: ["@feature:app.clear-data"] 
   await createChat(page);
   await page.waitForTimeout(16_000);
   await page.goto("/#/settings");
-  await page.getByRole("button", { name: "Clear all data" }).click();
-  await expect(page.getByText("Are you sure? This cannot be undone.")).toBeVisible();
-  await page.getByRole("button", { name: "Confirm" }).click();
+  await page.getByTestId("clear-all-data").click();
+  await expect(page.getByText("Clear everything? This cannot be undone.")).toBeVisible();
+  await page.getByTestId("clear-all-data-confirm").click();
   // The app starts over at once (the running peer held what was deleted), so the short "All data
   // cleared" note may be gone before anyone reads it: the restart is what to wait for.
   await expect(page).not.toHaveURL(/#\/settings/);

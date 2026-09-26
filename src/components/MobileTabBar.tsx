@@ -78,7 +78,7 @@ export function MobileTabBar() {
     <>
       <nav className="shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
         {TABS.map((tab) => {
-          const active = pathname === tab.path;
+          const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`);
           const dot = tab.path === "/identities" && identityAttention;
           const account = tab.path === "/settings" && canSwitch;
           const others = account && glances.othersUnread > 0;

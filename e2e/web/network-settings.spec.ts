@@ -27,7 +27,7 @@ async function keepOffline(peer: Peer): Promise<void> {
 
 test("a TURN server is kept across a reload, and removed by clearing its address", { tag: ["@feature:settings.network.turn", "@feature:settings.network.relays"] }, async ({ peer }) => {
   const { page } = await peer("alice");
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/advanced");
   const form = network(page);
   await expect(form.turnUrl).toHaveValue("");
   // The credential is a secret: typed into a password field.
@@ -68,7 +68,7 @@ test("relays: only http(s) addresses are kept, normalized and without duplicates
   const alice = await peer("alice");
   await keepOffline(alice);
   const { page } = alice;
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/advanced");
   const form = network(page);
   await form.relays.fill(
     [
@@ -96,7 +96,7 @@ test("relays: a list with no valid address is refused, and the relays stay", { t
   const alice = await peer("alice");
   await keepOffline(alice);
   const { page } = alice;
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/advanced");
   const form = network(page);
   await form.relays.fill("not a url\njavascript:alert(1)");
   await form.save.click();
@@ -110,7 +110,7 @@ test("relays: a list with no valid address is refused, and the relays stay", { t
 // why and keeps the old setting.
 test("a TURN address WebRTC cannot use is refused, and chats still connect", { tag: ["@feature:settings.network.turn", "@feature:chat.paired.send"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
-  await alice.page.goto("/#/settings");
+  await alice.page.goto("/#/settings/advanced");
   const form = network(alice.page);
   for (const [urls, user, credential, problem] of [
     ["turn:turn.example.org:3478", "", "", "username and credential"],

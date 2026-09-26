@@ -15,7 +15,7 @@ async function openTheChat(peer: Peer): Promise<void> {
 }
 
 async function setRelay(peer: Peer, url: string): Promise<void> {
-  await peer.page.goto("/#/settings");
+  await peer.page.goto("/#/settings/advanced");
   const field = peer.page.getByTestId("network-hyperdht-relay");
   await expect(field).toHaveValue("");
   await field.fill(url);
@@ -44,7 +44,7 @@ test("with WebRTC gone, two browsers keep chatting over HyperDHT through a relay
   await connect(alice, bob);
 
   // A relay address other than wss:// (or ws:// to this machine) is refused before anything is saved.
-  await alice.page.goto("/#/settings");
+  await alice.page.goto("/#/settings/advanced");
   await alice.page.getByTestId("network-hyperdht-relay").fill("ws://relay.example.org");
   await alice.page.getByTestId("network-save").click();
   await expect(alice.page.getByTestId("network-error")).toHaveText("Use a wss:// relay address");
@@ -61,7 +61,7 @@ test("with WebRTC gone, two browsers keep chatting over HyperDHT through a relay
     await p.page.keyboard.press("Escape");
   }
   // The setting is kept across a reload.
-  await bob.page.goto("/#/settings");
+  await bob.page.goto("/#/settings/advanced");
   await bob.page.reload();
   await expect(bob.page.getByTestId("network-hyperdht-relay")).toHaveValue(relay);
   await openTheChat(bob);

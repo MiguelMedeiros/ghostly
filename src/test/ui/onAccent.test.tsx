@@ -5,7 +5,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
-import { Settings } from "../../pages/Settings";
+import { AdvancedSettings, Settings } from "../../pages/Settings";
 import { renderApp } from "../render";
 
 // covers: app.theme.on-accent
@@ -66,6 +66,7 @@ describe("text on the accent", () => {
       <LockScreenProvider>
         <UpdateProvider>
           <Settings />
+          <AdvancedSettings />
         </UpdateProvider>
       </LockScreenProvider>,
       { route: "/settings" },
