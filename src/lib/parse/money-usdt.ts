@@ -26,9 +26,12 @@ export interface UsdtRequest {
   uri?: string;
 }
 
-/** EIP-55: an all-lower or all-upper address has no checksum; a mixed-case one must match it. */
+/**
+ * EIP-55: an all-lower or all-upper address has no checksum; a mixed-case one must match it. The zero address is
+ * refused: whatever is sent there is burnt.
+ */
 export function isEvmAddress(address: string): boolean {
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return false;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address) || /^0x0{40}$/.test(address)) return false;
   const body = address.slice(2);
   if (body === body.toLowerCase() || body === body.toUpperCase()) return true;
   const hash = keccak_256(new TextEncoder().encode(body.toLowerCase()));
