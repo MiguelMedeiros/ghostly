@@ -172,6 +172,7 @@
     "noticesDeniedMac": "Allow them in macOS Settings → Notifications → Ghostly",
     "noticesDeniedWindows": "Allow them in Windows Settings → Notifications",
     "noticesOpenSettings": "Open settings",
+    "noticesMisplaced": "Move Ghostly to Applications to allow them",
     "privateNotice": "New message",
     "title": "Settings",
     "profile": "Profile",

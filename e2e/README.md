@@ -209,7 +209,7 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
 | `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite — see [Compatibility with v0.4](#compatibility-with-v04) |
 | `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT — see [Desktop on macOS](#desktop-on-macos) |
-| `desktop-macos/notifications.spec.ts` | macOS only: a Desktop copy started by its binary registers itself with Launch Services, so it can ask for notifications; Settings offers the switch, a notification call is answered, and a refusal in macOS shows where to allow them — see [Desktop on macOS](#desktop-on-macos) |
+| `desktop-macos/notifications.spec.ts` | macOS only: Settings → System notifications in a Desktop copy in a temporary folder (macOS gives it none) says to move the app; from another folder the switch is offered and a notification call is answered — see [Desktop on macOS](#desktop-on-macos) |
 
 ## Desktop
 

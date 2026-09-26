@@ -1,5 +1,6 @@
 // macOS requires its actual authorization state; the desktop plugin's generic
 // permission API unconditionally returns Granted. No notification contains chat data.
+// "misplaced": the app runs from a temporary folder, where macOS gives it none (see `mac::misplaced`).
 
 /// Where a click on a notification goes: the main window hears `notification-open` with the notification's id,
 /// and finds the chat it was about (it never leaves the page). Elsewhere the plugin reports no clicks.
@@ -89,43 +90,38 @@ mod mac {
     use objc2::rc::Retained;
     use objc2::runtime::{Bool, NSObject, NSObjectProtocol, ProtocolObject};
     use objc2::{define_class, msg_send, AllocAnyThread};
-    use objc2_foundation::{NSBundle, NSError, NSString, NSURL};
+    use objc2_foundation::{NSBundle, NSError, NSString};
     use objc2_user_notifications::*;
     use std::{
-        ffi::c_void,
         ptr::NonNull,
-        sync::{Mutex, Once, OnceLock},
+        sync::{Mutex, OnceLock},
     };
     use tokio::sync::oneshot;
 
-    #[link(name = "CoreServices", kind = "framework")]
-    extern "C" {
-        fn LSRegisterURL(url: *const c_void, update: u8) -> i32;
-    }
-
     /// The app's bundle, when it runs as one. A bare binary (`cargo run`, tests) has no notification center:
     /// asking for it there raises an Objective-C exception.
-    fn bundle() -> Option<(Retained<NSURL>, String)> {
+    fn bundle() -> Option<(String, String)> {
         let bundle = NSBundle::mainBundle();
         let id = bundle.bundleIdentifier()?.to_string();
-        let url = bundle.bundleURL();
-        let is_app = url
-            .path()
-            .is_some_and(|path| path.to_string().trim_end_matches('/').ends_with(".app"));
-        is_app.then_some((url, id))
+        let path = bundle.bundlePath().to_string();
+        path.trim_end_matches('/')
+            .ends_with(".app")
+            .then_some((path, id))
     }
 
-    /// macOS answers a notification request only for an app Launch Services knows. Finder and `open` register
-    /// an app as they start it; an app started by its binary (a copy run from a folder, a test build) is not,
-    /// and the request fails. Registering our own bundle once makes it known wherever it runs from.
-    fn register() {
-        static ONCE: Once = Once::new();
-        ONCE.call_once(|| {
-            if let Some((url, _)) = bundle() {
-                // Toll-free bridged: an NSURL is a CFURLRef.
-                unsafe { LSRegisterURL(Retained::as_ptr(&url).cast(), 1) };
-            }
-        });
+    /// macOS gives no notifications to an app in a temporary folder: Launch Services marks it `in-temp-dir`,
+    /// and the request fails with no dialog. That is where macOS runs a downloaded app opened before it was
+    /// moved (App Translocation), and where a copy made for testing often lives.
+    pub(super) fn misplaced(path: &str) -> bool {
+        [
+            "/private/tmp/",
+            "/tmp/",
+            "/private/var/folders/",
+            "/var/folders/",
+        ]
+        .iter()
+        .any(|dir| path.starts_with(dir))
+            || path.contains("/AppTranslocation/")
     }
 
     /// `x-apple.systempreferences:` opens System Settings on its Notifications pane, at this app when the
@@ -176,8 +172,6 @@ mod mac {
         if bundle().is_none() || APP.set(app.clone()).is_err() {
             return;
         }
-        // Off the main thread: Launch Services may take a moment, and nothing asks before it is needed.
-        std::thread::spawn(register);
         let delegate: Retained<Delegate> =
             unsafe { msg_send![super(Delegate::alloc().set_ivars(())), init] };
         let center = UNUserNotificationCenter::currentNotificationCenter();
@@ -187,7 +181,9 @@ mod mac {
     }
 
     pub async fn permission(request: bool) -> Result<String, String> {
-        register();
+        if bundle().is_some_and(|(path, _)| misplaced(&path)) {
+            return Ok("misplaced".into());
+        }
         let (tx, rx) = oneshot::channel();
         // Objective-C owns a copy of the completion block until it invokes it.
         // Only plain Rust values cross the asynchronous callback boundary.
@@ -282,6 +278,30 @@ mod settings_tests {
         assert_eq!(url.as_deref(), Some("ms-settings:notifications"));
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         assert_eq!(url, None);
+    }
+
+    /// A temporary folder, or where macOS runs a downloaded app from before it is moved: no notifications.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_app_in_a_temporary_folder_is_misplaced() {
+        use super::mac::misplaced;
+        for path in [
+            "/private/tmp/scratch/Ghostly Chat a.app",
+            "/tmp/Ghostly.app",
+            "/private/var/folders/yz/abc/T/ghostly-mac-a-1/Ghostly-a.app",
+            "/var/folders/yz/abc/T/Ghostly.app",
+            "/private/var/folders/yz/abc/X/AppTranslocation/0A1B/d/Ghostly.app",
+        ] {
+            assert!(misplaced(path), "{path}");
+        }
+        for path in [
+            "/Applications/Ghostly.app",
+            "/Users/someone/Applications/Ghostly.app",
+            "/Users/someone/Downloads/Ghostly.app",
+            "/Volumes/Ghostly/Ghostly.app",
+        ] {
+            assert!(!misplaced(path), "{path}");
+        }
     }
 }
 

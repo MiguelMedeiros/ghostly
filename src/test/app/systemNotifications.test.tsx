@@ -264,6 +264,17 @@ describe("Settings → System notifications", () => {
     expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
   });
 
+  it("Desktop on macOS, run from a temporary folder: says to move the app, and asking changes nothing", async () => {
+    desktop("MacIntel", { native_notification_permission: "misplaced" });
+    const { user } = renderSettings();
+    await waitFor(() => expect(row()).toHaveTextContent("Move Ghostly to Applications to allow them"));
+    await user.click(toggle());
+    await waitFor(() => expect(commands()).toContainEqual(["native_notification_permission", { request: true }]));
+    expect(toggle()).toHaveAttribute("aria-checked", "false");
+    expect(loadSettings().notifications.systemEnabled).toBe(false);
+    expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
+  });
+
   it("web: blocked in the browser has no button; no Notification API says so", async () => {
     FakeNotification.permission = "denied";
     const { unmount } = renderSettings();

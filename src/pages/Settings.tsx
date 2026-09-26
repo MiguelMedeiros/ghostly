@@ -313,7 +313,7 @@ export function Settings() {
         })}
         <Row label={t("settings.systemNotifications")} testId="settings-system-notifications-row"
           hint={<span role="status">{noticePermission === "denied" ? (systemSettings === "macos" ? t("settings.noticesDeniedMac") : systemSettings === "windows" ? t("settings.noticesDeniedWindows") : t("settings.noticesDenied"))
-            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : t("settings.noticesRunning")}</span>}>
+            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : noticePermission === "misplaced" ? t("settings.noticesMisplaced") : t("settings.noticesRunning")}</span>}>
           {noticePermission === "denied" && systemSettings && (
             <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
           )}

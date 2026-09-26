@@ -172,6 +172,7 @@
     "noticesDeniedMac": "请在 macOS 设置 → 通知 → Ghostly 中允许",
     "noticesDeniedWindows": "请在 Windows 设置 → 通知 中允许",
     "noticesOpenSettings": "打开设置",
+    "noticesMisplaced": "将 Ghostly 移到“应用程序”以允许通知",
     "privateNotice": "新消息",
     "title": "设置",
     "profile": "个人资料",

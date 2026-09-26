@@ -1,5 +1,6 @@
 import {invoke} from "@tauri-apps/api/core";
-export type NoticePermission = NotificationPermission | "unavailable";
+/** "misplaced": the Desktop app runs from a temporary folder, where macOS gives it no notifications. */
+export type NoticePermission = NotificationPermission | "unavailable" | "misplaced";
 interface ExtensionNotifications {
   runtime: {id?:string;getURL(path:string):string};
   permissions: {contains(options:{permissions:string[]}):Promise<boolean>;request(options:{permissions:string[]}):Promise<boolean>};

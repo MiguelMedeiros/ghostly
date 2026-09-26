@@ -1,6 +1,6 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,16 +70,17 @@ function forget(bundleId: string): void {
 const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 /** A copy of the app with a bundle id of its own, ad-hoc signed again (its Info.plist changed). */
-function copyApp(source: string, name: string): { app: string; bundleId: string; remove: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), `ghostly-mac-${name}-`));
+function copyApp(source: string, name: string, parent = tmpdir()): { app: string; bundleId: string; remove: () => void } {
+  mkdirSync(parent, { recursive: true });
+  const dir = mkdtempSync(join(parent, `ghostly-mac-${name}-`));
   const app = join(dir, `Ghostly-${name}.app`);
   const bundleId = `${BUNDLE_PREFIX}${name}`;
   execFileSync("ditto", [source, app]);
   execFileSync("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleIdentifier ${bundleId}`, join(app, "Contents", "Info.plist")]);
   execFileSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "ignore" });
   const remove = () => {
-    // The app registers itself with Launch Services to post notifications (src-tauri/src/notifications.rs):
-    // forgotten with the copy, so no record points at a folder that is gone.
+    // Started outside a temporary folder, macOS registers the copy with Launch Services: forgotten with the
+    // copy, so no record points at a folder that is gone.
     try { execFileSync(LSREGISTER, ["-u", app], { stdio: "ignore" }); } catch { /* never registered */ }
     rmSync(dir, { recursive: true, force: true });
   };
@@ -234,6 +235,8 @@ export interface MacDesktopOptions {
   profile?: string;
   /** The driver's port on 127.0.0.1. */
   port: number;
+  /** The folder the copy goes in: a temporary one unless said (macOS treats an app in one differently). */
+  folder?: string;
   env?: Record<string, string>;
 }
 
@@ -252,7 +255,7 @@ export interface MacDesktop {
 export async function openMacDesktop(options: MacDesktopOptions): Promise<MacDesktop> {
   if (process.platform !== "darwin") throw new Error("openMacDesktop runs on macOS only");
   const source = macBundle();
-  const copy = copyApp(source, options.name);
+  const copy = copyApp(source, options.name, options.folder);
   // A fresh app: nothing left from an earlier run that stopped halfway.
   forget(copy.bundleId);
   const executable = join(copy.app, "Contents", "MacOS", readdirSync(join(copy.app, "Contents", "MacOS"))[0]);

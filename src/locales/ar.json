@@ -172,6 +172,7 @@
     "noticesDeniedMac": "اسمح بها في إعدادات macOS ← الإشعارات ← Ghostly",
     "noticesDeniedWindows": "اسمح بها في إعدادات Windows ← الإشعارات",
     "noticesOpenSettings": "فتح الإعدادات",
+    "noticesMisplaced": "انقل Ghostly إلى التطبيقات للسماح بها",
     "privateNotice": "رسالة جديدة",
     "title": "الإعدادات",
     "profile": "الملف الشخصي",
