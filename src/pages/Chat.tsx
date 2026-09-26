@@ -54,7 +54,8 @@ import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useChatLink } from "../hooks/useChatLink";
 import { TransportLine } from "../components/TransportTimeline";
 import { mergeTimeline } from "../lib/transportEvents";
-
+import { walletCards } from "../components/walletCardData";
+import { cardOn } from "../lib/chatPayments";
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
   sessionId: string;
@@ -266,7 +267,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   // The chat's link as the engine shows it: its transport lines in the timeline.
   const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
   const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : []), [messages, paired, chatLink?.transportLog]);
-  const paymentsOn = !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
+  // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.
+  const paymentsOn = walletState?.wallets?.length ? walletCards(walletState).some((c) => cardOn(chatPeer ?? undefined, c.rail, c.network)) : !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showHold, setShowHold] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   const [showServices, setShowServices] = useState(false);
@@ -636,7 +638,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         onSendFile={platform ? sendFile : undefined}
         fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? "Update both peers to send files" : undefined) : undefined}
         // The + → Payment row still opens on these: its Accept side is where this chat's ways of paying are chosen.
-        paymentsUnavailable={!paymentsOn ? "Off in this chat: turn a way on in Accept" : chatStop ? chatStop : paired && chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? "Your contact has payments off in this chat, or needs an updated Ghostly" : undefined}
+        paymentsUnavailable={!paymentsOn ? "Off in this chat: turn a way on in Accept" : chatStop ? chatStop : paired && chatLive && !chatPeer?.capabilities?.payments ? (chatPeer?.capabilities?.networks && !Object.keys(chatPeer.capabilities.networks).length ? "Your contact has no wallet yet" : "Your contact has payments off in this chat, or needs an updated Ghostly") : undefined}
         payments={
           walletState && wallet && peerKey
             ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,

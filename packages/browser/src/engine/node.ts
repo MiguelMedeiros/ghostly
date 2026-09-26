@@ -3095,7 +3095,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.holdingFor(live)) return { files: !!link && GhostlyNode.takesFiles(link), payments: link?.supportsPayments ?? false,
       calls: link?.supportsCalls ?? false, services: link?.supportsServices ?? false, largeFiles: link?.supportsLargeFiles ?? false,
       methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean>,
-      ...(link?.peerPaymentNetworks?.("cashu") !== undefined ? { networks: Object.fromEntries(PAYMENT_METHODS.map(m => [m, link!.peerPaymentNetworks(m) ?? []])) } : {}) };
+      ...(link?.peerWalletNetworks?.() ? { networks: link.peerWalletNetworks() } : {}) };
     const held = this.hold.heldPaymentMethods(live.stored.id) ?? [];
     const methods = Object.fromEntries(PAYMENT_METHODS.map(m => [m, held.includes(m) && (link?.paymentEnabled(m) ?? false)])) as Record<PaymentMethodName, boolean>;
     return { files: true, payments: Object.values(methods).some(Boolean), methods, calls: false, services: false };

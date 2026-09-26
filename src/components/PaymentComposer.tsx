@@ -47,7 +47,6 @@ interface PaymentComposerProps {
 type Mode = "pay" | "accept";
 /** Cashu fees are per proof: a few sats at most. The review shows the real fee before anything is spent. */
 const CASHU_FEE_CAP = 10;
-const RAILS = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"] as const;
 
 /**
  * Popover over the message input, as a wallet: the cards in a stack, one comes up as the pointer passes over it
@@ -71,10 +70,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     if (rails && !rails.includes(card.rail)) return `${card.name} cannot be used here`;
     if (!card.ready) return card.status === "Set up" || card.status === "Shared balance" ? `${card.name} is not set up yet` : `${card.name} is ${card.balance.toLowerCase()}`;
     if (peer && !cardOn(peer, card.rail, card.network)) return `${networkName(card)} is off in this chat`;
-    if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.rail]) return `Your contact does not accept ${card.name} in this chat`;
-    // The contact said which networks it has wallets on: a test card meets only a test wallet, and real money only real.
+    // The contact said which networks it has wallets on (none for a kind it has no wallet of): a test card meets only
+    // a test wallet, and real money only real.
     const theirs = peer?.dataLink === "open" ? peer.capabilities?.networks : undefined;
-    if (theirs && !(theirs[card.rail] ?? []).includes(card.network)) return `Your contact has no ${networkName(card)} wallet`;
+    if (theirs && !theirs[card.rail]) return `Your contact has no ${networkName(card)} wallet`;
+    if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.rail]) return `Your contact does not accept ${card.name} in this chat`;
+    if (theirs && !theirs[card.rail]!.includes(card.network)) return `Your contact has no ${networkName(card)} wallet`;
     return undefined;
   };
   const cards = state && wallet ? walletCards(state) : [];

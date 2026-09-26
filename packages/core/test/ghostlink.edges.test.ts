@@ -573,6 +573,10 @@ describe("paired payments", () => {
     expect(t.b.peerPaymentNetworks("cashu")).toEqual(["testnet"]);
     expect(t.b.peerPaymentNetworks("arkade")).toEqual(["mainnet", "testnet"]);
     expect(t.b.peerPaymentNetworks("usdt"), "said, and none: no USDT wallet").toEqual([]);
+    expect(t.b.peerAllowsPayment("usdt"), "a way with no wallet is not offered").toBe(false);
+    expect(t.b.peerWalletNetworks(), "the map as said: no entry for a way with no wallet").toEqual({ cashu: ["testnet"], arkade: ["mainnet", "testnet"] });
+    expect(t.a.peerWalletNetworks()).toBeUndefined();
+    expect(t.b.peerAllowsPayment("cashu")).toBe(true);
     // B said no networks at all (as an older app): anything may meet.
     expect(t.a.peerPaymentNetworks("cashu")).toBeUndefined();
     // A new wallet is told at once on the open session.
@@ -590,6 +594,21 @@ describe("paired payments", () => {
     t.toB({ t: "paired-payments", m: ["cashu"] });
     await t.settle("b");
     expect(t.b.peerPaymentNetworks("cashu")).toBeUndefined();
+    // No wallet at all: nothing is offered, and the contact sees payments off.
+    t.a.setPaymentNetworks({});
+    await t.settle("b");
+    expect(t.b.supportsPayments).toBe(false);
+    expect(t.b.peerAllowsPayment("cashu")).toBe(false);
+    // A wallet whose networks are all off in this chat still names its way (the chat turned it off, not the wallet).
+    t.a.setPaymentNetworks({ cashu: [] });
+    await t.settle("b");
+    expect(t.b.peerAllowsPayment("cashu")).toBe(true);
+    expect(t.b.peerPaymentNetworks("cashu")).toEqual([]);
+    // A way turned off in this chat still says its wallets' networks: the contact tells "off here" from "no wallet".
+    t.a.setPaymentMethods({ cashu: false });
+    await t.settle("b");
+    expect(t.b.peerAllowsPayment("cashu")).toBe(false);
+    expect(t.b.peerWalletNetworks()).toEqual({ cashu: [] });
   });
 
   it("an older contact that did not offer payments in its handshake is sent no payment frames", async () => {

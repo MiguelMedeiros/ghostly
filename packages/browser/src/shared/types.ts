@@ -896,7 +896,8 @@ export interface LinkView {
     files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean; largeFiles?: boolean;
     /**
      * The networks the contact has a wallet on, per way of paying, as it said on the open session. Absent: it said
-     * none (an older app): any network may meet. A card is offered only where its network is in the list.
+     * none (an older app): any network may meet. A way of paying it has no wallet of is not in the map (one it has
+     * but turned off here lists no network). A card is offered only where its network is in its list.
      */
     networks?: Partial<Record<PaymentMethodName, readonly WalletNetwork[]>>;
   };
