@@ -16,6 +16,8 @@ import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { markGroupRead, memberName } from "../lib/groups";
+import { chatsByPeer } from "../lib/identities";
+import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
 import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
@@ -91,7 +93,14 @@ export function GroupChat() {
   const nav = useAppNavigation();
   const { t } = useI18n();
   const state = useSyncExternalStore(subscribe, snapshot);
-  const group = state?.groups.find(g => g.id === groupId);
+  // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
+  const faceOf = useContactFaces();
+  const rosterGroup = state?.groups.find(g => g.id === groupId);
+  const group = useMemo(() => {
+    if (!rosterGroup) return undefined;
+    const chats = chatsByPeer();
+    return withContactFaces(rosterGroup, state?.links, faceOf, peerKey => chats.get(peerKey)?.label);
+  }, [rosterGroup, state?.links, faceOf]);
   const [messages, setMessages] = useState<StoredMessage[]>([]);
   const [showMembers, setShowMembers] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);

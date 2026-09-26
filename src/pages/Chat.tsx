@@ -6,7 +6,8 @@ import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
-import { IdentityStack } from "../components/identities/ContactMarks";
+import { FaceCorner, IdentityStack } from "../components/identities/ContactMarks";
+import { shownContactName, useChosenProfile, useContactFace } from "../components/identities/contactFace";
 import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { PinIcon } from "../components/PinIcon";
@@ -260,6 +261,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [chatLabel, setChatLabel] = useState<string>("");
   const [peerNick, setPeerNick] = useState<string>("");
   const profileNick = usePeerNick(params?.peerPubKeyB64);
+  // The identity the contact is shown as, when one was chosen and its proof still stands (identities/contactFace.ts).
+  const face = useContactFace(params?.peerPubKeyB64);
+  useChosenProfile(params?.peerPubKeyB64);
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState("");
   /** Ways of paying are chosen per chat; the ⚡ works while this device allows at least one. */
@@ -390,9 +394,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
   // What the contact last said on the session wins over a name read out of an older message.
   const contactNick = profileNick !== undefined ? profileNick : peerNick;
-  const displayName = chatLabel || contactNick;
-  const isAnonymous = !displayName;
-  const shownName = displayName || t("common.unnamedContact", { key: contactTag(params.peerPubKeyB64) });
+  // A nickname given here wins, then the chosen identity's name, then the contact's own, then their key.
+  const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params.peerPubKeyB64) }) });
+  const isAnonymous = shown.from === "key";
+  const shownName = shown.name;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
@@ -413,8 +418,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <path d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
-            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} testId="chat-avatar" />
+          <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
+            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" />
+            {face && <FaceCorner face={face} />}
             {inviteCode && !pairedReady && (
               <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-on-accent z-10 group/star">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
@@ -449,7 +455,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
                 title="Click to set a name"
               >
-                {shownName}
+                <bdi data-testid="chat-name">{shownName}</bdi>
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -467,7 +473,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   </svg>
                 )}
               </p>
-              {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }} />}
+              {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
+                footer={face ? `Shown with their ${face.providerName} profile · Ghostly key ${truncatedPeerKey}` : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
@@ -642,7 +649,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         paymentsUnavailable={!paymentsOn ? "Off in this chat: turn a way on in Accept" : chatStop ? chatStop : paired && chatLive && !chatPeer?.capabilities?.payments ? (chatPeer?.capabilities?.networks && !Object.keys(chatPeer.capabilities.networks).length ? "Your contact has no wallet yet" : "Your contact has payments off in this chat, or needs an updated Ghostly") : undefined}
         payments={
           walletState && wallet && peerKey
-            ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,
+            ? { balance: walletState.balance, contact: isAnonymous ? undefined : shownName, onSend: paySend, onRequest: payRequest,
               // Paying needs live: a bearer token never waits in a queue or a hold. A request can wait.
               sendUnavailable: paired && !chatLive ? "Payments need a live connection" : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined,
               // Which ways this chat accepts: chosen on the composer's Accept side, for this chat only.

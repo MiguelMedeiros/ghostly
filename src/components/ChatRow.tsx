@@ -3,7 +3,8 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
-import { ContactMarks } from "./identities/ContactMarks";
+import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
+import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
@@ -81,12 +82,13 @@ const rowAction = (hover = "hover:text-accent") =>
 
 /**
  * The row's actions, laid over its marks and time (RowText's `timeCover`). Pointer devices only: a phone opens the
- * chat on a tap, and mutes and pins from the chat's ⋮. Hover or keyboard focus shows them, a click's leftover focus
- * does not (else the layer would hide the new mark once the pointer leaves); an open menu keeps them up.
+ * chat on a tap, and mutes and pins from the chat's ⋮. Hover or keyboard focus on one of them shows them, a click's
+ * leftover focus does not (else the layer would hide the new mark once the pointer leaves); an open menu keeps them up.
+ * Keyboard focus elsewhere in the row (the identity marks, whose card it opens) leaves them down.
  */
 function RowActions({ active, children }: { active: boolean; children: ReactNode }) {
   return (
-    <div data-testid="chat-row-actions" className={`max-md:hidden absolute top-1/2 end-0 flex min-w-full -translate-y-1/2 items-center justify-end gap-1 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 has-[[aria-expanded=true]]:opacity-100 ${active ? "bg-surface-hover" : "bg-surface-alt"}`}>
+    <div data-testid="chat-row-actions" className={`max-md:hidden absolute top-1/2 end-0 flex min-w-full -translate-y-1/2 items-center justify-end gap-1 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[aria-expanded=true]]:opacity-100 ${active ? "bg-surface-hover" : "bg-surface-alt"}`}>
       {children}
     </div>
   );
@@ -161,8 +163,10 @@ export interface ChatRowProps {
   chatId: string;
   density: ChatListDensity;
   active: boolean;
-  /** What the contact goes by here, or the "Contact · xxxxxx" fallback when `named` is false. */
+  /** What the contact goes by here (identities/contactFace.ts `shownContactName`), or the "Contact · xxxxxx" fallback when `named` is false. */
   label: string;
+  /** The identity the contact is shown as: its photo on the avatar, its provider on the avatar's corner. */
+  face?: ContactFace;
   named: boolean;
   /** The contact's key, shortened (both ends kept). */
   keyLabel: string;
@@ -187,10 +191,12 @@ export function ChatRow(p: ChatRowProps) {
   const muted = useChatMute(p.chatId) !== undefined;
   const size = AVATAR[p.density];
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
+  useChosenProfile(p.peerPubKey);
   return (
     <div data-testid="chat-row" data-muted={muted || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
-        <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} testId="chat-row-avatar" />
+        <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
+        {p.face && <FaceCorner face={p.face} />}
         {p.syncing && (
           <span className="absolute -top-1 -start-1 w-5 h-5 flex items-center justify-center z-10">
             <svg className="animate-ghost-boo w-5 h-5" viewBox="0 0 64 64" aria-hidden="true">
@@ -214,7 +220,7 @@ export function ChatRow(p: ChatRowProps) {
         )}
       </div>
       <RowText
-        name={p.label}
+        name={<bdi>{p.label}</bdi>}
         marks={<ContactMarks peerKey={p.peerPubKey} />}
         nameClass={!p.named ? "text-text-muted/60 italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
         time={p.time}

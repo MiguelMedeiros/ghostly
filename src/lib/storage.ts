@@ -158,7 +158,11 @@ export function deleteMessage(
 }
 
 export function deleteSession(sessionId: string): void {
+  // The name and photo chosen for the contact (identities/contactFace.ts) go with their last chat.
+  const peer = loadSession(sessionId)?.peerPubKeyB64;
+  const lastOfPeer = !!peer && !listSessions().some(s => s.id !== sessionId && s.peerPubKeyB64 === peer);
   for (const key of [
+    ...(lastOfPeer ? [`${getPrefix()}face_${peer}`] : []),
     getKey(sessionId),
     `${getPrefix()}read_${sessionId}`,
     `${getPrefix()}invite_${sessionId}`,

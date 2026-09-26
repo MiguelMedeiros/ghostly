@@ -30,6 +30,7 @@ import { createPairedChat } from "../lib/pairedChat";
 import { chatPath } from "../lib/url";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { shownContactName, useContactFaces } from "./identities/contactFace";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
@@ -131,11 +132,14 @@ export function Sidebar() {
     setConfirmDeleteId(sessionId);
   };
 
+  // The identity a contact is shown as (identities/contactFace.ts): its name in the row, and found by search.
+  const faceOf = useContactFaces();
   const filtered = sessions.filter((s) => {
     if (!search) return true;
     const q = search.toLowerCase();
     if (s.label?.toLowerCase().includes(q)) return true;
     if (s.nick?.toLowerCase().includes(q)) return true;
+    if (faceOf(s.peerPubKeyB64)?.name?.toLowerCase().includes(q)) return true;
     if (s.peerPubKeyB64.toLowerCase().includes(q)) return true;
     return s.messages.some((m) => m.text.toLowerCase().includes(q));
   });
@@ -232,10 +236,11 @@ export function Sidebar() {
           const path = chatPath(session.id);
           const isActive = activeSessionId === session.id;
 
-          const peerName = session.label || session.nick;
+          const face = faceOf(session.peerPubKeyB64);
+          const shown = shownContactName({ nickname: session.label, face, nick: session.nick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) });
           const peerKey = publicKeyLabel(session.peerPubKeyB64);
-          const isAnonymous = !peerName;
-          const peerLabel = peerName || t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) });
+          const isAnonymous = shown.from === "key";
+          const peerLabel = shown.name;
           const unread = isActive ? 0 : getUnreadCount(session);
           const isCreator = !!getInviteCode(session.id);
 
@@ -246,6 +251,7 @@ export function Sidebar() {
               density={density}
               active={isActive}
               label={peerLabel}
+              face={face}
               named={!isAnonymous}
               keyLabel={peerKey}
               peerPubKey={session.peerPubKeyB64}

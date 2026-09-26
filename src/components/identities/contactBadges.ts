@@ -52,6 +52,14 @@ export interface Badge {
   label: string;
   /** The identity's public profile picture (a sanitized data URL), while the proof still vouches for it: the header's mark wears it. */
   photo?: string;
+  /** For the mark's card (IdentityTip.tsx): "GitHub (SSH key)", the subject shortened, and the state in words. */
+  providerName: string;
+  short: string;
+  stateText: string;
+  /** From its public profile, while the proof vouches for it: its name, handle and the hosts it was read from. */
+  name?: string;
+  handle?: string;
+  hosts?: string[];
 }
 
 /** "2 h ago", "3 days ago", "in 3 days", in the interface's language. */
@@ -83,9 +91,11 @@ export function contactBadges(received: ReceivedIdentityView[] | undefined, { go
     if (!state || (good && !isGood(state))) return;
     // A public profile's name, while the proof still vouches for it: "Nostr: npub1…yz (Alice) · verified 2 h ago".
     const profile = isGood(state) && r.publicProfile?.found ? r.publicProfile : undefined;
-    const label = `${providerLabel(r.provider)}: ${shortSubject(r.provider, r.verified.subject)}${profile?.name ? ` (${profile.name})` : ""} · ${STATE_WORDS[state](r, now)}`;
+    const providerName = providerLabel(r.provider), short = shortSubject(r.provider, r.verified.subject), stateText = STATE_WORDS[state](r, now);
+    const label = `${providerName}: ${short}${profile?.name ? ` (${profile.name})` : ""} · ${stateText}`;
     const photo = profile?.avatar?.startsWith("data:image/") ? profile.avatar : undefined;
-    badges.push({ id: r.id, provider: r.provider, subject: r.subject, state, label, ...(photo ? { photo } : {}), rank: badgeRank(r.provider, r.subject), i });
+    const about = profile ? { ...(profile.name ? { name: profile.name } : {}), ...(profile.handle ? { handle: profile.handle } : {}), ...(profile.hosts?.length ? { hosts: profile.hosts } : {}) } : {};
+    badges.push({ id: r.id, provider: r.provider, subject: r.subject, state, label, providerName, short, stateText, ...about, ...(photo ? { photo } : {}), rank: badgeRank(r.provider, r.subject), i });
   });
   return badges
     .sort((a, b) => Number(isGood(b.state)) - Number(isGood(a.state)) || a.rank - b.rank || a.i - b.i)

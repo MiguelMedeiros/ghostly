@@ -33,9 +33,13 @@ export function Identicon({ seed }: { seed: string }) {
   );
 }
 
-/** The picture a contact shares with this chat; else their initial, or a pattern of their key when they have no name. */
-export function PeerAvatar({ peerPubKey, label, named = true, testId }: { peerPubKey?: string; label: string; named?: boolean; testId?: string }) {
-  const src = usePeerAvatar(peerPubKey);
+/**
+ * The picture a contact shares with this chat; else their initial, or a pattern of their key when they have no name.
+ * `photo`: the picture of the identity the contact is shown as (identities/contactFace.ts), which wins over theirs.
+ */
+export function PeerAvatar({ peerPubKey, label, named = true, testId, photo }: { peerPubKey?: string; label: string; named?: boolean; testId?: string; photo?: string }) {
+  const sent = usePeerAvatar(peerPubKey);
+  const src = photo ?? sent;
   if (!src && !named && peerPubKey) return <Identicon seed={peerPubKey} />;
   return <Avatar src={src} label={label} testId={testId} />;
 }
