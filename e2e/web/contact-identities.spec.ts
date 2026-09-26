@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { expect, test, type Peer } from "../support/fixtures";
-import { closeIdentities, headerMarks, shareIdentity, theirCards, turnTheirs, backToTheirCards } from "../support/identities";
+import { closeIdentities, headerMarks, shareIdentity, theirCards, turnTheirs, backToTheirCards, setLoadPublicProfiles } from "../support/identities";
 import { LocalNostrRelay, NOSTR_TEST_RELAY } from "../support/nostrRelay";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
@@ -91,6 +91,8 @@ test("a contact's identities: two marks and +1 in the chat list, a stack in the 
   const published = new Map([["octo-cat", [ssh.publicKey]]]);
   await Promise.all([stubGitHub(alice, published), stubGitHub(bob, published)]);
 
+  // Bob's cards would load Alice's profile by themselves (public-profiles.spec.ts): off, to count what the Nostr card asks.
+  await setLoadPublicProfiles(bob, false);
   await addNostrIdentity(alice);
   await addGitHub(alice, ssh, "octo-cat");
   await addBitcoin(alice);

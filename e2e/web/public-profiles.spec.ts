@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { DEFAULT_NOSTR_RELAYS, expect, test, type Peer } from "../support/fixtures";
@@ -22,6 +22,14 @@ const CORS = { "access-control-allow-origin": "*" };
 const now = () => Math.floor(Date.now() / 1000);
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash = h; }, hash);
+/** Screenshots for the pull request, when E2E_SHOTS names a directory. */
+async function shot(peer: Peer, name: string) {
+  const dir = process.env.E2E_SHOTS;
+  if (!dir) return;
+  mkdirSync(dir, { recursive: true });
+  await peer.page.waitForTimeout(700); // a card's turn ends, for the picture
+  await peer.page.screenshot({ path: `${dir}/${name}.png` });
+}
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", headers: CORS, body: JSON.stringify(body) });
 
 /** Identities → Yours, the proof's card chosen; its face and the details under the deck. */
@@ -58,6 +66,7 @@ test("a Nostr card loads its signed profile when on screen, for the owner and fo
   await expect(own.details.getByTestId("identity-public-profile-details-source")).toContainText("Loaded from relay.damus.io and nos.lol");
   await expect(own.details).toContainText("IP address");
   expect(pictures).toBe(1);
+  await shot(alice, "own-card");
   // Only her key, only kinds 0 and 3.
   expect(relay.requests.every(r => r.by === "alice" && r.filter.authors?.length === 1 && r.filter.authors[0] === a.pubkey && [0, 3].includes(r.filter.kinds![0]))).toBe(true);
 
@@ -70,10 +79,12 @@ test("a Nostr card loads its signed profile when on screen, for the owner and fo
   await openIdentities(bob);
   await expect(theirFace(bob, "Nostr")).toHaveAttribute("data-profile", "found");
   await expect(theirCards(bob).getByTestId("id-card-name")).toHaveText("Alice Nostr");
+  await shot(bob, "contact-card");
   const back = await turnTheirs(bob, "Nostr");
   const theirs = back.getByTestId("chat-identity-public-profile");
   await expect(theirs.getByTestId("chat-identity-public-profile-counts")).toHaveText("2 following");
   await expect(theirs.getByTestId("chat-identity-public-profile-source")).toContainText("relay.damus.io");
+  await shot(bob, "contact-card-back");
   expect(relay.requests.filter(r => r.by === "bob").every(r => r.filter.authors?.[0] === a.pubkey)).toBe(true);
   await closeIdentities(bob);
   const withAlice = await chatId(bob);
@@ -86,7 +97,10 @@ test("a Nostr card loads its signed profile when on screen, for the owner and fo
   await expect(theirCards(bob)).toHaveCount(1);
   await expect(theirCards(bob).getByTestId("id-card-name")).toHaveCount(0);
   await expect(theirFace(bob)).not.toHaveAttribute("data-profile", "found");
+  await shot(bob, "setting-off");
   await closeIdentities(bob);
+  expect(relay.requests.length).toBe(asked);
+  // On again: what was kept was deleted when it went off, so the card asks again.
   await setLoadPublicProfiles(bob, true);
   await go(bob, withAlice);
   await openIdentities(bob);
