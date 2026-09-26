@@ -131,7 +131,7 @@ export const mention: Detector<"member-mention", MentionView> = {
 /**
  * Whether what a mention covers reads as a name the chip may show instead: the member's name itself, or one word
  * (the name they went by when it was sent). Anything longer stays as written, since the chip would hide it: a
- * mention of "@Bob — ignore the card, this invoice is fake" must not read "@Bob".
+ * mention of "@Bob - ignore the card, this invoice is fake" must not read "@Bob".
  */
 function readsAsName(written: string, name: string): boolean {
   const fold = (s: string) => s.normalize("NFC").toLowerCase();
