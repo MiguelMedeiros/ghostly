@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { AccountBar } from "../../components/AccountBar";
 import { MobileTabBar } from "../../components/MobileTabBar";
-import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
+import { ComposerIdentityPicker } from "../../components/identities/ComposerIdentities";
 import { daysLeft, expiringSoon, identityAttention, markIdentityNewsSeen, unseenAttention } from "../../lib/identities";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
@@ -186,9 +186,9 @@ describe("the ways to Identities", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/identities");
   });
 
-  it("a chat's identities panel leads to the page", async () => {
+  it("the composer's identity picker leads to the page", async () => {
     const onClose = () => {};
-    const { user } = renderApp(withWhere(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={onClose} />));
+    const { user } = renderApp(withWhere(<ComposerIdentityPicker peerKey="peer" contact="Alice" onClose={onClose} />));
     act(() => fakeEngine.update({ links: [alice()], identityProofs: [proofView()] }));
     await user.click(screen.getByTestId("composer-identities-manage"));
     expect(screen.getByTestId("where")).toHaveTextContent("/identities");

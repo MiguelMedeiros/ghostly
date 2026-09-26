@@ -7,7 +7,7 @@ import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { DAY, identitiesView, now, proofView, receivedView, sharedView } from "./views";
 
-// covers: proofs.badges, proofs.share, proofs.withdraw, proofs.recheck, proofs.expiry, proofs.unverifiable
+// covers: proofs.badges, proofs.recheck, proofs.expiry, proofs.unverifiable, proofs.public-activity
 
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
@@ -37,28 +37,24 @@ async function turnOver(user: ReturnType<typeof renderApp>["user"], i: number) {
 }
 const withReceived = (received: ReceivedIdentityView[]) => ({ links: [paired({ identities: identitiesView({ received }) })] });
 
-/** A chat's identities, in a panel beside the chat: the contact's ID cards, and which of mine they see. */
+/** A contact's identities, in a panel beside the chat: their ID cards, and the chosen one's public data. */
 describe("ContactIdentitiesPanel", () => {
   it("is titled for the contact, closes, and says when nothing is shared", async () => {
     const { user, onClose } = open({ links: [paired()] });
     expect(screen.getByRole("dialog", { name: "Identities with Alice" })).toBeInTheDocument();
     expect(screen.getByTestId("chat-identities-none")).toHaveTextContent("Nothing else shared by Alice yet.");
-    // Theirs: their Ghostly card alone. Mine: my Ghostly card, then the picker's blank card, to add the first one.
+    // Their Ghostly card alone, and nothing of mine: mine are shared from the composer.
     expect(screen.queryAllByTestId("chat-identity-received")).toHaveLength(0);
     expect(within(screen.getByTestId("chat-identities-received")).getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
-    expect(within(screen.getByTestId("chat-identities-mine")).getByTestId("composer-identity-ghostly")).toHaveAttribute("aria-checked", "true");
-    expect(within(screen.getByTestId("chat-identities-mine")).getByTestId("composer-identity-add")).toHaveTextContent("Add an identity");
+    expect(screen.queryByTestId("chat-identities-mine")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("composer-identity-ghostly")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-identities-share-yours")).toHaveTextContent("Share yours from the + in the chat.");
     await user.click(screen.getByTestId("chat-identities-close"));
     expect(onClose).toHaveBeenCalledOnce();
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it("says identities need a paired chat", () => {
-    open({ links: [linkView()], identityProofs: [proofView()] });
-    expect(screen.getByTestId("chat-identities-mine")).toHaveTextContent("Identities can be shared in paired chats only.");
-    expect(screen.queryByTestId("composer-identity-use")).not.toBeInTheDocument();
-  });
 
   describe("shared by the contact", () => {
     it("is a deck of their ID cards, verified first then in the header's order, each with the status this app found", () => {
@@ -167,47 +163,38 @@ describe("ContactIdentitiesPanel", () => {
     });
   });
 
-  describe("mine, for this contact", () => {
-    it("is the chat's identity picker: use a card, it turns over, share", async () => {
-      const { user, engine } = open({ links: [paired()], identityProofs: [proofView({ id: "a" })] });
-      engine.on("shareIdentityProof", () => undefined);
-      const mine = within(screen.getByTestId("chat-identities-mine"));
-      // The Ghostly card is first; a click on the proof's card turns that one over.
-      await user.click(mine.getByTestId("composer-identity"));
-      expect(mine.getByTestId("composer-identity-status")).toHaveTextContent("Not shared");
-      await user.click(mine.getByTestId("composer-identity-share"));
-      expect(engine.callsTo("shareIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }]);
+  describe("the chosen card's public data", () => {
+    const PUBKY = "y".repeat(52);
+    const pubky = (patch: Partial<ReceivedIdentityView> = {}) => receivedView({ id: "pubky-1", provider: "pubky", subject: PUBKY, verified: { subject: PUBKY, source: "File on the homeserver" }, ...patch });
+
+    it("comes up on their first shared card, and shows its profile and posts under the deck", async () => {
+      const { engine } = open(withReceived([pubky({ publicProfile: { found: true, name: "Pat", hosts: ["nexus.pubky.app"], fetchedAt: now() } })]));
+      engine.on("loadPublicPosts", () => ({ posts: [{ id: "p1", createdAt: now() - 60, text: "Hello", images: [] }], more: false, hosts: ["nexus.pubky.app"], fetchedAt: now() }));
+      engine.on("loadPublicGraph", () => null);
+      expect(theirs()[0]).toHaveAttribute("aria-checked", "true");
+      const block = await screen.findByTestId("contact-activity");
+      expect(block).toHaveAttribute("data-provider", "pubky");
+      expect(within(block).getByTestId("contact-activity-name")).toHaveTextContent("Pat");
+      expect(await within(block).findByTestId("contact-activity-post")).toHaveTextContent("Hello");
+      expect(engine.callsTo("loadPublicPosts")).toEqual([{ provider: "pubky", subject: PUBKY, force: false }]);
     });
 
-    it("stops sharing one already shared", async () => {
-      const { user, engine } = open({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "a", status: "accepted" })] }) })], identityProofs: [proofView({ id: "a" })] });
-      engine.on("withdrawIdentityProof", () => undefined);
-      const mine = within(screen.getByTestId("chat-identities-mine"));
-      await user.click(mine.getByTestId("composer-identity"));
-      expect(mine.getByTestId("composer-identity-status")).toHaveTextContent("Shared · verified by your contact");
-      await user.click(mine.getByRole("button", { name: "Stop sharing" }));
-      expect(engine.callsTo("withdrawIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }]);
+    it("nothing for the Ghostly card, an identity without posts, or one no longer verified; nothing asked", async () => {
+      const { engine } = open(withReceived([receivedView(), pubky({ status: "revoked" })]));
+      await act(async () => {});
+      expect(screen.queryByTestId("contact-activity")).not.toBeInTheDocument();
+      expect(engine.callsTo("loadPublicPosts")).toEqual([]);
+      expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
-    it("does not share what the contact's app cannot verify", async () => {
-      const { user } = open({ links: [paired({ identities: identitiesView({ contactProviders: ["nostr"] }) })], identityProofs: [proofView()] });
-      // From the Ghostly card, the keys bring the proof's card up.
-      act(() => screen.getByTestId("composer-identity-ghostly").focus());
-      await user.keyboard("{ArrowRight}");
-      expect(screen.getByTestId("composer-identity-hint")).toHaveTextContent("Alice’s app cannot verify Domain yet");
-      expect(screen.getByTestId("composer-identity-use")).toBeDisabled();
+    it("the panel closed asks nothing", () => {
+      renderApp(<p>no panel</p>).engine.update(withReceived([pubky()]));
+      expect(screen.queryByTestId("contact-activity")).not.toBeInTheDocument();
     });
 
     it("shows the engine's error for the chat", () => {
-      open({ links: [paired({ identities: identitiesView({ error: "Alice sent a proof this app could not read" }) })], identityProofs: [proofView()] });
-      expect(screen.getByTestId("composer-identities-error")).toHaveTextContent("Alice sent a proof this app could not read");
-    });
-
-    it("leads to the Identities page", async () => {
-      const { user, onClose } = open({ links: [paired()], identityProofs: [proofView()] });
-      await user.click(screen.getByTestId("composer-identities-manage"));
-      expect(onClose).toHaveBeenCalledOnce();
-      expect(screen.getByTestId("where")).toHaveTextContent("/identities");
+      open({ links: [paired({ identities: identitiesView({ error: "Alice sent a proof this app could not read" }) })] });
+      expect(screen.getByTestId("chat-identities-link-error")).toHaveTextContent("Alice sent a proof this app could not read");
     });
   });
 });

@@ -30,6 +30,5 @@
 .composer-identities-manage:hover{color:var(--theme-text-primary);text-decoration:underline}
 .composer-identities-manage:focus-visible{outline:2px solid var(--theme-accent,#00c49a);outline-offset:1px}
 
-/* The picker's body (IdentityPicker) lays out in whatever frames it: the composer's sheet, or the chat's identities panel. */
+/* The picker's body (IdentityPicker) lays out in whatever frames it: the composer's sheet. */
 .identity-picker{display:contents}
-.contact-picker{display:grid;gap:10px;min-width:0}

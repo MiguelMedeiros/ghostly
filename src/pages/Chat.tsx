@@ -279,6 +279,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [showIdentities, setShowIdentities] = useState(false);
   /** The card the identities panel opens on: a share tapped in the timeline. */
   const [identityCard, setIdentityCard] = useState<{ side: "mine" | "theirs"; id: string }>();
+  /** One of mine tapped in the timeline: the composer's picker opens on it. */
+  const [myIdentity, setMyIdentity] = useState<{ id: string; at: number }>();
   const [showServices, setShowServices] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
@@ -611,7 +613,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
             : row.kind === "identity"
             ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
-              onOpen={e => { setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true); }} />
+              onOpen={e => {
+                // Theirs: the contact's panel on that card. Mine: the composer's picker on it, where mine are shared.
+                if (e.side === "mine") { setShowIdentities(false); setMyIdentity({ id: e.proof, at: Date.now() }); return; }
+                setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true);
+              }} />
             : (
             <MessageBubble
               key={row.message.id}
@@ -658,7 +664,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               onSaveMethods: chatPeer && platform ? ({ methods, networks }) => platform.setChatPaymentMethods(peerKey, methods, networks) : undefined }
             : undefined
         }
-        identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}
+        identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName, open: myIdentity } : undefined}
         // Made on this device and sent with the text; the contact's app never contacts the site (WISP 401).
         linkPreviews={paired && settings.linkPreviews}
         // The apps this contact and you share, chosen per chat: always reachable here, even before anything is shared.
