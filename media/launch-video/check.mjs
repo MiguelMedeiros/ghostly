@@ -20,7 +20,7 @@ const names = new Map(Object.entries(M).flatMap(([name, v]) => Array.isArray(v) 
 // 1. The score: its measured tempo and how far its beats sit from the film's grid.
 const score = decode(join(out, "music.wav"));
 const lines = ["# Sync report", "", `Film grid: ${BPM} BPM, beat ${(BEAT * 1000).toFixed(2)} ms, bar ${BAR.toFixed(4)} s.`, "", "## Score", "", "| Part | Measured BPM | First beat | Beats within 10 ms of the grid | Median offset |", "|---|---|---|---|---|"];
-for (const [part, from, to] of [["Intro (bars 1-7)", 0, M.gap], ["Drop (bars 8-19)", M.drop, M.servers], ["Bar 23", M.words[0], M.gap2]]) {
+for (const [part, from, to] of [["Intro (bars 1-7)", 0, M.gap], ["Drop (bars 8-20)", M.drop, M.seed], ["Bar 23", M.words[0], M.gap2]]) {
   const g = grid(score, { bpm: BPM, from, to });
   const beats = g.beats.filter((b) => b.t >= from && b.t < to);
   const offsets = beats.map((b) => { const nearest = Math.round(b.onset / BEAT) * BEAT; return b.onset - nearest; }).sort((a, b) => a - b);
@@ -39,7 +39,7 @@ function onsetNear(samples, t) {
 }
 
 // 3. The picture: the first frame that changes at each moment (a grey 1/10 size copy, frame against frame).
-const [w, h] = [96, format === "9x16" ? 170 : format === "1x1" ? 96 : 54];
+const [w, h] = [384, format === "9x16" ? 682 : format === "1x1" ? 384 : 216];
 const raw = execFileSync("ffmpeg", ["-v", "error", "-i", film, "-vf", `scale=${w}:${h},format=gray`, "-f", "rawvideo", "-"], { maxBuffer: 1 << 30 });
 const size = w * h, frames = raw.length / size;
 const fps = Number(execFileSync("ffprobe", ["-v", "error", "-select_streams", "v", "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", film]).toString().trim().replace(/,$/, "").split("/").reduce((a, b) => a / b));
@@ -55,7 +55,7 @@ function motionNear(t) {
   const at = Math.round(t * fps);
   const before = change.slice(Math.max(1, at - 15), Math.max(2, at - 1)).sort((x, y) => x - y);
   const usual = before[before.length >> 1] ?? 0;
-  for (let f = Math.max(1, at - 6); f <= Math.min(frames - 1, at + 9); f++) if (change[f] > Math.max(0.3, usual * 3)) return f / fps;
+  for (let f = Math.max(1, at - 6); f <= Math.min(frames - 1, at + 9); f++) if (change[f] > Math.max(0.04, usual * 1.6)) return f / fps;
   return NaN;
 }
 
