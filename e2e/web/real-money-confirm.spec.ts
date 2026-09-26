@@ -1,5 +1,6 @@
 import { createWallet, expect, openWallet, test } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
+import { strangerInvoice } from "../support/bolt11";
 
 /**
  * Real money leaves only once confirmed as such: Pay on a Mainnet wallet opens a second step that says so in words,
@@ -22,12 +23,9 @@ test("the Cashu card's Pay on Mainnet asks once more in words; Back pays nothing
   await expect(page.getByTestId("wallet-paid")).toBeVisible({ timeout: 60_000 });
   await expect.poll(balance, { timeout: 15_000 }).toMatch(/^50\s*sats/);
 
-  // An invoice to pay: one more of the same mint's, which settles itself once paid.
-  await page.getByRole("button", { name: "New amount" }).click();
-  await page.getByTestId("wallet-receive-amount").fill("10");
-  await page.getByTestId("wallet-create-invoice").click();
-  const invoice = (await page.getByTestId("wallet-invoice").textContent())!.trim();
-  expect(invoice).toMatch(/^lnbc/);
+  // An invoice of a node that does not exist: the suite's mint marks its own invoices paid by itself, but pays this
+  // one through a real melt.
+  const invoice = strangerInvoice(10);
 
   await page.getByTestId("wallet-send").click();
   await page.getByTestId("wallet-pay-input").fill(invoice);
@@ -46,4 +44,6 @@ test("the Cashu card's Pay on Mainnet asks once more in words; Back pays nothing
   await page.getByTestId("review-confirm-send").click();
   await expect(page.getByText("Paid.", { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("review-mainnet-confirm")).toHaveCount(0);
+  // 10 sats and the mint's fee left the Mainnet wallet.
+  await expect.poll(balance, { timeout: 15_000 }).toMatch(/^(3\d|40)\s*sats/);
 });
