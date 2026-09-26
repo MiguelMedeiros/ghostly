@@ -11,6 +11,8 @@ What we know about Ghostly's security, what was fixed, how it was proven, and wh
 | **Network attacker** | see and delay traffic | read or alter traffic, impersonate a peer |
 | **Malicious web page** (any site the user visits) | message the browser | drive the extension, read keys, frame the app |
 | **Mint** | answer wallet requests | make the wallet lose or double-count proofs |
+| **Invite holder** (has a copy of a used invite) | publish on the records the invite derives | stop or read a paired chat, replace the pinned contact |
+| **Community member** | sign commits and branches | undo the admin's remove, role, rotate or link |
 | **Supply chain** | publish a bad dependency or action version | get it into a release unnoticed |
 
 ## Invariants to check every review
@@ -21,6 +23,8 @@ What we know about Ghostly's security, what was fixed, how it was proven, and wh
 4. A payment request is settled only by the full amount from a mint the request named; ecash is never lost or counted twice (persist before sending, reconcile after).
 5. Secrets (seeds, link keys, wallet proofs) never land in URLs, history, logs or third-party requests.
 6. CI actions are pinned to commits; `scripts/security-scan.mjs` is clean except for entries in `.github/security-allowlist.json`.
+7. What a contact's message costs the parser and renderer is bounded (size, nesting, time), and one bad message cannot take down the chat.
+8. A Mainnet spend needs the person's explicit confirmation in the engine (`confirmedReal`), not only in the UI.
 
 ## Findings
 
@@ -32,7 +36,7 @@ This repository is public, so anything written here or in an issue or pull reque
 
 - **Never** open a public issue or pull request that describes an unfixed or unreleased flaw, and never leave a security issue open. `SECURITY.md` asks reporters not to; the repository's own practice has to match.
 - The private channel is GitHub **private vulnerability reporting** (enabled) and a **draft security advisory**: the advisory carries the detail, its **private fork** carries the fix, and the advisory is published only after the release is out and people have had a chance to update.
-- Findings recorded here while still **open** are written as the shape of the problem and the invariant it touches — not as steps to reproduce it, and not with the code path that makes it work. The reproduction lives in the private advisory.
+- Findings recorded here while still **open** are written as the shape of the problem and the invariant it touches, not as steps to reproduce it, and not with the code path that makes it work. The reproduction lives in the private advisory.
 - A finding that can be fixed and proven ships straight through the autorelease gate; that is the preferred path, because a released fix is also the shortest disclosure window.
 
 ### 2026-09-19: first full review (v0.3.1)
@@ -59,11 +63,11 @@ This repository is public, so anything written here or in an issue or pull reque
 | S18 | Low | Storage | Seeds, messages and proofs are plaintext in localStorage/IndexedDB | open |
 | S20 | Low | HTTP host | Browser hosts follow redirects and check the final URL afterwards: one blind request elsewhere on the machine via an open redirect in the shared app | open |
 | S21 | Low | App | "Clear all data" keeps the wallet on purpose (ecash is money); a browser's global history may still list an invite URL opened once | accepted |
-| S19 | Low | Deps | `lru` (via pkarr/mainline), `glib`/`unic-*`/`proc-macro-error` (via Tauri) | accepted until the dates in the allowlist. Upstream-blocked, verified: `glib 0.18.5` (`RUSTSEC-2024-0429`) is fixed in `>=0.20.0`, but the Tauri 2 Linux stack needs the GTK3 `0.18` generation — remove when Tauri/Wry ships a Linux path on `glib >=0.20`. `lru 0.16.4` (`RUSTSEC-2026-0253`) comes through `mainline`, which still declares `lru ^0.16.2` even on 8.0.0, so a `pkarr 8` migration would not close it — remove when `mainline` moves to a fixed `lru`. Neither is vendored or forked to silence the alert |
+| S19 | Low | Deps | `lru` (via pkarr/mainline), `glib`/`unic-*`/`proc-macro-error` (via Tauri) | accepted until the dates in the allowlist. Upstream-blocked, verified: `glib 0.18.5` (`RUSTSEC-2024-0429`) is fixed in `>=0.20.0`, but the Tauri 2 Linux stack needs the GTK3 `0.18` generation. Remove when Tauri/Wry ships a Linux path on `glib >=0.20`. `lru 0.16.4` (`RUSTSEC-2026-0253`) comes through `mainline`, which still declares `lru ^0.16.2` even on 8.0.0, so a `pkarr 8` migration would not close it. Remove when `mainline` moves to a fixed `lru`. Neither is vendored or forked to silence the alert |
 
 ### Routine run 2026-09-19 (area 3: UI and local storage)
 
-Scanned: `package-lock.json`, `website/package-lock.json` and `Cargo.lock`. `scripts/security-scan.mjs` could not run here — this runner's egress policy answers 403 for `api.osv.dev` — so the same lock files were checked against `npm audit` (0 advisories in both trees) and against a clone of `rustsec/advisory-db` (8 advisories, all of them the ones already accepted in the allowlist, none expired). The scanner itself still runs in the Security workflow on every push, which is what the gate waits for.
+Scanned: `package-lock.json`, `website/package-lock.json` and `Cargo.lock`. `scripts/security-scan.mjs` could not run here (this runner's egress policy answers 403 for `api.osv.dev`), so the same lock files were checked against `npm audit` (0 advisories in both trees) and against a clone of `rustsec/advisory-db` (8 advisories, all of them the ones already accepted in the allowlist, none expired). The scanner itself still runs in the Security workflow on every push, which is what the gate waits for.
 
 Reviewed: everything merged since the first review, which is all dependency work (#25, #26, #30, #34, #40, #42, #43, #44, #45, #46, #50, #51). Every workflow `uses:` is still pinned to a commit (invariant 6). Two of those bumps touch code that matters here and both hold up: the rand 0.10 migration replaces `OsRng.fill_bytes` with `SysRng.try_fill_bytes` for link keys and secretbox nonces, which is the same OS generator and now fails loudly instead of quietly, with no fallback to a seeded one; and the pkarr 8 migration replaces `resolve_most_recent` with `resolve(…, ResolvePolicy::NetworkOnly)`, which that crate documents as "guaranteed to return the newest valid signed packet", so a relay or DHT node still cannot make a stale packet look current.
 
@@ -75,7 +79,7 @@ Then, in depth, the shared UI and what it keeps on the device: `src/` (lock scre
 | S23 | Low | Protocol/App | Display text a contact chooses was shown as it arrived: `_nick` had no length cap at all (the `hello` frame's 64 was not applied to the record) and neither nicknames nor service names had invisible or direction-changing characters removed, though file names have since S8. A contact could make the name it is known by read as another contact's, and a long nickname was copied onto every message the client stores | fixed: one `sanitizeDisplayText` in `packages/core/src/text.ts` on every receive path (record, `hello` frame, service advertisement) and where the UI reads a name back out of a "joined" message. Emoji and the joiners Indic and Arabic scripts need are kept. Proof: `npm test -w @ghostly/core` (`test/text.test.ts` fails on the old code) |
 | S24 | Low | Desktop | The Tauri builder has no `on_navigation` guard, so nothing in the app's own code stops the `main` window from being navigated away by a link in a contact's message. Tauri's ACL still refuses IPC from a remote origin, and `only_main` is by window label, so this is about the window being replaced, not about commands | open: could not be reproduced or fixed here (this runner has no GTK/WebKit, so `src-tauri` cannot even be compiled); needs checking against a real desktop build on each platform |
 
-Checks run: `npm run lint` (0 errors), `npm run typecheck`, `npm test` (98 tests), `npm run build`, `npm run build:extension`, `npm run build:web`, `cargo fmt --check` for both crates, `cargo clippy --all-targets -- -D warnings` and `cargo test` for `cli`. Not run here: `clippy`/`test` for `src-tauri` (no GTK/WebKit in the runner) and the Playwright suites (`cdn.playwright.dev` is blocked, and with the runner's own Chromium both `test:attacks` and `test:e2e` stop at the first step that needs the DHT or a relay — unmodified `main` stops at exactly the same step). CI runs all of them.
+Checks run: `npm run lint` (0 errors), `npm run typecheck`, `npm test` (98 tests), `npm run build`, `npm run build:extension`, `npm run build:web`, `cargo fmt --check` for both crates, `cargo clippy --all-targets -- -D warnings` and `cargo test` for `cli`. Not run here: `clippy`/`test` for `src-tauri` (no GTK/WebKit in the runner) and the Playwright suites (`cdn.playwright.dev` is blocked, and with the runner's own Chromium both `test:attacks` and `test:e2e` stop at the first step that needs the DHT or a relay; unmodified `main` stops at exactly the same step). CI runs all of them.
 
 ### Routine run 2026-09-19, second (Desktop, following S24)
 
@@ -87,15 +91,39 @@ Looking at S24 from the window rather than from the link turned up a real one, S
 
 | ID | Sev. | Area | Finding | Status |
 |---|---|---|---|---|
-| S25 | High | Desktop | A viewer window is bound to one contact and service by its label, and `viewer::handle` read only that label: nothing checked that the URL asked for was the one the window was opened for. A contact's app could navigate or frame `ghostly-svc://<service>.<other contact>/`, still be served by its own contact — the routing goes by label — and so run its own code in the other contact's origin, where that app keeps its storage, cookies and any session it holds. Invariant 2 ("no other peer's origin") and the Desktop counterpart of S2 | fixed: `handle` refuses any host that is not the window's own `<service>.<peer>` (and the `<scheme>.<service>.<peer>` spelling Windows and Android use) before anything is served there. Proof: `cargo test --manifest-path src-tauri/Cargo.toml` (`viewer::tests::another_contacts_origin_is_refused`; on the old code it gets 504 instead of 403, because the request is routed to the contact and only the timeout ends it) |
+| S25 | High | Desktop | A viewer window is bound to one contact and service by its label, and `viewer::handle` read only that label: nothing checked that the URL asked for was the one the window was opened for. A contact's app could navigate or frame `ghostly-svc://<service>.<other contact>/`, still be served by its own contact (the routing goes by label), and so run its own code in the other contact's origin, where that app keeps its storage, cookies and any session it holds. Invariant 2 ("no other peer's origin") and the Desktop counterpart of S2 | fixed: `handle` refuses any host that is not the window's own `<service>.<peer>` (and the `<scheme>.<service>.<peer>` spelling Windows and Android use) before anything is served there. Proof: `cargo test --manifest-path src-tauri/Cargo.toml` (`viewer::tests::another_contacts_origin_is_refused`; on the old code it gets 504 instead of 403, because the request is routed to the contact and only the timeout ends it) |
 
-Checks run: `npm run lint`, `npm run typecheck`, `npm test` (98), `npm run build`, `npm run build:extension`, `npm run build:web`, and for both crates `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` — `src-tauri` included this time, 4 tests. Still not run: the Playwright suites; the browsers here do start, and the two peers do link up over the relays, but there is no UDP out of this runner, so the data link never opens and the suites stop at the first step that needs it.
+Checks run: `npm run lint`, `npm run typecheck`, `npm test` (98), `npm run build`, `npm run build:extension`, `npm run build:web`, and for both crates `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`, `src-tauri` included this time (4 tests). Still not run: the Playwright suites; the browsers here do start, and the two peers do link up over the relays, but there is no UDP out of this runner, so the data link never opens and the suites stop at the first step that needs it.
 
 This is a review branch, not an automatic release: 0.3.3 went out minutes earlier and the gate allows one automatic release per 20 hours, so the fix is left for a person to ship.
 
 ### Verified on 2026-09-19
 
 Unit and protocol tests (86), extension e2e, `test:attacks`, web e2e against the Docker image (nginx 1.30), delete-chats, Tauri IPC tests, CLI interop over the real network, website image (Next 16.3.3, node 22). Before/after: `test:attacks` against v0.3.1 has 3 attacks succeed; the Tauri viewer test fails on v0.3.1.
+
+### 2026-09-26: audit of dev (2238cc16)
+
+A read-only audit of dev before the next release, in four areas: chat and parser, network and identity, payments and wallets, P2P surfaces. Only confirmed findings are listed. They went in as ordinary PRs into dev: v0.4.x is not treated as production, and most of the code involved (communities, parser v2, wallets per network, the `ghostly1` pin) was not in a release yet.
+
+| ID | Sev. | Area | Finding | Status |
+|---|---|---|---|---|
+| S26 | High | Groups | In a community (`group-community/1`), fork choice was "longer wins": a member could sign a longer branch from before an admin change and undo a `remove`, `role`, `rotate` or `link` | fixed in #300: admin changes are final (a branch holding one beats a branch holding none, then longer, then lower hash); an admin who signs two histories halts the group; frames from removed peers are dropped. WISP 9xx Group Community 0.6. Proof: `packages/core/test/groupCommunity.test.ts` (9 tests, all fail on the old code), `packages/browser/test/community.test.ts` |
+| S27 | High | Chat | Deeply nested JSON in a message grew quadratically when re-indented and hung the chat | fixed in #301: `prettyJson` takes at most 4 KiB and 32 levels, gives up past 64 KiB of output. Proof: `src/test/parse/adversarial.test.ts` (timing bounds) |
+| S28 | Med | Chat | Quadratic link and payment-URI trimming; a far-future peer timestamp could crash the renderer; bidi characters could make a link read as another | fixed in #301: one bracket count (`linkEnd`, `trimUriEnd`), URIs past 4 KiB stay text; `receivedTimestamp` clamps to now + 5 min, every bubble has its own `MessageBoundary`; atoms in `<bdi>`, links `dir="ltr"`, non-ASCII links shown as `new URL(url).href`. Proof: `packages/core/test/adversarialText.test.ts`, `src/test/chat/messageBoundary.test.tsx` |
+| S29 | Low | Chat | A mention chip could hide what the message said; map links trusted `google.*` look-alikes | fixed in #301: the chip shows the written text unless it is the member's name or one word; `validMentions` drops line breaks and control or direction characters; Google only from `google.<tld>`, `google.co.<cc>`, `google.com.<cc>` (and `maps.` before them). Proof: `packages/core/test/groupMentions.test.ts` |
+| S30 | Med | Chat | A copy of a used `ghostly1` invite could stop an already-paired chat (a foreign key on the DHT mailbox or the link's signals counted as a key mismatch) and overwrite the contact's DHT texts | fixed in #302: after the pin, another key on invite-keyed channels is ignored (a passive note in the connection panel's Details); the hard stop stays for channels the attacker cannot write; once both sides are pinned they move to pinned mailboxes derived from the two participation keys. WISP 403 0.3, WISP 400 requirement 8. Proof: `packages/core/test/dhtDelivery.edges.test.ts`, `packages/core/test/pairedLink.test.ts`, `e2e/web/dht-delivery.spec.ts` |
+| S31 | Low | Files | A `files/3` offer that expired unanswered was taken without asking when offered again | fixed in #302: `agreed` is recorded; a re-offer of a never-agreed file gets `pf-refuse expired`. WISP 501 0.3.1. Proof: `packages/core/test/chatFiles.test.ts` |
+| S32 | Low | Chat | Other per-chat Pkarr records still use invite-derived keys: a copy of a used invite cannot put content in them after the pin, but can overwrite them and delay a live connection | open (moving them to pinned keys is a separate task) |
+| S33 | Med | Wallet | Removing a wallet with 0 sats deleted its open, paid-unclaimed and issued-unclaimed quotes while chat requests still pointed at them: a contact paying afterwards lost the money | fixed in #303: `engine/walletAwaiting.ts` counts what each wallet waits for, removal needs `acceptLoss`, the rail is asked to claim first (30 s), matching requests are closed and the contact gets `pay-res` with `c: true`. Proof: `packages/browser/test/walletAwaiting.test.ts`, `walletRemove.test.ts`, `e2e/web/wallet-remove.spec.ts` |
+| S34 | Low | Payments | The ecash path of `payRequest` could spend from a mint of the other network when a request named it | fixed in #298: `createToken` spends only mints of the request's network; requests keep only their network's mints. Proof: `packages/browser/test/paymentNetworkPins.test.ts` |
+| S35 | Low | Payments | The Mainnet "Send real money" step was a UI step in the review flow only; the engine did not check it | fixed in #298: the engine refuses a Mainnet spend without `confirmedReal` (`approvePayment`, `payRequest`, `walletPayQuote`, `sendPayment`); `ConfirmRealMoney` guards every UI flow that spends. Proof: `e2e/web/real-money-confirm.spec.ts` |
+| S36 | Low | Payments | USDT requests ignored the chat's Accept switch, and the wire target carried the wallet's RPC URL (which may hold a key) | fixed in #298: requests follow the switch and the network; the wire `provider` is the chain's public RPC and is no longer compared. Proof: `packages/browser/test/usdtAdapter.test.ts` |
+| S37 | Low | Identity | A Pubky check could make the verifier contact a host and port the prover chose | fixed in #299: port 443 only, `assertPublicHost` via DoH first; network failures reach the peer only as `IDENTITY_CHECK_UNAVAILABLE`. Proof: `packages/browser/test/pubkyIdentity.test.ts`, `packages/core/test/identityProofs.test.ts` |
+| S38 | Low | Discovery | A Pkarr relay's response body had no size or time limit | fixed in #299: `readRelayBody` refuses a `content-length` over `RELAY_PAYLOAD_MAX_BYTES` and streams the rest with a cap, inside the 10 s timer. Proof: `packages/core/test/relay.edges.test.ts` |
+
+Also in #299: Desktop could not publish the profile's did:dht because `publish_signed_packet` was missing from the ACL. It is now granted to the main window only, and the Tauri tests require the `commands!` list in `main.rs` to equal the declared list.
+
+Nothing found in: XSS, actions taken without the person, cross-network payments through the UI, file path traversal, SSRF through shared services, extension messaging, pairing pin bypass.
 
 ## How to prove a fix
 
@@ -104,9 +132,9 @@ Every fix is verified in the client it affects, not only in unit tests.
 | Client | Command / method |
 |---|---|
 | Protocol | `npm test` (packages/core), `npm run test:interop` for Rust ↔ TS |
-| Extension | `npm run test:e2e` (two browsers, data link, HTTP service, viewer, sats, calls); `npm run test:attacks -w @ghostly/extension` (a malicious contact) |
-| Web | `node web/test/e2e.mjs`; headers: `curl -sI https://app.ghostly.tools` |
-| Desktop | `cargo test --manifest-path src-tauri/Cargo.toml` (IPC against the real capabilities); end to end: `npm run tauri dev` + `node extension/test/desktop-attacks.mjs` |
+| Extension | `npm run test:e2e -- --project=extension`; `npm run test:attacks -w @ghostly/extension` (a malicious contact) |
+| Web | `npm run test:e2e -- --project=web`; headers: `curl -sI https://app.ghostly.tools` |
+| Desktop | `cargo test --manifest-path src-tauri/Cargo.toml` (IPC against the real capabilities); two apps: `npm run test:e2e:desktop` (Linux), `npm run test:e2e:desktop-macos`; attacks: `npm run tauri dev` + `node extension/test/desktop-attacks.mjs` |
 | CLI | `cargo build -p ghostly-cli && GHOSTLY_CLI=target/debug/ghostly-cli npm run test:interop` (Rust ↔ TS over the real network) |
 | Website | `cd website && npx next build`; after deploy, `curl -sI https://ghostly.tools` |
 | Dependencies | `node scripts/security-scan.mjs` |

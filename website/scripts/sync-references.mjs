@@ -18,24 +18,25 @@ console.log(`Catalogue coverage: ${candidates.length} roadmap inventory entries,
 writeFileSync(resolve(root, "website/lib/wisp-numbering.json"), JSON.stringify(numbering, null, 2) + "\n");
 const guide = `# WISP numbering and compatibility
 
-All ${numbering.length} specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All ${numbering.length} specifications have the document status Draft; what is implemented is in the [catalogue](README.md). Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
 | Range | Contract and scope |
 |---|---|
-| 00-99 | Foundations: process, Ghost Core, peer keys, common capabilities |
+| 00-99 | Foundations: process (00), Ghost Core (01), peer keys (02), capabilities (03), local profiles (04), profile backups (05) |
 | 100-199 | Transport negotiation (100), WebRTC (101), Iroh (102), HyperDHT (103) |
-| 200-299 | Payment negotiation (200), Cashu (201), experimental Arkade (202), Lightning (203), Bark (204), Lightning addresses (205) |
-| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), Pubky, Keet, domain, OpenPGP, Bitcoin address, SSH, OpenID Connect and AT Protocol (Bluesky) providers, and the Nostr social layer (3xx; planned, number to be defined) |
-| 400-499 | Chat messaging (400), an independent application capability; store-and-forward for an away contact (4xx; planned, number to be defined) |
-| 500-599 | File transfer (500), an independent application capability |
-| 600-699 | Voice and video (600), an independent application capability |
-| 700-799 | Local services (700), an independent application capability |
-| 800-899 | Invite and join (800), an independent admission contract |
-| 900-999 | Group session negotiation (900), the group mesh profile and optional GossipSub distribution (9xx; planned, number to be defined) |
+| 200-299 | Payment negotiation (200), Cashu (201), Arkade (202), Lightning (203), Bark (204), Lightning addresses (205); Spark and Fedimint (2xx, numbers to be defined) |
+| 300-399 | Identity proofs (300; external proofs optional), Nostr (301); Pubky, Keet, domain, OpenPGP, Bitcoin address, SSH, OpenID Connect, AT Protocol (Bluesky) and DID providers, the profile DID (did:dht) and the Nostr social layer (3xx, numbers to be defined) |
+| 400-499 | Chat messaging (400), chat session (401), compatibility chat (402), DHT text (403); store-and-forward for an away contact (4xx, number to be defined) |
+| 500-599 | File transfer (500), chat files (501), compatibility file frames (502) |
+| 600-699 | Voice and video (600), WebRTC media (601) |
+| 700-799 | Local services (700), HTTP local service profile (701) |
+| 800-899 | Invite and join (800), invitation profiles (801) |
+| 900-999 | Group session negotiation (900); group mesh, group community and optional GossipSub distribution (9xx, numbers to be defined) |
+| 1000-1099 | Storage contract (1000), local file storage (1001), S3-compatible storage (1002) |
 
-202 documents the experimental Arkade integration, its regtest evidence and unfinished release gates. A document describing an adapter does not establish that an adapter is implemented. A vendor/plugin does not automatically require a WISP. These families are not a mandatory stack; DHT text has its own bounded delivery path and external identity remains optional.
+A document describing an adapter does not establish that an adapter is implemented. A vendor/plugin does not automatically require a WISP. These families are not a mandatory stack; DHT text has its own bounded delivery path and external identity remains optional.
 
 ## Migration table
 
@@ -43,7 +44,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 
 | Previous draft | Current draft |
 |---|---|
-${numbering.map((entry) => `| ${entry.oldId} | [${entry.displayNumber}${entry.numberAssignment === "unassigned" ? " · " + entry.file.replace(/^[0-9x]+-/, "").replace(/\.md$/, "") + " · planned; number to be defined" : ""}](${entry.file}) |`).join("\n")}
+${numbering.map((entry) => `| ${entry.oldId} | [${entry.displayNumber}${entry.numberAssignment === "unassigned" ? " · " + entry.file.replace(/^[0-9x]+-/, "").replace(/\.md$/, "") + " · number to be defined" : ""}](${entry.file}) |`).join("\n")}
 
 ## Link compatibility
 

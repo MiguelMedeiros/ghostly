@@ -5,10 +5,10 @@
 | Candidate number | 205; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
 | Revision | 0.1 |
-| Updated | 2026-09-24 |
+| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md), [203](203-lightning.md) |
-| Implementation | Paying a Lightning address or LNURL through the active Lightning source; no wire format |
+| Implementation | Paying a Lightning address or LNURL through a Lightning card; no wire format |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -41,8 +41,8 @@ the person runs (or a custodian's); Ghostly does not provide one, and this draft
   for, it has a payment hash, it is not expired, it is on the network of the wallet that pays it, and it commits to the
   metadata the person was shown: its `h` tag is the sha256 of the metadata string, or it carries that exact
   string as its description (the same commitment, unhashed; how an invoice issued by a Cashu mint commits).
-- **Paying is the ordinary invoice path** of [203](203-lightning.md): quoted and paid through the active
-  Lightning source, with the same review, fee ceiling, journal-before-spend and unknown-outcome rules. The
+- **Paying is the ordinary invoice path** of [203](203-lightning.md): quoted and paid through the Lightning card
+  the person picks (**Pay with**, when the network has several), with the same review, fee ceiling, journal-before-spend and unknown-outcome rules, and on Mainnet the "Send real money" step. The
   address is kept as the note of the journal entry.
 - **A success action** ([LUD-09](https://github.com/lnurl/luds/blob/luds/09.md)) of tag `message` is shown
   as text; of tag `url` as a link that is never opened by itself; anything else (`aes`) is ignored.
@@ -67,7 +67,7 @@ as the non-HTTP alternative.
 
 A plain-HTTP or credentialed URL, a non-`payRequest` answer, limits below a sat or inverted, missing
 `text/plain`, an identifier for another address, an amount outside the limits, an invoice for another amount,
-without a commitment to the metadata, expired, or of the other mode's network, an oversized or slow answer, an
+without a commitment to the metadata, expired, or of the other network, an oversized or slow answer, an
 unreachable domain named in the error. Two clients must agree on what is refused without any of them having
 paid.
 

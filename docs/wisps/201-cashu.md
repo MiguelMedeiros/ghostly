@@ -5,16 +5,23 @@
 | Candidate number | 201; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
 | Revision | 0.1 |
-| Updated | 2026-09-20 |
+| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md) |
-| Implementation | Existing application integration |
+| Implementation | Cashu wallet per network (Mainnet and Testnet); shared reviewed-payment coordinator |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
 ## Existing integration
 
 Ghostly currently uses Cashu tokens and mint-backed wallet operations. Requests advertise accepted mints; an in-band payment carries a token; the recipient attempts redemption and returns a result. The application keeps pending operations and recovery state. This functionality belongs to the application/payment component, not Core rendezvous.
+
+## Networks (2026-09-26)
+
+- **Per network.** New makes a Cashu wallet on Mainnet (a few public mints, only those that answer) or Testnet (the public test mint `testnut.cashu.space`). Test mints and mints on this machine are Testnet; every other mint is Mainnet ([200](200-payments.md#wallet-networks-mainnet-and-testnet)).
+- **Ecash is pinned to the request's network.** A payment spends only mints of the request's network, even when the request lists a mint of the other one first; a request's mints of the other network are dropped.
+- **Testnet never funds itself.** A test mint marks its own invoices paid, so such a quote is held: it is minted only when a payer says it paid that invoice, or with **Get test coins** (a small fixed amount, on the person's click).
+- **Removal.** Removing a Cashu wallet first claims paid quotes, counts open and unclaimed quotes and ecash not yet taken, and closes the chat requests only it could be paid through (`pay-res` with `c: true`).
 
 ## Candidate adapter
 

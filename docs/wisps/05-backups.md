@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [200](200-payments.md), [1000](1000-storage.md) |
-| Implementation | Experimental: web and desktop clients |
+| Implementation | Experimental: web, desktop and browser extension clients |
 
 > This is a review draft. Candidate numbers and formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -78,7 +78,7 @@ The decrypted, decompressed payload is JSON:
 
 ## Implementation status
 
-The web and desktop clients create bundles from the active profile (or another one, with its lock password), restore them into a new profile and switch to it; storage through the local file and S3-compatible adapters. Covered by unit tests (round trip of every store including file blobs and wallet records, tag-shaped data, Ark database relocation, rejected passphrase, tampered ciphertext and header) and end-to-end tests that back a profile up to a file and to an S3-compatible server and restore it.
+The web, desktop and browser extension clients create bundles from the active profile (or another one, with its lock password), restore them into a new profile and switch to it; storage through the local file and S3-compatible adapters. Covered by unit tests (round trip of every store including file blobs and wallet records, tag-shaped data, Ark database relocation, rejected passphrase, tampered ciphertext and header) and end-to-end tests that back a profile up to a file and to an S3-compatible server and restore it (the extension: to a file).
 
 ## Open decisions
 

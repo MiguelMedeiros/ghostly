@@ -2,9 +2,78 @@
 
 Ghostly is an ephemeral, identity-addressed peer-to-peer service layer. Chat, voice, video and web applications are services on top of it. A peer's live endpoints are reachable while the peer is online; local history and other retained state can remain afterwards.
 
-This document describes the protocol as implemented in [`packages/core`](../packages/core), which Ghostly Desktop, Ghostly Browser and the CLI share. The [WISP working catalogue](wisps/README.md) separates this implemented profile from proposed modular extensions and groups. Sections marked **v1** or **v2** are additions; everything else is the protocol Ghostly has always spoken, unchanged.
+This document describes the protocol as implemented in [`packages/core`](../packages/core), which the web app, Ghostly Browser and Ghostly Desktop share; the CLI implements the compatibility profile in Rust ([`cli`](../cli)). The [WISP catalogue](wisps/README.md) holds the per-module specifications; this page is the overview. How the bytes travel (relays, DHT, WebRTC, Iroh, HyperDHT) is in [TRANSPORTS.md](TRANSPORTS.md).
 
-Every new chat uses the [chat session](wisps/401-paired-chat.md) (`paired-chat/1`, first described as the [paired-chat increment](wisps/PAIRED-CHAT-INCREMENT.md)): version agreement and participation-key pinning over WebRTC, or Iroh and HyperDHT between desktops ([native transports](wisps/TRANSPORT-INCREMENT.md)), with [DHT text](wisps/403-dht-text.md) as its fallback. The one-chat model of [WISP 400](wisps/400-chat.md) (DHT rendezvous and floor, peer-to-peer upgrade, one `ghostly1` invite) was decided on 2026-09-25 and is being implemented. The sections below describe the record and signaling profile of compatibility chats ([WISP 402](wisps/402-legacy-chat.md), Ghostly 0.4 contacts), which current apps still read and write.
+- [The one chat](#the-one-chat): what every new chat speaks (invite, DHT records, capability record, chat session).
+- Sections 1 to 7: the record and frame profile first shipped in Ghostly 0.4. **Compatibility chats** ([WISP 402](wisps/402-legacy-chat.md)) still speak all of it, and the one chat reuses its link record signaling (§2, §5), its frames (§6) and its HTTP mapping (§6.4).
+
+## The one chat
+
+Decided in [WISP 400](wisps/400-chat.md) and implemented: one kind of chat, one invite. Layer 0 is the DHT (rendezvous, signaling, a text floor); layer 1 is a stream (WebRTC, Iroh or HyperDHT) carrying the chat session.
+
+### Invite: `ghostly1`
+
+One [bech32m](https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki) string ([WISP 801](wisps/801-invitation-profiles.md), [#210](https://github.com/MiguelMedeiros/ghostly/pull/210)):
+
+```text
+ghostly1p<payload and checksum>            220 characters, version 1
+https://ghostly.tools/#ghostly1p…          the same code as a link
+```
+
+| Payload bytes | Field |
+|---|---|
+| 0 to 31 | the joiner's rendezvous seed |
+| 32 to 63 | the inviter's rendezvous public key |
+| 64 to 95 | the invite secret (seals pre-pin records, derives mailboxes and record keys) |
+| 96 to 127 | the inviter's participation public key, pinned by the joiner from the code |
+
+- The first data symbol is the version (`p` = 1). An unknown version reads as "Update to join".
+- Decoders lower-case the code first and accept up to 1,023 characters. QR codes use capitals (alphanumeric mode).
+- The code stays in the URL fragment, which browsers never send to a server.
+- Older `pair1/`, `pair2d/` and prefix-less v0.4 codes are still read. Code: `packages/core/src/invite.ts`.
+
+### Records on the DHT
+
+Every record is a Pkarr signed packet (at most 1,000 bytes), sealed and signed as its WISP says.
+
+| Record | Label | Key | Purpose | Spec |
+|---|---|---|---|---|
+| Link record | the §2 labels, `_rtc` | the side's rendezvous key | Presence and WebRTC signaling (§2, §5) | [101](wisps/101-webrtc.md) |
+| DHT mailbox | `_dm`, `_dmk` | derived from the invite, then pinned mailboxes after both sides pin | Short text, receipts, the delivery mode | [403](wisps/403-dht-text.md), [DHT-DELIVERY.md](DHT-DELIVERY.md) |
+| Capability record | `_caps` | derived (`"caps:" + rendezvous key`) | What this side can do, and how to dial its native transports | [03](wisps/03-capabilities.md#layer-0-capability-record) |
+| Hold pointer | `_hold` | derived per link | Points at held items in the sender's S3 storage | [4xx](wisps/4xx-store-and-forward.md) |
+| Group entry | `_knock` | derived from a group link | A joiner's sealed member key | [9xx mesh](wisps/9xx-group-mesh.md) |
+| Community rendezvous | `_lobby`, `_hubs` | derived from the group | Entry and the hub beacon of a community | [9xx community](wisps/9xx-group-community.md) |
+| Profile DID | `_did` | the profile's own DID key | The profile's `did:dht` document, re-put hourly | [3xx DID DHT](wisps/3xx-did-dht.md) |
+
+### The capability record
+
+One per side, per chat ([WISP 03](wisps/03-capabilities.md#layer-0-capability-record)). It lets a contact know what this side can do before any stream exists.
+
+- **Body:** `[1, rev, issued, author, versions, transports, capabilities, extensions, descriptors, name, choice?]`, signed over `["ghostly-caps", from, to, body]`.
+- **Capabilities** include `dht-text/1` (accepts DHT text) and `hold/1` (Hold messages on), plus what the session would carry.
+- **Descriptors:** the minimum to dial each native transport (Iroh endpoint id and home relay, HyperDHT key, the relay a browser's goes through). Never an address.
+- **`choice`:** the transport chosen for this chat in its connection panel, so a contact with no session dials it first.
+- **Sealed** with the invite key before the pin and with the participation keys after it. Published at start, on change (coalesced within 30 s) and hourly. Every DHT envelope names its revision, so a contact re-reads it only when it changed.
+
+### The chat session
+
+`paired-chat/1` ([WISP 401](wisps/401-paired-chat.md)) runs on whichever stream connected. The handshake agrees on a version, binds the transport's own handshake (DTLS fingerprint, TLS exporter or Noise hash) and checks the pinned participation key.
+
+- The transcript-bound `pair-offer` lists what the session carries: `chat/1`, `files/2`, `payments/1`, `transport-switch/1`, `hold/1`, proofs, and more.
+- Once ready, each side sends `{"t":"paired-capabilities","c":[...]}` with `calls/1`, `services/1` and `files/3`. A capability is on only while both sides list it.
+- Liveness: `paired-ping` / `paired-pong`. Name and picture: `paired-nick`, `paired-avatar`.
+- Losing the session is not losing the chat: it moves to the DHT and comes back when a stream does ([WISP 100](wisps/100-transports.md)).
+
+### Service advertisements and HTTP
+
+| | Compatibility chat | One chat |
+|---|---|---|
+| Advertisement | `_svc` in the link record (§3), repeated in `hello` on the data link | `{"t":"paired-services","s":<list>}` on the session, per contact, never published |
+| HTTP | `ghostly-http/1` frames and binary chunks on the `ghostly/1` DataChannel (§6.4) | The same `req`/`res`/`rst` frames wrapped as `{"t":"ph","c":...}` and chunks as `{"t":"ph","b":<base64url>}`, on any transport |
+| Grant | Every enabled service, every link | Per contact; the host checks the grant on every request |
+
+The host guarantees of [§6.4](#64-ghostly-http1) apply to both. Profile: [WISP 701](wisps/701-http-services.md#paired-profile). Calls in the one chat: [WISP 601](wisps/601-webrtc-media.md#paired-profile).
 
 ## 1. Identities and links
 
@@ -26,7 +95,7 @@ The peer that creates a link generates both keypairs and the key, keeps one side
 
 Every link has its own identities, persisted locally for reconnection. This avoids reusing one identity across links, but network addresses, timing or application data can still correlate peers. The creator initially knows both seeds. Any holder of a copied invite has the joining seed and shared encryption key; the legacy format is not cryptographically consumed after joining. Removing its display does not revoke a copy. See the proposed [key lifecycle](wisps/02-peer-keys.md) and [admission protocol](wisps/800-invite-join.md).
 
-The invite is a bearer secret and must travel over a private channel.
+The invite is a bearer secret and must travel over a private channel. This slash-separated form is the v0.4 invite; new chats use [`ghostly1`](#invite-ghostly1).
 
 ## 2. Discovery: Pkarr records
 
@@ -50,7 +119,7 @@ Clients ignore labels they do not know. A v0 client therefore keeps working with
 
 **Presence.** A peer that advertises services publishes on start and republishes every 4 minutes. It is considered online while its packet carries `_svc` and is younger than 10 minutes. When it goes offline it publishes once more without `_svc` and `_rtc`. If it cannot (the machine lost power), the packet goes stale on its own. Presence is a hint; the real test is whether the data link comes up.
 
-**Transports.** Desktop and the CLI talk to the DHT directly and to Pkarr relays (the Rust client's defaults). Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees public keys, signed packets, plaintext `_ts`/`_ack`, sizes and activity. Without link secrets it cannot decrypt protected values or forge the expected signature. It carries the small application messages present in records, but not bulk data-link traffic. Browser peers publish to every configured relay and read from them in turn, one request per poll, keeping the newest validly signed packet seen; the relay list is user-configurable. Public relays rate limit by IP (120 requests a minute when this was written), so relay clients poll slower than DHT clients (4 s active, 2 s while signaling for at most 45 s or for 30 s when the peer's offer is due, 30 s in the background, 60 s while the data link is up), back off from a relay that answers 429 (or fails at the network level, which is how a browser sees a 429 without CORS headers), keep to a budget of 30 requests a minute per relay (a request that budget, or a relay's 429, holds back is a wait: it goes again when a request frees, and is never reported as an error), send `If-Match: <timestamp of the packet being replaced>` so that a burst of publishes is not refused with 428 while the previous put is still in flight, and open the data link on their own when the peer is online so that chat and call signaling leave Pkarr alone.
+**Transports.** Desktop and the CLI read the Mainline DHT directly and publish to the DHT and to the Pkarr relays. Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees public keys, signed packets, plaintext `_ts`/`_ack`, sizes and activity. Without link secrets it cannot decrypt protected values or forge the expected signature. Browser peers publish to every configured relay (a publish returns once one relay took it) and read from them in turn, keeping the newest validly signed packet seen. Relay clients poll slower than DHT clients (4 s active, 2 s while signaling for at most 45 s or for 30 s when the peer's offer is due, 30 s in the background, 60 s while the data link is up), keep to 30 requests a minute per relay (a request that budget, or a relay's 429, holds back is a wait, never an error), stop using a relay that keeps failing (a circuit breaker per relay), and send `If-Match: <timestamp of the packet being replaced>` so that a burst of publishes is not refused with 428. The relay list, the budget and the breaker: [TRANSPORTS.md](TRANSPORTS.md#layer-0-pkarr-and-the-mainline-dht).
 
 ## 3. Services (v1)
 
@@ -301,11 +370,11 @@ A second profile, `group-community/1`, is for a group whose link (`group2/<group
 - A message's `c` is XChaCha20-Poly1305 of the trimmed UTF-8 text (at most 16 KiB) under the epoch message key, with the JSON of `[g, e, s, n, ts]` as associated data; `sig` is the sender's signature on `["ghostly-group/1 msg", g, e, s, n, ts, nn, c]`. `n` counts from 0 in each epoch, per sender. The stable id is `<s>:<e>:<n>`.
 - `group-meta` is the group's metadata (its picture), outside the chain: the admin signs `["ghostly-group meta", g, e, h, r, by, ts, d]`, where `(e, h)` is a commit it is the admin after and `d` the SHA-256 of the JSON body `{ "pic"? }`; the body is sealed under the message key of epoch `k`. Members keep the newest statement (later commit, then higher revision) whose signer is the admin now; a sync's `mt` (`"e.r"`) says which one the sender holds, and whoever holds a newer one sends it. Community frames carry `v: 2` and `k` is a commit hash. The picture is a JPEG data URL of at most 512×512 and 40,000 characters. See [9xx § Metadata](wisps/9xx-group-mesh.md#metadata).
 - Receivers accept a message only from the edge of its sender, for an epoch both were members of, once per `(s, e, n)`; a frame ahead of the chain waits, bounded, while the receiver asks the sender to catch it up. Only the author re-sends its messages, from a log of its last 32.
-- Payments with a member use the ordinary payment frames of §6.4 on the edge to that member (`pay-ask`, `pay-req`, `pay`, `pay-res`), negotiated on the edge exactly as in a 1:1 chat; they never cross another member. A request to the whole group is one `pay-req` sent on every edge, on one rail (Cashu or Lightning), paid once. `group-pay` tells the other members what happened: `k` is `req` or `pay`, `f` the payer (or `*`, a request anyone may pay), `to` the payee, `v`/`u`/`d` the amount, unit and decimals, `r` the rail, `st` `open`, `sent`, `paid` or `closed`, `by` who paid. A receiver believes it only from the member it is about (the edge's peer): the payee for a request's state and for `paid`, the payer for `sent` and for taking that back. Additive: an app without it drops the frame, and an edge of an app without payments on edges negotiates none. Full rules: [WISP 9xx § Payments](wisps/9xx-group-mesh.md#payments).
+- Payments with a member use the ordinary payment frames of §6.3 on the edge to that member (`pay-ask`, `pay-req`, `pay`, `pay-res`), negotiated on the edge exactly as in a 1:1 chat; they never cross another member. A request to the whole group is one `pay-req` sent on every edge, on one rail (Cashu or Lightning), paid once. `group-pay` tells the other members what happened: `k` is `req` or `pay`, `f` the payer (or `*`, a request anyone may pay), `to` the payee, `v`/`u`/`d` the amount, unit and decimals, `r` the rail, `st` `open`, `sent`, `paid` or `closed`, `by` who paid. A receiver believes it only from the member it is about (the edge's peer): the payee for a request's state and for `paid`, the payer for `sent` and for taking that back. Additive: an app without it drops the frame, and an edge of an app without payments on edges negotiates none. Full rules: [WISP 9xx § Payments](wisps/9xx-group-mesh.md#payments).
 
 ## 7. What is not in the protocol
 
 - **A central Ghost message server.** The host serves its enabled services while online. Closing Ghostly ends live connectivity; published presence may remain stale and local history persists. Pkarr relays can carry encrypted small-message records; STUN assists discovery and TURN can relay encrypted live traffic.
 - **Public services.** A service is reachable by the peers you are linked with. Serving strangers needs a rendezvous that Pkarr, being pull-only, does not provide out of the box. One possible design is a published one-time mailbox key that strangers write their offer to; it is deliberately left for later.
-- **Per-peer service selection.** Every enabled service is advertised on every link.
+- **Per-peer service selection in compatibility chats.** There every enabled service is advertised on every link. The one chat grants apps per contact ([above](#service-advertisements-and-http)).
 - **WebSockets and server-sent events** over `ghostly-http/1`. The framing streams; the mapping for upgrades is not defined yet.

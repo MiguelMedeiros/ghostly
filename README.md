@@ -43,8 +43,8 @@ The protocol is specified in the open, one small document at a time: the [WISPs]
 |---|---|
 | **Web** (any browser, installs on a phone) | Open **[app.ghostly.tools](https://app.ghostly.tools)**. Nothing to install. |
 | **Desktop** (macOS, Windows, Linux) | `.dmg`, `.exe` / `.msi`, `.AppImage` / `.deb` from the **[latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest)**. The app updates itself. |
-| **Browser extension** (Chrome, Brave, Edge) | `ghostly-browser-extension-<version>.zip` from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest), loaded unpacked. |
-| **CLI** (macOS, Linux, Windows) | `ghostly-cli-<platform>` binaries from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest). |
+| **Browser extension** (Chrome, Brave, Edge) | The [Chrome Web Store](https://chromewebstore.google.com/detail/ghostly/nbedaagicniejlmfcncndfjcejaidbcf), or the newest `ghostly-browser-extension-<version>.zip` from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest), loaded unpacked. |
+| **CLI** for scripts and bots (macOS, Linux, Windows) | `ghostly-cli-<platform>` binaries from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest). A compatibility client: it talks to other CLIs over the v0.4 record format, not to `ghostly1` app chats. See [CLI](docs/CLI.md). |
 | **Self-hosted web** | `docker compose up -d` serves the web app on `localhost:8080`. See [WEB.md](docs/WEB.md). |
 
 Step by step, checksums and signatures: [Installation](docs/INSTALLATION.md).
@@ -57,7 +57,7 @@ Step by step, checksums and signatures: [Installation](docs/INSTALLATION.md).
 - Rich text, @mentions in groups, link previews made by the sender, location cards, and cards for invites, Nostr keys, identities and payment codes.
 - Voice messages, GIFs, emoji, message details, per-chat mute.
 - Files of any size, resumable and checked by digest. Large files ask the receiver first.
-- Voice and video calls, with screen sharing inside the call.
+- Voice and video calls, with screen sharing inside the call (not on Linux Desktop, whose WebKitGTK has no WebRTC).
 - Private groups and larger communities, joined by a link.
 
 **Money**

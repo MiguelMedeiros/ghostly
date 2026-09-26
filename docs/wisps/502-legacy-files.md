@@ -19,7 +19,7 @@ Formerly "Legacy File Frames". Retained, not withdrawn: a compatibility chat ([4
 
 ## Concrete framing
 
-A `file` control frame announces file ID, stream ID, name, size, MIME and timestamp. Binary kind-3 chunks carry content and END marks completion. Enforce announced length, 100 MiB per file, three incoming files per peer,500MiBreceived storage per peer and 30-second idle timeout. Unknown/duplicate stream IDs and excess/truncated bodies are errors.
+A `file` control frame announces file ID, stream ID, name, size, MIME and timestamp. Binary kind-3 chunks carry content and END marks completion. Enforce announced length, 100 MiB per file, three incoming files per peer, 500 MiB received storage per peer and 30-second idle timeout. Unknown/duplicate stream IDs and excess/truncated bodies are errors.
 
 Cancellation/reset, name sanitization, MIME distrust and per-peer storage limits remain local safety requirements. Content is not automatically executed. The legacy completion event does not provide the authenticated digest plus final durable-storage acknowledgement of [501](501-paired-files.md). Do not display those stronger guarantees for this profile.
 

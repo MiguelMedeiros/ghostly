@@ -8,13 +8,13 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md) |
-| Implementation | Existing adapter behavior; WISP binding proposed |
+| Implementation | Existing adapter in every client; WISP binding proposed |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
 ## Place in the one chat (revision 0.2)
 
-WebRTC is one layer-1 candidate of the one chat ([400](400-chat.md), [100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)), and the only one in browsers and the extension. Its `_rtc` signaling rides layer 0, in the link's own signed record, as today. A WebRTC attempt that does not connect (no ICE path, no TURN, a blocked network) no longer fails a first pairing: the chat stays `on-dht` and retries in the background. A WebRTC session that drops sends the chat to `on-dht` until it or another transport is back. In a compatibility chat ([402](402-legacy-chat.md)) the legacy WebRTC link is that chat's layer 1, with its own frames, calls and files.
+WebRTC is one layer-1 candidate of the one chat ([400](400-chat.md), [100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)), and the only direct one in browsers and the extension (they reach Iroh, and HyperDHT when a relay is set, only through a relay: [102](102-iroh.md), [103](103-hyperdht.md)). Its `_rtc` signaling rides layer 0, in the link's own signed record, as today. A WebRTC attempt that does not connect (no ICE path, no TURN, a blocked network) no longer fails a first pairing: the chat stays `on-dht` and retries in the background. A WebRTC session that drops sends the chat to `on-dht` until it or another transport is back. In a compatibility chat ([402](402-legacy-chat.md)) the legacy WebRTC link is that chat's layer 1, with its own frames, calls and files.
 
 ## Local experimental increment
 

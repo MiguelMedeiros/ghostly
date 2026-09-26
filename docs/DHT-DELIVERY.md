@@ -1,12 +1,12 @@
 # DHT delivery for modern conversations
 
-> **One chat, one invite (decided 2026-09-25, implemented).** Every chat runs this DHT delivery from its first contact, in parallel with a stream attempt, falls back to it whenever no stream connects, and upgrades to a stream by itself. There is one `ghostly1…` invite (shared as `https://ghostly.tools/#ghostly1…`) and DHT only is a per-chat choice in the Connection menu. See [WISP 400](wisps/400-chat.md), [WISP 403](wisps/403-dht-text.md), [WISP 03](wisps/03-capabilities.md) and [WISP 801](wisps/801-invitation-profiles.md).
+> **One chat, one invite.** Every chat runs this DHT delivery from its first contact, in parallel with a stream attempt, falls back to it whenever no stream connects, and upgrades to a stream by itself. There is one `ghostly1…` invite (shared as `https://ghostly.tools/#ghostly1…`), and DHT only is a per-chat choice in the connection panel. See [WISP 400](wisps/400-chat.md), [WISP 403](wisps/403-dht-text.md), [WISP 03](wisps/03-capabilities.md) and [WISP 801](wisps/801-invitation-profiles.md). How the streams and the relays fit around it: [TRANSPORTS.md](TRANSPORTS.md).
 
-Implementation contract for the current work. Integration and public-network validation are tracked separately; this document is not a release or security-audit claim.
+The contract the DHT path implements. It is not a security-audit claim.
 
 ## One conversation, two delivery methods
 
-An invitation creates one conversation, participation identity, durable contact pin and message history, shared by the DHT and live streams. There is no delivery choice in the invite: a joined `pair2d/` code starts like any other and upgrades by itself. Prefix-less v0.4 codes still open a compatibility chat ([WISP 402](wisps/402-legacy-chat.md)).
+An invitation creates one conversation, participation identity, durable contact pin and message history, shared by the DHT and live streams. There is no delivery choice in the invite. Older `pair1/` and `pair2d/` codes are still read and start like any other chat, upgrading by themselves. Prefix-less v0.4 codes still open a compatibility chat ([WISP 402](wisps/402-legacy-chat.md)).
 
 A chat is `live` (a stream carries it), `on-dht` (no stream; retried in the background: at once when the contact is seen, then 20 s doubling to 3 min, forever while the app runs) or `dht-chosen` (either side chose DHT only). DHT only does not register native endpoints, start stream discovery or dial WebRTC/Iroh/HyperDHT. Changing delivery mode preserves the conversation and accepted pending message IDs.
 
@@ -43,12 +43,8 @@ Expiry means the application stops accepting/retransmitting the message. It does
 
 ## Platform and feature boundaries
 
-Desktop uses its native Pkarr backend; browsers and extensions use HTTP Pkarr relays. A successful HTTP relay test does not independently prove Mainline UDP propagation. Relay/network observers can see addresses, timing and signed records; this is not network anonymity.
+Desktop and the CLI read the Mainline DHT directly and publish to the DHT and to the Pkarr relays; the web app and the extension use the relays only ([TRANSPORTS.md](TRANSPORTS.md#who-reads-and-writes-where)). A successful relay write does not by itself prove Mainline UDP propagation. Relay and network observers can see addresses, timing and signed records; this is not network anonymity.
 
 Files, calls, HTTP services and payment protocol operations travel only on authenticated live streams (or, for files and requests, a hold). Cashu bearer tokens are explicitly refused as DHT text. A short pasted Lightning invoice can fit as text, but publication does not initiate a payment. No personal funds are needed for QA.
 
-The header reports the actual state ("Connected · WebRTC", "On DHT · retrying live", "DHT only · chosen by you" or "by your contact") separately from the preferred method. Existing conversations are never silently converted to a different profile; a compatibility chat offers "Continue in a new chat".
-
-## Follow-up requested
-
-Consider a Ghostly-operated Pkarr relay as an additional option after this delivery. The proposed destination is the server named Zero, running the relay in Docker with Cloudflare in front of HTTP/HTTPS. Mainline DHT UDP must reach the host/container directly with suitable firewall configuration; an HTTP proxy or Tunnel must not be assumed to carry that UDP traffic. Access, configuration and deployment authorization have not been verified. No infrastructure has been provisioned, and this is not a dependency for the current client integration.
+The chat header shows only a connection icon. Its panel names the actual state ("Connected · WebRTC", "On DHT · retrying live", "DHT only · chosen by you" or "by your contact"), separately from the transport chosen for the chat. Existing conversations are never silently converted to a different profile; a compatibility chat offers "Continue in a new chat".

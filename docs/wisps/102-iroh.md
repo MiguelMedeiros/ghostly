@@ -8,13 +8,13 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md) |
-| Implementation | Experimental native adapter of the chat session (desktop); relay-only browser build in the web app and the extension (2026-09-25); descriptors on the DHT (decided 2026-09-25; being implemented) |
+| Implementation | Experimental: native adapter of the chat session (desktop); relay-only browser build in the web app and the extension; endpoint id and home relay in the layer-0 capability record |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
 ## Place in the one chat (revision 0.2)
 
-Iroh is a native layer-1 candidate of the one chat ([400](400-chat.md), [100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)). Proposed: its endpoint id is published in the layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), so two desktops can try Iroh without a WebRTC session first (today its descriptor is exchanged only inside an authenticated session). The endpoint id is dialled through Iroh's own discovery; no address goes into the record. An Iroh attempt that fails leaves the chat `on-dht`, and a dropped Iroh session sends it there until a transport is back.
+Iroh is a native layer-1 candidate of the one chat ([400](400-chat.md), [100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)). Its endpoint id is published in the layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), so two desktops try Iroh without a WebRTC session first. The endpoint id is dialled through Iroh's own discovery; no address goes into the record. An Iroh attempt that fails leaves the chat `on-dht`, and a dropped Iroh session sends it there until a transport is back.
 
 ## Browser profile: relay only (revision 0.3)
 
@@ -57,5 +57,5 @@ Two independent Ghost adapter implementations exchange the same capability paylo
 ## Revision log
 
 - 0.3 (2026-09-25): browser profile, relay only: same wire and binding, `relayed` descriptor, relay settings, measurements.
-- 0.2 (2026-09-25): place in the one chat; endpoint id in the layer-0 capability record (proposed).
+- 0.2 (2026-09-25): place in the one chat; endpoint id in the layer-0 capability record.
 - 0.1 (2026-09-20): initial review draft.

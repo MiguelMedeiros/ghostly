@@ -3,7 +3,7 @@
 Browsers have no UDP, so they cannot run HyperDHT (WISP 103) themselves. This relay runs the UDP half for them
 and talks to each browser over one WebSocket, with Holepunch's
 [`@hyperswarm/dht-relay`](https://github.com/holepunchto/hyperswarm-dht-relay) protocol. The web app and the
-extension use it when a relay is set in **Settings, Network** (`packages/browser/src/platform/hyperdhtRelay.ts`).
+extension use it when a relay is set in **Settings → Advanced → Network** (`packages/browser/src/platform/hyperdhtRelay.ts`).
 
 ## What it sees, and what it doesn't
 

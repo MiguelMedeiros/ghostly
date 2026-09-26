@@ -1,5 +1,11 @@
 # Files and sats in the chat session
 
+> **State on `dev` (2026-09-26).** Everything below is merged and still runs. Since then:
+>
+> - **Files of any size:** `files/3` (#228, #233), announced in the `paired-capabilities` frame, replaces `files/2` whenever both apps have it: offered and accepted (above 25 MiB, or past 500 MiB from one contact, the receiver is asked), streamed to storage, resumed from the last confirmed byte, checked by digest ([501](501-paired-files.md)). `files/2` below stays for apps without it, with its 100 MiB cap.
+> - **Payments per network:** a request or payment names its network, Mainnet or Testnet (older apps leave it out), and each rail is its own method (Cashu, Lightning, Arkade, Bark, Spark, Fedimint, on-chain, USDT); see [200](200-payments.md).
+> - **Calls and shared apps:** `calls/1` and `services/1` (#207), in the same frame.
+
 `paired-chat/1` now negotiates `files/2` and `payments/1` in its authenticated offer. Both endpoints must advertise support. Old text-only endpoints still pair and chat; new actions stay unavailable with them. External proofs and identities remain outside this change. Calls (`calls/1`) and hosted HTTP (`services/1`) came later, announced after the handshake in a `paired-capabilities` frame ([401](401-paired-chat.md#calls-and-shared-apps)), since the offer's 16 entries are full for apps before 0.5. Pair confirmation, pins, bootstrap and transport preferences are unchanged.
 
 ## Files

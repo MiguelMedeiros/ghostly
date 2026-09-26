@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md) |
-| Implementation | Existing bearer invite; admission protocol proposed |
+| Implementation | One bearer invite (`ghostly1…`) for every new chat, which pins the inviter's participation key; consumable admission protocol proposed |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -28,7 +28,7 @@ The [chat session increment](PAIRED-CHAT-INCREMENT.md), now the live session of 
 
 ## Baseline and purpose
 
-A current connection string carries a joining seed, creator public key and shared encryption key. Joining restores those credentials. The browser hides its saved invite after receiving a message; it does not invalidate copies of the secret. Local duplicate detection is not global single-use enforcement. Consumable 1:1 invitations below are a NEW admission design, not a property of that legacy string.
+A current connection string carries a joining seed, creator public key and shared encryption key. Joining restores those credentials. A `ghostly1…` code also carries the inviter's participation key, which the joiner pins. The browser hides its saved invite after receiving a message; it does not invalidate copies of the secret. After the pin, a copy can no longer stop or take over the chat: another key on the invite's channels is ignored ([400](400-chat.md#candidate-requirements-for-the-one-chat), requirement 8), and the DHT text moves to pinned mailboxes ([403](403-dht-text.md#pinned-mailboxes-revision-03)). Local duplicate detection is not global single-use enforcement. Consumable 1:1 invitations below are a NEW admission design, not a property of that legacy string.
 
 ## Objects and trust boundary
 

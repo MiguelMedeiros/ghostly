@@ -4,6 +4,27 @@ Inspection date: 2026-09-20. Baseline commit: `bbe142f08d88cefa173d1dc586608f64b
 
 The subsequent [paired-chat increment](PAIRED-CHAT-INCREMENT.md) adds an opt-in participation-pinned WebRTC chat profile; the table below remains explicitly the pre-increment baseline.
 
+## Current matrix (2026-09-26)
+
+What `dev` runs on each client today. The sections after this one are dated history; update this table, not them.
+
+| Capability | Web app | Extension | Desktop | Evidence |
+|---|---|---|---|---|
+| DHT (Pkarr) | HTTP relays | HTTP relays | Mainline DHT read directly; writes to the DHT and the relays | #289, #293 |
+| One chat: `ghostly1` invite, DHT first contact and floor, self-upgrade | Yes | Yes | Yes | #209, #210, #229 |
+| WebRTC | Yes | Yes | macOS only (Linux WebKitGTK has none) | [101](101-webrtc.md) |
+| Iroh | Relay only, on by default | Relay only, on by default | Native | #225, #270 |
+| HyperDHT | Only through a relay the person sets | Same | Native sidecar | #187, #231 |
+| Files (`files/2`, `files/3` of any size) | Yes | Yes | Yes | #233 |
+| Calls, screen share inside a call | Yes | Yes | macOS only | #207, #253 |
+| Shared apps (host / open) | No / No | Yes / Yes | Yes / Yes | #207, #268 |
+| Profiles and backups | Yes | Yes | Yes | #171 |
+| Wallets (per network) | Yes; WebLN web only | Yes | Yes; Bitcoin Core RPC Desktop only | #276, #277, #314, #317 |
+| Identity proofs | Yes | Yes | Yes | [300](300-peer-proofs.md) |
+| Groups (mesh, community) | Yes | Yes | Yes | [900](900-group-sessions.md) |
+| CLI | Compatibility client only: older DHT records, no `ghostly1` codes, no chat sessions | | | [CLI](../CLI.md) |
+
+
 ## Observed baseline
 
 | Area | Evidence | What it establishes / does not establish |
@@ -55,14 +76,14 @@ Next, prove a second data adapter before claiming interchangeable transports. Gr
 
 ## One chat, revision 0.2 (2026-09-25): implemented versus decided
 
-Inspection of `dev` at `802b48bc`, rechecked at `8670aeab`. The chat family's revision 0.2 describes one chat with the DHT as rendezvous and floor ([400](400-chat.md)); its decisions were recorded on 2026-09-25, and three implementation cards are queued: the `ghostly1` invite and its ghostly.tools link, DHT fallback and self-upgrade in every chat, and calls in the chat session. Much of the model exists; this table separates what the code does from what is decided.
+Inspection of `dev` at `802b48bc`, rechecked at `8670aeab`. The chat family's revision 0.2 describes one chat with the DHT as rendezvous and floor ([400](400-chat.md)); its decisions were recorded on 2026-09-25. The three implementation cards then queued have merged: the `ghostly1` invite and its ghostly.tools link (#210), DHT fallback and self-upgrade in every chat (#209, #229), and calls in the chat session (#207). The "Today" column is the 2026-09-25 inspection; rows it marks as different from the decision are now as decided.
 
 | Behaviour | Today | Decided (2026-09-25) |
 |---|---|---|
-| Invite formats created | `pair1/` (streams first) or `pair2d/` (DHT only), chosen at creation ([invite.ts](../../packages/core/src/invite.ts)) | One bech32m `ghostly1…` string (or `https://ghostly.tools/#ghostly1…`), no choice; `pair1/`, `pair2d/` and prefix-less still read ([801](801-invitation-profiles.md)) |
+| Invite formats created | `pair1/` (streams first) or `pair2d/` (DHT only), chosen at creation ([invite.ts](../../packages/core/src/invite.ts)); since #210 only `ghostly1…` | One bech32m `ghostly1…` string (or `https://ghostly.tools/#ghostly1…`), no choice; `pair1/`, `pair2d/` and prefix-less still read ([801](801-invitation-profiles.md)) |
 | First contact | Both at once in every chat: DHT envelope with recipient `invite` ([dhtDelivery.ts](../../packages/core/src/dhtDelivery.ts)) and a stream; a key mismatch on either path stops both ([ghostlink.ts](../../packages/core/src/ghostlink.ts)) | Both at once; pin on whichever verifies first; same key required on both |
 | First pairing without a stream | Ends `on-dht` ([pairingProgress.ts](../../packages/core/src/pairingProgress.ts)) and chats | Ends `on-dht` and chats |
-| Short-text fallback after a drop | Exists for `pair1/` chats once the contact announced DHT support (`GhostLink.textDelivery`, [ghostlink.ts](../../packages/core/src/ghostlink.ts)) | The rule for every chat; every contact announces it from the first contact |
+| Short-text fallback after a drop | Exists for `pair1/` chats once the contact announced DHT support (`GhostLink.textDelivery`, [ghostlink.ts](../../packages/core/src/ghostlink.ts)); every chat since #229 | The rule for every chat; every contact announces it from the first contact |
 | Upgrade from DHT to a stream | Automatic in every chat that is not `dht-chosen`; a joined `pair2d/` code no longer sets DHT only | Automatic in every chat that is not `dht-chosen` |
 | DHT only as a choice | Per chat, `setDeliveryMode("dht")`; either side blocks both | Same, listed as **DHT only** in the per-chat Connection menu |
 | Capabilities before a stream exists | Layer-0 capability record ([capsRecord.ts](../../packages/core/src/capsRecord.ts)), revision in the envelope | Layer-0 capability record: transports, capabilities, native descriptors, name ([03](03-capabilities.md#layer-0-capability-record)) |
@@ -86,6 +107,6 @@ Web ↔ extension and native ↔ extension exchanges were observed, including cl
 
 [Implemented profile](TRANSPORT-INCREMENT.md): Iroh 1.2.0 via Rust QUIC/TLS exporter and HyperDHT 6.34.0 via packaged native UDP/Noise runtime. Both reuse the shared participation/session authentication and durable chat engine. Web/extension advertise only their available WebRTC adapter. Real local transport integration tests and two Tauri app exchanges validated switching without changing conversation IDs, pins or history. No independent application implementation, external proof or group support is implied. The baseline tables above remain historical.
 
-## Optional Nostr proof increment (2026-09-20)
+## Optional Nostr proof increment (2026-09-20, history)
 
-The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.
+The [proof increment](PROOF-INCREMENT.md) recorded external-signer Nostr and local imports of Pubky and Keet-compatible keys in an experimental `proof-*` protocol. It stays off: the rebuilt identity proofs (2026-09-23, [300](300-peer-proofs.md#implementation-2026-09-23-identity-proofs)) replaced it. Ghostly participation remains the default. All WISPs remain Draft; earlier baseline inspections are historical.

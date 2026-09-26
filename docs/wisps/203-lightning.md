@@ -5,16 +5,16 @@
 | Candidate number | 203; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
 | Revision | 0.3 |
-| Updated | 2026-09-24 |
+| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md) |
-| Implementation | Existing invoice integration; Lightning sources (the Cashu mints by default) |
+| Implementation | Several Lightning cards per network, each on its own source (Cashu mints, Fedimint, Breez, NWC, Core Lightning, LND, WebLN) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
 ## Existing integration
 
-The current `btc-lightning-bolt11` endpoint carries an invoice; the application supports Lightning through its Cashu component and invoice UI. This is not evidence of a universal external-wallet adapter or a locally operated Lightning node. [BOLT 11](https://github.com/lightning/bolts/blob/master/11-payment-encoding.md) is the invoice format reference.
+The current `btc-lightning-bolt11` endpoint carries an invoice; the application reaches Lightning through the sources below. This is not evidence of a universal external-wallet adapter. [BOLT 11](https://github.com/lightning/bolts/blob/master/11-payment-encoding.md) is the invoice format reference.
 
 ## Lightning sources
 
@@ -32,8 +32,11 @@ wallet twice.
   invoice", and that invoice comes from the default card. A contact never learns which card; the wire format
   does not change.
 
-- A source is accepted only if it reports a network of the mode (Bitcoin for Mainnet, any test network for
-  Testnet). In Mainnet an invoice of a test network is refused.
+- A source is accepted only if it reports a chain of the card's network (Bitcoin for Mainnet, any test network
+  for Testnet). A Mainnet card refuses an invoice of a test network.
+- Where each source runs: the Cashu mints, NWC, Core Lightning, LND and WebLN on Mainnet and Testnet; Fedimint
+  and Breez on Testnet only for now. The table is in
+  [PROVIDERS.md](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md#built-in-providers).
 - A payment is journaled before the source is asked to pay. A source reports either "nothing was spent"
   (safe to retry) or an outcome that is unknown until it is reconciled with the same source; an unknown
   payment is never paid again, and the source cannot be replaced until it ends.
@@ -57,7 +60,7 @@ requests of [200](200-payments.md#paid-from-another-wallet).
 ## Lightning addresses
 
 Paying a Lightning address or an LNURL is resolving it to an invoice and paying that invoice through the
-active source, under every rule above. What is checked, and what is not offered (receiving on an address), is
+Lightning card chosen (**Pay with**, when the network has several), under every rule above. What is checked, and what is not offered (receiving on an address), is
 [205](205-lnurl.md).
 
 ## Candidate adapter

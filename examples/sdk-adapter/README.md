@@ -18,6 +18,7 @@ To see the adapters in the app, build it with the plugin compiled in:
 GHOSTLY_PLUGINS=examples/sdk-adapter/src/index.ts npm run build:web
 ```
 
-They then appear in the Lightning source picker (Testnet) and in Profile → Identities. The e2e build does
+The Lightning source is then offered when you make a Testnet Lightning wallet (Wallets → New → Testnet →
+Lightning; never on Mainnet), and the proof in Identities → New. The e2e build does
 this; see `e2e/web/sdk-plugin.spec.ts`. Read [docs/SDK.md](../../docs/SDK.md) before writing your own:
 the rules about money and secrets are the point.

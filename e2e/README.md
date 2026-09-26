@@ -25,7 +25,7 @@ npm run e2e:full -- --no-vitest -- --project=web e2e/web/wallet-lnd.spec.ts   # 
 ```
 
 Most suites need nothing but the test process (see [No servers](#no-servers)). The ones that pay over a real
-network — Ark, Bark, BDK, Bitcoin Core, Core Lightning, Fedimint, LND, NWC, WebLN, USDT, S3, the Cashu mint — need services,
+network (Ark, Bark, BDK, Bitcoin Core, Core Lightning, Fedimint, LND, NWC, WebLN, USDT, S3, the Cashu mint) need services,
 and `e2e/infra/` is all of them in one Docker Compose project: one regtest bitcoind (with a miner wallet) and its
 Esplora, arkd, captaind, two LND nodes for the LND suite, two behind the WebLN wallets, two under Alby Hubs with a
 strfry relay for NWC, two Core Lightning nodes, a one-guardian Fedimint federation with an LND gateway and an LND peer,
@@ -35,7 +35,7 @@ Worthless coins and throwaway keys only. Containers are `ghostly-e2e-*`, host po
 `e2e:full` starts from nothing and leaves nothing behind: it removes its own project first, brings it up, waits
 until every container is healthy and every endpoint answers, funds and opens channels (each suite's `ready`, in
 parallel, idempotent), writes `.env.e2e`, runs the gated provider contracts of `@ghostly/browser` (vitest), builds
-the extension, runs the whole Playwright suite with every gate on, and removes the project again — on failure and
+the extension, runs the whole Playwright suite with every gate on, and removes the project again, on failure and
 on Ctrl-C too. Safe to run twice in a row. It exits non-zero if either the contracts or the browsers failed, and
 prints how long each phase took.
 
@@ -50,7 +50,7 @@ npm run e2e:infra:down      # remove everything, volumes and .env.e2e included
 ```
 
 `e2e/playwright.config.ts` loads `.env.e2e` when it exists (a variable set in the shell wins), so with the
-environment up every gated suite runs and without it they are skipped. The variables — gates, endpoints, keys —
+environment up every gated suite runs and without it they are skipped. The variables (gates, endpoints, keys)
 are listed with what they mean in [`e2e/infra/env.mjs`](infra/env.mjs); specs and support scripts read every
 endpoint from there, never a literal port. Their names are stable: other suites build on them.
 
@@ -95,8 +95,8 @@ how long it takes.
 
 Every `e2e:infra` command takes `--host <ssh target>` (or `E2E_INFRA_HOST=<ssh target>` in the environment) and
 then runs the same Compose project on that machine's Docker instead of this one's. Browsers, the app build and
-Playwright stay here; only the containers move. `--host one` is short for `miguel@one`, the maintainer's test
-server on the tailnet. Without `--host` nothing changes: local mode is the default.
+Playwright stay here; only the containers move. `--host one` is an alias (in `remote.mjs`) for the
+maintainer's test server on the tailnet. Without `--host` nothing changes: local mode is the default.
 
 ```bash
 npm run e2e:infra:status -- --host one   # is the shared stack up? (exit 0 when every service answers)
@@ -132,7 +132,7 @@ How it works (`e2e/infra/remote.mjs`):
   `DOCKER_HOST=unix://…` points Compose and the tests that run `docker` themselves (the provider contracts,
   `lndProvider`, the Rust LND test) at it. `DOCKER_HOST=ssh://` would open a connection per call, and Compose opens
   dozens at once: sshd's `MaxStartups` resets them. The support scripts' `docker exec` (`chain.mjs`) runs on the
-  host's own docker CLI over that connection: ~0.15 s a call, where the Mac's CLI took 1–4 s with the Mac busy.
+  host's own docker CLI over that connection: ~0.15 s a call, where the Mac's CLI took 1 to 4 s with the Mac busy.
 - `docker-compose.remote.yml` goes on top of `docker-compose.yml`. A remote daemon cannot bind-mount this checkout,
   so the three files of `config/` travel as Compose configs. The project name and the containers are the same
   (`ghostly-e2e`, `ghostly-e2e-*`).
@@ -156,15 +156,18 @@ Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`
 
 GifCities and the Wayback Machine (`GIFCITIES`, `WAYBACK` in `support/fixtures.ts`) are **never** reached. GifCities limits requests per IP, answering with a 200 HTML page that has no CORS header (a browser page sees a failed request, which `route.abort("failed")` plays; `route.fulfill` cannot, since Playwright adds the CORS header itself), and our runs share the IPs Ghostly's own apps use: in September 2026 they were likely part of why it ran out. Each context gets `guardArchive(context)` first and the stubs after it. The guard answers only what gets past the stubs and aborts it, and the automatic `archiveGuard` fixture then fails the test. A spec with answers of its own adds a `context.route(GIFCITIES, handler)` (later routes win) and removes it with `unroute(GIFCITIES, handler)`. A bare `unroute(GIFCITIES)` drops the guard too. The Desktop suites cannot route requests, so they do not open the GIF panel.
 
-Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices read paid by themselves: the app never takes that as a payment, and tests get test sats from "Get test coins", see `getTestCoins` in `support/fixtures.ts`). CI does not even do that — it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's. `e2e/infra` has that mint (`ghostly-e2e-mint`, `E2E_MINT_URL=http://127.0.0.1:47090`), and the `E2E` workflow starts the same container by itself:
+Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices read paid by themselves: the app never takes that as a payment, and tests get test sats from "Get test coins", see `getTestCoins` in `support/fixtures.ts`). CI does not even do that: it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's. `e2e/infra` has that mint (`ghostly-e2e-mint`, `E2E_MINT_URL=http://127.0.0.1:47090`), and the `E2E` workflow starts the same container by itself:
 
 ```bash
 npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 ```
 
-`E2E_MINT_URL` is all it takes: the app is never told, so it goes on adding and spending `testnut.cashu.space` and the tests assert exactly what they asserted before — they just stop depending on one volunteer's server, which GitHub's runners cannot reach and which was blocking every release. Use the same mint software (`cashubtc/mintd`, which is what the public test mint runs); Nutshell refuses to quote an invoice whose mint quote was already issued, and the tests need that to work. Without `E2E_MINT_URL` the public mint answers for itself, as before.
+`E2E_MINT_URL` is all it takes: the app is never told, so it goes on adding and spending `testnut.cashu.space` and the tests assert exactly what they asserted before. They just stop depending on one volunteer's server, which GitHub's runners cannot reach and which was blocking every release. Use the same mint software (`cashubtc/mintd`, which is what the public test mint runs); Nutshell refuses to quote an invoice whose mint quote was already issued, and the tests need that to work. Without `E2E_MINT_URL` the public mint answers for itself, as before.
 
 ## What runs where
+
+Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of one feature:
+`npx playwright test -c e2e/playwright.config.ts --list --grep @feature:<id>`.
 
 | | |
 |---|---|
@@ -173,9 +176,9 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `web/chat.spec.ts` | two people: relay then peer to peer, nicknames, read ticks, long messages, offline delivery, emoji, GIFs, files (3 MiB, checksum), images |
 | `web/gif-busy.spec.ts` | GifCities' rate-limit page reads as busy: countdown, Try again disabled until the wait is over (the page's clock skips it), no request meanwhile, then GIFs; earlier GIFs while it waits again |
 | `web/calls.spec.ts` | video and audio calls, mute, camera, screen share, decline, the movable self view, the small call window, a call that outlives its chat, the lock over one |
-| `web/menus.spec.ts` | the chat, group and New menus: one line per row, nothing cut, inside the window — en, pt, ar, wide and 390px (a sheet) |
+| `web/menus.spec.ts` | the chat, group and New menus: one line per row, nothing cut, inside the window, in en, pt, ar, wide and 390px (a sheet) |
 | `web/mobile.spec.ts` | the phone layout: tabs, chat screen, composer |
-| `web/wallet.spec.ts` | `@network`: Lightning in, ecash out, requests, history and fees, invoice and token cards — against a real mint, ours in CI |
+| `web/wallet.spec.ts` | `@network`: Lightning in, ecash out, requests, history and fees, invoice and token cards, against a real mint (ours in CI) |
 | `web/chat-extras.spec.ts` | unread count, naming a chat, links (new tab, no opener/referrer), hostile text never becomes a link, contact pictures only on click and only https, per-message details, overlong text refused (and not kept), file size limit, Tech Info copy |
 | `web/invite-link.spec.ts` | an invite link opens its chat (fresh tab or running app) and leaves no key in the address or history; broken, damaged or conflicting links say so and never crash |
 | `web/network-settings.spec.ts` | TURN server saved, kept, cleared; relays sanitized; a relay list with none, or a TURN address WebRTC refuses, is refused with the reason |
@@ -190,30 +193,31 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, on Testnet wallets made with New: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
 | `web/fedimint-wallet.spec.ts` | Fedimint joins nothing on Mainnet and refuses what is not an invite code; the Lightning source form lists joined federations only; gated (`GHOSTLY_FEDIMINT_REGTEST=1`, see below): two peers join e2e/infra's federation, ecash in over the gateway, notes out and back, a Send in the chat in ecash, a request paid over the gateway's Lightning, Lightning out, both balances |
-| `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
+| `web/bark-wallet.spec.ts` | Bark (Second's Ark) on Mainnet: New checks Second's server first (one that does not answer leaves nothing), and a chain on another network is refused; `@network`: a Testnet wallet on Second's signet server, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
 | `web/wallet-bdk.spec.ts` | the BDK wallet as the on-chain source: offered in Testnet only, a new wallet's 12 words shown once, a bad phrase or an unreachable Esplora refused before anything is saved, the chat's Bitcoin card; gated (see below): funded, a Send from the wallet, a Send and a Request paid in the chat on regtest |
 | `web/wallet-webln.spec.ts` | the browser wallet (WebLN) as the Lightning source, with `window.webln` injected by the test: no wallet, a refused connection, invoices in and payments out (reviewed in Ghostly first), a refused wallet prompt that spends nothing, a chat request paid between two browser wallets (Lightning only, reviewed in the bubble); with `GHOSTLY_WEBLN_REGTEST=1`, the same against two real regtest LND nodes (see below) |
-| `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: the Lightning card on the Cashu mints by default, a source picked per mode (invoices through it, Mainnet keeping its own), the Bitcoin card's "no source" state and an on-chain send through a source — with the fake providers, no network |
-| `web/nostr-social.spec.ts` | the Nostr social layer on a shared proof: a contact's profile (with picture), follows (with direction hints against your own list) and notes (one hidden by your mute list) load only when asked, from the relays in your profile, with source and time; a contact without the proof sees nothing and asks no relay; publication off by default, then a note, a profile update and an unfollow/follow signed by a NIP-07 signer injected in the page — against a Nostr relay inside the test process (`support/nostrRelay.ts`, the WebSocket routed by Playwright), no network |
-| `web/wallet-nwc.spec.ts` | Lightning through Nostr Wallet Connect: a wallet connected by its URI receives and pays over its relay, and a bad URI or a Mainnet wallet in Testnet is refused — against a fake NWC wallet service on a relay in the test process, no network; gated (`GHOSTLY_NWC_REGTEST=1`, see below): two people on their own Alby Hub, a chat request paid over a regtest channel |
+| `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: a Cashu wallet's Lightning card starts on its mints, New adds another Lightning card beside it (invoices go through the card, the default moves, removing one leaves the other), each network offers only what it can run, and a Bitcoin wallet made with New and a source (Testnet only) pays on-chain. With the fake providers, no network |
+| `web/nostr-social.spec.ts` | the Nostr social layer on a shared proof: a contact's profile (with picture), follows (with direction hints against your own list) and notes (one hidden by your mute list) load only when asked, from the relays in your profile, with source and time; a contact without the proof sees nothing and asks no relay; publication off by default, then a note, a profile update and an unfollow/follow signed by a NIP-07 signer injected in the page, against a Nostr relay inside the test process (`support/nostrRelay.ts`, the WebSocket routed by Playwright), no network |
+| `web/wallet-nwc.spec.ts` | Lightning through Nostr Wallet Connect: a wallet connected by its URI receives and pays over its relay, and a bad URI or a Mainnet wallet in Testnet is refused, against a fake NWC wallet service on a relay in the test process, no network; gated (`GHOSTLY_NWC_REGTEST=1`, see below): two people on their own Alby Hub, a chat request paid over a regtest channel |
 | `web/wallet-cln.spec.ts` | Core Lightning as the Lightning source (gated, `GHOSTLY_CLN_REGTEST=1`): the form with a restricted rune (never back in the page), an invoice of the node paid by the other node, an invoice of the other node paid from the card, a chat request paid from one person's node to the other's, balances on both nodes and both cards |
-
-| `web/wallet-lnd.spec.ts` | gated (`GHOSTLY_LND_REGTEST=1`): the LND provider against two real regtest nodes, over REST from the page — the form, invoices in and out through the Lightning card, a chat request paid, both nodes' balances |
+| `web/wallet-lnd.spec.ts` | gated (`GHOSTLY_LND_REGTEST=1`): the LND provider against two real regtest nodes, over REST from the page: the form, invoices in and out through the Lightning card, a chat request paid, both nodes' balances |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
 | `web/external-wallet.spec.ts` | @network: a request paid with another wallet (QR, `lightning:` link, Copy, "I paid"; the payer pays from its own wallet page and both bubbles turn Paid by themselves), and a Lightning address served by `support/lnurl.ts` (a server in the test process on `E2E_LNURL_PORT`, 47110 by default, handing out the test mint's invoices) paid through the Cashu source, in the wallet and from a chat card |
 | `extension/wallet-bdk.spec.ts` | gated (`GHOSTLY_BDK_REGTEST=1`): the BDK wallet's WebAssembly in the extension's offscreen document, receiving and sending on regtest |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
-| `desktop/smoke.spec.ts` | the bundled Tauri app opens, and the peer behind it is the one Rust backs |
+| `desktop/smoke.spec.ts` | the bundled Tauri app opens, the peer behind it is the one Rust backs, and `<html lang>`/`<html dir>` follow the language |
+| `desktop/dht-direct.spec.ts` | two Desktop apps pair and go live reading the Mainline DHT directly (a DHT of their own, `support/mainlineTestnet.ts`), never reading a relay |
+| `desktop/voice.spec.ts` | voice recordings from every client play in the Desktop WebView under its Content-Security-Policy |
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
-| `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite — see [Compatibility with v0.4](#compatibility-with-v04) |
-| `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT — see [Desktop on macOS](#desktop-on-macos) |
-| `desktop-macos/notifications.spec.ts` | macOS only: Settings → System notifications in a Desktop copy in a temporary folder (macOS gives it none) says to move the app; from another folder the switch is offered and a notification call is answered — see [Desktop on macOS](#desktop-on-macos) |
+| `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with v0.4](#compatibility-with-v04) |
+| `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT. See [Desktop on macOS](#desktop-on-macos) |
+| `desktop-macos/notifications.spec.ts` | macOS only: Settings → System notifications in a Desktop copy in a temporary folder (macOS gives it none) says to move the app; from another folder the switch is offered and a notification call is answered. See [Desktop on macOS](#desktop-on-macos) |
 
 ## Desktop
 
-Desktop is not a browser, so it is not a Playwright project: `tauri-driver` launches the bundled binary and hands its WebView to the platform's WebDriver, and `support/desktop.ts` speaks that protocol over HTTP. Playwright is still the runner — it is only the driving that differs — so the test reads like the others. Nothing is added to the app to make this work: what the test drives is what people install.
+Desktop is not a browser, so it is not a Playwright project: `tauri-driver` launches the bundled binary and hands its WebView to the platform's WebDriver, and `support/desktop.ts` speaks that protocol over HTTP. Playwright is still the runner (only the driving differs), so the test reads like the others. Nothing is added to the app to make this work: what the test drives is what people install.
 
 ```bash
 cargo install tauri-driver --locked
@@ -233,11 +237,11 @@ Two things to know:
 - Build with `tauri build`, not `cargo build`. A plain cargo debug build points the WebView at `devUrl`, and with no dev server running the window only says "Connection refused". `--debug --no-bundle` keeps the compile short and skips the installers; the test runs the binary from `target/`, newest of `debug` and `release`.
 - The app runs under `GHOSTLY_PROFILE=e2e`, so a test never opens your own chats.
 
-The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network says `Mainline DHT (BEP44) — Direct UDP` (Rust reaching the DHT, where a browser would say `Pkarr relays (HTTP) → …`), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `src/desktop/host.ts` for a browser stand-in, this goes red.
+The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network names Mainline DHT (BEP44) over direct UDP (`data-testid="network-protocol"`: Rust reaching the DHT, where a browser names Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `src/desktop/host.ts` for a browser stand-in, this goes red.
 
 ### On macOS
 
-`npm run check:desktop-bundle` runs everywhere, in a second, and catches the same class of mistake from the other end: it reads what `src/desktop/` asks of Rust and fails if it is not in `dist/`, and it fails when a module is added to `PLATFORM_MODULES` without someone writing down why Desktop can live with the stand-in. It is a build assertion, not a test — but it is what stands between a Mac and a Desktop feature that silently does nothing. CI runs it on every pull request.
+`npm run check:desktop-bundle` runs everywhere, in a second, and catches the same class of mistake from the other end: it reads what `src/desktop/` asks of Rust and fails if it is not in `dist/`, and it fails when a module is added to `PLATFORM_MODULES` without someone writing down why Desktop can live with the stand-in. It is a build assertion, not a test, but it is what stands between a Mac and a Desktop feature that silently does nothing. CI runs it on every pull request.
 
 A Mac can still run the Linux harness inside a Linux container: `ubuntu:22.04` (arm64 works) with the packages of
 the `Desktop (Tauri)` job, Node 22, Rust, `cargo install tauri-driver` and `xvfb`, the repository copied in (not
@@ -247,13 +251,14 @@ mounted over: `node_modules` must be Linux's), then `npm ci`, `npm run tauri -- 
 ### Several apps, and their network
 
 `openDesktop({ profile, home, env })` opens one more app: `profile` is its `GHOSTLY_PROFILE`, `home` a directory of
-its own for `HOME` and the XDG directories (`desktopHome(name)` makes one) — two apps on one machine otherwise
-share one WebKit store — and `env` whatever else it should start with. The app reads two variables for its network,
-both for a private network as much as for tests:
+its own for `HOME` and the XDG directories (`desktopHome(name)` makes one; two apps on one machine otherwise
+share one WebKit store), and `env` whatever else it should start with. The app reads three variables for its network,
+for a private network as much as for tests:
 
 | | |
 |---|---|
 | `GHOSTLY_PKARR_RELAYS` | comma-separated Pkarr relay URLs used instead of the Mainline DHT and the public relays, with no read budget (`src-tauri/src/pkarr_network.rs`). The matrix points it at the test's relay (`relay.listen()`), which the browsers reach by request interception |
+| `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`src-tauri/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
 | `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native-transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
 
 `DesktopApp` clicks, types (`type`, with `\uE007` for Enter), reads text and attributes, and runs a script in the
@@ -289,7 +294,7 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   the test process on 49701-49703, the drivers on 49710-49711. The call's STUN lookups and the wallets' providers
   go out as the apps always do.
 - **Camera and microphone.** None are used. WKWebView has no fake-device flags, so the test answers
-  `getUserMedia` with a synthetic stream — an oscillator through Web Audio and a canvas that changes every frame
+  `getUserMedia` with a synthetic stream: an oscillator through Web Audio and a canvas that changes every frame
   (`captureStream`). Replace it on `MediaDevices.prototype`: on the `navigator.mediaDevices` instance, the answering
   app sometimes still reached WebKit's own, which with no camera fails "OverconstrainedError: Invalid constraint".
   Media flowing is read from each side's `RTCPeerConnection` stats (inbound audio and video bytes, decoded frames,
@@ -307,7 +312,7 @@ the test that many times on one build, which is how to measure a suspected flake
 
 Each spec above tests one feature in one setup. `matrix/` tests them together: two people on a combination of
 clients, transport, delivery, wallet network, payment rail and source, identity proof, group, restored profile, language
-and screen size — every pair of values at least once, and every client × transport × delivery combination.
+and screen size: every pair of values at least once, and every client × transport × delivery combination.
 
 ```bash
 npm run e2e:matrix                                # every scenario, with .env.e2e from npm run e2e:infra:up
@@ -322,13 +327,12 @@ npm run e2e:matrix -- --shard 1/4 --docs          # a shard; --docs writes the t
 |---|---|
 | `matrix/dimensions.ts` | the dimensions and their values, as data; the constraints (what cannot exist, and why); which subset is covered fully |
 | `matrix/pairwise.ts` | the generator: all pairs (and the chosen n-wise subset) with the fewest scenarios, greedy and seeded, so a seed is always the same matrix and a scenario id (a hash of its combination) always the same combination |
-| `matrix/plan.ts` | the steps of a scenario as data: which apply to a combination, the features of `features.json` each covers, the infrastructure each needs, which are not written yet — and so the scenario's tags |
-| `matrix/blocks.ts` | how each step is acted out — pair, talk, away and back (live, DHT, store-and-forward), transport, files, identity proof, payments, group, backup and restore — each asserting what the other person sees |
+| `matrix/plan.ts` | the steps of a scenario as data: which apply to a combination, the features of `features.json` each covers, the infrastructure each needs, which are not written yet, and so the scenario's tags |
+| `matrix/blocks.ts` | how each step is acted out (pair, talk, away and back over live, DHT and store-and-forward, transport, files, identity proof, payments, group, backup and restore), each asserting what the other person sees |
 | `matrix/matrix.spec.ts` | one test per scenario, from the table written into it (`npm run e2e:matrix:table`): the tags are string literals the test map reads, and `table.test.ts` (in `npm test`) fails when the table no longer matches the generator |
 | `matrix/actors.ts` | one way to drive a web or extension peer in English or Portuguese, on a laptop or a phone (`either("Join chat")` matches the text in both languages) |
 | `matrix/requirements.ts` | what a block needs from outside (a mint, S3, a regtest stack, `gpg`…) and how to tell it is up |
 | `matrix/reporter.ts` | the matrix as a table: `test-results/matrix-summary/summary.md` and `results.json`, the job summary in CI |
-
 | `matrix/desktop.ts` · `matrix/people.ts` | the scenarios with a Desktop peer (`desktop-web`, `desktop-desktop`): the same person, whether Playwright drives a browser or WebDriver drives the app; pair, talk, go away and back, pick a transport |
 | `matrix/rails.ts` | the Testnet payment blocks of the rails that need `e2e/infra` (LND, Core Lightning, NWC, Breez, Arkade, Bark, BDK, USDT): the source set up through its form or its wallet, funded from the environment, then a request and a direct Send each way in the chat, with the bubbles and both balances checked |
 
@@ -346,7 +350,7 @@ offline; its block runs only with a funded counterpart wallet (`GHOSTLY_BREEZ_CO
 that reason otherwise.
 
 A scenario with a Desktop peer needs Linux (or Windows), `tauri-driver` and a built app; elsewhere it is skipped
-with that reason. Desktop only chats in it — it pairs, talks, goes away and back, and picks a transport — so its
+with that reason. Desktop only chats in it (it pairs, talks, goes away and back, and picks a transport), so its
 files and wallet steps are skipped with the reason, and every other dimension stays at its plainest value. On
 Linux, WebKitGTK has no WebRTC at all: two Desktops open on the DHT and go live on Iroh or HyperDHT from each
 other's capability record, while a Desktop and a browser (WebRTC only) have no live transport in common and stay on
@@ -380,20 +384,22 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports 
 
 ## When they run
 
-- Before every release: the `Release` workflow runs them first, and neither the draft release nor the web image is made unless they pass. Desktop is a job of its own there, so a Rust build never holds up the browser tests.
-- By hand: Actions → E2E → Run workflow, optionally with the URL of a deployed web app, or `npm run test:e2e` locally.
-- Everything, gated suites included: nightly on `dev` and by hand, Actions → E2E (full), which runs
-  `npm run e2e:full`. On `ubuntu-24.04` it took about 42 minutes on 2026-09-24: the environment up and funded in
-  53 s, the vitest contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes — well inside a runner's
-  six hours and the workflow's 150-minute cap. On a 14-core Mac with 7 workers, about 22–28 minutes.
+The app's e2e suites do not run on pull requests: they would hold up every merge. The table of every workflow is in
+[docs/TESTING.md](../docs/TESTING.md#what-ci-runs).
 
-- Desktop on macOS: on every pull request and push, as part of CI (required), nightly, and by hand
-  ([Desktop on macOS](#desktop-on-macos)).
-- The Desktop specs (`e2e/desktop/`): before every release (the E2E workflow's Desktop job) and nightly, after the
-  Desktop scenarios of E2E (full), which build the app anyway.
-- Compatibility with v0.4.0: nightly, before every release and by hand ([Compatibility with v0.4](#compatibility-with-v04)).
+| Suite | When |
+|---|---|
+| Web and extension (`E2E`, `e2e.yml`) | before every release (`release.yml` runs it first; no draft release and no web image unless it passes), and by hand (Actions → E2E → Run workflow, optionally with the URL of a deployed web app) |
+| Desktop specs on Linux (`e2e/desktop/`) | a job of its own in `E2E` (a Rust build never holds up the browser tests), and nightly after the Desktop scenarios of E2E (full) |
+| Everything, gated suites included (`E2E (full)`, `npm run e2e:full`) | nightly on `dev`, and by hand |
+| Compatibility with v0.4.0 | nightly, before every release, and by hand ([Compatibility with v0.4](#compatibility-with-v04)) |
+| Desktop on macOS | on every pull request and push, as part of CI (required), nightly, and by hand ([Desktop on macOS](#desktop-on-macos)) |
 
-Not on pull requests: at about four minutes it would hold up every merge. `npm run check:desktop-bundle` is the exception — it is fast enough to run there.
+`npm run check:desktop-bundle` also runs on every pull request (Frontend builds): it takes seconds.
+
+E2E (full) on `ubuntu-24.04` took about 42 minutes on 2026-09-24: the environment up and funded in 53 s, the vitest
+contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes, inside the workflow's 150-minute cap. On a
+14-core Mac with 7 workers, about 22 to 28 minutes.
 
 ## Writing one
 
@@ -404,8 +410,8 @@ Say what it covers: `{ tag: ["@feature:<id>"] }` with ids from [`features.json`]
 ## The gated suites
 
 Each needs `e2e/infra` up (or `npm run e2e:full`); the commands below run one of them alone. The support scripts
-under `support/*-regtest/` drive their part of the environment — `node e2e/support/<suite>-regtest/regtest.mjs`
-with no argument lists what each can do (mine, pay, show balances) — and read credentials (macaroons, runes,
+under `support/*-regtest/` drive their part of the environment (`node e2e/support/<suite>-regtest/regtest.mjs`
+with no argument lists what each can do: mine, pay, show balances) and read credentials (macaroons, runes,
 pairing URIs, notes) from the containers into memory, never printing them.
 
 ### Held messages on a local S3 server
@@ -464,7 +470,7 @@ shared on-chain contract suite runs against a fresh wallet, then Alice's wallet 
 Bob through the `PaymentCoordinator` (review signed and locked, nothing in the mempool until approval),
 is reconciled by txid until it confirms, and both balances and the history are checked; a cancelled review
 unlocks its coins, a transaction the node rejects is `NothingSpentError` with its coins unlocked, a wrong
-password never runs, and a regtest node is refused in the Mainnet mode. It prints the txids and balances.
+password never runs, and a regtest node is refused by a Mainnet wallet. It prints the txids and balances.
 
 ### Every provider, sending and receiving
 
@@ -480,7 +486,7 @@ few sats that batch costs.
 
 ### Breez (Spark) on Breez's regtest
 
-Breez's nodeless SDK is the `breez` Lightning source (Testnet only for now). Its regtest is hosted by Breez and
+Breez's nodeless SDK is the `breez` Lightning source (Testnet only). Its regtest is hosted by Breez and
 Lightspark: **nothing runs locally, no API key**, worthless sats. The Ghostly side makes fresh wallets each run;
 the other side of every payment is a counterpart wallet the test runs from Node with the SDK's Node build
 (`support/breez.ts`, wallets under the system temp folder, `ghostly-breez-e2e/`).
@@ -508,7 +514,7 @@ own review pays Cashu only for now.
 
 ### Spark to Spark on Breez's regtest
 
-Spark is also its own way of paying (`spark`, WISP 2xx): a Spark wallet per profile and mode, the same Breez SDK
+Spark is also its own way of paying (`spark`, WISP 2xx): a Spark wallet per profile and network, the same Breez SDK
 as the Breez source. Testnet's wallet is made by itself on Breez's regtest (no API key); Mainnet's needs one.
 Nothing runs locally, so nothing of it is in `e2e/infra`.
 
@@ -660,5 +666,5 @@ The vitest file runs the provider contract against Alice's node (Bob's pays and 
 answer is lost, found paid by looking it up. The e2e connects each person's browser wallet in the app: Alice
 receives 1,000 sats from Bob's node, pays 400 from the Lightning card, and pays Bob's 250-sat request in the chat
 (Cashu off, so it carries only his wallet's invoice) after reviewing it in the bubble; both nodes' channel
-balances move by exactly that, both apps show them, and the balances are printed. What a real Alby adds on top —
-its own prompts, its own fee budget — is not exercised here.
+balances move by exactly that, both apps show them, and the balances are printed. What a real Alby adds on top
+(its own prompts, its own fee budget) is not exercised here.

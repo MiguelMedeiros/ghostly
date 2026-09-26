@@ -4,8 +4,8 @@ Every app screenshot the website shows comes from here: Playwright specs that dr
 web app (and, for services, the built extension) with a small cast of people who pair, talk,
 send photos, call, pay each other and prove who they are. Peers find each other through the e2e
 suite's in-process Pkarr relay (`e2e/support/relay.ts`). Wallets are funded with test coins from
-the shared regtest environment (`e2e/infra`), in the app's Testnet mode: no step can touch a
-Mainnet wallet, and the Testnet badge and notices the app shows stay in the shots.
+the shared regtest environment (`e2e/infra`), on Testnet wallets only: no step can touch a
+Mainnet wallet, and the Testnet labels the app shows stay in the shots.
 
 ## One command
 
@@ -72,4 +72,7 @@ nine at night whenever the capture runs. The clock itself is never faked.
     --skipLibCheck --types node --lib ES2022,DOM,DOM.Iterable --allowJs website/scripts/capture/*.ts
   ```
 - Voice messages and the pairing progress animation are not shot yet: add a line to the scene
-  they belong to once they are on `dev`.
+  they belong to.
+- `wallet.ts` still switches the old global Testnet mode (`wallet-mode`, `testnet-notice`), which the
+  app no longer has (wallets are made per network since #286). The wallet shots need that step
+  rewritten for Wallets → New → Testnet before the next capture.

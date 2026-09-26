@@ -42,7 +42,7 @@ permissions, the isolated runtime and package signing are a later phase of the r
 apps, catalogs and GhostlyOS"); until then, release builds of Ghostly carry no plugin, and test builds
 carry only the example.
 
-What the engine *does* enforce, for every provider, built-in or not: the platform and mode rules of the
+What the engine *does* enforce, for every provider, built-in or not: the platform and network rules of the
 pickers; the network check before a source is saved; the checks on what a provider returns (an invoice
 decodes and matches what was asked, a fee is within the cap, a prepared transaction pays the reviewed
 address and amount, a test-network invoice is refused in Mainnet); the journal-before-spend and
@@ -53,9 +53,10 @@ malicious adapter. It protects them from an honest one's mistakes.
 ## A wallet source
 
 A **Lightning source** creates and pays invoices (a node, a remote wallet, a mint); an **on-chain
-source** gives addresses, signs and broadcasts transactions (a BDK wallet, a Bitcoin Core wallet). One
-of each is active per profile and per network (a Testnet wallet and a Mainnet wallet each have their own). Everything around it is the app's: storage, sealed
-secrets, per-mode sources, the picker and its form, the Lightning journal, the on-chain
+source** gives addresses, signs and broadcasts transactions (a BDK wallet, a Bitcoin Core wallet). Each
+profile has one on-chain source per network (Mainnet, Testnet) and several Lightning cards per network,
+each with its own source. Everything around it is the app's: storage, sealed secrets, per-network sources,
+the picker and its form, the Lightning journal, the on-chain
 review/approve/reconcile flow, reconciliation of lost answers.
 
 ```ts
@@ -76,7 +77,7 @@ export const myLightning: LightningProviderDescriptor = {
   label: "My node",
   kind: "lightning",
   description: "Your own node over its API. It holds the sats.",
-  networks: ["bitcoin", "signet", "regtest"], // a mode offers only providers with a network of that mode
+  networks: ["bitcoin", "signet", "regtest"], // Mainnet offers it for "bitcoin", Testnet for the others
   platforms: ["web", "extension", "desktop"],
   fields: [{ name: "url", label: "API URL", kind: "url" }, { name: "token", label: "Token", kind: "secret" }],
   validate({ config, secrets }) { /* throw a message the person can act on, before anything is contacted */ },
@@ -116,7 +117,7 @@ tells you what the registry would refuse.
   `redact()` with the source's secrets, as a safety net.
 - A provider gets its secrets in `create()` and keeps them in memory only.
 
-### Platforms and modes
+### Platforms and networks
 
 `platforms` says where the provider can run: the engine runs in the page on `web` and `desktop`
 (Tauri) and in an offscreen document in the `extension`. A provider that needs `window.webln` is
@@ -124,10 +125,10 @@ tells you what the registry would refuse.
 `host.invoke` (a Tauri command, which is the app's to add: see `PROVIDERS.md`). Browsers reach HTTP
 APIs only with CORS; say so in `description` when a node must allow the origin.
 
-Mainnet and Testnet keep separate sources. `info().network` must be a network of the mode the source
-is used in (`bitcoin` is Mainnet, everything else Testnet); a provider on the wrong one is closed and
-refused before anything is saved. `host.signal` aborts when the source is replaced, the mode switches
-or the engine stops: end long waits on it.
+Mainnet and Testnet keep separate sources, and both are open at once. The contract names the wallet
+network `mode` (`"mainnet"` or `"testnet"`): `info().network` must belong to it (`bitcoin` is Mainnet,
+everything else Testnet), and a provider on the wrong one is closed and refused before anything is saved.
+`host.signal` aborts when the source is replaced or the engine stops: end long waits on it.
 
 ## An identity proof
 
@@ -187,7 +188,7 @@ export default plugin;
 ```
 
 Two ways into the app, both additive to the built-in lists (built-ins first, then plugins, then the
-test fakes), both under the same platform and mode rules:
+test fakes), both under the same platform and network rules:
 
 - **At build time.** `GHOSTLY_PLUGINS=path/to/plugin.ts npm run build:web` (comma-separated paths from
   the repository root, each default-exporting a plugin) compiles them into the web app, the extension
@@ -239,7 +240,7 @@ protocol library the apps and the CLI are built on. It follows the WISP drafts i
 
 ## Versioning and stability
 
-- The SDK carries Ghostly's version (`0.4.0` today; `scripts/bump-version.mjs` bumps it with the rest).
+- The SDK carries Ghostly's version (`packages/sdk/package.json`; `scripts/bump-version.mjs` bumps it with the rest).
   Before `1.0.0`, a **minor** may change a contract and says so in `CHANGELOG.md`; a **patch** never
   does. From `1.0.0`, semver applies to everything the entry points export.
 - `SDK_API` is the contract generation (`1`). A plugin declares the one it was written against and is

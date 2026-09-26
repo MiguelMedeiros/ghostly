@@ -1,68 +1,79 @@
 # Installation
 
-## Nothing to install
+Every download is on the latest GitHub release: **https://github.com/MiguelMedeiros/ghostly/releases/latest**
 
-Open **https://app.ghostly.tools** in any browser. On a phone, add it to the home screen (Share → *Add to Home Screen* on iOS, ⋮ → *Install app* on Android) and it opens like a native app. See [WEB.md](WEB.md) for what a web page can and cannot do, and how to host it yourself.
+## Web app: nothing to install
+
+Open **https://app.ghostly.tools** in any modern browser.
+
+- On a phone, add it to the home screen (Share, *Add to Home Screen* on iOS; ⋮, *Install app* on Android) and it opens like an app.
+- Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
 
 ## Browser extension (Chrome, Brave, Edge)
 
-1. Download [ghostly-browser-extension-0.4.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-browser-extension-0.4.0.zip) and unzip it somewhere you will keep.
+**From the Chrome Web Store:** [Ghostly](https://chromewebstore.google.com/detail/ghostly/nbedaagicniejlmfcncndfjcejaidbcf). Chrome keeps it up to date. The store version can trail the GitHub release while a new one is in review.
+
+**From the release zip** (the newest version, or a browser without store access):
+
+1. Download [ghostly-browser-extension-0.4.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-browser-extension-0.4.0.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
-Ghostly tells you when a new version is out, but an unpacked extension is the one thing Chrome never updates by itself: replace the folder's contents with the new zip and press the reload arrow on the extension's card. It is not in the Chrome Web Store yet. More in [BROWSER.md](BROWSER.md).
+Chrome never updates an unpacked extension. Ghostly tells you when a new version is out; replace the folder's contents with the new zip and press the reload arrow on the extension's card. More in [BROWSER.md](BROWSER.md).
 
-## Desktop Apps
+## Desktop app
 
-The app updates itself: when a release is out it offers it, downloads it, checks it carries Ghostly's signature and restarts into the new version. On Linux that is the AppImage; the `.deb` is updated by the package manager it came from. The check runs while **Settings → Updates** allows it, and never installs anything without being asked.
+Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest):
 
-| Platform | Architecture | Download |
-|----------|--------------|----------|
-| **macOS** | Apple Silicon (M1/M2/M3) | [Ghostly_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_aarch64.dmg) |
-| **macOS** | Intel (x64) | [Ghostly_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64.dmg) |
-| **Windows** | x64 (Installer) | [Ghostly_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64-setup.exe) |
-| **Windows** | x64 (MSI) | [Ghostly_x64.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64_en-US.msi) |
-| **Linux** | x64 (AppImage) | [Ghostly_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.AppImage) |
-| **Linux** | x64 (Debian/Ubuntu) | [Ghostly_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.deb) |
+| Platform | File |
+|---|---|
+| macOS, Apple silicon | [Ghostly_0.4.0_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_aarch64.dmg) |
+| macOS, Intel | [Ghostly_0.4.0_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64.dmg) |
+| Windows x64, installer | [Ghostly_0.4.0_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64-setup.exe) |
+| Windows x64, MSI | [Ghostly_0.4.0_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64_en-US.msi) |
+| Linux x64, AppImage | [Ghostly_0.4.0_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.AppImage) |
+| Linux x64, Debian/Ubuntu | [Ghostly_0.4.0_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.deb) |
 
-## CLI (Command Line)
+- **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings, Updates** allows it, and nothing installs without your OK.
+- **Linux has no calls and no WebRTC** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT.
+- **Checksums.** Each release has `SHA256SUMS.txt` and its signature `SHA256SUMS.txt.asc`. Check a download with `shasum -a 256 -c SHA256SUMS.txt --ignore-missing`.
+
+## CLI
+
+`ghostly-cli` is a compatibility client for bots and scripts ([CLI.md](CLI.md)). It is not on crates.io.
 
 | Platform | Download |
-|----------|----------|
-| **macOS** (Apple Silicon) | [ghostly-cli-macos-arm64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-cli-macos-arm64) |
-| **macOS** (Intel) | [ghostly-cli-macos-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-cli-macos-x64) |
-| **Linux** (x64) | [ghostly-cli-linux-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-cli-linux-x64) |
-| **Windows** (x64) | [ghostly-cli-windows-x64.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-cli-windows-x64.exe) |
+|---|---|
+| macOS, Apple silicon | [ghostly-cli-macos-arm64](https://github.com/MiguelMedeiros/ghostly/releases/latest/download/ghostly-cli-macos-arm64) |
+| macOS, Intel | [ghostly-cli-macos-x64](https://github.com/MiguelMedeiros/ghostly/releases/latest/download/ghostly-cli-macos-x64) |
+| Linux x64 | [ghostly-cli-linux-x64](https://github.com/MiguelMedeiros/ghostly/releases/latest/download/ghostly-cli-linux-x64) |
+| Windows x64 | [ghostly-cli-windows-x64.exe](https://github.com/MiguelMedeiros/ghostly/releases/latest/download/ghostly-cli-windows-x64.exe) |
 
-Or install via Cargo:
+Or build it from a clone:
 
 ```bash
-cargo install ghostly-cli
+cargo install --path cli
 ```
 
-## Build from Source
+## Build from source
 
-Prefer to summon your own ghost? Here's how:
+Requirements (what the release workflow uses):
+
+- Node.js 22 and npm
+- Rust, stable toolchain
+- The [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS. On Debian/Ubuntu: `libwebkit2gtk-4.1-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev`
 
 ```bash
-# Clone the haunted repository
 git clone https://github.com/MiguelMedeiros/ghostly.git
 cd ghostly
+npm ci
 
-# Install dependencies
-npm install
+npm run tauri dev        # Desktop, development
+npm run tauri build      # Desktop, release bundles in target/release/bundle/
 
-# Summon the ghost (development)
-npm run tauri dev
-
-# Build for production
-npm run tauri build
+npm run dev -w @ghostly/web   # web app on http://localhost:5180
+npm run build:web             # web app, static files in web/dist
+npm run build:extension       # extension, load extension/dist unpacked
 ```
 
-### Requirements
-
-- Node.js 18+
-- Rust 1.70+
-- [Tauri prerequisites](https://tauri.app/v1/guides/getting-started/prerequisites)
-
-> 💡 **Tip:** The built app will be in `src-tauri/target/release/bundle/`
+The Desktop build bundles the Node runtime that runs it, for HyperDHT (`scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).

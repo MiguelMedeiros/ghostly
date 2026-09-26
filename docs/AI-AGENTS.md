@@ -1,67 +1,39 @@
-# AI Agents Integration
+# AI agents
 
-Give your AI agent encrypted superpowers! Ghostly integrates with [OpenClaw](https://openclaw.dev) and other AI coding agents.
+Give your AI agent encrypted messaging: [cli/SKILL.md](../cli/SKILL.md) teaches an agent to use `ghostly-cli`, for [OpenClaw](https://openclaw.dev) and other coding agents.
 
-## Install the Skill
+## 1. Install the CLI
+
+The agent needs `ghostly-cli` on its `PATH`: a binary from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest), or `cargo install --path cli` from a clone. It is not on crates.io. See [CLI.md](CLI.md#install).
+
+## 2. Install the skill
 
 ### OpenClaw / Codex
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md \
+curl -fsSL --create-dirs https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md \
   -o ~/.codex/skills/ghostly-cli/SKILL.md
 ```
 
 ### Cursor
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md \
+curl -fsSL --create-dirs https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md \
   -o ~/.cursor/skills/ghostly-cli/SKILL.md
 ```
 
-## Commands
+`main` holds the released version of the skill.
 
-| Command | Description |
-|---------|-------------|
-| `ghostly-cli send` | Send encrypted messages |
-| `ghostly-cli recv` | Receive messages (poll once) |
-| `ghostly-cli watch` | Stream incoming messages (NDJSON) |
-| `ghostly-cli identity new` | Generate new keypair + shared key |
-| `ghostly-cli invite new` | Create invite URL for peers |
+## What the agent can do
 
-## Bot Examples
+| Command | What |
+|---|---|
+| `ghostly-cli identity new` | a new keypair and shared key |
+| `ghostly-cli invite new` / `invite parse` | make or read a `ghost://` invite |
+| `ghostly-cli send` | send one encrypted message |
+| `ghostly-cli recv` | read the peer's messages once |
+| `ghostly-cli watch` | stream new messages as JSON lines |
 
-### Echo Bot
+Every flag and output: [CLI.md](CLI.md). Bot examples (echo, OpenAI, notifications): [cli/SKILL.md](../cli/SKILL.md#bot-patterns).
 
-```bash
-ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY" | while read -r msg; do
-  text=$(echo "$msg" | jq -r '.text')
-  ghostly-cli send --seed "$SEED" --peer "$PEER" --key "$KEY" "Echo: $text 👻"
-done
-```
-
-### AI Bot (OpenAI)
-
-```bash
-ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY" | while read -r msg; do
-  text=$(echo "$msg" | jq -r '.text')
-  response=$(curl -s "https://api.openai.com/v1/chat/completions" \
-    -H "Authorization: Bearer $OPENAI_KEY" \
-    -d '{"model":"gpt-4","messages":[{"role":"user","content":"'"$text"'"}]}' \
-    | jq -r '.choices[0].message.content')
-  ghostly-cli send --seed "$SEED" --peer "$PEER" --key "$KEY" "$response"
-done
-```
-
-### Notification Service
-
-```bash
-notify() {
-  ghostly-cli send --seed "$BOT_SEED" --peer "$DEVICE_PUBKEY" --key "$KEY" \
-    --nick "Server" "[$(date)] $1"
-}
-
-notify "Deployment completed"
-notify "CPU usage above 90%"
-```
-
-> 📖 Full documentation: [cli/SKILL.md](../cli/SKILL.md)
+The CLI reads only its own `ghost://` invites, not the app's `ghostly1…` ones.

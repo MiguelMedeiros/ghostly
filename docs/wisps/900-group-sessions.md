@@ -8,7 +8,7 @@
 | Updated | 2026-09-24 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | Two profiles: [`group-mesh/1`](9xx-group-mesh.md) (private, up to eight) and [`group-community/1`](9xx-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text only |
+| Implementation | Two profiles: [`group-mesh/1`](9xx-group-mesh.md) (private, up to eight) and [`group-community/1`](9xx-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -40,7 +40,7 @@ A relay or rendezvous-based fan-out was considered and rejected for the first pr
 
 ## Coordinator, roster and epochs
 
-The community profile departs from what follows in three ways, detailed in [its document](9xx-group-community.md): any member may admit (commit `add`) and commit a departure on the leaver's signed request, the admin keeping removal, role, rotation and the link; adding derives the next secret instead of sealing a fresh one to everyone; and concurrent commits by different members are a race settled by a deterministic rule (longest branch, then lowest hash), while two commits by the admin after the same commit are still a fork. In the mesh:
+The community profile departs from what follows in three ways, detailed in [its document](9xx-group-community.md): any member may admit (commit `add`) and commit a departure on the leaver's signed request, the admin keeping removal, role, rotation and the link; adding derives the next secret instead of sealing a fresh one to everyone; and concurrent commits by different members are a race settled by a deterministic rule (a branch that keeps an admin change wins, then the longest branch, then the lowest hash), while two commits by the admin after the same commit are still a fork. In the mesh:
 
 Exactly **one admin** per epoch is the membership coordinator. The admin signs every change as a commit that carries the whole roster after it and the hash of the previous commit; the chain from the genesis is the authenticated roster of every epoch. Roles are `admin` and `member`; the role moves by a commit. There is no election: an admin who loses its key leaves a group that must be re-formed. Descriptor revision, connection attempt and cryptographic epoch are one counter here, the epoch: every commit (admission, removal, role transfer, rotation) is a new epoch with a new secret, and a network reconnect is not a commit.
 
@@ -72,7 +72,7 @@ The admin invites, removes and transfers its role; any member leaves. Local bloc
 
 ## Compatibility and open decisions
 
-Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Mesh groups, their links and frames are unchanged by the community profile; an app that knows only the mesh never receives a community frame and says a `group2/` link is not one it can open. Open before Proposed: multiple admins; member key updates; approval, expiry and use counts on links; group files and media as capabilities of their own (payments between members are in the mesh profile, [9xx § Payments](9xx-group-mesh.md#payments), not yet in communities); native transports on edges; a profile beyond a few hundred members; interoperability with a second implementation.
+Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Mesh groups, their links and frames are unchanged by the community profile; an app that knows only the mesh never receives a community frame and says a `group2/` link is not one it can open. Open before Proposed: multiple admins; member key updates; approval, expiry and use counts on links; group files and media as capabilities of their own (payments between members are in both profiles: [mesh](9xx-group-mesh.md#payments), [community](9xx-group-community.md#payments)); native transports on edges; a profile beyond a few hundred members; interoperability with a second implementation.
 
 ## Conformance
 

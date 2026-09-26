@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [403](403-dht-text.md) |
-| Implementation | Experimental rank-sum negotiation in every new chat; the DHT floor, background retry and upgrade (decided 2026-09-25; being implemented) |
+| Implementation | Experimental: rank-sum negotiation, the DHT floor, background retry and upgrade in every new chat; relayed transports; a choice made while not live travels in the capability record |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -20,7 +20,7 @@ Every 1:1 chat of [400](400-chat.md) has two layers. Layer 0 is the DHT: the ren
 
 ### Inputs
 
-Each side's candidates come from its layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)) before any stream exists, and from the transcript-bound `pair-offer` once a session is ready ([401](401-paired-chat.md)). The record carries, per native transport, a minimal descriptor that is enough to dial: the Iroh endpoint id, the HyperDHT public key (new). Today native descriptors are exchanged only inside an authenticated WebRTC session, so two desktops whose WebRTC never connects never try Iroh or HyperDHT; with descriptors on layer 0 they can.
+Each side's candidates come from its layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)) before any stream exists, and from the transcript-bound `pair-offer` once a session is ready ([401](401-paired-chat.md)). The record carries, per native transport, a minimal descriptor that is enough to dial: the Iroh endpoint id, the HyperDHT public key. Before revision 0.2, native descriptors were exchanged only inside an authenticated WebRTC session, so two desktops whose WebRTC never connected never tried Iroh or HyperDHT. With descriptors on layer 0 they do: two Linux Desktops with no WebRTC go live on Iroh or HyperDHT from each other's record (end-to-end tested).
 
 ### Upgrade
 

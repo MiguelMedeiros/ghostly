@@ -6,9 +6,9 @@
 | Status | Draft |
 | Kind | Adapter |
 | Revision | 0.1 |
-| Updated | 2026-09-24 |
+| Updated | 2026-09-26 |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Lightning 203](203-lightning.md) (the Breez source shares the wallet), authenticated live data transport |
-| Implementation | Experimental browser adapter, Breez SDK Spark `@breeztech/breez-sdk-spark` 0.26.0 (WebAssembly, nodeless). Every Testnet profile opens a wallet on Breez and Lightspark's hosted regtest. Mainnet makes one only after the person enters a Breez API key. |
+| Implementation | Experimental browser adapter, Breez SDK Spark `@breeztech/breez-sdk-spark` 0.26.0 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click. Mainnet is not offered yet ("Not yet" in New: never tried with real funds). |
 
 ## Scope and SDK choice
 
@@ -17,8 +17,8 @@
 Checked on 2026-09-24:
 
 - **SDK.** Breez SDK Spark already sends and receives on Spark natively. `receivePayment` makes a Spark address or a Spark invoice. `prepareSendPayment` of either answers with `paymentMethod.type` `sparkAddress` / `sparkInvoice` and a flat fee, and `sendPayment` takes an idempotency key. So the SDK the Breez source already loads serves the rail too: the same WebAssembly runs in the web app, the extension's offscreen document and Desktop's WebView. Spark's own SDK (`@buildonspark/spark-sdk`) was not chosen. A second SDK would keep a second copy of the same seed's leaves, and two SDKs moving one seed's leaves would race.
-- **One seed.** The rail owns a wallet per profile and mode. The Breez connection is shared per seed and storage (`openBreez`): the Spark rail and a Breez Lightning source of the same seed are one SDK instance, one database and one balance. "Use for Lightning too" (Testnet) makes the Spark wallet's own phrase the Breez source.
-- **Network and key.** Breez offers `mainnet` and `regtest`. Regtest is hosted by Breez and Lightspark and needs **no API key** (verified here and in 203). Mainnet needs a Breez API key (free, https://breez.technology/request-api-key/). The person enters it in the Spark panel. It is sealed with the phrase and never committed, and the panel says Mainnet moves real bitcoin. Spark's own testnet and signet are not offered by the SDK, so the payment networks are `bitcoin` and `regtest` only.
+- **One seed.** The rail owns a wallet per profile and network. The Breez connection is shared per seed and storage (`openBreez`): the Spark rail and a Breez Lightning source of the same seed are one SDK instance, one database and one balance. "Use for Lightning too" (Testnet) adds a Breez Lightning card on the Spark wallet's own phrase and makes it the default for receiving.
+- **Network and key.** Breez offers `mainnet` and `regtest`. Regtest is hosted by Breez and Lightspark and needs **no API key** (verified here and in 203). Mainnet needs a Breez API key (free, https://breez.technology/request-api-key/), sealed with the phrase and never committed. The engine can open a Mainnet wallet with one, but New does not offer Spark on Mainnet yet (`SPARK_MAINNET_NOT_YET`). Spark's own testnet and signet are not offered by the SDK, so the payment networks are `bitcoin` and `regtest` only.
 - **Tokens.** Spark carries tokens (BTKN), and the SDK takes a `tokenIdentifier`. This draft pays sats only: a token invoice is refused, and the prepared payment must carry no token. A token rail is later work (asset, decimals, review wording).
 
 ## Addresses, invoices and targets
@@ -64,8 +64,8 @@ Source: [`spark.ts`](../../packages/browser/src/engine/paymentAdapters/spark.ts)
 Checked on 2026-09-24 with worthless sats only:
 
 - **Real SDK, from Node, on Breez's regtest.** A new wallet's address is `sparkrt1pgss…` (bech32m, 35-byte payload: `0a 21` + identity key) and is the same on every call. An invoice of 1,234 sats with memo "probe" is 143 bytes, and its amount, memo and expiry decode as described above. These real strings are the core tests' vectors.
-- **Real SDK, in Chromium** (`e2e/web/spark-wallet.spec.ts`, `@network`). A Testnet profile opens a Spark wallet on regtest by itself in about 2.5 s: a `sparkrt1` address, a zero balance and a twelve-word phrase. Mainnet asks for a Breez API key and makes nothing without one.
-- **Unit tests against a fake SDK** that writes real-format strings. Review sends nothing, and the intent is written before the send with the key made at review. Other networks, providers, methods, a fee over the cap, a fee grown after review, a short balance and a missing journal stop before anything leaves. A send that errors after leaving is found by its key and settles; one that never left stays `unknown`, and reconciling never sends. A pending send is found by its key, not sent twice, and settles when the history says so. An invoice payment is found by its invoice when the SDK names the transfer otherwise. The Spark wallet and the Breez Lightning source of one seed share one SDK instance. On the desk: a request carries a fresh invoice; addresses, tokens and another amount are refused; asks are answered; a receipt alone settles nothing, and one transfer pays one request; replay and "I paid" work. Mode parking, Mainnet's key, no-replace and archival, and the encrypted backup round trip are covered.
+- **Real SDK, in Chromium** (`e2e/web/spark-wallet.spec.ts`, `@network`). A Testnet Spark wallet opens on regtest in about 2.5 s: a `sparkrt1` address, a zero balance and a twelve-word phrase.
+- **Unit tests against a fake SDK** that writes real-format strings. Review sends nothing, and the intent is written before the send with the key made at review. Other networks, providers, methods, a fee over the cap, a fee grown after review, a short balance and a missing journal stop before anything leaves. A send that errors after leaving is found by its key and settles; one that never left stays `unknown`, and reconciling never sends. A pending send is found by its key, not sent twice, and settles when the history says so. An invoice payment is found by its invoice when the SDK names the transfer otherwise. The Spark wallet and the Breez Lightning source of one seed share one SDK instance. On the desk: a request carries a fresh invoice; addresses, tokens and another amount are refused; asks are answered; a receipt alone settles nothing, and one transfer pays one request; replay and "I paid" work. Per-network storage, Mainnet's key, no-replace and archival, and the encrypted backup round trip are covered.
 
 ```sh
 npm test --workspace @ghostly/core -- test/sparkAddress.test.ts
