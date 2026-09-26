@@ -8,6 +8,7 @@ import {
   signCommunity, verifyCommunityChain, verifyCommunityCommit,
   type CommunityCommit, type CommunityFrame, type CommunityIncomingMessage, type CommunityState,
 } from "../src/groupCommunity";
+import type { Roster } from "../src/groupCommits";
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
@@ -75,6 +76,28 @@ class Net {
   /** Restarts a member from what it saved. */
   async restart(m: Member): Promise<void> { await m.session.flush(); m.session = new CommunitySession(clone(m.saved), this.hooks(m.name)); }
 }
+
+/**
+ * A commit signed by `signer` after `parent` (whose roster is `parentRoster`), as a member crafting
+ * a branch by hand would: anything the rules let a member of that roster sign.
+ */
+function forge(signer: Member, parent: CommunityCommit, parentRoster: Roster, fields: Partial<CommunityCommit> & Pick<CommunityCommit, "k">, ts = 5): { commit: CommunityCommit; roster: Roster } {
+  const base = { v: 2 as const, g: parent.g, e: parent.e + 1, p: communityCommitHash(parent), by: signer.session.myKey, ts, ...fields };
+  const roster = communityRoster(parentRoster, base);
+  if (!roster) throw new Error(`not allowed: ${fields.k}`);
+  const d = { ...base, m: rosterHash(roster) } as Omit<CommunityCommit, "sig" | "c">;
+  return { commit: signCommunity({ ...d, c: confirmationTag(epochKeys(newEpochSecret(), parent.g, d.e).confirm, communityUntaggedHash(d)) }, identityFromSeedB64(signer.seedB64).seed), roster };
+}
+/** `count` admissions of throwaway keys signed by `signer`, one after the other from `parent`. */
+function addBranch(signer: Member, parent: CommunityCommit, parentRoster: Roster, count: number): CommunityCommit[] {
+  const out: CommunityCommit[] = [];
+  for (let i = 0; i < count; i++) {
+    const next = forge(signer, parent, parentRoster, { k: "add", s: createIdentity().pubKeyZ32 });
+    out.push(next.commit); parent = next.commit; parentRoster = next.roster;
+  }
+  return out;
+}
+const commitFrame = (commit: CommunityCommit) => ({ t: "group-commit", v: 2, g: commit.g, commit: clone(commit) });
 
 async function say(net: Net, m: Member, text: string): Promise<void> {
   const result = await m.session.sendText(text, m.name);
@@ -331,5 +354,144 @@ describe("community sessions", { timeout: 60_000 }, () => {
     await say(net, members[3], "after restart");
     expect(net.texts(alice)).toContain("after restart");
     expect(shortHash(alice.session.topHash)).toHaveLength(16);
+  });
+});
+
+describe("community admin changes are final", { timeout: 60_000 }, () => {
+  /** Alice (admin), Bob and Carol (honest), Mallory; everyone has met. */
+  async function group() {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol"), mallory = await net.admit(bob, "mallory");
+    for (const [a, b] of [[alice, bob], [alice, carol], [alice, mallory], [bob, carol]] as const) await net.meet(a, b);
+    return { net, alice, bob, carol, mallory };
+  }
+
+  const changes = {
+    remove: (alice: Member, mallory: Member) => alice.session.remove(mallory.session.myKey),
+    link: (alice: Member) => alice.session.replaceLink(true),
+    rotate: (alice: Member) => alice.session.rotate(),
+    role: (alice: Member, _mallory: Member, bob: Member) => alice.session.transferAdmin(bob.session.myKey),
+  } as const;
+
+  for (const [kind, change] of Object.entries(changes)) {
+    it(`a longer branch of admissions from before a ${kind} does not undo it`, async () => {
+      const { net, alice, bob, carol, mallory } = await group();
+      const before = alice.session.top, beforeRoster = alice.session.roster;
+      await change(alice, mallory, bob);
+      await net.settle();
+      const adminTip = alice.session.topHash, adminRoster = alice.session.roster, adminEntry = alice.session.entryKey;
+      expect(alice.session.top.k).toBe(kind);
+      // Mallory, from the commit before the change, signs more admissions than the admin made commits since.
+      const branch = addBranch(mallory, before, beforeRoster, 4);
+      for (const commit of branch) for (const m of [bob, carol]) await m.session.handle(mallory.session.myKey, commitFrame(commit));
+      await net.settle();
+      for (const m of [alice, bob, carol]) {
+        expect(m.session.topHash).toBe(adminTip);
+        expect(m.session.roster).toEqual(adminRoster);
+        expect(m.session.entryKey).toBe(adminEntry);
+        expect(m.session.status).toBe("active");
+      }
+      if (kind === "remove") {
+        expect(bob.session.roster.map(([k]) => k)).not.toContain(mallory.session.myKey);
+        await say(net, bob, "after mallory");
+        expect(net.texts(carol)).toContain("after mallory");
+        expect(net.texts(mallory)).not.toContain("after mallory");
+      }
+      if (kind === "role") expect(carol.session.admin).toBe(bob.session.myKey);
+    });
+  }
+
+  it("a removed member's branch is not kept or passed on; one from a member still in is kept, never followed", async () => {
+    const { net, alice, bob, carol, mallory } = await group();
+    const before = alice.session.top, beforeRoster = alice.session.roster;
+    await alice.session.remove(mallory.session.myKey);
+    await net.settle();
+    const adminTip = bob.session.topHash;
+    // Mallory's own branch, even relayed by a hub: nothing to relay, nothing kept.
+    const theirs = addBranch(mallory, before, beforeRoster, 3);
+    expect(await bob.session.handle(carol.session.myKey, commitFrame(theirs[0]))).toBe(false);
+    expect(bob.session.state.side).toHaveLength(0);
+    // Carol, still a member, doing the same: kept (as any losing branch is) and relayed, not followed.
+    const hers = addBranch(carol, before, beforeRoster, 3);
+    for (const commit of hers) expect(await bob.session.handle(carol.session.myKey, commitFrame(commit))).toBe(true);
+    expect(bob.session.topHash).toBe(adminTip);
+    expect(bob.session.state.side).toHaveLength(3);
+  });
+
+  it("a member away through the change who hears the longer branch first ends on the admin's", async () => {
+    const { net, alice, bob, carol, mallory } = await group();
+    const before = alice.session.top, beforeRoster = alice.session.roster;
+    carol.online = false;
+    await alice.session.remove(mallory.session.myKey);
+    await net.settle();
+    // Carol, back, hears Mallory's branch first: nothing on her side says it drops anything, so she follows it…
+    carol.online = true;
+    const branch = addBranch(mallory, before, beforeRoster, 4);
+    for (const commit of branch) await carol.session.handle(mallory.session.myKey, commitFrame(commit));
+    expect(carol.session.topHash).toBe(communityCommitHash(branch[3]));
+    // …until she meets a member on the admin's: then she follows it, and Mallory is out.
+    await net.meet(carol, bob);
+    expect(carol.session.topHash).toBe(alice.session.topHash);
+    expect(carol.session.roster.map(([k]) => k)).not.toContain(mallory.session.myKey);
+    expect(carol.session.canSend).toBe(true);
+    await say(net, carol, "back");
+    expect(net.texts(alice)).toContain("back");
+  });
+
+  it("an admin change beats an admission of the same length, whatever the hashes", async () => {
+    const { net, alice, bob, carol } = await group();
+    const before = alice.session.top, beforeRoster = alice.session.roster;
+    // Bob and the admin commit after the same commit, each unaware of the other.
+    const bobs = forge(bob, before, beforeRoster, { k: "add", s: createIdentity().pubKeyZ32 }).commit;
+    alice.online = false;
+    await carol.session.handle(bob.session.myKey, commitFrame(bobs));
+    await bob.session.handle(carol.session.myKey, commitFrame(bobs));
+    expect(carol.session.topHash).toBe(communityCommitHash(bobs));
+    alice.online = true;
+    await alice.session.rotate();
+    await net.settle();
+    for (const m of [alice, bob, carol]) expect(m.session.top.k).toBe("rotate");
+    expect(bob.session.topHash).toBe(alice.session.topHash);
+  });
+
+  it("an admin who handed the role on and signs another history halts the group", async () => {
+    const { net, alice, bob, carol, mallory } = await group();
+    const before = alice.session.top, beforeRoster = alice.session.roster;
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    await bob.session.remove(mallory.session.myKey);
+    await net.settle();
+    expect(carol.session.admin).toBe(bob.session.myKey);
+    // Alice, admin before the hand-over, signs a rotation on another branch from there: two histories.
+    const race = forge(carol, before, beforeRoster, { k: "add", s: createIdentity().pubKeyZ32 });
+    const other = forge(alice, race.commit, race.roster, { k: "rotate" }).commit;
+    expect(await carol.session.handle(bob.session.myKey, commitFrame(race.commit))).toBe(true);
+    expect(carol.session.status).toBe("active");
+    await carol.session.handle(alice.session.myKey, commitFrame(other));
+    expect(carol.session.status).toBe("forked");
+    expect(carol.session.state.statusReason).toMatch(/admin signed changes on two branches/);
+  });
+
+  it("a stored branch from before the fix that dropped an admin change is dropped in turn", async () => {
+    const { net, alice, bob, mallory } = await group();
+    const before = alice.session.top, beforeRoster = alice.session.roster;
+    await alice.session.remove(mallory.session.myKey);
+    await net.settle();
+    const adminTip = alice.session.topHash;
+    // Bob, under the old rule, followed Mallory's longer branch and kept the admin's removal off it.
+    const branch = addBranch(mallory, before, beforeRoster, 3);
+    const state = clone(bob.saved);
+    const removal = state.chain.pop()!;
+    state.chain.push(...clone(branch));
+    state.side = [removal];
+    state.seqH = communityCommitHash(branch[2]);
+    bob.saved = state;
+    // Restarted on this version, he follows the admin's branch again.
+    await net.restart(bob);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(bob.session.topHash).toBe(adminTip);
+    expect(bob.session.status).toBe("active");
+    expect(bob.session.roster.map(([k]) => k)).not.toContain(mallory.session.myKey);
   });
 });
