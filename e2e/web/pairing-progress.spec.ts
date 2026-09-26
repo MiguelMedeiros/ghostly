@@ -87,6 +87,38 @@ test("pairing shows its stages in order on both sides, ends live, then gives the
   expect(inviter.indicator && joiner.indicator).toBe(true);
 });
 
+test("the inviter's invite card leaves once the joiner knocks, and the scene alone goes on to live", { tag: ["@feature:chat.paired.pairing-progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("invite-leaves-alice"), peer("invite-leaves-bob")]);
+  await alice.page.getByTitle("New Chat").click();
+  const scene = alice.page.getByTestId("pairing-scene");
+  await expect(scene).toHaveAttribute("data-stage", "waiting");
+  await expect(alice.page.getByTestId("invite-card")).toBeVisible();
+  // The scene's stage at the moment the card starts to leave: the handshake can be too quick to poll for.
+  await alice.page.evaluate(() => {
+    const state = window as unknown as { qaInviteLeftAt?: string | null };
+    const look = () => {
+      if (state.qaInviteLeftAt !== undefined) return;
+      if (document.querySelector("[data-testid=invite-card]:not([data-leaving])")) return;
+      state.qaInviteLeftAt = document.querySelector("[data-testid=pairing-scene]")?.getAttribute("data-stage") ?? null;
+    };
+    new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-leaving", "data-stage"] });
+  });
+
+  const invite = await copyInvite(alice.page);
+  await bob.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await pasteInvite(bob.page, invite);
+
+  await expect(alice.page.getByTestId("invite-card")).toHaveCount(0);
+  // It left while the scene was still on, before the chat took over: the contact had arrived, not the chat gone live.
+  const leftAt = await alice.page.evaluate(() => (window as unknown as { qaInviteLeftAt?: string | null }).qaInviteLeftAt);
+  expect(INVITER, `the card left at ${leftAt}`).toContain(leftAt);
+  expect(leftAt).not.toBe("publishing");
+  // Live, the scene gives the chat back, and the card does not come back with it.
+  await expect(alice.page.getByPlaceholder("Message…")).toBeEnabled();
+  await expect(scene).toHaveCount(0, { timeout: 10_000 });
+  await expect(alice.page.getByTestId("invite-card")).toHaveCount(0);
+});
+
 test("with reduced motion the scene is a still picture of the stage", { tag: ["@feature:chat.paired.pairing-progress"] }, async ({ peer }) => {
   const alice = await peer("progress-still");
   await alice.page.emulateMedia({ reducedMotion: "reduce" });
