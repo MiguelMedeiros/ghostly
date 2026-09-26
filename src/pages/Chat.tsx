@@ -15,6 +15,7 @@ import { InviteCard } from "../components/InviteCard";
 import { ChatConnection } from "../components/ChatConnection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
+import { contactArrived } from "../lib/pairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
@@ -196,8 +197,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     muted: muted && MUTE_SILENCES.connected,
   });
   const pairingSceneId = `pairing-${sessionId}`;
-  // Once the contact knocked, the invite has done its job.
-  const invitePast = pairing.show && ["answering", "connecting", "live", "on-dht"].includes(pairing.progress?.stage ?? "");
+  // Once the contact has arrived with the invite (their packet seen, or past the wait), the invite has done its job:
+  // its card goes and the scene alone tells the rest. It comes back if the state says nobody is there any more.
+  const invitePast = contactArrived(pairing.progress);
   const peerKey = params?.peerPubKeyB64;
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
@@ -509,8 +511,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
               <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
+              {/* Until the contact's session is ready, not just while the card is up: the card goes as soon as the
+                  contact arrives, and this stays the way to copy the invite again until the chat is live. */}
               {inviteCode && !pairedReady && (
-                <MenuItem onClick={() => { handleCopyCode(inviteShareText(inviteCode)); closeMenu(); }}
+                <MenuItem testId="chat-copy-invite" onClick={() => { handleCopyCode(inviteShareText(inviteCode)); closeMenu(); }}
                   icon={codeCopied
                     ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent"><polyline points="20 6 9 17 4 12" /></svg>
                     : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>}>
@@ -578,8 +582,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             <PairingScene id={pairingSceneId} progress={pairing.progress} contact={shownName}
               retry={() => void pairing.retry()} retrying={pairing.retrying} retryError={pairing.retryError} />
           )}
-          {inviteCode && !pairedReady && !invitePast && messages.length === 0 && (
-            <InviteCard code={inviteCode} />
+          {inviteCode && (
+            <InviteCard code={inviteCode} shown={!pairedReady && !invitePast && messages.length === 0} />
           )}
           </div></div>
           {!inviteCode && !pairing.show && messages.length === 0 && (

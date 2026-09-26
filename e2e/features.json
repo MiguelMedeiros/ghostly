@@ -568,6 +568,7 @@
     "src/components/ErrorBoundary.tsx": ["*"],
     "src/components/Avatar.tsx": ["*"],
     "src/components/InviteCard.tsx": ["*"],
+    "src/components/invite-card.css": ["chat.paired.pairing-progress","chat.paired.pair","invite.code"],
     "src/components/JoinDialog.tsx": ["*"],
     "src/components/MessageBubble.tsx": ["*"],
     "src/components/rich/**": ["chat.rich.*","chat.paired.links"],

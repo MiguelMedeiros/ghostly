@@ -68,6 +68,22 @@ export function deriveStage(link: LinkView | undefined, role: PairingRole, onlin
   return { stage: link.peerOnline ? "knocking" : "resolving", detail };
 }
 
+/** The stages past the inviter's wait: the contact came with the invite and the two are pairing, or paired. */
+const CONTACT_ARRIVED: PairingStage[] = ["answering", "connecting", "live", "on-dht"];
+
+/**
+ * The contact has the invite and is using it: their packet was seen (`peerSeen`), or the pairing is past the
+ * inviter's wait. The inviter's invite card goes then, and the scene alone tells the rest.
+ *
+ * Read off the state each time, not latched: when the state goes back to "nobody seen" (an engine that reports no
+ * progress, whose contact went offline; or a restarted engine, before the contact's packet is seen again), the
+ * card comes back. An attempt that fails after the contact was seen keeps `peerSeen` (the engine's tracker never
+ * clears it), so the card does not come back just because an attempt is retried: the contact still has the invite.
+ */
+export function contactArrived(progress: Pick<PairingProgress, "stage" | "peerSeen"> | null | undefined): boolean {
+  return !!progress && (!!progress.peerSeen || CONTACT_ARRIVED.includes(progress.stage));
+}
+
 /** `m:ss`, or `h:mm:ss` past the hour. */
 export function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
