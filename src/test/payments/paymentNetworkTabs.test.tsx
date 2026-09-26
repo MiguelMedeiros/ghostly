@@ -189,6 +189,31 @@ describe("a network with no wallet", () => {
   });
 });
 
+describe("Accept on a network with no wallet", () => {
+  it("keeps what was switched on the other tab, and Save stays in reach to save it", async () => {
+    const { user, onSaveMethods } = open({ wallet: testnetOnly() });
+    await user.click(screen.getByTestId("payment-mode-accept"));
+    await user.click(screen.getByTestId("payment-accept-lightning-testnet"));
+    await user.click(tab("mainnet"));
+    expect(screen.getByTestId("payment-network-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("payment-accept-status")).toHaveAttribute("data-state", "changed");
+    await user.click(tab("testnet"));
+    expect(screen.getByTestId("payment-accept-lightning-testnet")).toHaveAttribute("aria-checked", "false");
+    await user.click(tab("mainnet"));
+    await user.click(screen.getByTestId("payment-accept-save"));
+    expect(onSaveMethods).toHaveBeenCalledWith(expect.objectContaining({ methods: expect.objectContaining({ lightning: false }) }));
+  });
+
+  it("says only that there is none when nothing waits to be saved", async () => {
+    const { user } = open({ wallet: testnetOnly() });
+    await user.click(screen.getByTestId("payment-mode-accept"));
+    await user.click(tab("mainnet"));
+    expect(screen.getByTestId("payment-network-empty")).toHaveTextContent("No Mainnet wallets");
+    expect(screen.queryByTestId("payment-accept-save")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("payment-accept-status")).not.toBeInTheDocument();
+  });
+});
+
 describe("the keyboard", () => {
   it("moves between the networks with the arrows, Home and End, choosing as it goes", async () => {
     const { user } = open();

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { WALLET_NETWORKS, type PaymentMethodName } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { ALL_METHODS_ON, cardOn, type ChatAccepts, type ChatPaymentNetworks } from "../lib/chatPayments";
@@ -26,7 +26,7 @@ export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(":"
  * The deck shows one network's cards (the sheet's Mainnet | Testnet tab); the switches of both are kept while the tab
  * changes, and Save saves them all, each on its own network.
  */
-export function ChatPaymentAccept({ peer, contact, cards, network, onSave }: {
+export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave }: {
   peer: PeerLinkState | null | undefined;
   /** Who the chat is with, as the chat shows them. */
   contact: string;
@@ -34,6 +34,8 @@ export function ChatPaymentAccept({ peer, contact, cards, network, onSave }: {
   cards: InstanceCard[];
   /** The network whose cards the deck shows; every network's without one. */
   network?: WalletNetwork;
+  /** In place of the deck when the network has no card: what was switched on the other network stays, to save. */
+  empty?: ReactNode;
   onSave: (accepts: ChatAccepts) => Promise<void>;
 }) {
   const { t } = useI18n();
@@ -111,15 +113,21 @@ export function ChatPaymentAccept({ peer, contact, cards, network, onSave }: {
     }, (e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); });
   };
 
+  // A network with no card says so alone, unless the other network's switches wait to be saved.
+  const bare = !here.length && !!empty;
   return <>
+    {bare ? empty : <>
     <CardDeck<string> key={network} compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
       onSelect={setActive} onChoose={toggle} checked={(c) => !!draft[c.id]} cardLabel={(c) => label(c as InstanceCard)} testId={acceptCardTestId} size={{ max: 250, share: .62 }}
       corner={(c) => <SwitchLook checked={!!draft[c.id]} className="wallet-deck-card-switch" testId={`payment-accept-switch-${c.id.replace(":", "-")}`} />} />
     <p className="composer-sheet-hint" data-testid="payment-accept-hint">{card && hint(card)}</p>
+    </>}
+    {!(bare && state === "idle") && <>
     <p className="payment-accept-status" data-testid="payment-accept-status" data-state={state} role="status">{status}</p>
     {error && <p role="alert" className="text-danger text-xs m-0">{error}</p>}
     <button ref={saveRef} type="button" data-testid="payment-accept-save" className="composer-sheet-action" disabled={!changed || busy} onClick={save}>
       {t(busy ? "payments.accept.saving" : "payments.accept.save")}
     </button>
+    </>}
   </>;
 }

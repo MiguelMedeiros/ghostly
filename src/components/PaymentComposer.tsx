@@ -331,6 +331,16 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     </span>
   );
   const accepting = !!onSaveMethods && mode === "accept";
+  // No wallet of the tab's network: say so, and where to make one, rather than an empty deck.
+  const noWallet = (
+    <div className="payment-none" data-testid="payment-network-empty">
+      <p className="composer-sheet-hint">No {NETWORK_NAME[net]} wallets</p>
+      <button type="button" data-testid="payment-network-new" className="payment-network-new" onClick={() => { onClose(); nav.place("/wallet", { newWallet: { network: net } }); }}>
+        New {NETWORK_NAME[net]} wallet
+        <ForwardArrow />
+      </button>
+    </div>
+  );
 
   return (
     <ComposerSheet
@@ -358,15 +368,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
           {/* Not keyed by the network: Accept keeps both networks' switches while the tab changes. Each deck is. */}
           <div role="tabpanel" id="payment-tab-panel" aria-labelledby={`payment-tab-${net}`} data-testid="payment-tab-panel" data-network={net}
             className="payment-tab-panel wallet-network-view" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
-          {/* No wallet of this network: say so, and where to make one, rather than an empty deck. */}
-          {!mine.includes(net) ? <div className="payment-none" data-testid="payment-network-empty">
-            <p className="composer-sheet-hint">No {NETWORK_NAME[net]} wallets</p>
-            <button type="button" data-testid="payment-network-new" className="payment-network-new" onClick={() => { onClose(); nav.place("/wallet", { newWallet: { network: net } }); }}>
-              New {NETWORK_NAME[net]} wallet
-              <ForwardArrow />
-            </button>
-          </div>
-          : accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={cards} network={net} onSave={onSaveMethods} />
+          {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={cards} network={net} onSave={onSaveMethods} empty={noWallet} />
+          : !mine.includes(net) ? noWallet
           : !shown.length && onSaveMethods ? <div className="payment-none" data-testid="payment-none">
             <p className="composer-sheet-hint">{t("payments.none.text")}</p>
             <button type="button" data-testid="payment-none-accept" className="composer-sheet-action" data-variant="secondary" onClick={() => switchMode("accept")}>
