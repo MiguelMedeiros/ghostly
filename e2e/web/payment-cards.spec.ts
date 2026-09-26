@@ -1,5 +1,6 @@
 import { connect, createWallet, expect, link, test, useFakeProviders, useTestnet, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
+import { pointAt, stillness } from "../support/still";
 
 /**
  * Paying in a chat starts from the wallet's cards: a stack in the composer, where the card the pointer rests on
@@ -44,6 +45,16 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await expect(composer).toHaveAttribute("data-side", "cards");
   await expect(page.getByTestId("payment-amount")).toHaveCount(0);
 
+  // The pointer passing over the cards brings each one up, and that is all: nothing scrolls, nothing turns over, and
+  // the focus stays on the card it was on.
+  const still = await stillness(page);
+  for (const id of ["lightning", "bitcoin", "cashu"]) {
+    await pointAt(card(id));
+    await expect(card(id)).toHaveAttribute("aria-checked", "true");
+    expect(await stillness(page), `over ${id}`).toEqual(still);
+  }
+  await expect(composer).toHaveAttribute("data-side", "cards");
+
   // Resting on a card brings it up and says what Send and Request do with it; nothing turns over yet.
   await card("lightning").hover();
   await expect(card("lightning")).toHaveAttribute("aria-checked", "true");
@@ -85,11 +96,24 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await page.getByTestId("payment-amount").fill("7");
   await expect(page.getByTestId("payment-request")).toBeEnabled();
 
-  // Back to the cards, and another one turned over by a click.
+  // Back to the cards, in a short window where the sheet scrolls: passing over the cards still moves nothing, and
+  // another one turned over by a click has its amount focused, the sheet in view.
   await page.getByTestId("payment-change-card").click();
   await expect(composer).toHaveAttribute("data-side", "cards");
-  await card("lightning").click();
+  await page.setViewportSize({ width: 1280, height: 560 });
+  await expect(card("cashu")).toBeFocused();
+  const short = await stillness(page);
+  for (const id of ["bitcoin", "lightning", "cashu", "lightning"]) {
+    await pointAt(card(id));
+    await expect(card(id)).toHaveAttribute("aria-checked", "true");
+    expect(await stillness(page), `over ${id}, in a short window`).toEqual(short);
+  }
+  const at = await pointAt(card("lightning"));
+  await page.mouse.click(at.x, at.y);
   await expect(back).toContainText("Lightning");
+  await expect(page.getByTestId("payment-amount")).toBeFocused();
+  await expect(composer).toBeInViewport();
+  await expect(page.getByTestId("payment-amount")).toBeInViewport();
   await expect(page.getByTestId("payment-send"), "Lightning pays a request the contact sends").toBeDisabled();
   await expect(page.getByTestId("payment-send")).toHaveAttribute("title", /tap Pay on your contact's request/);
 
