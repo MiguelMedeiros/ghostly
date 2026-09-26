@@ -31,6 +31,7 @@ class FakeCashu {
     return { quote, mint: MINT, amount, invoice: fakeInvoice(amount, hash()), createdAt: Date.now(), expiresAt: Date.now() + 600_000 };
   });
   mintQuoteState = vi.fn(async (_mint: string, quote: string) => this.mintQuotes.get(quote) ?? "UNPAID");
+  isHeld = vi.fn(async () => false);
   quoteInvoice = vi.fn(async (invoice: string) => {
     const amount = decodeBolt11(invoice)?.amountSat;
     if (!amount) throw new Error("Not an invoice");

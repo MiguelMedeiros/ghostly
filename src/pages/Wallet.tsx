@@ -95,7 +95,7 @@ export function Wallet() {
               <span className="font-medium text-text-primary">{selected.name}</span>
             </p>
             {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
-            {panel && parseCardId(panel)?.network === "testnet" && <TestCoins key={panel} rail={parseCardId(panel)!.rail} network="testnet" wallet={wallet.forNetwork("testnet")} state={networkState(state, "testnet")} />}
+            {panel && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={wallet.forNetwork("testnet")} state={networkState(state, "testnet")} />}
             {panel && <WalletPanel id={panel} wallet={wallet} state={state} onOpen={select} />}
             {panel && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
           </div>
