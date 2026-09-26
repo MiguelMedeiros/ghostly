@@ -111,6 +111,7 @@ import type {
   StoredService,
   NetworkWalletsView,
   WalletCreate,
+  WalletRemove,
   WalletInstanceView,
   WalletOffer,
   WalletTx,
@@ -118,6 +119,7 @@ import type {
   WalletView,
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
+import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
 import { Groups } from "./groups";
@@ -1915,6 +1917,71 @@ export class GhostlyNode implements EngineImplementation {
     finally { clearTimeout(timer); wallet.resume(); }
   }
 
+  /**
+   * Removes the `type` wallet of `network`, asked for by the person: its keys, its ecash and its config go, and so does
+   * what every chat keeps about it (the network's place in its accepted ways of paying); every other wallet stays.
+   * What it holds is checked here again, whatever the page showed: money on this device (or a balance that could not
+   * be read) is removed only with `acceptLoss`, the person's own confirmation that it becomes unreachable without its
+   * backup. A payment through it that has not finished stops the removal. Never logs a seed or a key.
+   */
+  async walletRemove({ type, network, acceptLoss }: WalletRemove): Promise<void> {
+    if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
+    if (network !== "mainnet" && network !== "testnet") throw new Error("Choose Mainnet or Testnet");
+    await this.refreshWallet();
+    const label = `${networkLabel(network)} ${WALLET_NAMES[type]}`;
+    if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network)) throw new Error(`There is no ${label} wallet to remove`);
+    const removal = walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents);
+    if (removal.comesWith) throw new Error(`Lightning through the Cashu mints comes with your ${networkLabel(network)} Cashu wallet: remove that wallet to remove it`);
+    if (removal.pending) throw new Error(`A payment through this wallet is not finished yet (${removal.pending}). Cancel it or wait for it to settle, then remove the wallet.`);
+    if (removalRisksFunds(removal) && acceptLoss !== true) {
+      throw new Error(removal.held === "unknown"
+        ? `Ghostly could not read what the ${label} wallet holds. Confirm that anything in it becomes unreachable without its backup to remove it.`
+        : `The ${label} wallet holds ${removal.held.text}. Confirm that they become unreachable without its backup to remove it.`);
+    }
+    try {
+      if (type === "cashu") {
+        const mints = this.networkMints(network);
+        await this.wallet.forget(mints);
+        await this.updateSettings({ settings: { mints: this.settings.mints.filter((m) => !mints.includes(m)) } });
+      }
+      else if (type === "arkade") await this.arkWallets[network].remove();
+      else if (type === "bark") await this.barkWallets[network].remove();
+      else if (type === "spark") await this.sparkWallets[network].remove();
+      else if (type === "usdt") await this.usdtWallets[network].remove();
+      else if (type === "fedimint") await this.fedimintWallets[network].remove();
+      else await (type === "lightning" ? this.lightnings[network] : this.bitcoins[network]).sources.clear();
+    } finally {
+      await this.refreshWallet();
+    }
+    await this.forgetChatNetwork(type as PaymentMethodName, network);
+  }
+
+  /**
+   * What the chats keep about a way of paying on a network whose wallet was removed goes back to the default: a chat
+   * that had that network off takes it again if a wallet of it is made later, and a way with no wallet left on any
+   * network loses its on/off too. The choices about the other network stay. The contacts hear of it from the
+   * paired-payments offer, which already names only the ways with a wallet.
+   */
+  private async forgetChatNetwork(method: PaymentMethodName, network: WalletNetwork) {
+    const left = (this.walletView.wallets ?? []).some((w) => w.type === method);
+    for (const live of this.links.values()) {
+      const stored = live.stored, list = stored.paymentNetworks?.[method];
+      const paymentMethods = { ...stored.paymentMethods }, paymentNetworks = { ...stored.paymentNetworks };
+      if (!left) { delete paymentMethods[method]; delete paymentNetworks[method]; }
+      else if (list && !list.includes(network)) {
+        const next = [...list, network];
+        if (WALLET_NETWORKS.every((n) => next.includes(n))) delete paymentNetworks[method]; else paymentNetworks[method] = WALLET_NETWORKS.filter((n) => next.includes(n));
+      }
+      if (JSON.stringify([paymentMethods, paymentNetworks]) === JSON.stringify([{ ...stored.paymentMethods }, { ...stored.paymentNetworks }])) continue;
+      await db.patchLink(stored.id, { paymentMethods, paymentNetworks });
+      live.stored = { ...stored, paymentMethods, paymentNetworks };
+      live.link?.setPaymentMethods(paymentMethods);
+      live.link?.setPaymentNetworks?.(this.chatNetworks(live.stored));
+      this.capsChanged(stored.id);
+    }
+    this.emitState();
+  }
+
   /** Cashu of one network: its default mints, only those that answer. None answering is a failure, nothing added. */
   private async createCashu(network: WalletNetwork) {
     if (this.networkMints(network).length) throw new Error(`You already have a ${networkLabel(network)} Cashu wallet`);
@@ -2030,8 +2097,9 @@ export class GhostlyNode implements EngineImplementation {
     return { amount };
   }
 
-  walletExport() {
-    return this.wallet.exportTokens();
+  /** `network`: only that network's Cashu wallet (its mints). */
+  walletExport(params?: { network?: WalletNetwork }) {
+    return this.wallet.exportTokens(params?.network ? this.networkMints(params.network) : undefined);
   }
 
   /**

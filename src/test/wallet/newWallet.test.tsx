@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { WalletInstanceView, WalletOffer, WalletView } from "@ghostly/browser/shared/types";
 import { Wallet } from "../../pages/Wallet";
@@ -8,7 +8,7 @@ import { arkReady, mint, REAL_MINT, TEST_MINT, usdtReady } from "../payments/fix
 import { offered } from "./descriptors";
 import { choose } from "../select";
 
-// covers: wallet.instances.create, wallet.instances.networks, wallet.deck
+// covers: wallet.instances.create, wallet.instances.networks, wallet.instances.sections, wallet.deck
 
 const made = (type: WalletInstanceView["type"], network: WalletInstanceView["network"]): WalletInstanceView => ({ id: `${type}:${network}`, type, network, config: {} });
 /** What New offers when nothing is made yet: every kind, Bark, Spark and Fedimint Testnet only. */
@@ -45,7 +45,7 @@ describe("a profile with no wallet yet", () => {
     });
     await user.click(await screen.findByTestId("wallet-first-testnet"));
     expect(engine.callsTo("walletCreate")).toEqual([{ type: "cashu", network: "testnet" }, { type: "usdt", network: "testnet" }]);
-    const deck = await screen.findByRole("tablist", { name: "Wallet integrations" });
+    const deck = await screen.findByRole("tablist", { name: "Testnet wallets" });
     expect(within(deck).getByTestId("wallet-card-cashu-testnet")).toHaveTextContent("Testnet");
     expect(within(deck).getByTestId("wallet-card-usdt-testnet")).toBeInTheDocument();
     expect(screen.queryByTestId("wallet-first")).not.toBeInTheDocument();
@@ -70,22 +70,32 @@ describe("a profile with no wallet yet", () => {
 });
 
 describe("New, in the header", () => {
-  it("offers every kind on the network chosen, says what each needs, and why one is not there yet", async () => {
+  it("offers every kind on the network chosen, each saying what clicking it does, and why one is not there yet", async () => {
     const { user, engine } = renderApp(<Wallet />);
     engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, offers: offers({ "cashu:testnet": { exists: true } }) }) });
     await user.click(await screen.findByTestId("wallet-add"));
     const dialog = screen.getByTestId("new-wallet");
+    // The network is the first choice, in words and ticked: Test money is where it opens (the chosen card's network).
     expect(within(dialog).getByTestId("new-wallet-network")).toHaveAttribute("data-network", "testnet");
+    expect(within(dialog).getByTestId("new-wallet-network-testnet")).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByTestId("new-wallet-network-testnet")).toHaveTextContent("Test money");
+    expect(within(dialog).getByTestId("new-wallet-network-mainnet")).toHaveTextContent("Real money");
+    expect(within(dialog).getByRole("heading", { name: "Kinds of wallet on Testnet" })).toBeInTheDocument();
+    // Each kind is a button whose action says what happens: made, connected, joined, or there already.
     expect(within(dialog).getByTestId("new-wallet-type-cashu-status")).toHaveTextContent("Added");
-    expect(within(dialog).getByTestId("new-wallet-type-arkade-status")).toHaveTextContent("One click");
-    expect(within(dialog).getByTestId("new-wallet-type-fedimint-status")).toHaveTextContent("Needs an invite");
-    expect(within(dialog).getByTestId("new-wallet-type-lightning-status")).toHaveTextContent("Choose a source");
-    await user.click(within(dialog).getByRole("radio", { name: "Mainnet" }));
+    expect(within(dialog).getByTestId("new-wallet-type-cashu")).toHaveAttribute("aria-disabled", "true");
+    expect(within(dialog).getByTestId("new-wallet-type-cashu-status").querySelector("svg")).not.toBeNull();
+    expect(within(dialog).getByTestId("new-wallet-type-arkade-status")).toHaveTextContent("Create");
+    expect(within(dialog).getByTestId("new-wallet-type-fedimint-status")).toHaveTextContent("Join with invite…");
+    expect(within(dialog).getByTestId("new-wallet-type-lightning-status")).toHaveTextContent("Connect…");
+    await user.click(within(dialog).getByTestId("new-wallet-network-mainnet"));
     expect(within(dialog).getByTestId("new-wallet-network")).toHaveAttribute("data-network", "mainnet");
     expect(within(dialog).getByTestId("new-wallet-type-bark")).toHaveAttribute("aria-disabled", "true");
     expect(within(dialog).getByTestId("new-wallet-type-bark")).toHaveTextContent("bark on Mainnet is not available yet");
     expect(within(dialog).getByTestId("new-wallet-type-bark-status")).toHaveTextContent("Not yet");
-    expect(within(dialog).getByTestId("new-wallet-type-cashu-status")).toHaveTextContent("One click");
+    expect(within(dialog).getByTestId("new-wallet-type-cashu-status")).toHaveTextContent("Create");
+    // Why not, in one short line; the whole reason on hover.
+    expect(within(dialog).getByTestId("new-wallet-type-bark")).toHaveAttribute("title", expect.stringMatching(/not available yet: it has only been tried on test networks/));
     // A kind that is not there yet makes nothing when clicked.
     engine.on("walletCreate", () => made("bark", "mainnet"));
     await user.click(within(dialog).getByTestId("new-wallet-type-bark"));
@@ -102,11 +112,13 @@ describe("New, in the header", () => {
     await user.click(await screen.findByTestId("wallet-add"));
     // It opens on the chosen card's network (Mainnet Cashu here): the network is one click away.
     expect(screen.getByTestId("new-wallet-network")).toHaveAttribute("data-network", "mainnet");
-    await user.click(screen.getByRole("radio", { name: "Testnet" }));
+    await user.click(screen.getByTestId("new-wallet-network-testnet"));
     await user.click(screen.getByTestId("new-wallet-type-arkade"));
     expect(engine.callsTo("walletCreate")).toEqual([{ type: "arkade", network: "testnet" }]);
-    expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument();
+    // Ready, then the dialog closes and the card is in its network's deck.
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
     expect(await screen.findByTestId("wallet-card-arkade-testnet")).toHaveAttribute("aria-selected", "true");
+    expect(within(screen.getByTestId("wallet-section-testnet")).getByTestId("wallet-card-arkade-testnet")).toBeInTheDocument();
     expect(await screen.findByTestId("ark-wallet", {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
@@ -119,13 +131,13 @@ describe("New, in the header", () => {
       return made(params.type, params.network);
     });
     await user.click(await screen.findByTestId("wallet-add"));
-    await user.click(screen.getByRole("radio", { name: "Testnet" }));
+    await user.click(screen.getByTestId("new-wallet-network-testnet"));
     await user.click(screen.getByTestId("new-wallet-type-arkade"));
     expect(await screen.findByTestId("new-wallet-error")).toHaveTextContent("It did not answer in time. Nothing was saved; try again.");
     down = false;
     await user.click(screen.getByTestId("new-wallet-retry"));
     expect(engine.callsTo("walletCreate")).toHaveLength(2);
-    expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
   });
 
   it("Fedimint asks for its invite only, and Lightning for its source's form only", async () => {
@@ -133,15 +145,16 @@ describe("New, in the header", () => {
     engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
     engine.on("walletCreate", (params) => made(params.type, params.network));
     await user.click(await screen.findByTestId("wallet-add"));
-    await user.click(screen.getByRole("radio", { name: "Testnet" }));
+    await user.click(screen.getByTestId("new-wallet-network-testnet"));
     await user.click(screen.getByTestId("new-wallet-type-fedimint"));
     expect(engine.callsTo("walletCreate")).toEqual([]);
     await user.type(screen.getByTestId("new-wallet-invite"), "fed11qqqq");
     await user.click(screen.getByTestId("new-wallet-create"));
     expect(engine.callsTo("walletCreate")).toEqual([{ type: "fedimint", network: "testnet", invite: "fed11qqqq" }]);
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
 
     await user.click(await screen.findByTestId("wallet-add"));
-    await user.click(screen.getByRole("radio", { name: "Testnet" }));
+    await user.click(screen.getByTestId("new-wallet-network-testnet"));
     await user.click(screen.getByTestId("new-wallet-type-lightning"));
     const form = await screen.findByTestId("new-wallet-provider");
     await choose(user, within(form).getByRole("combobox", { name: "Source" }), "nwc");
@@ -150,16 +163,137 @@ describe("New, in the header", () => {
   });
 });
 
-describe("the deck, one card per wallet", () => {
-  it("shows a wallet on each network as its own card, and only the test one says Testnet", async () => {
+describe("the picker, while a wallet is made", () => {
+  /** A creation the test finishes itself: the dialog shows each state in turn. */
+  function slow(engine: ReturnType<typeof renderApp>["engine"]) {
+    let settle!: (outcome: Error | WalletInstanceView) => void;
+    engine.on("walletCreate", () => new Promise<WalletInstanceView>((resolve, reject) => { settle = (o) => o instanceof Error ? reject(o) : resolve(o); }));
+    return (outcome: Error | WalletInstanceView) => act(async () => { settle(outcome); });
+  }
+
+  it("idle, then connecting on the card chosen with its steps, then Ready, then the card in its deck", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, offers: offers({ "cashu:testnet": { exists: true } }) }) });
+    const finish = slow(engine);
+    await user.click(await screen.findByTestId("wallet-add"));
+    const ark = screen.getByTestId("new-wallet-type-arkade");
+    expect(ark).toHaveAttribute("data-state", "on");
+    expect(screen.queryByTestId("new-wallet-progress")).not.toBeInTheDocument();
+
+    await user.click(ark);
+    expect(ark).toHaveAttribute("data-state", "busy");
+    expect(ark).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByTestId("new-wallet-type-arkade-status")).toHaveTextContent("Creating…");
+    // Nothing else can start meanwhile, and the network cannot change under it.
+    expect(screen.getByTestId("new-wallet-type-usdt")).toBeDisabled();
+    expect(screen.getByTestId("new-wallet-network-mainnet")).toBeDisabled();
+    const progress = screen.getByTestId("new-wallet-progress");
+    expect(progress).toHaveTextContent("Nothing is saved until its server answers");
+    expect(within(progress).getAllByTestId("new-wallet-step").map((s) => [s.textContent, s.dataset.state])).toEqual([["Creating keys…", "active"], ["Reaching the Ark server", "todo"]]);
+    await waitFor(() => expect(within(progress).getAllByTestId("new-wallet-step").map((s) => s.dataset.state)).toEqual(["done", "active"]));
+    // Escape does not close it while the wallet is being made.
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("new-wallet")).toBeInTheDocument();
+
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, ark: arkReady(), offers: offers({ "cashu:testnet": { exists: true }, "arkade:testnet": { exists: true } }) }) });
+    await finish(made("arkade", "testnet"));
+    expect(screen.getByTestId("new-wallet-ready")).toHaveAttribute("data-state", "done");
+    expect(screen.getByTestId("new-wallet-type-arkade-status")).toHaveTextContent("Ready");
+    expect(screen.getByTestId("new-wallet-progress")).toHaveTextContent("Your Testnet Ark wallet is ready.");
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
+    expect(within(screen.getByTestId("wallet-section-testnet")).getByTestId("wallet-card-arkade-testnet")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("a failure shows once, on the card and below it, with Try again; nothing is left chosen or half made", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, offers: offers() }) });
+    const finish = slow(engine);
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-type-usdt"));
+    await finish(new Error("Could not create the Testnet USDT wallet: RPC unavailable. Nothing was saved; try again."));
+    expect(screen.getByTestId("new-wallet-type-usdt")).toHaveAttribute("data-state", "error");
+    expect(screen.getByTestId("new-wallet-type-usdt-status")).toHaveTextContent("Try again");
+    expect(screen.getAllByTestId("new-wallet-error")).toHaveLength(1);
+    expect(screen.getByTestId("new-wallet-error")).toHaveTextContent("RPC unavailable. Nothing was saved; try again.");
+    expect(screen.queryByTestId("new-wallet-progress")).not.toBeInTheDocument();
+    // The others can be chosen again, and the network changed.
+    expect(screen.getByTestId("new-wallet-type-arkade")).toBeEnabled();
+    expect(screen.getByTestId("new-wallet-network-mainnet")).toBeEnabled();
+    // Try again on the card itself.
+    const again = slow(engine);
+    await user.click(screen.getByTestId("new-wallet-type-usdt"));
+    expect(screen.getByTestId("new-wallet-type-usdt")).toHaveAttribute("data-state", "busy");
+    expect(screen.queryByTestId("new-wallet-error")).not.toBeInTheDocument();
+    await again(made("usdt", "testnet"));
+    expect(engine.callsTo("walletCreate")).toEqual([{ type: "usdt", network: "testnet" }, { type: "usdt", network: "testnet" }]);
+  });
+
+  it("a kind that needs one thing asks for it on its own step, with a way back to every kind", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, offers: offers() }) });
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-type-fedimint"));
+    expect(screen.getByTestId("new-wallet-step")).toHaveTextContent("Testnet Fedimint");
+    expect(screen.queryByTestId("new-wallet-type-arkade")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("new-wallet-back"));
+    expect(screen.getByTestId("new-wallet-type-arkade")).toBeInTheDocument();
+    expect(engine.callsTo("walletCreate")).toEqual([]);
+  });
+
+  it("is a sheet on a phone", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, offers: offers() }) });
+    await user.click(await screen.findByTestId("wallet-add"));
+    expect(screen.getByTestId("new-wallet")).toHaveClass("sheet");
+  });
+});
+
+describe("real money and test money, apart", () => {
+  it("two sections, Real money on Mainnet and Test money on Testnet, each its own deck; only the test card says Testnet", async () => {
     const { engine } = renderApp(<Wallet />);
     engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 21), mint(TEST_MINT, 5)], balance: 26, offers: offers() }) });
-    const deck = await screen.findByRole("tablist", { name: "Wallet integrations" });
-    const mainnet = within(deck).getByTestId("wallet-card-cashu-mainnet"), testnet = within(deck).getByTestId("wallet-card-cashu-testnet");
+    const real = await screen.findByTestId("wallet-section-mainnet"), test = screen.getByTestId("wallet-section-testnet");
+    expect(within(real).getByRole("heading")).toHaveTextContent("Real money · Mainnet");
+    expect(within(test).getByRole("heading")).toHaveTextContent("Test money · Testnet");
+    expect(within(real).getByTestId("wallet-section-mainnet-tag")).toHaveAttribute("data-network", "mainnet");
+    const mainnetDeck = within(real).getByRole("tablist", { name: "Mainnet wallets" }), testnetDeck = within(test).getByRole("tablist", { name: "Testnet wallets" });
+    expect(within(mainnetDeck).getAllByRole("tab").map((t) => t.dataset.testid)).toEqual(["wallet-card-cashu-mainnet", "wallet-card-lightning-mainnet"]);
+    expect(within(testnetDeck).getAllByRole("tab").map((t) => t.dataset.testid)).toEqual(["wallet-card-cashu-testnet", "wallet-card-lightning-testnet"]);
+    const mainnet = within(mainnetDeck).getByTestId("wallet-card-cashu-mainnet"), testnet = within(testnetDeck).getByTestId("wallet-card-cashu-testnet");
     expect(within(testnet).getByTestId("wallet-card-network")).toHaveTextContent("Testnet");
     expect(within(mainnet).queryByTestId("wallet-card-network")).not.toBeInTheDocument();
     expect(testnet).toHaveTextContent("test sats");
     expect(mainnet).not.toHaveTextContent("test sats");
+    // One card is the panel's: its deck is live, the other rests with no card selected.
+    expect(mainnet).toHaveAttribute("aria-selected", "true");
+    expect(testnetDeck.closest(".deck")).toHaveAttribute("data-resting", "true");
+    expect(within(testnetDeck).getAllByRole("tab").every((t) => t.getAttribute("aria-selected") === "false")).toBe(true);
+    expect(screen.getByTestId("wallet-panel-network")).toHaveTextContent("Real money");
+  });
+
+  it("an empty network says so, and its New opens the picker on that network", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 5)], balance: 5, offers: offers() }) });
+    const empty = await screen.findByTestId("wallet-section-mainnet-empty");
+    expect(empty).toHaveTextContent("No Mainnet wallets yet.");
+    expect(screen.queryByTestId("wallet-section-testnet-empty")).not.toBeInTheDocument();
+    await user.click(within(empty).getByTestId("wallet-section-mainnet-new"));
+    expect(screen.getByTestId("new-wallet-network")).toHaveAttribute("data-network", "mainnet");
+  });
+
+  it("clicking the resting deck hands it the panel; the other deck keeps its card on top", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 21), mint(TEST_MINT, 5)], balance: 26, offers: offers() }) });
+    await user.click(await screen.findByTestId("wallet-card-lightning-testnet"));
+    expect(screen.getByTestId("wallet-card-lightning-testnet")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "wallet-tab-lightning:testnet");
+    expect(screen.getByTestId("wallet-section-mainnet").querySelector(".deck")).toHaveAttribute("data-resting", "true");
+    await user.click(screen.getByTestId("wallet-card-cashu-mainnet"));
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "wallet-tab-cashu:mainnet");
+    // Lightning stays the Testnet deck's top card, and a click on it brings it back.
+    expect(screen.getByTestId("wallet-card-lightning-testnet")).toHaveAttribute("tabindex", "0");
+    await user.click(screen.getByTestId("wallet-card-lightning-testnet"));
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "wallet-tab-lightning:testnet");
   });
 
   it("a card's panel acts on its own network's wallet", async () => {

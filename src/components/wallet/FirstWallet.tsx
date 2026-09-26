@@ -2,10 +2,10 @@ import { useState } from "react";
 import type { WalletNetwork, WalletPlatform, WalletType } from "../../lib/platform";
 import { WalletMark } from "../WalletCards";
 import { Button, Notice } from "./ui";
+import { WALLET_NAME as NAME } from "./names";
 
 /** What the first setup makes: payments over Lightning (Cashu) and a dollar token, each ready in one click. */
 const FIRST: WalletType[] = ["cashu", "usdt"];
-const NAME: Record<WalletType, string> = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin", fedimint: "Fedimint", usdt: "USDT" };
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**

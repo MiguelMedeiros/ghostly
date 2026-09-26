@@ -46,6 +46,7 @@ function walletPlatform(network?: WalletNetwork): WalletPlatform {
     network,
     forNetwork: (next) => walletPlatform(next),
     create: (params) => engine.call("walletCreate", params),
+    remove: (params) => engine.call("walletRemove", params),
     usdtCreate:params=>engine.call("usdtCreate",params),
     usdtUnlock:password=>engine.call("usdtUnlock",{password,...(network?{network}:{})}),
     usdtReveal:password=>engine.call("usdtReveal",{password,...(network?{network}:{})}),
@@ -125,7 +126,7 @@ function walletPlatform(network?: WalletNetwork): WalletPlatform {
     },
     receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
     inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
-    exportTokens: () => engine.call("walletExport"),
+    exportTokens: () => engine.call("walletExport", on),
     async send(peerPubKeyZ32, amount, memo) {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");

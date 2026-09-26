@@ -10,13 +10,14 @@ import './wallet-deck.css';
  */
 /**
  * A card's face: the same on the wallet page, in the chat and on the front of the chat's flipping card. In a deck of
- * checks (the ways of paying a chat accepts) `checked` says whether it is on: its mark wears a check, or dims.
+ * checks (the ways of paying a chat accepts) `checked` says whether it is on: its mark wears a check, or dims. A test
+ * card says Testnet; `tagAll`: a real one says Mainnet too, where both kinds share a deck (the chat's).
  */
-export function WalletCardFace({card,after,checked}:{card:WalletCard<string>;after?:boolean;checked?:boolean}) {
+export function WalletCardFace({card,after,checked,tagAll}:{card:WalletCard<string>;after?:boolean;checked?:boolean;tagAll?:boolean}) {
  const check=checked!==undefined&&<span className="wallet-deck-card-check"><svg viewBox="0 0 12 12"><path d="m2.5 6.2 2.3 2.3 4.7-4.9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></span>;
  return <span className="wallet-deck-face" data-deck="face" data-after={after||undefined} data-checked={checked}>
   <span className="wallet-deck-card-glyph" aria-hidden="true"><WalletMark rail={railOf(card)}/>{check}</span>
-  <span className="wallet-deck-card-status">{card.network==='testnet'&&<span className="wallet-deck-card-network" data-testid="wallet-card-network">Testnet</span>}{card.status}</span>
+  <span className="wallet-deck-card-status">{card.network&&(card.network==='testnet'||tagAll)&&<span className="wallet-deck-card-network" data-network={card.network} data-testid="wallet-card-network">{card.network==='testnet'?'Testnet':'Mainnet'}</span>}{card.status}</span>
   {/* A card after the chosen one shows only its trailing edge: its mark is there too. */}
   <span className="wallet-deck-card-glyph-end" aria-hidden="true"><WalletMark rail={railOf(card)}/>{check}</span>
   <span className="wallet-deck-card-ghost" data-deck="ghost" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/><circle cx="9" cy="9" r="1.5" fill="var(--ghost-eye)"/><circle cx="15" cy="9" r="1.5" fill="var(--ghost-eye)"/></svg></span>
@@ -46,12 +47,16 @@ export interface CardDeckProps<Id extends string=WalletRail> {
  /** The deck's own name for its arrows' test ids. */
  name:string;
  compact?:boolean;
+ /** Every card names its network, Mainnet too: a deck where both kinds sit together (the chat's). */
+ tagAll?:boolean;
+ /** One of the wallet page's two decks whose card is not the panel's (deck/Deck.tsx `resting`). */
+ resting?:boolean;
 }
 
 const WALLET_PANEL={id:'wallet-panel',tabId:(rail:string)=>`wallet-tab-${rail}`};
 
-export function CardDeck<Id extends string=WalletRail>({onSelect,onChoose,testId,...props}:CardDeckProps<Id>) {
+export function CardDeck<Id extends string=WalletRail>({onSelect,onChoose,testId,tagAll,...props}:CardDeckProps<Id>) {
  return <Deck<WalletCard<Id>> {...props} className="wallet-deck" panel={WALLET_PANEL}
   onSelect={id=>onSelect(id as Id)} onChoose={onChoose&&(id=>onChoose(id as Id))} testId={card=>testId(card.id)}
-  face={(card,{after,checked})=><WalletCardFace card={card} after={after} checked={checked}/>} mark={card=><WalletMark rail={railOf(card)}/>} tone={card=>`wallet-card-${railOf(card)}`}/>;
+  face={(card,{after,checked})=><WalletCardFace card={card} after={after} checked={checked} tagAll={tagAll}/>} mark={card=><WalletMark rail={railOf(card)}/>} tone={card=>`wallet-card-${railOf(card)}`}/>;
 }

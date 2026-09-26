@@ -115,6 +115,16 @@ export class SparkWallet {
   }
 
   async stop() { this.stopped = true; this.gate.close(); await this.serial(() => this.lock()); }
+  /** The person removes this wallet (see ArkWallet.remove): closed and its record, with its sealed seed, deleted. */
+  remove(): Promise<void> {
+    this.gate.interrupt();
+    return this.serial(async () => {
+      await this.lock();
+      await transact([STORES.settings], (s) => { s[STORES.settings].delete(this.key); });
+      this.saved = undefined;
+      this.view = this.idle(); this.changed();
+    }).finally(() => this.gate.resume());
+  }
   async lock() { clearTimeout(this.timer); clearTimeout(this.retry); const adapter = this.adapter; this.adapter = undefined; this.view = { ...this.view, locked: true }; this.changed(); await adapter?.close(); }
 
   async refresh() { await this.poll().catch((error) => { if (!(error instanceof ModeChanged)) throw error; }); }

@@ -115,6 +115,13 @@ export async function clearChatData(): Promise<void> {
   });
 }
 
+/** Deletes a database of the origin by name (an SDK's own), as far as the browser lets it: blocked or failed, it gives up quietly. */
+export function deleteDatabase(name: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    try { const request = indexedDB.deleteDatabase(name); request.onsuccess = request.onerror = request.onblocked = () => resolve(); } catch { resolve(); }
+  });
+}
+
 export function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);

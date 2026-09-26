@@ -679,14 +679,34 @@ export class CashuWallet {
     });
   }
 
+  /**
+   * The person removes the Cashu wallet of a network (the engine checked what it holds and what they confirmed): the
+   * ecash held at its mints, reserved or not, and their unpaid invoices are deleted. A Lightning payment still in
+   * flight from one of them is not cut off: the removal is refused until it settles.
+   */
+  async forget(mints: readonly string[]): Promise<void> {
+    const at = new Set(mints);
+    const melts = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
+    if (melts.some((m) => at.has(m.mint))) throw new Error("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.");
+    const proofs = (await this.allProofs()).filter((p) => at.has(p.mint));
+    const quotes = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).filter((q) => at.has(q.mint));
+    await transact([STORES.proofs, STORES.quotes], (stores) => {
+      for (const p of proofs) stores[STORES.proofs].delete(p.secret);
+      for (const q of quotes) stores[STORES.quotes].delete(q.quote);
+    });
+    for (const mint of mints) { this.wallets.delete(mint); this.names.delete(mint); this.infos.delete(mint); }
+  }
+
   private async reservedProofs(melt: PendingMelt): Promise<StoredProof[]> {
     const secrets = new Set(melt.secrets);
     return (await this.allProofs()).filter((p) => secrets.has(p.secret));
   }
 
-  async exportTokens(): Promise<{ mint: string; token: string; amount: number }[]> {
+  /** Everything held, as one token per mint; `mints`: only these mints' (one network's wallet). */
+  async exportTokens(mints?: readonly string[]): Promise<{ mint: string; token: string; amount: number }[]> {
     const out: { mint: string; token: string; amount: number }[] = [];
     for (const mint of new Set((await this.allProofs()).map((p) => p.mint))) {
+      if (mints && !mints.includes(mint)) continue;
       const proofs = await this.proofsAt(mint);
       if (proofs.length === 0) continue;
       out.push({

@@ -46,6 +46,13 @@
 .deck[data-mode=stack]:is(:hover,:focus-within) [data-deck=face]{will-change:transform}
 @media(hover:hover){.deck[data-mode=stack] .deck-card:hover:not([data-active=true]) [data-deck=face]::after{opacity:0}}
 
+/* One of two decks over one panel whose card is not the panel's (the wallet page's other network): no glow and no lit
+   edge, its top card a little shaded; the card under the pointer lightens, to say that a click brings it up. */
+.deck[data-resting] .deck-glow{opacity:0}
+.deck[data-resting] .deck-card[data-active=true] [data-deck=face]{border-color:rgba(255,255,255,.1)}
+.deck[data-resting] .deck-card[data-active=true] [data-deck=face]::after{opacity:.2}
+@media(hover:hover){.deck[data-resting] .deck-card:hover [data-deck=face]::after{opacity:0}}
+
 /* A finger: a snapping track. The chosen card is the one at rest in the centre. */
 .deck[data-mode=track] .deck-track{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding:10px calc(var(--deck-w) * .12);scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .deck[data-mode=track] .deck-track::-webkit-scrollbar{display:none}

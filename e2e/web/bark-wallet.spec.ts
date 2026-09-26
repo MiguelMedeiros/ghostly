@@ -25,7 +25,7 @@ test("Bark is not on Mainnet yet: New says so, with its reason, instead of makin
   await expect(dialog).toBeVisible();
   // Testnet offers it, in one click.
   await dialog.getByRole("radio", { name: "Testnet" }).click();
-  await expect(dialog.getByTestId("new-wallet-type-bark-status")).toHaveText("One click");
+  await expect(dialog.getByTestId("new-wallet-type-bark-status")).toHaveText("Create");
   await alice.page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);

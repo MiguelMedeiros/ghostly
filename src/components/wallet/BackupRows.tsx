@@ -5,13 +5,16 @@ import { InputGroup } from "../layout";
 
 type Open = "none" | "phrase" | "backup" | "restore";
 
-/** Recovery phrase, encrypted backup and restore: the same three rows for every self-custodial wallet. */
-export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreFile, canReplace, busy, run }: {
-  name: string; busy: boolean; canReplace: boolean;
+/**
+ * Recovery phrase, encrypted backup and restore: the same three rows for every self-custodial wallet. Without
+ * `restorePhrase` and `restoreFile` (a backup before removing the wallet), only the first two.
+ */
+export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreFile, canReplace = false, busy, run }: {
+  name: string; busy: boolean; canReplace?: boolean;
   reveal: () => Promise<string>;
   exportBackup: (password: string) => Promise<string>;
-  restorePhrase: (phrase: string) => Promise<void>;
-  restoreFile: (text: string, password: string) => Promise<void>;
+  restorePhrase?: (phrase: string) => Promise<void>;
+  restoreFile?: (text: string, password: string) => Promise<void>;
   run: (work: () => Promise<unknown>) => Promise<void>;
 }) {
   const [open, setOpen] = useState<Open>("none");
@@ -35,10 +38,10 @@ export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreF
           </InputGroup>
         </Block>
       )}
-      <Row label="Restore" hint={canReplace ? undefined : "Only while empty"}>
+      {restorePhrase && restoreFile && <Row label="Restore" hint={canReplace ? undefined : "Only while empty"}>
         <Button onClick={() => toggle("restore")} disabled={!canReplace && open !== "restore"}>{open === "restore" ? "Cancel" : "Restore"}</Button>
-      </Row>
-      {open === "restore" && (
+      </Row>}
+      {open === "restore" && restorePhrase && restoreFile && (
         <Block>
           <textarea aria-label="Recovery phrase" rows={2} autoComplete="off" spellCheck={false} placeholder="Recovery phrase" className={`${input} font-mono resize-none`} value={restore} onChange={(e) => setRestore(e.target.value)} />
           <Button variant="primary" disabled={busy || !restore.trim()} onClick={() => void run(async () => { await restorePhrase(restore.trim()); setRestore(""); toggle("none"); })}>Restore from phrase</Button>

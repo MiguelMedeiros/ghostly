@@ -592,7 +592,7 @@ const TESTNET_WALLETS: Partial<Record<Combination["rail"], WalletKind[]>> = {
   cashu: ["cashu"], "ln-mint": ["cashu"], "ark-arkade": ["arkade"], bark: ["bark"], usdt: ["usdt"],
 };
 
-/** What Mainnet's New says of a kind: `Not yet` (with its reason), or what it takes (`One click`, `Choose a source`). */
+/** What Mainnet's New says of a kind: `Not yet` (with its reason), or what clicking it does (`Create`, `Connect…`). */
 const offer = (dialog: Locator, kind: WalletKind) => dialog.getByTestId(`new-wallet-type-${kind}-status`);
 
 /**
@@ -621,7 +621,7 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
       continue;
     }
     const dialog = await newWalletDialog(p, "mainnet");
-    if (combo.rail === "cashu" || combo.rail === "ln-mint") await expect(offer(dialog, "cashu")).toHaveText("One click");
+    if (combo.rail === "cashu" || combo.rail === "ln-mint") await expect(offer(dialog, "cashu")).toHaveText("Create");
     else if (combo.rail === "bark") {
       await expect(offer(dialog, "bark")).toHaveText("Not yet");
       await expect(dialog.getByTestId("new-wallet-type-bark")).toHaveAttribute("aria-disabled", "true");
@@ -630,7 +630,7 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
       await expect(offer(dialog, "bitcoin")).toHaveText("Not yet");
     } else if (card === "lightning") {
       // Only the sources Mainnet allows are offered; the test sources never are.
-      await expect(offer(dialog, "lightning")).toHaveText("Choose a source");
+      await expect(offer(dialog, "lightning")).toHaveText("Connect…");
       await dialog.getByTestId("new-wallet-type-lightning").click();
       const select = dialog.getByTestId("new-wallet-provider-select");
       const options = (await select.count()) ? await (await optionsOf(select)).allTextContents() : [await dialog.getByTestId("new-wallet-provider").innerText()];
@@ -638,7 +638,7 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
       expect(options.join(" ")).not.toMatch(/fake|regtest|\(test\)/i);
     } else {
       // Ark and USDT: one click on Mainnet, but that reaches the real server and chain, so it is not made here.
-      await expect(offer(dialog, card as WalletKind)).toHaveText("One click");
+      await expect(offer(dialog, card as WalletKind)).toHaveText("Create");
     }
     await p.page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);

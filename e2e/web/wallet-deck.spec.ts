@@ -4,79 +4,85 @@ import { mockMainnetMints } from "../support/mint";
 import { swipe } from "../support/swipe";
 
 /**
- * The wallet cards are a deck. With a mouse they are a stack, each card in its own place, and the one the pointer
- * rests on comes up; on a touch screen they are a snapping track and the card at rest in the centre is the chosen
- * one. Either way the chosen card's panel shows below, and the arrows under the deck and the keyboard move along it.
+ * The wallet cards are decks, one per network: real money (Mainnet) and test money (Testnet) never share one. With a
+ * mouse a deck is a stack, each card in its own place, and the one the pointer rests on comes up; on a touch screen it
+ * is a snapping track and the card at rest in the centre is the chosen one. Either way the chosen card's panel shows
+ * below, and the arrows under the deck and the keyboard move along it. The deck whose card is not the panel's rests:
+ * the pointer crossing it chooses nothing, a click on it hands the panel over.
  *
  * A new profile has no wallet: each test makes five cards first, none of which reaches a real service: Cashu on
  * both networks (the Mainnet mints answered by the suite's own mint), the Lightning that comes with each, and a fake
  * Testnet Bitcoin wallet (in memory).
  */
 
-/** The deck's order: kind by kind, Mainnet before Testnet. */
-const CARDS = ["cashu-mainnet", "cashu-testnet", "lightning-mainnet", "lightning-testnet", "bitcoin-testnet"] as const;
-type Card = (typeof CARDS)[number];
+/** The Testnet deck's order, the one these tests move along. */
+const CARDS = ["cashu-testnet", "lightning-testnet", "bitcoin-testnet"] as const;
+/** The Mainnet deck, resting while a Testnet card is chosen. */
+const MAINNET = ["cashu-mainnet", "lightning-mainnet"] as const;
+type Card = (typeof CARDS)[number] | (typeof MAINNET)[number];
 const PANELS: Record<string, string> = { cashu: "wallet-balance", lightning: "wallet-balance", bitcoin: "bitcoin-wallet" };
 
 /**
- * The five wallets, made with New. Mainnet Cashu is made last, so the page opens on the first card, as a profile
- * that has just made its wallets and comes back to them does.
+ * The five wallets, made with New. Testnet Cashu is made last, so the page opens on the Testnet deck's first card, as
+ * a profile that has just made its wallets and comes back to them does.
  */
 async function wallets(peer: Peer): Promise<Page> {
   await mockMainnetMints(peer.context);
   await useFakeProviders(peer);
   await peer.page.goto("/#/wallet");
-  await createWallet(peer, "cashu", "testnet");
   await createWallet(peer, "bitcoin", "testnet", { provider: "fake-onchain", fill: async (form) => {
     await form.getByLabel("Access token").fill("token");
     await form.getByTestId("provider-save").click();
   } });
   await createWallet(peer, "cashu", "mainnet");
-  // Back to the chat list: each test opens the Wallets page afresh, its deck at rest.
+  await createWallet(peer, "cashu", "testnet");
+  // Back to the chat list: each test opens the Wallets page afresh, its decks at rest.
   await peer.page.goto("/#/");
   await expect(peer.page.getByTitle("New Chat")).toBeVisible();
   return peer.page;
 }
 
-const deck = (page: Page) => page.getByTestId("wallet").locator(".wallet-deck");
+const section = (page: Page, network: "mainnet" | "testnet") => page.getByTestId(`wallet-section-${network}`);
+const deck = (page: Page, network: "mainnet" | "testnet" = "testnet") => section(page, network).locator(".wallet-deck");
 const card = (page: Page, id: string) => page.getByTestId(`wallet-card-${id}`);
 const chosen = async (page: Page, id: Card) => {
   await expect(card(page, id)).toHaveAttribute("aria-selected", "true");
-  for (const other of CARDS) if (other !== id) await expect(card(page, other)).toHaveAttribute("aria-selected", "false");
+  for (const other of [...CARDS, ...MAINNET]) if (other !== id) await expect(card(page, other)).toHaveAttribute("aria-selected", "false");
   await expect(page.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", `wallet-tab-${id.replace("-", ":")}`);
   await expect(page.getByRole("tabpanel").getByTestId(PANELS[id.split("-")[0]])).toBeVisible();
 };
-/** How far the card's centre is from the track's centre, in pixels. */
+/** How far the card's centre is from its track's centre, in pixels. */
 const offCentre = (page: Page, id: string) => page.evaluate((id) => {
-  const track = document.querySelector(".wallet-deck-track")!.getBoundingClientRect();
-  const r = document.querySelector(`[data-testid=wallet-card-${id}]`)!.getBoundingClientRect();
+  const el = document.querySelector(`[data-testid=wallet-card-${id}]`)!;
+  const track = el.closest(".wallet-deck-track")!.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
   return Math.abs(r.left + r.width / 2 - (track.left + track.width / 2));
 }, id);
 
 /** Where a card sits in the stack, whatever card is on top: the face's place, before its lift and shrink. */
 const place = (page: Page, id: string) => card(page, id).evaluate((el) => (el as HTMLElement).offsetLeft + (el.querySelector(".wallet-deck-face") as HTMLElement).offsetLeft);
-/** The buttons' strips, left to right: they tile the stack, with no gap and no overlap. */
-const strips = (page: Page) => page.evaluate((ids) => ids.map((id) => { const r = document.querySelector(`[data-testid=wallet-card-${id}]`)!.getBoundingClientRect(); return { left: r.left, right: r.right }; }), [...CARDS]);
+/** The buttons' strips of one deck, left to right: they tile the stack, with no gap and no overlap. */
+const strips = (page: Page, ids: readonly string[] = CARDS) => page.evaluate((ids) => ids.map((id) => { const r = document.querySelector(`[data-testid=wallet-card-${id}]`)!.getBoundingClientRect(); return { left: r.left, right: r.right }; }), [...ids]);
 const tiled = (s: { left: number; right: number }[]) => s.every((strip, i) => strip.right > strip.left && (i === 0 || Math.abs(strip.left - s[i - 1].right) <= 1));
 
 test("with a mouse the cards are a stack: resting on one brings it up, and its panel follows", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
   const page = await wallets(await peer("alice", { viewport: { width: 1280, height: 900 } }));
   await page.goto("/#/wallet");
   await expect(deck(page)).toHaveAttribute("data-mode", "stack");
-  const tabs = page.getByRole("tablist", { name: "Wallet integrations" }).getByRole("tab");
+  const tabs = page.getByRole("tablist", { name: "Testnet wallets" }).getByRole("tab");
   await expect(tabs).toHaveCount(CARDS.length);
-  await chosen(page, "cashu-mainnet");
+  await chosen(page, "cashu-testnet");
   expect(tiled(await strips(page))).toBe(true);
   const before = await Promise.all(CARDS.map((id) => place(page, id)));
 
   // The pointer rests on the middle card's strip: it comes up, and nothing moves sideways.
-  await card(page, "lightning-mainnet").hover();
-  await chosen(page, "lightning-mainnet");
+  await card(page, "lightning-testnet").hover();
+  await chosen(page, "lightning-testnet");
   expect(await Promise.all(CARDS.map((id) => place(page, id)))).toEqual(before);
   expect(tiled(await strips(page))).toBe(true);
   // The card that came up is under the pointer, so resting there keeps it: the stack does not flicker.
   await page.waitForTimeout(400);
-  await chosen(page, "lightning-mainnet");
+  await chosen(page, "lightning-testnet");
 
   // Passing over the stack flips through it, a card at a time, to the one the pointer stops on.
   const box = (await card(page, "bitcoin-testnet").boundingBox())!;
@@ -84,41 +90,78 @@ test("with a mouse the cards are a stack: resting on one brings it up, and its p
   await chosen(page, "bitcoin-testnet");
   await page.mouse.move(10, 10);
 
-  await card(page, "lightning-mainnet").click();
-  await chosen(page, "lightning-mainnet");
+  await card(page, "lightning-testnet").click();
+  await chosen(page, "lightning-testnet");
   // Only the chosen card is in the tab order; the others are reached with the arrows.
-  await expect(card(page, "lightning-mainnet")).toHaveAttribute("tabindex", "0");
-  await expect(card(page, "cashu-mainnet")).toHaveAttribute("tabindex", "-1");
+  await expect(card(page, "lightning-testnet")).toHaveAttribute("tabindex", "0");
+  await expect(card(page, "cashu-testnet")).toHaveAttribute("tabindex", "-1");
 
   // A card moving under a still pointer is not the pointer moving: the keys win.
-  await card(page, "lightning-mainnet").focus();
+  await card(page, "lightning-testnet").focus();
   await page.keyboard.press("ArrowRight");
-  await chosen(page, "lightning-testnet");
-  await expect(card(page, "lightning-testnet")).toBeFocused();
+  await chosen(page, "bitcoin-testnet");
+  await expect(card(page, "bitcoin-testnet")).toBeFocused();
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowLeft");
   await chosen(page, "cashu-testnet");
   await page.keyboard.press("End");
   await chosen(page, "bitcoin-testnet");
   await page.keyboard.press("Home");
-  await chosen(page, "cashu-mainnet");
-  await expect(card(page, "cashu-mainnet")).toBeFocused();
+  await chosen(page, "cashu-testnet");
+  await expect(card(page, "cashu-testnet")).toBeFocused();
 
   // The arrows under the deck, going round at the ends.
-  await page.getByTestId("wallet-deck-prev").click();
+  await page.getByTestId("wallet-deck-testnet-prev").click();
   await chosen(page, "bitcoin-testnet");
-  await page.getByTestId("wallet-deck-next").click();
-  await chosen(page, "cashu-mainnet");
-  await page.getByTestId("wallet-deck-next").click();
+  await page.getByTestId("wallet-deck-testnet-next").click();
   await chosen(page, "cashu-testnet");
+  await page.getByTestId("wallet-deck-testnet-next").click();
+  await chosen(page, "lightning-testnet");
 
   // The chosen card is lifted; the ones after it show their trailing edge, with their mark there.
-  await expect(card(page, "lightning-mainnet").locator(".wallet-deck-card-glyph-end")).toBeVisible();
-  await expect(card(page, "cashu-mainnet").locator(".wallet-deck-card-glyph-end")).toBeHidden();
+  await expect(card(page, "bitcoin-testnet").locator(".wallet-deck-card-glyph-end")).toBeVisible();
+  await expect(card(page, "cashu-testnet").locator(".wallet-deck-card-glyph-end")).toBeHidden();
   // The chosen card comes back after a reload.
   await card(page, "bitcoin-testnet").click();
   await page.reload();
   await chosen(page, "bitcoin-testnet");
+});
+
+test("real money and test money are two decks: the one resting ignores the pointer crossing it, and a click hands it the panel", { tag: ["@feature:wallet.deck", "@feature:wallet.instances.sections"] }, async ({ peer }) => {
+  const page = await wallets(await peer("alice", { viewport: { width: 1280, height: 900 } }));
+  await page.goto("/#/wallet");
+  await chosen(page, "cashu-testnet");
+  // Whose money, in words as well as colour, and each network's cards in its own deck.
+  await expect(section(page, "mainnet").getByRole("heading")).toHaveText(/Real money\s*· Mainnet/);
+  await expect(section(page, "testnet").getByRole("heading")).toHaveText(/Test money\s*· Testnet/);
+  await expect(page.getByRole("tablist", { name: "Mainnet wallets" }).getByRole("tab")).toHaveCount(MAINNET.length);
+  await expect(deck(page, "mainnet")).toHaveAttribute("data-resting", "true");
+  await expect(deck(page, "testnet")).not.toHaveAttribute("data-resting");
+  await expect(page.getByTestId("wallet-panel-network")).toHaveText("Test money");
+
+  // The pointer crosses the Mainnet deck on its way somewhere: nothing is chosen.
+  const box = (await card(page, "lightning-mainnet").boundingBox())!;
+  await page.mouse.move(box.x + 4, box.y + box.height / 2);
+  await page.mouse.move(box.x + box.width - 4, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.move(10, 10);
+  await chosen(page, "cashu-testnet");
+
+  // A click on it hands it the panel; the Testnet deck rests, its card still on top.
+  await card(page, "lightning-mainnet").click();
+  await chosen(page, "lightning-mainnet");
+  await expect(deck(page, "testnet")).toHaveAttribute("data-resting", "true");
+  await expect(deck(page, "mainnet")).not.toHaveAttribute("data-resting");
+  await expect(page.getByTestId("wallet-panel-network")).toHaveText("Real money");
+  // Now the Mainnet deck follows the pointer, and the keys stay in it.
+  await card(page, "cashu-mainnet").hover();
+  await chosen(page, "cashu-mainnet");
+  await page.mouse.move(10, 10);
+  await card(page, "cashu-mainnet").focus();
+  await page.keyboard.press("ArrowRight");
+  await chosen(page, "lightning-mainnet");
+  // A click on the resting Testnet deck's top card brings that deck back, on that card.
+  await card(page, "cashu-testnet").click();
+  await chosen(page, "cashu-testnet");
 });
 
 test("on a phone the cards are a snapping track: a swipe chooses the card that comes to rest in the centre", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
@@ -127,40 +170,45 @@ test("on a phone the cards are a snapping track: a swipe chooses the card that c
   await wallets(alice);
   await page.goto("/#/wallet");
   await expect(deck(page)).toHaveAttribute("data-mode", "track");
-  await chosen(page, "cashu-mainnet");
-  expect(await offCentre(page, "cashu-mainnet")).toBeLessThan(3);
+  await chosen(page, "cashu-testnet");
+  expect(await offCentre(page, "cashu-testnet")).toBeLessThan(3);
   await expect(deck(page).locator(".wallet-deck-marks span[data-on=true]")).toHaveCount(1);
+  await expect(deck(page, "mainnet").locator(".wallet-deck-marks span[data-on=true]")).toHaveCount(0);
 
   // A finger drags the track to the left, past half a card, and lets go: the next card settles in the centre and
   // becomes the chosen one.
-  await swipe(context, page.locator(".wallet-deck-track"), -0.6);
-  await chosen(page, "cashu-testnet");
-  await expect.poll(() => offCentre(page, "cashu-testnet")).toBeLessThan(3);
+  await swipe(context, deck(page).locator(".wallet-deck-track"), -0.6);
+  await chosen(page, "lightning-testnet");
+  await expect.poll(() => offCentre(page, "lightning-testnet")).toBeLessThan(3);
 
   // Tapping a card at the side brings it to the centre and chooses it.
-  await card(page, "lightning-mainnet").click();
-  await chosen(page, "lightning-mainnet");
-  await expect.poll(() => offCentre(page, "lightning-mainnet")).toBeLessThan(3);
+  await card(page, "bitcoin-testnet").click();
+  await chosen(page, "bitcoin-testnet");
+  await expect.poll(() => offCentre(page, "bitcoin-testnet")).toBeLessThan(3);
 
   // The arrows move along the track too.
-  await page.getByTestId("wallet-deck-next").click();
+  await page.getByTestId("wallet-deck-testnet-prev").click();
   await chosen(page, "lightning-testnet");
   await expect.poll(() => offCentre(page, "lightning-testnet")).toBeLessThan(3);
 
   // The keyboard works on the track too.
   await card(page, "lightning-testnet").focus();
   await page.keyboard.press("Home");
-  await chosen(page, "cashu-mainnet");
-  await expect.poll(() => offCentre(page, "cashu-mainnet")).toBeLessThan(3);
+  await chosen(page, "cashu-testnet");
+  await expect.poll(() => offCentre(page, "cashu-testnet")).toBeLessThan(3);
   await page.keyboard.press("End");
   await chosen(page, "bitcoin-testnet");
   await expect.poll(() => offCentre(page, "bitcoin-testnet")).toBeLessThan(3);
   // Two keys faster than the track scrolls: the end of the first, cut off on its way, does not choose its card.
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowLeft");
-  await expect.poll(() => offCentre(page, "lightning-mainnet")).toBeLessThan(3);
-  await chosen(page, "lightning-mainnet");
-  // Nothing scrolls sideways but the track itself.
+  await expect.poll(() => offCentre(page, "cashu-testnet")).toBeLessThan(3);
+  await chosen(page, "cashu-testnet");
+
+  // A tap on the resting Mainnet track hands it the panel.
+  await card(page, "cashu-mainnet").click();
+  await chosen(page, "cashu-mainnet");
+  // Nothing scrolls sideways but the tracks themselves.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(await page.evaluate(() => { const body = document.querySelector("[data-page-body]")!; return body.scrollWidth <= body.clientWidth + 1; })).toBe(true);
 });
@@ -176,13 +224,13 @@ test("a desktop column squeezed by the chat list keeps the stack, and every card
   await expect(deck(page)).toHaveAttribute("data-mode", "stack");
   const column = (await page.getByTestId("wallet").boundingBox())!;
   // Still a stack of readable cards (deck/Deck.tsx STACK_MIN_CARD); narrower, it is a track (responsive.spec.ts).
-  expect((await card(page, "cashu-mainnet").locator(".wallet-deck-face").boundingBox())!.width).toBeGreaterThanOrEqual(210);
+  expect((await card(page, "cashu-testnet").locator(".wallet-deck-face").boundingBox())!.width).toBeGreaterThanOrEqual(210);
   const narrow = await strips(page);
   expect(tiled(narrow)).toBe(true);
   // The whole stack is inside the column.
   expect(narrow[0].left).toBeGreaterThanOrEqual(column.x - 1);
   expect(narrow[narrow.length - 1].right).toBeLessThanOrEqual(column.x + column.width + 1);
-  for (const id of ["bitcoin-testnet", "cashu-testnet", "lightning-mainnet"] as const) {
+  for (const id of ["bitcoin-testnet", "cashu-testnet", "lightning-testnet"] as const) {
     await card(page, id).hover();
     await chosen(page, id);
   }
@@ -213,21 +261,21 @@ const atRest = (page: Page) => page.evaluate(() => [...document.querySelectorAll
 test("changing the card swings the new one up and tucks the old one back, and quick changes all settle", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
   const page = await wallets(await peer("alice", { viewport: { width: 1280, height: 900 } }));
   await page.goto("/#/wallet");
-  await chosen(page, "cashu-mainnet");
+  await chosen(page, "cashu-testnet");
   await recordSwings(page);
 
-  await page.getByTestId("wallet-deck-next").click();
-  await chosen(page, "cashu-testnet");
+  await page.getByTestId("wallet-deck-testnet-next").click();
+  await chosen(page, "lightning-testnet");
   const moving = await swings(page);
-  expect(moving["cashu-testnet"]).toEqual(["wallet-deck-face", "wallet-deck-card-ghost", "wallet-deck-card-sheen"]);
-  expect(moving["cashu-mainnet"]).toEqual(["wallet-deck-face"]);
-  expect(Object.keys(moving).sort()).toEqual(["cashu-mainnet", "cashu-testnet"]);
-  await chosen(page, "cashu-testnet");
+  expect(moving["lightning-testnet"]).toEqual(["wallet-deck-face", "wallet-deck-card-ghost", "wallet-deck-card-sheen"]);
+  expect(moving["cashu-testnet"]).toEqual(["wallet-deck-face"]);
+  expect(Object.keys(moving).sort()).toEqual(["cashu-testnet", "lightning-testnet"]);
+  await chosen(page, "lightning-testnet");
   await expect.poll(() => atRest(page)).toBe(true);
 
   // Clicking faster than a swing lasts: every one is interrupted, the last card wins and the stack comes to rest.
-  for (let i = 0; i < 3; i++) await page.getByTestId("wallet-deck-next").click({ delay: 0 });
-  await chosen(page, "bitcoin-testnet");
+  for (let i = 0; i < 3; i++) await page.getByTestId("wallet-deck-testnet-next").click({ delay: 0 });
+  await chosen(page, "lightning-testnet");
   await expect.poll(() => atRest(page)).toBe(true);
   expect(tiled(await strips(page))).toBe(true);
 });
@@ -236,12 +284,12 @@ test("on a phone the card that settles in the centre swings too", { tag: ["@feat
   const page = await wallets(await peer("alice", { mobile: true }));
   await page.goto("/#/wallet");
   await expect(deck(page)).toHaveAttribute("data-mode", "track");
-  await chosen(page, "cashu-mainnet");
-  await recordSwings(page);
-  await page.getByTestId("wallet-deck-next").click();
   await chosen(page, "cashu-testnet");
-  expect((await swings(page))["cashu-testnet"]).toContain("wallet-deck-face");
-  await expect.poll(() => offCentre(page, "cashu-testnet")).toBeLessThan(3);
+  await recordSwings(page);
+  await page.getByTestId("wallet-deck-testnet-next").click();
+  await chosen(page, "lightning-testnet");
+  expect((await swings(page))["lightning-testnet"]).toContain("wallet-deck-face");
+  await expect.poll(() => offCentre(page, "lightning-testnet")).toBeLessThan(3);
   await expect.poll(() => atRest(page)).toBe(true);
 });
 
@@ -249,7 +297,7 @@ test("with reduced motion the deck still stacks, chooses and follows, without a 
   const page = await wallets(await peer("alice", { viewport: { width: 1280, height: 900 } }));
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/#/wallet");
-  await chosen(page, "cashu-mainnet");
+  await chosen(page, "cashu-testnet");
   await recordSwings(page);
   await card(page, "bitcoin-testnet").click();
   await chosen(page, "bitcoin-testnet");
@@ -270,10 +318,10 @@ test("the app's own reduced-motion switch stills the deck too", async ({ peer })
   await page.getByRole("switch", { name: "Reduce motion" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-reduce-motion", "true");
   await page.goto("/#/wallet");
-  await chosen(page, "cashu-mainnet");
-  await recordSwings(page);
-  await page.getByTestId("wallet-deck-next").click();
   await chosen(page, "cashu-testnet");
+  await recordSwings(page);
+  await page.getByTestId("wallet-deck-testnet-next").click();
+  await chosen(page, "lightning-testnet");
   expect(await swings(page)).toEqual({});
-  expect(await card(page, "cashu-testnet").locator(".wallet-deck-face").evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
+  expect(await card(page, "lightning-testnet").locator(".wallet-deck-face").evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
 });
