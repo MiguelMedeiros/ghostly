@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
-import { createRelayPayload } from "../src/pkarr";
+import { createRelayPayload, RELAY_PAYLOAD_MAX_BYTES } from "../src/pkarr";
 import { didDhtDocument, encodeDidDhtPacket, signDidDhtPacket } from "../src/didDht";
-import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl } from "../src/relay";
+import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl, readRelayBody } from "../src/relay";
 import { DiscoveryBudgetError, isDiscoveryBudgetError } from "../src/transport";
 
 // covers: core.relay-client
@@ -112,6 +112,51 @@ describe("resolving", () => {
       return new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
     }) as typeof fetch });
     expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(4n);
+  });
+
+  /** A relay at a.test that answers 200 with `body`, and b.test with a good packet. */
+  const behind = (body: ReadableStream<Uint8Array>, headers?: Record<string, string>, timeoutMs?: number) => new RelayTransport({
+    relays: ["https://a.test", "https://b.test"], timeoutMs,
+    fetch: (async (url: RequestInfo | URL) => String(url).includes("a.test") ? new Response(body, { headers }) : packet(7n)) as typeof fetch,
+  });
+
+  it("refuses an answer whose content-length is over a payload's size without reading it, and tries the next", async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({ pull(c) { pulled++; c.enqueue(new Uint8Array(4096)); } }, { highWaterMark: 0 });
+    const relay = behind(body, { "content-length": String(RELAY_PAYLOAD_MAX_BYTES + 1) });
+    expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(7n);
+    expect(pulled).toBe(0);
+  });
+
+  it("stops reading an endless answer once it passes a payload's size, and tries the next", async () => {
+    let sent = 0, cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) { sent += 256; c.enqueue(new Uint8Array(256)); },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    expect((await behind(body).resolve(id.pubKeyZ32))?.timestampMicros).toBe(7n);
+    expect(sent).toBeLessThanOrEqual(RELAY_PAYLOAD_MAX_BYTES + 256);
+    expect(cancelled).toBe(true);
+  });
+
+  it("gives up on an answer that trickles past the timeout after its headers, and tries the next", async () => {
+    let cancelled = false;
+    // Headers and one byte right away, then nothing: the body is not tied to the request's signal.
+    const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(1)); }, pull: () => new Promise(() => {}), cancel() { cancelled = true; } });
+    const started = Date.now();
+    expect((await behind(body, undefined, 30).resolve(id.pubKeyZ32))?.timestampMicros).toBe(7n);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(cancelled).toBe(true);
+  });
+
+  it("reads a body of exactly a payload's size, and nothing larger", async () => {
+    const signal = new AbortController().signal;
+    const exact = new Uint8Array(RELAY_PAYLOAD_MAX_BYTES).fill(1);
+    expect(await readRelayBody(new Response(exact as BodyInit), signal)).toEqual(exact);
+    await expect(readRelayBody(new Response(new Uint8Array(RELAY_PAYLOAD_MAX_BYTES + 1) as BodyInit), signal)).rejects.toThrow(/larger than 1072 bytes/);
+    // No content-length, chunks that only add up to too much.
+    const chunks = new ReadableStream<Uint8Array>({ start(c) { for (let i = 0; i < 5; i++) c.enqueue(new Uint8Array(250)); c.close(); } });
+    await expect(readRelayBody(new Response(chunks), signal)).rejects.toThrow(/larger than/);
   });
 
   it("treats a malformed or forged packet as a failed relay and tries the next", async () => {

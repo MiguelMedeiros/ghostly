@@ -27,6 +27,7 @@
     "allow-publish-messages",
     "allow-resolve-messages",
     "allow-publish-records",
+    "allow-publish-signed-packet",
     "allow-resolve-records",
     "allow-set-pkarr-relays",
     "allow-pkarr-status",
