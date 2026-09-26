@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
-import { walletNetworkOf } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { lightningNetworkFor } from "./walletCardData";
 import { MONEY_LABEL, NetworkTag, satsOf } from "./NetworkTag";
@@ -105,10 +104,12 @@ function relativeExpiry(expiresAt: number, now: number): string {
 
 function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: boolean; off: boolean }) {
   const all = useServicesPlatform()?.wallet;
-  // Paid by the Lightning wallet of the invoice's network: a test invoice never meets real money.
-  const network = walletNetworkOf(invoice.network);
-  const wallet = all?.forNetwork(lightningNetworkFor(all.getState(), invoice.network));
-  // No Lightning wallet on the invoice's network (the profile's wallets are known): said in words, nothing pays it.
+  // Paid by the Lightning wallet of the invoice's network: a test invoice never meets real money. An invoice on
+  // Bitcoin (a test mint's look the same) goes to the Mainnet wallet when there is one, else the Testnet one; the
+  // money named is that wallet's, since that is what leaves.
+  const network = lightningNetworkFor(all?.getState(), invoice.network);
+  const wallet = all?.forNetwork(network);
+  // No Lightning wallet of that network (the profile's wallets are known): said in words, nothing here pays it.
   const known = all?.getState()?.wallets;
   const noWallet = !!known && !known.some((w) => w.type === "lightning" && w.network === network);
   const id = invoice.paymentHash ?? invoice.invoice.slice(-32);

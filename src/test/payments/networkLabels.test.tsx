@@ -114,11 +114,19 @@ describe("a Lightning invoice in a message", () => {
     if (!card.textContent?.includes("Expired")) expect(within(card).getByTestId("invoice-pay")).toBeInTheDocument();
   });
 
-  it("with only a Testnet wallet, says in words there is no Mainnet Lightning wallet to pay it from, and offers no Pay", () => {
-    invoiceMessage({ mints: [mint(TEST_MINT, 1_000)] });
+  it("with no Lightning wallet at all, says in words there is no Mainnet Lightning wallet to pay it from, and offers no Pay", () => {
+    invoiceMessage({ mints: [] });
     const card = screen.getByTestId("invoice-bubble");
     expect(card).toHaveTextContent("Real money: you have no Mainnet Lightning wallet to pay it from");
     expect(within(card).queryByTestId("invoice-pay")).not.toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+  });
+
+  it("with only a Testnet wallet, an invoice on Bitcoin (a test mint's look the same) is paid with test sats, and says so", () => {
+    invoiceMessage({ mints: [mint(TEST_MINT, 1_000)] });
+    const card = screen.getByTestId("invoice-bubble");
+    expect(within(card).getByTestId("invoice-network")).toHaveTextContent("Test money");
+    expect(card).toHaveTextContent("test sats");
+    expect(card).not.toHaveTextContent("you have no");
   });
 });
