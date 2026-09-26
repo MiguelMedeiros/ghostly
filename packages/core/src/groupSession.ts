@@ -13,6 +13,7 @@ import {
   encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaFrame,
 } from "./groupMeta";
+import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 
 /**
  * One member's view of a `group-mesh/1` group: the membership chain, the epoch
@@ -45,7 +46,12 @@ export const GROUP_LIMITS = {
 /** What every member should know about who can read what, in the words the apps show. */
 export const GROUP_READ_NOTE = `Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go directly to each member; whoever was away gets the last ${GROUP_LIMITS.outlog} messages from each member when they meet again.`;
 
-export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string }
+/**
+ * `m`: the message's mentions (`GroupMention[]` as JSON), sealed under the same epoch key with a nonce of their own
+ * and bound to the header. Outside the signature, which older apps check as it was: only the author's edge ever
+ * carries its frame, so the edge vouches for it. Older apps ignore the field.
+ */
+export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string } }
 export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupCommit; secret?: SealedSecret }
 /** `mt`: which metadata statement I hold (`groupMetaTag`); apps without metadata leave it out. */
 export interface GroupSyncFrame { t: "group-sync"; g: string; e: number; h: string; have: Record<string, Record<string, number>>; secrets: number[]; mt?: string }
@@ -87,7 +93,7 @@ export interface GroupState {
   meta?: GroupMeta;
 }
 
-export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string }
+export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[] }
 
 export interface GroupSessionHooks {
   save(state: GroupState): Promise<void>;
@@ -102,6 +108,12 @@ export interface GroupSessionHooks {
 }
 
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
+/** Sixteen mentions as JSON, each a key and two offsets, with room to spare, sealed. */
+const MAX_MENTIONS_BOX = Math.ceil((MENTION_LIMITS.count * 96 + 16) * 4 / 3) + 4;
+const mentionsAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify(["ghostly-group/1 mentions", f.g, f.e, f.s, f.n, f.ts]);
+const isMentionsBox = (v: unknown): v is { n: string; c: string } => !!v && typeof v === "object" &&
+  typeof (v as Record<string, unknown>).n === "string" && (v as Record<string, string>).n.length === 32 && B64.test((v as Record<string, string>).n) &&
+  typeof (v as Record<string, unknown>).c === "string" && (v as Record<string, string>).c.length <= MAX_MENTIONS_BOX && B64.test((v as Record<string, string>).c);
 const B64 = /^[A-Za-z0-9_-]*$/;
 const secretAad = (g: string, e: number, member: string) => JSON.stringify(["ghostly-group/1 secret", g, e, member]);
 const messageAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify([f.g, f.e, f.s, f.n, f.ts]);
@@ -334,8 +346,11 @@ export class GroupSession {
     this.waiting = []; this.waitingBytes = 0; this.pendingCommits.clear();
   }
 
-  /** Encrypts and signs a text, keeps it for catch-up and sends it to every other member. */
-  sendText(text: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
+  /**
+   * Encrypts and signs a text, keeps it for catch-up and sends it to every other member. `mentions`: places of the
+   * text that name members (everyone: the admin only); what does not hold is left out.
+   */
+  sendText(text: string, now = Date.now(), mentions: readonly GroupMention[] = []): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (this.state.status !== "active") return { error: this.state.statusReason ?? "You are no longer in this group" };
       const trimmed = text.trim();
@@ -346,14 +361,17 @@ export class GroupSession {
       if (this.state.seqEpoch !== epoch) { this.state.seq = 0; this.state.seqEpoch = epoch; }
       const n = this.state.seq++;
       const header = { g: this.id, e: epoch, s: this.myKey, n, ts: now };
-      const { n: nn, c } = encryptText(epochKeys(secret, this.id, epoch).message, messageAad(header), trimmed);
+      const key = epochKeys(secret, this.id, epoch).message;
+      const { n: nn, c } = encryptText(key, messageAad(header), trimmed);
       const unsigned = { ...header, nn, c };
-      const frame: GroupMessageFrame = { t: "group-msg", ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)) };
+      const named = validMentions(wireMentions(mentions), trimmed, this.isAdmin);
+      const frame: GroupMessageFrame = { t: "group-msg", ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)),
+        ...(named.length ? { m: encryptText(key, mentionsAad(header), JSON.stringify(named)) } : {}) };
       this.state.sent.push(frame);
       let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
       while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
       const id = groupMessageId(this.myKey, epoch, n);
-      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed });
+      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}) });
       await this.persist();
       for (const key of this.others) this.hooks.send(key, frame);
       return { id };
@@ -409,11 +427,21 @@ export class GroupSession {
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
     const secret = this.secret(raw.e);
     if (!secret) { this.park(from, raw); return; }
-    const text = decryptText(epochKeys(secret, this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
+    const key = epochKeys(secret, this.id, raw.e).message;
+    const text = decryptText(key, messageAad(raw), raw.nn, raw.c);
     if (text === null) return;
-    await this.hooks.message({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text });
+    // Everyone is named only by the admin of the message's epoch; a box that does not open is no mentions, not no message.
+    const mentions = this.openMentions(key, raw, text, rosterAdmin(commit.m) === raw.s);
+    await this.hooks.message({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}) });
     this.markSeen(raw);
     await this.persist();
+  }
+
+  private openMentions(key: Uint8Array, raw: GroupMessageFrame, text: string, everyone: boolean): GroupMention[] {
+    if (!isMentionsBox(raw.m)) return [];
+    const plain = decryptText(key, mentionsAad(raw), raw.m.n, raw.m.c);
+    if (plain === null) return [];
+    try { return validMentions(JSON.parse(plain), text, everyone); } catch { return []; }
   }
 
   private isDuplicate(f: GroupMessageFrame): boolean {

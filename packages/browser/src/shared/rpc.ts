@@ -1,5 +1,5 @@
 import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
-import type { LnurlSuccessAction, PaymentReview, PaymentTarget } from "@ghostly/core";
+import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { LnurlView } from "../engine/paymentAdapters/providers/lightningService";
 import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
@@ -213,7 +213,8 @@ export interface EngineApi {
   disableGroupLink(params: { groupId: string }): void;
   /** Joins through a group's link (`group1/…`, or an address carrying it); resolves at once, admission follows. */
   joinGroupByLink(params: { link: string }): { groupId: string };
-  sendGroupMessage(params: { groupId: string; text: string }): { error: string | null };
+  /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
+  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[] }): { error: string | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
   leaveGroup(params: { groupId: string }): void;
   removeGroupMember(params: { groupId: string; key: string }): void;
@@ -255,6 +256,8 @@ export interface AttentionEvent {
   at: number;
   /** The chat a message event belongs to (its link id, `group:<id>` for a group), so a page can mute one chat. */
   linkId?: string;
+  /** A group message that names me (or everyone): it may still notify in a muted group. */
+  mention?: true;
 }
 export type EngineEvent =
   | { kind: "attention"; event: AttentionEvent }
