@@ -23,6 +23,8 @@ export class FakeFederation {
   readonly joined = new Map<string, number>();
   /** Recoveries give back what a mnemonic held (the federation's backup of it). */
   readonly backups = new Map<string, number>();
+  /** What a joined client says of it, over what the preview said (a real client's can come back with no meta yet). */
+  joinedInfo: Partial<Omit<FederationInfo, "federationId">> = {};
   constructor(readonly info: Omit<FederationInfo, "federationId">) {}
   /** Bech32 characters only, as a real invite code (fed1…). */
   get invite() { return `fed11${[...this.id.slice(0, 40)].map((c) => "qpzry9x8gf2tvdw0"["0123456789abcdef".indexOf(c)]).join("")}qqqq`; }
@@ -47,7 +49,7 @@ class FakeClient implements FedimintClient {
     return id;
   }
   changed() { for (const l of this.listeners) l(this.balanceMsats); this.sdk.backup(this); }
-  async info(): Promise<FederationInfo> { return { federationId: this.federation.id, ...this.federation.info }; }
+  async info(): Promise<FederationInfo> { return { federationId: this.federation.id, ...this.federation.info, ...this.federation.joinedInfo }; }
   async balance() { this.check(); return this.balanceMsats; }
   onBalance(listener: (msats: number) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   async parseNotes(notes: string) {

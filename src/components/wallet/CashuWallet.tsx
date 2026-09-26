@@ -77,7 +77,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
         ) : (
           <p className="text-text-primary" data-testid="wallet-balance">
             <span className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : ln.balance.toLocaleString()}</span>
-            <span className="text-text-muted text-sm ml-2">sats · {sourceName}</span>
+            <span className="text-text-muted text-sm ml-2">{testnet ? "test sats" : "sats"} · {sourceName}</span>
             {ln?.status !== "ready" && <span className="block text-xs text-yellow-500 mt-1" data-testid="lightning-source-state">{ln?.error ?? "Connecting to the source…"}</span>}
           </p>
         )}
