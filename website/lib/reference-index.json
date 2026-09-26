@@ -298,7 +298,7 @@
     "title": "WISP 204: Ark payments via Bark",
     "status": "Draft",
     "updated": "2026-09-23",
-    "implementation": "Experimental browser adapter, Second's Bark SDK @secondts/bark 0.24.0 (bark 0.7.1, WebAssembly). Testnet mode only: every Testnet profile starts a signet wallet on Second's server; Mainnet makes none yet. Regtest evidence below.",
+    "implementation": "Experimental browser adapter, Second's Bark SDK @secondts/bark 0.24.0 (bark 0.7.1, WebAssembly). Testnet only (New offers no Mainnet Bark yet): New makes a signet wallet on Second's server; Mainnet makes none yet. Regtest evidence below.",
     "documentKind": "Adapter",
     "dependencies": [
       "200-payments.md",
@@ -331,7 +331,7 @@
     "title": "WISP 2xx: Fedimint ecash and Lightning through a federation",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental browser adapter on the Fedimint web SDK (@fedimint/core canary, pinned). Testnet mode only; regtest evidence below.",
+    "implementation": "Experimental browser adapter on the Fedimint web SDK (@fedimint/core canary, pinned). Testnet only (New offers no Mainnet Fedimint yet); regtest evidence below.",
     "documentKind": "Adapter",
     "dependencies": [
       "200-payments.md",
@@ -866,7 +866,7 @@
     "slug": "9xx-group-community",
     "title": "WISP 9xx: Group Community Distribution Profile",
     "status": "Draft",
-    "updated": "2026-09-24",
+    "updated": "2026-09-25",
     "implementation": "group-community/1: core protocol in groupCommunity.ts and communityRendezvous.ts; engine in community.ts, payments in communityPay.ts; UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test",
     "documentKind": "Profile",
     "dependencies": [
@@ -887,7 +887,7 @@
     "slug": "9xx-group-mesh",
     "title": "WISP 9xx: Group Mesh Distribution Profile",
     "status": "Draft",
-    "updated": "2026-09-24",
+    "updated": "2026-09-25",
     "implementation": "group-mesh/1: core protocol in packages/core and, for the group's link (group-entry/1), groupEntry.ts; engine, UI and four-browser e2e in packages/browser and e2e/web/groups.spec.ts; web, extension and desktop share it",
     "documentKind": "Profile",
     "dependencies": [
@@ -978,7 +978,7 @@
     "sourcePath": "docs/wisps/PUBLIC-PROFILES.md",
     "aliases": [],
     "slug": "public-profiles",
-    "title": "Identity presentation and local public profiles",
+    "title": "Identity presentation and public profiles",
     "dependencies": [],
     "notices": []
   },
