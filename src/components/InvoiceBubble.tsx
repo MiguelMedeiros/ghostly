@@ -5,6 +5,8 @@ import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { CashuInspection } from "../lib/platform";
 import type { MoneyInText } from "../lib/money";
+import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
+import { moreMoneyMethod } from "../lib/parse/money-more";
 
 const SETTLED_KEY = "ghostly_settled_money";
 
@@ -291,16 +293,20 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
   );
 }
 
+const METHOD_NAME = { cashu: "Cashu", lightning: "Lightning", bitcoin: "On-chain Bitcoin", arkade: "Ark", bark: "Bark", usdt: "USDT" } as const;
+
 /** Money pasted into the chat, shown as something a person can read and act on. */
 /** `peerPubKey`: the chat it is in, whose choice of ways of paying decides whether it can be paid or redeemed here. */
 export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText; mine: boolean; peerPubKey?: string }) {
   const allowed = useServicesPlatform()?.getPeer(peerPubKey ?? "")?.paymentMethods;
-  const off = !!allowed && !(money.type === "cashu" ? allowed.cashu : allowed.lightning);
+  const method = money.type === "cashu" ? "cashu" : money.type === "lightning" || money.type === "lnurl" ? "lightning" : moreMoneyMethod(money);
+  const off = !!allowed && !allowed[method];
   return (
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
-      {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : <CashuCard value={money.value} mine={mine} off={off} />}
-      {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{money.type === "cashu" ? "Cashu" : "Lightning"} is off in this chat.</p>}
+      {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
+        : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} />} />}
+      {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{METHOD_NAME[method]} is off in this chat.</p>}
     </>
   );
 }

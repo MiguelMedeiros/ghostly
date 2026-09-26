@@ -1,10 +1,12 @@
 import { findMoney } from "./money";
+import { moreMoneyPreview } from "./parse/money-preview";
 
 /** A pasted invoice or token reads as what it is, not as its first characters. */
 export function previewText(text: string): string {
   const money = findMoney(text);
   if (!money) return text;
   if (money.type === "cashu") return "⚡ Ecash";
+  if (money.type === "onchain" || money.type === "bolt12" || money.type === "ark" || money.type === "usdt") return moreMoneyPreview(money);
   if (money.type === "lnurl") return `⚡ ${money.destination.kind === "address" ? "Lightning address" : "LNURL"} · ${money.destination.text}`;
   return money.invoice.amountSat === null ? "⚡ Lightning invoice" : `⚡ Lightning invoice · ${money.invoice.amountSat.toLocaleString()} sats`;
 }
