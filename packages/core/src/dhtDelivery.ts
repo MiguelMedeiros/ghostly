@@ -3,7 +3,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, toBase64Url, utf8Encode } from "./bytes";
 import { encrypt, tryDecrypt } from "./crypto";
-import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
+import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
@@ -39,14 +39,27 @@ const ID = /^[A-Za-z0-9_-]{22}$/;
 type Message = [id: string, timestamp: number, text: string];
 /**
  * The ninth element, the author's capability-record revision (WISP 03), is optional; readers ignore
- * trailing elements they do not know. The signature covers all of them.
+ * trailing elements they do not know. The signature covers all of them. The tenth is the pinned mailbox
+ * (WISP 403, revision 0.3): `1`, the author can use it; `2`, the author knows the reader can too, and reads
+ * there first. A ninth element then goes as `null` when there is no revision to name.
  */
-type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number];
+type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2];
+/**
+ * Before the contact said it can use the pinned mailbox, the invite's mailbox is read. When that held a packet but
+ * nothing from the contact (expired, or someone else's), the pinned one is looked in too, no more often than this:
+ * the contact may have moved there while this side was away, and every read spends a relay request.
+ */
+const PINNED_PROBE_MS = 60_000;
 export interface DhtDeliveryState {
   sequence: number;
   peerSequence: number;
   peerMode?: DeliveryMode;
-  peerRejected?: boolean;
+  /**
+   * How far the contact is in the pinned mailbox (WISP 403, revision 0.3), from its envelopes sealed to this side: it
+   * `can` use it; it `reads` there first (it knows this side can); it was `seen` publishing there. This side reads
+   * there first from `can` on and publishes there from `reads` on; from `seen` on it reads only there.
+   */
+  peerPinned?: "can" | "reads" | "seen";
   pending?: { message: Message; expires: number; attempts: number; next: number };
   /**
    * The receipt this side owes for the contact's last text. `next`: when it forces a publication again (absent: at
@@ -65,6 +78,12 @@ export interface DhtDeliveryView {
   maxTextBytes: number;
   /** The envelope last published from here, for a text's details; absent until one carried a text. */
   lastPublished?: DhtPacketFacts;
+  /**
+   * When an envelope or a connection signal signed by a participation key other than the pinned one last came in
+   * over one of the chat's invite-derived keys. Anyone holding a copy of the invite can publish there, so it is
+   * ignored, never a reason to stop the chat: a passive warning only.
+   */
+  foreignKeySeenAt?: number;
 }
 /**
  * What can be said about one DHT envelope without opening it: which text it carried, its sequence and times, the
@@ -108,7 +127,11 @@ export class DhtDelivery {
   private controlDue = 0;
   /** Until when the relays' request budget holds publications back: what is due then goes at once. */
   private budgetUntil = 0;
-  private errors: Partial<Record<"publish" | "read" | "peer", string>> = {};
+  private errors: Partial<Record<"publish" | "read", string>> = {};
+  private foreignKeySeenAt?: number;
+  /** When the pinned mailbox was last looked in while the contact had not said it uses it. */
+  private pinnedProbeAt = 0;
+  private pinnedBoxes?: { peerKey: string; identity: Identity; peerAddress: string };
   private readonly identity;
   private readonly peerAddress: string;
   private readonly key: Uint8Array;
@@ -133,8 +156,10 @@ export class DhtDelivery {
     peerAcceptsText?(): boolean;
     pollMs?: number;
   }) {
-    this.state = structuredClone(options.state ?? emptyDhtDeliveryState()); this.mode = options.mode;
-    if (this.state.peerRejected) this.errors.peer = "DHT participation key does not match the saved contact. No content or receipt was accepted.";
+    // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
+    // holding the invite could forge: it is dropped, not honoured.
+    const { peerRejected: _peerRejected, ...state } = structuredClone(options.state ?? emptyDhtDeliveryState()) as DhtDeliveryState & { peerRejected?: boolean };
+    this.state = state; this.mode = options.mode;
     this.from = identityFromSeedB64(options.params.seedB64).pubKeyZ32; this.to = options.params.peerPubKeyZ32;
     this.participation = identityFromSeedB64(options.credentials.seedB64);
     const secret = fromBase64Url(options.params.encKeyB64);
@@ -147,7 +172,32 @@ export class DhtDelivery {
   get view(): DhtDeliveryView {
     return { mode: this.mode, peerMode: this.state.peerMode, authenticated: !!this.options.credentials.peerKey,
       error: Object.values(this.errors).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES,
-      ...(this.lastPublished && { lastPublished: this.lastPublished }) };
+      ...(this.lastPublished && { lastPublished: this.lastPublished }), ...(this.foreignKeySeenAt && { foreignKeySeenAt: this.foreignKeySeenAt }) };
+  }
+  /**
+   * Something signed by a participation key other than the pinned one came in over the chat's invite-derived keys (this
+   * mailbox, the link's signals, a connection to an endpoint whose address a copy of the invite could read): ignored,
+   * and said in the view as a passive warning.
+   */
+  foreignKeySeen(path: "dht" | "signal" | "stream"): void {
+    const first = !this.foreignKeySeenAt;
+    this.foreignKeySeenAt = Date.now();
+    traceLink(this.from, "foreign-key-ignored", { path });
+    if (first) this.changed();
+  }
+  /**
+   * The mailboxes once the contact is pinned (WISP 403, revision 0.3): derived from the secret only the two
+   * participation keys share, so a copy of the invite can neither publish there nor overwrite the contact's texts.
+   */
+  private pinned(): { identity: Identity; peerAddress: string } | undefined {
+    const peerKey = this.options.credentials.peerKey;
+    if (!peerKey) return undefined;
+    if (this.pinnedBoxes?.peerKey !== peerKey) {
+      const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.participation.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peerKey)));
+      const derive = (label: string) => hkdf(sha256, shared, this.key, utf8Encode(`ghostly-dht-pinned-mailbox/1:${label}`), 32);
+      this.pinnedBoxes = { peerKey, identity: identityFromSeed(derive(this.from)), peerAddress: identityFromSeed(derive(this.to)).pubKeyZ32 };
+    }
+    return this.pinnedBoxes;
   }
   private lastPublished?: DhtPacketFacts;
   /** The sealed record's nonce is its first 24 bytes: 32 characters of base64. */
@@ -226,7 +276,6 @@ export class DhtDelivery {
   }
   validate(text: string, timestamp: number, id: string): string | null {
     // Every chat's first contact runs here too (WISP 403): before the pin the text is sealed with the invite key.
-    if (this.errors.peer) return this.errors.peer;
     if (this.options.peerAcceptsText?.() === false) return DHT_TEXT_REFUSED;
     if (!ID.test(id) || !Number.isSafeInteger(timestamp) || timestamp <= 0) return "Invalid message.";
     if (utf8Encode(text).length > DHT_TEXT_BYTES) return `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
@@ -279,12 +328,13 @@ export class DhtDelivery {
   private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null): Body {
     const rev = this.options.capsRev?.();
     const body: Body = [1, sequence, issued, expires, this.participation.pubKeyZ32, this.mode, message, receipt];
-    if (rev !== undefined && Number.isSafeInteger(rev) && rev >= 0) body.push(rev);
+    // Whether it has a revision to name or not, the ninth element holds the place of the tenth: this side uses the pinned mailbox.
+    body.push(rev !== undefined && Number.isSafeInteger(rev) && rev >= 0 ? rev : null, this.state.peerPinned ? 2 : 1);
     return body;
   }
   private async publish(force = false): Promise<void> {
     const now = Date.now();
-    if (!this.running || this.errors.peer || (!force && (now - this.lastPublish < 4_000 || now < this.budgetUntil))) return;
+    if (!this.running || (!force && (now - this.lastPublish < 4_000 || now < this.budgetUntil))) return;
     const pending = this.state.pending && this.state.pending.expires > now && this.state.pending.attempts < MAX_ATTEMPTS ? this.state.pending : undefined;
     const receipt = this.state.receipt && this.state.receipt.expires > now && this.state.receipt.attempts < MAX_ATTEMPTS ? this.state.receipt : undefined;
     // A receipt forces an envelope of its own only while the contact still asks for it, and with a text's backoff: the
@@ -294,20 +344,22 @@ export class DhtDelivery {
     const expires = pending?.expires ?? now + CONTROL_TTL;
     const body = this.body(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null);
     const records = this.records(body);
+    // In the pinned mailbox once the contact said it reads there; until then where an older app looks.
+    const identity = (this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
     // Persist sequence and attempt count first. A crash cannot reuse them or
     // reset the retransmission budget/absolute message deadline.
     await this.persist({ ...this.state, sequence: body[1], pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + backoff(pending.attempts) } : this.state.pending,
       receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1, next: now + backoff(receipt.attempts) } : this.state.receipt });
     const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
-    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1] });
-    if (pending) this.lastPublished = DhtDelivery.facts(body, records, this.identity.pubKeyZ32);
-    try { await this.options.transport.publish(this.identity, records); }
+    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }) });
+    if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
+    try { await this.options.transport.publish(identity, records); }
     catch (error) {
       if (isDiscoveryBudgetError(error)) await this.heldBack(error, now, before, pending, receipt);
       throw error;
     }
-    this.namedRev = body[8];
+    this.namedRev = body[8] ?? undefined;
     delete this.errors.publish; this.changed();
   }
   /**
@@ -323,53 +375,96 @@ export class DhtDelivery {
     traceLink(this.from, "dht-publish-waits", { retryInMs: at - now });
     await this.persist({ ...this.state, pending: pending ?? this.state.pending, receipt: receipt ?? this.state.receipt });
   }
-  private async receive(packet: SignedPacket): Promise<void> {
-    if (packet.pubKeyZ32 !== this.peerAddress || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return;
-    const records = packet.records.filter(r => r.label === "_dm"); if (records.length !== 1) return;
-    const hints = packet.records.filter(r => r.label === "_dmk"); if (hints.length > 1) return;
+  /**
+   * One packet from one of the contact's two mailboxes: `invite` (derived from the invite, which anyone holding a copy
+   * can write to) or `pinned`. `none`: nothing from the contact in it; `old`: the contact's, already read; `new`: taken.
+   */
+  private async receive(packet: SignedPacket, box: "invite" | "pinned"): Promise<"none" | "old" | "new"> {
+    const address = box === "pinned" ? this.pinned()?.peerAddress : this.peerAddress;
+    if (!address || packet.pubKeyZ32 !== address || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return "none";
+    const records = packet.records.filter(r => r.label === "_dm"); if (records.length !== 1) return "none";
+    const hints = packet.records.filter(r => r.label === "_dmk"); if (hints.length > 1) return "none";
     const sender = hints.length ? tryDecrypt(hints[0].value, this.key) : null;
-    if (hints.length && !sender) return;
+    if (hints.length && !sender) return "none";
     let plaintext: string | null;
-    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { return; }
-    if (!plaintext || utf8Encode(plaintext).length > 900) return;
-    let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return; }
-    if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return;
+    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { return "none"; }
+    if (!plaintext || utf8Encode(plaintext).length > 900) return "none";
+    let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return "none"; }
+    if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return "none";
     const [body, signature] = envelope as [Body, string];
-    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev] = body;
+    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox] = body;
     const now = Date.now();
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || issued > now + 30_000 || expires <= now || expires - issued > CONTROL_TTL || issued >= expires ||
-      (mode !== "stream" && mode !== "dht") || typeof author !== "string" || typeof signature !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return;
-    if (sender && sender !== author) return;
+      (mode !== "stream" && mode !== "dht") || typeof author !== "string" || typeof signature !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return "none";
+    if (sender && sender !== author) return "none";
     try {
-      if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.to, this.from, sender ? this.participation.pubKeyZ32 : "invite", body])), publicKeyFromZ32(author))) return;
-    } catch { return; }
+      if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.to, this.from, sender ? this.participation.pubKeyZ32 : "invite", body])), publicKeyFromZ32(author))) return "none";
+    } catch { return "none"; }
     // Before the pin, the key the invite named: another invite holder's envelope is refused, and not remembered,
     // since whoever holds a copy can write to this mailbox and the inviter's next envelope replaces it.
-    if (!this.options.credentials.peerKey && this.options.credentials.expectedPeerKey && this.options.credentials.expectedPeerKey !== author) return;
-    if (this.options.credentials.peerKey && this.options.credentials.peerKey !== author) { await this.persist({ ...this.state, peerRejected: true }); this.errors.peer = "DHT participation key does not match the saved contact. No content or receipt was accepted."; this.changed(); return; }
-    if (sequence <= this.state.peerSequence) return;
+    if (!this.options.credentials.peerKey && this.options.credentials.expectedPeerKey && this.options.credentials.expectedPeerKey !== author) return "none";
+    // After it, the same: this mailbox's key comes from the invite, so another key signing here proves only that someone
+    // holds a copy of it. Ignored, never a reason to stop the chat; a key change is proven only on a stream (WISP 400).
+    if (this.options.credentials.peerKey && this.options.credentials.peerKey !== author) { this.foreignKeySeen("dht"); return "none"; }
+    // How far the contact is in the pinned mailbox: only an envelope sealed to this side says it (the contact pinned this
+    // side, so it can derive the mailbox), and it only goes forward.
+    const peerPinned = box === "pinned" ? "seen" : !sender ? this.state.peerPinned
+      : pinnedMailbox === 2 && this.state.peerPinned !== "seen" ? "reads" : this.state.peerPinned ?? (pinnedMailbox === 1 ? "can" : undefined);
+    if (sequence <= this.state.peerSequence) {
+      if (peerPinned !== this.state.peerPinned && this.options.credentials.peerKey) {
+        await this.persist({ ...this.state, peerPinned }); traceLink(this.from, "dht-peer-pinned", { peerPinned }); this.changed();
+      }
+      return "old";
+    }
     if (message !== null && (!Array.isArray(message) || message.length !== 3 || typeof message[0] !== "string" || !ID.test(message[0]) || !Number.isSafeInteger(message[1]) || message[1] <= 0 || message[1] > issued + 30_000 ||
-      typeof message[2] !== "string" || utf8Encode(message[2]).length > DHT_TEXT_BYTES || expires - issued > DHT_MESSAGE_TTL)) return;
-    if (receipt !== null && (typeof receipt !== "string" || !ID.test(receipt))) return;
+      typeof message[2] !== "string" || utf8Encode(message[2]).length > DHT_TEXT_BYTES || expires - issued > DHT_MESSAGE_TTL)) return "none";
+    if (receipt !== null && (typeof receipt !== "string" || !ID.test(receipt))) return "none";
     await this.options.pin(author); this.options.credentials.peerKey = author; this.options.credentials.requireSignedSignals = true;
     // Store content before advancing anti-replay state. Retrying after a crash
     // is safe because the durable message table deduplicates the stable ID.
     let nextReceipt = this.state.receipt;
     if (message) {
-      await this.options.message({ id: message[0], timestamp: message[1], text: message[2] }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
+      // The text this side owes a receipt for was stored already (the receipt is saved only after it): a retransmission
+      // that crossed the receipt, or the same envelope moved to the pinned mailbox, is not handed over twice.
+      if (nextReceipt?.id !== message[0]) await this.options.message({ id: message[0], timestamp: message[1], text: message[2] }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
       if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires, attempts: 0 };
       // Asked for again (the text sent anew after a lost session): its receipt goes at once again.
       else if (nextReceipt.settled) { const { settled: _settled, next: _next, ...asked } = nextReceipt; nextReceipt = asked; }
     } else if (nextReceipt && !nextReceipt.settled) nextReceipt = { ...nextReceipt, settled: true };
     const confirmed = receipt && this.state.pending?.message[0] === receipt ? receipt : this.state.confirmed;
     if (mode !== this.state.peerMode) traceLink(this.from, "dht-peer-mode", { peerMode: mode });
-    await this.persist({ ...this.state, peerSequence: sequence, peerMode: mode, peerRejected: undefined, receipt: nextReceipt, confirmed,
+    if (peerPinned !== this.state.peerPinned) traceLink(this.from, "dht-peer-pinned", { peerPinned });
+    await this.persist({ ...this.state, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }),
       pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending });
     if (confirmed) await this.options.receipt(confirmed);
-    delete this.errors.peer;
     if (Number.isSafeInteger(capsRev) && (capsRev as number) >= 0) this.options.peerCapsRev?.(capsRev as number);
     this.changed();
+    return "new";
+  }
+  /**
+   * Reads the contact's mailbox: the pinned one first once the contact said it can use it, the invite's otherwise. The
+   * other is read too when the first held nothing from the contact (the contact publishes in the other one still, or a
+   * copy of the invite overwrote this one), or when the contact just said it can use the pinned one. Once the contact's
+   * envelope was seen in the pinned mailbox, the invite's is not read any more.
+   */
+  private async read(background: boolean): Promise<void> {
+    const pinned = this.pinned(), options = background ? { background } : undefined;
+    const before = this.state.peerPinned;
+    const boxes: ("invite" | "pinned")[] = !pinned ? ["invite"] : before === "seen" ? ["pinned"] : before ? ["pinned", "invite"] : ["invite", "pinned"];
+    let found: SignedPacket | null = null;
+    for (const [i, box] of boxes.entries()) {
+      if (i > 0 && box === "pinned") {
+        // The contact just said it can use it: looked in at once. Otherwise a probe, when the invite's mailbox held a
+        // packet but nothing from the contact, now and then.
+        if (!this.state.peerPinned && (!found || Date.now() - this.pinnedProbeAt < PINNED_PROBE_MS)) return;
+        if (!this.state.peerPinned) this.pinnedProbeAt = Date.now();
+      }
+      const packet = found = await this.options.transport.resolve(box === "pinned" ? pinned!.peerAddress : this.peerAddress, options);
+      if (!this.running) return;
+      const got = packet ? await this.receive(packet, box) : "none";
+      if (got !== "none" && !(box === "invite" && !before && this.state.peerPinned)) return;
+    }
   }
   private async tick(): Promise<void> {
     if (!this.running) return;
@@ -386,7 +481,7 @@ export class DhtDelivery {
       const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
       this.urgent = false;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
-      try { const packet = await this.options.transport.resolve(this.peerAddress, background ? { background } : undefined); if (!this.running) return; if (packet) await this.receive(packet); delete this.errors.read; }
+      try { await this.read(background); if (!this.running) return; delete this.errors.read; }
       catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       try { await this.publish(); }
       catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }

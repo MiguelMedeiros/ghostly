@@ -89,6 +89,11 @@ export interface FileTransferRecord {
   since: number;
   /** In: the person accepted it (not taken on its own). */
   consented?: boolean;
+  /**
+   * In: taken, by the person or within the app's limits. An offer that expired unanswered never was, so offered again
+   * it is refused, never taken without asking.
+   */
+  agreed?: boolean;
 }
 
 const FINAL: ReadonlySet<TransferState> = new Set(["done", "failed", "declined", "cancelled"]);
@@ -433,7 +438,9 @@ export class ChatFiles {
         case "declined": this.send({ t: "pf-refuse", id, why: "declined" }); return;
         case "cancelled": this.send({ t: "pf-refuse", id, why: "cancelled" }); return;
         case "failed":
-          // Sent again after it failed here (damaged, expired): taken again from the start, as it was agreed.
+          // Expired here before anyone answered: nothing was agreed, and offered again it would skip the question.
+          if (!record.agreed && !record.consented) { this.send({ t: "pf-refuse", id, why: "expired" }); return; }
+          // Sent again after it failed here (damaged, not stored): taken again from the start, as it was agreed.
           await existing.in?.target?.then((t) => t.discard()).catch(() => {});
           existing.in = { written: 0, stored: 0, acked: 0, checkpointed: 0, writing: Promise.resolve() };
           Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, since: this.now() });
@@ -456,7 +463,8 @@ export class ChatFiles {
     if (this.entries.has(key("in", id))) return;
     if (typeof decision === "object") { this.send({ t: "pf-refuse", id, why: decision.refuse, ...(decision.room !== undefined && { room: decision.room }) }); return; }
     const entry: Entry = {
-      record: { id, direction: "in", file, state: decision === "ask" ? "asking" : paused ? "paused" : "queued", confirmed: 0, since: this.now(), ...(paused && decision !== "ask" && { pausedBy: "peer" as const }) },
+      record: { id, direction: "in", file, state: decision === "ask" ? "asking" : paused ? "paused" : "queued", confirmed: 0, since: this.now(),
+        ...(decision !== "ask" && { agreed: true }), ...(paused && decision !== "ask" && { pausedBy: "peer" as const }) },
       in: { written: 0, stored: 0, acked: 0, checkpointed: 0, writing: Promise.resolve() },
     };
     this.entries.set(key("in", id), entry);
@@ -644,7 +652,7 @@ export class ChatFiles {
     const entry = this.entry("in", id);
     if (entry.record.state !== "asking") return;
     entry.record.state = "queued";
-    entry.record.consented = true;
+    entry.record.consented = entry.record.agreed = true;
     this.changed(entry);
     this.startIncoming(entry);
   }

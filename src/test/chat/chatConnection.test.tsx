@@ -201,6 +201,16 @@ describe("ChatConnection: what the header says", () => {
     expect(within(screen.getByTestId("pair-trust")).getByRole("alert")).toHaveTextContent("This key does not match the saved contact");
     expect(screen.queryByTestId("pair-verify")).not.toBeInTheDocument();
   });
+
+  it("says, only in Details, that someone else publishes on the invite's keys, and stays connected", () => {
+    // covers: chat.dht.key-change
+    banner({ pairing: ready(), dhtDelivery: { mode: "stream", authenticated: true, maxTextBytes: 256, foreignKeySeenAt: Date.now() } });
+    expect(header()).toMatchObject({ kind: "connected" });
+    expect(screen.getByTestId("connection-tooltip")).not.toHaveTextContent("invite keys");
+    const warning = within(screen.getByTestId("connection-details")).getByTestId("connection-foreign-key");
+    expect(warning).toHaveTextContent("Someone else is publishing on this chat's invite keys");
+    expect(warning).not.toHaveAttribute("role", "alert");
+  });
 });
 
 describe("ChatConnection: what the panel does", () => {

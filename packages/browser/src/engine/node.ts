@@ -1333,11 +1333,12 @@ export class GhostlyNode implements EngineImplementation {
     return { error: null };
   }
 
-  /** A chat stopped by a security rejection (a participation key other than the pinned one): nothing goes until the person acts. */
+  /**
+   * A chat stopped by a security rejection (a stream authenticated a participation key other than the pinned one):
+   * nothing goes until the person acts. Another key on the DHT or the link's signals is ignored instead (WISP 400).
+   */
   private chatStopped(live: LiveLink): string | null {
-    const error = live.link?.dhtDelivery?.error;
     if (live.pairing?.keyMismatch) return live.pairing.error ?? "This chat stopped: your contact's key changed.";
-    if (error?.includes("does not match")) return error;
     return null;
   }
 

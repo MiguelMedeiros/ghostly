@@ -6,6 +6,7 @@ import { createIdentity } from "../src/identity";
 import { fromBase64Url } from "../src/bytes";
 import { buildLinkRecords } from "../src/records";
 import { signPairedSignal } from "../src/pairedSignal";
+import { PairedSession } from "../src/pairedSession";
 import { createChannelPair } from "./helpers";
 import type { BoundChannel, NativeEndpoint } from "../src/pairedTransports";
 // covers: chat.paired.session, chat.paired.status, core.peer-keys, transport.preference, chat.dht.send
@@ -52,7 +53,8 @@ describe("paired profile policy boundaries", () => {
     expect(onPairingState.mock.calls.some(([state]) => state.status === "error")).toBe(false);
     await link.stop(false);
   });
-  it.each([false, true])("rejects discovery with a replacement key (tampered signature: %s)", async tampered => {
+  it.each([false, true])("after the pin, drops discovery signed by a replacement key without a stop (tampered signature: %s)", async tampered => {
+    // covers: chat.dht.key-change
     const invitation = createLink();
     const saved = createIdentity();
     const replacement = createIdentity();
@@ -64,25 +66,79 @@ describe("paired profile policy boundaries", () => {
     const records = buildLinkRecords(invitation.mine.peerPubKeyZ32, {
       messages: [], ackTimestamp: 0, rtcSignal: JSON.stringify(raw),
     }, fromBase64Url(invitation.mine.encKeyB64)).records;
-    const onPairingState = vi.fn(), createPeerConnection = vi.fn(() => { throw new Error("must not connect"); });
+    const onPairingState = vi.fn(), onDhtDelivery = vi.fn(), createPeerConnection = vi.fn(() => { throw new Error("must not connect"); });
     const pinPeer = vi.fn();
+    // The link's records are published under keys any copy of the invite derives: a signal there proves nothing.
+    const resolve = vi.fn(async (key: string) => key === invitation.mine.peerPubKeyZ32 ? { pubKeyZ32: key, records, timestampMicros: BigInt(Date.now()) * 1000n } : null);
     const link = new GhostLink({ params: { ...invitation.mine, profile: "paired-chat/1" },
       pairing: { credentials, pinPeer },
       dht: { state: { sequence: 0, peerSequence: 0, peerMode: "stream" }, save: vi.fn(async () => {}) },
-      transport: { publish: vi.fn(), resolve: async () => ({ pubKeyZ32: invitation.mine.peerPubKeyZ32, records, timestampMicros: BigInt(Date.now()) * 1000n }), describe: () => ({ protocol: "test", relays: [] }) },
+      transport: { publish: vi.fn(), resolve, describe: () => ({ protocol: "test", relays: [] }) },
       createPeerConnection, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-      events: { onPairingState },
+      events: { onPairingState, onDhtDelivery },
     });
     try {
       link.session.start();
-      await vi.waitFor(() => expect(onPairingState).toHaveBeenCalled());
-      expect(onPairingState.mock.lastCall?.[0].keyMismatch).toBe(!tampered);
+      await vi.waitFor(() => expect(resolve.mock.calls.some(([key]) => key === invitation.mine.peerPubKeyZ32)).toBe(true));
+      if (!tampered) await vi.waitFor(() => expect(onDhtDelivery.mock.lastCall?.[0].foreignKeySeenAt).toBeGreaterThan(0));
+      else await new Promise(resolve => setTimeout(resolve, 100));
+      expect(onPairingState.mock.calls.some(([state]) => state.status === "error" || state.keyMismatch)).toBe(false);
       expect(createPeerConnection).not.toHaveBeenCalled();
       expect(pinPeer).not.toHaveBeenCalled();
       expect(credentials.peerKey).toBe(saved.pubKeyZ32);
-      expect(link.supportsPayments).toBe(false);
-      expect(await link.sendMessage("blocked")).not.toBeNull();
+      // Text still goes, over the DHT while no stream is up.
+      expect(link.textDelivery).toBe("dht");
+      expect(await link.sendMessage("still here")).toBeNull();
     } finally { await link.stop(false); }
+  });
+  /** A pinned chat with an Iroh endpoint, and the other end of a native connection run by `key`'s participation key. */
+  function nativePair(inbound: boolean) {
+    const saved = createIdentity(), params = { ...createLink().mine, profile: "paired-chat/1" as const };
+    const credentials = { seedB64: createIdentity().seedB64, peerKey: saved.pubKeyZ32, requireSignedSignals: true };
+    let dial!: (connection: BoundChannel) => void;
+    const endpoint: NativeEndpoint = { transport: "iroh/1", descriptor: {}, onConnection: null, onDescriptor: null,
+      close: async () => {}, connect: () => new Promise(resolve => { dial = resolve; }) };
+    const onPairingState = vi.fn(), onDhtDelivery = vi.fn();
+    const link = new GhostLink({ params, pairing: { credentials, pinPeer: vi.fn() },
+      dht: { state: { sequence: 0, peerSequence: 0, peerMode: "stream" }, save: vi.fn(async () => {}) },
+      native: { preferred: "iroh/1", fallback: true, peerDescriptors: { "iroh/1": {} }, peerTransports: ["iroh/1"] },
+      transport: { publish: vi.fn(), resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) },
+      rtcAvailable: false, createPeerConnection: () => { throw new Error("no WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+      events: { onPairingState, onDhtDelivery },
+    });
+    link.registerEndpoint(endpoint);
+    const [mine, theirs] = createChannelPair();
+    const binding = { transport: "iroh/1" as const, context: "a".repeat(64), identities: ["b".repeat(64), "c".repeat(64)] as [string, string] };
+    // Someone holding a copy of the invite, with a participation key of its own.
+    const other = new PairedSession(theirs, { credentials: { seedB64: createIdentity().seedB64 }, rendezvousKeys: [params.peerPubKeyZ32, link.myPubKeyZ32], binding,
+      transports: ["iroh/1"], trustOnFirstUse: true, pinPeer: async () => {}, onState: () => {}, onReady: () => {}, onApplication: () => {}, onFailure: () => {} });
+    const close = vi.spyOn(mine, "close");
+    const go = async () => {
+      if (inbound) { endpoint.onConnection!({ channel: mine, binding }); other.start(); }
+      else { const pending = link.connect().catch(() => {}); await vi.waitFor(() => expect(dial).toBeTypeOf("function")); dial({ channel: mine, binding }); other.start(); await pending; }
+      await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    };
+    return { link, onPairingState, onDhtDelivery, go, stop: async () => { other.stop(); await link.stop(false); } };
+  }
+  it("a native connection dialled in with another key closes, and stops nothing: its address was readable with the invite", async () => {
+    const p = nativePair(true);
+    try {
+      await p.go();
+      // It did get as far as the other key (a passive warning), and no further.
+      expect(p.onDhtDelivery.mock.lastCall?.[0].foreignKeySeenAt).toBeGreaterThan(0);
+      expect(p.onPairingState.mock.calls.some(([state]) => state.status === "error" || state.keyMismatch)).toBe(false);
+      expect(p.link.isDataLinkOpen).toBe(false);
+      expect(p.link.textDelivery).toBe("dht");
+    } finally { await p.stop(); }
+  });
+  it("a native connection this side dialled that authenticates another key still stops the chat on both layers", async () => {
+    const p = nativePair(false);
+    try {
+      await p.go();
+      await vi.waitFor(() => expect(p.onPairingState.mock.calls.some(([state]) => state.keyMismatch)).toBe(true));
+      expect(p.link.textDelivery).toBe("unavailable");
+      expect(await p.link.sendMessage("blocked")).not.toBeNull();
+    } finally { await p.stop(); }
   });
   it("reports failed discovery publication when explicitly requested", async () => {
     const session = new LinkSession({ params: createLink().mine,

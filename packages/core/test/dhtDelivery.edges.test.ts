@@ -13,7 +13,7 @@ import { DiscoveryBudgetError } from "../src/transport";
 
 // covers: chat.dht.delivery, chat.dht.send, chat.dht.errors
 
-const ID = "abcdefghijklmnopqrstuv", ID2 = "bcdefghijklmnopqrstuvw";
+const ID = "abcdefghijklmnopqrstuv", ID2 = "bcdefghijklmnopqrstuvw", ID3 = "cdefghijklmnopqrstuvwx", ID4 = "defghijklmnopqrstuvwxy", ID5 = "efghijklmnopqrstuvwxyz";
 
 /**
  * Bob's DhtDelivery reads whatever packet the test puts at Alice's mailbox address. Alice's side is
@@ -37,6 +37,8 @@ function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state
     envelopeKey, utf8Encode("ghostly-dht-participation-envelope/1"), 32);
 
   let packet: SignedPacket | null = null;
+  /** Packets at given addresses; any other address reads `packet`. */
+  const at = new Map<string, SignedPacket | null>();
   let failSave = false;
   const saved: DhtDeliveryState[] = [];
   const credentials: PairingCredentials = options.bobCredentials ?? { seedB64: bobSeed };
@@ -44,7 +46,7 @@ function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state
   const receipts: string[] = [], views: DhtDeliveryView[] = [], pins: string[] = [];
   const transport = {
     publish: vi.fn(async (_identity: unknown, _records: GhostRecord[]) => {}),
-    resolve: vi.fn(async (_key: string): Promise<SignedPacket | null> => packet),
+    resolve: vi.fn(async (key: string): Promise<SignedPacket | null> => at.has(key) ? at.get(key)! : packet),
     describe: () => ({ protocol: "forged fixture", relays: [] }),
   };
   const bob = new DhtDelivery({ params: link.invite, mode: options.mode ?? "dht", state: options.state, credentials, transport,
@@ -66,16 +68,31 @@ function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state
   const invitePacket = (b: Body, sig = signature(b), plaintext?: string): SignedPacket => ({ pubKeyZ32: mailbox, timestampMicros: 0n,
     records: [{ label: "_dm", value: encrypt(plaintext ?? JSON.stringify([b, sig]), envelopeKey), ttl: 60 }] });
   /** A post-pin envelope sealed to Bob's participation key, with Alice's key as the hint. */
-  const pinnedPacket = (b: Body, hint = alice.pubKeyZ32, sealer = alice.seed): SignedPacket => ({ pubKeyZ32: mailbox, timestampMicros: 0n, records: [
+  const pinnedPacket = (b: Body, hint = alice.pubKeyZ32, sealer = alice.seed, address = mailbox): SignedPacket => ({ pubKeyZ32: address, timestampMicros: 0n, records: [
     { label: "_dm", value: encrypt(JSON.stringify([b, signature(b, bobParticipation.pubKeyZ32)]), sealedKey(bobParticipation.pubKeyZ32, sealer)), ttl: 60 },
     { label: "_dmk", value: encrypt(hint, envelopeKey), ttl: 60 }] });
   const put = async (p: SignedPacket | null) => { packet = p; await vi.advanceTimersByTimeAsync(options.pollMs ?? 100); };
+  /**
+   * The mailboxes once pinned (WISP 403, revision 0.3), from the secret Alice's and Bob's participation keys share:
+   * Alice's, where Bob reads, and Bob's, where he publishes.
+   */
+  const pinnedBox = (rdv: string) => identityFromSeed(hkdf(sha256, x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(alice.seed),
+    ed25519.utils.toMontgomery(publicKeyFromZ32(bobParticipation.pubKeyZ32))), envelopeKey, utf8Encode(`ghostly-dht-pinned-mailbox/1:${rdv}`), 32)).pubKeyZ32;
+  const alicePinned = pinnedBox(aliceRdv), bobPinned = pinnedBox(bobRdv);
+  const bobInvite = identityFromSeed(derive(`mailbox:${bobRdv}`)).pubKeyZ32;
+  /** Puts a packet at one address only (null: nothing there), then lets one read happen. */
+  const putAt = async (address: string, p: SignedPacket | null) => { at.set(address, p); await vi.advanceTimersByTimeAsync(options.pollMs ?? 100); };
+  /** Addresses Bob read, in order, and the one he last published at. */
+  const reads = () => transport.resolve.mock.calls.map(c => c[0]);
+  const publishedAt = () => (transport.publish.mock.lastCall![0] as { pubKeyZ32: string }).pubKeyZ32;
   const last = () => saved.at(-1) ?? options.state ?? emptyDhtDeliveryState();
   const setFailSave = (on: boolean) => { failSave = on; };
   /** The body of the last first-contact envelope Bob published. */
   const openPublished = (): unknown[] => JSON.parse(decrypt(transport.publish.mock.lastCall![1][0].value, envelopeKey))[0];
+  /** The body of the last envelope Bob published sealed to Alice. */
+  const openPublishedSealed = (): unknown[] => JSON.parse(decrypt(transport.publish.mock.lastCall![1][0].value, sealedKey(bobParticipation.pubKeyZ32)))[0];
   return { setFailSave, openPublished, link, alice, bob, credentials, mailbox, envelopeKey, transport, saved, messages, receipts, views, pins, body, signature,
-    invitePacket, pinnedPacket, put, last, bobParticipation };
+    invitePacket, pinnedPacket, put, last, bobParticipation, openPublishedSealed, alicePinned, bobPinned, bobInvite, putAt, reads, publishedAt };
 }
 
 beforeEach(() => { vi.useFakeTimers(); });
@@ -255,7 +272,7 @@ describe("DHT delivery: ordering and replay", () => {
     expect(named.messages).toEqual([]);
     expect(named.pins).toEqual([]);
     // Another invite holder can write to this mailbox, so a refusal is not remembered: the chat stays usable.
-    expect(named.last().peerRejected).toBeFalsy();
+    expect(named.last()).not.toHaveProperty("peerRejected");
     expect(named.views.at(-1)?.error).toBeUndefined();
     await named.bob.stop();
     const h = setup(); h.credentials.expectedPeerKey = h.alice.pubKeyZ32; await h.bob.start();
@@ -265,24 +282,105 @@ describe("DHT delivery: ordering and replay", () => {
     await h.bob.stop();
   });
 
-  it("fails closed and remembers it when a different participation key signs after pinning", async () => {
+  it("after the pin, ignores an envelope another key signed in the invite's mailbox: no stop, nothing kept, a passive warning", async () => {
+    // covers: chat.dht.key-change
     const other = createIdentity().pubKeyZ32;
     const h = setup({ bobCredentials: { seedB64: createIdentity().seedB64, peerKey: other }, pollMs: 10_000 });
     await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
     const published = h.transport.publish.mock.calls.length;
+    // Anyone holding a copy of the invite can publish here, signed by a key of their own.
     await h.put(h.invitePacket(h.body()));
     expect(h.messages).toEqual([]);
-    expect(h.last().peerRejected).toBe(true);
-    expect(h.views.at(-1)?.error).toMatch(/does not match the saved contact/);
-    expect(h.bob.validate("hi", Date.now(), ID)).toMatch(/does not match/);
-    // Nothing more is published once the contact's key is in doubt.
+    expect(h.last()).not.toHaveProperty("peerRejected");
+    expect(h.last().peerSequence).toBe(0);
+    expect(h.views.at(-1)?.error).toBeUndefined();
+    expect(h.views.at(-1)?.foreignKeySeenAt).toBeGreaterThan(0);
+    expect(h.bob.validate("hi", Date.now(), ID), "the chat still sends").toBeNull();
+    expect(h.credentials.peerKey, "the pin is not replaced").toBe(other);
+    // Publications go on as before.
     await vi.advanceTimersByTimeAsync(5 * 60_000);
-    expect(h.transport.publish).toHaveBeenCalledTimes(published);
+    expect(h.transport.publish.mock.calls.length).toBeGreaterThan(published);
+    expect(await h.bob.send("still here", Date.now(), ID)).toBeNull();
     await h.bob.stop();
-    // Reloaded from disk, the refusal still stands before any packet is read.
-    const reloaded = new DhtDelivery({ params: h.link.invite, mode: "dht", state: h.last(), credentials: h.credentials, transport: { ...h.transport, resolve: async () => null },
-      save: async () => {}, pin: async () => {}, message: async () => {}, receipt: async () => {}, changed: () => {}, pollMs: 100 });
-    expect(reloaded.view.error).toMatch(/does not match/);
+  });
+
+  it("drops a key-mismatch stop an older app saved: the chat is usable again", async () => {
+    const other = createIdentity().pubKeyZ32;
+    const state = { ...emptyDhtDeliveryState(), peerRejected: true } as DhtDeliveryState;
+    const h = setup({ bobCredentials: { seedB64: createIdentity().seedB64, peerKey: other }, state });
+    expect(h.bob.view.error).toBeUndefined();
+    expect(h.bob.validate("hi", Date.now(), ID)).toBeNull();
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(h.last()).not.toHaveProperty("peerRejected");
+    await h.bob.stop();
+  });
+
+  it("an older contact, whose envelopes say nothing of the pinned mailbox, keeps the invite's mailbox both ways", async () => {
+    const h = setup(); await h.bob.start();
+    await h.put(h.invitePacket(h.body({ 6: null })));
+    for (let seq = 2; seq < 6; seq++) await h.put(h.pinnedPacket(h.body({ 6: null }, seq)));
+    expect(h.last().peerSequence).toBe(5);
+    expect(h.last().peerPinned).toBeUndefined();
+    expect(await h.bob.send("to an older app", Date.now(), ID2)).toBeNull();
+    expect(h.publishedAt()).toBe(h.bobInvite);
+    expect(h.reads().filter(a => a === h.alicePinned), "its mailbox held its envelope: no need to look further").toEqual([]);
+    await h.bob.stop();
+  });
+
+  it("moves to the pinned mailbox in two steps, and then a copy of the invite cannot overwrite the contact's texts", async () => {
+    const h = setup(); await h.bob.start();
+    // First contact: nothing sealed to Bob yet, so nothing said about the pinned mailbox.
+    await h.put(h.invitePacket(h.body({ 6: null, 8: null, 9: 1 })));
+    expect(h.last().peerPinned).toBeUndefined();
+    expect(await h.bob.send("first", Date.now(), ID2)).toBeNull();
+    expect(h.publishedAt(), "Alice has not pinned Bob yet: the invite's mailbox").toBe(h.bobInvite);
+    expect(h.openPublishedSealed()[9], "Bob can use it").toBe(1);
+    // Sealed to Bob, flag 1: she can use it. Bob reads there first now, and still publishes where she reads.
+    await h.put(h.pinnedPacket(h.body({ 6: null, 7: ID2, 8: null, 9: 1 }, 2)));
+    expect(h.last().peerPinned).toBe("can");
+    expect(h.reads().at(-1), "looked in at once").toBe(h.alicePinned);
+    expect(await h.bob.send("second", Date.now(), ID)).toBeNull();
+    expect(h.publishedAt()).toBe(h.bobInvite);
+    expect(h.openPublishedSealed()[9], "Bob reads there first").toBe(2);
+    // Flag 2: she reads there first too. Bob publishes there from now on.
+    await h.put(h.pinnedPacket(h.body({ 6: null, 7: ID, 8: null, 9: 2 }, 3)));
+    expect(h.last().peerPinned).toBe("reads");
+    expect(await h.bob.send("third", Date.now(), ID3)).toBeNull();
+    expect(h.publishedAt()).toBe(h.bobPinned);
+    // Her envelope in the pinned mailbox: Bob reads only there from now on.
+    await h.putAt(h.alicePinned, h.pinnedPacket(h.body({ 6: [ID4, Date.now(), "in the pinned mailbox"], 8: null, 9: 2 }, 4), undefined, undefined, h.alicePinned));
+    expect(h.last().peerPinned).toBe("seen");
+    expect(h.messages.map(m => m.text)).toContain("in the pinned mailbox");
+    // A copy of the invite overwrites her invite mailbox, signed by a key of its own: never read again, never a stop.
+    const reads = h.reads().length;
+    const copy = identityFromSeedB64(createIdentity().seedB64);
+    await h.put(h.invitePacket(h.body({ 4: copy.pubKeyZ32 }, 99), h.signature(h.body({ 4: copy.pubKeyZ32 }, 99), "invite", copy.seed)));
+    await h.putAt(h.alicePinned, h.pinnedPacket(h.body({ 6: [ID5, Date.now(), "still arrives"], 8: null, 9: 2 }, 5), undefined, undefined, h.alicePinned));
+    expect(h.reads().slice(reads).every(a => a === h.alicePinned)).toBe(true);
+    expect(h.messages.map(m => m.text)).toContain("still arrives");
+    expect(h.views.at(-1)?.error).toBeUndefined();
+    await h.bob.stop();
+  });
+
+  it("before the contact said anything, looks in the pinned mailbox when the invite's held something that is not the contact's", async () => {
+    const h = setup(); await h.bob.start();
+    await h.put(h.invitePacket(h.body({ 6: null })));
+    const reads = () => h.reads().filter(a => a === h.alicePinned).length;
+    expect(reads()).toBe(0);
+    // Her invite mailbox now holds someone else's envelope (or her own, expired): the pinned one is looked in, once a minute at most.
+    const copy = identityFromSeedB64(createIdentity().seedB64);
+    await h.put(h.invitePacket(h.body({ 4: copy.pubKeyZ32 }, 9), h.signature(h.body({ 4: copy.pubKeyZ32 }, 9), "invite", copy.seed)));
+    expect(reads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(reads()).toBe(2);
+    // She moved there while Bob was away: found, and read there from now on.
+    await h.putAt(h.alicePinned, h.pinnedPacket(h.body({ 6: [ID4, Date.now(), "moved"], 8: null, 9: 2 }, 6), undefined, undefined, h.alicePinned));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.messages.map(m => m.text)).toContain("moved");
+    expect(h.last().peerPinned).toBe("seen");
+    await h.bob.stop();
   });
 
   it("clears the pending text only on a receipt for that very id", async () => {
@@ -483,8 +581,9 @@ describe("DHT delivery: sending and lifecycle", () => {
     const revs: number[] = [];
     const h = setup({ mode: "dht", capsRev: 7, peerCapsRev: rev => revs.push(rev) }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
     const body = h.openPublished();
-    expect(body.length).toBe(9);
+    expect(body.length).toBe(10);
     expect(body[8]).toBe(7);
+    expect(body[9], "it can use the pinned mailbox").toBe(1);
     await h.put(h.invitePacket(h.body({ 8: 3 })));
     expect(revs).toEqual([3]);
     await h.put(h.invitePacket(h.body({ 8: "x", 9: ["later"] }, 2)));

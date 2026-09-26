@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 403; editorial family allocation |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-25 |
+| Revision | 0.3 |
+| Updated | 2026-09-26 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
 | Implementation | Existing envelope, limits and DHT-only mode (`pair2d/` chats and paired fallback); as the floor and first contact of every chat (decided 2026-09-25; being implemented). Native DHT versus browser relays differ. |
@@ -42,7 +42,19 @@ The envelope's `mode` field (`"stream"` or `"dht"`) is unchanged. In revision 0.
 2. The joiner generates and stores its participation key, then publishes a first-contact envelope in its mailbox: intended recipient `invite`, signed by its participation key, sealed with the invitation-derived key. It carries the joiner's `mode` and MAY carry a first text. At the same moment the joiner publishes its capability record ([03](03-capabilities.md#layer-0-capability-record)) and starts a stream attempt ([100](100-transports.md)).
 3. The inviter reads the joiner's mailbox at the signaling pace (every 4 s) from the moment the invite exists until it pins a contact or the invite is withdrawn (new: today the inviter of a streams-first invite reads it every 30 s). It verifies the signature, durably pins the participation key, stores any text, and answers with its own envelope (its key hint in `_dmk`, sealed with the post-pin key) and a receipt.
 4. The joiner already pinned the inviter's participation key from the invite ([801](801-invitation-profiles.md#exact-layout)); it verifies the answer against that pin, and refuses an answer signed by any other key as a security rejection. The chat is now `on-dht`, or `live` if the stream attempt verified first. Every later envelope uses the post-pin key. (Codes made before revision 0.2 carry no participation key; for them the joiner pins from the first answer, as today.)
-5. If the stream path pins first, the DHT path MUST find the same participation key when its envelope arrives; a different key is a security rejection on both layers ([400](400-chat.md#candidate-requirements-for-the-one-chat)). Possession of the invite is enough to compete for first admission, as before; the comparison code shown on both sides verifies the pin independently.
+5. If the stream path pins first, the DHT path MUST find the same participation key when its envelope arrives. An envelope signed by a different key is ignored, not a security rejection: this mailbox's key comes from the invite, so anyone holding a copy can publish there (revision 0.3; [400](400-chat.md#candidate-requirements-for-the-one-chat), requirement 8). It is never stored, never remembered as a stop, and never replaces the pin. Possession of the invite is enough to compete for first admission, as before; the comparison code shown on both sides verifies the pin independently.
+
+## Pinned mailboxes (revision 0.3)
+
+A newer packet under a mailbox key replaces the older one, and a copy of the invite derives both invite mailbox keys: it could overwrite the contact's envelope, texts included, about once a minute. Once both sides are pinned, each moves to a mailbox derived from the X25519 agreement of the two participation keys, which the invite alone does not give ([DHT delivery](../DHT-DELIVERY.md#invitation-bootstrap-and-encryption)).
+
+- The signed body gains an optional tenth element (the ninth, the capability revision, is then `null` when absent): `1` = the author can use the pinned mailbox; `2` = the author knows the reader can, and reads the pinned mailbox first. Readers from before ignore it.
+- Only an envelope sealed to the reader (a post-pin envelope with `_dmk`) counts: its author has pinned the reader, so it can derive the mailbox.
+- A side reads the contact's pinned mailbox first once the contact sent `1`, and the invite mailbox only when the pinned one held nothing from the contact. It publishes in its own pinned mailbox once the contact sent `2`. Once the contact's envelope was seen in the pinned mailbox, the invite mailbox is not read any more.
+- Before the contact sent either, a read of the invite mailbox that finds a packet but nothing from the contact (expired, or someone else's) looks in the pinned mailbox too, at most once a minute: the contact may have moved while this side was away.
+- A contact whose envelopes carry no tenth element keeps the invite mailboxes both ways, and costs no extra read while its own envelope is there.
+
+The move costs one extra read per poll only while it is under way (the contact said `1` or `2` but was not seen in the pinned mailbox yet).
 
 ## When text goes over the DHT
 
@@ -87,5 +99,6 @@ DHT only avoids stream discovery/dialing. Native uses Pkarr; browser/extension u
 
 ## Revision log
 
+- 0.3 (2026-09-26): another key on the invite mailbox after the pin is ignored, not a stop; pinned mailboxes, told by the envelope's tenth element, so a copy of the invite cannot overwrite the contact's texts.
 - 0.2 (2026-09-25): the floor and first contact of every chat; states instead of invite modes; queueing, expiry per state, poll pace, DHT only as a per-chat choice.
 - 0.1 (2026-09-22): bounded DHT text profile.

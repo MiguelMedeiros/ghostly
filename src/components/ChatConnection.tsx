@@ -199,6 +199,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
                 </div>}
               </>}
             </div>}
+            {link?.dhtDelivery?.foreignKeySeenAt && <p data-testid="connection-foreign-key">
+              Someone else is publishing on this chat's invite keys (last at {new Date(link.dhtDelivery.foreignKeySeenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}). It was ignored: nothing from it was accepted, and your contact's saved key is unchanged. Anyone holding a copy of the invite can do this.
+            </p>}
             <dl data-testid="connection-keys" className="space-y-1">
               {keyOfMine && <KeyRow label="You" value={keyOfMine} testId="connection-key-you" />}
               <KeyRow label="Contact" value={peerKey} testId="connection-key-contact" />

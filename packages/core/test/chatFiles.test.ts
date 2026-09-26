@@ -428,6 +428,43 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.b.records.get("in:week-001")?.error).toBe("The offer expired");
   });
 
+  it("an offer that expired unanswered, offered again, is refused: never taken without asking", async () => {
+    let now = 1_000;
+    const w = wire();
+    const asked: string[] = [];
+    w.b.decide = async (f) => { asked.push(f.id); return "ask"; };
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    w.attach();
+    send(w, file("week-002", 40 * 1024 * 1024));
+    await until(() => state(w.b, "in", "week-002") === "asking");
+    now += FILE_LIMITS.offerTtlMs + 1;
+    w.b.files.sweep();
+    await until(() => state(w.b, "in", "week-002") === "failed");
+    // The same pf-offer again (same id, name and size), as a sender replaying it would.
+    const offer = w.a.sent.find((f) => f.t === "pf-offer" && f.id === "week-002")!;
+    w.b.sent.length = 0;
+    await w.b.files.handle({ ...offer });
+    expect(w.b.sent).toEqual([{ t: "pf-refuse", id: "week-002", why: "expired" }]);
+    expect(state(w.b, "in", "week-002")).toBe("failed");
+    expect(w.b.disks.has("week-002"), "nothing was written").toBe(false);
+    expect(asked).toEqual(["week-002"]);
+  });
+
+  it("a file taken within the limits that failed here is taken again from the start when offered again", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("full-002", 2 * 1024 * 1024));
+    await until(() => w.b.disks.has("full-002"));
+    w.b.disks.get("full-002")!.failAt = 500_000;
+    await until(() => state(w.b, "in", "full-002") === "failed");
+    expect(w.b.records.get("in:full-002")?.agreed).toBe(true);
+    w.b.disks.get("full-002")!.failAt = Infinity;
+    w.a.sources.set("full-002", source(2 * 1024 * 1024));
+    await until(() => state(w.a, "out", "full-002") === "failed");
+    w.a.files.retry("full-002");
+    await until(() => state(w.b, "in", "full-002") === "done");
+  });
+
   it("malformed offers are refused, and data for nothing, or out of bounds, is ignored", async () => {
     const w = wire();
     w.attach();

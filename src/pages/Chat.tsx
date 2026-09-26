@@ -182,9 +182,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? "Calls need a live connection" : deliveryPeer.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits ("Sends when live") or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
-  // A security rejection stops the chat on both layers until the person acts.
-  const chatStop = paired && (deliveryPeer?.pairing?.keyMismatch || deliveryPeer?.dhtDelivery?.error?.includes("does not match"))
-    ? deliveryPeer?.pairing?.error ?? deliveryPeer?.dhtDelivery?.error ?? "This chat stopped: your contact's key changed." : undefined;
+  // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
+  const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? deliveryPeer.pairing.error ?? "This chat stopped: your contact's key changed." : undefined;
   // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
   // invite code is forgotten when the contact shows up.
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
