@@ -441,6 +441,12 @@
           "markdownDescription": "Enables the paired_native_send command without any pre-configured scope."
         },
         {
+          "description": "Enables the pkarr_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pkarr-status",
+          "markdownDescription": "Enables the pkarr_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the pubky_session_close command without any pre-configured scope.",
           "type": "string",
           "const": "allow-pubky-session-close",
@@ -487,6 +493,12 @@
           "type": "string",
           "const": "allow-service-respond",
           "markdownDescription": "Enables the service_respond command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_pkarr_relays command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-pkarr-relays",
+          "markdownDescription": "Enables the set_pkarr_relays command without any pre-configured scope."
         },
         {
           "description": "Enables the share_text command without any pre-configured scope.",
@@ -765,6 +777,12 @@
           "markdownDescription": "Denies the paired_native_send command without any pre-configured scope."
         },
         {
+          "description": "Denies the pkarr_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pkarr-status",
+          "markdownDescription": "Denies the pkarr_status command without any pre-configured scope."
+        },
+        {
           "description": "Denies the pubky_session_close command without any pre-configured scope.",
           "type": "string",
           "const": "deny-pubky-session-close",
@@ -811,6 +829,12 @@
           "type": "string",
           "const": "deny-service-respond",
           "markdownDescription": "Denies the service_respond command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_pkarr_relays command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-pkarr-relays",
+          "markdownDescription": "Denies the set_pkarr_relays command without any pre-configured scope."
         },
         {
           "description": "Denies the share_text command without any pre-configured scope.",

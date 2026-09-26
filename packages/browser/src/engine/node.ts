@@ -41,6 +41,7 @@ import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automat
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
+  currentRelays,
   GhostLink,
   utf8Encode,
   type IncomingMessage,
@@ -744,6 +745,13 @@ export class GhostlyNode implements EngineImplementation {
     this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
     this.localFetch = options.localFetch ?? webLocalFetch;
     (this.hold as unknown as { host: { transport: PkarrTransport } }).host.transport = this.transport;
+    // A relay that trips or recovers shows in the connection panel's Details.
+    this.transport.subscribe?.(() => this.emitState());
+  }
+
+  /** The Desktop reaches the DHT itself: the relays in Settings are written to, and read from only when the person chose so. */
+  private configureDirect(): void {
+    this.transport.configure?.({ relays: this.settings.relays, readRelays: this.settings.readRelays === true });
   }
 
   private async refreshWallet(): Promise<void> {
@@ -788,7 +796,10 @@ export class GhostlyNode implements EngineImplementation {
   async start(): Promise<void> {
     // A new profile has no wallet until one is made (New, or the first-run setup): no mint is added by itself.
     this.settings = { ...DEFAULT_SETTINGS, ...(await db.getSettings()) };
+    // A profile still on an old default list gets today's defaults: a relay added to them reaches everyone.
+    this.settings.relays = currentRelays(this.settings.relays);
     this.relays?.setRelays(this.settings.relays);
+    this.configureDirect();
     this.services = await db.getServices();
     await this.identities.load();
     this.identities.start();
@@ -891,7 +902,10 @@ export class GhostlyNode implements EngineImplementation {
     const groups = this.groups.views();
     return {
       settings: this.settings,
-      transport: { ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}) },
+      transport: {
+        ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
+        ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
+      },
       // Group edges are links the engine runs, not chats anyone sees.
       links: [...this.links.values()].filter((live) => !live.stored.group).map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
       services: this.services
@@ -2410,7 +2424,8 @@ export class GhostlyNode implements EngineImplementation {
     // would leave this peer unreachable or without WebRTC.
     for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
     if (settings.avatar !== undefined && settings.avatar !== "" && typeof sanitizeAvatar(settings.avatar) !== "string") throw new Error("Use a small JPEG picture");
-    if (settings.relays && this.relays && !settings.relays.some((relay) => normalizeRelayUrl(relay))) throw new Error("Enter at least one relay address (https://…)");
+    if (settings.relays && (this.relays || this.transport.configure) && !settings.relays.some((relay) => normalizeRelayUrl(relay))) throw new Error("Enter at least one relay address (https://…)");
+    if (settings.readRelays !== undefined && typeof settings.readRelays !== "boolean") throw new Error("readRelays is on or off");
     if (settings.irohRelays) {
       if (settings.irohRelays.length > 4) throw new Error("Use at most four Iroh relays");
       for (const relay of settings.irohRelays) { const problem = irohRelayProblem(relay); if (problem) throw new Error(problem); }
@@ -2434,6 +2449,11 @@ export class GhostlyNode implements EngineImplementation {
     if (settings.relays) {
       this.relays?.setRelays(settings.relays);
       if (this.relays) this.settings.relays = this.relays.describe().relays;
+      else this.settings.relays = [...new Set(settings.relays.map(normalizeRelayUrl).filter((relay): relay is string => relay !== null))];
+    }
+    if (settings.relays || settings.readRelays !== undefined) {
+      if (this.settings.readRelays !== true) delete this.settings.readRelays;
+      this.configureDirect();
     }
     await db.putSettings(this.settings);
 

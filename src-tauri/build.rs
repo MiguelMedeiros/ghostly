@@ -27,6 +27,8 @@ const COMMANDS: &[&str] = &[
     "resolve_messages",
     "publish_records",
     "resolve_records",
+    "set_pkarr_relays",
+    "pkarr_status",
     "diagnostic_log",
     "local_fetch",
     "bitcoind_rpc",

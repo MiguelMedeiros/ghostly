@@ -1,4 +1,4 @@
-import type { GroupMention, LinkPreview, PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, LinkPreview, PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -773,7 +773,13 @@ export interface Settings {
    * yes; off, every chat and group member is told there is none, and the join notice names nobody.
    */
   shareProfile?: boolean;
+  /** The Pkarr relays. Browsers read and write through them; the Desktop writes to them (so browser contacts see its packets). */
   relays: string[];
+  /**
+   * Where the DHT is reached directly (the Desktop): whether reads may use the relays too, "Also use Pkarr relays"
+   * in Settings, Network. Absent means no: reads go to the DHT alone.
+   */
+  readRelays?: boolean;
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
   /**
@@ -1053,6 +1059,10 @@ export interface EngineState {
     protocol: string; relays: string[];
     /** Present where Iroh runs in the browser (web app, extension): the relays it uses and the defaults. */
     iroh?: { relays: string[]; defaults: string[] };
+    /** This client reaches the Mainline DHT itself (the Desktop): relays are for writes, and reads only when chosen. */
+    direct?: boolean;
+    /** How reads go and how each relay is doing, for the connection panel's Details. */
+    discovery?: DiscoveryStatus;
   };
   links: LinkView[];
   services: ServiceView[];
