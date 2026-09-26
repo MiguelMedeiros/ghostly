@@ -204,7 +204,31 @@ describe("ComposerIdentityPicker", () => {
     await user.click(use());
     await turned();
     expect(status()).toBe("Not verified by your contact: bad signature");
-    expect(action()).toHaveTextContent("Stop sharing");
+    expect(action()).toHaveTextContent("Share again");
+    expect(screen.getByTestId("composer-identity-stop")).toHaveTextContent("Stop sharing");
+  });
+
+  const refused = () => ({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "d", status: "rejected", error: "bad signature" })] }) })],
+    identityProofs: [proofView({ id: "d", subject: "example.biz" })] });
+
+  it("shares a refused identity again from its back, with no stop first", async () => {
+    const { user, engine } = open(refused());
+    engine.on("shareIdentityProof", () => undefined);
+    await user.click(use());
+    await turned();
+    await user.click(action());
+    await waitFor(() => expect(engine.callsTo("shareIdentityProof")).toEqual([{ linkId: "link-1", id: "d" }]));
+    expect(engine.callsTo("withdrawIdentityProof")).toEqual([]);
+  });
+
+  it("still stops a refused identity from its back", async () => {
+    const { user, engine } = open(refused());
+    engine.on("withdrawIdentityProof", () => undefined);
+    await user.click(use());
+    await turned();
+    await user.click(screen.getByTestId("composer-identity-stop"));
+    await waitFor(() => expect(engine.callsTo("withdrawIdentityProof")).toEqual([{ linkId: "link-1", id: "d" }]));
+    expect(engine.callsTo("shareIdentityProof")).toEqual([]);
   });
 
   it("moves along the cards with the keys, the line following", async () => {

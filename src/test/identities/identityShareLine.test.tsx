@@ -67,6 +67,8 @@ describe("IdentityShareLine", () => {
     line({ ...mine, state: "failed", error: "The record is gone" });
     expect(mark()).toHaveAccessibleName("Not verified: The record is gone");
     expect(card()).toHaveAttribute("data-state", "failed");
+    // Why, on the card itself, not only in a tooltip.
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("The record is gone");
   });
 
   it("says the contact's share was never checked once its challenge can no longer be answered", () => {
