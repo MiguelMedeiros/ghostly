@@ -301,7 +301,7 @@ fn is_payment_link(url: &str) -> bool {
 }
 
 /// Opens a URL with the system's handler for it. Callers decide what may be opened.
-fn launch(url: &str) -> Result<(), String> {
+pub(crate) fn launch(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let result = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "linux")]

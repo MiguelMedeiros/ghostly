@@ -5,6 +5,7 @@
 const COMMANDS: &[&str] = &[
     "native_notification_permission",
     "native_private_notification",
+    "open_notification_settings",
     "paired_iroh_start",
     "paired_iroh_address",
     "paired_iroh_connect",
