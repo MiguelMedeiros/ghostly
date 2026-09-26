@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { DEFAULT_MINTS, TEST_MINT } from "../src/shared/mints";
-import type { StoredLink, StoredProof } from "../src/shared/types";
+import type { StoredLink, StoredPayment, StoredProof } from "../src/shared/types";
 import { removalRisksFunds, walletRemoval } from "../src/shared/walletRemoval";
 import { FakeBarkServer } from "./helpers/fakeBark";
 import { FakeBreezNetwork } from "./helpers/fakeBreez";
@@ -30,10 +30,22 @@ const { FakeLightningProvider, FakeOnchainProvider, fakeLightning, fakeOnchain }
 const { TESTNET_ARK } = await import("../src/engine/paymentAdapters/arkWallet");
 const { barkTiming } = await import("../src/engine/paymentAdapters/bark");
 barkTiming.serverWaitMs = 1;
+const { removalTiming } = await import("../src/engine/node");
+removalTiming.claimMs = 2_000;
 
 const settingsKeys = async () => (await wrap((await store(STORES.settings, "readonly")).getAllKeys())).map(String).sort();
 const proofsAt = async (mint: string) => (await wrap<StoredProof[]>((await store(STORES.proofs, "readonly")).getAll())).filter((p) => p.mint === mint);
 const ecash = (mint: string, amount: number, secret: string): StoredProof => ({ mint, id: "00ad268c4d1f5826", amount, secret, C: `02${"cd".repeat(32)}` });
+
+/** The Cashu mints, answering each quote as `answer` says; what they mint is recorded. Nothing reaches a network. */
+function fakeMints(node: InstanceType<typeof GhostlyNode>, answer: (quote: string) => "UNPAID" | "PAID" | "ISSUED") {
+  const minted: string[] = [];
+  vi.spyOn(node["wallet"] as unknown as { wallet: (mint: string) => Promise<unknown> }, "wallet").mockImplementation(async () => ({
+    checkMintQuoteBolt11: async (quote: string) => ({ state: answer(quote) }),
+    mintProofsBolt11: async (amount: number, quote: string) => { minted.push(quote); return [{ id: "00ad268c4d1f5826", amount: { toNumber: () => amount }, secret: `minted-${quote}`, C: `02${"cd".repeat(32)}` }]; },
+  }));
+  return minted;
+}
 
 function engine() {
   const fedimint = new FakeFedimintSdk(), bark = new FakeBarkServer(), breez = new FakeBreezNetwork();
@@ -142,6 +154,7 @@ describe("removing a wallet", () => {
       s[STORES.proofs].put(ecash(TEST_MINT, 8, "test-1"));
       s[STORES.quotes].put({ quote: "q-real", mint: real, amount: 21, invoice: "lnbc210n1", createdAt: 1, expiresAt: null });
     });
+    fakeMints(node, () => "UNPAID");
     await node["refreshWallet"]();
     expect(wallets()).toEqual(["cashu:mainnet", "cashu:testnet", "lightning:mainnet", "lightning:testnet"]);
     expect(walletRemoval("cashu", "mainnet", node.getState().wallet.networks?.mainnet)).toMatchObject({ held: { empty: false, text: "500 sats" }, backup: "tokens" });
@@ -155,6 +168,77 @@ describe("removing a wallet", () => {
     expect(await proofsAt(real)).toEqual([]);
     expect((await proofsAt(TEST_MINT)).map((p) => p.amount)).toEqual([8]);
     expect(await wrap((await store(STORES.quotes, "readonly")).get("q-real"))).toBeUndefined();
+  });
+
+  it("Cashu holding nothing, with an open invoice, a paid one the mint has not handed over and one it issued elsewhere: each needs the person's confirmation, listed in words", async () => {
+    const { node, wallets, started } = engine();
+    await started;
+    const real = DEFAULT_MINTS[1];
+    node["settings"].mints = [];
+    await node.updateSettings({ settings: { mints: [real] } });
+    const later = Date.now() + 3_600_000;
+    const cases = [
+      { quote: { quote: "q-open", mint: real, amount: 50_000, invoice: "lnbc500u1open", createdAt: 1, expiresAt: later }, says: "an invoice for 50,000 sats, not paid yet" },
+      { quote: { quote: "q-paid", mint: real, amount: 700, invoice: "lnbc7u1paid", createdAt: 1, expiresAt: later, paid: true }, says: "700 sats paid to an invoice, not claimed from the mint yet" },
+      { quote: { quote: "q-issued", mint: real, amount: 300, invoice: "lnbc3u1issued", createdAt: 1, expiresAt: 5, issuedUnclaimed: true }, says: "300 sats the mint says it issued for an invoice, never received here" },
+    ];
+    // The mint does not answer: nothing can be claimed, so each stays what it was.
+    vi.spyOn(node["wallet"] as unknown as { wallet: (mint: string) => Promise<unknown> }, "wallet").mockRejectedValue(new Error("mint.example did not answer"));
+    for (const { quote, says } of cases) {
+      await transact([STORES.quotes], (s) => { s[STORES.quotes].clear(); s[STORES.quotes].put(quote); });
+      await node["refreshWallet"]();
+      const removal = walletRemoval("cashu", "mainnet", node.getState().wallet.networks?.mainnet);
+      expect(removal.held).toEqual({ empty: true, text: "0 sats" });
+      expect(removalRisksFunds(removal), says).toBe(true);
+      await expect(node.walletRemove({ type: "cashu", network: "mainnet" })).rejects.toThrow(`The Mainnet Cashu wallet still waits for money: ${says}. Confirm that what is paid to it after it is removed is lost to remove it.`);
+      expect(wallets()).toContain("cashu:mainnet");
+    }
+    await node.walletRemove({ type: "cashu", network: "mainnet", acceptLoss: true });
+    expect(wallets()).toEqual([]);
+    expect(await wrap((await store(STORES.quotes, "readonly")).getAll())).toEqual([]);
+    vi.restoreAllMocks();
+  });
+
+  it("Cashu: an invoice the mint says is paid is claimed before anything is deleted, and the ecash it brings is counted", async () => {
+    const { node, started } = engine();
+    await started;
+    node["settings"].mints = [];
+    await node.walletCreate({ type: "cashu", network: "testnet" });
+    await transact([STORES.quotes], (s) => { s[STORES.quotes].put({ quote: "q-paid", mint: TEST_MINT, amount: 40, invoice: "lnbc400n1paid", createdAt: 1, expiresAt: Date.now() + 3_600_000 }); });
+    const minted = fakeMints(node, () => "PAID");
+    await node["refreshWallet"]();
+    expect(walletRemoval("cashu", "testnet", node.getState().wallet.networks?.testnet).held).toEqual({ empty: true, text: "0 test sats" });
+
+    await expect(node.walletRemove({ type: "cashu", network: "testnet" }), "the ecash is in: it is what the wallet holds now").rejects.toThrow("The Testnet Cashu wallet holds 40 test sats. Confirm that they become unreachable without its backup to remove it.");
+    expect(minted).toEqual(["q-paid"]);
+    expect((await proofsAt(TEST_MINT)).map((p) => p.amount)).toEqual([40]);
+    expect(await wrap((await store(STORES.quotes, "readonly")).get("q-paid")), "claimed, so the quote is done").toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  it("an open request of ours only this wallet is paid through: confirmed, then closed, never sent again", async () => {
+    const { node, wallets, started } = engine();
+    await started;
+    await node.walletCreate({ type: "arkade", network: "testnet" });
+    const target = { method: "arkade" as const, network: "mutinynet", provider: TESTNET_ARK.provider, asset: "BTC" as const, unit: "sat" as const, address: "tark1me", expiresAt: Date.now() + 900_000 };
+    const desk = node["desk"] as unknown as { save(p: StoredPayment): Promise<void>; payment(id: string): StoredPayment | undefined; replay(linkId: string): Promise<void> };
+    await desk.save({ id: "req-1", linkId: "chat", kind: "request", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt: 1, target, network: "testnet" });
+    await desk.save({ id: "req-mainnet", linkId: "chat", kind: "request", direction: "out", amount: 9, unit: "sat", state: "pending", createdAt: 1, target: { ...target, network: "bitcoin" }, network: "mainnet" });
+    await node["refreshWallet"]();
+    const removal = walletRemoval("arkade", "testnet", node.getState().wallet.networks?.testnet);
+    expect(removal.awaiting).toEqual([{ kind: "request", text: "A request for 1,000 test sats in a chat, still open", amount: "1,000 test sats", paymentId: "req-1" }]);
+
+    await expect(node.walletRemove({ type: "arkade", network: "testnet" })).rejects.toThrow("The Testnet Ark wallet still waits for money: a request for 1,000 test sats in a chat, still open.");
+    expect(desk.payment("req-1")?.state).toBe("pending");
+    await node.walletRemove({ type: "arkade", network: "testnet", acceptLoss: true });
+    expect(wallets()).toEqual([]);
+    expect(desk.payment("req-1")).toMatchObject({ state: "failed", closed: true, error: "you removed the Testnet Ark wallet it was paid to" });
+    expect(desk.payment("req-mainnet")?.state, "the other network's request is not this wallet's").toBe("pending");
+
+    const sendPaymentRequest = vi.fn(async () => {});
+    node["paymentLink"] = (() => ({ supportsPayments: true, supportsArkPayments: true, sendPaymentRequest, sendPayment: vi.fn(), sendPaymentResult: vi.fn() })) as never;
+    await desk.replay("chat");
+    expect(sendPaymentRequest.mock.calls.map((c) => (c as unknown as [{ id: string }])[0].id)).toEqual(["req-mainnet"]);
   });
 
   it("Cashu with a Lightning payment still in flight at its mint waits for it", async () => {

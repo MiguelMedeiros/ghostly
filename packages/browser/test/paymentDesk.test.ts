@@ -834,3 +834,43 @@ describe("receipts that do not add up", () => {
     expect(sent).toEqual([]);
   });
 });
+
+describe("a request closed because its wallet was removed", () => {
+  it("is never sent again, and the contact is told in its own words", async () => {
+    const { desk, sent, state } = setup([
+      record({ id: "ark", direction: "out", target: ark() }),
+      record({ id: "ln", direction: "out", invoice: INVOICE, mints: [MINT] }),
+      record({ id: "done", direction: "out", target: ark(), state: "settled" }),
+    ]);
+    await desk.start();
+    await desk.replay("l");
+    expect(sent.filter((s) => s.kind === "req").map((s) => s.frame.id).sort()).toEqual(["ark", "ln"]);
+
+    sent.length = 0;
+    expect(await desk.close("ark", "you removed the Mainnet Ark wallet it was paid to", "your contact removed the wallet it was paid to")).toBe(true);
+    expect(await desk.close("done", "x", "y"), "a paid request stays paid").toBe(false);
+    expect(state("ark")).toMatchObject({ state: "failed", closed: true, error: "you removed the Mainnet Ark wallet it was paid to" });
+    expect(state("done")?.state).toBe("settled");
+    expect(sent).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to" } }]);
+
+    sent.length = 0;
+    await desk.replay("l");
+    expect(sent.filter((s) => s.kind === "req").map((s) => s.frame.id)).toEqual(["ln"]);
+  });
+
+  it("on the payer's side it closes too, unless a Lightning payment for it is already in flight; nobody else can close it", async () => {
+    const { desk, state } = setup([
+      record({ id: "open", invoice: INVOICE }),
+      record({ id: "flying", invoice: INVOICE, lightningPending: true }),
+      record({ id: "ours", direction: "out", invoice: INVOICE }),
+      record({ id: "other-chat", linkId: "m", invoice: INVOICE }),
+    ]);
+    await desk.start();
+    for (const id of ["open", "flying", "ours", "other-chat"]) await desk.onPaymentResult("l", { id, ok: false, error: "your contact removed the wallet it was paid to" });
+    expect(state("open")).toMatchObject({ state: "failed", closed: true, error: "your contact removed the wallet it was paid to" });
+    expect(state("flying")).toMatchObject({ state: "pending", lightningPending: true });
+    expect(state("ours")?.state, "a contact never closes a request of ours").toBe("pending");
+    expect(state("other-chat")?.state).toBe("pending");
+    await expect(desk.payRequest({ linkId: "l", paymentId: "open", via: "lightning" })).rejects.toThrow("no longer open");
+  });
+});

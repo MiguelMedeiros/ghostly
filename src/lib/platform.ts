@@ -193,6 +193,8 @@ export interface ChatPayment {
   invoice?: string;
   /** Requests we pay: our Lightning payment is still pending at the mint. */
   lightningPending?: boolean;
+  /** Requests: closed by the one who made it (the wallet it was paid to was removed), so it cannot be paid. */
+  closed?: boolean;
   /** Fedimint requests: the federations the payee takes ecash of. */
   federations?: string[];
   /** Fedimint payments: the federation of the notes. */

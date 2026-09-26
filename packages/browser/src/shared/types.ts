@@ -321,6 +321,8 @@ export interface StoredQuote {
    * only record of sats the user paid for.
    */
   issuedUnclaimed?: boolean;
+  /** The mint said this invoice is paid, and its ecash is not claimed yet (the claim is tried again every round). */
+  paid?: boolean;
   /**
    * The mint marks its invoices paid by itself (a test mint, `paysItsOwnInvoices`): its "paid" says nothing about a
    * payer. Not polled, never minted by itself: a payer saying it paid (`CashuWallet.vouch`) lets it be minted.
@@ -378,6 +380,11 @@ export interface StoredPayment {
    * every member over their edges, and the first member whose payment settles it pays it; later ones are refused.
    */
   group?: string;
+  /**
+   * A request closed by the one who made it (their wallet for it was removed): it can no longer be paid, and a
+   * payment still made to what it named is lost. Set on both sides, with `state` "failed".
+   */
+  closed?: boolean;
 }
 
 /** What pages see of a payment: everything but the token. */
@@ -449,6 +456,25 @@ export interface NetworkWalletsView {
   /** This network's history, newest first. */
   history: WalletTx[];
   feesPaid: number;
+  /** What this network's wallets still wait for: removing one reads it (see `walletRemoval`). Always set by the engine. */
+  awaiting?: WalletAwaitingView[];
+}
+
+/**
+ * Something one wallet still waits for. `request`: a request of ours still open in a chat that only this wallet can
+ * be paid through; `invoice`: an invoice of its own, not paid and not expired; `paid`: an invoice the mint says is
+ * paid whose ecash is not claimed yet; `unclaimed`: ecash the mint says it issued for an invoice of ours that this
+ * wallet never received; `sent`: ecash sent from it that the contact has not taken yet. Removing the wallet loses
+ * what is paid to the first four; `sent` Cashu comes back once its mint is added again.
+ */
+export interface WalletAwaitingView {
+  /** The wallet it goes through (Lightning through the Cashu mints is the Cashu wallet's). */
+  type: WalletType;
+  kind: "request" | "invoice" | "paid" | "unclaimed" | "sent";
+  /** In the wallet's base unit: sats, or the token's smallest unit for USDT. */
+  amount: number;
+  /** The chat payment it belongs to, when it does. */
+  paymentId?: string;
 }
 
 /**

@@ -84,10 +84,17 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
     ? `Your money stays ${source ? `in ${source}` : "where it is"}: Ghostly only forgets how to reach it. You can connect it again later.`
     : held === "unknown" ? "Ghostly cannot read its balance right now (it is not connected): it may hold money."
     : held.empty ? "It holds nothing." : `It holds ${held.text} on ${NETWORK_NAME[network]}${real ? ", real money" : ", test coins worth nothing"}.`;
-  const consent = held === "unknown"
-    ? `I understand: whatever this ${label} wallet holds becomes unreachable without its backup.`
-    : real ? `I understand: these ${held.text} are real money, and they become unreachable without this wallet's backup.`
-    : `I understand: these ${held.text} become unreachable without this wallet's backup.`;
+  const { awaiting, returnable } = removal;
+  const holds = held === "unknown" ? `whatever this ${label} wallet holds becomes unreachable without its backup`
+    : held.empty ? ""
+    : real ? `these ${held.text} are real money, and they become unreachable without this wallet's backup`
+    : `these ${held.text} become unreachable without this wallet's backup`;
+  const waits = awaiting.length ? `anything paid to its open requests and invoices after it is removed is lost${real && !holds ? ", and it is real money" : ""}` : "";
+  const consent = `I understand: ${[holds, waits].filter(Boolean).join("; and ")}.`;
+  const requests = awaiting.some((i) => i.kind === "request");
+  const afterwards = removal.custody === "elsewhere"
+    ? `Anything paid to them afterwards still reaches ${source ?? "the wallet"}; Ghostly just no longer sees it.`
+    : `Anything paid to them afterwards is lost${real ? ": this is real money" : ""}. To keep it, wait until they are paid or have expired.`;
   // A backup is offered whenever something could be lost, and for any real-money wallet: an address shared before
   // may still be paid, and only its recovery phrase reaches what arrives there.
   const offerBackup = removal.custody === "device" && (risks || real);
@@ -101,6 +108,20 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
         <h2 id={`${id}-title`} className="text-base font-semibold">Remove your {label} wallet?</h2>
         <p id={`${id}-body`} className="text-sm text-text-secondary" data-testid="wallet-remove-held">{what}</p>
       </div>
+      {awaiting.length > 0 && (
+        <div className="space-y-2" data-testid="wallet-remove-awaiting">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">Still waiting for money</h3>
+          <ul className="bg-surface rounded-xl divide-y divide-border text-sm">
+            {awaiting.map((item, i) => <li key={`${item.kind}-${item.paymentId ?? i}`} className="px-3 py-2" data-testid="wallet-remove-awaiting-item" data-kind={item.kind}>{item.text}</li>)}
+          </ul>
+          <p className="text-xs text-text-secondary" data-testid="wallet-remove-awaiting-note">{requests ? "Removing the wallet closes its open requests, and your contacts are told. " : ""}{afterwards}</p>
+        </div>
+      )}
+      {returnable.length > 0 && (
+        <Notice testId="wallet-remove-returnable">
+          Ecash you sent from this wallet has not been taken yet ({returnable.map((i) => i.amount).join(", ")}). It is not lost: to take it back later, add its mint again first.
+        </Notice>
+      )}
       {removal.pending > 0 && <Notice tone="error" testId="wallet-remove-pending">A payment through this wallet is not finished yet ({removal.pending}). Wait for it to settle or cancel it, then remove the wallet.</Notice>}
       {offerBackup && (
         <div className="space-y-2" data-testid="wallet-remove-backup">
