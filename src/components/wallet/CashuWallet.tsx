@@ -34,8 +34,10 @@ const shortFee = (ppk: number) => (ppk === 0 ? "No fee to spend" : `${ppk / 1000
  * ecash held by the mints, filled and emptied over Lightning. The Cashu card also holds the mint
  * settings; the Lightning card is about invoices, and where they are paid into and from (its source).
  */
-export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; onOpenCashu: () => void }) {
+export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = false }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; onOpenCashu: () => void; focusAmount?: boolean }) {
   const [action, setAction] = useState<Action>("receive");
+  // The amount takes the focus when the person chose this wallet (`focusAmount`) or chose Receive here.
+  const [actionChosen, setActionChosen] = useState(false);
   const { busy, error, setError, run } = useRun();
   const [amount, setAmount] = useState("");
   const [invoice, setInvoice] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
     try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, e instanceof Error ? e.message : String(e)] as const; }
   })();
 
-  const choose = (next: Action) => { setAction(next); setError(""); setNotice(""); setInvoice(null); setQuote(null); };
+  const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); };
 
   return (
     <div className="space-y-6">
@@ -114,7 +116,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
               </div>
             ) : (
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { setBalanceBefore(state.balance); setInvoiceAt(Date.now()); const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }); }}>
-                <Amount value={amount} onChange={setAmount} unit="sats" testId="wallet-receive-amount" autoFocus />
+                <Amount value={amount} onChange={setAmount} unit="sats" testId="wallet-receive-amount" autoFocus={focusAmount || actionChosen} />
                 <Button type="submit" variant="primary" className="w-full" data-testid="wallet-create-invoice" disabled={busy || !amount || (viaMint ? !state.mints.length : ln?.status !== "ready")}>{busy ? (viaMint ? "Asking the mint…" : `Asking ${sourceName}…`) : "Create Lightning invoice"}</Button>
                 <Notice>{rail === "cashu" ? "Got an ecash token instead? Paste it under Send." : "Anyone can pay this invoice from any Lightning wallet."}</Notice>
               </form>

@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { createWallet, expect, test, useFakeProviders, type Peer } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
+import { pointAt, stillness } from "../support/still";
 import { swipe } from "../support/swipe";
 
 /**
@@ -125,6 +126,32 @@ test("with a mouse the cards are a stack: resting on one brings it up, and its p
   await card(page, "bitcoin-testnet").click();
   await page.reload();
   await chosen(page, "bitcoin-testnet");
+});
+
+// A short window too: there the panel's amount is below the fold, and a focus on it pulled the page down to it (WebKit).
+for (const height of [900, 560]) test(`the pointer passing over the cards moves neither the page nor the focus; a click puts the focus in the amount, where it is (${height} px high)`, { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
+  const page = await wallets(await peer("alice", { viewport: { width: 1280, height } }));
+  await page.goto("/#/wallet");
+  await expect(deck(page)).toHaveAttribute("data-mode", "stack");
+  await chosen(page, "cashu-testnet");
+  // The page opens without taking the focus: the amount is below the decks.
+  const still = await stillness(page);
+  expect(still.focus).toBe("body");
+
+  // Over each card, back and forth, and across the resting Mainnet deck: each Testnet card comes up with its panel
+  // (Cashu's and Lightning's with an amount), and nothing scrolls or takes the focus.
+  for (const id of ["lightning-testnet", "bitcoin-testnet", "cashu-testnet", "lightning-testnet", "cashu-mainnet", "bitcoin-testnet", "cashu-testnet"] as const) {
+    await pointAt(card(page, id));
+    if (id !== "cashu-mainnet") await chosen(page, id);
+    expect(await stillness(page), `over ${id}`).toEqual(still);
+  }
+
+  // A click on the card under the pointer chooses it: its amount takes the focus, and the page stays where it is.
+  const at = await pointAt(card(page, "lightning-testnet"));
+  await page.mouse.click(at.x, at.y);
+  await chosen(page, "lightning-testnet");
+  await expect(page.getByTestId("wallet-receive-amount")).toBeFocused();
+  expect((await stillness(page)).scroll).toEqual(still.scroll);
 });
 
 test("real money and test money are two decks: the one resting ignores the pointer crossing it, and a click hands it the panel", { tag: ["@feature:wallet.deck", "@feature:wallet.instances.sections"] }, async ({ peer }) => {
