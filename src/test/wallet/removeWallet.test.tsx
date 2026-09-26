@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { WalletAwaitingView, WalletNetwork, WalletView } from "@ghostly/browser/shared/types";
+import type { WalletNetwork } from "@ghostly/core";
+import type { WalletAwaitingView, WalletView } from "@ghostly/browser/shared/types";
 import { Wallet } from "../../pages/Wallet";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";

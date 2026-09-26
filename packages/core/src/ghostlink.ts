@@ -1457,7 +1457,7 @@ export class GhostLink {
   sendPaymentResult(result: PaymentResult): void {
     if (this.options.params.profile && !this.supportsPayments) return;
     try {
-      this.channel?.send(encodeControl({ t: "pay-res", id: result.id, ok: result.ok, v: result.credited, err: result.error }));
+      this.channel?.send(encodeControl({ t: "pay-res", id: result.id, ok: result.ok, v: result.credited, err: result.error, ...(result.closed ? { c: true as const } : {}) }));
     } catch {
       // the peer learns on reconnect that nothing came back
     }
@@ -1964,7 +1964,7 @@ export class GhostLink {
               if (payment?.t === "pay") await this.options.events?.onPayment?.({ id: payment.id, timestamp: payment.ts, requestId: payment.rid, amount: { value: payment.v, asset: payment.u }, memo: payment.memo, endpoint: payment.e });
               else if (payment?.t === "pay-req") await this.options.events?.onPaymentRequest?.({ id: payment.id, timestamp: payment.ts, amount: { value: payment.v, asset: payment.u }, memo: payment.memo, endpoints: payment.e, ask: payment.a, network: payment.n });
               else if (payment?.t === "pay-ask") await this.options.events?.onPaymentAsk?.({ id: payment.id, timestamp: payment.ts, amount: { value: payment.v, asset: payment.u }, method: payment.m, memo: payment.memo, network: payment.n });
-              else if (payment?.t === "pay-res") await this.options.events?.onPaymentResult?.({ id: payment.id, ok: payment.ok, credited: payment.v, error: payment.err });
+              else if (payment?.t === "pay-res") await this.options.events?.onPaymentResult?.({ id: payment.id, ok: payment.ok, credited: payment.v, error: payment.err, ...(payment.c ? { closed: true } : {}) });
             }
             return;
           }
@@ -2253,7 +2253,7 @@ export class GhostLink {
         });
         break;
       case "pay-res":
-        this.options.events?.onPaymentResult?.({ id: frame.id, ok: frame.ok, credited: frame.v, error: frame.err });
+        this.options.events?.onPaymentResult?.({ id: frame.id, ok: frame.ok, credited: frame.v, error: frame.err, ...(frame.c ? { closed: true } : {}) });
         break;
       case "rst":
         if (frame.d === "q") this.httpHost?.handleReset(frame);

@@ -830,9 +830,9 @@ export class PaymentDesk {
       // Only the payee can declare a request paid, and only about a request it sent us. It says so once its
       // own wallet saw the money (its source, its chain, its Ark server), however the request was paid.
       if (payment.direction === "in" && result.ok) await this.save({ ...payment, state: "settled", lightningPending: undefined });
-      // Or closed: the wallet it was paid through is gone, so paying it now would lose the money. A Lightning payment
-      // already in flight is left to settle; its own answer decides.
-      else if (payment.direction === "in" && !payment.lightningPending) await this.save({ ...payment, state: "failed", closed: true, error: result.error?.slice(0, 200) || "your contact closed it" });
+      // Or closed, said so in as many words (`closed`, never a bare refusal): the wallet it was paid through is gone, so
+      // paying it now would lose the money. A Lightning payment already in flight is left to settle; its own answer decides.
+      else if (payment.direction === "in" && result.closed && !payment.lightningPending) await this.save({ ...payment, state: "failed", closed: true, error: result.error?.slice(0, 200) || "your contact closed it" });
       return;
     }
     // A payment with a target reconciles through its own adapter, never on the contact's word.
@@ -1412,7 +1412,7 @@ export class PaymentDesk {
     const links = request.group ? this.host.groupLinks?.(request.group) ?? [] : [request.linkId];
     for (const linkId of links) {
       const link = this.host.getLink(linkId);
-      if (link?.supportsPayments) { try { link.sendPaymentResult({ id, ok: false, error: told }); } catch { /* not reachable now */ } }
+      if (link?.supportsPayments) { try { link.sendPaymentResult({ id, ok: false, error: told, closed: true }); } catch { /* not reachable now */ } }
     }
     return true;
   }

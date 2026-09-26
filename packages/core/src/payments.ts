@@ -86,6 +86,11 @@ export interface PaymentResult {
   /** Amount credited when it differs from the amount sent. */
   credited?: string;
   error?: string;
+  /**
+   * On a request (`ok` false): its payee closed it for good, and a payment made to it now is lost. Only the payee of a
+   * request says it; the payer stops offering to pay it.
+   */
+  closed?: boolean;
 }
 
 export function cashuRequestPayload(mints: string[]): string {

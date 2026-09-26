@@ -851,7 +851,7 @@ describe("a request closed because its wallet was removed", () => {
     expect(await desk.close("done", "x", "y"), "a paid request stays paid").toBe(false);
     expect(state("ark")).toMatchObject({ state: "failed", closed: true, error: "you removed the Mainnet Ark wallet it was paid to" });
     expect(state("done")?.state).toBe("settled");
-    expect(sent).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to" } }]);
+    expect(sent).toEqual([{ kind: "res", frame: { id: "ark", ok: false, error: "your contact removed the wallet it was paid to", closed: true } }]);
 
     sent.length = 0;
     await desk.replay("l");
@@ -866,7 +866,10 @@ describe("a request closed because its wallet was removed", () => {
       record({ id: "other-chat", linkId: "m", invoice: INVOICE }),
     ]);
     await desk.start();
-    for (const id of ["open", "flying", "ours", "other-chat"]) await desk.onPaymentResult("l", { id, ok: false, error: "your contact removed the wallet it was paid to" });
+    // A bare refusal about a request changes nothing: only "closed", said in as many words, does.
+    await desk.onPaymentResult("l", { id: "open", ok: false, error: "nope" });
+    expect(state("open")?.state).toBe("pending");
+    for (const id of ["open", "flying", "ours", "other-chat"]) await desk.onPaymentResult("l", { id, ok: false, error: "your contact removed the wallet it was paid to", closed: true });
     expect(state("open")).toMatchObject({ state: "failed", closed: true, error: "your contact removed the wallet it was paid to" });
     expect(state("flying")).toMatchObject({ state: "pending", lightningPending: true });
     expect(state("ours")?.state, "a contact never closes a request of ours").toBe("pending");

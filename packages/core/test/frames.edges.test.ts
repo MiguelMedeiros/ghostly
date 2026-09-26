@@ -267,6 +267,12 @@ describe("payment frames", () => {
     expect(decode({ t: "pay-res", id, ok: false, err: "e".repeat(300) })).toMatchObject({ err: "e".repeat(200) });
     expect(decode({ t: "pay-res", id, ok: false, err: 5 })).toMatchObject({ err: undefined });
   });
+
+  it("carries a request's closing only as a refusal, and only as `c: true`", () => {
+    expect(decode({ t: "pay-res", id, ok: false, err: "gone", c: true })).toEqual({ t: "pay-res", id, ok: false, v: undefined, err: "gone", c: true });
+    expect(decode({ t: "pay-res", id, ok: true, c: true })).not.toHaveProperty("c");
+    expect(decode({ t: "pay-res", id, ok: false, c: "yes" })).not.toHaveProperty("c");
+  });
 });
 
 describe("reset frames", () => {

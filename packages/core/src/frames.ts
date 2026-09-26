@@ -175,6 +175,8 @@ export interface PayResultFrame {
   /** Amount credited, when it differs from what was sent (fees). */
   v?: string;
   err?: string;
+  /** On the payee's own `pay-req`: closed for good, never to be paid (its wallet was removed). */
+  c?: true;
 }
 
 /** Aborts a stream in either direction. */
@@ -319,7 +321,7 @@ export function decodeControl(text: string): ControlFrame | null {
     case "pay-res":
       if (!isPayId(f.id) || typeof f.ok !== "boolean") return null;
       if (f.v !== undefined && !isAmount(f.v)) return null;
-      return { t: "pay-res", id: f.id, ok: f.ok, v: f.v, err: typeof f.err === "string" ? f.err.slice(0, 200) : undefined };
+      return { t: "pay-res", id: f.id, ok: f.ok, v: f.v, err: typeof f.err === "string" ? f.err.slice(0, 200) : undefined, ...(f.c === true && !f.ok ? { c: true as const } : {}) };
     case "rst":
       if (!isStreamId(f.id) || (f.d !== "q" && f.d !== "s" && f.d !== "f")) return null;
       return { t: "rst", id: f.id, d: f.d, e: typeof f.e === "string" ? f.e.slice(0, 256) : "" };

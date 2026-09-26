@@ -223,7 +223,7 @@ Ghostly does not move money. It carries payment requests, payments that fit in a
 |---|---|
 | `pay-req` | Payment Request. `e` lists every way the payee can be paid, best first: `btc-lightning-bolt11` with an invoice anyone can pay from any wallet, `cashu` with the mints the payee accepts ecash from. |
 | `pay` | A payment carried in band: `e` is `["cashu", <token>]`. `rid` names the request it settles. Without `rid` it is a plain transfer. |
-| `pay-res` | The payee's word on a `pay` (redeemed, with the amount credited, or refused and why) or on its own `pay-req` (paid some other way, e.g. the invoice). Only the payee of a request may declare it paid. |
+| `pay-res` | The payee's word on a `pay` (redeemed, with the amount credited, or refused and why) or on its own `pay-req` (paid some other way, e.g. the invoice). Only the payee of a request may declare it paid. On its own `pay-req`, `"ok": false` with `"c": true` says the payee closed it for good (the wallet it was paid to was removed): the payer stops offering to pay it. Without `c` a refusal about a request changes nothing. |
 
 - Ids are `[A-Za-z0-9_-]{8,64}`; `v` is decimal text, never a float; `u` is the asset (`sat`). Payloads are at most 32 KiB and requests list at most 8 endpoints.
 - Payments only travel over the data link. Tokens and invoices do not fit in a Pkarr packet and should not sit in one.
