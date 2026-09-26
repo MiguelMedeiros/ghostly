@@ -13,8 +13,6 @@ import { composerRow } from "../support/composer";
 test.skip(process.env.GHOSTLY_LND_REGTEST !== "1" || process.env.GHOSTLY_NWC_REGTEST !== "1", "Requires e2e/infra with GHOSTLY_LND_REGTEST=1 and GHOSTLY_NWC_REGTEST=1");
 test.describe.configure({ mode: "serial", timeout: 300_000 });
 
-const sats = (text: string) => Number(/[\d,]+/.exec(text)?.[0].replace(/,/g, ""));
-
 /** Adds a Lightning card through the LND node's form; the card comes up selected. */
 async function addLnd(p: Peer, lnd: typeof import("../support/lnd-regtest/regtest.mjs")) {
   const { url, macaroon, cert } = lnd.credentials("alice");
@@ -111,5 +109,5 @@ test("two Lightning cards on Testnet: each pays through its own node; the defaul
   await expect(received).toContainText("paid");
   await node.click();
   await expect(page.getByTestId("lightning-recent").getByTestId("lightning-op").filter({ hasText: "Invoice" })).toHaveCount(0);
-  console.log(`  two Lightning cards: node pays 300, hub pays 200, hub receives 1000 (Alice's hub card shows ${sats(await hub.innerText())} sats)`);
+  console.log("  two Lightning cards: the node's paid 300, the hub's paid 200, the hub's (the default) received a 1,000 request");
 });
