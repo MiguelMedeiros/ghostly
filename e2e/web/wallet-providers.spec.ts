@@ -54,7 +54,8 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
     const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
     await review.getByRole("button", { name: "Approve payment" }).click();
     await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "Sent you" }).getByTestId("payment-state")).toHaveText("Received", { timeout: 60_000 });
-    await alice.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+    // The sheet closed once the payment went out.
+    await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
 
     await ecashOnly(bob);
     await composer(bob, "cashu", "10");
