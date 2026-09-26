@@ -1,3 +1,0 @@
-# Generations (billed, cached by the hash of what was asked), renders and their frames stay out of git.
-cache/
-out/
