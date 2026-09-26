@@ -7,7 +7,7 @@
   repeating-radial-gradient(circle at -15% 120%,transparent 0 9px,rgba(var(--card-rgb,36,211,194),.06) 9px 10px),
   linear-gradient(160deg,color-mix(in srgb,rgb(var(--card-rgb,36,211,194)) 18%,#101522),#0b0f19 70%);
  box-shadow:0 24px 50px -28px rgba(0,0,0,.9)}
-.id-card-back-band{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;padding:7px 10px 7px 14px;
+.id-card-back-band{display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0;padding:7px 14px 7px 8px;
  background:linear-gradient(90deg,rgba(var(--card-rgb,36,211,194),.34),rgba(var(--card-rgb,36,211,194),.12));border-bottom:1px solid rgba(var(--card-rgb,36,211,194),.3)}
 .id-card-back-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.88)}
 .id-card-back-body{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;padding:12px 14px 6px}

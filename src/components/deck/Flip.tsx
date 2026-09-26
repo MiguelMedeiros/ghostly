@@ -30,10 +30,13 @@ export function CardFlip({flipped,front,back,className,tone=''}:{flipped:boolean
  </div>;
 }
 
-/** On a turned card's back, the way back to the deck: "Cards", in the card's ink. `label` says it in full. */
+/**
+ * On a turned card's back, the way back to the deck: "‹ Cards" in its top-left corner, in the card's ink, where a
+ * back button is looked for (Escape does the same, PaymentComposer.tsx). `label` says it in full.
+ */
 export function FlipTurnButton({testId,label,onClick}:{testId:string;label:string;onClick:()=>void}) {
  return <button type="button" className="deck-flip-turn" data-testid={testId} aria-label={label} title={label} onClick={onClick}>
-  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2v3.2h3.2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
   <span>Cards</span>
  </button>;
 }

@@ -229,8 +229,8 @@ function GhostlyBack({ t, card, contact, others, busy, done, error, actionRef, o
   return (
     <div className="id-card-back" data-testid="composer-identity-back" data-ghostly="true">
       <div className="id-card-back-band">
-        <span className="id-card-back-title">What {contact} sees</span>
         {!done && <FlipTurnButton testId="composer-identity-change-card" label="Choose another identity" onClick={onCards} />}
+        <span className="id-card-back-title">What {contact} sees</span>
       </div>
       <div className="id-card-back-body">
         <div className="id-card-back-sees" data-testid="composer-identity-sees">
@@ -280,8 +280,8 @@ function IdentityBack({ entry, contact, now, busy, done, error, status, actionRe
   return (
     <div className="id-card-back" data-testid="composer-identity-back">
       <div className="id-card-back-band">
-        <span className="id-card-back-title">What {contact} sees</span>
         {!done && <FlipTurnButton testId="composer-identity-change-card" label="Choose another identity" onClick={onCards} />}
+        <span className="id-card-back-title">What {contact} sees</span>
       </div>
       <div className="id-card-back-body">
         <div className="id-card-back-sees" data-testid="composer-identity-sees">

@@ -1,6 +1,7 @@
-import { connect, createWallet, expect, link, test, useFakeProviders, useTestnet, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, getTestCoins, link, openChat, test, useFakeProviders, useTestnet, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 import { pointAt, stillness } from "../support/still";
+import { closePayments, openPayments } from "../support/payments";
 
 /**
  * Paying in a chat starts from the wallet's cards: a stack in the composer, where the card the pointer rests on
@@ -117,11 +118,89 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await expect(page.getByTestId("payment-send"), "Lightning pays a request the contact sends").toBeDisabled();
   await expect(page.getByTestId("payment-send")).toHaveAttribute("title", /tap Pay on your contact's request/);
 
-  // The card turned over is the one the next payment starts on.
+  // The card turned over is the one the next payment starts on. Escape goes back to the cards, then closes.
+  await page.keyboard.press("Escape");
+  await expect(composer).toHaveAttribute("data-side", "cards");
   await page.keyboard.press("Escape");
   await expect(composer).toHaveCount(0);
   await (await composerRow(page, "payment-button")).click();
   await expect(card("lightning")).toHaveAttribute("aria-checked", "true");
+});
+
+test("back from a chosen card by its Cards button and by Escape, then a payment on another card", { tag: ["@feature:payments.chat.cards", "@feature:payments.cashu.send"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice", { viewport: { width: 1280, height: 900 } }), peer("bob")]);
+  for (const p of [alice, bob]) await wallets(p);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await getTestCoins(alice);
+  await openChat(alice);
+  const { page } = alice;
+  const card = (id: string) => page.getByTestId(`payment-card-${id}-testnet`);
+  const composer = await openPayments(page);
+
+  // Lightning turned over, then back to the cards with "‹ Cards" in the card's top-left corner: the deck is back, the
+  // keyboard on the card that was turned over.
+  await card("lightning").click();
+  await expect(page.getByTestId("payment-amount")).toBeFocused();
+  const back = page.getByTestId("payment-change-card");
+  await expect(back).toHaveAccessibleName("Back to the cards");
+  // It leads the card's head, before the mark and the name (its place on screen moves while the card turns).
+  await expect(page.getByTestId("payment-back").locator(".payment-back-head > :first-child")).toHaveAttribute("data-testid", "payment-change-card");
+  await back.click();
+  await expect(composer).toHaveAttribute("data-side", "cards");
+  await expect(card("lightning")).toBeFocused();
+
+  // Cashu turned over; a click on the card's text keeps the sheet, and Escape goes back to the cards, not out.
+  await card("cashu").click();
+  await expect(page.getByTestId("payment-amount")).toBeVisible();
+  await page.getByTestId("payment-back").locator(".payment-back-hint").click();
+  await expect(composer).toHaveAttribute("data-side", "back");
+  await page.keyboard.press("Escape");
+  await expect(composer).toHaveAttribute("data-side", "cards");
+  await expect(card("cashu")).toBeFocused();
+
+  // Chosen again, it pays: 21 test sats, reviewed, received.
+  await card("cashu").click();
+  await page.getByTestId("payment-amount").fill("21");
+  await page.getByTestId("payment-send").click();
+  await composer.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+  for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state")).toHaveText(/Received/, { timeout: 60_000 });
+});
+
+test("the Accept cards are switches, grey when off, and a saved choice stays", { tag: ["@feature:payments.chat.methods", "@feature:payments.chat.cards"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice", { viewport: { width: 1280, height: 900 } }), peer("bob")]);
+  for (const p of [alice, bob]) await wallets(p);
+  await link(alice, bob);
+  const { page } = alice;
+  const accept = (id: string) => page.getByTestId(`payment-accept-${id}-testnet`);
+  const drawn = (id: string) => page.getByTestId(`payment-accept-switch-${id}-testnet`);
+  const composer = await openPayments(page, "accept");
+  await expect(page.getByRole("switch", { name: /^Accept Lightning \(Testnet\) from / })).toBeVisible();
+  await expect(accept("lightning")).toHaveAttribute("aria-checked", "true");
+  await expect(drawn("lightning")).toHaveAttribute("data-on", "true");
+
+  // From the keyboard: the arrows bring Lightning to the front, Space turns it off, and it goes grey.
+  await accept("cashu").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(accept("lightning")).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(accept("lightning")).toHaveAttribute("aria-checked", "false");
+  await expect(drawn("lightning")).toHaveAttribute("data-on", "false");
+  await expect(accept("lightning").locator("[data-deck=face]")).toHaveAttribute("data-checked", "false");
+  await expect(accept("lightning")).toContainText("Testnet");
+  await expect(composer).toHaveAttribute("data-side", "cards");
+  await page.getByTestId("payment-accept-save").click();
+  await expect(page.getByTestId("payment-accept-status")).toHaveAttribute("data-state", "saved");
+  await closePayments(page);
+
+  // Opened again, the choice is there: Lightning off on Accept, gone from Pay.
+  await openPayments(page, "accept");
+  await expect(accept("lightning")).toHaveAttribute("aria-checked", "false");
+  await expect(drawn("lightning")).toHaveAttribute("data-on", "false");
+  await expect(accept("cashu")).toHaveAttribute("aria-checked", "true");
+  await openPayments(page, "pay");
+  await expect(page.getByTestId("payment-card-lightning-testnet")).toHaveCount(0);
+  await closePayments(page);
 });
 
 test("on a phone the payment cards are a track, and a tap turns one over", { tag: ["@feature:payments.chat.cards"] }, async ({ peer }) => {

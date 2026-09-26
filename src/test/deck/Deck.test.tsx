@@ -176,14 +176,14 @@ describe("a deck of checks", () => {
     return shown;
   };
 
-  it("is a group of checkboxes, any number of them on, each face told whether it is on", () => {
+  it("is a group of switches, any number of them on, each face told whether it is on", () => {
     showChecks();
     expect(screen.getByRole("group", { name: "Ways on" })).toBeInTheDocument();
-    expect(screen.getAllByRole("checkbox").map(c => c.getAttribute("aria-checked"))).toEqual(["true", "false", "true", "false"]);
+    expect(screen.getAllByRole("switch").map(c => c.getAttribute("aria-checked"))).toEqual(["true", "false", "true", "false"]);
     expect(check("c").querySelector("[data-deck=face]")).toHaveAttribute("data-face-checked", "true");
     expect(check("b").querySelector("[data-deck=face]")).toHaveAttribute("data-face-checked", "false");
     // Only the card in front is in the tab order, as in every deck.
-    expect(screen.getAllByRole("checkbox").map(c => c.tabIndex)).toEqual([0, -1, -1, -1]);
+    expect(screen.getAllByRole("switch").map(c => c.tabIndex)).toEqual([0, -1, -1, -1]);
   });
 
   it("raises the cards that are on, less than the one in front, and leaves the others down", () => {

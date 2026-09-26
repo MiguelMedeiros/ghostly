@@ -10,8 +10,10 @@
 .deck-flip[data-flipped=true] .deck-flip-front{visibility:hidden;transition:visibility 0s .26s}
 .deck-flip[data-flipped=false] .deck-flip-back{visibility:hidden;transition:visibility 0s .26s}
 
-/* The way back to the deck, on a turned card's back (and a step back before the deck, in the payment picker's head). */
+/* The way back to the deck, in a turned card's top-left corner (and a step back before the deck, in the payment
+   picker's head). */
 .deck-flip-turn{display:flex;align-items:center;gap:5px;flex:none;padding:5px 9px;border-radius:999px;border:1px solid rgba(var(--card-rgb,36,211,194),.45);background:rgba(0,0,0,.25);color:rgb(var(--card-rgb,36,211,194));font-size:11px;font-weight:600;cursor:pointer}
+.deck-flip-turn:has(span){padding:5px 10px 5px 6px}
 .deck-flip-turn:hover{background:rgba(var(--card-rgb,36,211,194),.14)}
 .deck-flip-turn:focus-visible{outline:2px solid #fff;outline-offset:2px}
 

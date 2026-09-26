@@ -516,6 +516,7 @@
     },
     "accept": {
       "deck": "Ways of paying this chat accepts from {{name}}",
+      "card": "Accept {{card}} from {{name}}",
       "on": "On here",
       "off": "Off here",
       "contactOn": "Contact: accepts it",

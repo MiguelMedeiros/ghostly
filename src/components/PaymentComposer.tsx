@@ -142,14 +142,35 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const use = (next: string) => {
     pick(next); setError("");
     rememberRail(chat, next);
+    leaving.current = false;
     turn();
   };
-  const backToCards = () => { setError(""); turnBack(); };
+  /** The card is turning back to the deck (until another is turned over). */
+  const leaving = useRef(false);
+  const backToCards = () => { leaving.current = true; setError(""); turnBack(); };
+  /**
+   * Escape steps back: from a turned card to the deck, and only then out of the sheet. Wherever the focus is (a click
+   * on the card's text leaves it on the page), so this listens on the document before anything else does; the
+   * sheet's dismissal (useOutsideDismiss) leaves an Escape handled here alone. A card under review stays: its
+   * review has taken the card's place.
+   */
+  const escapeToCards = useRef<() => boolean>(() => false);
+  escapeToCards.current = () => {
+    // Already on its way back to the deck: a second Escape closes.
+    if (side !== "back" || leaving.current || !cards.length || review) return false;
+    backToCards();
+    return true;
+  };
+  useEffect(() => {
+    const key = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && escapeToCards.current()) e.preventDefault(); };
+    document.addEventListener("keydown", key, true);
+    return () => document.removeEventListener("keydown", key, true);
+  }, []);
   // On the cards, the keyboard starts on the chosen one: arrows move, Enter turns it over. Once turned, on the amount
   // (not as the back mounts: it is still face down then, and a hidden field takes no focus).
   const amountRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (side === "cards") containerRef.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"], [role=checkbox][tabindex="0"]')?.focus({ preventScroll: true });
+    if (side === "cards") containerRef.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"], [role=switch][tabindex="0"]')?.focus({ preventScroll: true });
     else if (flipped) amountRef.current?.focus({ preventScroll: true });
   }, [side, flipped]);
   useSheetRoom(containerRef);
@@ -225,15 +246,15 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
       <div className="payment-back-stripe" aria-hidden="true" />
       <div className="payment-back-body">
         <div className="payment-back-head">
+          {cards.length > 0 && !review && (
+            <FlipTurnButton testId="payment-change-card" label="Back to the cards" onClick={backToCards} />
+          )}
           {card && <span className="payment-back-mark" aria-hidden="true"><WalletMark rail={card.rail} /></span>}
           <span className="payment-back-title">
             <span className="payment-back-name">{card ? (card.network === "testnet" ? `${card.name} · Testnet` : card.name) : "Payment"}</span>
             {card && <NetworkTag network={card.network} testId="payment-back-network" className="payment-back-network" />}
             <span className="payment-back-meta">{card ? `${card.balance} · with ${who}` : `With ${who}`}</span>
           </span>
-          {cards.length > 0 && !review && (
-            <FlipTurnButton testId="payment-change-card" label="Choose another card" onClick={backToCards} />
-          )}
         </div>
         {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} /> : <>
           <label className="payment-back-amount" data-over={tooMuch || undefined}>
@@ -287,7 +308,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
       data-mode={onSaveMethods ? mode : undefined}
       className={`payment-composer${accepting ? "" : ` wallet-card-${rail}`}`}
       data-network={accepting ? undefined : network}
-      onKeyDown={(e) => e.key === "Escape" && onClose()}
+      onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onClose(); } }}
     >
       {side === "cards" ? <>
         <ComposerSheetHead title={modes || (sendUnavailable ? "Request" : "Pay or request")} who={`with ${who}`} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>

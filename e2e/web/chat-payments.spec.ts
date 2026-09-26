@@ -109,7 +109,10 @@ test("a chat's ways of paying, and the card it starts on, are its own", { tag: [
   await openPayments(alice.page);
   await card(alice, "lightning-testnet").click();
   await expect(alice.page.getByTestId("payment-amount")).toBeVisible();
+  // Escape steps back to the cards first, then closes.
   await alice.page.getByTestId("payment-amount").press("Escape");
+  await expect(alice.page.getByTestId("payment-composer")).toHaveAttribute("data-side", "cards");
+  await alice.page.keyboard.press("Escape");
   await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
 
   // With Carol nothing changed: every way on, and Pay starts on the first card, Cashu.

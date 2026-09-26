@@ -27,6 +27,7 @@
 .payment-back-mark svg{width:22px;height:22px}
 .payment-back-title{display:grid;min-width:0;flex:1}
 .payment-back-name{font-size:15px;font-weight:700;line-height:1.2}
+.payment-back-network{justify-self:start}
 .payment-back-meta{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;letter-spacing:.03em;color:rgba(255,255,255,.62);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .payment-back-amount{display:flex;align-items:baseline;gap:8px;padding:4px 2px 6px;border-bottom:1px solid rgba(var(--card-rgb,36,211,194),.45);transition:border-color .2s}
 .payment-back-amount:focus-within{border-color:rgb(var(--card-rgb,36,211,194))}
