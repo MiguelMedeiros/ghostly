@@ -44,7 +44,7 @@ The implementation uses existing Ed25519 signing/verification and WebRTC DTLS. I
 
 Application objects:
 
-- `paired-message`: `id` (16 random bytes, 22 unpadded base64url characters), `ts` (positive safe integer milliseconds), `m` (text, at most 16 KiB UTF-8).
+- `paired-message`: `id` (16 random bytes, 22 unpadded base64url characters), `ts` (positive safe integer milliseconds), `m` (text, at most 16 KiB UTF-8), and optionally `pv`, a link preview made by the sender ([401 § Link previews](401-paired-chat.md#link-previews)), which older apps ignore.
 - `paired-received`: matching `id`, sent after the receiving engine has completed its local message-storage transaction. It does not mean a human read it. Core callers supplying another storage callback must honor that contract.
 
 Receiver storage deduplicates on link plus random message ID, including concurrent receipt/restart cases. Outgoing paired messages are persisted before transmission with a stable random `wireId`, `delivery` state and optional error. UI states are **Sending…**, **Sent · waiting for receipt**, **Not confirmed yet · sends again by itself** (`queued`), **Received by peer**, and **Delivery unconfirmed** (`failed`). A receiver-storage receipt is the only transition to delivered; timestamp aggregation is not used for these messages. Old history lacking per-message receipts remains unchanged and does not acquire invented delivery evidence.

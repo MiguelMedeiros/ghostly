@@ -6,6 +6,7 @@ use crate::bitcoind_rpc::{self, RpcError};
 use crate::crypto;
 use crate::diagnostics;
 use crate::lnd::{self, LndRequest, LndResponse};
+use crate::link_preview::{self, PreviewResponse};
 use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
 use crate::pkarr_network::Pkarr;
@@ -163,6 +164,34 @@ pub async fn local_fetch(
     body_b64: Option<String>,
 ) -> Result<LocalResponse, String> {
     local_fetch::fetch(url, method, headers, body_b64).await
+}
+
+/// A page, oEmbed answer or picture for a link preview the person is writing
+/// (WISP 401 § Link previews): public addresses only, see `link_preview`.
+#[tauri::command]
+pub async fn link_preview_fetch(url: String, kind: String) -> Result<PreviewResponse, String> {
+    link_preview::fetch(url, kind).await
+}
+
+/// Opens a web link from a message (a link preview, a location card) in the
+/// system's browser or maps app. http(s) only; the page never names a program.
+#[tauri::command]
+pub fn open_web_link(url: String) -> Result<(), String> {
+    if !is_web_link(&url) {
+        return Err("Not a web link".into());
+    }
+    launch(&url)
+}
+
+fn is_web_link(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    matches!(parsed.scheme(), "http" | "https")
+        && parsed.host().is_some()
+        && url.len() <= 4096
+        // What `open` receives is exactly the URL: no spaces, quotes or control characters.
+        && url.bytes().all(|c| c.is_ascii_graphic() && !b"\"'`<>\\".contains(&c))
 }
 
 /// One call to the wallet RPC of the user's Bitcoin Core node: only the methods
@@ -355,6 +384,30 @@ mod project_link_tests {
             "https://github.com/MiguelMedeiros/ghostly/releases/tag/v1?redirect=evil",
         ] {
             assert!(super::open_project_link(url.into()).is_err());
+        }
+    }
+
+    #[test]
+    fn opens_only_plain_web_links_from_messages() {
+        // covers: chat.location.card
+        for url in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "geo:38.7,-9.1",
+            "https://example.com/a b",
+            "https://example.com/\"; open -a Calculator",
+            "https://example.com/`id`",
+            "http:///nohost",
+            "",
+        ] {
+            assert!(!super::is_web_link(url), "{url}");
+        }
+        for url in [
+            "https://www.openstreetmap.org/?mlat=38.7223&mlon=-9.1393#map=16/38.7223/-9.1393",
+            "https://maps.apple.com/?ll=38.7223,-9.1393&q=Lisboa",
+            "http://news.example/story?id=9",
+        ] {
+            assert!(super::is_web_link(url), "{url}");
         }
     }
 

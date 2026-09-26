@@ -41,6 +41,14 @@ describe("the Content-Security-Policy of every shell", () => {
     if (media !== "anything") expect(media).toContain("blob:");
   });
 
+  // covers: chat.location.card, chat.link-preview.render
+  it.each(Object.keys(policies) as (keyof typeof policies)[])("%s shows link-preview thumbnails (data:) and OpenStreetMap tiles on tap", (shell) => {
+    const images = allowed(policies[shell](), "img-src");
+    if (images === "anything") return;
+    expect(images).toContain("data:");
+    expect(images).toContain("https://tile.openstreetmap.org");
+  });
+
   it("names media-src on Desktop, rather than leaning on default-src", () => {
     expect(directives(policies.desktop()).get("media-src")).toEqual(["'self'", "blob:"]);
   });

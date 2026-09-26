@@ -628,7 +628,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       {/* Input */}
       <MessageInput draftId={sessionId}
         key={sessionId}
-        onSend={sendMessage}
+        // A paired chat has no mentions; a link preview made in the composer goes with the text.
+        onSend={(text, _mentions, extra) => sendMessage(text, extra)}
         // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
         disabled={isSending || (paired && (!!chatStop || engine.state?.settings.online === false))}
         disabledPlaceholder="Message…"
@@ -649,6 +650,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             : undefined
         }
         identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}
+        // Made on this device and sent with the text; the contact's app never contacts the site (WISP 401).
+        linkPreviews={paired && settings.linkPreviews}
         // The apps this contact and you share, chosen per chat: always reachable here, even before anything is shared.
         services={composerServices(t, platform, params.peerPubKeyB64, shownName, () => setShowServices(true))}
       />

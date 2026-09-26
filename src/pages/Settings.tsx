@@ -37,7 +37,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 export function Settings() {
   const nav = useAppNavigation();
   const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
-    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, randomizeNickname } =
+    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
   const { lock } = useLockScreen();
@@ -299,6 +299,9 @@ export function Settings() {
       <Section title={t("settings.security")}>
         <Row label={t("settings.lockScreen")} hint={t("settings.lockScreenDescription")}>
           <Switch label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
+        </Row>
+        <Row label="Link previews" hint="When you send a link, Ghostly reads the page's title and picture on this device and sends them with the message, so your contact's app never contacts the site. Off: links go as plain text.">
+          <Switch label="Link previews" checked={settings.linkPreviews} onChange={(on) => updateLinkPreviews(on)} />
         </Row>
         {hasPassword && (
           <Row label={t("settings.timeout")}>

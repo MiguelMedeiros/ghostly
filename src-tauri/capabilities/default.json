@@ -40,6 +40,8 @@
     "allow-open-pubky-passport",
     "allow-pubky-session-fetch",
     "allow-pubky-session-close",
+    "allow-link-preview-fetch",
+    "allow-open-web-link",
     "allow-share-text",
     "allow-read-clipboard-text",
     "allow-oidc-loopback-start",

@@ -291,6 +291,12 @@
           "markdownDescription": "Enables the get_public_key command without any pre-configured scope."
         },
         {
+          "description": "Enables the link_preview_fetch command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-link-preview-fetch",
+          "markdownDescription": "Enables the link_preview_fetch command without any pre-configured scope."
+        },
+        {
           "description": "Enables the lnd_request command without any pre-configured scope.",
           "type": "string",
           "const": "allow-lnd-request",
@@ -355,6 +361,12 @@
           "type": "string",
           "const": "allow-open-service-window",
           "markdownDescription": "Enables the open_service_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_web_link command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-web-link",
+          "markdownDescription": "Enables the open_web_link command without any pre-configured scope."
         },
         {
           "description": "Enables the paired_hyperdht_address command without any pre-configured scope.",
@@ -603,6 +615,12 @@
           "markdownDescription": "Denies the get_public_key command without any pre-configured scope."
         },
         {
+          "description": "Denies the link_preview_fetch command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-link-preview-fetch",
+          "markdownDescription": "Denies the link_preview_fetch command without any pre-configured scope."
+        },
+        {
           "description": "Denies the lnd_request command without any pre-configured scope.",
           "type": "string",
           "const": "deny-lnd-request",
@@ -667,6 +685,12 @@
           "type": "string",
           "const": "deny-open-service-window",
           "markdownDescription": "Denies the open_service_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_web_link command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-web-link",
+          "markdownDescription": "Denies the open_web_link command without any pre-configured scope."
         },
         {
           "description": "Denies the paired_hyperdht_address command without any pre-configured scope.",

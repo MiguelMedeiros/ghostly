@@ -49,6 +49,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     nick: message.nick,
     file: message.file,
     paymentId: message.paymentId,
+    ...(message.preview && { preview: message.preview }),
     meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,
