@@ -67,6 +67,8 @@ function forget(bundleId: string): void {
   for (const path of libraryPaths(bundleId)) rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
+const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
 /** A copy of the app with a bundle id of its own, ad-hoc signed again (its Info.plist changed). */
 function copyApp(source: string, name: string): { app: string; bundleId: string; remove: () => void } {
   const dir = mkdtempSync(join(tmpdir(), `ghostly-mac-${name}-`));
@@ -75,7 +77,13 @@ function copyApp(source: string, name: string): { app: string; bundleId: string;
   execFileSync("ditto", [source, app]);
   execFileSync("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleIdentifier ${bundleId}`, join(app, "Contents", "Info.plist")]);
   execFileSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "ignore" });
-  return { app, bundleId, remove: () => rmSync(dir, { recursive: true, force: true }) };
+  const remove = () => {
+    // The app registers itself with Launch Services to post notifications (src-tauri/src/notifications.rs):
+    // forgotten with the copy, so no record points at a folder that is gone.
+    try { execFileSync(LSREGISTER, ["-u", app], { stdio: "ignore" }); } catch { /* never registered */ }
+    rmSync(dir, { recursive: true, force: true });
+  };
+  return { app, bundleId, remove };
 }
 
 /** Wraps a function body (`arguments[0]`… are `args`) so the page answers with JSON, or with what it threw. */
@@ -232,6 +240,8 @@ export interface MacDesktopOptions {
 export interface MacDesktop {
   app: MacDriver;
   bundleId: string;
+  /** Where the copy is (a temporary folder). */
+  bundle: string;
   /** What the app printed, for the report when something fails. */
   log: string[];
   /** Quits the app. `keep` leaves its data, for opening the same copy again with `open`. */
@@ -288,5 +298,5 @@ export async function openMacDesktop(options: MacDesktopOptions): Promise<MacDes
     await cleanup();
     throw error;
   }
-  return { app, bundleId: copy.bundleId, log, stop: cleanup };
+  return { app, bundleId: copy.bundleId, bundle: copy.app, log, stop: cleanup };
 }

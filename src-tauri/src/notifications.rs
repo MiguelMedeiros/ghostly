@@ -2,8 +2,9 @@
 // permission API unconditionally returns Granted. No notification contains chat data.
 
 /// Where a click on a notification goes: the main window hears `notification-open` with the notification's id,
-/// and finds the chat it was about (it never leaves the page).
-pub const OPEN_EVENT: &str = "notification-open";
+/// and finds the chat it was about (it never leaves the page). Elsewhere the plugin reports no clicks.
+#[cfg(target_os = "macos")]
+const OPEN_EVENT: &str = "notification-open";
 
 /// Set up at launch: macOS tells us about clicks on our notifications.
 pub fn install(app: &tauri::AppHandle) {
@@ -14,7 +15,7 @@ pub fn install(app: &tauri::AppHandle) {
 }
 
 /// Brings the main window forward and names the notification clicked.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg(target_os = "macos")]
 fn opened(app: &tauri::AppHandle, id: String) {
     use tauri::{Emitter, Manager};
     if let Some(window) = app.get_webview_window("main") {
@@ -36,12 +37,19 @@ pub fn open_notification_settings() -> Result<(), String> {
     crate::commands::launch(&url)
 }
 
+#[cfg(target_os = "macos")]
 fn settings_url() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    return Some(mac::settings_url());
-    #[cfg(target_os = "windows")]
-    return Some("ms-settings:notifications".into());
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Some(mac::settings_url())
+}
+
+#[cfg(target_os = "windows")]
+fn settings_url() -> Option<String> {
+    Some("ms-settings:notifications".into())
+}
+
+/// Linux desktops keep notification settings in no one place.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn settings_url() -> Option<String> {
     None
 }
 
@@ -123,9 +131,13 @@ mod mac {
     /// `x-apple.systempreferences:` opens System Settings on its Notifications pane, at this app when the
     /// system knows the id.
     pub fn settings_url() -> String {
-        let mut url = "x-apple.systempreferences:com.apple.Notifications-Settings.extension".to_string();
+        let mut url =
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension".to_string();
         if let Some((_, id)) = bundle() {
-            if id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-') {
+            if id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-')
+            {
                 url.push_str("?id=");
                 url.push_str(&id);
             }
@@ -257,14 +269,15 @@ mod mac {
 
 #[cfg(test)]
 mod settings_tests {
+    // covers: desktop.notifications
     /// macOS opens its Notifications pane, Windows its notification settings; Linux has no one place.
     #[test]
     fn names_the_system_notification_settings() {
         let url = super::settings_url();
         #[cfg(target_os = "macos")]
-        assert!(url.unwrap().starts_with(
-            "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
-        ));
+        assert!(url
+            .unwrap()
+            .starts_with("x-apple.systempreferences:com.apple.Notifications-Settings.extension"));
         #[cfg(target_os = "windows")]
         assert_eq!(url.as_deref(), Some("ms-settings:notifications"));
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]

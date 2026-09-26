@@ -3,7 +3,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
-import { notificationPermission, requestNotifications, type NoticePermission } from "../lib/notifications";
+import { noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
 import { DomainProofSettings } from "../components/DomainProofSettings";
@@ -192,6 +192,7 @@ export function Settings() {
   const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
   const lockOn = lockEnabled && hasPassword;
   const systemOn = settings.notifications.systemEnabled && noticePermission === "granted";
+  const systemSettings = noticeSettings();
   const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); };
   const deleteChats = () => {
     deleteAllSessions();
@@ -310,8 +311,12 @@ export function Settings() {
             </Row>
           );
         })}
-        <Row label={t("settings.systemNotifications")}
-          hint={<span role="status">{noticePermission === "denied" ? t("settings.noticesDenied") : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : t("settings.noticesRunning")}</span>}>
+        <Row label={t("settings.systemNotifications")} testId="settings-system-notifications-row"
+          hint={<span role="status">{noticePermission === "denied" ? (systemSettings === "macos" ? t("settings.noticesDeniedMac") : systemSettings === "windows" ? t("settings.noticesDeniedWindows") : t("settings.noticesDenied"))
+            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : t("settings.noticesRunning")}</span>}>
+          {noticePermission === "denied" && systemSettings && (
+            <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
+          )}
           <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
         </Row>
       </Section>
