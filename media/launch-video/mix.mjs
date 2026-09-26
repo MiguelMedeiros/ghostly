@@ -60,10 +60,10 @@ function hit(file, place, db, filters = []) {
 
 // Bars 1-7: the intro's hook, silent on the last beat before the drop.
 piece(music("intro"), intro, 0, M.gap, 0, [], 0.03);
-// Bars 8-19: the drop at full energy; 20-21 the breakdown (a low pass); 22 opening up; 23 its groove again, silent on
+// Bars 8-20: the drop at full energy; 21 the breakdown (a low pass); 22 opening up; 23 its groove again, silent on
 // the last beat before the final hit.
-piece(music("drop"), drop, 0, M.servers - M.drop, M.drop);
-piece(music("drop"), drop, (M.servers - M.drop) / BEAT, M.safe - M.servers, M.servers, ["lowpass=f=380:p=2", "volume=-2dB"]);
+piece(music("drop"), drop, 0, M.seed - M.drop, M.drop);
+piece(music("drop"), drop, (M.seed - M.drop) / BEAT, M.safe - M.seed, M.seed, ["lowpass=f=380:p=2", "volume=-2dB"]);
 piece(music("drop"), drop, (M.safe - M.drop) / BEAT, M.words[0] - M.safe, M.safe, ["lowpass=f=1400:p=2", "volume=-1dB"]);
 piece(music("drop"), drop, 13 * 4, M.gap2 - M.words[0], M.words[0], [], 0.03);
 // Bar 24: the drop's first bar again as the last hit, ringing out.
@@ -74,7 +74,7 @@ hit(music("riser"), M.drop - riserStop, -4);
 hit(music("riser"), M.end - riserStop, -4);
 hit(music("impact"), M.drop - attack(music("impact")), -9);
 hit(music("impact"), M.end - attack(music("impact")), -8);
-hit(music("downlift"), M.servers - attack(music("downlift")), -8);
+hit(music("downlift"), M.seed - attack(music("downlift")), -8);
 const scoreParts = chains.length;
 
 // The app's cues, each placed so its attack lands on its moment. `CUE_DB` sets the cues against the score.

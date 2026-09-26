@@ -50,6 +50,9 @@ serves the page; `http://localhost:5391/?t=13.2&format=9x16` shows one frame.
 
 ## Changing it
 
+- Pacing: one idea per bar, never two new words on the same beat, and nothing pulses or shakes with the kick
+  (Miguel's first review: too fast to follow, the beat bumps felt cheap). Arrivals ease out from the beat, so
+  what you see starts where you hear it.
 - A moment: move it in `M` (bar and beat) and the motion and its cue move together.
 - A cue's level: its `db` in `CUES`; all cues against the score: `mix.mjs --cues-db`.
 - The score: edit a prompt in `music.mjs` and run it again (only the changed part is billed). Then run
