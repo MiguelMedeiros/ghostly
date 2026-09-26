@@ -6,6 +6,8 @@ import { AttentionFeedback } from "../../components/AttentionFeedback";
 import { ConfirmRealMoney } from "../../components/ConfirmRealMoney";
 import { RichText } from "../../components/rich/RichText";
 import { useCardFlip } from "../../components/deck/useCardFlip";
+import { Deck } from "../../components/deck/Deck";
+import { useState } from "react";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { groupChat, setChatMute } from "../../lib/chatMute";
@@ -218,6 +220,36 @@ describe("cues the pages play", () => {
     setCues({ interface: true });
     await user.click(await screen.findByRole("button", { name: "back" }));
     expect(played()).toEqual(["flip"]);
+  });
+});
+
+describe("the deck's slide", () => {
+  function Cards() {
+    const [selected, setSelected] = useState("a");
+    return <>
+      <button type="button" onClick={() => setSelected("c")}>From outside</button>
+      <Deck cards={[{ id: "a" }, { id: "b" }, { id: "c" }]} selected={selected} onSelect={setSelected} kind="tabs" label="Cards" name="cue-deck"
+        panel={{ id: "cue-panel", tabId: id => `cue-tab-${id}` }} testId={card => `cue-${card.id}`} face={card => <span data-deck="face">{card.id}</span>} mark={() => null} tone={() => ""} className="cue-deck" />
+    </>;
+  }
+
+  it("plays as the person moves to another card (Interface on), not for a card chosen from outside", async () => {
+    setCues({ interface: true });
+    const { user } = renderApp(<><AttentionFeedback /><Cards /></>);
+    await user.click(screen.getByTestId("cue-a"));
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() => expect(played()).toEqual(["slide"]));
+    await user.click(screen.getByRole("button", { name: "From outside" }));
+    expect(screen.getByTestId("cue-c")).toHaveAttribute("aria-selected", "true");
+    expect(played()).toEqual(["slide"]);
+  });
+
+  it("is silent while Interface sounds are off, as they are by default", async () => {
+    const { user } = renderApp(<><AttentionFeedback /><Cards /></>);
+    await user.click(screen.getByTestId("cue-a"));
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByTestId("cue-b")).toHaveAttribute("aria-selected", "true");
+    expect(played()).toEqual([]);
   });
 });
 

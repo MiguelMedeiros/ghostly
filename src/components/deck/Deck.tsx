@@ -1,7 +1,6 @@
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent,type PointerEvent,type ReactNode} from 'react';
 import {stackLayout,stackStrips,stepCard,stripAt} from './stack';
 import {playSwitch,switchDirection} from './motion';
-import {playCue} from '../../lib/cues';
 import './deck.css';
 
 /**
@@ -81,6 +80,13 @@ export interface DeckProps<C extends DeckCard> {
  compact?:boolean;
 }
 
+/**
+ * What plays as the person moves to another card (the app's Interface sounds, src/lib/cues.ts): set by the app, so the
+ * deck imports nothing of it (the website's copy of the deck has no sounds).
+ */
+let switchSound:(()=>void)|undefined;
+export function setDeckSwitchSound(play:(()=>void)|undefined){switchSound=play;}
+
 export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,checked,cardLabel,panel,label,testId,face,mark,tone,blocked,size,name,className,compact}:DeckProps<C>) {
  const part=(p:string)=>`deck-${p} ${className}-${p}`;
  const active=Math.max(0,cards.findIndex(card=>card.id===selected));
@@ -106,7 +112,7 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  const own=useRef(chosen);
  useLayoutEffect(()=>{
   // The person moved to another card: a quiet slide (Interface sounds), with or without the motion.
-  if(shown.n&&own.current===shown.id)playCue('slide');
+  if(shown.n&&own.current===shown.id)switchSound?.();
   if(!shown.n||reducedMotion())return;
   const ids=cards.map(card=>card.id),to=ids.indexOf(shown.id!),from=shown.from?ids.indexOf(shown.from):-1;
   playSwitch({glow:glow.current,incoming:tabs.current[to],outgoing:from<0?null:tabs.current[from],dir:switchDirection(from,to)});

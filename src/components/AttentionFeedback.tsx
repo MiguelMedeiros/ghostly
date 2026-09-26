@@ -6,6 +6,7 @@ import {showPrivateNotification} from "../lib/notifications";
 import {loadSettings} from "../lib/settings";
 import {attentionOutcome,chatOfLink,mutedFor} from "../lib/chatMute";
 import {eventSound,playCue} from "../lib/cues";
+import {setDeckSwitchSound} from "./deck/Deck";
 import {useI18n} from "../contexts/I18nContext";
 
 const seen=new Set<string>();
@@ -13,6 +14,7 @@ const seen=new Set<string>();
 export function AttentionFeedback(){
   const {t}=useI18n();
   useEffect(()=>installAudioGestures(),[]);
+  useEffect(()=>{setDeckSwitchSound(()=>playCue("slide"));return ()=>setDeckSwitchSound(undefined);},[]);
   useEffect(()=>engine.onAttention((event:AttentionEvent)=>{
     if(Date.now()-event.at>5000 || seen.has(event.id)) return;
     seen.add(event.id);
