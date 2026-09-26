@@ -77,3 +77,11 @@ export function playSwitch({ glow, incoming, outgoing, dir }: { glow: HTMLElemen
   // The glow takes the new colour by its own transition; this is the breath it takes as it does.
   glow?.animate([{ opacity: 0 }, { opacity: 0.1, offset: 0.3, easing: 'ease-out' }, { opacity: 0 }], { duration: TIMING.glow, ...ADD });
 }
+
+/**
+ * What plays as the person moves to another card (the app's Interface sounds, src/lib/cues.ts): set by the app, so the
+ * deck imports nothing of it (the website's copy of the deck has no sounds).
+ */
+let switchSound: (() => void) | undefined;
+export function setDeckSwitchSound(play: (() => void) | undefined): void { switchSound = play; }
+export const deckSwitchSound = (): void => switchSound?.();

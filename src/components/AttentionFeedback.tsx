@@ -6,7 +6,7 @@ import {showPrivateNotification} from "../lib/notifications";
 import {loadSettings} from "../lib/settings";
 import {attentionOutcome,chatOfLink,mutedFor} from "../lib/chatMute";
 import {eventSound,playCue} from "../lib/cues";
-import {setDeckSwitchSound} from "./deck/Deck";
+import {setDeckSwitchSound} from "./deck/motion";
 import {useI18n} from "../contexts/I18nContext";
 
 const seen=new Set<string>();
