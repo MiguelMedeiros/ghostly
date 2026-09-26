@@ -88,7 +88,8 @@ test('WDK local token request, approval and confirmed receipt across two peers',
  const direct=bob.page.getByTestId('payment-composer').getByTestId('payment-review');
  await expect(direct).toContainText('0.5 TEST-USDT',{timeout:60000});
  await direct.getByRole('button',{name:'Approve payment'}).click();
- await expect(direct.getByTestId('review-status')).toHaveText('confirmed',{timeout:60000});
+ // Gone out: the sheet closes, back to the chat.
+ await expect(bob.page.getByTestId('payment-composer')).toHaveCount(0,{timeout:60000});
  await openWallet(alice,'usdt-testnet');
  await expect(panel(alice).getByTestId('usdt-balance')).toHaveText('9.25 TEST-USDT',{timeout:30000});
 });

@@ -235,10 +235,14 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
   await expect(direct).toContainText("bitcoin · regtest", { timeout: 60_000 });
   await direct.getByRole("button", { name: "Approve payment" }).click();
-  await expect(direct.getByTestId("review-status")).toHaveText(/submitted|settled/, { timeout: 60_000 });
-  await direct.getByText("Payment details").click();
-  const chatSend = (await direct.locator("dt:text-is('Transaction') + dd").innerText()).trim();
-  await bob.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+  // Gone out: the sheet closes, back to the chat. The transaction is in Bob's wallet history, going out.
+  await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 60_000 });
+  await openWallet(bob, "bitcoin-testnet");
+  await panel(bob).getByTestId("wallet-history").click();
+  const out = panel(bob).getByTestId("bitcoin-tx").filter({ hasText: "−" });
+  await expect.poll(async () => { await panel(bob).getByRole("button", { name: "Refresh now" }).click(); return out.count(); }, { timeout: 60_000, intervals: [3_000] }).toBe(1);
+  const chatSend = (await out.locator("span").first().innerText()).trim();
+  await openChat(bob);
   const alicesRequest = chat(alice).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last();
   // Not paid before it confirms, whatever Bob's app says.
   await expect(alicesRequest.getByTestId("payment-state")).toHaveText("Waiting for payment");

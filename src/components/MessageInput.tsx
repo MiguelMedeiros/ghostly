@@ -389,6 +389,8 @@ export function MessageInput({
             payUnavailable={paymentsUnavailable}
             onSaveMethods={payments.onSaveMethods}
             onClose={() => setShowPayment(false)}
+            // Sent or requested: back to the chat, where its bubble shows how it goes, and to writing.
+            onDone={() => { setShowPayment(false); textareaRef.current?.focus({ preventScroll: true }); }}
           />
         )}
 

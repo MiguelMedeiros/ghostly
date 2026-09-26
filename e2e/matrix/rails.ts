@@ -91,19 +91,12 @@ async function sendInChat(from: Actor, to: Actor, p: ChatPayment, confirm?: () =
   await from.page.getByTestId("payment-send").click();
   const composer = from.page.getByTestId("payment-composer");
   await approve(composer);
-  const status = composer.getByTestId("payment-review").getByTestId("review-status");
-  await expect(status).not.toHaveText("pending", { timeout: 90_000 });
+  // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
+  await expect(composer).toHaveCount(0, { timeout: 90_000 });
   // The payee's app made the request this was paid against, with the note: it settles from its own wallet
   // (a USDT one once the transfer is confirmed, which is also when the payer's next payment may go).
   await openChat(to);
   await settles(bubble(to, p.note), confirm);
-  // What the payer's review says once it is paid. Soft: a composer that forgets the payment it just made is
-  // worth reporting, and the rest of the story is still worth running.
-  await expect.soft(status, "the payer's review shows the payment done").toHaveText(confirm ? /submitted|settled/ : /settled|confirmed/, { timeout: 60_000 });
-  const close = composer.getByRole("button", { name: either("Close") });
-  if (await close.isVisible()) await close.click();
-  else await from.page.keyboard.press("Escape");
-  await expect(composer).toHaveCount(0);
 }
 
 /** A request: `payee` asks, `payer` pays it from the bubble after reviewing it. */

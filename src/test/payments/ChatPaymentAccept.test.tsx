@@ -50,6 +50,8 @@ function open({ link, wallet = everyWallet(), save }: Open = {}) {
 
 const composer = () => screen.getByTestId("payment-composer");
 const mode = (m: "pay" | "accept") => screen.getByTestId(`payment-mode-${m}`);
+/** The sheet's Mainnet | Testnet tab: each deck shows that network's cards only. */
+const tab = (n: "mainnet" | "testnet") => screen.getByTestId(`payment-tab-${n}`);
 /** An Accept card by its type and network: `accept("cashu-mainnet")`. */
 const accept = (id: string) => screen.getByTestId(`payment-accept-${id}`);
 const save = () => screen.getByTestId("payment-accept-save");
@@ -69,12 +71,17 @@ describe("Pay and Accept", () => {
 
   it("shows on Pay only the cards this chat has on; Accept keeps every card, the one off unticked", async () => {
     const { user } = open({ link: { paymentMethods: { ...ALL_METHODS_ON, bark: false } } });
+    await user.click(tab("testnet"));
     expect(screen.queryByTestId("payment-card-bark-testnet")).not.toBeInTheDocument();
     expect(screen.getByTestId("payment-card-spark-testnet")).toBeInTheDocument();
+    expect(screen.getByTestId("payment-tab-testnet-count")).toHaveTextContent("3");
     await user.click(mode("accept"));
+    // The tab stays: Accept shows the same network's cards, every one of them.
+    expect(tab("testnet")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("payment-tab-testnet-count")).toHaveTextContent("4");
     expect(screen.getByRole("group", { name: "Ways of paying this chat accepts from Alice" })).toBeInTheDocument();
-    // One card per wallet the profile has.
-    expect(screen.getAllByRole("switch")).toHaveLength(7);
+    // One card per wallet the profile has on this network.
+    expect(screen.getAllByRole("switch")).toHaveLength(4);
     expect(accept("bark-testnet")).toHaveAttribute("aria-checked", "false");
     expect(within(accept("bark-testnet")).getByText("Off here")).toBeInTheDocument();
     expect(accept("spark-testnet")).toHaveAttribute("aria-checked", "true");
@@ -99,20 +106,22 @@ describe("choosing what this chat accepts", () => {
     const { user } = open({ link: { paymentMethods: { ...ALL_METHODS_ON, bark: false } } });
     await user.click(mode("accept"));
     expect(screen.getByRole("switch", { name: "Accept Cashu (Mainnet) from Alice" })).toBe(accept("cashu-mainnet"));
-    expect(screen.getByRole("switch", { name: "Accept Bark (Testnet) from Alice" })).toBe(accept("bark-testnet"));
     const face = (id: string) => accept(id).querySelector("[data-deck=face]")!;
     const drawn = (id: string) => screen.getByTestId(`payment-accept-switch-${id}`);
     // On: the card's face in its colours, its switch lit. Off: a grey face (wallet-deck.css), its switch off.
     expect(face("cashu-mainnet")).toHaveAttribute("data-checked", "true");
     expect(drawn("cashu-mainnet")).toHaveAttribute("data-on", "true");
     expect(drawn("cashu-mainnet")).toHaveClass("wallet-deck-card-switch");
-    expect(face("bark-testnet")).toHaveAttribute("data-checked", "false");
-    expect(drawn("bark-testnet")).toHaveAttribute("data-on", "false");
     // The switch takes the chip's place; the check the marks once wore is gone, the network tags stay.
     expect(accept("cashu-mainnet").querySelector(".wallet-deck-card-chip")).toBeNull();
     expect(document.querySelector(".wallet-deck-card-check")).toBeNull();
     expect(within(accept("cashu-mainnet")).getByTestId("wallet-card-network")).toHaveTextContent("Mainnet");
+    await user.click(tab("testnet"));
+    expect(screen.getByRole("switch", { name: "Accept Bark (Testnet) from Alice" })).toBe(accept("bark-testnet"));
+    expect(face("bark-testnet")).toHaveAttribute("data-checked", "false");
+    expect(drawn("bark-testnet")).toHaveAttribute("data-on", "false");
     expect(within(accept("bark-testnet")).getByTestId("wallet-card-network")).toHaveTextContent("Testnet");
+    await user.click(tab("mainnet"));
 
     // A click turns one off, and it goes grey; again, and it is back in its colours. Nothing turns over.
     await user.click(accept("cashu-mainnet"));
@@ -145,7 +154,10 @@ describe("choosing what this chat accepts", () => {
     expect(save()).toBeDisabled();
     expect(status()).toHaveTextContent("A way works only when both of you have it on.");
     await user.click(accept("cashu-mainnet"));
+    // Another tab keeps what was switched on this one: Save saves both networks'.
+    await user.click(tab("testnet"));
     await user.click(accept("usdt-testnet"));
+    await user.click(tab("mainnet"));
     expect(accept("cashu-mainnet")).toHaveAttribute("aria-checked", "false");
     expect(status()).toHaveTextContent("Not saved yet: Alice is told when you save.");
     expect(onSaveMethods).not.toHaveBeenCalled();
@@ -158,13 +170,15 @@ describe("choosing what this chat accepts", () => {
     // Pay shows what is left on.
     await user.click(mode("pay"));
     expect(screen.queryByTestId("payment-card-cashu-mainnet")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("payment-card-usdt-testnet")).not.toBeInTheDocument();
     expect(screen.getByTestId("payment-card-lightning-mainnet")).toHaveAttribute("aria-checked", "true");
+    await user.click(tab("testnet"));
+    expect(screen.queryByTestId("payment-card-usdt-testnet")).not.toBeInTheDocument();
   });
 
   it("never pays, asks or turns a card over", async () => {
     const { user, engine, onSend, onRequest, onClose } = open();
     await user.click(mode("accept"));
+    await user.click(tab("testnet"));
     await user.click(accept("arkade-testnet"));
     await user.keyboard(" ");
     await user.keyboard("{Enter}");
@@ -210,11 +224,12 @@ describe("choosing what this chat accepts", () => {
     const { user } = open({ link: { dataLink: "open", paymentMethods: { ...ALL_METHODS_ON, bark: false }, capabilities: { files: true, payments: true, methods: { ...ALL_METHODS_ON, bark: false, usdt: false } } } });
     await user.click(mode("accept"));
     expect(within(accept("cashu-mainnet")).getByText("Contact: accepts it")).toBeInTheDocument();
+    expect(hint()).toHaveTextContent("Cashu is on for both of you");
+    await user.click(tab("testnet"));
     expect(within(accept("usdt-testnet")).getByText("Contact: has it off")).toBeInTheDocument();
     // Off here, the contact's choice is not known: the card's own line stays.
     expect(within(accept("bark-testnet")).queryByText(/Contact:/)).not.toBeInTheDocument();
-    expect(hint()).toHaveTextContent("Cashu is on for both of you");
-    accept("cashu-mainnet").focus();
+    accept("arkade-testnet").focus();
     await user.keyboard("{End}");
     expect(accept("usdt-testnet")).toHaveFocus();
     // A test card is named by its network.
@@ -259,6 +274,7 @@ describe("one card per network", () => {
     const { user, onSaveMethods } = open({ wallet: both() });
     await user.click(mode("accept"));
     expect(accept("cashu-mainnet")).toHaveAttribute("aria-checked", "true");
+    await user.click(tab("testnet"));
     expect(accept("cashu-testnet")).toHaveAttribute("aria-checked", "true");
     await user.click(accept("cashu-testnet"));
     expect(hint()).toHaveTextContent("Testnet Cashu is off here");
@@ -269,15 +285,17 @@ describe("one card per network", () => {
     expect(networks.lightning).toEqual(["mainnet", "testnet"]);
     // Pay offers the Mainnet card alone.
     await user.click(mode("pay"));
-    expect(screen.getByTestId("payment-card-cashu-mainnet")).toBeInTheDocument();
     expect(screen.queryByTestId("payment-card-cashu-testnet")).not.toBeInTheDocument();
     expect(screen.getByTestId("payment-card-lightning-testnet")).toBeInTheDocument();
+    await user.click(tab("mainnet"));
+    expect(screen.getByTestId("payment-card-cashu-mainnet")).toBeInTheDocument();
   });
 
   it("turns a way off when every one of its cards is", async () => {
     const { user, onSaveMethods } = open({ wallet: both() });
     await user.click(mode("accept"));
     await user.click(accept("cashu-mainnet"));
+    await user.click(tab("testnet"));
     await user.click(accept("cashu-testnet"));
     await user.click(save());
     const [{ methods, networks }] = onSaveMethods.mock.calls[0];
@@ -289,8 +307,9 @@ describe("one card per network", () => {
     const { user } = open({ wallet: both(), link: { paymentNetworks: { cashu: ["testnet"] } } });
     await user.click(mode("accept"));
     expect(accept("cashu-mainnet")).toHaveAttribute("aria-checked", "false");
-    expect(accept("cashu-testnet")).toHaveAttribute("aria-checked", "true");
     expect(accept("lightning-mainnet")).toHaveAttribute("aria-checked", "true");
+    await user.click(tab("testnet"));
+    expect(accept("cashu-testnet")).toHaveAttribute("aria-checked", "true");
   });
 });
 
@@ -303,6 +322,7 @@ describe("one chat at a time", () => {
       reviewContext={reviewContext()} contact="Alice" onSaveMethods={({ methods, networks }) => servicesPlatform!.setChatPaymentMethods("peer", methods, networks)} />);
     engine.on("setChatPaymentMethods", () => undefined);
     await user.click(mode("accept"));
+    await user.click(tab("testnet"));
     await user.click(accept("arkade-testnet"));
     await user.click(save());
     await act(async () => {});
@@ -344,8 +364,9 @@ describe("the + menu of a chat that chooses its own ways", () => {
     await user.click(screen.getByTestId("composer-more"));
     await user.click(screen.getByTestId("payment-button"));
     expect(screen.getByTestId("payment-card-cashu-mainnet")).toHaveAttribute("title", refused);
-    expect(screen.getByTestId("payment-card-arkade-testnet")).toHaveAttribute("title", refused);
     expect(screen.getByTestId("payment-use")).toBeDisabled();
+    await user.click(tab("testnet"));
+    expect(screen.getByTestId("payment-card-arkade-testnet")).toHaveAttribute("title", refused);
     await user.click(mode("accept"));
     expect(save()).toBeInTheDocument();
   });

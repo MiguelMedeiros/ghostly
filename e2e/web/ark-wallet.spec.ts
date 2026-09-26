@@ -67,7 +67,8 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
   await expect(direct).toContainText("arkade · regtest", { timeout: 60000 });
   await direct.getByRole("button", { name: "Approve payment" }).click();
-  await expect(direct).toContainText("settled", { timeout: 60000 });
+  // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
+  await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 60000 });
   await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "400" }).filter({ hasText: "Sent you" }).getByTestId("payment-state")).toHaveText("Received", { timeout: 60000 });
   await openWallet(bob, "arkade-testnet");
   await expect(balance(bob)).toHaveText(/^600\s*test sats/, { timeout: 30000 });

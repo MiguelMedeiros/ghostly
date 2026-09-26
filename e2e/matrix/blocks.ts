@@ -495,7 +495,8 @@ async function cashuInChat({ a, b }: World): Promise<void> {
   await approve(a.page.getByTestId("payment-composer"));
   await openChat(b);
   await expect(bubble(b, "matrix send").getByTestId("payment-state")).toHaveText(either("Received"), { timeout: 90_000 });
-  await a.page.getByTestId("payment-composer").getByRole("button", { name: either("Close") }).click();
+  // The sheet closed once the payment went out.
+  await expect(a.page.getByTestId("payment-composer")).toHaveCount(0);
   // A request: B asks, A pays from the bubble.
   await chatMethods(b, ["lightning"]);
   await paymentCard(b, "cashu");

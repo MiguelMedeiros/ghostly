@@ -54,7 +54,8 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
     const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
     await review.getByRole("button", { name: "Approve payment" }).click();
     await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "Sent you" }).getByTestId("payment-state")).toHaveText("Received", { timeout: 60_000 });
-    await alice.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+    // The sheet closed once the payment went out.
+    await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
 
     await ecashOnly(bob);
     await composer(bob, "cashu", "10");
@@ -142,8 +143,8 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   await bob.page.getByTestId("payment-send").click();
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
   await direct.getByRole("button", { name: "Approve payment" }).click({ timeout: 60_000 });
-  await expect(direct.getByTestId("review-status")).toHaveText("settled", { timeout: 60_000 });
-  await bob.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+  // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
+  await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 60_000 });
 
   // A Request paid in the chat.
   await composer(bob, "arkade", "100");
@@ -223,8 +224,8 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
   await bob.page.getByTestId("payment-send").click();
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
   await direct.getByRole("button", { name: "Approve payment" }).click({ timeout: 60_000 });
-  await expect(direct.getByTestId("review-status")).toHaveText("settled", { timeout: 60_000 });
-  await bob.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+  // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
+  await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 60_000 });
   // Alice's app settles the request it made for that from her own wallet, not from Bob's word.
   await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
 
@@ -294,14 +295,16 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await bob.page.getByTestId("payment-send").click();
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
   await direct.getByRole("button", { name: "Approve payment" }).click({ timeout: 60_000 });
-  await expect(direct.getByTestId("review-status")).toHaveText("confirmed", { timeout: 60_000 });
-  await bob.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+  // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest. Bob's next USDT payment goes once this
+  // transfer is confirmed: Alice's request for it reads Paid.
+  await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 60_000 });
+  await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
 
   // A Request paid in the chat.
   await composer(alice, "usdt", "1");
   await alice.page.getByTestId("payment-request").click();
   // The chat Send above left the request Alice's app made for it; this is the new one, for 1.
-  const request = chat(bob).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
+  const request = chat(bob).getByTestId("payment-bubble").filter({ hasText: "Requests" }).filter({ hasText: /(?<![\d.])1\s*TEST-USDT/ });
   await request.getByTestId("payment-pay").click();
   await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });

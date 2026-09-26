@@ -108,8 +108,8 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
       const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
       await expect(direct).toContainText("sparkrt1", { timeout: 60_000 });
       await direct.getByRole("button", { name: "Approve payment" }).click();
-      await expect(direct.getByTestId("review-status")).toHaveText("settled", { timeout: 90_000 });
-      await bob.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+      // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
+      await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 90_000 });
       await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
 
       // A Request paid in the chat.

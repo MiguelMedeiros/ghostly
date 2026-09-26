@@ -1,6 +1,7 @@
-import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import "../components/wallet/wallet-networks.css";
+import { WALLET_NETWORKS as NETWORKS, isWalletNetwork as isNetwork } from "@ghostly/core";
+import { NetworkTabs } from "../components/wallet/NetworkTabs";
 import { WalletDeck, walletCardTestId } from "../components/WalletDeck";
 import { cardId, networkState, parseCardId, walletCards, type InstanceCard } from "../components/walletCardData";
 import { CashuWallet } from "../components/wallet/CashuWallet";
@@ -17,7 +18,7 @@ import { TestCoins } from "../components/wallet/TestCoins";
 import { NETWORK_NAME } from "../components/wallet/names";
 import { dealCard } from "../components/wallet/motion";
 import { Button } from "../components/wallet/ui";
-import { MONEY_LABEL, NetworkTag } from "../components/NetworkTag";
+import { NetworkTag } from "../components/NetworkTag";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Page, PageAction } from "../components/layout";
@@ -32,13 +33,10 @@ const remembered = (): string => {
 };
 /** The network tab shown last on this device: a view of the page, not a mode (payments never read it). */
 export const NETWORK_KEY = "ghostly-wallet-network";
-const isNetwork = (value: unknown): value is WalletNetwork => value === "mainnet" || value === "testnet";
 const rememberedNetwork = (): WalletNetwork | null => {
   try { const value = localStorage.getItem(NETWORK_KEY); if (isNetwork(value)) return value; } catch { /* storage unavailable */ }
   return parseCardId(remembered())?.network ?? null;
 };
-/** Real money first, then test money: each network's wallets are a deck of their own, never mixed. */
-const NETWORKS: readonly WalletNetwork[] = ["mainnet", "testnet"];
 /**
  * A wallet whose real money rests on a recovery phrase kept on this device: made with New, it opens on its backup rows
  * (Settings), asking for a copy of the phrase before money goes in. Real money with no copy is one lost device from gone.
@@ -87,7 +85,6 @@ export function Wallet() {
   // A wallet just made that asks for its backup first (`backupFirst`): its panel opens on the backup rows, focus there.
   const [backup, setBackup] = useState<string | null>(null);
   const page = useRef<HTMLDivElement>(null);
-  const tabs = useRef<Partial<Record<WalletNetwork, HTMLButtonElement | null>>>({});
   // The deck paints first and the chosen card's panel follows, in a render React can interrupt for frames: the two
   // together overrun a frame, and opening the wallet (or bringing up another card) would stutter.
   const panel = useDeferredValue<string | null>(selected?.id ?? null, null);
@@ -133,18 +130,6 @@ export function Wallet() {
     const next = shown.find((c) => c.id !== id);
     if (next) select(next.id, false);
   };
-  // A tablist moves with the arrows (and Home, End), choosing as it goes: two tabs, so either arrow is the other one.
-  const tabKeys = (e: KeyboardEvent) => {
-    const at = NETWORKS.indexOf(network);
-    const to = e.key === "ArrowRight" ? (at + 1) % NETWORKS.length : e.key === "ArrowLeft" ? (at - 1 + NETWORKS.length) % NETWORKS.length
-      : e.key === "Home" ? 0 : e.key === "End" ? NETWORKS.length - 1 : -1;
-    if (to < 0) return;
-    e.preventDefault();
-    setFocusPanel(false);
-    show(NETWORKS[to]);
-    tabs.current[NETWORKS[to]]?.focus();
-  };
-
   return (
     <Page title={t("tabs.wallet")} testId="wallet" trailing={wallet && state && (
       <PageAction label={t("sidebar.new")} title="Create a wallet" testId="wallet-add" onClick={() => setCreating(cards.length && !firstRun ? network : "testnet")} />
@@ -154,18 +139,8 @@ export function Wallet() {
         {!wallet || !state ? <p className="text-text-muted text-sm">The wallet is not available here.</p> : !cards.length || firstRun ? (
           <FirstWallet wallet={wallet} onNew={() => setCreating("testnet")} onStart={() => setFirstRun(true)} onMade={(id) => { setFirstRun(false); select(id); setDealt(id); }} />
         ) : <>
-          <div role="tablist" aria-label="Networks" className="wallet-networks" data-testid="wallet-networks" onKeyDown={tabKeys}>
-            {NETWORKS.map((n) => {
-              const count = cards.filter((c) => c.network === n).length, on = n === network;
-              return (
-                <button key={n} ref={(el) => { tabs.current[n] = el; }} type="button" role="tab" id={`wallet-network-tab-${n}`} data-testid={`wallet-network-${n}`} data-network={n}
-                  aria-label={`${MONEY_LABEL[n]}, ${NETWORK_NAME[n]}, ${count} ${count === 1 ? "wallet" : "wallets"}`} aria-selected={on} aria-controls="wallet-network-panel" tabIndex={on ? 0 : -1} className="wallet-network" onClick={() => { setFocusPanel(false); show(n); }}>
-                  <NetworkTag network={n} testId={`wallet-network-${n}-tag`} />
-                  <span className="wallet-network-name">{NETWORK_NAME[n]} <span aria-hidden="true">·</span> <span data-testid={`wallet-network-${n}-count`}>{count}</span></span>
-                </button>
-              );
-            })}
-          </div>
+          <NetworkTabs network={network} counts={{ mainnet: cards.filter((c) => c.network === "mainnet").length, testnet: cards.filter((c) => c.network === "testnet").length }}
+            onChange={(n) => { setFocusPanel(false); show(n); }} label="Networks" testId="wallet-networks" tabTestId="wallet-network" idPrefix="wallet-network-tab" controls="wallet-network-panel" />
           <div role="tabpanel" id="wallet-network-panel" aria-labelledby={`wallet-network-tab-${network}`} data-testid="wallet-network-panel" data-network={network} className="space-y-6">
             <div key={network} className="wallet-network-view space-y-3" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
               <p className="text-xs text-text-muted" data-testid="wallet-network-about">{ABOUT[network]}</p>

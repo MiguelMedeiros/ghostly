@@ -72,7 +72,10 @@ describe("GroupPaymentComposer: whom first", () => {
     engine.on("requestGroupPayment", () => ({ paymentId: "g1" }));
     await user.click(screen.getByTestId("group-pay-everyone"));
     expect(screen.getByTestId("payment-composer")).toHaveTextContent("with the group");
+    // A group's sheet has the network tabs too.
+    await user.click(screen.getByTestId("payment-tab-testnet"));
     expect(screen.getByTestId("payment-card-arkade-testnet")).toHaveAttribute("title", "Ark cannot be used here");
+    await user.click(screen.getByTestId("payment-tab-mainnet"));
     // Choosing a card turns it over.
     await user.click(screen.getByTestId("payment-card-lightning-mainnet"));
     await user.type(screen.getByTestId("payment-amount"), "10");
@@ -87,6 +90,7 @@ describe("GroupPaymentComposer: whom first", () => {
     const { user, engine } = composer({ wallet: everyWallet({ mints: [mint(REAL_MINT, 500), mint(TEST_MINT, 500)], balance: 500 }) });
     engine.on("requestGroupPayment", () => ({ paymentId: "g1" }));
     await user.click(screen.getByTestId("group-pay-everyone"));
+    await user.click(screen.getByTestId("payment-tab-testnet"));
     await user.click(screen.getByTestId("payment-card-cashu-testnet"));
     await user.type(screen.getByTestId("payment-amount"), "10");
     await user.click(screen.getByTestId("payment-request"));

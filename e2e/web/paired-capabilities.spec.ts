@@ -29,7 +29,8 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   for (const p of [alice, bob]) await expect(payment(p)).toHaveText(/Received/);
   await openWallet(bob, "cashu-testnet");
   await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^21\s*test sats/);
-  await alice.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+  // The sheet closed once the payment went out.
+  await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
   await openChat(bob);
   // Ecash only: the request is paid in ecash, reviewed.
   await chatPayments(bob.page, { lightning: false });
