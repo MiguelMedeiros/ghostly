@@ -72,7 +72,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
     await expect(dialog.getByTestId("chat-hold-storage")).toContainText("your S3 storage");
     await alice.page.keyboard.press("Escape");
   }).toPass({ timeout: 30_000 });
-  // Ecash only in Alice's requests: with Lightning on, the test mint would pay the request's own invoice by itself.
+  // Ecash only in Alice's requests: the request carries no Lightning invoice.
   await chatPayments(alice.page, { lightning: false });
 
   // Bob leaves. Alice sends text, a picture and a request: each is held, and the chat says how much waits.

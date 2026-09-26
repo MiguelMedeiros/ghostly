@@ -27,8 +27,8 @@ test("paired extension and web exchange verified files and local-mint sats", { t
     await p.page.getByTestId("mint-row").filter({ hasText: "127.0.0.1" }).getByRole("button", { name: "Make primary", exact: true }).click();
     if (p === ext) await openChat(p);
   }
-  await web.page.getByTestId("wallet-receive").click(); await web.page.getByTestId("wallet-receive-amount").fill("50"); await web.page.getByTestId("wallet-create-invoice").click();
-  await expect(web.page.getByTestId("wallet-paid")).toBeVisible();
+  await web.page.getByTestId("test-coins-get").click();
+  await expect(web.page.getByTestId("test-coins-result")).toHaveText("+10,000 test sats", { timeout: 60_000 });
   await openChat(web);
   await (await composerRow(web.page, "payment-button")).click(); await paymentCard(web.page, "cashu-testnet").click(); await web.page.getByTestId("payment-amount").fill("12"); await web.page.getByTestId("payment-send").click();
   // Every send is reviewed first: nothing leaves before the approval.
@@ -36,7 +36,7 @@ test("paired extension and web exchange verified files and local-mint sats", { t
   for (const p of [web, ext]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "12" }).getByTestId("payment-state")).toHaveText(/Received/);
   await web.page.keyboard.press("Escape");
   await expect(web.page.getByTestId("payment-composer")).toHaveCount(0);
-  // Ecash only: the fake mint pays a request's own Lightning invoice by itself and would race the payer.
+  // Ecash only: the request is paid in ecash, reviewed.
   await chatPayments(ext.page, { lightning: false });
   await (await composerRow(ext.page, "payment-button")).click(); await paymentCard(ext.page, "cashu-testnet").click(); await ext.page.getByTestId("payment-amount").fill("5"); await ext.page.getByTestId("payment-request").click();
   await web.page.getByTestId("payment-pay").click();

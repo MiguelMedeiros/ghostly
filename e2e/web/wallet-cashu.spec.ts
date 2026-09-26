@@ -1,4 +1,4 @@
-import { createWallet, expect, openWallet, test, useTestnet, walletCard, type Peer } from "../support/fixtures";
+import { createWallet, expect, getTestCoins, openWallet, test, useTestnet, walletCard, type Peer } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 
 /**
@@ -115,7 +115,7 @@ test("the Lightning card pays invoices and addresses, not tokens, and its settin
 test.describe("test sats", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
 
-  test("a Testnet and a Mainnet Cashu wallet side by side: each its own mints and balance, no switch, and Mainnet stays untouched", { tag: ["@feature:wallet.mode", "@feature:wallet.instances.networks", "@feature:wallet.cashu.test-sats", "@feature:wallet.cashu.receive-lightning"] }, async ({ peer }) => {
+  test("a Testnet and a Mainnet Cashu wallet side by side: each its own mints and balance, no switch, and Mainnet stays untouched", { tag: ["@feature:wallet.mode", "@feature:wallet.instances.networks", "@feature:wallet.cashu.test-sats", "@feature:wallet.test-coins", "@feature:wallet.cashu.receive-lightning"] }, async ({ peer }) => {
     const alice = await peer("cashu-testnet");
     // The Mainnet default mints are answered by the suite's own mint: no real mint is reached.
     await mockMainnetMints(alice.context);
@@ -143,12 +143,10 @@ test.describe("test sats", { tag: "@network" }, () => {
     await expect(page.getByTestId("mint-row").first()).toContainText("Primary");
     await expect(testnet).toContainText("0 test sats");
 
-    await page.getByTestId("wallet-receive").click();
-    await page.getByTestId("wallet-receive-amount").fill("21");
-    await page.getByTestId("wallet-create-invoice").click();
-    await expect(page.getByTestId("wallet-balance")).toHaveText(/^21\s*test sats$/);
+    await getTestCoins(alice);
+    await expect(page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats$/);
     await expect(page.getByTestId("wallet-test-balance"), "the whole balance is test sats; it is not said twice").toHaveCount(0);
-    await expect(testnet).toContainText("21 test sats");
+    await expect(testnet).toContainText("10,000 test sats");
     await expect(page.getByTestId("wallet-chip")).toHaveText("Wallets");
     await expect(page.getByTestId("wallet-chip")).toHaveAccessibleName("Wallets");
 
@@ -159,12 +157,13 @@ test.describe("test sats", { tag: "@network" }, () => {
     await expect.poll(async () => (await page.getByTestId("wallet-balance").innerText()).trim()).toMatch(/^0\s*sats/);
     await expect(page.getByTestId("wallet-test-balance")).toHaveCount(0);
     await expect(mainnet).not.toContainText("test sats");
+    await expect(page.getByTestId("test-coins"), "no test coins for real money").toHaveCount(0);
     await expect(page.getByTestId("wallet-new"), "opening another wallet is not sats arriving").toHaveCount(0);
 
     // Both are kept, each with its own balance.
     await page.reload();
     await openWallet(alice, "cashu-testnet");
-    await expect(page.getByTestId("wallet-balance")).toHaveText(/^21\s*test sats$/);
+    await expect(page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats$/);
     await expect(walletCard(page, "cashu-mainnet")).toBeVisible();
   });
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { chat, expect, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { chat, expect, getTestCoins, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
@@ -18,10 +18,8 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   const downloading = bob.page.waitForEvent("download"); await bubble.getByTestId("file-save").click();
   const received = readFileSync(await (await downloading).path());
   expect(createHash("sha256").update(received).digest("hex")).toBe(createHash("sha256").update(bytes).digest("hex"));
-  await openWallet(alice, "cashu-testnet");
-  await alice.page.getByTestId("wallet-receive").click(); await alice.page.getByTestId("wallet-receive-amount").fill("100");
-  await alice.page.getByTestId("wallet-create-invoice").click();
-  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^100\s*test sats/);
+  await getTestCoins(alice);
+  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats/);
   for (const p of [alice, bob]) await openChat(p);
   await (await composerRow(alice.page, "payment-button")).click(); await paymentCard(alice.page, "cashu-testnet").click(); await alice.page.getByTestId("payment-amount").fill("21");
   await alice.page.getByTestId("payment-send").click();
@@ -33,7 +31,7 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^21\s*test sats/);
   await alice.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
   await openChat(bob);
-  // Ecash only: the fake mint pays a request's own Lightning invoice by itself and would race Alice.
+  // Ecash only: the request is paid in ecash, reviewed.
   await chatPayments(bob.page, { lightning: false });
   await (await composerRow(bob.page, "payment-button")).click(); await paymentCard(bob.page, "cashu-testnet").click(); await bob.page.getByTestId("payment-amount").fill("10"); await bob.page.getByTestId("payment-request").click();
   await alice.page.getByTestId("payment-pay").click();

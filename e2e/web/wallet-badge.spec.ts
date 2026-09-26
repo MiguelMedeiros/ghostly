@@ -1,4 +1,4 @@
-import { chat, connect, expect, link, openChat, openWallet, test, useTestnet } from "../support/fixtures";
+import { chat, connect, expect, getTestCoins, link, openChat, test, useTestnet } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
 
@@ -15,11 +15,8 @@ test.describe("wallet badge", { tag: "@network" }, () => {
     for (const p of [alice, bob]) await openChat(p);
     await expect(bob.page.getByTestId("wallet-new")).toHaveCount(0);
 
-    await openWallet(alice, "cashu-testnet");
-    await alice.page.getByTestId("wallet-receive").click();
-    await alice.page.getByTestId("wallet-receive-amount").fill("50");
-    await alice.page.getByTestId("wallet-create-invoice").click();
-    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*test sats/);
+    await getTestCoins(alice);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats/);
     // Her own wallet was open when they arrived: nothing to point out.
     await openChat(alice);
     await expect(alice.page.getByTestId("wallet-new")).toHaveCount(0);

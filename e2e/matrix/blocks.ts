@@ -476,17 +476,16 @@ async function localMint(actor: Actor): Promise<void> {
   await actor.page.getByTestId("mint-row").filter({ hasText: new URL(url).host }).getByRole("button", { name: either("Make primary") }).click();
 }
 
-async function fundOverLightning(actor: Actor, sats: number): Promise<void> {
+/** Test sats from Get test coins: the wallet's first test mint (the local one, primary) pays its own faucet invoice. */
+async function getTestCoins(actor: Actor): Promise<void> {
   await wallet(actor, "cashu");
-  await actor.page.getByTestId("wallet-receive").click();
-  await actor.page.getByTestId("wallet-receive-amount").fill(String(sats));
-  await actor.page.getByTestId("wallet-create-invoice").click();
-  await expect(actor.page.getByTestId("wallet-paid")).toBeVisible({ timeout: 60_000 });
+  await actor.page.getByTestId("test-coins-get").click();
+  await expect(actor.page.getByTestId("test-coins-result")).toBeVisible({ timeout: 60_000 });
 }
 
 async function cashuInChat({ a, b }: World): Promise<void> {
   for (const p of [a, b]) await localMint(p);
-  await fundOverLightning(a, 100);
+  await getTestCoins(a);
   // A direct send: reviewed, approved, received.
   await openChat(a);
   await paymentCard(a, "cashu");
@@ -513,7 +512,7 @@ async function cashuInChat({ a, b }: World): Promise<void> {
 
 async function lightningThroughMint({ a, b }: World): Promise<void> {
   for (const p of [a, b]) await localMint(p);
-  await fundOverLightning(a, 100);
+  await getTestCoins(a);
   // Out: an invoice the mint does not own, so the melt is real.
   await wallet(a, "lightning");
   await a.page.getByTestId("wallet-send").click();
@@ -521,12 +520,15 @@ async function lightningThroughMint({ a, b }: World): Promise<void> {
   await a.page.getByRole("button", { name: "Pay 25 sats" }).click();
   await a.page.getByRole("button", { name: either("Pay") }).click();
   await expect(a.page.getByTestId("wallet-notice")).toHaveText(either("Paid."), { timeout: 60_000 });
-  // In, on B's side: an invoice of B's own wallet, which the test mint settles.
+  // In, on B's side: an invoice of B's own wallet. The test mint reads it paid by itself, which is nobody paying:
+  // Receive only makes the invoice, and nothing arrives.
   await wallet(b, "lightning");
   await b.page.getByTestId("wallet-receive").click();
   await b.page.getByTestId("wallet-receive-amount").fill("25");
   await b.page.getByTestId("wallet-create-invoice").click();
-  await expect(b.page.getByTestId("wallet-paid")).toBeVisible({ timeout: 60_000 });
+  await expect(b.page.getByTestId("wallet-invoice")).toBeVisible({ timeout: 60_000 });
+  await b.page.waitForTimeout(10_000);
+  await expect(b.page.getByTestId("wallet-paid")).toHaveCount(0);
   // In a chat, Lightning only pays a request: a direct send is refused with the reason.
   await openChat(a);
   await paymentCard(a, "lightning");

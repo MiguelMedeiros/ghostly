@@ -261,6 +261,20 @@ export async function useTestnet(peer: Peer, kinds: WalletKind[] = ["cashu"]): P
   for (const kind of kinds) await createWallet(peer, kind, "testnet");
 }
 
+/** What one "Get test coins" press brings from the test mint (packages/browser engine TEST_COINS_SATS). */
+export const TEST_COINS = 10_000;
+
+/**
+ * Test sats into a Testnet Cashu wallet, the way a person gets them: "Get test coins" on its details, which asks the
+ * test mint (the suite's own mint answers for the public one and pays its own invoice). Receive never fills a wallet
+ * by itself any more. Leaves the Cashu card open.
+ */
+export async function getTestCoins(peer: Peer): Promise<void> {
+  await openWallet(peer, "cashu-testnet");
+  await peer.page.getByTestId("test-coins-get").click();
+  await expect(peer.page.getByTestId("test-coins-result")).toHaveText(`+${TEST_COINS.toLocaleString("en-US")} test sats`, { timeout: 60_000 });
+}
+
 /** The Profile page, from the account bar: its Profile place opens the account switcher, whose first entry is the page. */
 export async function openProfilePage(page: Page): Promise<void> {
   await page.getByTestId("account-profile").click();

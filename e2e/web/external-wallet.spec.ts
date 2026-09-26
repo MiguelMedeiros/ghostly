@@ -1,4 +1,4 @@
-import { chat, connect, expect, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
+import { chat, connect, expect, getTestCoins, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
 import { paymentCard } from "../support/payments";
 import { LocalLnurlServer } from "../support/lnurl";
 import { endpoints } from "../infra/env.mjs";
@@ -7,19 +7,12 @@ import { composerRow } from "../support/composer";
 /**
  * Paying with a wallet that is not Ghostly, and paying a Lightning address. Sats move through the test
  * mint (`E2E_MINT_URL` answers for the public one when set, see support/mint.ts): worthless, and its
- * invoices pay themselves, so a request settles through the payee's own source with nobody pressing Pay
- * in the chat. The Lightning address is served by a server of this test's own (support/lnurl.ts).
+ * invoices read paid by themselves, so the payee's wallet waits for the payer's word ("I paid") before a
+ * request settles through its own source, with nobody pressing Pay in the chat. The Lightning address is
+ * served by a server of this test's own (support/lnurl.ts).
  */
 test.describe("another wallet", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
-
-  async function receive(peer: Peer, sats: number): Promise<string> {
-    await openWallet(peer, "cashu-testnet");
-    await peer.page.getByTestId("wallet-receive").click();
-    await peer.page.getByTestId("wallet-receive-amount").fill(String(sats));
-    await peer.page.getByTestId("wallet-create-invoice").click();
-    return (await peer.page.getByTestId("wallet-invoice").textContent())!.trim();
-  }
 
   test("a request is paid with another wallet, and the bubble turns Paid by itself on both sides", { tag: ["@feature:payments.external", "@feature:wallet.lightning.cashu-mint.receive"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
@@ -28,8 +21,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
     await link(alice, bob);
     await connect(alice, bob);
     // Alice holds sats in her own wallet: the "other wallet" that will pay Bob's invoice.
-    await receive(alice, 100);
-    await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
+    await getTestCoins(alice);
     for (const p of [alice, bob]) await openChat(p);
 
     // The wallet page's receive side shows the same thing a contact gets: QR, text, Copy, a lightning: link.
@@ -58,9 +50,9 @@ test.describe("another wallet", { tag: "@network" }, () => {
     await panel.getByTestId("payment-external-copy").click();
     expect((await alice.page.evaluate(() => navigator.clipboard.readText())).trim()).toBe(invoice);
     await expect(panel.getByTestId("payment-external-copy")).toHaveText("Copied");
-    // "I paid" asks Bob's app to look; it marks nothing paid by itself.
-    await panel.getByTestId("payment-external-paid").click();
-    await expect(panel.getByTestId("payment-external-checking")).toBeVisible();
+    // The test mint reads Bob's invoice paid by itself: that alone settles nothing.
+    await bob.page.waitForTimeout(10_000);
+    await expect(bubble(bob).getByTestId("payment-state")).not.toHaveText(/Paid/);
 
     // Alice pays the invoice from her wallet, as any other wallet would.
     await openWallet(alice, "cashu-testnet");
@@ -70,9 +62,13 @@ test.describe("another wallet", { tag: "@network" }, () => {
     await alice.page.getByRole("button", { name: "Pay 10 sats" }).click();
     await expect(alice.page.getByRole("button", { name: "Pay", exact: true })).toBeVisible();
     await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
-    // The test mint settles its own invoices, so it may have paid Bob before Alice's melt reached it.
+    // The test mint marks its own invoices paid, so it may refuse Alice's melt as already paid.
     await expect(alice.page.getByTestId("wallet-notice").or(alice.page.getByTestId("wallet-error"))).toBeVisible();
     await openChat(alice);
+    // "I paid" asks Bob's app to look. On a test mint it is the payer's word the wallet waits for.
+    const external = bubble(alice).getByTestId("payment-external-external");
+    if (!await external.isVisible()) await bubble(alice).getByTestId("payment-external").first().click();
+    await external.getByTestId("payment-external-paid").click();
 
     // Bob's source saw the invoice paid: his request is Paid, and he told Alice, whose bubble turned Paid too.
     await expect(bubble(bob).getByTestId("payment-state")).toHaveText(/Paid/);
@@ -90,8 +86,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
       await useTestnet(alice);
       await link(alice, bob);
       await connect(alice, bob);
-      await receive(alice, 100);
-      await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
+      await getTestCoins(alice);
 
       // The wallet's Send tab: the address, the domain it will ask, the amount within the limits, a comment.
       await alice.page.getByTestId("wallet-send").click();

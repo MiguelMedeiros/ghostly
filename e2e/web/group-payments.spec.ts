@@ -21,16 +21,15 @@ test.describe("group payments", { tag: "@network" }, () => {
     await expect(peer.page.getByTitle("New Chat")).toBeVisible();
   }
 
-  /** A Testnet Cashu wallet made with New (the test mint is primary), and, for a payer, test sats from the mint's own invoice. */
-  async function testnet(peer: Peer, fund = 0): Promise<void> {
+  /** A Testnet Cashu wallet made with New (the test mint is primary), and, for a payer, test sats from Get test coins. */
+  async function testnet(peer: Peer, fund = false): Promise<void> {
     await useTestnet(peer);
     await openWallet(peer, "cashu-testnet");
     await expect(peer.page.getByTestId("wallet-balance")).toBeVisible();
     if (fund) {
-      await peer.page.getByTestId("wallet-receive").click();
-      await peer.page.getByTestId("wallet-receive-amount").fill(String(fund));
-      await peer.page.getByTestId("wallet-create-invoice").click();
-      await expect(peer.page.getByTestId("wallet-balance")).toHaveText(new RegExp(`^${fund}\\s*test sats`), { timeout: 60_000 });
+      await peer.page.getByTestId("test-coins-get").click();
+      await expect(peer.page.getByTestId("test-coins-result")).toHaveText("+10,000 test sats", { timeout: 60_000 });
+      await expect(peer.page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats/);
     }
     await peer.page.goBack();
   }
@@ -60,7 +59,7 @@ test.describe("group payments", { tag: "@network" }, () => {
     test.setTimeout(10 * 60_000);
     const [alice, bob, carol] = await Promise.all([peer("alice"), peer("bob"), peer("carol")]);
     await Promise.all([setName(alice, "Alice"), setName(bob, "Bob"), setName(carol, "Carol")]);
-    await Promise.all([testnet(alice), testnet(bob, 100), testnet(carol, 100)]);
+    await Promise.all([testnet(alice), testnet(bob, true), testnet(carol, true)]);
 
     await alice.page.getByTestId("sidebar-new-more").click();
     await alice.page.getByTestId("new-group").click();
@@ -104,8 +103,8 @@ test.describe("group payments", { tag: "@network" }, () => {
     await openWallet(alice, "cashu-testnet");
     await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^31\s*test sats/, { timeout: 60_000 });
     await openWallet(bob, "cashu-testnet");
-    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^(7[5-9])\s*test sats/);
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^9,97[5-9]\s*test sats/);
     await openWallet(carol, "cashu-testnet");
-    await expect(carol.page.getByTestId("wallet-balance")).toHaveText(/^(8[5-9])\s*test sats/);
+    await expect(carol.page.getByTestId("wallet-balance")).toHaveText(/^9,98[5-9]\s*test sats/);
   });
 });
