@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "target": "ES2022", "lib": ["ES2023", "DOM", "DOM.Iterable"], "resolveJsonModule": true, "types": ["vite/client"] },
+  "include": ["film", "../../vite-env.d.ts"]
+}

@@ -1,0 +1,22 @@
+{
+  "_": "One entry per narration line. `say` goes to the voice, `show` is the caption; both split by | into the same number of chunks, and a caption chunk shows while its words are spoken. `gap` is the silence before the line, in seconds. `act` names the music part the line belongs to; `scene` the picture.",
+  "voice": { "id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "model": "eleven_multilingual_v2", "settings": { "stability": 0.45, "similarity_boost": 0.8, "style": 0.35, "use_speaker_boost": true, "speed": 0.9 } },
+  "lines": [
+    { "id": "witness", "act": "cold", "scene": "witness", "gap": 1.6, "say": "Every message you've ever sent... | had a witness.", "show": "Every message you've ever sent… | had a witness." },
+    { "id": "middle", "act": "cold", "scene": "witness", "gap": 0.9, "say": "Someone in the middle. | Always awake. | Always reading along.", "show": "Someone in the middle. | Always awake. | Always reading along." },
+    { "id": "ghosts", "act": "cold", "scene": "crack", "gap": 1.2, "say": "But ghosts... | don't do middlemen.", "show": "But ghosts… | don't do middlemen." },
+    { "id": "boo", "act": "story", "scene": "boo", "gap": 1.8, "say": "This is Boo.", "show": "This is Boo." },
+    { "id": "one", "act": "story", "scene": "casper", "gap": 0.7, "say": "Boo wants to reach one friend. | Just one.", "show": "Boo wants to reach one friend. | Just one." },
+    { "id": "invite", "act": "story", "scene": "invite", "gap": 0.8, "say": "So Boo sends Casper an invitation. | A secret, meant for one.", "show": "So Boo sends Casper an invitation. | A secret, meant for one." },
+    { "id": "crowd", "act": "story", "scene": "crowd", "gap": 1.0, "say": "Between them lies a vast, dark crowd. | Millions of strangers. | No owner. | No boss.", "show": "Between them lies a vast, dark crowd. | Millions of strangers. | No owner. | No boss." },
+    { "id": "note", "act": "story", "scene": "note", "gap": 1.0, "say": "Boo leaves a little note in the crowd... | sealed. | To everyone else, it's just noise.", "show": "Boo leaves a little note in the crowd… | sealed. | To everyone else, it's just noise." },
+    { "id": "look", "act": "story", "scene": "look", "gap": 0.8, "say": "But Casper's invitation | knows exactly where to look.", "show": "But Casper's invitation | knows exactly where to look." },
+    { "id": "reply", "act": "story", "scene": "reply", "gap": 0.8, "say": "A note. | A reply. | A whisper, answered.", "show": "A note. | A reply. | A whisper, answered." },
+    { "id": "step", "act": "rise", "scene": "step", "gap": 0.8, "say": "They agree on how to talk... | and step out of the crowd.", "show": "They agree on how to talk… | and step out of the crowd." },
+    { "id": "two", "act": "rise", "scene": "direct", "gap": 0.9, "say": "Now it's just the two of them. | Peer to peer. | Nobody in between.", "show": "Now it's just the two of them. | Peer to peer. | Nobody in between." },
+    { "id": "fade", "act": "rise", "scene": "fade", "gap": 0.9, "say": "And the notes? | They fade. | The crowd forgets.", "show": "And the notes? | They fade. | The crowd forgets." },
+    { "id": "title", "act": "title", "scene": "title", "gap": 1.6, "say": "Ghostly.", "show": "Ghostly" },
+    { "id": "tag", "act": "title", "scene": "title", "gap": 0.8, "say": "Find your people. | Vanish from everyone else.", "show": "Find your people. | Vanish from everyone else." },
+    { "id": "sting", "act": "sting", "scene": "sting", "gap": 1.6, "say": "Boo.", "show": "Boo.", "settings": { "stability": 0.3, "style": 0.6, "speed": 0.8 } }
+  ]
+}
