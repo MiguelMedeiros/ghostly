@@ -155,7 +155,7 @@
     "level": "available",
     "range": "2xx",
     "section": "Rails and wallet adapters",
-    "body": "**Provider / signer route**\n\nCashu SDK + chosen mint; wallet controls bearer proofs, mint backs redemption\n\n**Runtime and platform route**\n\nCurrent app integration; upstream TS/Rust/Python options\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Available**, [Draft 201](201-cashu.md): Mainnet mints by default, a test mint in Testnet mode (`payments.cashu.send`, `wallet.cashu.*`), [NUTs](https://github.com/cashubtc/nuts), [libraries](https://docs.cashu.space/). Mint trust/custody must be visible. Verify mint/unit allowlist, quote states, duplicate redemption, keysets and recovery; NUT07/09 availability is not universal seed recovery.",
+    "body": "**Provider / signer route**\n\nCashu SDK + chosen mint; wallet controls bearer proofs, mint backs redemption\n\n**Runtime and platform route**\n\nCurrent app integration; upstream TS/Rust/Python options\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Available**, [Draft 201](201-cashu.md): Mainnet mints by default, a test mint on a Testnet wallet (`payments.cashu.send`, `wallet.cashu.*`), [NUTs](https://github.com/cashubtc/nuts), [libraries](https://docs.cashu.space/). Mint trust/custody must be visible. Verify mint/unit allowlist, quote states, duplicate redemption, keysets and recovery; NUT07/09 availability is not universal seed recovery.",
     "sourceAnchor": "rails-and-wallet-adapters"
   },
   {
@@ -180,7 +180,7 @@
     "level": "available",
     "range": "2xx",
     "section": "Rails and wallet adapters",
-    "body": "**Provider / signer route**\n\nArkade TypeScript SDK, operator and wallet signer\n\n**Runtime and platform route**\n\nTypeScript SDK 0.4.74 in the browser engine (web, extension offscreen page, Desktop WebView); native parity unverified\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Available: no unilateral exit yet**, experimental, [Draft 202](202-arkade.md): a wallet is made with no setup, on Bitcoin mainnet through the pinned operator by default (mutinynet in Testnet mode); payments were tested on regtest only: send/receive, HD return spend, receipt reconciliation, the shared Cashu/Ark review flow and sealed backup restore (`payments.arkade.*`, `wallet.ark.*`). [Wallet docs](https://docs.arkadeos.com/wallets/getting-started/introduction), [security model](https://docs.arkadeos.com/learn/core-concepts/security-and-trust-model). Preserve exit transaction data, measure operator/chain dependencies and exit costs; exits remain open.",
+    "body": "**Provider / signer route**\n\nArkade TypeScript SDK, operator and wallet signer\n\n**Runtime and platform route**\n\nTypeScript SDK 0.4.74 in the browser engine (web, extension offscreen page, Desktop WebView); native parity unverified\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Available: no unilateral exit yet**, experimental, [Draft 202](202-arkade.md): a wallet is made with no setup, on Bitcoin mainnet through the pinned operator by default (mutinynet on a Testnet wallet); payments were tested on regtest only: send/receive, HD return spend, receipt reconciliation, the shared Cashu/Ark review flow and sealed backup restore (`payments.arkade.*`, `wallet.ark.*`). [Wallet docs](https://docs.arkadeos.com/wallets/getting-started/introduction), [security model](https://docs.arkadeos.com/learn/core-concepts/security-and-trust-model). Preserve exit transaction data, measure operator/chain dependencies and exit costs; exits remain open.",
     "sourceAnchor": "rails-and-wallet-adapters"
   },
   {
@@ -427,11 +427,11 @@
     "family": "social",
     "kind": "Profile data",
     "status": "Available",
-    "note": "Nostr only",
+    "note": "Nostr, Pubky and Bluesky",
     "level": "available",
     "range": "Unassigned",
     "section": "Identity, profiles and social data",
-    "body": "**Data / action**\n\nName, avatar, bio and source metadata\n\n**Trust and permission boundary**\n\n**Available: Nostr only**, experimental ([3xx](3xx-nostr-social.md), `nostr.social.profile`): kind 0 on request or by an explicit setting, from the person's relays, cached with source/time/stale. Self-described content; local cache, provenance and manual nickname precedence; fetching is not proof.",
+    "body": "**Data / action**\n\nName, avatar, bio and source metadata\n\n**Trust and permission boundary**\n\n**Available: Nostr, Pubky and Bluesky**, on identity cards ([PUBLIC-PROFILES.md](PUBLIC-PROFILES.md), `proofs.public-profile.*`): a card of an identity with a current verified proof shows its public picture, name, bio and follower counts, read from fixed hosts once the card is on screen, kept a day, behind Settings → Load public profiles (on by default); the Nostr social layer ([3xx](3xx-nostr-social.md), `nostr.social.profile`) also loads a contact's kind 0 on request. Self-described content; local cache, provenance and manual nickname precedence; fetching is not proof.",
     "sourceAnchor": "identity-profiles-and-social-data"
   },
   {
@@ -518,7 +518,7 @@
     "level": "research",
     "range": "Unassigned",
     "section": "Identity and social candidate matrix",
-    "body": "**Confirmed upstream primitive / source**\n\nExisting local [profile experiment](PUBLIC-PROFILES.md), upstream homeserver/indexer separation\n\n**Signer, runtime and trust distinction**\n\nCached indexed metadata must identify source; an indexer response is not automatically a user-signed payload\n\n**Ghostly status / next gate**\n\n**Research**: the local profile experiment is off on `dev` ([PUBLIC-PROFILES.md](PUBLIC-PROFILES.md)), and broader social adapters are research. Separate source data, indexes, publication permissions and multiple-indexer disagreement.",
+    "body": "**Confirmed upstream primitive / source**\n\nExisting local [profile experiment](PUBLIC-PROFILES.md), upstream homeserver/indexer separation\n\n**Signer, runtime and trust distinction**\n\nCached indexed metadata must identify source; an indexer response is not automatically a user-signed payload\n\n**Ghostly status / next gate**\n\n**Research** for the graph and content: a verified Pubky identity's card shows its indexed profile (name, picture, bio, followers and following from nexus.pubky.app, [PUBLIC-PROFILES.md](PUBLIC-PROFILES.md)); broader social adapters are research. Separate source data, indexes, publication permissions and multiple-indexer disagreement.",
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {

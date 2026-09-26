@@ -14,6 +14,7 @@ import { GHOSTLY, ghostlyCard, idCard, idCardTone, type IdCardContent } from "./
 import { ProviderMark, StatusPill } from "./ProviderMark";
 import { PublicDid } from "./PublicDid";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { PublicProfileDetails } from "./PublicProfileDetails";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 type Entry =
@@ -147,6 +148,9 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
                 </div>
               )}
             </Block>
+            {card.lookup && p.publicProfile && <Block testId="identity-public-profile">
+              <PublicProfileDetails provider={p.provider} profile={p.publicProfile} tone="panel" testId="identity-public-profile-details" />
+            </Block>}
             <Block testId="identity-panel-sharing">
               <p className="text-xs font-medium text-text-secondary">{card.shared}</p>
               {sharedIn.length === 0 ? <p className="text-xs text-text-muted">Share it from a chat’s Identities, one contact at a time.</p>

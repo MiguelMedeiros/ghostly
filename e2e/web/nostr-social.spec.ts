@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { expect, test, type Peer } from "../support/fixtures";
-import { closeIdentities, openIdentities, shareIdentity, turnTheirs } from "../support/identities";
+import { closeIdentities, openIdentities, setLoadPublicProfiles, shareIdentity, turnTheirs } from "../support/identities";
 import { LocalNostrRelay, NOSTR_TEST_RELAY } from "../support/nostrRelay";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
@@ -52,6 +52,8 @@ test("a contact's profile, follows and notes load only on request from the perso
   let pictureFetches = 0;
   await bob.context.route("https://image.nostr.build/**", route => { pictureFetches++; return route.fulfill({ status: 200, contentType: "image/png", headers: { "access-control-allow-origin": "*" }, body: png }); });
 
+  // Identity cards would load the profile by themselves (public-profiles.spec.ts): off here, to count what the social layer asks.
+  await Promise.all([alice, bob, carol].map(p => setLoadPublicProfiles(p, false)));
   await addNostrIdentity(alice);
   await addNostrIdentity(bob);
   await useTestRelay(bob);

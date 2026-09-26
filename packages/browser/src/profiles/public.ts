@@ -36,9 +36,10 @@ export function nostrMetadata(value: unknown, key: string, now = Date.now()): { 
 }
 // Fixed public infrastructure only. Never follow an arbitrary metadata URL to a
 // local/private host (including DNS rebinding), or discover arbitrary relays.
-const IMAGE_HOSTS = new Set(['nostr.build','image.nostr.build','i.nostr.build','media.nostr.band','pfp.nostr.build','nexus.pubky.app']);
-export function safeAvatarUrl(value: string): string | undefined {
-  try { const u = new URL(value); if (value.length > 2048 || u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443') || !IMAGE_HOSTS.has(u.hostname) || u.hash) return; return u.href; } catch { return; }
+export const IMAGE_HOSTS: ReadonlySet<string> = new Set(['nostr.build','image.nostr.build','i.nostr.build','media.nostr.band','pfp.nostr.build','nexus.pubky.app']);
+/** An avatar address on one of `hosts` (the fixed list by default): https, port 443, no credentials or fragment. */
+export function safeAvatarUrl(value: string, hosts: ReadonlySet<string> = IMAGE_HOSTS): string | undefined {
+  try { const u = new URL(value); if (value.length > 2048 || u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443') || !hosts.has(u.hostname) || u.hash) return; return u.href; } catch { return; }
 }
 export async function boundedBytes(response: Response, max: number): Promise<Uint8Array> {
   if (!response.ok || !response.body || Number(response.headers.get('content-length')) > max) throw new Error('Profile response unavailable');
@@ -54,18 +55,33 @@ export function rasterDimensions(b: Uint8Array): { width: number; height: number
     let i=2; while (i+4 <= b.length) { if (b[i++] !== 255) return; const marker=b[i++]; if (marker===0xd9 || marker===0xda) return; const size=v.getUint16(i); if (size < 2 || i+size>b.length) return; if ([0xc0,0xc1,0xc2].includes(marker) && size>=8) return {width:v.getUint16(i+5),height:v.getUint16(i+3),mime:'image/jpeg'}; i+=size; }
   }
 }
-export async function cacheAvatar(url?: string, fetcher: typeof fetch = fetch): Promise<string | undefined> {
-  if (!url || !safeAvatarUrl(url) || typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') return;
+/** Most bytes an avatar download may have, and the most pixels it may decode to (checked before decoding). */
+export const AVATAR_MAX_BYTES = 256 * 1024;
+export const AVATAR_MAX_SIDE = 2048;
+export const AVATAR_MAX_PIXELS = 4_000_000;
+
+/**
+ * Downloaded avatar bytes → a 96×96 JPEG data URL of at most 32 KiB, or undefined. Only PNG/JPEG whose header
+ * gives dimensions within the limits is decoded; SVG, HTML, WebP and anything else never is.
+ */
+export async function smallAvatar(bytes: Uint8Array): Promise<string | undefined> {
+  if (bytes.length > AVATAR_MAX_BYTES || typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') return;
   try {
-    const response = await fetcher(url,{ signal:AbortSignal.timeout(5000), credentials:'omit', referrerPolicy:'no-referrer', redirect:'error', cache:'no-store' });
-    const bytes = await boundedBytes(response,256*1024); const shape=rasterDimensions(bytes);
-    if (!shape || shape.width<1 || shape.height<1 || shape.width>2048 || shape.height>2048 || shape.width*shape.height>4_000_000) return;
+    const shape=rasterDimensions(bytes);
+    if (!shape || shape.width<1 || shape.height<1 || shape.width>AVATAR_MAX_SIDE || shape.height>AVATAR_MAX_SIDE || shape.width*shape.height>AVATAR_MAX_PIXELS) return;
     const bitmap=await createImageBitmap(new Blob([new Uint8Array(bytes)],{type:shape.mime}));
     try {
       const canvas=new OffscreenCanvas(96,96); const ctx=canvas.getContext('2d'); if(!ctx) return;
       ctx.drawImage(bitmap,0,0,96,96); const blob=await canvas.convertToBlob({type:'image/jpeg',quality:0.8}); if(blob.size>32768) return;
       const small=new Uint8Array(await blob.arrayBuffer()); return 'data:image/jpeg;base64,'+btoa(String.fromCharCode(...small));
     } finally { bitmap.close(); }
+  } catch { return; }
+}
+export async function cacheAvatar(url?: string, fetcher: typeof fetch = fetch, hosts: ReadonlySet<string> = IMAGE_HOSTS): Promise<string | undefined> {
+  if (!url || !safeAvatarUrl(url, hosts) || typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') return;
+  try {
+    const response = await fetcher(url,{ signal:AbortSignal.timeout(5000), credentials:'omit', referrerPolicy:'no-referrer', redirect:'error', cache:'no-store' });
+    return await smallAvatar(await boundedBytes(response,AVATAR_MAX_BYTES));
   } catch { return; }
 }
 type Metadata = NonNullable<ReturnType<typeof nostrMetadata>>;

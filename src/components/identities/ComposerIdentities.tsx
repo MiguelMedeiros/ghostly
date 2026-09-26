@@ -14,6 +14,7 @@ import { AddIdentityDialog } from "./AddIdentityDialog";
 import { AddIdCardFace, IdCardFace, IdCardMark } from "./IdCardFace";
 import { GHOSTLY, ghostlyCard, idCard, idCardTone, machineLine, type IdCardContent } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
+import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./composer-identities.css";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
@@ -291,6 +292,7 @@ function IdentityBack({ entry, contact, now, busy, done, error, status, actionRe
             <span className="id-card-back-meta">{card.category} · {card.validity}</span>
           </span>
         </div>
+        {card.lookup && <PublicProfileDetails provider={p.provider} profile={card.profile} compact testId="composer-identity-public-profile" />}
         {/* Once done, the line saying so stands for it: the engine's state catches up a moment later. */}
         {!done && <p className="id-card-back-state">
           <span data-testid="composer-identity-status" className={tone}>{state}</span>

@@ -4,6 +4,8 @@ import { useI18n } from "../../contexts/I18nContext";
 import { BADGE_LIMITS, contactBadges, isGood, takeBadges, useReceived, type BadgeState } from "./contactBadges";
 import { GHOSTLY } from "./idCard";
 import { PROVIDER_ICONS, providerIcon } from "./ProviderIcons";
+import { engine } from "@ghostly/browser/platform/engine";
+import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import "./contact-marks.css";
 
 const CLOCK = <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="2" /><path d="M8 5v3.2l2 1.3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
@@ -70,7 +72,7 @@ export function IdentityStack({ peerKey, name, onOpen, open }: { peerKey: string
   const { t } = useI18n();
   const received = useReceived(peerKey);
   const badges = contactBadges(received);
-  const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
+  const [tip, setTip] = useState<{ id: string; top: number; left: number } | null>(null);
   const press = useRef<{ timer?: ReturnType<typeof setTimeout>; held: boolean }>({ held: false });
   const hide = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => { clearTimeout(press.current.timer); clearTimeout(hide.current); }, []);
@@ -80,10 +82,16 @@ export function IdentityStack({ peerKey, name, onOpen, open }: { peerKey: string
   const ghostly = shown.length ? undefined : `${t("identities.ghostly.theirs")}. ${t("identities.ghostly.nothingElse", { name })}`;
   const markOf = (e: PointerEvent) => (e.target as Element).closest<HTMLElement>("[data-badge]");
   const show = (el: HTMLElement | null) => {
-    const label = el && (el.dataset.badge === GHOSTLY ? ghostly : badges.find(b => b.id === el.dataset.badge)?.label);
-    setTip(el && label ? { label, ...tipAt(el) } : null);
+    const badge = el ? badges.find(b => b.id === el.dataset.badge) : undefined;
+    const label = el && (el.dataset.badge === GHOSTLY ? ghostly : badge?.label);
+    setTip(el && label ? { id: el.dataset.badge!, ...tipAt(el) } : null);
+    // A mark named on screen is a card on screen: its public profile's name comes into the tooltip once read.
+    if (badge && isGood(badge.state) && hasPublicProfile(badge.provider))
+      void engine.call("loadPublicProfile", { provider: badge.provider, subject: badge.subject }).catch(() => {});
   };
   const label = ghostly ?? badges.map(b => b.label).join("; ");
+  // Worked out on every render, so a profile read while the tooltip is open names itself there.
+  const tipLabel = tip && (tip.id === GHOSTLY ? ghostly : badges.find(b => b.id === tip.id)?.label);
   return (
     <>
       <button type="button" className="identity-stack" data-testid="chat-identity-badges" data-count={badges.length} aria-expanded={open} aria-label={`Identities with ${name}: ${label}`}
@@ -114,7 +122,7 @@ export function IdentityStack({ peerKey, name, onOpen, open }: { peerKey: string
           </span>
         ))}
       </button>
-      {tip && createPortal(<div role="tooltip" className="badge-tip" data-testid="chat-identity-tip" style={{ top: tip.top, left: tip.left }}>{tip.label}</div>, document.body)}
+      {tipLabel && tip && createPortal(<div role="tooltip" className="badge-tip" data-testid="chat-identity-tip" style={{ top: tip.top, left: tip.left }}>{tipLabel}</div>, document.body)}
     </>
   );
 }

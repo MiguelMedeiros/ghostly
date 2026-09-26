@@ -1,0 +1,20 @@
+/* An identity's public profile (PublicProfileDetails.tsx): on a card's dark back (data-tone=back, the card's ink in
+   --card-rgb) or in the Identities page's details (data-tone=panel, the theme's surface). Plain text only. */
+.public-profile{display:grid;gap:6px;min-width:0}
+.public-profile-head{display:flex;align-items:center;gap:10px;min-width:0}
+.public-profile-avatar{width:40px;height:40px;flex:none;border-radius:12px;object-fit:cover}
+.public-profile-who{display:grid;min-width:0}
+.public-profile-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:700;line-height:1.25}
+.public-profile-handle,.public-profile-counts{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:1.35}
+.public-profile-about{margin:0;font-size:12px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.public-profile-note,.public-profile-source{margin:0;font-size:11px;line-height:1.35;overflow-wrap:anywhere}
+
+.public-profile[data-tone=back] .public-profile-name{color:#fff}
+.public-profile[data-tone=back] .public-profile-handle{color:rgb(var(--card-rgb,36,211,194))}
+.public-profile[data-tone=back] .public-profile-counts,.public-profile[data-tone=back] .public-profile-about{color:rgba(255,255,255,.8)}
+.public-profile[data-tone=back] .public-profile-note,.public-profile[data-tone=back] .public-profile-source{color:rgba(255,255,255,.55)}
+
+.public-profile[data-tone=panel] .public-profile-name{color:var(--theme-text-primary)}
+.public-profile[data-tone=panel] .public-profile-handle{color:var(--theme-accent)}
+.public-profile[data-tone=panel] .public-profile-counts,.public-profile[data-tone=panel] .public-profile-about{color:var(--theme-text-secondary)}
+.public-profile[data-tone=panel] .public-profile-note,.public-profile[data-tone=panel] .public-profile-source{color:var(--theme-text-muted)}

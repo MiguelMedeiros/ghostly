@@ -773,6 +773,11 @@ export interface Settings {
   /** The Nostr social layer: relays, automatic profile loading, publication. Absent means the defaults, everything off. */
   nostr?: NostrSocialSettings;
   /**
+   * Identity cards show the public profile (picture, name, bio, counts) of a verified identity, read from its
+   * network's public host when the card is on screen (PUBLIC-PROFILES.md). Absent means on; off drops what was kept.
+   */
+  publicProfiles?: boolean;
+  /**
    * Where items are held for away contacts (WISP 4xx): the profile's S3 storage and its random space
    * (WISP 1000/1002), as set up under Profile → Backups. Kept here for the peer, which may run outside the
    * page; never copied into a backup.
@@ -827,6 +832,34 @@ export interface IdentityProofView {
   publicUri?: string;
   /** What the provider checked (public: contacts receive it too). Removal uses it to take down a published proof. */
   evidence?: unknown;
+  /** The identity's public profile on its network, once asked for (PUBLIC-PROFILES.md); absent while not asked or turned off. */
+  publicProfile?: PublicProfileView;
+}
+
+/**
+ * An identity's public profile, as its network publishes it (docs/wisps/PUBLIC-PROFILES.md): self-described by the
+ * account, never part of the proof. Only for an identity with a current verified proof, with Settings → Load public
+ * profiles on; kept on this device and asked again after a day.
+ */
+export interface PublicProfileView {
+  /** False when the network has no profile for this identity (or none was read yet). */
+  found: boolean;
+  name?: string;
+  /** How the network writes the account: "@alice.bsky.social", a Nostr `name`. */
+  handle?: string;
+  /** A short bio, plain text. */
+  about?: string;
+  /** A sanitized `data:image/jpeg;base64,…` URL, never a remote one. */
+  avatar?: string;
+  followers?: number;
+  following?: number;
+  /** The hosts it was read from, which saw this device's IP address: "nexus.pubky.app". */
+  hosts: string[];
+  /** Seconds; 0 when it was never read. */
+  fetchedAt: number;
+  loading?: boolean;
+  /** The last attempt failed (a copy read before, if any, is still shown). */
+  error?: string;
 }
 
 /** The profile's did:dht (WISP 3xx-did-dht): its own key, public to everyone, never tied to a chat. */
@@ -860,6 +893,8 @@ export interface ReceivedIdentityView {
   error?: string;
   /** The provider's checks can go stale and the last one is old enough to repeat. */
   recheckDue: boolean;
+  /** Its public profile, while the proof is verified and current (PUBLIC-PROFILES.md). */
+  publicProfile?: PublicProfileView;
 }
 
 export interface LinkIdentitiesView {

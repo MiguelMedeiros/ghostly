@@ -16,6 +16,7 @@ import { contactBadges } from "./contactBadges";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
 import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, type IdCardContent } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
+import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -179,9 +180,10 @@ function TheirCardBack({ entry, linkId, name, nostr, onCards }: { entry: Receive
             <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
-            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">Name: {r.display?.source ?? r.verified.display?.source}</span>}
+            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">Name: {card.profile?.found && card.profile.name ? "their public profile" : r.display?.source ?? r.verified.display?.source}</span>}
           </span>
         </div>
+        {card.lookup && <PublicProfileDetails provider={r.provider} profile={card.profile} testId="chat-identity-public-profile" />}
         <dl className="contact-card-facts">
           <dt>Proves</dt>
           <dd>{card.attested ? `${r.verified.attester ?? "The provider"} says this account logged in: only as trustworthy as ${r.verified.attester ?? "it"}.` : "Only the holder of this key could have made this proof."}</dd>

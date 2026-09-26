@@ -1,4 +1,6 @@
-import type { IdentityProofView, LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
+import type { IdentityProofView, LinkView, PublicProfileView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
+import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
+import type { ProfileLookup } from "../../hooks/usePublicProfileRequest";
 import type { Translate } from "../../contexts/I18nContext";
 import { providerIcon } from "./ProviderIcons";
 import { date, daysLeft, expiringSoon, providerLabel, providerOf, RECEIVED_STATUS, shortSubject } from "../../lib/identities";
@@ -45,7 +47,23 @@ export interface IdCardContent {
   refusedBy: string[];
   /** The machine-readable line, when it is not the provider and the subject (the Ghostly card's is the name). */
   mrz?: string;
+  /** The identity's public profile as its network publishes it (PUBLIC-PROFILES.md): its picture and name go on the face. */
+  profile?: PublicProfileView;
+  /** Set while the proof is current and verified, for a provider with public profiles: the card asks for it when on screen. */
+  lookup?: ProfileLookup;
 }
+
+/** The profile's picture and name, when its network has them; else what the evidence carried. */
+const face = (profile: PublicProfileView | undefined, name: string | undefined, avatar: string | undefined) => {
+  const picture = profile?.found && profile.avatar?.startsWith("data:image/") ? profile.avatar : avatar?.startsWith("data:image/") ? avatar : undefined;
+  return { name: (profile?.found ? profile.name : undefined) ?? name, photo: picture };
+};
+/**
+ * The profile and its lookup, for a provider with public profiles and only while the proof is current and verified:
+ * an expired, revoked or withdrawn identity's card never wears what its account says about itself.
+ */
+const profileOf = (provider: string, subject: string, profile: PublicProfileView | undefined, current: boolean): { lookup?: ProfileLookup; profile?: PublicProfileView } =>
+  current && hasPublicProfile(provider) ? { lookup: { provider, subject }, ...(profile ? { profile } : {}) } : {};
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -60,6 +78,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     expiring: `Expires in ${plural(daysLeft(p.expiresAt, now), "day", "days")}`,
     verified: "Verified",
   }[status];
+  const pp = profileOf(p.provider, p.verified.subject, p.publicProfile, !expired && !revoking);
   return {
     id: p.id,
     provider: p.provider,
@@ -67,8 +86,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     subject: p.verified.subject,
     short: shortSubject(p.provider, p.verified.subject),
     bound: p.subject,
-    name: p.verified.display?.name,
-    photo: p.verified.display?.avatar?.startsWith("data:image/") ? p.verified.display.avatar : undefined,
+    ...face(pp.profile, p.verified.display?.name, p.verified.display?.avatar),
     category: attested ? `Attested by ${p.verified.attester ?? "the provider"}` : "Your own key",
     attested,
     status,
@@ -77,6 +95,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     issued: date(p.issuedAt),
     shared: p.sharedWith === 0 ? "Not shared" : `Shared in ${plural(p.sharedWith, "chat", "chats")}`,
     refusedBy,
+    ...pp,
   };
 }
 
@@ -98,6 +117,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000)
     revoking: "",
   }[status];
   const avatar = r.display?.avatar ?? r.verified.display?.avatar;
+  const pp = profileOf(r.provider, r.verified.subject, r.publicProfile, status === "verified" || status === "expiring");
   return {
     id: r.id,
     provider: r.provider,
@@ -105,8 +125,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000)
     subject: r.verified.subject,
     short: shortSubject(r.provider, r.verified.subject),
     bound: r.subject,
-    name: r.display?.name ?? r.verified.display?.name,
-    photo: avatar?.startsWith("data:image/") ? avatar : undefined,
+    ...face(pp.profile, r.display?.name ?? r.verified.display?.name, avatar),
     category: attested ? `Attested by ${r.verified.attester ?? "the provider"}` : "Their own key",
     attested,
     status,
@@ -115,6 +134,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000)
     issued: date(r.verifiedAt),
     shared: `Checked ${ago(r.checkedAt, now)}`,
     refusedBy: [],
+    ...pp,
   };
 }
 
