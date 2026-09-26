@@ -44,42 +44,52 @@ export const EVERYTHING = ["package.json", "package-lock.json", "patches/**"];
 /**
  * The unit test projects. `sources`: a change there can change what these tests import, so `vitest related` looks
  * at it. `whole`: a change there (config, setup, install) is not in any import graph, so the project runs whole.
+ * `tests`: the project's test files (its vitest `include`). A test there may import a file outside `sources` by
+ * relative path (packages/browser/test/chatConnection.test.ts imports src/components/ChatConnection.tsx), so a
+ * change outside `sources` still runs the tests whose relative imports reach it (testsReaching).
  */
 export const UNIT_PROJECTS = [
   {
     name: "core", cwd: "packages/core", args: [],
     sources: ["packages/core/**"],
     whole: ["packages/core/package.json", "packages/core/vitest.config.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
+    tests: ["packages/core/test/**"],
   },
   {
     name: "browser", cwd: "packages/browser", args: [],
     sources: ["packages/core/src/**", "packages/browser/**"],
     whole: ["packages/browser/package.json", "packages/browser/vitest.config.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
+    tests: ["packages/browser/test/**"],
   },
   {
     name: "sdk", cwd: "packages/sdk", args: [],
     sources: ["packages/core/src/**", "packages/browser/src/**", "packages/sdk/**"],
     whole: ["packages/sdk/package.json", "packages/sdk/vite.config.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
+    tests: ["packages/sdk/test/**"],
   },
   {
     name: "extension", cwd: "extension", args: [],
     sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "src/**", "extension/**"],
     whole: ["extension/package.json", "extension/vitest.config.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
+    tests: ["extension/test/**"],
   },
   {
     name: "ui", cwd: ".", args: ["-c", "vitest.ui.config.ts"],
     sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "src/**"],
     whole: ["vitest.ui.config.ts", "src/test/setup.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
+    tests: ["src/**", "packages/react/test/**"],
   },
   {
     name: "matrix", cwd: ".", args: ["-c", "e2e/matrix/vitest.config.ts"],
     sources: ["e2e/matrix/**"],
     whole: ["e2e/matrix/vitest.config.ts", "vitest.shared.ts"],
+    tests: ["e2e/matrix/*"],
   },
   {
     name: "scripts", cwd: ".", args: ["-c", "scripts/vitest.config.ts"],
     sources: ["scripts/**", "e2e/features.json"],
     whole: ["scripts/vitest.config.ts", "vitest.shared.ts"],
+    tests: ["scripts/test/**"],
   },
 ];
 
@@ -178,6 +188,43 @@ export function specsImporting(changed, e2eFiles) {
   return specs;
 }
 
+// ---------- tests that import across workspaces ----------
+
+/**
+ * The test files that reach one of `changed` through relative imports, directly or through other files. It follows
+ * relative paths only: a package name (`@ghostly/core`) is not followed, and core's barrel has throughCoreBarrel.
+ * `./x`, `./x.js` and `./x.ts` all name x.ts, and `./dir` names dir/index.ts; other extensions (`.json`) are kept.
+ *
+ * @param {string[]} changed  changed files (deleted ones too: their importers break)
+ * @param {Record<string, string>} files  path → text of the files to follow
+ * @param {string[]} tests  globs of the test files wanted
+ * @returns {string[]} those test files, sorted
+ */
+export function testsReaching(changed, files, tests) {
+  const importers = new Map();
+  for (const [path, text] of Object.entries(files)) {
+    for (const dep of relativeImports(path, text)) {
+      for (const key of [dep, `${dep}/index`]) {
+        if (!importers.has(key)) importers.set(key, new Set());
+        importers.get(key).add(path);
+      }
+    }
+  }
+  const wanted = tests.map(globToRegExp);
+  const seen = new Set(changed);
+  const queue = changed.map(stripExt);
+  const out = new Set();
+  while (queue.length) {
+    for (const imp of importers.get(queue.pop()) ?? []) {
+      if (seen.has(imp)) continue;
+      seen.add(imp);
+      if (isTest(imp) && wanted.some((re) => re.test(imp))) out.add(imp);
+      queue.push(stripExt(imp));
+    }
+  }
+  return [...out].sort();
+}
+
 // ---------- seeing through @ghostly/core's barrel ----------
 
 const CORE_SRC = "packages/core/src/";
@@ -260,9 +307,10 @@ export function throughCoreBarrel(changedCore, files) {
  *   "scripts" alone changed (it installs nothing new, so it is left out; run the script you changed yourself)
  * @param {{features: {id: string}[], paths?: Record<string, string[]>}} input.inventory
  * @param {Record<string, string>} input.e2eFiles  every .ts under e2e/ (path → text); specs are the *.spec.ts
- * @param {Record<string, string>} [input.codeFiles]  every TypeScript file that may import @ghostly/core (path →
+ * @param {Record<string, string>} [input.codeFiles]  every TypeScript/JavaScript file of the workspaces (path →
  *   text), core's own included: with it, a change in packages/core/src reaches the tests of what imports it
- *   (throughCoreBarrel) instead of every test behind the barrel
+ *   (throughCoreBarrel) instead of every test behind the barrel, and a change outside a project's `sources` reaches
+ *   the project's tests that import it by relative path (testsReaching)
  */
 export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
   const scriptsOnly = all.filter((c) => c.scriptsOnly).map((c) => c.path);
@@ -283,12 +331,17 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
     // Without codeFiles a core module goes to vitest as it is (and reaches every test behind the barrel).
     const direct = code.filter((c) => c.exists && match(p.sources, c.path) && !(codeFiles && coreChanged.includes(c.path))).map((c) => c.path);
     const viaCore = coreDependents.filter((f) => match(p.sources, f) && !direct.includes(f));
-    const files = [...direct, ...viaCore];
+    // Outside `sources` vitest is not asked (it would transform every test to find none), so the tests that reach
+    // a change there by relative path are found here and handed over themselves.
+    const outside = [...code.map((c) => c.path), ...coreDependents].filter((f) => !match(p.sources, f));
+    const viaPath = outside.length && codeFiles ? testsReaching(outside, codeFiles, p.tests).filter((f) => !direct.includes(f) && !viaCore.includes(f)) : [];
+    const files = [...direct, ...viaCore, ...viaPath];
     if (!files.length) return { ...p, mode: "skip", reason: coreChanged.length && match(p.sources, coreChanged[0]) ? "nothing it tests imports the changed core code" : "nothing it imports changed" };
     const tests = files.filter(isTest).length;
     const parts = [];
     if (direct.length) parts.push(`${direct.length} changed file(s)`);
     if (viaCore.length) parts.push(`${viaCore.length} importer(s) of the changed core code`);
+    if (viaPath.length) parts.push(`${viaPath.length} test file(s) importing the change by relative path`);
     return { ...p, mode: "related", files, reason: `vitest related over ${parts.join(" + ")}${tests ? ` (${tests} test file(s) among them)` : ""}` };
   });
 

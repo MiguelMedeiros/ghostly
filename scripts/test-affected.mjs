@@ -89,7 +89,7 @@ function sources(...dirs) {
   const walk = (dir) => {
     if (!existsSync(join(ROOT, dir))) return;
     for (const name of readdirSync(join(ROOT, dir))) {
-      if (["node_modules", "dist", "dist-e2e", "coverage"].includes(name)) continue;
+      if (["node_modules", "dist", "dist-e2e", "coverage", ".next", "target"].includes(name)) continue;
       const path = `${dir}/${name}`;
       if (statSync(join(ROOT, path)).isDirectory()) walk(path);
       else if (/\.[cm]?[jt]sx?$/.test(name)) out[path.split(sep).join("/")] = readFileSync(join(ROOT, path), "utf8");
@@ -99,9 +99,10 @@ function sources(...dirs) {
   return out;
 }
 const inventory = JSON.parse(readFileSync(join(ROOT, "e2e/features.json"), "utf8"));
-const coreTouched = changed.some((c) => c.path.startsWith("packages/core/src/"));
-const codeFiles = coreTouched ? sources("packages", "src", "extension/src", "extension/test", "web/src") : undefined;
 const e2eFiles = sources("e2e");
+// Tests import across workspaces by relative path (packages/browser/test → src/, e2e/matrix → packages/browser/),
+// so the plan reads every workspace's imports.
+const codeFiles = { ...sources("packages", "src", "extension", "web/src", "scripts", "website", "examples"), ...e2eFiles };
 const p = makePlan({ changed, inventory, e2eFiles, codeFiles });
 
 // ---------- the plan, printed ----------
