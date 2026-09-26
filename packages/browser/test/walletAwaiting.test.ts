@@ -38,6 +38,10 @@ describe("what a wallet still waits for", () => {
     const quotes = [quote({ quote: "q1", paymentId: "r1" })];
     expect(read({ quotes, payments: [request({ id: "r1", invoice: "LNBC-Q1", mints: [REAL] })] })).toEqual([{ type: "cashu", kind: "request", amount: 50_000, paymentId: "r1" }]);
     expect(read({ quotes: [{ ...quotes[0], paid: true }], payments: [request({ id: "r1", invoice: "lnbc-q1" })] })).toEqual([{ type: "cashu", kind: "paid", amount: 50_000, paymentId: "r1" }]);
+    // The mints' Lightning source does not name the request on its quote: the invoice ties them.
+    const unnamed = [quote({ quote: "q2" })];
+    expect(read({ quotes: unnamed, payments: [request({ id: "r2", invoice: "lnbc-q2", mints: [REAL] })] })).toEqual([{ type: "cashu", kind: "request", amount: 50_000, paymentId: "r2" }]);
+    expect(read({ quotes: [{ ...unnamed[0], paid: true }], payments: [request({ id: "r2", invoice: "lnbc-q2" })] })).toEqual([{ type: "cashu", kind: "paid", amount: 50_000, paymentId: "r2" }]);
   });
 
   it("a request counts for the one wallet it can be paid through: an invoice of another Lightning source with Cashu mints is lost with neither", () => {

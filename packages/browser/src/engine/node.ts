@@ -2062,6 +2062,9 @@ export class GhostlyNode implements EngineImplementation {
     const removal = first.awaiting.length ? walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents) : first;
     if (removal.pending) throw new Error(`A payment through this wallet is not finished yet (${removal.pending}). Cancel it or wait for it to settle, then remove the wallet.`);
     if (removalRisksFunds(removal) && acceptLoss !== true) throw new Error(lossRefusal(label, removal));
+    // Its open requests close first, while the chats still carry payment frames: once its last wallet goes, a chat
+    // may have no way of paying left, and the contact would never hear of it.
+    for (const item of removal.awaiting) if (item.kind === "request" && item.paymentId) await this.closeRequest(item.paymentId, `you removed the ${label} wallet it was paid to`).catch(() => {});
     try {
       if (type === "cashu") {
         const mints = this.networkMints(network);
@@ -2077,7 +2080,6 @@ export class GhostlyNode implements EngineImplementation {
     } finally {
       await this.refreshWallet();
     }
-    for (const item of removal.awaiting) if (item.kind === "request" && item.paymentId) await this.closeRequest(item.paymentId, `you removed the ${label} wallet it was paid to`).catch(() => {});
     await this.forgetChatNetwork(type as PaymentMethodName, network);
   }
 

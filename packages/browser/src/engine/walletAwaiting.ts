@@ -33,13 +33,21 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
   const live = (expiresAt: number | null | undefined) => !expiresAt || expiresAt + GRACE_MS > now;
   const invoiceKey = (invoice: string) => invoice.trim().toLowerCase();
 
+  const pending = payments.filter((p) => p.kind === "request" && p.direction === "out" && p.state === "pending" && !p.closed && paymentNetwork(p) === network);
+  const requests = new Set(pending.map((p) => p.id));
+  // The request an invoice belongs to: named on it, or found by the invoice (the mints' source does not name it).
+  const byInvoice = new Map(pending.filter((p) => p.invoice).map((p) => [invoiceKey(p.invoice!), p.id]));
+  const ownerOf = (x: { paymentId?: string; invoice: string }) => x.paymentId ?? byInvoice.get(invoiceKey(x.invoice));
+  const withOwner = (id: string | undefined) => (id ? { paymentId: id } : {});
+
   const cashuQuotes = quotes.filter((q) => at.has(q.mint) && !q.testCoins);
   const claimedBy = new Set<string>();
   const out: WalletAwaitingView[] = [];
   for (const q of cashuQuotes) {
     if (!q.issuedUnclaimed && !q.paid) continue;
-    out.push({ type: "cashu", kind: q.issuedUnclaimed ? "unclaimed" : "paid", amount: q.amount, ...(q.paymentId ? { paymentId: q.paymentId } : {}) });
-    if (q.paymentId) claimedBy.add(q.paymentId);
+    const owner = ownerOf(q);
+    out.push({ type: "cashu", kind: q.issuedUnclaimed ? "unclaimed" : "paid", amount: q.amount, ...withOwner(owner) });
+    if (owner) claimedBy.add(owner);
   }
   const openQuotes = cashuQuotes.filter((q) => !q.issuedUnclaimed && !q.paid && live(q.expiresAt));
   const cashuInvoices = new Set(openQuotes.map((q) => invoiceKey(q.invoice)));
@@ -65,18 +73,15 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
     return through;
   };
 
-  const requests = new Set<string>();
-  for (const p of payments) {
-    if (p.kind !== "request" || p.direction !== "out" || p.state !== "pending" || p.closed || paymentNetwork(p) !== network) continue;
-    requests.add(p.id);
+  for (const p of pending) {
     if (claimedBy.has(p.id)) continue;
     const through = ways(p);
     if (through.size !== 1) continue;
     out.push({ type: [...through][0], kind: "request", amount: p.amount, paymentId: p.id });
   }
   // Invoices of no open request: made on the wallet's Receive, or of a request already closed.
-  for (const q of openQuotes) if (!q.paymentId || !requests.has(q.paymentId)) out.push({ type: "cashu", kind: "invoice", amount: q.amount, ...(q.paymentId ? { paymentId: q.paymentId } : {}) });
-  for (const op of openOps) if (!op.paymentId || !requests.has(op.paymentId)) out.push({ type: "lightning", kind: "invoice", amount: op.amount, ...(op.paymentId ? { paymentId: op.paymentId } : {}) });
+  for (const q of openQuotes) { const owner = ownerOf(q); if (!owner || !requests.has(owner)) out.push({ type: "cashu", kind: "invoice", amount: q.amount, ...withOwner(owner) }); }
+  for (const op of openOps) { const owner = ownerOf(op); if (!owner || !requests.has(owner)) out.push({ type: "lightning", kind: "invoice", amount: op.amount, ...withOwner(owner) }); }
 
   // Ecash sent that the contact has not taken yet: only the wallet it came from can take it back.
   for (const p of payments) {
