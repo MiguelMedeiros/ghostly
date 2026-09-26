@@ -18,6 +18,7 @@ mod oidc;
 mod paired_transport;
 mod pkarr_client;
 mod pkarr_network;
+mod pubky_session;
 mod records;
 mod share;
 #[cfg(test)]
@@ -85,6 +86,8 @@ macro_rules! commands {
             commands::open_project_link,
             commands::open_payment_link,
             commands::open_pubky_passport,
+            commands::pubky_session_fetch,
+            commands::pubky_session_close,
             share::share_text,
             clipboard::read_clipboard_text,
             oidc::oidc_loopback_start,
@@ -254,14 +257,14 @@ mod tests {
             "timeoutMs": 1, "peer": "p", "service": "s", "title": "t",
             "response": {"status": 200, "headers": [], "bodyB64": ""},
             "port": 0, "expectedState": "x", "space": "x", "prefix": "", "size": 0,
-            "offset": 0, "length": 0, "name": "x",
+            "offset": 0, "length": 0, "name": "x", "session": "x",
         })
     }
 
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 50, "{declared:?}");
+        assert_eq!(declared.len(), 52, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

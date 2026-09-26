@@ -73,6 +73,18 @@ export interface BrowserHost {
    * outside the app. The desktop app hands it to the system browser; left out where the page opens a popup itself.
    */
   openPubkyPassport?(url: string): Promise<void>;
+  /**
+   * A Pubky cookie session's requests to the homeserver, made outside the page with a cookie jar of their own: the
+   * desktop app, whose WKWebView drops the homeserver's session cookie (a third-party one there). Left out where
+   * the page's own fetch keeps it.
+   */
+  pubkyCookieSession?(): PubkyCookieSession;
+}
+
+/** One approval's cookie session, outside the page: its cookies never reach the page, and `close` forgets them. */
+export interface PubkyCookieSession {
+  fetch(request: { url: string; method: string; headers: [string, string][]; body: Uint8Array | null }): Promise<{ status: number; headers: [string, string][]; body: Uint8Array }>;
+  close(): void;
 }
 
 /** Where a share sheet points: the button that opened it, in CSS pixels from the page's top left. */
