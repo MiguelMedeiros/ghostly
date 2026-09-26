@@ -11,21 +11,45 @@ pub use types::*;
 use ::pkarr::Client;
 
 pub struct GhostClient {
-    client: Client,
+    /// Where packets are looked up: the Mainline DHT directly, unless relay reads were asked for.
+    reader: Client,
+    /// Where packets are published: the DHT and pkarr's default relays, since a contact in a browser reads
+    /// only relays (and a relay keeps serving the copy it has for minutes).
+    writer: Client,
 }
 
 impl GhostClient {
     pub fn new() -> Self {
-        Self::with_client(
-            Client::builder()
-                .build()
-                .expect("Failed to create pkarr client"),
-        )
+        Self::with_relay_reads(false)
     }
 
-    /// Over a Pkarr client of the caller's making: other relays, no DHT.
+    /// `read_relays`: look packets up through the relays too, not on the DHT alone (`--read-relays`).
+    pub fn with_relay_reads(read_relays: bool) -> Self {
+        let writer = Client::builder()
+            .build()
+            .expect("Failed to create pkarr client");
+        let reader = if read_relays {
+            writer.clone()
+        } else {
+            Client::builder()
+                .no_relays()
+                .build()
+                .expect("Failed to create pkarr client")
+        };
+        Self { reader, writer }
+    }
+
+    /// Over a Pkarr client of the caller's making, for reads and writes: other relays, no DHT.
     pub fn with_client(client: Client) -> Self {
-        Self { client }
+        Self {
+            reader: client.clone(),
+            writer: client,
+        }
+    }
+
+    /// The client packets are published with.
+    pub fn writer(&self) -> &Client {
+        &self.writer
     }
 
     pub async fn send(
@@ -49,11 +73,11 @@ impl GhostClient {
             m: message.to_string(),
         }];
 
-        let peer_batch = resolve_messages(&self.client, peer_pubkey, &key_bytes).await?;
+        let peer_batch = resolve_messages(&self.reader, peer_pubkey, &key_bytes).await?;
         let ack = peer_batch.map(|b| b.latest_timestamp).unwrap_or(0);
 
         let kept =
-            publish_messages(&self.client, &keypair, &messages, &key_bytes, ack, nick).await?;
+            publish_messages(&self.writer, &keypair, &messages, &key_bytes, ack, nick).await?;
 
         Ok(SendOutput {
             ok: true,
@@ -65,7 +89,7 @@ impl GhostClient {
     pub async fn recv(&self, peer_pubkey: &str, shared_key: &str) -> Result<RecvOutput, String> {
         let key_bytes = from_base64_url(shared_key)?;
 
-        let batch = resolve_messages(&self.client, peer_pubkey, &key_bytes).await?;
+        let batch = resolve_messages(&self.reader, peer_pubkey, &key_bytes).await?;
 
         match batch {
             Some(b) => Ok(RecvOutput {

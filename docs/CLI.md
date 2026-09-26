@@ -39,6 +39,8 @@ ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY"
 | `ghostly-cli recv` | Receive messages (poll once) |
 | `ghostly-cli watch` | Stream incoming messages (NDJSON) |
 
+The CLI looks packets up on the Mainline DHT directly. It publishes to the DHT and to the public Pkarr relays, because a contact in a browser can only read relays. `--read-relays` (on any command) looks packets up through the relays too, which finds a new packet sooner at the cost of the relays' per-address rate limits.
+
 ## Environment Variables
 
 You can set these environment variables instead of passing flags:
