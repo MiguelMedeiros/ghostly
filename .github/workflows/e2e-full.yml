@@ -177,10 +177,12 @@ jobs:
           # runner image's libunwind-14-dev (LLVM's) blocks.
           sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get update
+          # gstreamer1.0-plugins-good: WebKitGTK's VP9 decoder, for the large-video check (e2e/desktop/video-stream.spec.ts).
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-good \
             librsvg2-dev \
             patchelf \
             libssl-dev \

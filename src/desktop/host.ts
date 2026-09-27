@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   DHT_POLL_INTERVALS,
@@ -184,10 +184,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
-  // Files sent and received are real files in the app's data folder, written and read through Rust. A large video
-  // plays from the `ghostly-file` scheme (`ghostly-file://localhost/<token>`, `http://ghostly-file.localhost/<token>`
-  // on Windows), which serves the file in ranges.
-  registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke, (token) => convertFileSrc(token, "ghostly-file")), true);
+  // Files sent and received are real files in the app's data folder, written and read through Rust.
+  registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
   return createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },

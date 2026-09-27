@@ -9,13 +9,10 @@ export const NATIVE_BLOB_MAX = 64 * 1024 * 1024;
 /**
  * Files as real files in the app's data folder (`files/<space>/<id>`), written and read by the Rust
  * commands in `src-tauri/src/file_store.rs`. Bytes cross as raw IPC bodies, a step at a time.
- *
- * `streamUrl` makes the URL of a token of the `ghostly-file` scheme (`src-tauri/src/file_stream.rs`), which serves a
- * stored file in ranges; without it nothing streams.
  */
 export class NativeFileBytes implements FileBytes {
   readonly kind = "native" as const;
-  constructor(private readonly invoke: NativeInvoke, private readonly streamUrl?: (token: string) => string) {}
+  constructor(private readonly invoke: NativeInvoke) {}
 
   private args(id: string, extra: Record<string, unknown> = {}) {
     return { space: fileSpace(), id: checkFileId(id), ...extra };
@@ -68,14 +65,17 @@ export class NativeFileBytes implements FileBytes {
     return new Blob(parts as BlobPart[], { type });
   }
 
-  /** A token for the file on the `ghostly-file` scheme: the WebView reads it in ranges, as a video seeks. */
+  /**
+   * A URL Rust serves the file from in ranges (`src-tauri/src/file_stream.rs`): the `ghostly-file` scheme, or HTTP on
+   * 127.0.0.1 on Linux, whose WebKitGTK plays no custom scheme. The WebView reads it as a video seeks.
+   */
   async stream(id: string, type: string): Promise<FileStream | null> {
-    if (!this.streamUrl) return null;
-    const token = await this.invoke("file_bytes_stream_open", this.args(id, { mime: type })).catch(() => null);
-    if (typeof token !== "string") return null;
+    const opened = await this.invoke("file_bytes_stream_open", this.args(id, { mime: type })).catch(() => null) as { url?: unknown; token?: unknown } | null;
+    if (typeof opened?.url !== "string" || typeof opened.token !== "string") return null;
+    const { url, token } = opened as { url: string; token: string };
     let released = false;
     return {
-      url: this.streamUrl(token),
+      url,
       release: () => {
         if (released) return;
         released = true;

@@ -6,11 +6,15 @@
 //! on Windows). The token stands for one file of one profile's folder, checked when it was given; nothing in a URL is
 //! ever read as a path, and there is nothing to list. Only the Ghostly window is answered: a window showing a
 //! contact's app (`viewer.rs`) reaches the scheme too, and gets 404 whatever it asks.
+//!
+//! Linux's WebKitGTK plays media from `http(s)` and `blob:` only, so there the same tokens are served over HTTP on
+//! 127.0.0.1 (`loopback`); `file_bytes_stream_open` gives the page the URL for its platform.
 
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -55,10 +59,12 @@ struct Grant {
     serial: u64,
 }
 
-#[derive(Default)]
+/// The tokens given out, shared by the scheme's handler and (Linux) the loopback server's threads.
+#[derive(Default, Clone)]
 pub struct StreamGrants {
-    grants: Mutex<HashMap<String, Grant>>,
-    next: Mutex<u64>,
+    grants: Arc<Mutex<HashMap<String, Grant>>>,
+    next: Arc<AtomicU64>,
+    loopback: Arc<Mutex<Option<u16>>>,
 }
 
 impl StreamGrants {
@@ -76,11 +82,7 @@ impl StreamGrants {
         let mut raw = [0u8; 32];
         SysRng.try_fill_bytes(&mut raw).map_err(|e| e.to_string())?;
         let token = URL_SAFE_NO_PAD.encode(raw);
-        let serial = {
-            let mut next = self.next.lock().unwrap();
-            *next += 1;
-            *next
-        };
+        let serial = self.next.fetch_add(1, Ordering::Relaxed);
         let mut grants = self.grants.lock().unwrap();
         while grants.len() >= MAX_GRANTS {
             let oldest = grants
@@ -102,6 +104,18 @@ impl StreamGrants {
             },
         );
         Ok(token)
+    }
+
+    /// The loopback server's port, started on first use.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn loopback_port(&self, store: &FileStore) -> Result<u16, String> {
+        let mut port = self.loopback.lock().unwrap();
+        if let Some(port) = *port {
+            return Ok(port);
+        }
+        let started = loopback::start(store.clone(), self.clone())?;
+        *port = Some(started);
+        Ok(started)
     }
 
     pub fn close(&self, token: &str) {
@@ -199,6 +213,95 @@ fn empty(status: StatusCode) -> Response<Vec<u8>> {
         .unwrap()
 }
 
+/// What to answer a request with: its status and headers, and which bytes of which file follow them.
+struct Plan {
+    status: StatusCode,
+    headers: Vec<(header::HeaderName, String)>,
+    body: Option<(File, u64, u64)>,
+}
+
+impl Plan {
+    fn bare(status: StatusCode) -> Self {
+        Plan {
+            status,
+            headers: vec![(header::CACHE_CONTROL, "no-store".into())],
+            body: None,
+        }
+    }
+}
+
+/// The answer to a request for `path` (`/<token>`, nothing else). `cap` bounds a body that is read into memory (the
+/// scheme's); without it (the loopback server's, which streams) a range goes to its end.
+fn plan(
+    store: &FileStore,
+    grants: &StreamGrants,
+    method: &Method,
+    path: &str,
+    asked: Option<&str>,
+    cap: Option<u64>,
+) -> Plan {
+    let head = method == Method::HEAD;
+    if !head && method != Method::GET {
+        return Plan::bare(StatusCode::METHOD_NOT_ALLOWED);
+    }
+    let Some(token) = path.strip_prefix('/') else {
+        return Plan::bare(StatusCode::NOT_FOUND);
+    };
+    if token.len() != 43
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Plan::bare(StatusCode::NOT_FOUND);
+    }
+    let Some((space, id, mime)) = grants.lookup(token) else {
+        return Plan::bare(StatusCode::NOT_FOUND);
+    };
+    let Ok(file) = store
+        .path_of(&space, &id)
+        .and_then(|path| File::open(path).map_err(|e| e.to_string()))
+    else {
+        return Plan::bare(StatusCode::NOT_FOUND);
+    };
+    let Ok(size) = file.metadata().map(|meta| meta.len()) else {
+        return Plan::bare(StatusCode::NOT_FOUND);
+    };
+
+    let range = match parse_range(asked, size) {
+        Range::Whole if cap.is_none() || size <= WHOLE_MAX => None,
+        // Too large to answer whole in memory: what an engine gets when it asks for the rest of the file.
+        Range::Whole => Some((0, size - 1)),
+        Range::Bytes(start, end) => Some((start, end)),
+        Range::Unsatisfiable => {
+            let mut plan = Plan::bare(StatusCode::RANGE_NOT_SATISFIABLE);
+            plan.headers
+                .push((header::CONTENT_RANGE, format!("bytes */{size}")));
+            plan.headers.push((header::ACCEPT_RANGES, "bytes".into()));
+            return plan;
+        }
+    };
+    let mut headers = vec![
+        (header::CONTENT_TYPE, mime.to_string()),
+        (header::ACCEPT_RANGES, "bytes".into()),
+        (header::CACHE_CONTROL, "no-store".into()),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+    ];
+    let (status, start, length) = match range {
+        None => (StatusCode::OK, 0, size),
+        Some((start, end)) => {
+            let end = cap.map_or(end, |cap| end.min(start + cap - 1));
+            headers.push((header::CONTENT_RANGE, format!("bytes {start}-{end}/{size}")));
+            (StatusCode::PARTIAL_CONTENT, start, end + 1 - start)
+        }
+    };
+    headers.push((header::CONTENT_LENGTH, length.to_string()));
+    Plan {
+        status,
+        headers,
+        body: (!head).then_some((file, start, length)),
+    }
+}
+
 fn read_at(file: &mut File, start: u64, length: u64) -> std::io::Result<Vec<u8>> {
     file.seek(SeekFrom::Start(start))?;
     let mut body = Vec::with_capacity(length as usize);
@@ -213,112 +316,51 @@ pub fn respond(
     window: &str,
     request: &Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
-    let not_found = || empty(StatusCode::NOT_FOUND);
     if window != "main" {
-        return not_found();
+        return empty(StatusCode::NOT_FOUND);
     }
-    let head = request.method() == Method::HEAD;
-    if !head && request.method() != Method::GET {
-        return empty(StatusCode::METHOD_NOT_ALLOWED);
-    }
-    // The path is one token and nothing else: `/<token>`.
-    let Some(token) = request.uri().path().strip_prefix('/') else {
-        return not_found();
-    };
-    if token.len() != 43
-        || !token
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    {
-        return not_found();
-    }
-    let Some((space, id, mime)) = grants.lookup(token) else {
-        return not_found();
-    };
-    let Ok(path) = store.path_of(&space, &id) else {
-        return not_found();
-    };
-    let Ok(mut file) = File::open(path) else {
-        return not_found();
-    };
-    let Ok(size) = file.metadata().map(|meta| meta.len()) else {
-        return not_found();
-    };
-
     let asked = request
         .headers()
         .get(header::RANGE)
         .and_then(|value| value.to_str().ok());
-    let range = match parse_range(asked, size) {
-        Range::Whole if size <= WHOLE_MAX => None,
-        // Too large to answer whole: what an engine gets when it asks for the rest of the file.
-        Range::Whole => Some((0, size - 1)),
-        Range::Bytes(start, end) => Some((start, end)),
-        Range::Unsatisfiable => {
-            return Response::builder()
-                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                .header(header::CONTENT_RANGE, format!("bytes */{size}"))
-                .header(header::ACCEPT_RANGES, "bytes")
-                .header(header::CACHE_CONTROL, "no-store")
-                .body(Vec::new())
-                .unwrap();
-        }
-    };
-
-    let builder = Response::builder()
-        .header(header::CONTENT_TYPE, mime)
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(header::CACHE_CONTROL, "no-store")
-        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-    let (builder, start, length) = match range {
-        None => (builder.status(StatusCode::OK), 0, size),
-        Some((start, end)) => {
-            let end = end.min(start + MAX_BODY - 1);
-            (
-                builder
-                    .status(StatusCode::PARTIAL_CONTENT)
-                    .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{size}")),
-                start,
-                end + 1 - start,
-            )
-        }
-    };
-    let body = if head {
-        Vec::new()
-    } else {
-        match read_at(&mut file, start, length) {
-            Ok(body) => body,
+    let plan = plan(
+        store,
+        grants,
+        request.method(),
+        request.uri().path(),
+        asked,
+        Some(MAX_BODY),
+    );
+    let body = match plan.body {
+        Some((mut file, start, length)) => match read_at(&mut file, start, length) {
+            Ok(body) => Some(body),
             Err(_) => return empty(StatusCode::INTERNAL_SERVER_ERROR),
-        }
+        },
+        None => None,
     };
-    // A file cut short since (a transfer going back to its last checkpoint) sends what is there.
-    let length = if head { length } else { body.len() as u64 };
-    builder
-        .header(header::CONTENT_LENGTH, length)
-        .body(body)
-        .unwrap()
+    let mut builder = Response::builder().status(plan.status);
+    for (name, value) in plan.headers {
+        // A file cut short since (a transfer going back to its last checkpoint) sends what is there.
+        let value = match (&name, &body) {
+            (&header::CONTENT_LENGTH, Some(body)) => body.len().to_string(),
+            _ => value,
+        };
+        builder = builder.header(name, value);
+    }
+    builder.body(body.unwrap_or_default()).unwrap()
 }
 
 /// With `GHOSTLY_STREAM_LOG` set to a file, one line per request is added to it: what the engine asked for, and how
-/// much went back. The Desktop checks read it to see that no answer carried the whole file.
-pub fn trace(request: &Request<Vec<u8>>, response: &Response<Vec<u8>>) {
+/// much went back. The Desktop checks read it to see how each engine reads a file.
+fn trace_line(method: &str, range: Option<&str>, status: u16, sent: Option<&str>, body: u64) {
     use std::io::Write;
     let Some(path) = std::env::var_os("GHOSTLY_STREAM_LOG") else {
         return;
     };
-    let text = |value: Option<&header::HeaderValue>| {
-        value
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("-")
-            .to_string()
-    };
     let line = format!(
-        "[ghostly-file] {} range={} -> {} content-range={} body={}\n",
-        request.method(),
-        text(request.headers().get(header::RANGE)).replace(' ', ""),
-        response.status().as_u16(),
-        text(response.headers().get(header::CONTENT_RANGE)).replace(' ', "_"),
-        response.body().len()
+        "[ghostly-file] {method} range={} -> {status} content-range={} body={body}\n",
+        range.unwrap_or("-").replace(' ', ""),
+        sent.unwrap_or("-").replace(' ', "_"),
     );
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
@@ -329,14 +371,186 @@ pub fn trace(request: &Request<Vec<u8>>, response: &Response<Vec<u8>>) {
     }
 }
 
-/// A token to play a stored file through the scheme.
+pub fn trace(request: &Request<Vec<u8>>, response: &Response<Vec<u8>>) {
+    fn text(value: Option<&header::HeaderValue>) -> Option<&str> {
+        value.and_then(|v| v.to_str().ok())
+    }
+    trace_line(
+        request.method().as_str(),
+        text(request.headers().get(header::RANGE)),
+        response.status().as_u16(),
+        text(response.headers().get(header::CONTENT_RANGE)),
+        response.body().len() as u64,
+    );
+}
+
+/// The same files over plain HTTP on 127.0.0.1, for Linux: WebKitGTK's player takes media only from `http(s)` and
+/// `blob:` URLs, so it refuses a custom scheme's (a `FormatError` before it even starts). The server takes the same
+/// tokens (unguessable, and only the Ghostly window is given them: this is what stands in for the scheme's window
+/// check here), answers only a `Host` of exactly `127.0.0.1:<port>` (no other name can be pointed at it), and streams a
+/// range from the file to the socket, so nothing is held whole in memory. One thread per connection; the engine opens
+/// a new one for each seek.
+pub mod loopback {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::Duration;
+
+    /// Starts listening on a free port of 127.0.0.1 and serves until the app ends.
+    pub fn start(store: FileStore, grants: StreamGrants) -> Result<u16, String> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
+        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+        std::thread::Builder::new()
+            .name("ghostly-file".into())
+            .spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let (store, grants) = (store.clone(), grants.clone());
+                    let _ = std::thread::Builder::new()
+                        .name("ghostly-file-conn".into())
+                        .spawn(move || {
+                            let _ = serve(stream, &store, &grants, port);
+                        });
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(port)
+    }
+
+    /// A request's method, target and headers (names in lower case).
+    type Head = (String, String, Vec<(String, String)>);
+
+    /// The request line and headers, at most 16 KiB of them.
+    fn read_head(stream: &TcpStream) -> std::io::Result<Option<Head>> {
+        let mut reader = BufReader::new(stream.take(16 * 1024));
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        let mut parts = line.split_whitespace();
+        let (Some(method), Some(target), Some(_version)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            return Ok(None);
+        };
+        let (method, target) = (method.to_string(), target.to_string());
+        let mut headers = Vec::new();
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line)? == 0 {
+                return Ok(None);
+            }
+            let line = line.trim_end_matches(['\r', '\n']);
+            if line.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
+            }
+        }
+        Ok(Some((method, target, headers)))
+    }
+
+    fn serve(
+        mut stream: TcpStream,
+        store: &FileStore,
+        grants: &StreamGrants,
+        port: u16,
+    ) -> std::io::Result<()> {
+        stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(60)))?;
+        let Some((method, target, headers)) = read_head(&stream)? else {
+            return Ok(());
+        };
+        let header_of = |name: &str| {
+            headers
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v.as_str())
+        };
+        let method = Method::from_bytes(method.as_bytes()).unwrap_or(Method::POST);
+        let host = format!("127.0.0.1:{port}");
+        let plan = if header_of("host") != Some(host.as_str()) {
+            Plan::bare(StatusCode::NOT_FOUND)
+        } else {
+            plan(store, grants, &method, &target, header_of("range"), None)
+        };
+
+        let mut head = format!(
+            "HTTP/1.1 {} {}\r\n",
+            plan.status.as_u16(),
+            plan.status.canonical_reason().unwrap_or("")
+        );
+        let mut length = 0;
+        for (name, value) in &plan.headers {
+            head.push_str(&format!("{}: {value}\r\n", name.as_str()));
+        }
+        if !plan
+            .headers
+            .iter()
+            .any(|(name, _)| name == header::CONTENT_LENGTH)
+        {
+            head.push_str("content-length: 0\r\n");
+        }
+        head.push_str("connection: close\r\n\r\n");
+        stream.write_all(head.as_bytes())?;
+        let mut sent = 0;
+        if let Some((mut file, start, len)) = plan.body {
+            length = len;
+            file.seek(SeekFrom::Start(start))?;
+            // Written until the engine has what it wants: it closes the connection when it seeks elsewhere.
+            let mut piece = vec![0u8; 256 * 1024];
+            let mut file = file.take(length);
+            loop {
+                let read = file.read(&mut piece)?;
+                if read == 0 || stream.write_all(&piece[..read]).is_err() {
+                    break;
+                }
+                sent += read as u64;
+            }
+        }
+        let _ = stream.flush();
+        let content_range = plan
+            .headers
+            .iter()
+            .find(|(name, _)| name == header::CONTENT_RANGE)
+            .map(|(_, value)| value.as_str());
+        trace_line(
+            method.as_str(),
+            header_of("range"),
+            plan.status.as_u16(),
+            content_range,
+            sent.min(length),
+        );
+        Ok(())
+    }
+}
+
+/// Where a token is served: the scheme (`http://ghostly-file.localhost` on Windows, where WebView2 takes no custom
+/// scheme), or the loopback server on Linux.
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+fn stream_url(token: &str, loopback: Option<u16>) -> String {
+    #[cfg(target_os = "linux")]
+    if let Some(port) = loopback {
+        return format!("http://127.0.0.1:{port}/{token}");
+    }
+    #[cfg(windows)]
+    return format!("http://{SCHEME}.localhost/{token}");
+    #[cfg(not(windows))]
+    format!("{SCHEME}://localhost/{token}")
+}
+
+#[derive(serde::Serialize)]
+pub struct StreamOpened {
+    pub url: String,
+    pub token: String,
+}
+
+/// A URL to play a stored file from, and the token that closes it.
 #[tauri::command]
 pub fn file_bytes_stream_open<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     space: String,
     id: String,
     mime: String,
-) -> Result<String, String> {
+) -> Result<StreamOpened, String> {
     use tauri::Manager;
     let store = app
         .try_state::<FileStore>()
@@ -344,7 +558,15 @@ pub fn file_bytes_stream_open<R: tauri::Runtime>(
     let grants = app
         .try_state::<StreamGrants>()
         .ok_or("File storage unavailable")?;
-    grants.open(&store, &space, &id, &mime)
+    let token = grants.open(&store, &space, &id, &mime)?;
+    #[cfg(target_os = "linux")]
+    let port = Some(grants.loopback_port(&store)?);
+    #[cfg(not(target_os = "linux"))]
+    let port = None;
+    Ok(StreamOpened {
+        url: stream_url(&token, port),
+        token,
+    })
 }
 
 /// The file stops being served under this token.
@@ -697,6 +919,164 @@ mod tests {
             StatusCode::OK
         );
         fs_cleanup(dir);
+    }
+
+    /// One request to the loopback server, and its whole answer: status line, headers (lower case), body.
+    fn over_http(port: u16, head: &str) -> (String, Vec<(String, String)>, Vec<u8>) {
+        use std::io::Write;
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.write_all(head.as_bytes()).unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).unwrap();
+        let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        let text = String::from_utf8(raw[..split].to_vec()).unwrap();
+        let mut lines = text.split("\r\n");
+        let status = lines.next().unwrap().to_string();
+        let headers = lines
+            .filter_map(|line| line.split_once(": "))
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_string()))
+            .collect();
+        (status, headers, raw[split + 4..].to_vec())
+    }
+
+    fn named<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn over_loopback_http_a_range_streams_to_its_end_and_a_plain_get_gets_the_whole_file() {
+        let (files, dir) = store();
+        let grants = StreamGrants::default();
+        let data = bytes(20 * 1024 * 1024 + 7);
+        for (index, piece) in data.chunks(1024 * 1024).enumerate() {
+            files
+                .append("p", "big", (index * 1024 * 1024) as u64, piece)
+                .unwrap();
+        }
+        let token = grants.open(&files, "p", "big", "video/mp4").unwrap();
+        let port = grants.loopback_port(&files).unwrap();
+        assert_eq!(grants.loopback_port(&files).unwrap(), port, "one server");
+        let host = format!("Host: 127.0.0.1:{port}");
+
+        // What WebKitGTK sends first: no range. The whole file, streamed.
+        let (status, headers, body) =
+            over_http(port, &format!("GET /{token} HTTP/1.1\r\n{host}\r\n\r\n"));
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert_eq!(body, data);
+        assert_eq!(
+            named(&headers, "content-length"),
+            Some(data.len().to_string().as_str())
+        );
+        assert_eq!(named(&headers, "accept-ranges"), Some("bytes"));
+        assert_eq!(named(&headers, "content-type"), Some("video/mp4"));
+        assert_eq!(named(&headers, "connection"), Some("close"));
+
+        // Then from where it seeks, to the end: past the scheme's 4 MiB, since nothing is held in memory here.
+        let from = 5 * 1024 * 1024 + 3;
+        let (status, headers, body) = over_http(
+            port,
+            &format!("GET /{token} HTTP/1.1\r\n{host}\r\nRange: bytes={from}-\r\n\r\n"),
+        );
+        assert_eq!(status, "HTTP/1.1 206 Partial Content");
+        assert_eq!(body[..], data[from..]);
+        assert_eq!(
+            named(&headers, "content-range").map(str::to_string),
+            Some(format!("bytes {from}-{}/{}", data.len() - 1, data.len()))
+        );
+        let (status, headers, body) = over_http(
+            port,
+            &format!("GET /{token} HTTP/1.1\r\n{host}\r\nrange: bytes=-4\r\n\r\n"),
+        );
+        assert_eq!(status, "HTTP/1.1 206 Partial Content");
+        assert_eq!(body[..], data[data.len() - 4..]);
+        assert_eq!(named(&headers, "content-length"), Some("4"));
+        let (status, headers, body) = over_http(
+            port,
+            &format!(
+                "GET /{token} HTTP/1.1\r\n{host}\r\nRange: bytes={}-\r\n\r\n",
+                data.len()
+            ),
+        );
+        assert_eq!(status, "HTTP/1.1 416 Range Not Satisfiable");
+        assert_eq!(
+            named(&headers, "content-range").map(str::to_string),
+            Some(format!("bytes */{}", data.len()))
+        );
+        assert!(body.is_empty());
+        let (status, _, body) =
+            over_http(port, &format!("HEAD /{token} HTTP/1.1\r\n{host}\r\n\r\n"));
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert!(body.is_empty());
+        fs_cleanup(dir);
+    }
+
+    #[test]
+    fn over_loopback_http_only_a_token_and_the_exact_host_get_anything() {
+        let (files, dir) = store();
+        let grants = StreamGrants::default();
+        files.append("p", "f", 0, b"secret").unwrap();
+        std::fs::write(dir.join("outside"), b"outside").unwrap();
+        let token = grants.open(&files, "p", "f", "video/mp4").unwrap();
+        let port = grants.loopback_port(&files).unwrap();
+        let host = format!("Host: 127.0.0.1:{port}");
+        let ok = over_http(port, &format!("GET /{token} HTTP/1.1\r\n{host}\r\n\r\n"));
+        assert_eq!(
+            (ok.0.as_str(), ok.2.as_slice()),
+            ("HTTP/1.1 200 OK", &b"secret"[..])
+        );
+        for target in [
+            "/",
+            "/p/f",
+            "/../outside",
+            "/%2e%2e/outside",
+            "/f",
+            &format!("/{token}/"),
+            &format!("/{token}?x"),
+            &format!("/p/{token}"),
+        ] {
+            let (status, _, body) =
+                over_http(port, &format!("GET {target} HTTP/1.1\r\n{host}\r\n\r\n"));
+            assert_eq!(status, "HTTP/1.1 404 Not Found", "{target}");
+            assert!(body.is_empty(), "{target}");
+        }
+        // A name pointed at 127.0.0.1 (DNS rebinding), another spelling of it, or none: nothing.
+        for host in [
+            "Host: evil.example:{port}".replace("{port}", &port.to_string()),
+            format!("Host: localhost:{port}"),
+            "Host: 127.0.0.1".to_string(),
+            String::new(),
+        ] {
+            let (status, _, body) =
+                over_http(port, &format!("GET /{token} HTTP/1.1\r\n{host}\r\n\r\n"));
+            assert_eq!(status, "HTTP/1.1 404 Not Found", "{host}");
+            assert!(body.is_empty());
+        }
+        let (status, _, _) = over_http(port, &format!("POST /{token} HTTP/1.1\r\n{host}\r\n\r\n"));
+        assert_eq!(status, "HTTP/1.1 405 Method Not Allowed");
+        // Not HTTP at all: the connection just ends.
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        std::io::Write::write_all(&mut stream, b"\r\n\r\n").unwrap();
+        let mut rest = Vec::new();
+        stream.read_to_end(&mut rest).unwrap();
+        assert!(rest.is_empty());
+        grants.close(&token);
+        let (status, _, _) = over_http(port, &format!("GET /{token} HTTP/1.1\r\n{host}\r\n\r\n"));
+        assert_eq!(status, "HTTP/1.1 404 Not Found");
+        fs_cleanup(dir);
+    }
+
+    #[test]
+    fn the_url_is_the_platform_s_own() {
+        let url = stream_url("tok", Some(4321));
+        #[cfg(target_os = "linux")]
+        assert_eq!(url, "http://127.0.0.1:4321/tok");
+        #[cfg(windows)]
+        assert_eq!(url, "http://ghostly-file.localhost/tok");
+        #[cfg(target_os = "macos")]
+        assert_eq!(url, "ghostly-file://localhost/tok");
     }
 
     fn fs_cleanup(dir: PathBuf) {

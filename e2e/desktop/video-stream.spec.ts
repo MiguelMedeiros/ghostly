@@ -7,8 +7,9 @@ import { playFromStore, servePieces, servedRequests, storeInApp } from "../suppo
 
 /**
  * A video too large for the page (#381: over 64 MiB) plays and seeks in the Desktop WebView from the stored file,
- * read in ranges from the `ghostly-file` scheme (src-tauri/src/file_stream.rs) under the app's own policy. This
- * harness runs Linux's WebKitGTK and Windows' WebView2 (`http://ghostly-file.localhost/<token>` there); the macOS
+ * read in ranges from what Rust serves it on (src-tauri/src/file_stream.rs) under the app's own policy. This harness
+ * runs Linux's WebKitGTK, which plays no custom scheme, so it gets HTTP on 127.0.0.1, and Windows' WebView2
+ * (`http://ghostly-file.localhost/<token>`); the macOS
  * WKWebView has the same check in e2e/desktop-macos/video-stream.spec.ts. The video is 100 MB, fifty copies of the
  * two-second fixture (support/bigVideo.ts): H.264 where the engine plays it, else VP9 (a WebKitGTK without
  * gstreamer1.0-libav).
@@ -39,13 +40,15 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
     test.info().annotations.push({ type: "requests", description: JSON.stringify(served.slice(0, 80)) });
 
     expect(report.error, JSON.stringify(report.events)).toBeUndefined();
-    expect(report.url).toMatch(/^(ghostly-file:\/\/localhost|https?:\/\/ghostly-file\.localhost)\/[A-Za-z0-9_-]{43}$/);
+    const loopback = /^http:\/\/127\.0\.0\.1:\d+\//.test(report.url ?? "");
+    expect(report.url).toMatch(process.platform === "linux" ? /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{43}$/ : /^https?:\/\/ghostly-file\.localhost\/[A-Za-z0-9_-]{43}$/);
     expect(report.duration).toBeCloseTo(video.duration, 0);
     expect(report.seekedTo).toBeGreaterThanOrEqual(89.5);
     expect(report.playedAfterSeek).toBeGreaterThan(91);
     expect(served.length).toBeGreaterThan(0);
-    // Never the whole file at once, and the seek read past 80 MB.
-    expect(Math.max(...served.map((request) => request.body))).toBeLessThanOrEqual(MAX_BODY);
+    // The scheme never answers with more than 4 MiB at once; the loopback server streams to the socket instead. Either
+    // way the seek read past 80 MB.
+    if (!loopback) expect(Math.max(...served.map((request) => request.body))).toBeLessThanOrEqual(MAX_BODY);
     expect(served.some((request) => request.status === 206 && Number(/^bytes=(\d+)/.exec(request.range)?.[1] ?? 0) > 80 * 1024 * 1024)).toBe(true);
   } finally {
     await stop();

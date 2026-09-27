@@ -81,8 +81,7 @@ export function playFromStore(app: DesktopApp, place: { space: string; id: strin
      });
      const frames = () => video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality().totalVideoFrames : -1;
      (async () => {
-       const token = await window.__TAURI_INTERNALS__.invoke("file_bytes_stream_open", { space, id, mime: "video/mp4" });
-       const url = window.__TAURI_INTERNALS__.convertFileSrc(token, "ghostly-file");
+       const { url, token } = await window.__TAURI_INTERNALS__.invoke("file_bytes_stream_open", { space, id, mime: "video/mp4" });
        video.muted = true;
        video.playsInline = true;
        video.preload = "auto";

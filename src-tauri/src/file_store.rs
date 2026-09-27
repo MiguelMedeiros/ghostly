@@ -15,6 +15,7 @@ use tauri::ipc::{InvokeBody, Request, Response};
 pub const MAX_STEP: u64 = 16 * 1024 * 1024;
 
 /// Where the files are: set once the app knows its data folder.
+#[derive(Clone)]
 pub struct FileStore {
     base: PathBuf,
 }

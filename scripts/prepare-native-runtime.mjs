@@ -5,7 +5,9 @@ const source = resolve('native-transports/hyperdht')
 const target = resolve('src-tauri/native-runtime')
 // Reproducible dependency graph; runtime matches the architecture building the
 // desktop app. Cross compilation must provide a matching runtime separately.
-execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: source, stdio: 'inherit' })
+// Node refuses to start a .cmd without a shell on Windows (EINVAL since its CVE-2024-27980 fix); the arguments are
+// fixed here, so a shell is safe.
+execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: source, stdio: 'inherit', shell: process.platform === 'win32' })
 await mkdir(target, { recursive: true })
 await copyFile(process.execPath, resolve(target, process.platform === 'win32' ? 'node.exe' : 'node'))
 await chmod(resolve(target, process.platform === 'win32' ? 'node.exe' : 'node'), 0o755)
