@@ -61,3 +61,46 @@ test("a pasted screenshot and a dropped file reach the contact", { tag: ["@featu
   await sheet.getByTestId("attachment-send").click();
   for (const name of ["ghost notes.txt", "route.csv"]) await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: name })).toBeVisible();
 });
+
+/**
+ * Whether the picture's URL still serves its bytes. Chromium keeps drawing an image whose object URL was revoked after
+ * it loaded; WebKit loads it again and shows its broken "?", which is what Miguel saw.
+ */
+const liveSource = (img: ReturnType<Page["getByRole"]>) => img.evaluate(async (el: HTMLImageElement) => {
+  try { return (await (await fetch(el.src)).blob()).size > 0; } catch { return false; }
+}).catch(() => false);
+
+/** A picture's decoded width, or 0 while it is not loaded (a broken image stays at 0). */
+const loadedWidth = (img: ReturnType<Page["getByRole"]>) => img.evaluate((el: HTMLImageElement) => (el.complete ? el.naturalWidth : 0)).catch(() => 0);
+
+test("the sender's own pasted picture shows at once, stays through the transfer, and after a reload", { tag: ["@feature:app.composer.paste-files", "@feature:files.paired.send"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  // Bob's app stops mid-session: the transfer is under way, and stays so, while Alice looks at her picture.
+  const cdp = await bob.context.newCDPSession(bob.page);
+  await cdp.send("Debugger.enable");
+  await cdp.send("Debugger.pause");
+
+  expect(await paste(alice.page, "textarea", [{ name: "image.png", type: "image/png", base64: PNG }])).toBe(false);
+  await alice.page.getByTestId("attachment-send").click();
+  const mine = chat(alice).getByTestId("file-bubble").filter({ hasText: /Pasted image .*\.png/ });
+  const picture = mine.getByRole("img", { name: /^Pasted image .*\.png$/ });
+  // The bytes are on this device already: the picture does not wait for the contact, nor for the transfer.
+  await expect(mine).toBeVisible();
+  await expect.poll(() => loadedWidth(picture), { timeout: 500, intervals: [25] }).toBeGreaterThan(0);
+  await expect(mine).toHaveAttribute("data-stage", /transferring|waiting|queued|asking/);
+  // Still there a while later, the transfer still going (a revoked URL under it showed WebKit's broken "?").
+  await alice.page.waitForTimeout(1500);
+  expect(await loadedWidth(picture)).toBeGreaterThan(0);
+  expect(await liveSource(picture), "its URL still serves the picture").toBe(true);
+
+  await cdp.send("Debugger.resume");
+  await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: /Pasted image .*\.png/ }).getByRole("img")).toBeVisible({ timeout: 60_000 });
+  expect(await loadedWidth(picture), "still loaded once the transfer ended").toBeGreaterThan(0);
+  await expect.poll(() => liveSource(picture), { timeout: 5_000 }).toBe(true);
+
+  await alice.page.reload();
+  await expect.poll(() => loadedWidth(picture), { timeout: 30_000 }).toBeGreaterThan(0);
+});

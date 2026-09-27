@@ -153,6 +153,48 @@ describe("FileBubble: files/3", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("a picture sent from here shows at once, and keeps its image while the transfer starts, moves and ends", async () => {
+    const created: string[] = [], revoked: string[] = [];
+    const { createObjectURL, revokeObjectURL } = URL;
+    URL.createObjectURL = () => { const url = `blob:picture-${created.length}`; created.push(url); return url; };
+    URL.revokeObjectURL = (url: string) => { revoked.push(url); };
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    try {
+      const id = "chat1-out-pasted";
+      const picture = { id, name: "Pasted image.png", size: 3, mime: "image/png" };
+      // Already sending when the bubble appears: the sender's bytes are here, so the picture does not wait.
+      fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: { [id]: { state: "transferring", direction: "out", transferred: 0, size: 3 } } });
+      const view = renderApp(<FileBubble file={picture} peerName="Ana" />);
+      const src = (await screen.findByRole("img", { name: "Pasted image.png" })).getAttribute("src");
+      act(() => fakeEngine.update({ transfers: { [id]: { state: "transferring", direction: "out", transferred: 1, size: 3 } } }));
+      act(() => fakeEngine.update({ transfers: { [id]: { state: "done", direction: "out", transferred: 3, size: 3 } } }));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      // The same URL all along, never revoked under the image (that showed WebKit's broken "?" until the end).
+      expect(screen.getByRole("img", { name: "Pasted image.png" })).toHaveAttribute("src", src);
+      expect(created).toEqual([src]);
+      expect(revoked).toEqual([]);
+      view.unmount();
+      expect(revoked).toEqual([src]);
+    } finally {
+      Object.assign(URL, { createObjectURL, revokeObjectURL });
+    }
+  });
+
+  it("a picture arriving here shows once it is all here, not from a part", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    const { createObjectURL } = URL;
+    URL.createObjectURL = () => "blob:arrived";
+    try {
+      show({ state: "transferring", direction: "in", transferred: 1, size: 3 }, { name: "photo.png", mime: "image/png", size: 3 });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(screen.queryByRole("img", { name: "photo.png" })).toBeNull();
+      act(() => fakeEngine.update({ transfers: { "chat1-in-abc": { state: "done", direction: "in", transferred: 3, size: 3 } } }));
+      expect(await screen.findByRole("img", { name: "photo.png" })).toHaveAttribute("src", "blob:arrived");
+    } finally {
+      URL.createObjectURL = createObjectURL;
+    }
+  });
+
   it("a file kept but too large to show here is saved through the system (Desktop)", async () => {
     const saveFile = vi.fn(async () => true);
     Object.assign(servicesPlatform!, { saveFile });
