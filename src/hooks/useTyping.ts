@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import type { TypingActivity, TypingKind } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 
 /*
  * The typing indicator of a 1:1 chat (WISP 401 § Typing). The engine says it on the live session only, throttled,
- * and shows the contact's with a timeout; these hooks read it and tell the engine when this side types.
+ * and shows the contact's with a timeout; these hooks read it and tell the engine when this side types or records.
  */
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -18,6 +19,15 @@ export function usePeerTyping(peerPubKey?: string): boolean {
   return useSyncExternalStore(subscribe, () => !!(peerPubKey && engine.linkByPeer(peerPubKey)?.peerTyping));
 }
 
+/** What the contact of this chat is doing now (typing, recording, thinking, a bot's status), or null. */
+export function usePeerTypingActivity(peerPubKey?: string): TypingActivity | null {
+  const link = () => (peerPubKey ? engine.linkByPeer(peerPubKey) : undefined);
+  const typing = useSyncExternalStore(subscribe, () => !!link()?.peerTyping);
+  const kind = useSyncExternalStore(subscribe, () => link()?.peerTypingKind ?? "typing");
+  const status = useSyncExternalStore(subscribe, () => link()?.peerTypingStatus);
+  return useMemo(() => (typing ? { kind, ...(status ? { status } : {}) } : null), [typing, kind, status]);
+}
+
 /** Whether contacts are told when this profile is typing; on unless switched off (per profile). */
 export function useSendTyping(): boolean {
   return useSyncExternalStore(subscribe, () => engine.state?.settings.sendTyping !== false);
@@ -28,35 +38,52 @@ export function setSendTyping(on: boolean): Promise<void> {
 }
 
 /**
- * What the composer calls: `true` on a keystroke that leaves text, `false` when the text is cleared or sent. Stops by
- * itself after `TYPING_IDLE_MS` without a keystroke, when `active` goes false (the chat is left), when the page is
- * hidden, and on unmount.
+ * What the composer calls: `true` on a keystroke that leaves text, `false` when the text is cleared or sent; with
+ * `"recording"` while a voice note is being recorded (then the contact is told again every second, with no idle
+ * stop, until `false`). Typing stops by itself after `TYPING_IDLE_MS` without a keystroke, when `active` goes false
+ * (the chat is left), when the page is hidden (a recording carries on), and on unmount. A new kind is told at once.
  */
-export function useTypingSender(linkId: string | undefined, active = true): (typing: boolean) => void {
-  const state = useRef<{ typing: boolean; toldAt: number; idle: ReturnType<typeof setTimeout> | null }>({ typing: false, toldAt: 0, idle: null });
+export function useTypingSender(linkId: string | undefined, active = true): (typing: boolean, kind?: TypingKind) => void {
+  const state = useRef<{
+    typing: boolean; kind: TypingKind; toldAt: number;
+    idle: ReturnType<typeof setTimeout> | null; keep: ReturnType<typeof setInterval> | null;
+  }>({ typing: false, kind: "typing", toldAt: 0, idle: null, keep: null });
+
+  const tell = useCallback((kind: TypingKind) => {
+    const now = state.current;
+    now.typing = true; now.kind = kind; now.toldAt = Date.now();
+    if (linkId) void engine.call("setTyping", { linkId, typing: true, ...(kind !== "typing" ? { kind } : {}) }).catch(() => {});
+  }, [linkId]);
 
   const stop = useCallback(() => {
     const now = state.current;
     if (now.idle) { clearTimeout(now.idle); now.idle = null; }
+    if (now.keep) { clearInterval(now.keep); now.keep = null; }
     if (!now.typing) return;
     now.typing = false; now.toldAt = 0;
     if (linkId) void engine.call("setTyping", { linkId, typing: false }).catch(() => {});
   }, [linkId]);
 
-  const typing = useCallback((on: boolean) => {
+  const typing = useCallback((on: boolean, kind: TypingKind = "typing") => {
     if (!on || !active || !linkId) return stop();
     const now = state.current, at = Date.now();
-    if (now.idle) clearTimeout(now.idle);
-    now.idle = setTimeout(stop, TYPING_IDLE_MS);
-    if (now.typing && at - now.toldAt < TELL_EVERY_MS) return;
-    now.typing = true; now.toldAt = at;
-    void engine.call("setTyping", { linkId, typing: true }).catch(() => {});
-  }, [active, linkId, stop]);
+    if (now.idle) { clearTimeout(now.idle); now.idle = null; }
+    if (kind === "recording") {
+      // No keystrokes while recording: kept said until the recorder stops (the engine sends a start every 3 s).
+      if (!now.keep) now.keep = setInterval(() => tell("recording"), TELL_EVERY_MS);
+    } else {
+      if (now.keep) { clearInterval(now.keep); now.keep = null; }
+      now.idle = setTimeout(stop, TYPING_IDLE_MS);
+    }
+    if (now.typing && now.kind === kind && at - now.toldAt < TELL_EVERY_MS) return;
+    tell(kind);
+  }, [active, linkId, stop, tell]);
 
   useEffect(() => { if (!active) stop(); }, [active, stop]);
 
   useEffect(() => {
-    const hidden = () => { if (document.visibilityState === "hidden") stop(); };
+    // A recording goes on in the background (hands-free): it ends when the recorder says so, not here.
+    const hidden = () => { if (document.visibilityState === "hidden" && !(state.current.typing && state.current.kind === "recording")) stop(); };
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("pagehide", stop);
     return () => {

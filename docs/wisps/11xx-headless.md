@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.7.2 |
+| Revision | 0.7.3 |
 | Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
@@ -75,6 +75,10 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 **Secrets over the socket.** Calls that return secrets (`exportLinks`, `takeInvite`, `walletExport`, the wallets' `*Backup`, `*Reveal` and `*ExportBackup`, Fedimint notes) are answered to the socket, which only the owner can reach; the CLI refuses to make them without `--show-secret`, and `settings.get` masks credentials unless asked. A group's entry link lets anyone join: `group.get`, `group.list` and the admin methods answer `link: "<hidden>"` unless `showSecret` is set, `group.created` events never carry it, and `engine getState` hides `entryLink`; `group.create` and `group.link` answer with it.
 
+### Typing
+
+`chat.typing` (`ghostly typing <chat> [--kind typing|recording|thinking] [--status "<text>"] [--for <seconds>] [--stop]`) says this side is writing, recording a voice note or thinking, with an optional status line shown in its place on the contact's screen ("Transcribing your audio…"): [401](401-paired-chat.md#typing). A `start` holds 6 s there, so a bot says it again while it works; a new kind or status reaches the contact at once, and a message or `--stop` ends it. The CLI refuses (`bad_request`) an unknown kind, a status over 40 characters, a status with a link or markup (the contact's app would drop it), and a kind or status with `--stop`. The contact's side reports `typing.started` with `kind` (always) and `status` (when given), and again whenever either changes while the typing lasts; `typing.stopped` carries neither.
+
 ## Event stream
 
 `events.subscribe` turns the connection into a stream; `ghostly listen` prints it as JSON lines:
@@ -97,7 +101,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 ### Typing kept on
 
-A typing `start` holds 6 s on the contact's side ([401](401-paired-chat.md#typing)). `typing <chat> --for <seconds>` (up to 600) has the daemon say it again, at twice the engine's refresh pace, until the time is up, a message goes to that chat (from any command or `engine` call), or `typing --stop`; when the time is up it says `stop`. A one-shot command stays for that long.
+A typing `start` holds 6 s on the contact's side ([401](401-paired-chat.md#typing)). `typing <chat> --for <seconds>` (up to 600) has the daemon say it again, at twice the engine's refresh pace, until the time is up, a message goes to that chat (from any command or `engine` call), or `typing --stop`; when the time is up it says `stop`. A one-shot command stays for that long. It says the `--kind` and `--status` it was given each time ([Typing](#typing)).
 
 ### Versions
 
@@ -133,6 +137,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Chats | Pin and mute | Not applicable: both are UI-only in the app (local display state); a bot filters for itself |
 | Chats | Message details | Phase 1 |
 | Chats | Reactions: `react <chat> <message> <emoji>` and `--remove`, `group react`, reactions on each message of history, `message.reaction` / `group.reaction` events | #354 |
+| Chats | Typing indicator: typing, recording, thinking and a bot's status line ([Typing](#typing)) | Phase 1 (typing), kinds and status with 401 0.11 |
 | Chats | Secret guard | Phase 1: `send` refuses seeds, keys and ecash unless `--force` (the app's detector) |
 | Chats | Rich text | Not applicable: text is text; the bot formats it |
 | Chats | Link previews made by the sender | Planned (not in phases 1 to 4; `--preview`) |

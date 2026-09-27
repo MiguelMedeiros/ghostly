@@ -84,7 +84,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
-| `typing <chat> [--for s] [--stop]` | Show the contact you are writing: live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a message to the chat or `--stop` ends it |
+| `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a new kind or status shows at once; a message to the chat or `--stop` ends it |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
@@ -233,7 +233,7 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
 - `seq` grows by one per event in the profile, across restarts; `id` is the same whenever the same fact is reported.
   Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled.
 - Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,
-  waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
+  waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` (with `kind` and, when given, `status`; again when either changes) and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
   announced itself; not a message), `chat.announced`, `message.received`, `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.edited` (a text changed in place, the
   contact's or mine: once per edit number, with `edits` and the message as it is now), `message.deleted`, `group.created`,

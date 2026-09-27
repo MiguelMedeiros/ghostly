@@ -54,6 +54,8 @@
     "offline": "غير متصل",
     "connecting": "جاري الاتصال",
     "typing": "يكتب…",
+    "typingRecording": "يسجل صوتًا…",
+    "typingThinking": "يفكر…",
     "lastSeen": "آخر ظهور {{time}}",
     "today": "اليوم",
     "yesterday": "أمس",

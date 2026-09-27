@@ -8,7 +8,7 @@ import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
 import { DeliveryIcon } from "./chat/DeliveryStatus";
 import { TypingText } from "./TypingIndicator";
-import { usePeerTyping } from "../hooks/useTyping";
+import { usePeerTypingActivity } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
@@ -180,7 +180,7 @@ export function ChatRow(p: ChatRowProps) {
   const muted = useChatMute(p.chatId) !== undefined;
   const size = AVATAR[p.density];
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
-  const typing = usePeerTyping(p.peerPubKey);
+  const typing = usePeerTypingActivity(p.peerPubKey);
   useChosenProfile(p.peerPubKey);
   return (
     <div data-testid="chat-row" data-muted={muted || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
@@ -223,7 +223,7 @@ export function ChatRow(p: ChatRowProps) {
         </>}
         // The contact writing now takes the last message's place, in the accent, until it stops or the message comes.
         preview={typing
-          ? <TypingText testId="chat-row-typing" />
+          ? <TypingText testId="chat-row-typing" activity={typing} />
           : p.note
           ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
           : p.lastMessage

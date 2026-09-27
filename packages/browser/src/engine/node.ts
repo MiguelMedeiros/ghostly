@@ -34,7 +34,7 @@ import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResu
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, type WireEdit } from "@ghostly/core";
-import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
@@ -326,6 +326,15 @@ export interface NodeEvents {
  * when it stops, the peer is gone.
  */
 /** A waiting file or request that went out: it shows like any other from now on (a file by its transfer). */
+/** The contact's typing as the chat shows it: plain typing needs only `peerTyping`. */
+function typingView(activity: TypingActivity | null): Pick<LinkView, "peerTyping" | "peerTypingKind" | "peerTypingStatus"> {
+  return {
+    peerTyping: true,
+    ...(activity && activity.kind !== "typing" ? { peerTypingKind: activity.kind } : {}),
+    ...(activity?.status ? { peerTypingStatus: activity.status } : {}),
+  };
+}
+
 function sentNow(message: StoredMessage): StoredMessage {
   const { delivery: _delivery, deliveryError: _error, resendUntil: _until, ...sent } = message;
   return sent;
@@ -2345,11 +2354,15 @@ export class GhostlyNode implements EngineImplementation {
     await this.links.get(linkId)?.link?.setCallSignal(signal);
   }
 
-  /** WISP 401 § Typing: a `stop` always goes (when a `start` stands); a `start` only while the setting is on. */
-  setTyping({ linkId, typing }: { linkId: string; typing: boolean }): void {
+  /**
+   * WISP 401 § Typing: a `stop` always goes (when a `start` stands); a `start` only while the setting is on, with
+   * its kind and status checked here (an unknown kind is plain typing, a status with a link is dropped).
+   */
+  setTyping({ linkId, typing, kind, status }: { linkId: string; typing: boolean; kind?: TypingKind; status?: string }): void {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return;
-    live.link?.setTyping(typing === true && this.settings.sendTyping !== false);
+    if (typing === true && this.settings.sendTyping !== false) live.link?.setTyping(true, typingActivity(kind, status));
+    else live.link?.setTyping(false);
   }
 
   setFastPoll({ linkId, fast }: { linkId: string; fast: boolean }): void {
@@ -3806,7 +3819,7 @@ export class GhostlyNode implements EngineImplementation {
       groups: live.link?.groupsSupport ?? false,
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
       callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
-      ...(stored.profile && !stored.group && live.link?.peerTyping ? { peerTyping: true } : {}),
+      ...(stored.profile && !stored.group && live.link?.peerTyping ? typingView(live.link.peerTypingActivity) : {}),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
       peerParticipationKey: stored.pairedPeerKey,

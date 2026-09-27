@@ -41,7 +41,7 @@ import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
 import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
-import { TYPING_FRAME, TypingReceiver, TypingSender } from "./pairedTyping";
+import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
@@ -231,8 +231,11 @@ export interface GhostLinkEvents {
   onHold?(state: { peerAllows: boolean; peerTop?: number }): void | Promise<void>;
   onPeerAck?(ackTimestamp: number): void;
   onCallSignal?(signal: string): void;
-  /** The contact started or stopped typing (`typing/1`, WISP 401 § Typing); only changes, never stored. */
-  onPeerTyping?(typing: boolean): void;
+  /**
+   * The contact started or stopped typing (`typing/1`, WISP 401 § Typing), or said something new while it goes on
+   * (recording, thinking, a bot's status); only changes, never stored.
+   */
+  onPeerTyping?(typing: boolean, activity: TypingActivity | null): void;
   /**
    * The contact reacted to a message (`react/1`, WISP 401 § Reactions), already checked. True: confirm it (it was
    * taken: shown, kept for its message, or older than what is shown); false: not now, it comes again.
@@ -453,7 +456,7 @@ export class GhostLink {
   private readonly pairedCalls = new PairedCalls();
   /** Typing on this session (`typing/1`): when to say `start` again, and the contact's word with its timeout. */
   private readonly typingSender = new TypingSender();
-  private readonly typingReceiver = new TypingReceiver(typing => this.options.events?.onPeerTyping?.(typing));
+  private readonly typingReceiver = new TypingReceiver((typing, activity) => this.options.events?.onPeerTyping?.(typing, activity));
   /** Reaction frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly reactionsReceived = new ReactionWindow(REACTION_LIMITS.receive);
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
@@ -1765,6 +1768,8 @@ export class GhostLink {
   }
   /** The contact is typing now, as it said on this session. */
   get peerTyping(): boolean { return this.typingReceiver.peerTyping; }
+  /** What the contact is doing now (typing, recording, thinking, and a bot's status), or null. */
+  get peerTypingActivity(): TypingActivity | null { return this.typingReceiver.peerActivity; }
   /** Both sides offer `edit/1` on the open session: edits can be said and confirmed. */
   get supportsEdits(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(EDIT_CAPABILITY); }
   /**
@@ -1788,11 +1793,12 @@ export class GhostLink {
   }
   /**
    * This side is typing (true) or stopped (false). Said only on the live session and only when both sides offer
-   * `typing/1`; never on the DHT. A `start` goes at most every few seconds, a `stop` only after a `start`.
+   * `typing/1`; never on the DHT. A `start` goes at most every few seconds (at once when `activity` changes), a
+   * `stop` only after a `start`.
    */
-  setTyping(typing: boolean): void {
+  setTyping(typing: boolean, activity?: TypingActivity): void {
     if (!this.options.params.profile) return;
-    const frame = typing ? (this.supportsTyping ? this.typingSender.typing() : null) : this.typingSender.stopped();
+    const frame = typing ? (this.supportsTyping ? this.typingSender.typing(activity) : null) : this.typingSender.stopped();
     if (!frame || !this.channel || !this.supportsTyping) return;
     try { this.channel.send(JSON.stringify(frame)); } catch { /* the session is going; the contact's timeout ends it */ }
   }

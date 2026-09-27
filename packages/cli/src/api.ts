@@ -1,4 +1,4 @@
-import { inviteLink, MENTION_EVERYONE, type GroupMention, type PairedTransport } from "@ghostly/core";
+import { inviteLink, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
@@ -258,19 +258,26 @@ const METHODS: Record<string, Method> = {
   },
   /**
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.
+   * `kind` (typing, recording, thinking) and `status` (a short line, e.g. "Transcribing your audio…") say what this
+   * side is doing; a new one reaches the contact at once.
    * `for`: kept that many seconds (a one-shot stays that long), until a message to the chat or a stop.
    */
   async "chat.typing"(ctx, params) {
     const link = chatOf(ctx, params);
     const typing = !bool(params, "stop");
+    const { kind, status } = typingWord(params, typing);
+    const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
     const seconds = params.for === undefined ? 0 : num(params, "for", 0, { min: 1, max: 600 });
     if (!typing && seconds) throw new CliError("bad_request", "for keeps typing on: not with stop");
     endTyping(ctx, link.id, false);
-    node(ctx).setTyping({ linkId: link.id, typing });
+    node(ctx).setTyping({ linkId: link.id, typing, ...word });
     const until = seconds ? Date.now() + seconds * 1000 : null;
-    const kept = seconds ? keepTyping(ctx, link.id, seconds * 1000) : null;
+    const kept = seconds ? keepTyping(ctx, link.id, seconds * 1000, word) : null;
     if (kept && ctx.mode === "one-shot") await kept;
-    return { chat: link.id, typing, live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}) };
+    return {
+      chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
+      live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+    };
   },
   /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
   async "chat.react"(ctx, params) {
@@ -460,6 +467,22 @@ async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{
   const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
   if (result.error) throw new CliError(/not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
   return { messageId, emoji: emoji || null, removed };
+}
+
+/**
+ * What `typing` says: a kind, and a status a bot writes. The contact's app would cut a long status and drop one with
+ * a link; here that is an error instead, so the bot learns what the contact will (not) see.
+ */
+function typingWord(params: Params, typing: boolean): { kind: TypingKind; status?: string } {
+  const kind = oneOf(params, "kind", TYPING_KINDS, "typing");
+  const raw = str(params, "status");
+  if (!typing && (params.kind !== undefined || raw !== undefined)) throw new CliError("bad_request", "kind and status go with a start, not with stop");
+  if (raw === undefined) return { kind };
+  const oneLine = raw.replace(/\s+/g, " ").trim();
+  if ([...oneLine].length > TYPING_STATUS_MAX) throw new CliError("bad_request", `status: at most ${TYPING_STATUS_MAX} characters`);
+  const status = sanitizeTypingStatus(oneLine);
+  if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
+  return { kind, status };
 }
 
 function history(messages: StoredMessage[], params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {

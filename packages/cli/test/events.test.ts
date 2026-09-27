@@ -65,10 +65,27 @@ describe("the event stream", () => {
     h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true })]) });
     h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true })]) });
     h.sink.post({ kind: "state", state: state([link("c1")]) });
-    expect(events.map((e) => [e.type, e.id, e.chat])).toEqual([
-      ["typing.started", "typing.started:c1:1000", "c1"],
-      ["typing.stopped", "typing.stopped:c1:1000", "c1"],
+    expect(events.map((e) => [e.type, e.id, e.chat, e.kind])).toEqual([
+      ["typing.started", "typing.started:c1:1000", "c1", "typing"],
+      ["typing.stopped", "typing.stopped:c1:1000", "c1", undefined],
     ]);
+  });
+
+  it("a start says what the contact is doing, and a change while it lasts is a start again", async () => {
+    const { h, events } = await hub("typing-kinds.jsonl");
+    h.baseline(state([link("c1")]), new Map());
+    h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true, peerTypingKind: "recording" })]) });
+    h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true, peerTypingKind: "thinking" })]) });
+    h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true, peerTypingKind: "thinking", peerTypingStatus: "Transcribing your audio…" })]) });
+    h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true, peerTypingKind: "thinking", peerTypingStatus: "Transcribing your audio…" })]) });
+    h.sink.post({ kind: "state", state: state([link("c1")]) });
+    expect(events.map(({ type, chat, kind, status }) => ({ type, chat, kind, status }))).toEqual([
+      { type: "typing.started", chat: "c1", kind: "recording", status: undefined },
+      { type: "typing.started", chat: "c1", kind: "thinking", status: undefined },
+      { type: "typing.started", chat: "c1", kind: "thinking", status: "Transcribing your audio…" },
+      { type: "typing.stopped", chat: "c1", kind: undefined, status: undefined },
+    ]);
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
 
   it("after a restart: seq goes on, only what is new is reported, and the journal replays", async () => {

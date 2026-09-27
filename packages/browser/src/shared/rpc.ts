@@ -1,5 +1,5 @@
 import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
-import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget } from "@ghostly/core";
+import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, TypingKind } from "@ghostly/core";
 import type { LnurlView } from "../engine/paymentAdapters/providers/lightningService";
 import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
@@ -241,9 +241,11 @@ export interface EngineApi {
   setCallSignal(params: { linkId: string; signal: string | null }): Promise<void>;
   /**
    * This side is typing in a paired chat (true), or stopped: cleared the text, sent it, left the chat (false). Said
-   * on the live session only, throttled there; nothing is said while Settings `sendTyping` is off.
+   * on the live session only, throttled there; nothing is said while Settings `sendTyping` is off. `kind`: what this
+   * side is doing (default typing; recording a voice note; thinking); `status`: a bot's short line (40 characters,
+   * sanitized, a link or markup dropped). A new kind or status goes at once.
    */
-  setTyping(params: { linkId: string; typing: boolean }): void;
+  setTyping(params: { linkId: string; typing: boolean; kind?: TypingKind; status?: string }): void;
   setFastPoll(params: { linkId: string; fast: boolean }): void;
 
   // Private groups (WISP 900, `group-mesh/1`). Group messages arrive as `messages` events under `group:<id>`.

@@ -1,4 +1,4 @@
-import { TYPING_REFRESH_MS } from "@ghostly/core";
+import { TYPING_REFRESH_MS, type TypingKind } from "@ghostly/core";
 import { node, type ApiContext } from "./apiKit";
 
 /**
@@ -15,13 +15,16 @@ function keepersOf(ctx: ApiContext): Map<string, () => void> {
   return map;
 }
 
-/** Says this side is typing in the chat for `ms`; resolves when that ends, whichever way. */
-export function keepTyping(ctx: ApiContext, linkId: string, ms: number): Promise<void> {
+/**
+ * Says this side is typing in the chat for `ms`, with the kind and status it gave (`--kind`, `--status`) each time;
+ * resolves when that ends, whichever way.
+ */
+export function keepTyping(ctx: ApiContext, linkId: string, ms: number, word: { kind?: TypingKind; status?: string } = {}): Promise<void> {
   endTyping(ctx, linkId, false);
   const map = keepersOf(ctx);
   return new Promise<void>((resolve) => {
     const end = () => { clearInterval(again); clearTimeout(until); off(); if (map.get(linkId) === end) map.delete(linkId); resolve(); };
-    const again = setInterval(() => node(ctx).setTyping({ linkId, typing: true }), KEEP_EVERY_MS);
+    const again = setInterval(() => node(ctx).setTyping({ linkId, typing: true, ...word }), KEEP_EVERY_MS);
     const until = setTimeout(() => { end(); node(ctx).setTyping({ linkId, typing: false }); }, ms);
     // A message ends it, sent from anywhere (the engine said `stop` with it).
     const off = ctx.hub.onEvent((event) => { if (event.type === "message.sent" && event.chat === linkId) end(); });
