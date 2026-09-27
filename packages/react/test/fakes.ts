@@ -23,7 +23,7 @@ export function deferred<T>(): Deferred<T> {
 
 let trackIds = 0;
 
-export class FakeTrack {
+export class FakeTrack extends EventTarget {
   readonly id = `track-${++trackIds}`;
   enabled = true;
   readyState: "live" | "ended" = "live";
@@ -33,7 +33,24 @@ export class FakeTrack {
     this.readyState = "ended";
   });
 
-  constructor(readonly kind: "audio" | "video") {}
+  /** `deviceId`: the device it captures from ("default" when nothing asked for one); `label` its name. */
+  constructor(readonly kind: "audio" | "video", readonly deviceId = "default", readonly label = "") {
+    super();
+  }
+
+  getSettings() { return { deviceId: this.deviceId }; }
+
+  /** The device was unplugged: the track ends, as browsers end it. */
+  unplug() {
+    this.readyState = "ended";
+    this.onended?.();
+    this.dispatchEvent(new Event("ended"));
+  }
+}
+
+/** A device the fake `enumerateDevices` lists. */
+export function device(kind: MediaDeviceKind, deviceId: string, label: string): MediaDeviceInfo {
+  return { kind, deviceId, label, groupId: "", toJSON: () => ({}) } as MediaDeviceInfo;
 }
 
 export class FakeMediaStream {
@@ -58,7 +75,10 @@ export interface MediaRequest {
   deny(error: unknown): void;
 }
 
-export class FakeMediaDevices {
+export class FakeMediaDevices extends EventTarget {
+  /** What `enumerateDevices` lists; `plug` and `unplug` change it and fire `devicechange`. */
+  devices: MediaDeviceInfo[] = [];
+  readonly enumerateDevices = vi.fn(async () => [...this.devices]);
   readonly userMedia: MediaRequest[] = [];
   readonly displayMedia: MediaRequest[] = [];
   /** Every stream handed out, so a test can check none is left running. */
@@ -66,6 +86,27 @@ export class FakeMediaDevices {
 
   readonly getUserMedia = vi.fn((constraints: MediaStreamConstraints) => this.request(this.userMedia, constraints));
   readonly getDisplayMedia = vi.fn((constraints: MediaStreamConstraints) => this.request(this.displayMedia, constraints));
+
+  plug(info: MediaDeviceInfo) {
+    this.devices.push(info);
+    this.dispatchEvent(new Event("devicechange"));
+  }
+
+  unplug(deviceId: string) {
+    this.devices = this.devices.filter((d) => d.deviceId !== deviceId);
+    this.dispatchEvent(new Event("devicechange"));
+  }
+
+  /** The device a request for `kind` gets: the one asked for (exactly, or ideally when it is there), else the default. */
+  private pick(kind: "audio" | "video", constraint: boolean | MediaTrackConstraints | undefined): { id: string; label: string } {
+    const wanted = typeof constraint === "object" ? constraint.deviceId : undefined;
+    const exact = typeof wanted === "object" && !Array.isArray(wanted) ? (wanted as ConstrainDOMStringParameters).exact : undefined;
+    const ideal = typeof wanted === "string" ? wanted : typeof wanted === "object" && !Array.isArray(wanted) ? (wanted as ConstrainDOMStringParameters).ideal : undefined;
+    const id = (exact ?? ideal) as string | undefined;
+    const listed = this.devices.find((d) => d.kind === `${kind}input` && d.deviceId === id);
+    if (exact && !listed) throw new DOMException("No such device", "OverconstrainedError");
+    return listed ? { id: listed.deviceId, label: listed.label } : { id: "default", label: `Default ${kind}` };
+  }
 
   /** Every track handed out that nobody stopped. */
   liveTracks(): FakeTrack[] {
@@ -78,8 +119,17 @@ export class FakeMediaDevices {
       constraints,
       grant: () => {
         const tracks: FakeTrack[] = [];
-        if (constraints.audio) tracks.push(new FakeTrack("audio"));
-        if (constraints.video) tracks.push(new FakeTrack("video"));
+        try {
+          for (const kind of ["audio", "video"] as const) {
+            if (!constraints[kind]) continue;
+            const { id, label } = this.pick(kind, constraints[kind]);
+            tracks.push(new FakeTrack(kind, id, label));
+          }
+        } catch (error) {
+          // A device asked for exactly that is not there: the request fails, as in browsers.
+          answer.reject(error);
+          return new FakeMediaStream();
+        }
         const stream = new FakeMediaStream(tracks);
         this.streams.push(stream);
         answer.resolve(stream);

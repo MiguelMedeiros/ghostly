@@ -22,6 +22,7 @@ const from = (id: string | undefined): MediaTrackConstraints | true => (id ? { d
 export function MediaSettings() {
   const { t } = useI18n();
   const { supported, list, choices, allowNames } = useMediaDevices();
+  const [preview, setPreview] = useState(false);
   if (!supported) return null;
 
   const speaker = canPickSpeaker() && list.audiooutput.length > 0;
@@ -35,8 +36,13 @@ export function MediaSettings() {
       <DeviceRow kind="audioinput" list={list} choices={choices} info={t("settings.media.microphoneInfo")}>
         {(id, fail) => <MicrophoneTest id={id} fail={fail} />}
       </DeviceRow>
-      <DeviceRow kind="videoinput" list={list} choices={choices} info={t("settings.media.cameraInfo")}>
-        {(id, fail) => <CameraTest id={id} fail={fail} />}
+      <DeviceRow kind="videoinput" list={list} choices={choices} info={t("settings.media.cameraInfo")}
+        below={preview ? (id, fail) => <CameraPreview id={id} fail={(failed) => { fail(failed); if (failed) setPreview(false); }} /> : undefined}>
+        {() => (
+          <Button data-testid="settings-camera-preview" aria-pressed={preview} onClick={() => setPreview(!preview)}>
+            {preview ? t("settings.media.stop") : t("settings.media.preview")}
+          </Button>
+        )}
       </DeviceRow>
       {speaker && (
         <DeviceRow kind="audiooutput" list={list} choices={choices} info={t("settings.media.speakerInfo")}>
@@ -47,13 +53,15 @@ export function MediaSettings() {
   );
 }
 
-function DeviceRow({ kind, list, choices, info, children }: {
+function DeviceRow({ kind, list, choices, info, children, below }: {
   kind: DeviceKind;
   list: DeviceList;
   choices: ReturnType<typeof useMediaDevices>["choices"];
   info: string;
   /** The row's way to try the device; `fail` says it could not be opened. */
   children: (id: string | undefined, fail: (failed: boolean) => void) => ReactNode;
+  /** What trying it shows under the row, the whole width (the camera's picture). */
+  below?: (id: string | undefined, fail: (failed: boolean) => void) => ReactNode;
 }) {
   const { t } = useI18n();
   const name = t(NAME_KEY[kind]);
@@ -73,12 +81,15 @@ function DeviceRow({ kind, list, choices, info, children }: {
   };
 
   return (
-    <Row label={name} info={info} testId={`${TEST_ID[kind]}-row`}
-      hint={missing ? <span role="status" data-testid={`${TEST_ID[kind]}-missing`}>{t("settings.media.missing", { name: missing })}</span>
-        : failed ? <span role="alert" data-testid={`${TEST_ID[kind]}-failed`} className="text-danger">{t("settings.media.failed")}</span> : undefined}>
-      <Select fit aria-label={name} data-testid={TEST_ID[kind]} value={id ?? ""} options={options} onChange={pick} />
-      {children(id, setFailed)}
-    </Row>
+    <div>
+      <Row label={name} info={info} testId={`${TEST_ID[kind]}-row`}
+        hint={missing ? <span role="status" data-testid={`${TEST_ID[kind]}-missing`}>{t("settings.media.missing", { name: missing })}</span>
+          : failed ? <span role="alert" data-testid={`${TEST_ID[kind]}-failed`} className="text-danger">{t("settings.media.failed")}</span> : undefined}>
+        <Select fit aria-label={name} data-testid={TEST_ID[kind]} value={id ?? ""} options={options} onChange={pick} />
+        {children(id, setFailed)}
+      </Row>
+      {below && <div className="px-4 pb-3.5">{below(id, setFailed)}</div>}
+    </div>
   );
 }
 
@@ -134,37 +145,32 @@ function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failed: b
   </>;
 }
 
-/** The chosen camera's picture, while it is on. */
-function CameraTest({ id, fail }: { id: string | undefined; fail: (failed: boolean) => void }) {
+/** The chosen camera's picture, while it is shown. */
+function CameraPreview({ id, fail }: { id: string | undefined; fail: (failed: boolean) => void }) {
   const { t } = useI18n();
-  const [on, setOn] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
+  const failRef = useRef(fail);
+  failRef.current = fail;
 
   useEffect(() => {
-    if (!on) return;
     let live = true;
     let stream: MediaStream | null = null;
-    fail(false);
+    failRef.current(false);
     navigator.mediaDevices.getUserMedia({ video: from(id), audio: false }).then((s) => {
       if (!live) { s.getTracks().forEach((track) => track.stop()); return; }
       stream = s;
       if (video.current) { video.current.srcObject = s; void video.current.play?.()?.catch(() => {}); }
-    }, () => { if (live) { fail(true); setOn(false); } });
+    }, () => { if (live) failRef.current(true); });
     return () => {
       live = false;
       stream?.getTracks().forEach((track) => track.stop());
     };
-  }, [on, id, fail]);
+  }, [id]);
 
-  return <>
-    <Button data-testid="settings-camera-preview" aria-pressed={on} onClick={() => setOn(!on)}>
-      {on ? t("settings.media.stop") : t("settings.media.preview")}
-    </Button>
-    {on && (
-      <video ref={video} muted playsInline aria-label={t("settings.media.previewLabel")} data-testid="settings-camera-video"
-        className="basis-full w-full max-w-xs aspect-video rounded-lg bg-black object-cover -scale-x-100" />
-    )}
-  </>;
+  return (
+    <video ref={video} muted playsInline aria-label={t("settings.media.previewLabel")} data-testid="settings-camera-video"
+      className="w-full max-w-sm aspect-video rounded-lg bg-black object-cover -scale-x-100" />
+  );
 }
 
 /** A short sound on the chosen speaker. */

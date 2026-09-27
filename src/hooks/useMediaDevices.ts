@@ -26,10 +26,11 @@ export function useMediaDevices(): {
     let live = true;
     const update = () => { void listDevices().then((next) => { if (live) setList(next); }); };
     update();
-    navigator.mediaDevices.addEventListener?.("devicechange", update);
+    const media = navigator.mediaDevices;
+    media.addEventListener?.("devicechange", update);
     return () => {
       live = false;
-      navigator.mediaDevices.removeEventListener?.("devicechange", update);
+      media.removeEventListener?.("devicechange", update);
     };
   }, [supported]);
 
