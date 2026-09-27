@@ -216,7 +216,9 @@ export default function PrivacyPage() {
                 </strong>{" "}
                 A direct connection means the peer on the other end sees your IP
                 address. Only ever connect with people you are willing to reveal
-                that to.
+                that to. While you write in a one-to-one chat, your app tells
+                that contact you are typing, over the live connection only. You
+                can turn this off in Settings, Security.
               </li>
             </ul>
             <p>

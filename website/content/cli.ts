@@ -46,6 +46,7 @@ export const LINKS = {
 /** What it covers, one level each (the site's levels; see lib/status.ts). */
 const SCOPE: { level: Level; key: string }[] = [
   { level: "available", key: "chats" },
+  { level: "available", key: "chatting" },
   { level: "available", key: "groups" },
   { level: "available", key: "files" },
   { level: "available", key: "pay" },
@@ -62,12 +63,12 @@ export const cli = {
   meta: {
     title: "Ghostly CLI: the app's engine for bots",
     description:
-      "ghostly runs the Ghostly app's own engine without a screen: invites, chats, groups, files and payments for scripts, bots and AI agents, with every event as a JSON line.",
+      "ghostly runs the Ghostly app's own engine without a screen: invites, chats, groups, files, payments and voice calls for scripts, bots and AI agents, with every event as a JSON line.",
   },
   hero: {
     eyebrow: "Command line",
     title: "Ghostly for bots.",
-    lead: "ghostly runs the app's own engine without a screen. Your script gets the same invites, chats, groups and payments as the app, and every event as a JSON line.",
+    lead: "ghostly runs the app's own engine without a screen. Your script gets the same invites, chats, groups, payments and voice calls as the app, and every event as a JSON line.",
     install: "Install",
     guide: "Full guide",
     term: "Example ghostly session",
@@ -97,8 +98,9 @@ export const cli = {
     title: "What it covers",
     items: {
       chats: "Invites and one chat, over the app's transports",
+      chatting: "Typing, replies and emoji reactions",
       groups: "Groups, with mentions and admin tools",
-      files: "Files and voice notes",
+      files: "Files and voice notes, with their waveform",
       pay: "Wallets and payments (Mainnet only with --confirm-real)",
       ids: "Identity proofs",
       services: "Shared web apps",
