@@ -87,3 +87,45 @@ export async function playInPage(fixtures) {
   }
   return out;
 }
+
+/**
+ * In the page: plays each fixture muted at `rate` (2× by default) with the pitch kept, as the voice bubble's speed pill does,
+ * and reports what the engine made of it: `{ [name]: { rate, preservesPitch, speed, error? } }`. `rate` and
+ * `preservesPitch` are read back from the element (an engine without them reports 1 and undefined); `speed` is
+ * how many seconds of the recording played per second of wall clock, so 2 means it really plays twice as fast.
+ */
+export async function rateInPage(fixtures, rate = 2) {
+  const out = {};
+  for (const { name, mime, base64 } of fixtures) {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    const audio = new Audio();
+    audio.muted = true;
+    audio.preservesPitch = true;
+    audio.webkitPreservesPitch = true;
+    audio.src = url;
+    audio.defaultPlaybackRate = rate;
+    audio.playbackRate = rate;
+    const result = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve({ error: `stuck at ${audio.currentTime.toFixed(2)} s` }), 8_000);
+      const finish = (value) => { clearTimeout(timer); resolve(value); };
+      let first = null;
+      audio.addEventListener("error", () => finish({ error: `MediaError ${audio.error?.code} ${audio.error?.message ?? ""}`.trim() }));
+      const timed = () => ({ speed: Math.round(((audio.currentTime - first.time) / ((performance.now() - first.at) / 1000)) * 100) / 100 });
+      audio.addEventListener("timeupdate", () => {
+        if (!first) { if (audio.currentTime > 0) first = { at: performance.now(), time: audio.currentTime }; return; }
+        if (performance.now() - first.at >= 400) finish(timed());
+      });
+      // A short recording ends first: timed to its end, when there was long enough to time.
+      audio.addEventListener("ended", () => finish(first && performance.now() - first.at >= 150 ? timed() : { error: "ended before it could be timed" }));
+      audio.play().catch((error) => finish({ error: `play() ${error?.name}: ${error?.message}` }));
+    });
+    // Read from the engine's own property: on an engine without one, the value set above is only a plain field.
+    const pitch = "preservesPitch" in HTMLMediaElement.prototype ? audio.preservesPitch : "webkitPreservesPitch" in HTMLMediaElement.prototype ? audio.webkitPreservesPitch : undefined;
+    out[name] = { rate: audio.playbackRate, preservesPitch: pitch, ...result };
+    audio.pause();
+    audio.removeAttribute("src");
+    URL.revokeObjectURL(url);
+  }
+  return out;
+}

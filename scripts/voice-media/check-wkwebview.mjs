@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadFixtures, playInPage } from "../../e2e/support/voice-media.mjs";
+import { loadFixtures, playInPage, rateInPage } from "../../e2e/support/voice-media.mjs";
 import { desktopPolicy, inWebView } from "./webview.mjs";
 
 /**
@@ -21,5 +21,17 @@ for (const [name, result] of Object.entries(results)) {
 }
 if (failed) {
   console.error(`\n${failed} recording(s) do not play in WKWebView${policy ? " under Desktop's CSP (try --policy none: a policy problem, or a codec one?)" : ""}.`);
+  process.exit(1);
+}
+
+// The speed pill: 2× must really play twice as fast, with the pitch kept (at 1× the same timing reads under 1).
+const fast = inWebView(rateInPage, [loadFixtures(), 2], { csp: policy });
+for (const [name, result] of Object.entries(fast)) {
+  const ok = result.rate === 2 && result.preservesPitch === true && result.speed > 1.4;
+  if (!ok) failed++;
+  console.log(`${ok ? "✓" : "✗"} ${name.padEnd(28)} at 2×: playbackRate=${result.rate} preservesPitch=${result.preservesPitch} speed=${result.speed ?? "?"}${result.error ? `  ${result.error}` : ""}`);
+}
+if (failed) {
+  console.error(`\n${failed} recording(s) do not play faster with the pitch kept in WKWebView.`);
   process.exit(1);
 }

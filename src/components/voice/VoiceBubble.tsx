@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
+import { useOptionalI18n } from "../../contexts/I18nContext";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
+import { languageTag } from "../../lib/documentLanguage";
 import { formatFileSize } from "../../lib/format";
 import type { ChatFile } from "../../lib/types";
 import {
+  applyVoiceRate,
   claimPlayback,
+  formatVoiceRate,
   isVoicePlayed,
   markVoicePlayed,
   nextVoiceRate,
@@ -38,6 +42,7 @@ function describeFailure(what: string, error: unknown): string {
  */
 export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer" }) {
   const platform = useServicesPlatform();
+  const locale = languageTag(useOptionalI18n()?.language ?? "en");
   const transfer = platform?.getTransfer(file.id) ?? null;
   const ready = transfer === null || transfer.state === "done";
   const seconds = file.voice.duration / 1000;
@@ -52,6 +57,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
   const [retryError, setRetryError] = useState("");
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const playRef = useRef<HTMLButtonElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobRef = useRef<Blob | null>(null);
@@ -130,7 +136,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
         cannotPlayHere();
         return null;
       }
-      audio.playbackRate = voiceRate();
+      applyVoiceRate(audio, voiceRate());
       audio.addEventListener("timeupdate", () => setPosition(audio.currentTime));
       audio.addEventListener("ended", () => {
         stopFrames();
@@ -168,7 +174,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
     try {
       for (;;) {
         if (Math.abs(audio.currentTime - positionRef.current) > 0.05) audio.currentTime = positionRef.current;
-        audio.playbackRate = voiceRate();
+        applyVoiceRate(audio, voiceRate());
         try {
           await audio.play();
           return true;
@@ -214,7 +220,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause }), [file.id, play, pause]);
   useEffect(() => onVoiceRate((next) => {
     setRate(next);
-    if (audioRef.current) audioRef.current.playbackRate = next;
+    if (audioRef.current) applyVoiceRate(audioRef.current, next);
   }), []);
   useEffect(() => () => {
     stopFrames();
@@ -277,6 +283,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
     >
       <div className="flex items-center gap-1.5">
         <button
+          ref={playRef}
           type="button"
           data-testid="voice-play"
           aria-label={state === "playing" ? "Pause voice message" : "Play voice message"}
@@ -310,35 +317,28 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
             onPointerCancel={onScrubEnd}
             onKeyDown={onWaveKey}
           />
-          {/* One line under the waveform, all inside the bubble: what it is and how long, then the speed while it plays. */}
+          {/* One line under the waveform, all inside the bubble: what it is and how long; while it plays, the speed in the mic's place. */}
           <div className="flex items-center gap-1 mt-1 h-[18px] text-[11px] text-text-primary/65" data-testid="voice-meta">
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              className={`shrink-0 ${unplayed ? "text-accent-hover" : ""}`}
-              data-testid={unplayed ? "voice-unplayed" : "voice-mic"}
-              role="img"
-              aria-label={unplayed ? "Voice message, not played yet" : "Voice message"}
-            >
-              <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
-            </svg>
+            {active ? (
+              <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />
+            ) : (
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className={`shrink-0 ${unplayed ? "text-accent-hover" : ""}`}
+                data-testid={unplayed ? "voice-unplayed" : "voice-mic"}
+                role="img"
+                aria-label={unplayed ? "Voice message, not played yet" : "Voice message"}
+              >
+                <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+              </svg>
+            )}
             <span data-testid="voice-time" className={`tabular-nums ${unplayed ? "text-accent-hover font-medium" : ""}`}>
               {active ? formatVoiceDuration(position * 1000) : formatVoiceDuration(file.voice.duration)}
             </span>
             {status && <span data-testid="voice-status" className={`min-w-0 ${transfer?.state === "failed" ? "text-danger-ink truncate" : "truncate"}`}>· {status}</span>}
-            {active && (
-              <button
-                type="button"
-                data-testid="voice-speed"
-                aria-label={`Playback speed ${rate}×`}
-                onClick={() => nextVoiceRate()}
-                className="ms-auto shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums"
-              >
-                {rate}×
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -353,5 +353,36 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
       )}
       {retryError && <p className="text-xs text-danger-ink px-1 m-0" role="alert">{retryError}</p>}
     </div>
+  );
+}
+
+/**
+ * The speed, WhatsApp's pill: 1× → 1.5× → 2× → 1× on each tap, for every voice message on this device. It is
+ * there only while one plays or waits mid-way; when it goes (the recording ended) with the keyboard on it,
+ * the keyboard goes back to play rather than to the page.
+ */
+function SpeedPill({ rate, locale, onGone }: { rate: number; locale: string; onGone: () => void }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const goneRef = useRef(onGone);
+  goneRef.current = onGone;
+  // A layout cleanup runs while the button is still in the page, so it can still tell whether it had focus.
+  useLayoutEffect(() => {
+    const button = ref.current;
+    return () => { if (button && document.activeElement === button) goneRef.current(); };
+  }, []);
+  const label = formatVoiceRate(rate, locale);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      data-testid="voice-speed"
+      data-rate={rate}
+      aria-label={`Playback speed ${label}`}
+      onClick={() => nextVoiceRate()}
+      // The pill is as tall as the line it sits on; its touch area reaches a little past it.
+      className="relative shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums before:content-[''] before:absolute before:-inset-x-1 before:-inset-y-1"
+    >
+      {label}
+    </button>
   );
 }

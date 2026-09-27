@@ -1,4 +1,4 @@
-import { loadFixtures, playInPage } from "../support/voice-media.mjs";
+import { loadFixtures, playInPage, rateInPage } from "../support/voice-media.mjs";
 import { test, expect } from "../support/desktop";
 
 /**
@@ -31,4 +31,25 @@ test("voice recordings from every Ghostly play in the Desktop WebView", { tag: [
   // AAC (older Macs record it) needs a GStreamer AAC decoder on Linux, which not every system has. Where it is
   // missing the bubble offers the file to save; what must never happen is the policy refusing the blob.
   for (const [name, result] of Object.entries(results)) expect(result.error ?? "", name).not.toMatch(/Content Security Policy|NotAllowedError/i);
+});
+
+test("voice recordings play twice as fast with the pitch kept in the Desktop WebView (the speed pill)", { tag: ["@feature:files.voice.play"] }, async ({ app }) => {
+  await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+
+  // WebM/Opus only: AAC may have no decoder here at all (above).
+  const results: Record<string, { rate: number; preservesPitch?: boolean; speed?: number; error?: string }> = {};
+  for (const fixture of fixtures.filter((f) => f.name.endsWith(".webm"))) {
+    const result = await app.executeAsync<typeof results>(
+      `const done = arguments[arguments.length - 1];
+       (${String(rateInPage)})([arguments[0]], 2).then(done, (error) => done({ [arguments[0].name]: { rate: 0, error: String(error) } }));`,
+      fixture,
+    );
+    Object.assign(results, result);
+  }
+  test.info().annotations.push({ type: "rates", description: JSON.stringify(results) });
+  // At 1× the same timing reads under 1, so over 1.4 is really faster, not a clock's jitter.
+  for (const [name, result] of Object.entries(results)) {
+    expect(result, name).toMatchObject({ rate: 2, preservesPitch: true });
+    expect(result.speed ?? 0, name).toBeGreaterThan(1.4);
+  }
 });

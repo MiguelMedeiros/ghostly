@@ -145,6 +145,71 @@ describe("a voice message in the chat", () => {
     expect(within(second!).getByTestId("voice-speed")).toHaveTextContent("1×");
   });
 
+  it("plays faster with the voice at its own pitch, and remembers the speed for the next one on this device", async () => {
+    const first = chat(voice());
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    const player = audio.players[0]! as HTMLAudioElement & { webkitPreservesPitch?: boolean };
+    expect(player.playbackRate).toBe(1);
+    expect(player.preservesPitch).toBe(true);
+    expect(player.webkitPreservesPitch).toBe(true);
+    fireEvent.click(screen.getByTestId("voice-speed"));
+    expect(player.playbackRate).toBe(1.5);
+    // A new source (the decoded WAV) resets the rate to the default one: that follows too.
+    expect(player.defaultPlaybackRate).toBe(1.5);
+    expect(player.preservesPitch).toBe(true);
+    expect(localStorage.getItem("ghostly-voice-rate")).toBe("1.5");
+    first.unmount();
+
+    // Another voice message, later: it starts at the speed last chosen.
+    chat(voice());
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    expect(audio.players[1]!.playbackRate).toBe(1.5);
+    expect(screen.getByTestId("voice-speed")).toHaveTextContent("1.5×");
+  });
+
+  it.each([
+    ["en", "1.5×"],
+    ["pt", "1,5×"],
+    ["fr", "1,5×"],
+    ["ja", "1.5×"],
+    // Latin digits, as the clock beside it has in every language.
+    ["ar", "1.5×"],
+  ] as const)("shows the speed in the app language's decimals (%s: %s)", async (language, label) => {
+    localStorage.setItem("ghostly-voice-rate", "1.5");
+    renderApp(<MessageBubble message={voice()} peerPubKey="peer" />, { language });
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    expect(screen.getByRole("button", { name: `Playback speed ${label}` })).toHaveTextContent(label);
+  });
+
+  it("takes the mic's place while it plays, is a button the keyboard can use, and hands focus back to play when it goes", async () => {
+    chat(voice());
+    const bubble = screen.getByTestId("voice-bubble");
+    expect(within(bubble).queryByTestId("voice-speed")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    const meta = screen.getByTestId("voice-meta");
+    // In the mic's place, first on the line, before the time.
+    expect(meta.firstElementChild).toBe(screen.getByTestId("voice-speed"));
+    expect(within(meta).queryByTestId("voice-unplayed")).not.toBeInTheDocument();
+    // Tapping it leaves playback alone.
+    const speed = screen.getByRole("button", { name: "Playback speed 1×" });
+    speed.focus();
+    fireEvent.click(speed);
+    expect(bubble).toHaveAttribute("data-state", "playing");
+    expect(audio.players[0]!.paused).toBe(false);
+    expect(document.activeElement).toBe(speed);
+
+    // The recording ends with the keyboard on the pill: it goes to play, not to the page.
+    endPlayback(audio.players[0]!);
+    await flush();
+    expect(screen.queryByTestId("voice-speed")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByTestId("voice-play"));
+    expect(within(meta).getByTestId("voice-mic")).toBeInTheDocument();
+  });
+
   it("moves to where the waveform is tapped or dragged", async () => {
     chat(voice({}, 10_000));
     const wave = screen.getByTestId("voice-waveform");

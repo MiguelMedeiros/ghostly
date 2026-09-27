@@ -50,6 +50,26 @@ const overhang = (bubble: Locator) =>
     return worst;
   });
 
+/**
+ * Starts keeping every media element the page plays: the voice bubble's `<audio>` is never in the DOM, and the
+ * speed test reads what the engine itself was told (`playbackRate`, `preservesPitch`), not only the label.
+ */
+const watchAudio = (page: Page) =>
+  page.evaluate(() => {
+    const w = window as unknown as { voiceAudio?: HTMLMediaElement[] };
+    if (w.voiceAudio) return;
+    const seen: HTMLMediaElement[] = (w.voiceAudio = []);
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+      if (!seen.includes(this)) seen.push(this);
+      return play.call(this);
+    };
+  });
+
+/** The rate and pitch setting of every media element played since `watchAudio`. */
+const audioRates = (page: Page) =>
+  page.evaluate(() => ((window as unknown as { voiceAudio?: HTMLMediaElement[] }).voiceAudio ?? []).map((audio) => ({ rate: audio.playbackRate, preservesPitch: audio.preservesPitch })));
+
 /** How many different bar heights a waveform has: a flat line has one. */
 const shapes = (bubble: Locator) =>
   bubble.locator(".voice-wave-base .voice-wave-bar").evaluateAll((bars) => new Set(bars.map((bar) => (bar as HTMLElement).style.height)).size);
@@ -161,12 +181,38 @@ test("voice messages: hands-free with a click, pause and preview, Enter, Esc; th
   await expect(second).toHaveAttribute("data-played", "true");
 
   // Only one at a time: starting the first again stops the second.
+  await watchAudio(bob.page);
   await first.getByTestId("voice-play").click();
   await expect(first).toHaveAttribute("data-state", "playing");
   await expect(second).toHaveAttribute("data-state", "paused");
 
-  // Speed is shared by every voice message.
+  // The speed pill, in the mic's place while it plays or waits mid-way. Paused first: a short recording would
+  // end (and the pill go) between two taps.
+  await first.getByTestId("voice-play").click();
+  await expect(first).toHaveAttribute("data-state", "paused");
+  const pill = first.getByRole("button", { name: "Playback speed 1×" });
+  await expect(pill).toHaveText("1×");
+  await expect(first.getByTestId("voice-mic")).toHaveCount(0);
+  // Shared by every voice message: 1× → 1.5× → 2×, and what the engine plays at, with the pitch kept.
   await first.getByTestId("voice-speed").click();
   await expect(first.getByTestId("voice-speed")).toHaveText("1.5×");
   await expect(second.getByTestId("voice-speed")).toHaveText("1.5×");
+  await first.getByTestId("voice-speed").click();
+  await expect(first.getByRole("button", { name: "Playback speed 2×" })).toHaveText("2×");
+  await expect(second.getByTestId("voice-speed")).toHaveText("2×");
+  await expect.poll(() => audioRates(bob.page)).toEqual([{ rate: 2, preservesPitch: true }]);
+  // It plays on at 2× from where it was, and the next one follows at 2× too.
+  await first.getByTestId("voice-play").click();
+  await expect(second).toHaveAttribute("data-state", "playing", { timeout: 15_000 });
+  await expect.poll(() => audioRates(bob.page)).toEqual([{ rate: 2, preservesPitch: true }, { rate: 2, preservesPitch: true }]);
+  await expect(second).toHaveAttribute("data-state", "idle", { timeout: 15_000 });
+
+  // Remembered on this device: after a reload, the next voice message starts at 2×.
+  await bob.page.reload();
+  const again = voices(bob).first();
+  await expect(again.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
+  await watchAudio(bob.page);
+  await again.getByTestId("voice-play").click();
+  await expect(again.getByTestId("voice-speed")).toHaveText("2×");
+  await expect.poll(() => audioRates(bob.page)).toEqual([{ rate: 2, preservesPitch: true }]);
 });
