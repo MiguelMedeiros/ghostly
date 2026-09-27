@@ -93,7 +93,7 @@ Inspection of `dev` at `802b48bc`, rechecked at `8670aeab`. The chat family's re
 | Mailbox reads while live | Every 5 min, at once on a drop (10 s, not 4 s, while open on the DHT: relay budget) | Every 5 min, at once on a drop |
 | Compatibility (prefix-less, v0.4) chats | Read and written, marked in the header, "Continue in a new chat" | Same; never created; "Continue in a new chat" |
 | Hosted HTTP in new chats | Yes: `ph` frames on the chat session ([pairedHttp.ts](../../packages/core/src/pairedHttp.ts)) under `services/1` ([pairedCapabilities.ts](../../packages/core/src/pairedCapabilities.ts)), live only | Unchanged |
-| Calls in new chats | Yes: `calls/1`, `paired-call` signals on the live session ([pairedCalls.ts](../../packages/core/src/pairedCalls.ts)), media on its own WebRTC connection; not on Linux Desktop (no WebRTC) | Unchanged |
+| Calls in new chats | Yes: `calls/1`, `paired-call` signals on the live session ([pairedCalls.ts](../../packages/core/src/pairedCalls.ts)), media on its own WebRTC connection; on Linux Desktop (no WebRTC in WebKitGTK) that connection runs in Rust, webrtc-rs and GStreamer, with no screen sharing yet | Unchanged |
 | Pairing progress | Ends `live` or `on-dht`; `failed` only for key mismatch, rejection, publish, offline | Adds terminal `on-dht`; `failed` only for security or an unreachable DHT |
 | CLI | Legacy `_msgs` only | Unchanged by the Drafts; a DHT-only client of 403 is the natural next step |
 

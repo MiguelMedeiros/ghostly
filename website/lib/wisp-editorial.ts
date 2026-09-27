@@ -569,8 +569,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "In every chat while it is live. Not on Linux desktop (its webview has no WebRTC) and not in groups.",
-      "pt-br": "Em todo chat enquanto ele está ao vivo. Não no desktop Linux (o webview não tem WebRTC) nem em grupos.",
+      en: "In every chat while it is live, the Linux desktop included (with media of its own, its webview having no WebRTC). Not in groups.",
+      "pt-br": "Em todo chat enquanto ele está ao vivo, inclusive no desktop Linux (com mídia própria, já que o webview não tem WebRTC). Não em grupos.",
     },
     feature: inApp("next", "Calls", "Chamadas"),
   },

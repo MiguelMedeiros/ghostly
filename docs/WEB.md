@@ -52,7 +52,7 @@ Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the ca
 | | Web | Extension | Desktop |
 |---|---|---|---|
 | Chat, files, payments | ✅ | ✅ | ✅ |
-| Calls | ✅ | ✅ | ✅ (not on Linux: no WebRTC) |
+| Calls | ✅ | ✅ | ✅ (Linux: native media, no screen sharing yet) |
 | Mainline DHT | through relays | through relays | directly |
 | Iroh, HyperDHT | through a relay (HyperDHT only when one is set) | same as web | native |
 | Runs while no window is open | no, the peer is the tab | yes, until the browser closes | yes, until the app closes |

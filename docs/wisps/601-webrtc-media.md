@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 601; editorial family allocation |
 | Status | Draft |
-| Revision | 0.4 |
-| Updated | 2026-09-25 |
+| Revision | 0.5 |
+| Updated | 2026-09-26 |
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
 | Implementation | Compatibility chats (`_call`) and the chat session of every new chat (`calls/1`); capture varies by platform. |
@@ -26,13 +26,26 @@ Signaling: each compact signal above (offer `o`, answer `a`, hang-up `h`, pictur
 
 Media: always a WebRTC peer connection of its own, separate from the session, whatever carries the chat (WebRTC, Iroh or HyperDHT). Iroh and HyperDHT carry the session's text frames, not RTP; the call's connection gathers its own ICE candidates (STUN) and runs DTLS-SRTP end to end, as in a compatibility chat. The offer and answer carry that connection's DTLS fingerprint inside the authenticated session, so the media is bound to the contact the session authenticated, which a `_call` record read from the DHT does not give. A separate connection also means a transport switch of the chat does not interrupt a call.
 
-An app without WebRTC (Desktop on Linux: WebKitGTK has none) does not offer `calls/1`, and says "Calls are not available in this app"; its contact's app says the contact cannot take calls. If the session drops during a call, the media goes on; the call ends on hang-up (sent on the next session while fresh) or when the media connection fails.
+An app that cannot call does not offer `calls/1` and says why on its call buttons ("Calls are not available in this app", or its own reason); its contact's app says the contact cannot take calls. If the session drops during a call, the media goes on; the call ends on hang-up (sent on the next session while fresh) or when the media connection fails.
+
+## Desktop on Linux
+
+WebKitGTK, the WebView of Ghostly Desktop on Linux, is built without WebRTC by Ubuntu (22.04, 24.04), Debian 13 and Fedora 42: there is no `RTCPeerConnection`, and turning on WebKit's `enable-webrtc` setting changes nothing. So the Linux app runs the media connection itself, in Rust, and nothing on the wire changes: the same compact signals, the same WebRTC (ICE with STUN, DTLS-SRTP, Opus and VP8), so it calls browsers and other Desktops alike.
+
+- **WebRTC** is `webrtc-rs`. Its host candidates end at `typ host` (browsers add `generation 0`), which a signal must still read as a host candidate; a socket on an unspecified address (`::` where there is no IPv6) gives no candidate.
+- **Media** is GStreamer: the microphone to Opus, the camera to VP8, and back through a jitter buffer to the speakers and to the page, which shows the peer's picture as JPEG frames drawn on a canvas. Only gst-plugins-base and gst-plugins-good are used; WebKitGTK depends on both, so an installed app has them. Not GStreamer's `webrtcbin`: its libnice links libsoup 2 on Ubuntu 22.04 and Debian 12, and loading libsoup 2 into a WebKitGTK 4.1 process (libsoup 3) aborts it.
+- **Missing plugins**: the app checks for every element it uses when it starts. When one is missing it does not offer `calls/1`, and its call buttons name the packages to install.
+- **Screen sharing** is not available on Linux yet (it needs the desktop portal): the share button stays in the call window, turned off, with that reason.
+
+Permissions are the same choices: capture starts only when the person places or answers a call, or turns the camera on, and stops on hang-up.
 
 ## Scope and evidence
 
-This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of the chat session ([401](401-paired-chat.md)). It does not add group calls, an SFU or an end-to-end encrypted forwarding-service claim. See [React call hooks](../../packages/react), [paired calls](../../packages/core/src/pairedCalls.ts). Exercise accept/reject/hangup, stale signals, simultaneous calls, denied permissions and camera/screen transitions on supported platforms, and in the chat session the live-only rule and a contact without `calls/1`.
+This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of the chat session ([401](401-paired-chat.md)), in browsers and in the Linux Desktop's native media (`src-tauri/src/native_call`, `src/desktop/nativeCalls.ts`). It does not add group calls, an SFU or an end-to-end encrypted forwarding-service claim. See [React call hooks](../../packages/react), [paired calls](../../packages/core/src/pairedCalls.ts). Exercise accept/reject/hangup, stale signals, simultaneous calls, denied permissions and camera/screen transitions on supported platforms, and in the chat session the live-only rule and a contact without `calls/1`.
 
 ## Revision log
+
+- 0.5 (2026-09-26): Desktop on Linux calls: WebRTC in Rust (webrtc-rs), media in GStreamer, no wire change; a host candidate may end at `typ host`. Tested between two Linux Desktops (e2e/desktop/calls.spec.ts) and against Chromium both ways (e2e/desktop/calls-interop.spec.ts).
 
 - 0.4 (2026-09-25): signals carry the Opus/VP8 payload types when not 111/96 (`ap`, `vp`; PROTOCOL.md §4.2) and accept an IPv6 related address: WebKit's offers rang nowhere or showed one picture. Found by two Desktop apps on a Mac (e2e/desktop-macos/).
 - 0.3 (2026-09-25): paired profile: `paired-call` signals on the live session, media on a WebRTC connection of its own whatever carries the chat.

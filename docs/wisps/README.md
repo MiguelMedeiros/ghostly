@@ -72,7 +72,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-26. Pull req
 | [500](500-files.md) | File Transfer | Draft | 1:1 files of any size, with consent, resume and a digest check (#228, #233) |
 | [501](501-paired-files.md) | Chat Files (formerly Paired Files) | Draft | `files/2` (100 MiB) and `files/3` (any size) on every chat's live link |
 | [502](502-legacy-files.md) | Compatibility File Frames | Draft; retained for compatibility | Compatibility chats only; both peers online |
-| [600](600-media.md) | Voice and Video | Draft | 1:1 calls in every chat while live; screen sharing from inside a call (#253); not on Linux Desktop |
+| [600](600-media.md) | Voice and Video | Draft | 1:1 calls in every chat while live; screen sharing from inside a call (#253); Linux Desktop with native media, no screen sharing yet |
 | [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); capture varies by platform |
 | [700](700-local-services.md) | Local Services | Draft | HTTP proxy in every chat, hosted from Desktop and the extension; Shared apps from the composer's + (#268) |
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | `ph` frames in the chat session (`services/1`, #207); the web app can neither host nor open one |
@@ -147,7 +147,7 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 | 500 File Transfer | Stable 1.0 | Files in every chat |
 | 501 Chat Files | Stable 1.0 | `files/2` and `files/3` on the live link |
 | 502 Compatibility File Frames | Stable 1.0, compatibility only | v0.4 contacts; candidate to drop later |
-| 600 Voice and Video | Stable 1.0 | Calls in every chat, not on Linux Desktop |
+| 600 Voice and Video | Stable 1.0 | Calls in every chat, Linux Desktop included (no screen sharing there yet) |
 | 601 WebRTC Media | Stable 1.0 | The media profile calls use |
 | 700 Local Services | Stable 1.0 | In v0.4 already, now in every chat |
 | 701 HTTP Local Service Profile | Stable 1.0 | `ph` frames under `services/1` |

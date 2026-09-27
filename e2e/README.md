@@ -210,6 +210,8 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, the peer behind it is the one Rust backs, and `<html lang>`/`<html dir>` follow the language |
 | `desktop/dht-direct.spec.ts` | two Desktop apps pair and go live reading the Mainline DHT directly (a DHT of their own, `support/mainlineTestnet.ts`), never reading a relay |
 | `desktop/voice.spec.ts` | voice recordings from every client play in the Desktop WebView under its Content-Security-Policy |
+| `desktop/calls.spec.ts` | two Linux Desktops (no WebRTC in WebKitGTK) go live, then call through the call window: decline, a video call with sound and pictures both ways (read from Rust and from the window's own `<video>`), mute, camera off and on, screen share off with its reason, hang up. The media runs in Rust with a test picture and tone (`GHOSTLY_FAKE_MEDIA`) |
+| `desktop/calls-interop.spec.ts` | a Linux Desktop's native call media against Chromium (fake devices), each side calling once, the descriptions going through the call signal as in a call: sound and pictures both ways |
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
 | `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with v0.4](#compatibility-with-v04) |
 | `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT. See [Desktop on macOS](#desktop-on-macos) |
@@ -221,7 +223,7 @@ Desktop is not a browser, so it is not a Playwright project: `tauri-driver` laun
 
 ```bash
 cargo install tauri-driver --locked
-sudo apt-get install webkit2gtk-driver xvfb      # Linux; Windows uses msedgedriver
+sudo apt-get install webkit2gtk-driver xvfb libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev   # Linux; Windows uses msedgedriver
 npm run tauri -- build --debug --no-bundle       # not `cargo build`: see below
 xvfb-run -a npm run test:e2e:desktop
 ```
@@ -266,9 +268,9 @@ page (`execute`): enough for `matrix/people.ts` to drive a chat.
 
 ## Desktop on macOS
 
-A call's media is WebRTC, which WebKitGTK does not have: a Linux Desktop pair goes live on Iroh or HyperDHT
-(`desktop/native-upgrade.spec.ts`) but cannot call, so the Linux harness only sees the call buttons say why not. `desktop-macos/calls-services.spec.ts` runs them where most
-Desktop users are: two apps on one Mac, in the system WKWebView.
+WebKitGTK has no WebRTC, so a Linux Desktop calls with media of its own, in Rust (`desktop/calls.spec.ts`,
+`desktop/calls-interop.spec.ts`). `desktop-macos/calls-services.spec.ts` runs calls where most Desktop users are, in
+the system WKWebView's own WebRTC: two apps on one Mac.
 
 ```bash
 npm run desktop:macos:build        # a debug build with the test driver, as tools.ghostly.e2e (about 1.5 min warm)

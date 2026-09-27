@@ -31,7 +31,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 - One `RTCPeerConnection` per chat with the `ghostly/1` DataChannel. Its signals (`_rtc`) ride the chat's signed Pkarr record.
 - STUN: Google's public servers (`packages/core/src/callSignal.ts`). A TURN server is optional: Settings, Advanced, Network.
-- Calls always use a WebRTC connection of their own, whatever carries the chat ([WISP 601](wisps/601-webrtc-media.md#paired-profile)). An app without WebRTC (Linux Desktop) has no calls.
+- Calls always use a WebRTC connection of their own, whatever carries the chat ([WISP 601](wisps/601-webrtc-media.md#paired-profile)). The Linux Desktop, whose WebView has no WebRTC, runs that connection itself (WebRTC in Rust, media in GStreamer): the same calls on the same wire ([WISP 601](wisps/601-webrtc-media.md#desktop-on-linux)).
 
 ### Iroh
 
