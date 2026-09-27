@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { desktopBinary, type DesktopApp } from "./desktop";
 import { MacDriver } from "./desktopMac";
 
@@ -10,6 +11,18 @@ import { MacDriver } from "./desktopMac";
  * src-tauri/src/file_stream.rs), in the real WebView under the app's real policy: macOS (WKWebView, the #230
  * driver) and Linux/Windows (tauri-driver). The same page scripts for every engine.
  */
+
+/**
+ * A port free on 127.0.0.1 right now. Fixed ports fail on Windows runners, which reserve ranges around 49xxx
+ * (`netsh interface ipv4 show excludedportrange protocol=tcp`).
+ */
+export async function freePort(): Promise<number> {
+  const server = createNetServer();
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const { port } = server.address() as { port: number };
+  await new Promise<void>((done) => server.close(() => done()));
+  return port;
+}
 
 /** Serves `path` on 127.0.0.1 a piece at a time (`/?offset=&length=`), for the page to copy into the file store. */
 export function servePieces(path: string, port: number): Promise<Server> {
@@ -132,12 +145,15 @@ export function playFromStore(app: DesktopApp, place: { space: string; id: strin
  * attached to the app's WebView2 on the GitHub runner ("DevToolsActivePort file doesn't exist"), while the app itself
  * ran fine there.
  */
-export async function openDriven(port: number, env: Record<string, string> = {}): Promise<{ app: MacDriver; stop: () => Promise<void> }> {
+export async function openDriven(env: Record<string, string> = {}): Promise<{ app: MacDriver; stop: () => Promise<void> }> {
+  const port = await freePort();
   const token = randomBytes(16).toString("hex");
+  const log: string[] = [];
   const child = spawn(desktopBinary(), [], {
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, GHOSTLY_PROFILE: "e2e-stream", GHOSTLY_E2E_DRIVER: String(port), GHOSTLY_E2E_DRIVER_TOKEN: token, ...env },
   });
+  for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
   let exited: number | null | undefined;
   const gone = new Promise<void>((done) => child.on("exit", (code) => { exited = code; done(); }));
   const stop = async () => {
@@ -149,11 +165,11 @@ export async function openDriven(port: number, env: Record<string, string> = {})
   const app = new MacDriver(`http://127.0.0.1:${port}`, token);
   const deadline = Date.now() + 90_000;
   for (;;) {
-    if (exited !== undefined) throw new Error(`The app exited (${exited}) before it could be driven`);
+    if (exited !== undefined) throw new Error(`The app exited (${exited}) before it could be driven:\n${log.join("")}`);
     try {
       if ((await app.execute<string>(`return document.readyState;`)) === "complete") break;
     } catch (error) {
-      if (Date.now() > deadline) { await stop(); throw error; }
+      if (Date.now() > deadline) { await stop(); throw new Error(`${String(error)}; the app said:\n${log.join("").slice(-4000)}`, { cause: error }); }
     }
     await new Promise((done) => setTimeout(done, 250));
   }

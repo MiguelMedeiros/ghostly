@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { makeBigVideo } from "../support/bigVideo";
 import { desktopHome, expect, openDesktop, test } from "../support/desktop";
-import { openDriven, playFromStore, removeFromApp, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
+import { freePort, openDriven, playFromStore, removeFromApp, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
 
 /**
  * A video too large for the page (#381: over 64 MiB) plays and seeks in the Desktop WebView from the stored file,
@@ -18,9 +18,7 @@ import { openDriven, playFromStore, removeFromApp, servePieces, servedRequests, 
 const MAX_BODY = 4 * 1024 * 1024;
 const PLACE = { space: "e2e-stream", id: "chat-in-video-1" };
 const DIR = fileURLToPath(new URL("../../test-results/desktop-video", import.meta.url));
-const PIECES_PORT = 49741;
 /** Windows (or `GHOSTLY_E2E_DRIVEN=1`, e.g. on a Mac): the app's own test driver (see `openDriven`). */
-const DRIVER_PORT = 49742;
 const DRIVEN = process.platform === "win32" || process.env.GHOSTLY_E2E_DRIVEN === "1";
 
 test("a 100 MB video plays and seeks from the stored file, a range at a time", { tag: ["@feature:files.video.stream"] }, async () => {
@@ -29,15 +27,16 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
   const log = `${DIR}/requests.log`;
   rmSync(log, { force: true });
   const { app, stop } = DRIVEN
-    ? await openDriven(DRIVER_PORT, { GHOSTLY_STREAM_LOG: log })
+    ? await openDriven({ GHOSTLY_STREAM_LOG: log })
     : await openDesktop({ home: home.dir, env: { GHOSTLY_STREAM_LOG: log } });
   let server: Server | null = null;
   try {
     await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
     const h264 = await app.execute<string>(`return document.createElement("video").canPlayType('video/mp4; codecs="avc1.42E01E"');`);
     const video = makeBigVideo(`${DIR}/big.mp4`, { codec: h264 ? "h264" : "vp9" });
-    server = await servePieces(video.path, PIECES_PORT);
-    await storeInApp(app, PIECES_PORT, video.size, PLACE);
+    const piecesPort = await freePort();
+    server = await servePieces(video.path, piecesPort);
+    await storeInApp(app, piecesPort, video.size, PLACE);
 
     const report = await playFromStore(app, PLACE, 90);
     test.info().annotations.push({ type: "playback", description: JSON.stringify({ h264, ...report, events: report.events?.slice(0, 40) }) });
