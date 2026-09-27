@@ -1,5 +1,5 @@
 // Prints the catalogue the site shows (lib/wisps.ts, evaluated) as JSON, to compare two checkouts:
-//   node scripts/catalog-snapshot.mjs > before.json
+//   node scripts/catalog-snapshot.mjs [other-checkout/website/lib] > before.json
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -7,7 +7,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-const lib = resolve(fileURLToPath(new URL("../lib", import.meta.url)));
+// Optional: the lib/ directory of another checkout (after its own `npm run sync:references`).
+const lib = resolve(process.argv[2] ?? fileURLToPath(new URL("../lib", import.meta.url)));
 const out = mkdtempSync(join(tmpdir(), "catalog-snapshot-"));
 mkdirSync(out, { recursive: true });
 for (const name of readdirSync(lib)) {
