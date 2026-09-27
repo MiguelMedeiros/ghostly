@@ -240,6 +240,11 @@ const METHODS: Record<string, Method> = {
     if (kept && ctx.mode === "one-shot") await kept;
     return { chat: link.id, typing, live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}) };
   },
+  /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
+  async "chat.react"(ctx, params) {
+    const link = chatOf(ctx, params);
+    return { chat: link.id, ...(await react(ctx, link.id, params)) };
+  },
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);
     await node(ctx).retryMessage({ linkId: link.id, messageId: str(params, "message", true) });
@@ -358,6 +363,10 @@ const METHODS: Record<string, Method> = {
     if (result.error) throw new CliError("unavailable", result.error);
     return { group: group.id, sent: true };
   },
+  async "group.react"(ctx, params) {
+    const group = groupOf(ctx, params);
+    return { group: group.id, ...(await react(ctx, `group:${group.id}`, params)) };
+  },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
     await node(ctx).leaveGroup({ groupId: group.id });
@@ -408,6 +417,17 @@ const METHODS: Record<string, Method> = {
     return (await target.call(node(ctx), args)) ?? null;
   },
 };
+
+/** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
+async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean }> {
+  const messageId = str(params, "message", true);
+  const removed = bool(params, "remove");
+  const emoji = removed ? "" : str(params, "emoji");
+  if (!removed && !emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
+  const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
+  if (result.error) throw new CliError(/not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
+  return { messageId, emoji: emoji || null, removed };
+}
 
 function history(messages: StoredMessage[], params: Params) {
   const limit = num(params, "limit", 50, { min: 1, max: 10_000 });

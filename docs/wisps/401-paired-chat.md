@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.7 |
+| Revision | 0.8 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
@@ -99,16 +99,28 @@ Each local profile ([04](04-profiles.md)) decides whether contacts are told (on 
 
 Groups ([900](900-group-sessions.md)) do not carry it yet. A mesh group would send one frame per member edge for every refresh, and a community's typing would tell every member, most of them strangers, when each person is present; both need their own decision on cost and privacy.
 
+### Reactions
+
+Reactions ([400](400-chat.md#reactions), revision 0.8) go on this session once both sides list `react/1` in `paired-capabilities`, and the contact confirms each one it took:
+
+```
+{"t":"paired-reaction","id":"<message id>","e":"❤️","n":1790000000000}
+{"t":"paired-reacted","n":1790000000000}
+```
+
+`id` is the message's id as both sides know it (a reply's `i`, [above](#replies)); `e` one emoji, or `""` to take the reaction back; `n` the reactor's number. The reader takes a reaction (shows it, keeps it for a message not here yet, or finds it older than what it shows) and confirms its `n`; one it could not keep (no room left to wait) goes unconfirmed. It counts reaction frames before it reads them and drops those past 30 in 10 seconds unconfirmed, so a flood costs as much as the limit. The reactor keeps every reaction not confirmed (the newest per message, at most 32, in the order of their numbers), says them on each new session, again after 30 seconds without a receipt, and at most 20 in 10 seconds; off this session they ride on the DHT envelopes ([403](403-dht-text.md#reactions)). Both frames count only on the authenticated session with the pinned contact. Neither carries a message ID: older apps drop both, and a reactor whose contact never says `react/1` keeps its reactions waiting (and on the envelopes) without showing anything odd. Group edges never offer it: groups carry reactions in their own frames ([900](900-group-sessions.md)).
+
 ## Runtime boundary and compatibility
 
 First contact runs on the DHT and on a stream in parallel, and native transports are tried from their descriptors in the capability record ([100](100-transports.md)). Compatibility chats use [402](402-legacy-chat.md) and never this session. DHT text uses [403](403-dht-text.md), preserving conversation/history without treating DHT as a stream adapter. Files and payments are negotiated in the offer; calls and shared apps after it ([above](#calls-and-shared-apps)).
 
 ## Evidence and checks
 
-[Paired implementation profile](PAIRED-CHAT-INCREMENT.md), [paired session](../../packages/core/src/pairedSession.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [durable outbox](../../packages/browser/src/engine/outbox.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [paired calls](../../packages/core/src/pairedCalls.ts), [typing](../../packages/core/src/pairedTyping.ts). Exercise commit-before-ack, duplicate IDs, disconnect before receipt, restart, adapter switch and unsupported capability rejection.
+[Paired implementation profile](PAIRED-CHAT-INCREMENT.md), [paired session](../../packages/core/src/pairedSession.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [durable outbox](../../packages/browser/src/engine/outbox.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [paired calls](../../packages/core/src/pairedCalls.ts), [typing](../../packages/core/src/pairedTyping.ts), [reactions](../../packages/core/src/reactions.ts). Exercise commit-before-ack, duplicate IDs, disconnect before receipt, restart, adapter switch and unsupported capability rejection.
 
 ## Revision log
 
+- 0.8 (2026-09-27): reactions, `react/1` with `paired-reaction` and `paired-reacted`, confirmed by number, capped per window.
 - 0.7 (2026-09-27): replies (`r` on `paired-message`): the original's id, a cleaned line and its author, checked by the reader against this chat.
 - 0.6 (2026-09-27): the typing indicator, `typing/1` and `paired-typing` on the live session only, 1:1 chats.
 - 0.5.1 (2026-09-27): Desktop on Linux offers `calls/1` too, with its own call media (#331).

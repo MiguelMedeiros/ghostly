@@ -19,6 +19,9 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import type { QuoteView } from "../lib/replies";
 import { ReplyQuote } from "./chat/ReplyQuote";
+import { SmileIcon } from "./composer/icons";
+import { ReactAction, ReactionBar, ReactionChips } from "./chat/Reactions";
+import { myReaction, reactionChips } from "../lib/reactions";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -35,14 +38,22 @@ interface MessageBubbleProps {
   onReply?: () => void;
   /** The message this one answers, as the chat shows it (`quoteFor`). */
   quote?: QuoteView;
+  /**
+   * Reacts to this message (WISP 400 § Reactions), "" taking mine back: a pointer finds a React button beside it and
+   * its ⋮ says React; a long press on a touch screen opens the quick bar. Left out where a message takes none.
+   */
+  onReact?: (emoji: string) => void;
+  /** Who reacted, as the chat names them: `peer`, or a member's key. */
+  reactionName?: (by: string) => string;
 }
 
-/** How long a finger holds a message before its details open. */
+/** How long a finger holds a message before its quick bar (or, where it takes no reaction, its details) opens. */
 export const LONG_PRESS_MS = 500;
 
 /**
- * A long press on a touch screen (or a pen): the details open, the way a double click opens them with a mouse. A
- * finger that moves on, or a press on a control inside the message, is not one.
+ * A long press on a touch screen (or a pen): the reactions' quick bar opens, with the details one tap under it; the
+ * details at once where there is nothing to react with. A finger that moves on, or a press on a control inside the
+ * message, is not one.
  */
 function useLongPress(fire: () => void) {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -343,11 +354,13 @@ function DownloadItem({ file, name, sender, onDone }: { file: ChatFile; name: st
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDetails, onReply, align, download }: {
+function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download }: {
   onDelete?: () => void;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
   onReply?: () => void;
+  /** Opens the reactions' quick bar (WISP 400 § Reactions): after Reply. */
+  onReact?: () => void;
   align: "left" | "right";
   /** A message carrying a file: the file, the name to save it under and who sent it. */
   download?: { file: ChatFile; name: string; sender: "me" | "peer" };
@@ -381,6 +394,9 @@ function MessageMenu({ onDelete, onDetails, onReply, align, download }: {
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t("chat.message.options")}>
         {onReply && <MenuItem testId="message-reply" onClick={() => { setOpen(false); onReply(); }} icon={<ReplyGlyph />}>
           {t("chat.message.reply")}
+        </MenuItem>}
+        {onReact && <MenuItem testId="message-react" onClick={() => { setOpen(false); onReact(); }} icon={<SmileIcon size={16} />}>
+          {t("chat.reactions.react")}
         </MenuItem>}
         {download && <DownloadItem {...download} onDone={() => setOpen(false)} />}
         <MenuItem testId="message-details" onClick={() => { setOpen(false); onDetails(); }}
@@ -434,7 +450,8 @@ export function MessageBubble(props: MessageBubbleProps) {
   );
 }
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId, onReply, quote }: MessageBubbleProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId, onReply, quote, onReact, reactionName }: MessageBubbleProps) {
+  const { t } = useI18n();
   const chat = useCueChat();
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
@@ -448,7 +465,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [details, setDetails] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const openDetails = () => setDetails(true);
-  const press = useLongPress(openDetails);
+  // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
+  const [bar, setBar] = useState<"button" | "press" | null>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const reactRef = useRef<HTMLSpanElement>(null);
+  const press = useLongPress(onReact ? () => setBar("press") : openDetails);
+  const chips = useMemo(() => reactionChips(message.reactions, by => reactionName?.(by) ?? by.slice(0, 8), t("chat.reply.you")), [message.reactions, reactionName, t]);
   const swipe = useSwipeReply(onReply);
   const [imgError, setImgError] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -557,12 +579,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           <ReplyGlyph />
         </span>
       )}
+      {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} align="left" download={download} />}
+      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} align="left" download={download} />}
+      {/* The bubble, and its reactions under it. */}
+      <div className={`flex flex-col min-w-0 max-w-[85%] ${isMe ? "items-end" : "items-start"}`}>
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
       <div
+        ref={bubbleRef}
         data-message-bubble
-        className={`relative max-w-[85%] min-w-[80px] ${
+        className={`relative max-w-full min-w-[80px] ${
           isMe
             ? "rounded-ss-[7.5px] rounded-es-[7.5px] rounded-ee-[7.5px]"
             : "rounded-se-[7.5px] rounded-es-[7.5px] rounded-ee-[7.5px]"
@@ -675,8 +701,13 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </>}
         </div>}
       </div>
-      {!isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} align="right" download={download} />}
+      <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
+      </div>
+      {!isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} align="right" download={download} />}
       {!isMe && onReply && <ReplyAction onReply={onReply} />}
+      {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
+      {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
+        align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} />}
       {detailsPanel}
     </div>
   );

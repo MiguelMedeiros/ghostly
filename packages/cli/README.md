@@ -82,6 +82,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `chat list`, `chat show <chat>` | Chats, and one chat's connection: transports, last attempt, comparison code |
 | `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
 | `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
+| `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
 | `typing <chat> [--for s] [--stop]` | Show the contact you are writing: live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a message to the chat or `--stop` ends it |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
@@ -92,6 +93,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `group create <name> [--mesh]`, `group join <link>` | A community (a link anyone can open), or a private mesh |
 | `group list`, `group show <group>`, `group history <group>` | Groups, members, history |
 | `group send <group> [text…] [--mention <member>]… [--reply <message>]` | Send; each mentioned member is written as `@name` in the text |
+| `group react <group> <message> <emoji> [--remove]` | React to a group's message |
 | `group leave <group>`, `group forget <group> --yes`, `group accept\|decline <group>` | Membership |
 | `listen [--since seq] [--cursor file] [--type t]… [--exec cmd] [--webhook url] [--print]` | The event stream |
 | `events [--since seq]` | What the event journal holds, without following |
@@ -243,6 +245,9 @@ refused without it.
   message id in this chat when it is here (`found: true`, and `snippet` and `from` come from that copy), else the id
   the reply named; `from` is `me`, `peer` or null (only the id came, over the DHT). Answer one with
   `ghostly send <chat> --reply <message id> "…"` (`group send` too): the id from history or from the event.
+- Reactions (WISP 400 § Reactions): `message.reaction` (a chat) and `group.reaction` (a group) say each change once:
+  `{messageId, by, emoji, removed, mine}`, with `by` `me`, `peer` or a member key, `emoji` "" when taken back, `mine`
+  when the message is this profile's. `chat history` lists each message's `reactions`: `[{by, emoji, at}]`.
 - `--type message.received` keeps one type; `--type message.` (or `message.*`) a family.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
   `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment.

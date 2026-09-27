@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, LinkPreview, PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, LinkPreview, PairingProgress, PaymentMethodName, VoiceMeta, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -68,6 +68,8 @@ export interface StoredLink {
   inviteCode?: string;
   /** Messages deleted on this device, by id, so a republished one is not stored again. */
   deletedIds?: string[];
+  /** This side's reactions the contact has not confirmed yet (WISP 401 § Reactions), in the order of their numbers. */
+  reactionsOut?: WireReaction[];
   /** Ways of paying this device allows in this chat. Absent or true: allowed. */
   paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
   /**
@@ -188,6 +190,8 @@ export interface GroupView {
   lastMessageAt: number;
   /** When the latest message that names me arrived; absent for none. */
   lastMentionAt?: number;
+  /** The latest reaction in the group, for the chat list. */
+  lastReaction?: ReactionNote;
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
@@ -626,6 +630,26 @@ export interface StoredMessage {
   preview?: LinkPreview;
   /** The message this one answers (WISP 400 § Replies). */
   replyTo?: MessageReply;
+  /**
+   * Reactions to it (WISP 400 § Reactions), one per person: `me`, `peer` (a 1:1 chat's contact) or a group member's
+   * key. One taken back stays with an empty emoji, so an older reaction arriving late does not bring it back.
+   */
+  reactions?: Record<string, MessageReaction>;
+}
+
+/** One person's reaction to a message: the emoji ("" once taken back), their number (the highest wins), when it came. */
+export interface MessageReaction { e: string; n: number; at: number }
+
+/** The latest reaction in a chat, as the chat list says it: "Ana reacted ❤️ to "…"". */
+export interface ReactionNote {
+  at: number;
+  /** Who reacted: `me`, `peer`, or a group member's key. */
+  by: string;
+  emoji: string;
+  /** A line of the message it went to. */
+  snippet: string;
+  /** The message was mine. */
+  mine: boolean;
 }
 
 /**
@@ -1164,6 +1188,8 @@ export interface LinkView {
   identityTimeline?: IdentityTimelineEntry[];
   /** When the contact last shared an identity here (milliseconds): the chat list's preview and order. Paired chats. */
   identitySharedAt?: number;
+  /** The latest reaction in this chat, for the chat list; paired chats. */
+  lastReaction?: ReactionNote;
   id: string;
   myPubKeyZ32: string;
   peerPubKeyZ32: string;

@@ -71,7 +71,7 @@ export function cueOutcome(cue: CueName, notifications: NotificationSettings, mu
  * The sound of one of the first events, finer when its category is on: a mention instead of a message, a group's own
  * line, test coins instead of a coin, a payment of mine gone out (`confirmed`) as a coin whooshing away.
  */
-export function eventSound(event: Pick<AttentionEvent, "cue" | "mention"> & { type: Exclude<AttentionEvent["type"], "cue"> }, notifications: NotificationSettings): SoundName {
+export function eventSound(event: Pick<AttentionEvent, "cue" | "mention"> & { type: Exclude<AttentionEvent["type"], "cue" | "reaction"> }, notifications: NotificationSettings): SoundName {
   const finer: CueName | undefined = event.cue ?? (event.type === "message" && event.mention ? "mention" : event.type === "confirmed" ? "paid" : undefined);
   const rule: CueRule | undefined = finer && CUES[finer];
   return finer && rule?.replaces === event.type && categoryOn(rule.category, notifications) ? finer : event.type;

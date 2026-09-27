@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
-// covers: files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing
+// covers: files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -238,6 +238,27 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     } finally {
       example.kill();
     }
+  });
+
+  it("react to a message: the contact's stream says it, its history shows it, a new one replaces it, --remove takes it back", async () => {
+    const listen = new Running(["--home", bob, "listen", "--type", "message.reaction"], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    const theirs = (ok(await as(alice, "chat", "history", "bob")).messages as { id: string; text: string }[]).find((m) => m.text === "done typing")!;
+    expect(ok(await as(alice, "react", "bob", theirs.id, "👍"))).toMatchObject({ chat: chatA, messageId: theirs.id, emoji: "👍", removed: false });
+    const event = await listen.waitFor((l) => l.type === "message.reaction");
+    // Alice's own message: on Bob's side it is the contact's, reacted to by the contact.
+    expect(event).toMatchObject({ chat: chatB, by: "peer", emoji: "👍", removed: false, mine: false });
+    const shown = async () => (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; text: string; reactions?: { by: string; emoji: string }[] }[]).find((m) => m.text === "done typing")!;
+    expect((await shown()).reactions).toMatchObject([{ by: "peer", emoji: "👍" }]);
+    ok(await as(alice, "react", "bob", theirs.id, "❤"));
+    await listen.waitFor((l) => l.type === "message.reaction" && l.emoji === "❤️");
+    ok(await as(alice, "react", "bob", theirs.id, "--remove"));
+    await listen.waitFor((l) => l.type === "message.reaction" && l.removed === true);
+    expect((await shown()).reactions).toBeUndefined();
+    error(await as(alice, "react", "bob", theirs.id, "not an emoji"), "bad_request", 1);
+    error(await as(alice, "react", "bob", "no-such-message", "👍"), "not_found", 3);
+    await listen.stop();
   });
 
   it("send files: a small one taken at once, a large one only once accepted, saved byte for byte", async () => {

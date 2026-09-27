@@ -62,6 +62,8 @@ ghostly send alice -- "-text that starts with a dash"
 ghostly typing alice --for 30                      # "typing…" on the contact's screen while you compose, up to 30 s
 ghostly typing alice --stop                        # or just send: the message ends it
 ghostly send alice --reply peer_jY7N… "Yes, that one"  # quotes a message of the chat (its id from history or an event)
+ghostly react alice peer_jY7N… 👍                   # one reaction per message: a new one replaces it
+ghostly react alice peer_jY7N… --remove            # takes it back
 ghostly chat history alice --limit 20              # oldest first
 ghostly chat list
 ```
@@ -81,7 +83,8 @@ ghostly listen --type message.received            # one JSON object per line, un
   thread with `ghostly send <chat> --reply "$(jq -r .message.id <<<"$event")" "…"`.
 - Useful types: `message.received`, `message.delivery`, `chat.created`, `chat.joined` (a contact arrived: not a
   message, do not answer it as one), `chat.connection`, `group.message` (with `message.mentioned: true` when it
-  names this bot), `group.members`, `typing.started` / `typing.stopped` (the contact is writing, or stopped).
+  names this bot), `group.members`, `typing.started` / `typing.stopped` (the contact is writing, or stopped),
+  `message.reaction` / `group.reaction` (`by`, `emoji`, "" when taken back; `mine` when it is on your message).
 - Files: `message.received` carries `message.file` (`id`, `name`, `size`, `mime`, and for a voice note `voice`:
   `{duration, peaks}`); `file.done` and `file.failed` carry `file`, `chat` and `messageId`.
 - Hooks: `--exec '<command>'` runs once per event with the event on **stdin** (never in arguments), in order;

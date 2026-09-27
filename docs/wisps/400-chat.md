@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2.6 |
+| Revision | 0.2.7 |
 | Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
@@ -187,6 +187,26 @@ A reply is started from the message's ⋮ (Reply), a reply button beside the mes
 
 **Older apps.** The reply is an optional field, which an app from before this revision ignores: it shows the text alone. No quote is copied into the text for it (no "> …" prefix): a reply's text reads on its own in a conversation, as it does when people answer each other without quoting, and a prefix would be shown twice by every app that knows replies, sent to the DHT's 256 bytes, and counted against every bound.
 
+## Reactions
+
+Anyone in a chat may react to a message with one emoji (revision 0.2.7), as in WhatsApp: **one reaction per person per message**, and a new one replaces the old. A reaction names the message by the same id a reply does ([above](#replies)), carries the emoji, or nothing to take the reaction back, and a number of the reactor's own. For each person and message the **highest number wins**, whatever order reactions arrive in, so a late or repeated one changes nothing.
+
+| Field | Meaning |
+|---|---|
+| `id` | The message's id in this chat as both sides know it (as a reply's `i`). |
+| `e` | One emoji: exactly one grapheme, made only of emoji code points (a joiner, a selector, a keycap, skin tones, tags and regional indicators included) with a pictograph in it, at most **32** UTF-8 bytes. A single pictograph drawn as text by default carries the emoji selector (❤ is sent as ❤️) and one drawn as emoji by default carries none, so the same emoji from two apps is one. `""` takes the reaction back. |
+| `n` | The reactor's number: a positive safe integer that only grows in this chat. Ghostly uses the clock in milliseconds, or one past its last number when the clock went back. |
+
+A receiver MUST drop a reaction whose `id`, `e` or `n` does not hold, and one from anyone but the authenticated sender: a reaction is filed under whoever the session, the envelope or the group frame proves sent it, never under a name it claims. It keeps one reaction per person and message, the one with the highest `n`; one taken back stays as an empty reaction, so an older one arriving late does not bring it back. A reaction to a message that is not here yet (it may come a moment later, on another path) waits for it a minute, at most 64 per chat; after that it is dropped. A receiver SHOULD cap how many reactions it takes from one sender per window ([401](401-paired-chat.md#reactions): 30 in 10 seconds).
+
+Any message both sides know by an id takes reactions: a text, a voice message, a file, a payment, a reply. What only this device has (a notice, a group's payment line, an identity shared in the timeline, [300](300-peer-proofs.md)) takes none.
+
+**How it shows.** Chips under the bubble, one per emoji, the most chosen first, with how many chose it; mine is marked. A click on mine takes it back; on another emoji, reacts with the same. The names show on hover, on focus and on a long press (then the press is not a toggle). A reaction is started from a React button beside the message for a pointer, the message's ⋮ (React), or a long press on a touch screen, which opens a quick bar of six (👍 ❤️ 😂 😮 😢 🙏) and + for any emoji; the details are one tap under it there. A reaction is not a message: it never counts as unread and never plays the message sound. The chat list says the latest ("Ana reacted ❤️ to "…"") until something is said after it. A reaction to a message of mine may give a quiet notice (no sound) while the app is away; a muted chat gives none.
+
+**How it travels.** A 1:1 chat on its live session once both sides say `react/1` ([401](401-paired-chat.md#reactions)), and on the DHT envelopes meanwhile ([403](403-dht-text.md#reactions)); the reactor keeps it until the contact confirms it. A private group over each member's edge ([mesh](9xx-group-mesh.md#reactions)); a community inside a sealed frame of the group ([community](9xx-group-community.md#reactions)). A compatibility chat ([402](402-legacy-chat.md)) has no room for one: it is refused, not kept here only.
+
+**Older apps.** A reaction is a frame or a trailing element an app from before this revision does not know: it drops it, shows nothing, and nothing it shows changes. The reactor still sees its own chip.
+
 ## Candidate semantics
 
 Future messages need a stable sender-scoped message ID, authenticated channel/participation context, sequence within a sender generation, content type and bounded body. Distinguish locally queued, sent, received, durably stored and read; only advertise receipts actually implemented. Retries reuse IDs. Deduplication retention must cover the declared retry window and survive restart where durable delivery is promised.
@@ -221,6 +241,7 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
+- 0.2.7 (2026-09-27): reactions: one emoji per person per message, the highest number winning; checked emoji; waiting a minute for an unknown message; no unread, no sound.
 - 0.2.6 (2026-09-27): replies: the original's id, a line of it and its author with a message; checked against this chat only; no text prefix for older apps.
 - 0.2.5 (2026-09-26): after the pin, another key on invite-derived channels (DHT mailbox, signals, a native connection dialled in) is ignored with a passive warning, not a stop; only an authenticated session this side can trust proves a key change.
 - 0.2.4 (2026-09-25): link previews ride layer 1 only; places in a text show as a location card whose map loads on request.

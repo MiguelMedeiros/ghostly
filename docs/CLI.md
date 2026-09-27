@@ -94,7 +94,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 
 Main types: `message.received`, `message.delivery`, `chat.pairing`, `chat.connection`, `chat.joined`,
-`typing.started` and `typing.stopped`,
+`typing.started` and `typing.stopped`, `message.reaction` and `group.reaction`,
 `group.message` (with `mentioned`), `group.members`, `file.offered`, `file.done`, `payment.created`,
 `payment.updated`, `identity.received`, `call.incoming`, `call.connected`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
@@ -103,10 +103,10 @@ Main types: `message.received`, `message.delivery`, `chat.pairing`, `chat.connec
 
 | Area | Commands |
 |---|---|
-| Invites and chats | `invite create\|join`, `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `message retry\|delete\|details` |
+| Invites and chats | `invite create\|join`, `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `message retry\|delete\|details`, `react <chat> <message> <emoji>` (`--remove` takes yours back) |
 | Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` |
 | Files and voice | `file send <chat> <path>`, `file send … --voice [ms]` (length and waveform measured from the file), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`. `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
-| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join`, `group send … --mention <member> --reply <message>`, `group history`; admin: `group invite\|remove\|admin\|rotate\|link\|picture` |
+| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join`, `group send … --mention <member> --reply <message>`, `group history`, `group react`; admin: `group invite\|remove\|admin\|rotate\|link\|picture` |
 | Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|usdt`, `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history`, `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
 | Identities | `identity providers\|list\|add\|complete`, `identity share\|withdraw <chat> <id>`, `identity contact <chat>` |

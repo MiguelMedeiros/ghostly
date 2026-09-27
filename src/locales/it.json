@@ -110,6 +110,14 @@
       "notHere": "L'originale non è in questa chat",
       "jump": "Vai al messaggio originale",
       "replyingTo": "Risposta a {{name}}"
+    },
+    "reactions": {
+      "react": "Reagisci",
+      "more": "Altre emoji",
+      "chipLabel": "{{emoji}}: {{names}}",
+      "notice": "Qualcuno ha reagito al tuo messaggio",
+      "note": "{{name}} ha reagito con {{emoji}} a \"{{snippet}}\"",
+      "noteMine": "Hai reagito con {{emoji}} a \"{{snippet}}\""
     }
   },
   "group": {

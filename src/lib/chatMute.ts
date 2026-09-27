@@ -114,6 +114,8 @@ export function chatOfLink(linkId: string | undefined, links: readonly { id: str
  * wallet's coins and confirmations, belong to no chat's notifications and are never muted.
  */
 export function attentionOutcome(type: AttentionEvent["type"], muted: boolean, notifications: NotificationSettings, background: boolean): { sound: boolean; notice: boolean } {
+  // A reaction to my message: a quiet notice (no sound) while the app is away, never in a muted chat.
+  if (type === "reaction") return { sound: false, notice: notifications.systemEnabled && background && !muted };
   const quiet = muted && type === "message" && MUTE_SILENCES.message;
   return {
     sound: notifications.soundEnabled && !quiet,

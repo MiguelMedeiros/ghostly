@@ -38,6 +38,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
+import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, wireReaction, type WireReaction } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
@@ -106,6 +107,7 @@ import type {
   MessageDetailsView,
   MessageFile,
   MessageReply,
+  ReactionNote,
   MessageSend,
   GroupView,
   Settings,
@@ -139,6 +141,7 @@ import { db } from "./db";
 import { Groups } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
+import { Reactions, latestReaction } from "./reactions";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
@@ -167,6 +170,8 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** How many deleted ids a link remembers: enough to outlast what a peer republishes. */
 const MAX_DELETED_IDS = 500;
+/** A reaction said on the live session and not confirmed is said again after this long. */
+const REACTION_RESEND_MS = 30_000;
 
 interface LiveLink {
   /** The chat's layer-0 capability record exchange (WISP 03); paired chats only. */
@@ -275,6 +280,8 @@ export interface NodeOptions {
    * (WISP 102). It loads when a chat first starts an endpoint, not with the app.
    */
   irohWeb?: boolean;
+  /** Reactions on 1:1 chats (`react/1`, WISP 401 § Reactions). Default on; off only stands in for an older app in tests. */
+  reactions?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -728,6 +735,27 @@ export class GhostlyNode implements EngineImplementation {
     return out;
   }
 
+  /**
+   * Reactions to messages (WISP 400 § Reactions), kept on their rows. `reactionNotes`: each chat's latest, for the
+   * chat list. `reactionsSent`: when each reaction was said on this session, per link: a flush says only the new ones, and
+   * again those not confirmed after a while.
+   */
+  private readonly reactionNotes = new Map<string, ReactionNote>();
+  private readonly reactionsSent = new Map<string, Map<number, number>>();
+  private readonly reactionPace = new Map<string, ReactionWindow>();
+  private readonly reactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly reactions = new Reactions({
+    messages: chat => db.getMessages(chat),
+    patch: (chat, id, change) => db.patchMessage(chat, id, change),
+    changed: async (chat, note) => {
+      if (note) this.reactionNotes.set(chat, note);
+      this.events.onMessages(chat, await db.getMessages(chat));
+      this.emitState();
+    },
+    // Someone reacted to a message of mine: a quiet notice, never a message's sound or an unread count.
+    notify: (chat, key) => this.feedback("reaction", `${chat}:${key}`, chat),
+  });
+
   /** Private groups (WISP 900): sessions, admission on contact chats, and the pairwise edges that carry them. */
   private readonly groups = new Groups({
     sendOnLink: (linkId, frame) => {
@@ -760,7 +788,7 @@ export class GhostlyNode implements EngineImplementation {
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeMessage(message),
     emit: () => this.emitState(),
-    communityApp: (groupId, sender, frame) => this.communityPay.receiveApp(groupId, sender, frame),
+    communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame) : this.communityPay.receiveApp(groupId, sender, frame),
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
   });
 
@@ -958,10 +986,16 @@ export class GhostlyNode implements EngineImplementation {
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       history.set(stored.id, messages);
+      const note = latestReaction(messages);
+      if (note) this.reactionNotes.set(stored.id, note);
       if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
     }
     // Groups know their edges from the links above, and may add or drop some before anything dials.
     await this.groups.load();
+    for (const group of this.groups.views()) {
+      const note = latestReaction(await db.getMessages(`group:${group.id}`));
+      if (note) this.reactionNotes.set(`group:${group.id}`, note);
+    }
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
     if (this.settings.online) for (const [linkId, messages] of history) {
@@ -998,6 +1032,8 @@ export class GhostlyNode implements EngineImplementation {
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
+    for (const timer of this.reactionTimers.values()) clearTimeout(timer);
+    this.reactionTimers.clear();
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
     this.identities.stop();
@@ -1040,7 +1076,7 @@ export class GhostlyNode implements EngineImplementation {
       did: this.did.view(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
-      groups: groups.map(group => ({ ...group, members: group.members.map(member => {
+      groups: groups.map(group => ({ ...group, ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), members: group.members.map(member => {
         const edge = member.me ? undefined : this.edgeView(group.id, member.key);
         return edge ? { ...member, edge } : member;
       }) })),
@@ -2067,6 +2103,102 @@ export class GhostlyNode implements EngineImplementation {
     return this.groups.send(groupId, text, Array.isArray(mentions) ? mentions : [], reply && { i: reply.id, s: reply.snippet, f: reply.member! });
   }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
+
+  /**
+   * Reacts to a message of a chat or a group (WISP 400 § Reactions): shown here at once; a 1:1 chat keeps it until the
+   * contact confirms it (the live session, or DHT envelopes meanwhile), a group sends it to its members.
+   */
+  async react({ linkId, messageId, emoji }: { linkId: string; messageId: string; emoji: string }): Promise<{ error: string | null }> {
+    if (typeof linkId !== "string" || !linkId) return { error: "No chat to react in" };
+    if (linkId.startsWith("group:")) {
+      const groupId = linkId.slice("group:".length);
+      if (!this.membership(groupId)) return { error: "You are not in this group" };
+      const result = await this.reactions.mine(linkId, messageId, emoji);
+      return "error" in result ? result : this.sendGroupReaction(groupId, result.reaction);
+    }
+    const live = this.links.get(linkId);
+    if (!live || live.stored.group) return { error: "No such chat" };
+    // A compatibility chat's records have no room for one (WISP 402): said, rather than kept here only.
+    if (!live.stored.profile) return { error: "Reactions need a current chat; this compatibility chat sends text only." };
+    const result = await this.reactions.mine(linkId, messageId, emoji, live.stored.reactionsOut);
+    if ("error" in result) return result;
+    const reactionsOut = queueReaction(live.stored.reactionsOut ?? [], result.reaction);
+    live.stored = { ...live.stored, reactionsOut };
+    await db.patchLink(linkId, { reactionsOut });
+    this.flushReactions(linkId);
+    return { error: null };
+  }
+
+  /**
+   * Says this side's reactions the contact has not confirmed: on the live session once both sides say `react/1`, at
+   * the pace allowed, and again after a while when no receipt came. Off it, they ride on the DHT envelopes.
+   */
+  private flushReactions(linkId: string): void {
+    const live = this.links.get(linkId), link = live?.link;
+    const pending = live?.stored.reactionsOut ?? [];
+    clearTimeout(this.reactionTimers.get(linkId));
+    this.reactionTimers.delete(linkId);
+    if (!link || !pending.length) return;
+    if (!link.supportsReactions) { link.reactionsPending(); return; }
+    let sent = this.reactionsSent.get(linkId);
+    if (!sent) this.reactionsSent.set(linkId, sent = new Map());
+    let pace = this.reactionPace.get(linkId);
+    if (!pace) this.reactionPace.set(linkId, pace = new ReactionWindow(REACTION_LIMITS.send));
+    const now = Date.now();
+    let wait = REACTION_RESEND_MS;
+    for (const reaction of pending) {
+      const at = sent.get(reaction.n);
+      if (at !== undefined && now - at < REACTION_RESEND_MS) { wait = Math.min(wait, at + REACTION_RESEND_MS - now); continue; }
+      if (!pace.take()) { wait = Math.min(wait, pace.wait()); break; }
+      if (link.sendReaction(reaction)) return;
+      sent.set(reaction.n, now);
+    }
+    this.reactionTimers.set(linkId, setTimeout(() => this.flushReactions(linkId), Math.max(wait, 50)));
+  }
+
+  /** The contact confirmed this side's reaction `n` (on the DHT: every one up to `n`). */
+  private async reactionReceipt(linkId: string, n: number, upTo = false): Promise<void> {
+    const live = this.links.get(linkId);
+    const before = live?.stored.reactionsOut ?? [];
+    const reactionsOut = before.filter(r => upTo ? r.n > n : r.n !== n);
+    if (!live || reactionsOut.length === before.length) return;
+    live.stored = { ...live.stored, reactionsOut };
+    for (const r of before) if (!reactionsOut.includes(r)) this.reactionsSent.get(linkId)?.delete(r.n);
+    await db.patchLink(linkId, { reactionsOut });
+    if (!reactionsOut.length) { clearTimeout(this.reactionTimers.get(linkId)); this.reactionTimers.delete(linkId); }
+    // An envelope carries only so many: once the contact took those, the rest go.
+    else if (upTo) this.flushReactions(linkId);
+  }
+
+  /** A group reaction goes to every member: over each edge in a private group, through the group in a community. */
+  private async sendGroupReaction(groupId: string, reaction: WireReaction): Promise<{ error: string | null }> {
+    if (this.groups.isCommunityGroup(groupId)) {
+      try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_REACTION_FRAME, ...wireReaction(reaction) }); return { error: null }; }
+      catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+    }
+    const frame = { t: GROUP_REACTION_FRAME, g: groupId, ...wireReaction(reaction) };
+    // An edge that is down hears it when it opens (`resendGroupReactions`).
+    for (const edge of this.groupEdges(groupId).values()) { try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ } }
+    return { error: null };
+  }
+
+  /** An edge of a private group opened: the member hears my latest reactions again, in case it missed them. */
+  private async resendGroupReactions(groupId: string, linkId: string): Promise<void> {
+    const mine = (await db.getMessages(`group:${groupId}`)).flatMap(m => {
+      const r = m.reactions?.me, id = replyRef(m, true);
+      return r && id ? [{ id, e: r.e, n: r.n }] : [];
+    }).sort((a, b) => b.n - a.n).slice(0, REACTION_LIMITS.pending).reverse();
+    for (const reaction of mine) { try { this.links.get(linkId)?.link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction }); } catch { return; } }
+  }
+
+  /** A reaction from a member of a group: over the edge pinned to them (private), or signed by them (community). */
+  private async receiveGroupReaction(groupId: string, member: string, raw: Record<string, unknown>): Promise<void> {
+    const membership = this.membership(groupId);
+    if (!membership?.members.has(member) || member === membership.me) return;
+    if (raw.t === GROUP_REACTION_FRAME && raw.g !== groupId) return;
+    const reaction = readReaction(raw);
+    if (reaction) await this.reactions.receive(`group:${groupId}`, member, reaction);
+  }
   leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
   removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
@@ -2978,12 +3110,17 @@ export class GhostlyNode implements EngineImplementation {
       events: {
         // An entry session carries the admission frames a contact chat would; an edge, the group's own, and what the group sees of payments.
         onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame)
-          : (frame as { t?: unknown }).t === "group-pay" ? this.groupPayments.receive(group, peer, frame) : this.groups.handleEdgeFrame(group, peer, frame),
+          : (frame as { t?: unknown }).t === "group-pay" ? this.groupPayments.receive(group, peer, frame)
+          : (frame as { t?: unknown }).t === GROUP_REACTION_FRAME ? this.receiveGroupReaction(group, peer, frame as Record<string, unknown>)
+          : this.groups.handleEdgeFrame(group, peer, frame),
         onGroupsSupport: supported => {
           if (supported) traceJoin(group, "link.ready", { role });
           if (supported) {
             if (entry) this.groups.entryReady(group, linkId, peer);
-            else { this.groups.edgeReady(group, peer, linkId); void this.groupPayments.edgeReady(group, linkId).catch(() => {}); }
+            else {
+              this.groups.edgeReady(group, peer, linkId); void this.groupPayments.edgeReady(group, linkId).catch(() => {});
+              if (!this.groups.isCommunityGroup(group)) void this.resendGroupReactions(group, linkId).catch(() => {});
+            }
           }
           this.emitState();
         },
@@ -3050,6 +3187,7 @@ export class GhostlyNode implements EngineImplementation {
       largeFilesSupport: true,
       // 1:1 chats only: group edges (startEdge) never offer it.
       typingSupport: true,
+      reactionsSupport: this.options.reactions !== false,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
@@ -3059,6 +3197,7 @@ export class GhostlyNode implements EngineImplementation {
         capsRev: () => live.caps?.rev, peerCapsRev: rev => live.caps?.peerRev(rev),
         // A contact whose record lacks dht-text/1 gets nothing on the DHT: what would go there waits for live.
         peerAcceptsText: () => { const peer = live.caps?.peer; return !peer || peer.capabilities.includes(DHT_TEXT_CAPABILITY); },
+        reactions: () => live.stored.reactionsOut ?? [],
       } : undefined,
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback,
@@ -3233,6 +3372,12 @@ export class GhostlyNode implements EngineImplementation {
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
         // Presence, not a message: only the state shows it, nothing is stored or counted.
         onPeerTyping: () => this.emitState(),
+        // Taken (shown, older than what is shown, or waiting for its message) is confirmed; no room left is not.
+        onReaction: async reaction => (await this.reactions.receive(linkId, "peer", reaction)) !== "dropped",
+        onReactionReceipt: n => this.reactionReceipt(linkId, n),
+        onReactionsTaken: n => this.reactionReceipt(linkId, n, true),
+        // A new session: everything not confirmed is said again on it.
+        onReactionsSupport: supported => { this.reactionsSent.delete(linkId); if (supported) this.flushReactions(linkId); },
         // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
         onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
         onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),
@@ -3475,6 +3620,8 @@ export class GhostlyNode implements EngineImplementation {
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
     this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
     this.emitState();
+    // Reactions that came before it are shown now.
+    await this.reactions.stored(message);
   }
 
   private servicesChanged(): void {
@@ -3502,6 +3649,7 @@ export class GhostlyNode implements EngineImplementation {
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
       callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
       ...(stored.profile && !stored.group && live.link?.peerTyping ? { peerTyping: true } : {}),
+      ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,

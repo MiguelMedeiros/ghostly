@@ -39,7 +39,8 @@ import { EXPECT_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type P
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { TYPING_FRAME, TypingReceiver, TypingSender } from "./pairedTyping";
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
@@ -231,6 +232,17 @@ export interface GhostLinkEvents {
   onCallSignal?(signal: string): void;
   /** The contact started or stopped typing (`typing/1`, WISP 401 § Typing); only changes, never stored. */
   onPeerTyping?(typing: boolean): void;
+  /**
+   * The contact reacted to a message (`react/1`, WISP 401 § Reactions), already checked. True: confirm it (it was
+   * taken: shown, kept for its message, or older than what is shown); false: not now, it comes again.
+   */
+  onReaction?(reaction: WireReaction): boolean | Promise<boolean>;
+  /** The contact confirmed this side's reaction numbered `n`. */
+  onReactionReceipt?(n: number): void | Promise<void>;
+  /** The contact's DHT envelope said it took this side's reactions up to number `n`. */
+  onReactionsTaken?(n: number): void | Promise<void>;
+  /** Both sides offer `react/1` on the open session (true), or no longer (false). */
+  onReactionsSupport?(supported: boolean): void;
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -302,6 +314,8 @@ export interface GhostLinkOptions {
   largeFilesSupport?: boolean;
   /** Offer `typing/1` on paired sessions: say and show when either side is writing (1:1 chats, not group edges). */
   typingSupport?: boolean;
+  /** Offer `react/1` on paired sessions: reactions to messages (1:1 chats, not group edges). */
+  reactionsSupport?: boolean;
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -310,6 +324,8 @@ export interface GhostLinkOptions {
     peerCapsRev?(rev: number): void;
     /** Whether the contact's capability record accepts DHT text; absent or unknown: it does. */
     peerAcceptsText?(): boolean;
+    /** This side's reactions the contact has not confirmed, oldest first: they ride on the envelopes. */
+    reactions?(): readonly WireReaction[];
   };
   rtcAvailable?: boolean;
   /** `automatic`: the chat follows the app's rule (no transport chosen for it); `preferred` is then the rule's. Absent: automatic unless `preferred` is given. */
@@ -425,6 +441,8 @@ export class GhostLink {
   /** Typing on this session (`typing/1`): when to say `start` again, and the contact's word with its timeout. */
   private readonly typingSender = new TypingSender();
   private readonly typingReceiver = new TypingReceiver(typing => this.options.events?.onPeerTyping?.(typing));
+  /** Reaction frames the contact may send per window; the rest go unconfirmed and come again. */
+  private readonly reactionsReceived = new ReactionWindow(REACTION_LIMITS.receive);
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   /** When the ping awaiting its pong went, and the round trip last measured on this session. */
@@ -465,6 +483,12 @@ export class GhostLink {
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs,
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText,
+      // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
+      ...(options.reactionsSupport && {
+        reactions: options.dht.reactions,
+        reaction: async reaction => { await options.events?.onReaction?.(reaction); },
+        reactionsTaken: async n => { await options.events?.onReactionsTaken?.(n); },
+      }),
       // A first contact verified on the DHT pins the contact: the pairing is on the DHT until a stream is up.
       pin: async key => {
         await options.pairing!.pinPeer(key, true);
@@ -1690,6 +1714,7 @@ export class GhostLink {
     if (this.options.servicesSupport) offered.push(SERVICES_CAPABILITY);
     if (this.options.largeFilesSupport) offered.push(FILES_CAPABILITY);
     if (this.options.typingSupport) offered.push(TYPING_CAPABILITY);
+    if (this.options.reactionsSupport) offered.push(REACTIONS_CAPABILITY);
     return offered;
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
@@ -1700,6 +1725,23 @@ export class GhostLink {
   get supportsLargeFiles(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(FILES_CAPABILITY); }
   /** Both sides offer `typing/1` on the open session: typing can be said and shown. */
   get supportsTyping(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(TYPING_CAPABILITY); }
+  /** Both sides offer `react/1` on the open session: reactions can be said and confirmed here. */
+  get supportsReactions(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(REACTIONS_CAPABILITY); }
+  /**
+   * Says a reaction of this side (WISP 401 § Reactions) on the live session, once both sides offer `react/1`. An
+   * error when it could not go now: the caller keeps it, and it goes again later (or on the DHT).
+   */
+  /**
+   * This side has reactions the contact has not confirmed (`reactions` in the DHT options): off the live session they
+   * ride on the DHT envelopes, and one goes now (WISP 403 § Reactions).
+   */
+  reactionsPending(): void { if (this.options.params.profile) void this.dht?.announceReactions(); }
+  sendReaction(reaction: WireReaction): string | null {
+    if (!this.options.params.profile) return "Reactions need a current chat";
+    if (!this.channel || !this.isDataLinkOpen) return "Reactions go when you are live";
+    if (!this.supportsReactions) return "Your contact's app does not show reactions yet";
+    try { this.channel.send(reactionFrame(reaction)); return null; } catch { return "The connection closed before sending"; }
+  }
   /** The contact is typing now, as it said on this session. */
   get peerTyping(): boolean { return this.typingReceiver.peerTyping; }
   /**
@@ -1773,6 +1815,7 @@ export class GhostLink {
       if (pending) try { this.channel.send(JSON.stringify(pending)); } catch { /* the next session */ }
     }
     if (changed.includes(TYPING_CAPABILITY) && !this.supportsTyping) { this.typingSender.reset(); this.typingReceiver.clear(); }
+    if (changed.includes(REACTIONS_CAPABILITY)) this.options.events?.onReactionsSupport?.(this.supportsReactions);
     this.emitPairingState();
   }
   /** Both sides announced groups on this session and it is open. */
@@ -2059,6 +2102,20 @@ export class GhostLink {
           if (frame?.t === TYPING_FRAME) {
             // Only on the authenticated session with the pinned contact, and only once both said typing/1.
             if (this.supportsTyping) this.typingReceiver.receive(frame);
+            return;
+          }
+          if (frame?.t === REACTION_FRAME) {
+            // Counted before it is read: a flood of malformed frames costs as much as one of reactions.
+            if (!this.supportsReactions || !this.reactionsReceived.take()) return;
+            const reaction = parseReactionFrame(frame);
+            if (!reaction) return;
+            if (await this.options.events?.onReaction?.(reaction) && this.channel === channel && this.isDataLinkOpen)
+              try { channel.send(reactedFrame(reaction.n)); } catch { /* it comes again */ }
+            return;
+          }
+          if (frame?.t === REACTED_FRAME) {
+            const n = parseReactedFrame(frame);
+            if (n !== null) await this.options.events?.onReactionReceipt?.(n);
             return;
           }
           if (frame?.t === PAIRED_CALL_FRAME) {

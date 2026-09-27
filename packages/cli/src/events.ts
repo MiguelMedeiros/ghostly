@@ -285,6 +285,7 @@ export class EventHub {
     const quiet = this.firstRun && !this.baselined;
     const changes: [string, string | null][] = [];
     const present = new Set<string>();
+    this.reactions(chat, group, messages, quiet);
     const files: [string, string][] = [];
     for (const message of messages) {
       present.add(message.id);
@@ -317,6 +318,28 @@ export class EventHub {
     if (changes.length) this.persist(chat, changes);
     // After the message's own event: what waited for it goes now.
     for (const [fileId, messageId] of files) this.flushFile(fileId, messageId);
+  }
+
+  /**
+   * Reactions that changed (WISP 400 § Reactions): `message.reaction` in a chat, `group.reaction` in a group, one per
+   * person and number; `emoji` "" when one was taken back. Kept apart from the messages' own seen set.
+   */
+  private reactions(chat: string, group: string | null, messages: readonly StoredMessage[], quiet: boolean): void {
+    const key = `reactions:${chat}`, known = this.seenOf(key);
+    const changes: [string, string | null][] = [];
+    for (const message of messages) for (const [by, r] of Object.entries(message.reactions ?? {})) {
+      const id = `${message.id}|${by}`, value = String(r.n);
+      if (known.get(id) === value) continue;
+      const before = known.get(id);
+      known.set(id, value);
+      changes.push([id, value]);
+      // A reaction taken back before this process ever reported it says nothing.
+      if (quiet || (before === undefined && !r.e)) continue;
+      const fields = { messageId: message.id, by, emoji: r.e, removed: !r.e, mine: message.sender === "me" };
+      if (group) this.emit("group.reaction", `group.reaction:${group}:${message.id}:${by}:${r.n}`, { group, ...fields });
+      else this.emit("message.reaction", `message.reaction:${chat}:${message.id}:${by}:${r.n}`, { chat, ...fields });
+    }
+    if (changes.length) this.persist(key, changes);
   }
 
   private persist(chat: string, changes: [string, string | null][]): void {
