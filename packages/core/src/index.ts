@@ -68,6 +68,7 @@ export * from "./groupCrypto";
 export * from "./groupCommits";
 export * from "./groupSession";
 export * from "./groupMentions";
+export * from "./groupEdits";
 export * from "./replies";
 export * from "./reactions";
 export * from "./groupEntry";

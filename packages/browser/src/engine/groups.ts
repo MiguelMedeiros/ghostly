@@ -1,7 +1,7 @@
 import {
   GroupSession, MAX_GROUP_CHAIN, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type GroupMention, type WireReply, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
+  type GhostRecord, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -57,6 +57,8 @@ export interface GroupsHost {
   communityApp?(groupId: string, sender: string, frame: Record<string, unknown>): Promise<void> | void;
   /** A payload a member of a community sealed to me (a payment between the two of us). */
   communityPair?(groupId: string, sender: string, payload: Record<string, unknown>): Promise<void> | void;
+  /** An edit a member of a private group made of its message, authenticated as theirs (WISP 9xx § Edits). */
+  groupEdit?(groupId: string, edit: GroupIncomingEdit): Promise<void> | void;
 }
 
 /** Where groups and their history are kept: the engine's database, or a test's memory. */
@@ -188,6 +190,18 @@ export class Groups {
   /** Through a community group: an application frame to everyone, or a payload sealed to one member. */
   sendCommunityApp(groupId: string, frame: Record<string, unknown>): Promise<void> { return this.communities.sendApp(groupId, frame); }
   sendCommunityPair(groupId: string, to: string, payload: Record<string, unknown>): Promise<void> { return this.communities.sendPair(groupId, to, payload); }
+
+  /**
+   * Says an edit of my message to the group (WISP 9xx § Edits): over the edges of a private group (to member `to`
+   * alone, when given), through a community like any frame. An error when it cannot go now.
+   */
+  async sendEdit(groupId: string, edit: GroupEdit, to?: string): Promise<string | null> {
+    if (this.isCommunity(groupId)) return this.communities.sendEdit(groupId, edit);
+    const session = this.sessions.get(groupId);
+    if (!session) return "You are not in this group";
+    const result = await session.sendEdit(edit.id, { v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k }, to);
+    return "error" in result ? result.error : null;
+  }
   /** Resolves once the community frames received so far were handed to the engine (tests). */
   communityIdle(): Promise<void> { return this.communities.idle(); }
 
@@ -691,6 +705,7 @@ export class Groups {
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }) });
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
       },
+      edit: e => this.host.groupEdit?.(state.id, e),
       changed: () => { void this.membershipChanged(state.id); },
       metaChanged: (by, picture) => { void this.pictureChanged(state.id, session, by, picture); },
     });

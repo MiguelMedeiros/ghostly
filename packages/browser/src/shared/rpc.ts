@@ -140,10 +140,12 @@ export interface EngineApi {
   /** `replyTo`: the id of a message of this chat the text answers (WISP 400 § Replies). */
   sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): { error: string | null; refused?: boolean; messageId?: string };
   /**
-   * Edits a text of mine in a 1:1 chat (WISP 400 § Edits): the new text here at once, and to the contact once both
-   * sides offer edit/1 on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit.
+   * Edits a text of mine (WISP 400 § Edits): the new text here at once, and to the contact once both sides offer edit/1
+   * on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit. In a group
+   * (`group:<id>`, WISP 9xx § Edits) it goes to the members; `mentions`: members named by the new text beyond those the
+   * message already named.
    */
-  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview }): { error: string | null; refused?: boolean; messageId?: string };
+  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[] }): { error: string | null; refused?: boolean; messageId?: string };
   retryMessage(params: { linkId: string; messageId: string }): void;
   /**
    * Reacts to a message (WISP 400 § Reactions): `linkId` a chat's link or `group:<id>`, `messageId` the message's id

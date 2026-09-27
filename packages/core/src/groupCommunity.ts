@@ -10,6 +10,8 @@ import {
 import { GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
 import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
+import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
+import { validEditNumber } from "./pairedEdits";
 import {
   encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaFrame,
@@ -945,6 +947,32 @@ export class CommunitySession {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       if (!isObject(frame) || utf8Encode(JSON.stringify(frame)).length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
       const sent = await this.sendPayload(() => ({ x: frame }), nick, now);
+      if ("error" in sent) return sent;
+      await this.persist();
+      this.hooks.broadcast(sent.frame);
+      return { id: sent.id };
+    });
+  }
+
+  /**
+   * An edit of one of my messages (WISP 9xx · Group Community § Edits): an application frame like `sendApp`'s, sealed
+   * to the current epoch, but with a text's room rather than an application frame's, since it carries a whole text.
+   * The nick is left out when the text leaves no room for it.
+   */
+  sendEdit(edit: { id: string; v: number; ts: number; text: string; mentions?: readonly GroupMention[] }, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
+    return this.serialize(async () => {
+      if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
+      if (communityMessageAuthor(edit.id) !== this.myKey) return { error: "Only your own messages can be edited" };
+      if (!validEditNumber(edit.v)) return { error: "This message was edited too many times" };
+      const text = edit.text.trim();
+      if (!validEditText(text)) return { error: text ? "Message exceeds 16 KiB" : "An edit cannot be empty" };
+      const named = validMentions(wireMentions(edit.mentions ?? []), text, false);
+      const frame = communityEditFrame({ id: edit.id, e: edit.v, ts: edit.ts, m: text, k: named });
+      // What a message's box holds (`isMessageFrame`): the text's bound and a little more.
+      const room = COMMUNITY_LIMITS.textBytes + 256, clean = sanitizeNick(nick);
+      const size = (withNick: boolean) => utf8Encode(JSON.stringify(withNick && clean ? { x: frame, nick: clean } : { x: frame })).length;
+      if (size(false) > room) return { error: "Too long to edit in this group" };
+      const sent = await this.sendPayload(() => ({ x: frame }), size(true) <= room ? nick : undefined, now);
       if ("error" in sent) return sent;
       await this.persist();
       this.hooks.broadcast(sent.frame);

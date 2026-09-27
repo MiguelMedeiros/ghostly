@@ -19,6 +19,15 @@ export function canEdit(message: Pick<StoredMessage, "sender" | "linkId" | "wire
     && !message.event && !message.groupPay && !JOIN_NOTICE.test(message.text);
 }
 
+/** A group message's id: `<sender>:<epoch>:<seq>` in a private group, `<sender>:<epoch>:<commit>:<seq>` in a community. */
+const GROUP_MESSAGE_ID = /^[a-z0-9]{52}:\d+:(?:[0-9a-f]{16}:)?\d+$/;
+
+/** A text of mine in a group (WISP 9xx § Edits): one the group carried under its id, not a payment, a note or an event line. */
+export function canEditInGroup(message: Pick<StoredMessage, "sender" | "linkId" | "id" | "file" | "paymentId" | "event" | "groupPay">): boolean {
+  return message.sender === "me" && message.linkId.startsWith("group:") && GROUP_MESSAGE_ID.test(message.id) && !message.file && !message.paymentId
+    && !message.event && !message.groupPay;
+}
+
 /** A text of the contact's that an edit may change (the same kinds, from the other side). */
 export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "paymentId" | "event" | "groupPay" | "text">): boolean {
   return message.sender === "peer" && !message.file && !message.paymentId && !message.event && !message.groupPay && !JOIN_NOTICE.test(message.text);
