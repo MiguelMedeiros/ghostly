@@ -885,7 +885,7 @@ html.calm .psx-replay {
 /* ── Your path: three one-line steps ─────────────────── */
 .dvx-path {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: clamp(14px, 2vw, 24px);
   margin: 0;
   padding: 0;
@@ -924,6 +924,11 @@ html.calm .psx-replay {
   padding: 0;
   list-style: none;
   font-size: 14px;
+}
+@media (max-width: 1180px) {
+  .dvx-path {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media (max-width: 860px) {
   .dvx-path {

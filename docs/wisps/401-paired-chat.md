@@ -8,10 +8,10 @@
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
-| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`) and edits (`edit/1`) on the live session. |
+| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`), reactions (`react/1`) and edits (`edit/1`) on the live session; replies on texts and files. |
 | Summary | The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT. |
 | Availability | Available |
-| Notes | Every new chat on web, desktop and extension, calls included while it is live. |
+| Notes | Every new chat on web, desktop and extension, calls included while it is live. The typing indicator goes over the live session only, and each person can turn it off. |
 | Feature | [Chat](https://ghostly.tools/#next) |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.

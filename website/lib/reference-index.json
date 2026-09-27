@@ -303,7 +303,7 @@
     "notices": [],
     "benefit": "Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares.",
     "level": "available",
-    "note": "Experimental, the same engine as the apps on Node: ghostly1 invites, chats, groups, wallets, files, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, no video in calls, and the DHT only through relays. Number not yet assigned."
+    "note": "Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions), groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, no video in calls, and the DHT only through relays. Number not yet assigned."
   },
   {
     "file": "200-payments.md",
@@ -758,7 +758,7 @@
     "title": "WISP 400: Chat Messaging",
     "status": "Draft",
     "updated": "2026-09-27",
-    "implementation": "The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, on-dht, self-upgrade, DHT only per chat; compatibility chats for v0.4",
+    "implementation": "The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, on-dht, self-upgrade, DHT only per chat; replies, reactions, edits and the text's display conventions; compatibility chats for v0.4",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -770,7 +770,7 @@
     "notices": [],
     "benefit": "One chat for everyone: the DHT to meet, a live link when one connects, the DHT again when none does.",
     "level": "available",
-    "note": "Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only.",
+    "note": "Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited in a 1:1 chat, reactions put one emoji per person on a message, and lists, quotes, headings and links show as such.",
     "feature": {
       "label": "Chat",
       "href": "/#next"
@@ -784,7 +784,7 @@
     "title": "WISP 401: Chat Session",
     "status": "Draft",
     "updated": "2026-09-27",
-    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (calls/1, screen sharing inside a call), shared apps (services/1), files/3, the typing indicator (typing/1) and edits (edit/1) on the live session.",
+    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (calls/1, screen sharing inside a call), shared apps (services/1), files/3, the typing indicator (typing/1), reactions (react/1) and edits (edit/1) on the live session; replies on texts and files.",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md",
@@ -795,7 +795,7 @@
     "notices": [],
     "benefit": "The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT.",
     "level": "available",
-    "note": "Every new chat on web, desktop and extension, calls included while it is live.",
+    "note": "Every new chat on web, desktop and extension, calls included while it is live. The typing indicator goes over the live session only, and each person can turn it off.",
     "feature": {
       "label": "Chat",
       "href": "/#next"

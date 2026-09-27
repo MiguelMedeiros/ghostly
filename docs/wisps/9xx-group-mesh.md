@@ -230,3 +230,13 @@ Private payments in a group (no note, or amounts hidden); more metadata (renamin
 ## References
 
 [Group contract](900-group-sessions.md), [chat session](401-paired-chat.md), [invite/join](800-invite-join.md), [protocol](../PROTOCOL.md#65-private-groups-group-mesh1), [session](../../packages/core/src/groupSession.ts), [commits](../../packages/core/src/groupCommits.ts), [crypto](../../packages/core/src/groupCrypto.ts).
+
+## Revision log
+
+- 0.7 (2026-09-27): reactions: a frame of their own on each of the reactor's edges, one emoji per member per message, not in the message log (#354).
+- 0.6 (2026-09-27): replies: a sealed `r` box beside the mentions' `m` on `group-msg` (#347).
+- 0.5 (2026-09-25): @mentions bound to member keys, in a sealed `m` box (#279).
+- 0.4 (2026-09-24): a group picture set by the admin, outside the commit chain (#154).
+- 0.3 (2026-09-24): payments between two members over their own edge, and a request to the whole group (#145).
+- 0.2 (2026-09-24): the group's link, `group-entry/1`, anyone with it can ask to join while the admin's app is open (#109).
+- 0.1 (2026-09-23): `group-mesh/1`: one admin, signed commit chain, epoch secrets sealed per member, a mesh of pairwise edges (#102, #106).

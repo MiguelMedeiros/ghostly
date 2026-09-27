@@ -31,13 +31,21 @@
         "level": "available"
       },
       {
-        "text": "A headless CLI for bots that joins the same chats",
+        "text": "Replies, edits, emoji reactions, delivery marks, videos that play in the chat, and pictures or files pasted or dropped into a chat",
+        "level": "available"
+      },
+      {
+        "text": "In one-to-one chats, see when your contact is typing or recording, or what a bot is doing; you can turn it off",
+        "level": "available"
+      },
+      {
+        "text": "A headless CLI for bots that joins the same chats, calls included",
         "level": "available"
       }
     ],
     "next": [
       {
-        "text": "Typing and presence, each a capability of its own that you can keep private",
+        "text": "Presence, a capability of its own that you can keep private",
         "level": "planned"
       },
       {
@@ -60,7 +68,7 @@
         "level": "available"
       },
       {
-        "text": "Cashu and Lightning, through the mint or your own sources (NWC, LND, Core Lightning, WebLN), several Lightning cards per network",
+        "text": "Cashu and Lightning, through the mint or your own sources (NWC, LND, Core Lightning, WebLN, Breez, Fedimint), several Lightning cards per network",
         "level": "available"
       },
       {
@@ -70,11 +78,15 @@
       {
         "text": "Ark (Arkade and Bark), Spark, Fedimint, USDT and on-chain bitcoin, experimental; BDK on test networks only",
         "level": "available"
+      },
+      {
+        "text": "Spark, Breez and Fedimint on Mainnet (Spark and Breez with your own Breez API key; Fedimint not yet tried with real funds)",
+        "level": "available"
       }
     ],
     "next": [
       {
-        "text": "Mainnet for Spark, Breez, BDK and Fedimint, once reviewed with real money in mind",
+        "text": "Mainnet for the BDK on-chain wallet, once reviewed with real money in mind",
         "level": "planned"
       },
       {

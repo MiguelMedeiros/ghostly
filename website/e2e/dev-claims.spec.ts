@@ -39,6 +39,7 @@ test("the availability map has the headless CLI", async ({ page }) => {
   const cli = (name: string) => table.locator("tr", { has: page.locator("th", { hasText: name }) }).locator("td").last();
   await expect(cli("Text chat, ghostly1 invites")).toHaveText("✓");
   await expect(cli("Bark & Fedimint wallets")).toHaveText("No");
-  await expect(cli("Voice, video, screen")).toHaveText("No");
+  await expect(cli("Voice calls")).toHaveText("✓");
+  await expect(cli("Video calls, screen sharing")).toHaveText("No");
   await expect(page.locator(".avail-notes")).toContainText("--confirm-real");
 });

@@ -63,12 +63,35 @@ Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #2
   - **Shared services** (#268): apps shared with this contact. Greyed on the web app: "Needs the Ghostly extension or desktop app".
   - **Document**, **Photos & videos**, **Camera** (when the device has one)
 - **Emoji and GIFs**: one panel with two tabs. GIFs come from GifCities (Internet Archive) and are sent as a link.
-- **Voice messages** (#214): the mic takes the Send button's place while the text is empty. Hold to record, slide to cancel, slide up to lock. Recorded as Opus when the browser can; a file that `<audio>` refuses plays through a WAV fallback (`packages/core/src/voice.ts`, `src/lib/voiceDecode.ts`).
+- **Voice messages** (#214, #355, #363): the mic takes the Send button's place while the text is empty, as in WhatsApp (`src/components/voice/`).
+  - Hold to record and release to send. Slide sideways to cancel, slide up to lock.
+  - A click (or the keyboard) records hands-free at once. Locked, the mic turns into **Send**: one press sends. The row holds Discard, the timer, the live waveform and **Pause**; paused, ▶ plays back what is recorded so far and the mic reads **Resume**.
+  - **Enter** sends while locked. **Esc** discards under 3 s; longer, it pauses and asks "Discard voice message?" in the bar.
+  - Recorded as Opus when the browser can; a file that `<audio>` refuses plays through a WAV fallback (`packages/core/src/voice.ts`, `src/lib/voiceDecode.ts`).
+  - Playing, a pill in the mic's place sets the speed: 1×, 1.5×, 2×, pitch kept, remembered on the device (#345).
+- **Paste or drop** (#349): paste a picture or files into the composer, or drop files on the chat column. A sheet shows them with an optional caption, **Send** and **Cancel**; another paste adds to it. Plain text pastes as text. Not in groups, which take no files.
 - **Secret guard** (#283): asks before a seed, a private key or a Cashu token goes out as text ([WALLETS.md](WALLETS.md#secret-guard)).
 - **Mentions** (#279): `@` in a group picks a member. A mention is bound to the member's key. Paired chats have no mentions.
 - **Edits** (#351): edit a text you sent from its ⋮ (Edit), or press ↑ in an empty composer for your last one. The composer shows what you edit (✕ or Escape leaves it as it was, and your draft comes back); Enter saves. The bubble says *edited* beside the time (until your contact's app confirms it, its hint says it was not shown yet), and the message's details list the earlier versions. An edit never rings, never counts as unread and never moves the chat; the chat list shows the new text. 1:1 chats only; texts only; at most 100 edits a message, no time limit. A contact whose app does not show edits keeps the old text, and gets the edit once it does ([WISP 400](wisps/400-chat.md#edits)).
-- **Replies** (#347): answer a message from its ⋮ (Reply), the reply button beside it, or a swipe right on a touch screen. The composer shows what you answer (✕ or Escape to let go); the reply's bubble quotes it, and a tap jumps to the original. The reply names the original by the id both sides know it by, with a short line of it, so it still reads where the original is gone ([WISP 400](wisps/400-chat.md#replies)). Only text carries a reply.
+- **Replies** (#347): answer a message from its ⋮ (Reply), the reply button beside it, or a swipe right on a touch screen. The composer shows what you answer (✕ or Escape to let go); the reply's bubble quotes it, and a tap jumps to the original. The reply names the original by the id both sides know it by, with a short line of it, so it still reads where the original is gone ([WISP 400](wisps/400-chat.md#replies)). Texts and files (a voice message included, #359) carry a reply; payments do not.
 - **Reactions** (#354): one emoji per person per message, like WhatsApp. Hover a message for the React button (or its ⋮ → React; a long press on a phone) to open a quick bar of six and + for any emoji. Chips under the bubble show each emoji with its count and who chose it; a click on yours takes it back, on another adds the same. A reaction never counts as unread or plays the message sound; the chat list says the latest. It travels live once both apps say `react/1`, and on DHT envelopes meanwhile; groups carry it too ([WISP 400](wisps/400-chat.md#reactions)).
+
+## A message's ⋮
+
+In order, each row when it applies (`src/components/MessageBubble.tsx`):
+
+1. **Reply** (#347)
+2. **Edit**, for a text you sent, in a 1:1 chat (#351)
+3. **React** (#354)
+4. **Send again**, for a message that was not sent (#360)
+5. **Download**, for a voice message, a picture or a file, once its bytes are on this device (#346). Desktop opens the save dialog; web and extension download it.
+6. **Download as MP3**, for a voice message: converted on this device, mono at 64 kbit/s (#365)
+7. **Details** (#240)
+8. **Cancel sending** for a message still waiting, else **Delete** (from this device only)
+
+## Delivery marks
+
+One mark beside the time, as in WhatsApp (#360, `src/components/chat/DeliveryStatus.tsx`): 🕓 sending or waiting for the contact, ✓ sent, ✓✓ delivered, a red ! not sent. Hover, focus or tap the mark for one line on what happens next; the engine's reason is in ⋮ → Details. The red mark is a button that sends again. A voice message or file that did not go, or stopped moving, shows a round ↻ in place of play or its icon. Group messages keep the tick from receipts.
 
 ## How messages render
 
@@ -91,7 +114,7 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 
 ## Message details
 
-Double click, long press, or the message's ⋮ → **Details** (#240, `src/components/MessageDetailsPanel.tsx`). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
+Double click, or the message's ⋮ → **Details** (#240, `src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
 
 ## Files
 
@@ -100,6 +123,9 @@ Double click, long press, or the message's ⋮ → **Details** (#240, `src/compo
 - Any size. Offered first, then sent in 16 KiB chunks with 1 MiB in flight, resumed from the last confirmed byte, checked against the sender's SHA-256.
 - Taken without asking up to 25 MiB per file and 500 MiB per contact; past that, the receiver is asked. Offers expire after 7 days.
 - Bytes stream to storage, never whole in memory: OPFS on web and extension, files on Desktop, IndexedDB as fallback.
+- A transfer that has not moved for 60 s offers **Send again** (sender) or **Ask again** (receiver); both go on from what the receiver already holds. A receiver with no data for 30 s asks again by itself (#348, #352).
+- A file can answer a message, with the same quote a text shows (#359).
+- **Videos** (#371): an MP4, WebM, MOV, Ogg or M4V plays in its bubble, with the sender's poster and length. The bytes are read on tap; one video or voice message plays at a time. A type this device cannot play offers Download. On Desktop, videos over 64 MiB are downloaded, not played in place.
 - Older contacts: files/2, up to 100 MiB ([WISP 500](wisps/500-files.md)).
 
 ## Calls and shared services

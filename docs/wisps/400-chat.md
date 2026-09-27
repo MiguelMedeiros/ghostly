@@ -8,10 +8,10 @@
 | Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, `on-dht`, self-upgrade, DHT only per chat; compatibility chats for v0.4 |
+| Implementation | The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, `on-dht`, self-upgrade, DHT only per chat; replies, reactions, edits and the text's display conventions; compatibility chats for v0.4 |
 | Summary | One chat for everyone: the DHT to meet, a live link when one connects, the DHT again when none does. |
 | Availability | Available |
-| Notes | Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. |
+| Notes | Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited in a 1:1 chat, reactions put one emoji per person on a message, and lists, quotes, headings and links show as such. |
 | Feature | [Chat](https://ghostly.tools/#next) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
