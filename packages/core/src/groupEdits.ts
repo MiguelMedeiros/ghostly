@@ -81,21 +81,23 @@ export function parseCommunityEdit(frame: Record<string, unknown>, sender: strin
 }
 
 /**
- * The mentions of an edited text: the places the message named that are still there, found by their words in order
- * (the text around them may have changed), and those `added` while editing. Where two overlap, `added` wins.
+ * The mentions of an edited text: the places the message named that are still there, found by their words (the text
+ * around them may have changed, or their order), and those `added` while editing. Where two overlap, `added` wins.
  */
 export function carryMentions(before: { text: string; mentions?: readonly GroupMention[] }, after: string, added: readonly GroupMention[], everyone: boolean): GroupMention[] {
   const was = Array.from(before.text), now = Array.from(after);
+  const overlaps = (a: GroupMention, b: GroupMention) => a.o < b.o + b.l && b.o < a.o + a.l;
   const carried: GroupMention[] = [];
-  let from = 0;
   for (const m of [...(before.mentions ?? [])].sort((a, b) => a.o - b.o)) {
     const words = was.slice(m.o, m.o + m.l);
-    const at = indexOf(now, words, from);
-    if (at < 0) continue;
-    carried.push({ k: m.k, o: at, l: m.l });
-    from = at + m.l;
+    // The first place with its words that no mention carried already holds: "@Bob … @Bob" keeps both, in either order.
+    for (let at = indexOf(now, words, 0); at >= 0; at = indexOf(now, words, at + 1)) {
+      const place = { k: m.k, o: at, l: m.l };
+      if (carried.some(c => overlaps(c, place))) continue;
+      carried.push(place);
+      break;
+    }
   }
-  const overlaps = (a: GroupMention, b: GroupMention) => a.o < b.o + b.l && b.o < a.o + a.l;
   const fresh = validMentions(added.map(({ k, o, l }) => ({ k, o, l })), after, everyone);
   const all = [...fresh, ...carried.filter(m => !fresh.some(a => overlaps(a, m)))].sort((a, b) => a.o - b.o);
   return validMentions(all.slice(0, MENTION_LIMITS.count), after, everyone);
