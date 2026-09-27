@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.7.3 |
+| Revision | 0.8 |
 | Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
@@ -12,7 +12,7 @@
 | Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is not published |
 | Summary | Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares. |
 | Availability | Available |
-| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats, groups, wallets, files, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, no video in calls, and the DHT only through relays. Number not yet assigned. |
+| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, reactions), groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, no video in calls, and the DHT only through relays. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -226,3 +226,16 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 3. Files, identities, services, advanced groups, pictures, backups (DHT-direct left planned).
 4. Packaging: an npm package whose dependencies are exactly what the bundle imports (a test keeps them so), checked by installing the packed tarball outside the repository and running two bots and four wallets from it; the bot skill; examples (echo bot, payment bot). A single-file binary and DHT-direct remain open.
 5. Voice calls with the apps, the audio handed to a program over a Unix socket per call ([Calls](#calls)); the `call-echo` example.
+
+## Revision log
+
+- 0.8 (2026-09-27): groups for bots: messages name their author from the roster, `group send` answers with the message id, the entry link is printed only with `--show-secret` (#372); `file send --reply` (#359); calls log their ICE candidates and state, and `call list` shows the pair (#362); ids that start with a dash are read as ids (#367).
+- 0.7.2 (2026-09-27): edits: `ghostly edit`, `message.edited`, `edits` and `editedAt` in history (#351).
+- 0.7.1 (2026-09-27): reactions: `react`, `group react`, `message.reaction` and `group.reaction` events (#354).
+- 0.7 (2026-09-27): phase 5, voice calls with the audio on a Unix socket per call (#350); for bots: file events name their message, `file wait`, `typing --for`, help per command, `chat disconnect --hold`, `daemon restart` (#358).
+- 0.6.1 (2026-09-27): typing events and `ghostly typing` (#344); voice notes carry a waveform measured from the file (#353).
+- 0.6 (2026-09-26): phase 4, an npm package whose dependencies are what the bundle imports (#327).
+- 0.5 (2026-09-26): phase 3b, identity proofs, shared web apps and profile backups (#326).
+- 0.4 (2026-09-26): phase 3a, files, voice notes, group admin and pictures (#325).
+- 0.3 (2026-09-26): phase 2, wallets and payments, `--confirm-real` on Mainnet (#324).
+- 0.2 (2026-09-26): phase 1, the runtime, the daemon and its socket, profiles, invites, one chat, groups, events and hooks (#323).

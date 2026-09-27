@@ -61,8 +61,10 @@ One per side, per chat ([WISP 03](wisps/03-capabilities.md#layer-0-capability-re
 `paired-chat/1` ([WISP 401](wisps/401-paired-chat.md)) runs on whichever stream connected. The handshake agrees on a version, binds the transport's own handshake (DTLS fingerprint, TLS exporter or Noise hash) and checks the pinned participation key.
 
 - The transcript-bound `pair-offer` lists what the session carries: `chat/1`, `files/2`, `payments/1`, `transport-switch/1`, `hold/1`, proofs, and more.
-- Once ready, each side sends `{"t":"paired-capabilities","c":[...]}` with `calls/1`, `services/1`, `files/3` and `typing/1`. A capability is on only while both sides list it.
+- Once ready, each side sends `{"t":"paired-capabilities","c":[...]}` with `calls/1`, `services/1`, `files/3`, `typing/1` and `react/1`. A capability is on only while both sides list it.
 - Liveness: `paired-ping` / `paired-pong`. Name and picture: `paired-nick`, `paired-avatar`. Typing: `{"t":"paired-typing","s":"start"|"stop"}` under `typing/1`, a `start` optionally with `kind` (`recording`, `thinking`) and a bot's `status` line, never stored and never on the DHT ([WISP 401](wisps/401-paired-chat.md#typing)).
+- Replies: `r` (`{i, s, f}`: the original's id, a cleaned line of it, its author) on `paired-message` and on a file's offer; the DHT envelope carries the id only ([WISP 400](wisps/400-chat.md#replies)).
+- Reactions: `paired-reaction` (`{id, e, n}`, one emoji per person per message, the highest `n` wins) answered by `paired-reacted`, under `react/1`; on the DHT they ride in the envelope's thirteenth and fourteenth elements ([WISP 401](wisps/401-paired-chat.md), [WISP 403](wisps/403-dht-text.md)).
 - Losing the session is not losing the chat: it moves to the DHT and comes back when a stream does ([WISP 100](wisps/100-transports.md)).
 
 ### Service advertisements and HTTP

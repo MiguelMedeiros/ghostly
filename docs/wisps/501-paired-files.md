@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 501; editorial family allocation |
 | Status | Draft |
-| Revision | 0.4.1 |
+| Revision | 0.4.2 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
@@ -49,6 +49,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 - **Video description (0.4.1).** A `video/*` file's offer (and a `files/2` `pf-start`, and a held file's meta in [4xx](4xx-store-and-forward.md)) may carry `video {duration, width, height, poster?}`: milliseconds, pixels as it plays, and a JPEG of an early frame in base64url, at most 12 KiB, so the receiver shows a picture and a length before a byte has arrived (and before its person accepts a large one). Optional and advisory: an app that does not know it ignores it, and a malformed one is dropped without refusing the file (a bad poster alone drops only the poster). The receiver may make its own poster from the first frame once the file is in. Received video of a playable type (MP4, WebM, QuickTime, Ogg, M4V) is handed to a player with its type; anything else stays opaque bytes.
 - **Integrity.** The receiver computes the SHA-256 of what it stored (read back, not what passed through memory) and compares it with `pf-sum`. A mismatch deletes the file and is refused with `damaged`; the sender may offer it again under the same id, and the receiver takes it from the start without asking again.
 - **Pause and cancel.** The sender pauses by offering with `paused` and resumes by offering without it; the receiver pauses with `pf-wait` `paused` and resumes with `pf-accept`. Either side cancels: the sender with `pf-abort`, the receiver with `pf-refuse` `cancelled`; the receiver removes what it stored.
+- **Offered again after a stop (0.4.2, no wire change).** A transfer its sender stopped with `pf-abort` (a read failure, for example) is taken again from the start when the sender offers it again under the same id. One the receiver's person cancelled stays refused with `cancelled`. An older receiver refuses both, as before.
 - **Storage.** Received bytes go to storage as they arrive and are read back in ranges, so no file is held whole in memory (browsers: the origin-private file system, IndexedDB pieces where it is missing; Desktop: files in the app's data folder). There is no size limit but the receiver's space and safe integers (2^53 - 1 bytes).
 
 Implemented in [`chatFiles.ts`](../../packages/core/src/chatFiles.ts) (protocol) and [`fileDesk.ts`](../../packages/browser/src/engine/fileDesk.ts) (the app's records, storage and messages).
@@ -67,8 +68,10 @@ For `files/2`: the common contract's 100 MiB file bound, three concurrent incomi
 
 ## Revision log
 
+- 0.4.2 (2026-09-27): a transfer its sender stopped (`pf-abort`) is taken again from the start when offered again; one the receiver cancelled stays refused (#352).
 - 0.4.1 (2026-09-27): optional `video` description on an offer (length, size, poster); no change for apps that ignore it.
 - 0.4 (2026-09-27): `r` on `pf-offer` and `pf-start`: a file that answers a message. A reply that does not check out is dropped; the file is taken all the same. Older apps ignore it.
+- 0.3.2 (2026-09-27): stuck transfers (no move for 60 s) offer Send again and Ask again; a receiver with no data for 30 s accepts again by itself; a sender writes only while the session has room (#348). No wire change.
 - 0.3.1 (2026-09-26): an offer that expired unanswered is refused when offered again, never taken without consent.
 - 0.3 (2026-09-25): `files/3`: offer and consent, advertised room, 1 MiB window, resume from the stored offset after a drop, a switch or a restart, SHA-256 checked on what was stored, pause and cancel from either side. `files/2` kept for older apps.
 - 0.2 (2026-09-25): renamed Chat Files; place in the one chat; behaviour on a drop to the DHT.

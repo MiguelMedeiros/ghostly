@@ -264,3 +264,14 @@ On public relays each trip through Pkarr (a packet published, then seen by the o
 ## Open decisions
 
 Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; files and media; native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members.
+
+## Revision log
+
+- 0.8 (2026-09-27): reactions as a sealed, signed application frame that every member and hub carries, caught up like messages (#354).
+- 0.7 (2026-09-27): replies: `r` inside the sealed payload, beside the mentions (#347).
+- 0.6 (2026-09-26): the admin's changes are final: a member's longer branch cannot undo a remove, a role, a rotation or a new link (#300).
+- 0.5 (2026-09-25): @mentions bound to member keys (#279).
+- 0.4 (2026-09-24): a join by link takes seconds: the door answers before the relay budget runs out (#167).
+- 0.3 (2026-09-24): payments between two members, sealed to them and carried by the hubs (#169).
+- 0.2 (2026-09-24): a group picture set by the admin (#154).
+- 0.1 (2026-09-24): `group-community/1`: a link anyone can open, admission by any member, elected hubs, up to 256 members (#153).

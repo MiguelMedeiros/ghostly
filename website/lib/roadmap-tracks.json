@@ -31,13 +31,21 @@
         "level": "available"
       },
       {
-        "text": "A headless CLI for bots that joins the same chats",
+        "text": "Replies, emoji reactions, delivery marks, and pictures or files pasted or dropped into a chat",
+        "level": "available"
+      },
+      {
+        "text": "A typing indicator in one-to-one chats, which you can turn off",
+        "level": "available"
+      },
+      {
+        "text": "A headless CLI for bots that joins the same chats, calls included",
         "level": "available"
       }
     ],
     "next": [
       {
-        "text": "Typing and presence, each a capability of its own that you can keep private",
+        "text": "Presence, a capability of its own that you can keep private",
         "level": "planned"
       },
       {
@@ -70,11 +78,15 @@
       {
         "text": "Ark (Arkade and Bark), Spark, Fedimint, USDT and on-chain bitcoin, experimental; BDK on test networks only",
         "level": "available"
+      },
+      {
+        "text": "Spark, Breez and Fedimint on Mainnet (Spark and Breez with your own Breez API key; Fedimint not yet tried with real funds)",
+        "level": "available"
       }
     ],
     "next": [
       {
-        "text": "Mainnet for Spark, Breez, BDK and Fedimint, once reviewed with real money in mind",
+        "text": "Mainnet for the BDK on-chain wallet, once reviewed with real money in mind",
         "level": "planned"
       },
       {
