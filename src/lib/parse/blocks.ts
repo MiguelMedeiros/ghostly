@@ -38,7 +38,13 @@ function proseBlocks(text: string, detectors: readonly Detector[], ctx: ParseCon
   const closeList = () => { closeItem(); list = null; };
   const last = () => units[units.length - 1];
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // One blank line between items of the same list does not end it ("9. a", "", "10. b" is one list).
+    if (list && BLANK.test(line)) {
+      const next = ITEM.exec(lines[i + 1] ?? "");
+      if (next && ((next[1] === "\t" ? NESTED : next[1].length) >= NESTED || (next[3] !== undefined) === list.ordered)) continue;
+    }
     const m = ITEM.exec(line);
     if (m) {
       const ordered = m[3] !== undefined;

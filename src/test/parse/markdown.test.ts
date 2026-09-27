@@ -52,6 +52,14 @@ describe("lists", () => {
     expect(parse("- a\n  more of a\n- b\nThanks")).toBe("ul • a\nmore of a\nul • b\np(Thanks)");
   });
 
+  it("goes on across one blank line between its items", () => {
+    expect(parseMessage("9. a\n\n10. b").filter((b) => b.type === "list")).toHaveLength(1);
+    expect(parse("- a\n\n  - a1\n\n- b")).toBe("ul • a\n  ul • a1\nul • b");
+    expect(parse("- a\n\n\n- b")).toBe("ul • a\nul • b");
+    expect(parseMessage("- a\n\n\n- b").filter((b) => b.type === "list")).toHaveLength(2);
+    expect(parse("- a\n\nThanks")).toBe("ul • a\np(Thanks)");
+  });
+
   it("starts a new list when bullets turn to numbers", () => {
     expect(parse("- a\n1. b")).toBe("ul • a\nol 1. b");
   });
