@@ -19,6 +19,11 @@ export function encrypt(plaintext: string, key: Uint8Array): string {
   return toBase64(concatBytes(nonce, box));
 }
 
+/** The length of what `encrypt` returns for a plaintext of this many UTF-8 bytes: base64 of nonce, box and 16-byte tag. */
+export function sealedLength(plaintextBytes: number): number {
+  return 4 * Math.ceil((NONCE_LENGTH + 16 + plaintextBytes) / 3);
+}
+
 export function decrypt(encoded: string, key: Uint8Array): string {
   if (key.length !== KEY_LENGTH) throw new Error("Invalid key length: expected 32 bytes");
   const combined = fromBase64(encoded);

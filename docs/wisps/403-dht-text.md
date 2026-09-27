@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 403; editorial family allocation |
 | Status | Draft |
-| Revision | 0.6 |
+| Revision | 0.7 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
@@ -31,11 +31,29 @@ Before this revision, the same envelope served two separate cases: chats created
 
 It uses separate directional Pkarr mailboxes and the `_dm`/`_dmk` envelope described in [DHT delivery](../DHT-DELIVERY.md). The envelope binds sender participation, intended recipient, sequence, times, delivery mode, message ID and receipt. Known participation keys must not be silently replaced.
 
-Only text is admitted: at most 256 UTF-8 bytes, and complete encrypted/authenticated DNS packets must fit 1,000 bytes. Escaping/receipts can lower the usable text budget. Refuse oversized content intact; do not fragment or truncate. Keep one outstanding message per direction, a five-minute lifetime and at most eight bounded publication attempts. Save original expiry/sequence/attempt state before publishing. A mode switch cannot reset the budget.
+Only text is admitted: at most 256 UTF-8 bytes, and complete encrypted/authenticated DNS packets must fit 992 bytes ([What a mailbox shows](#what-a-mailbox-shows-revision-07)). Escaping/receipts can lower the usable text budget. Refuse oversized content intact; do not fragment or truncate. Keep one outstanding message per direction, a five-minute lifetime and at most eight bounded publication attempts. Save original expiry/sequence/attempt state before publishing. A mode switch cannot reset the budget.
 
 Persist received content before advancing replay state or acknowledging its stable ID. Publishing is not delivery confirmation. Expiry stops acceptance/retransmission; it does not erase caches, screenshots or recipient history. This construction has no forward-secrecy guarantee.
 
 The envelope's `mode` field (`"stream"` or `"dht"`) is unchanged. In revision 0.2 its reading is: `"dht"` = this side is `dht-chosen`; `"stream"` = this side wants layer 1 whenever it connects.
+
+## What a mailbox shows (revision 0.7)
+
+A mailbox's packet can be read by anyone who has its address, without the envelope key: a holder of the invite for the invite mailboxes, and the relays and DHT nodes that store either kind. Every envelope is made to look the same to such a reader:
+
+- Every record carries a TTL of 300 s, whatever the envelope holds. Readers never read the TTL; it only tells caches how long to keep the packet.
+- The sealed `_dm` plaintext is padded with spaces after the JSON value, up to the largest length whose packet fits 992 bytes. Every packet of a mailbox then has one size: 992 bytes before the pin (one record), 989 after it (with `_dmk`). JSON allows spaces after the value, so readers from before read these envelopes as ever.
+- The sender measures a text against the same 992 bytes, 8 under the DHT's 1,000: the Rust client splits TXT strings at 254 bytes, not 255, so the packet it builds can be a byte or two larger. This can lower the usable text budget a little for a text with many escaped characters.
+
+So one read of a mailbox does not tell whether its envelope carries a text, a receipt, reactions, an edit or only the delivery mode, nor how long a text is, nor how many times it was retried.
+
+What such a reader can still learn:
+
+- That the mailbox exists and is in use, and whether the pin happened (the `_dmk` record appears).
+- When each envelope was published: the packet's timestamp is in the clear. With nothing to send, an envelope goes about every four minutes; a text goes at once and again after 4, 8, 16 and 32 s and then every 60 s until its receipt, and a receipt goes at once. Someone reading a mailbox every few seconds can tell activity from that pattern. Hiding it would take envelopes on a fixed schedule whatever happens, which the relays' request budget and the delivery latency do not allow today; it is an open item.
+- The relays see the IP address of whoever publishes and reads.
+
+Before this revision a text's TTL was its remaining lifetime (at most 300 s, lower on every retry), a keep-alive's was 600 s, and a packet's size followed its content (in one run: keep-alives of 406 bytes before the pin and 576 after, texts of 474 to 969), so a single read told that a text was pending.
 
 ## First contact
 
@@ -125,6 +143,7 @@ DHT only avoids stream discovery/dialing. Native clients read the Mainline DHT d
 
 ## Revision log
 
+- 0.7 (2026-09-27): one TTL (300 s) and one packet size (padded to 992 bytes) for every envelope, so a read of a mailbox does not tell a text from a keep-alive; what a mailbox shows.
 - 0.6 (2026-09-27): edits ride as a text of their own id with a twelfth element naming the edited message and its number, only to a contact whose record lists `edit/1`.
 - 0.5 (2026-09-27): reactions ride as the thirteenth element (the author's, not yet confirmed, as many as fit) with the fourteenth saying which of the reader's were taken; the twelfth is kept for edits.
 - 0.4 (2026-09-27): a text's reply rides as the eleventh element, its id only, left out when the packet has no room for it.

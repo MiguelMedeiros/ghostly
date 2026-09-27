@@ -6,7 +6,7 @@ import { tryDecrypt } from "../src/crypto";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { createLink } from "../src/invite";
 import { DhtDelivery, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
-import { createRelayPayload, parseRelayPayload, type SignedPacket } from "../src/pkarr";
+import { createRelayPayload, measureRecords, parseRelayPayload, type GhostRecord, type SignedPacket } from "../src/pkarr";
 import type { PairingCredentials } from "../src/pairedSession";
 // covers: chat.dht.delivery, chat.dht.send, chat.dht.offline, chat.dht.fallback, chat.dht.errors, chat.dht.key-change
 
@@ -155,5 +155,35 @@ it("never receipts content that failed durable storage, then safely retries the 
   h.failMessage[1] = false; await vi.advanceTimersByTimeAsync(4500);
   expect(h.messages[1].get("abcdefghijklmnopqrstuv")).toBe("store before receipt");
   expect(h.receipts[0]).toHaveBeenCalledWith("abcdefghijklmnopqrstuv");
+  await a.stop(); await b.stop();
+});
+
+it("a text and a keep-alive look the same in the mailbox: one TTL and one packet size, before and after the pin", async () => {
+  vi.useFakeTimers(); const h = setup(), a = h.make(0), b = h.make(1);
+  const sent = () => h.publish.mock.calls.map(([identity, records]: [{ pubKeyZ32: string }, GhostRecord[]]) =>
+    ({ ttl: records.map(r => r.ttl), labels: records.map(r => r.label), bytes: measureRecords(identity.pubKeyZ32, records), wire: createRelayPayload(identity as never, records).length }));
+  // Before the pin: a keep-alive, then a short text and its retries, whose TTL no longer counts down.
+  await a.start(); await vi.advanceTimersByTimeAsync(200);
+  expect(await a.send("hi", Date.now(), "abcdefghijklmnopqrstuv")).toBeNull();
+  await vi.advanceTimersByTimeAsync(30_000);
+  const before = sent();
+  expect(before.length).toBeGreaterThanOrEqual(4);
+  expect(new Set(before.map(p => JSON.stringify(p))).size).toBe(1);
+  expect(before[0]).toMatchObject({ ttl: [300], labels: ["_dm"] });
+  // After the pin: the receiver's receipt (a keep-alive with a receipt), then a long text and a short one.
+  h.publish.mockClear();
+  await b.start(); await vi.advanceTimersByTimeAsync(4500);
+  expect(h.messages[1].get("abcdefghijklmnopqrstuv")).toBe("hi");
+  expect(await b.send("x".repeat(256), Date.now(), "bcdefghijklmnopqrstuvw")).toBeNull();
+  await vi.advanceTimersByTimeAsync(4500);
+  expect(h.messages[0].get("bcdefghijklmnopqrstuvw")).toBe("x".repeat(256));
+  expect(await a.send("ok", Date.now(), "cdefghijklmnopqrstuvwx")).toBeNull();
+  await vi.advanceTimersByTimeAsync(4500);
+  expect(h.messages[1].get("cdefghijklmnopqrstuvwx")).toBe("ok");
+  const after = sent().filter(p => p.labels.length === 2);
+  expect(after.length).toBeGreaterThanOrEqual(3);
+  expect(new Set(after.map(p => JSON.stringify(p))).size).toBe(1);
+  expect(after[0]).toMatchObject({ ttl: [300, 300], labels: ["_dm", "_dmk"] });
+  expect(after[0].bytes).toBeLessThanOrEqual(1000);
   await a.stop(); await b.stop();
 });

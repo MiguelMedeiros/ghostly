@@ -2,7 +2,7 @@ import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, toBase64Url, utf8Encode } from "./bytes";
-import { encrypt, tryDecrypt } from "./crypto";
+import { encrypt, sealedLength, tryDecrypt } from "./crypto";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
@@ -56,6 +56,17 @@ type DhtReaction = [id: string, emoji: string, n: number];
 type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string | null, edit?: DhtEdit | null, reactions?: DhtReaction[], reactionsTaken?: number | null];
 /** An envelope's plaintext past this is not read (`receive`): what rides along must stay under it. */
 const MAX_ENVELOPE_PLAINTEXT = 900;
+/**
+ * Every envelope's records carry this TTL, whatever it holds (WISP 403 § What a mailbox shows): a text's TTL used to
+ * count down from its five minutes while a keep-alive's said ten, so a look at the mailbox told a text was pending.
+ * Readers never read it; relays cache for at least this long anyway.
+ */
+const ENVELOPE_TTL = 300;
+/**
+ * An envelope's packet, text or not, is padded to the largest plaintext that fits this. A few bytes under the DHT's
+ * 1000: the Rust client splits TXT strings at 254 bytes, not 255, so the packet it builds can be a byte or two larger.
+ */
+const ENVELOPE_PACKET_BYTES = MAX_DNS_PACKET_BYTES - 8;
 /**
  * The twelfth element, with a text only: the text is an edit (WISP 403 § Edits), the new text of the message with this id,
  * edit number `e`. The eleventh then goes as `null` when the text replies to nothing. An app from before edits would show
@@ -252,11 +263,18 @@ export class DhtDelivery {
   private signed(body: Body, recipient = "invite"): Uint8Array { return utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.from, this.to, recipient, body])); }
   private records(body: Body, recipient = this.options.credentials.peerKey): GhostRecord[] {
     const signature = toBase64Url(sign(this.signed(body, recipient), this.participation.seed));
-    const ttl = Math.max(1, Math.ceil((body[3] - Date.now()) / 1000));
-    const records = [{ label: "_dm", value: encrypt(JSON.stringify([body, signature]), recipient ? this.sealedKey(recipient) : this.key), ttl },
-      ...(recipient ? [{ label: "_dmk", value: encrypt(this.participation.pubKeyZ32, this.key), ttl }] : [])];
-    if (measureRecords(this.identity.pubKeyZ32, records) > MAX_DNS_PACKET_BYTES) throw new Error("Text and authentication exceed the DHT packet budget. Shorten the message.");
-    return records;
+    const plaintext = JSON.stringify([body, signature]);
+    const hint = recipient ? [{ label: "_dmk", value: encrypt(this.participation.pubKeyZ32, this.key), ttl: ENVELOPE_TTL }] : [];
+    // The packet a plaintext of this many bytes makes: its size depends on the length alone.
+    const fits = (bytes: number) => bytes <= MAX_ENVELOPE_PLAINTEXT &&
+      measureRecords(this.identity.pubKeyZ32, [{ label: "_dm", value: "A".repeat(sealedLength(bytes)), ttl: ENVELOPE_TTL }, ...hint]) <= ENVELOPE_PACKET_BYTES;
+    const bytes = utf8Encode(plaintext).length;
+    if (!fits(bytes)) throw new Error("Text and authentication exceed the DHT packet budget. Shorten the message.");
+    // Padded with spaces up to the largest that fits, so a keep-alive is as long as a text. JSON allows spaces after the
+    // value: readers from before read the envelope as ever.
+    let padded = bytes;
+    for (let step = 512; step >= 1; step >>= 1) if (fits(padded + step)) padded += step;
+    return [{ label: "_dm", value: encrypt(plaintext + " ".repeat(padded - bytes), recipient ? this.sealedKey(recipient) : this.key), ttl: ENVELOPE_TTL }, ...hint];
   }
   async start(): Promise<void> {
     if (this.running) return; this.running = true;
