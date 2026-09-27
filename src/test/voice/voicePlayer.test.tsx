@@ -265,6 +265,8 @@ describe("a voice message in the chat", () => {
     chat(message);
     expect(screen.getByTestId("voice-play")).toBeDisabled();
     expect(screen.getByTestId("voice-status")).toHaveTextContent("50% of");
+    // A ring around the play button fills as it arrives.
+    expect(screen.getByTestId("voice-progress")).toHaveAttribute("data-progress", "50");
   });
 
   it("a failed note offers Retry only when it can go again: not one the contact cancelled", () => {
@@ -278,9 +280,14 @@ describe("a voice message in the chat", () => {
     } });
     chat(retryable, cancelled);
     const [first, second] = bubbles();
-    expect(within(first).getByText("Retry sending")).toBeInTheDocument();
-    expect(within(second).queryByText("Retry sending")).toBeNull();
-    expect(within(second).getByTestId("voice-status")).toHaveTextContent("Failed: Cancelled by your contact");
+    // The play button's place holds a round Retry; the status says it in two words; why is behind ⓘ.
+    expect(within(first).getByRole("button", { name: "Retry sending" })).toBe(within(first).getByTestId("voice-retry"));
+    expect(within(first).queryByTestId("voice-play")).toBeNull();
+    expect(within(first).getByTestId("voice-status")).toHaveTextContent("Not sent");
+    fireEvent.click(within(first).getByTestId("voice-info"));
+    expect(within(first).getByTestId("voice-reason")).toHaveTextContent("Could not read the file: The object can not be found here.");
+    expect(within(second).queryByTestId("voice-retry")).toBeNull();
+    expect(within(second).getByTestId("voice-status")).toHaveTextContent("Cancelled");
   });
 
   it("stuck on its way, it says so instead of a bare 0%, and offers Send again (sent) or Ask again (received)", async () => {
@@ -294,7 +301,7 @@ describe("a voice message in the chat", () => {
     } });
     chat(mine, theirs);
     const [sent, received] = bubbles();
-    expect(within(sent).getByTestId("voice-status")).toHaveTextContent("Not moving · 0% of 1.2 KB");
+    expect(within(sent).getByTestId("voice-status")).toHaveTextContent("Stalled · 0% of 1.2 KB");
     expect(within(received).getByTestId("voice-status")).toHaveTextContent("Waiting for connection · 50% done");
     fireEvent.click(within(sent).getByTestId("voice-resend"));
     fireEvent.click(within(received).getByTestId("voice-request"));

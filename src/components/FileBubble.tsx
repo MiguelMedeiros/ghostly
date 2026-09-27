@@ -3,9 +3,10 @@ import { PREVIEWABLE_IMAGE, sanitizeFileName } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { fileStatus, stalledAction } from "../lib/fileStatus";
+import { fileStatus, transferMove, transferReason } from "../lib/fileStatus";
 import type { FileAction } from "../lib/platform";
 import type { ChatFile } from "../lib/types";
+import { MoveButton, ReasonToggle } from "./TransferControls";
 
 const linkButton = "text-xs underline px-2 py-1 bg-transparent border-none text-inherit cursor-pointer";
 
@@ -15,6 +16,10 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   const transfer = platform?.getTransfer(file.id) ?? null;
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+  /** ⓘ open: why it stopped, in full. */
+  const [why, setWhy] = useState(false);
+  /** The round button was pressed and its answer is not back yet. */
+  const [busy, setBusy] = useState(false);
   const [missing, setMissing] = useState(false);
   /** The file is kept, but too large for this app to hand out: it is saved through the system instead. */
   const [saveOnly, setSaveOnly] = useState(false);
@@ -50,14 +55,14 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
 
   const act = (action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(String(error.message ?? error)); setWhy(true); });
   };
   /** The same path as Download in the message's menu: the system's save dialog where there is one, else a download. */
   const save = () => {
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setMissing(true); })
-      .catch((error: Error) => setActionError(String(error.message ?? error)));
+      .catch((error: Error) => { setActionError(String(error.message ?? error)); setWhy(true); });
   };
 
   const status = fileStatus(file, transfer, peerName, missing);
@@ -66,8 +71,16 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
   const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
-  const canRetry = transfer?.state === "failed" && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
-  const stuck = platform?.fileAction ? stalledAction(transfer) : null;
+  const move = transferMove(file, transfer, { retry: !!platform?.retryFile, act: !!platform?.fileAction });
+  const reason = actionError || transferReason(transfer);
+  const alarm = transfer?.state === "failed" || !!transfer?.stalled || missing;
+  const press = () => {
+    if (!move || !platform) return;
+    setActionError("");
+    setBusy(true);
+    const run = move.action === "retry" ? platform.retryFile!(file.id) : platform.fileAction!(file.id, move.action);
+    void run.catch((error: Error) => { setActionError(String(error.message ?? error)); setWhy(true); }).finally(() => setBusy(false));
+  };
 
   return (
     <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
@@ -75,21 +88,21 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
         <img src={blobUrl} alt={file.name} className="rounded-[4px] max-w-full max-h-[330px] object-contain block mb-1" />
       )}
       <div className="flex items-center gap-3 px-2 py-1.5">
-        <span className="w-9 h-9 rounded-full bg-black/20 flex items-center justify-center shrink-0">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-          </svg>
-        </span>
+        {move ? <MoveButton move={move} onPress={press} busy={busy} testId={`file-${move.action}`} /> : (
+          <span className="w-9 h-9 rounded-full bg-black/20 flex items-center justify-center shrink-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
             {file.name}
           </p>
-          <p
-            className={`text-[11px] m-0 ${transfer?.state === "failed" || missing ? "text-danger-ink" : "text-text-primary/65"}`}
-            data-testid="file-status"
-          >
-            {status}
+          <p className={`text-[11px] m-0 flex items-center gap-1 min-w-0 ${alarm ? "text-danger-ink" : "text-text-primary/65"}`}>
+            <span className="truncate" data-testid="file-status">{status}</span>
+            {reason && <ReasonToggle open={why} onToggle={() => setWhy(!why)} testId="file-info" />}
           </p>
         </div>
         {(blobUrl || saveOnly) && (
@@ -131,14 +144,10 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
         <div className="flex gap-1 px-1">
           {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>Pause</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>Resume</button>}
-          {stuck && <button type="button" className={linkButton} data-testid={`file-${stuck.action}`} title={stuck.hint} onClick={() => act(stuck.action)}>{stuck.label}</button>}
           <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>Cancel</button>
         </div>
       )}
-      {canRetry && (
-        <button className="text-xs underline px-2 py-1" onClick={() => { setActionError(""); void platform!.retryFile!(file.id).catch(error => setActionError(String(error.message ?? error))); }}>Retry sending</button>
-      )}
-      {actionError && <p className="text-xs text-danger-ink px-2" role="alert">{actionError}</p>}
+      {why && reason && <p className="text-[11px] text-text-primary/80 m-0 px-2 pb-1.5 break-words" data-testid="file-reason" role={actionError ? "alert" : undefined}>{reason}</p>}
       {moving && transfer.stage !== "asking" && (
         <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
           <div

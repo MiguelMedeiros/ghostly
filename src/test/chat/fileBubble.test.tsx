@@ -38,8 +38,10 @@ describe("what a file's status line says", () => {
     ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by Ana · 62% of 4.2 GB"],
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
     ["copying before the offer", t({ stage: "preparing" }), "Preparing… 62% of 4.2 GB"],
-    ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Failed: Declined by your contact"],
-    ["stuck", t({ stalled: true, rate: 12 * 1024 ** 2 }), "Not moving · 62% of 4.2 GB"],
+    ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Declined"],
+    ["cancelled", { state: "failed", transferred: 0, size: f.size, error: "Cancelled by the sender" } as FileTransferState, "Cancelled"],
+    ["failed, received here", { state: "failed", transferred: 0, size: f.size, error: "Could not store the file: disk full" } as FileTransferState, "Not received"],
+    ["stuck", t({ stalled: true, rate: 12 * 1024 ** 2 }), "Stalled · 62% of 4.2 GB"],
     ["stuck, no connection: the connection is the reason", t({ stalled: true, stage: "waiting" }), "Waiting for connection · 62% done"],
   ])("%s", (_, transfer, text) => {
     expect(fileStatus(f, transfer, "Ana", false)).toBe(text);
@@ -86,7 +88,9 @@ describe("FileBubble: files/3", () => {
 
   it("a stuck file sent from here offers Send again, a stuck one arriving here Ask again; a moving one neither", async () => {
     const sending = show({ state: "transferring", direction: "out", transferred: GB, size: 4.2 * GB, stalled: true }, { id: "chat1-out-stuck" });
-    expect(screen.getByTestId("file-status")).toHaveTextContent("Not moving · 23% of 4.2 GB");
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Stalled · 23% of 4.2 GB");
+    // In the file icon's place: a round button, named for what it does.
+    expect(screen.getByRole("button", { name: "Send again" })).toBe(screen.getByTestId("file-resend"));
     expect(screen.queryByTestId("file-request")).toBeNull();
     expect(screen.getByTestId("file-resend")).toHaveAttribute("title", "Offers it again. It goes on from what your contact already has.");
     fireEvent.click(screen.getByTestId("file-resend"));
@@ -110,14 +114,28 @@ describe("FileBubble: files/3", () => {
     expect(screen.queryByTestId("file-resend")).toBeNull();
   });
 
-  it("a declined or cancelled file cannot be sent again; a failed one can", () => {
+  it("a declined or cancelled file cannot be sent again; a failed one can, from the round button; why is behind ⓘ", async () => {
     const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
     const declined = show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "Declined by your contact" }, { id: "chat1-out-1" });
-    expect(screen.queryByText("Retry sending")).toBeNull();
+    expect(screen.queryByTestId("file-retry")).toBeNull();
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Declined");
     declined.unmount();
-    show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "The file arrived damaged", retry: true }, { id: "chat1-out-2" });
-    fireEvent.click(screen.getByText("Retry sending"));
+    show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "The file arrived damaged and was deleted. Send it again.", retry: true }, { id: "chat1-out-2" });
+    // Short in the bubble; the engine's words only once asked for.
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^Not sent$/);
+    expect(screen.queryByText("Retry sending")).toBeNull();
+    expect(screen.queryByTestId("file-reason")).toBeNull();
+    fireEvent.click(screen.getByTestId("file-info"));
+    expect(screen.getByTestId("file-reason")).toHaveTextContent("The file arrived damaged and was deleted. Send it again.");
+    fireEvent.click(screen.getByRole("button", { name: "Retry sending" }));
     expect(retryFile).toHaveBeenCalledWith("chat1-out-2");
+    // What the retry says back, when it cannot, opens under the status.
+    // Pressed, it waits for the answer before it can be pressed again.
+    await waitFor(() => expect(screen.getByTestId("file-retry")).toBeEnabled());
+    retryFile.mockRejectedValueOnce(new Error("Connect to an updated peer first"));
+    fireEvent.click(screen.getByTestId("file-info"));
+    fireEvent.click(screen.getByTestId("file-retry"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Connect to an updated peer first");
   });
 
   it("a file kept but too large to show here is saved through the system (Desktop)", async () => {
