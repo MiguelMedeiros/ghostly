@@ -349,7 +349,8 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
           {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">Save</a>}
         </p>
       )}
-      {transfer?.state === "failed" && file.id.includes("-out-") && platform?.retryFile && (
+      {/* As in FileBubble: a files/3 transfer says whether it can go again (not one the contact cancelled or declined). */}
+      {transfer?.state === "failed" && file.id.includes("-out-") && platform?.retryFile && (transfer.direction ? !!transfer.retry : true) && (
         <button className="text-xs underline px-1 py-1 bg-transparent border-none text-inherit cursor-pointer" onClick={() => { setRetryError(""); void platform.retryFile!(file.id).catch((error) => setRetryError(String(error.message ?? error))); }}>Retry sending</button>
       )}
       {stuck && (

@@ -267,6 +267,22 @@ describe("a voice message in the chat", () => {
     expect(screen.getByTestId("voice-status")).toHaveTextContent("50% of");
   });
 
+  it("a failed note offers Retry only when it can go again: not one the contact cancelled", () => {
+    const retryable = voice({ id: "me_r1", sender: "me" });
+    retryable.file!.id = "link-1-out-voice-r1";
+    const cancelled = voice({ id: "me_r2", sender: "me" });
+    cancelled.file!.id = "link-1-out-voice-r2";
+    fakeEngine.update({ links: [linkView({ id: "link-1" })], transfers: {
+      [retryable.file!.id]: { state: "failed", direction: "out", transferred: 0, size: 1234, error: "Could not read the file: The object can not be found here.", retry: true },
+      [cancelled.file!.id]: { state: "failed", direction: "out", transferred: 0, size: 1234, error: "Cancelled by your contact" },
+    } });
+    chat(retryable, cancelled);
+    const [first, second] = bubbles();
+    expect(within(first).getByText("Retry sending")).toBeInTheDocument();
+    expect(within(second).queryByText("Retry sending")).toBeNull();
+    expect(within(second).getByTestId("voice-status")).toHaveTextContent("Failed: Cancelled by your contact");
+  });
+
   it("stuck on its way, it says so instead of a bare 0%, and offers Send again (sent) or Ask again (received)", async () => {
     fakeEngine.on("fileAction", () => undefined);
     const mine = voice({ id: "me_1", sender: "me" });

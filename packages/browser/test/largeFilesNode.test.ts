@@ -241,3 +241,57 @@ it("sends a file to a contact with files/3, and cancels one on both sides", asyn
   t.node().fileAction({ linkId: t.id, fileId: cancelled.id, action: "cancel" });
   await vi.waitFor(() => expect(t.records.get("in:send-0002")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
 }, 60_000);
+
+const notFound = () => Object.assign(new Error("The object can not be found here."), { name: "NotFoundError" });
+
+it("a stored file that reads in slices but not as a stream (WebKit, IndexedDB) still checks out", async () => {
+  const t = await setup();
+  const stream = vi.spyOn(Blob.prototype, "stream").mockImplementation(() => { throw notFound(); });
+  try {
+    const sent = await put(t, "slices-001", 63_899, 11);
+    await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", transferred: 63_899 }), { timeout: 20_000 });
+    expect(t.records.get("in:slices-001")?.state).toBe("done");
+  } finally { stream.mockRestore(); }
+}, 60_000);
+
+it("Retry never says 'already active': a failed read goes again, an unfinished transfer is taken over after a restart, a cancelled one says why", async () => {
+  const t = await setup();
+  const retry = (file: { id: string; name: string; size: number; mime: string }, timestamp: number) => t.node().sendFile({ linkId: t.id, file, timestamp });
+
+  // 1. The bytes could not be read: failed, and the contact's copy stopped. Retry sends it again, whole, one message.
+  const read = vi.spyOn(Blob.prototype, "arrayBuffer").mockRejectedValue(notFound());
+  const unread = await put(t, "unread-001", 63_899, 12);
+  await vi.waitFor(() => expect(t.node().getState().transfers[unread.id]).toMatchObject({ state: "failed", retry: true }), { timeout: 20_000 });
+  expect(t.node().getState().transfers[unread.id].error).toBe("Could not read the file: The object can not be found here.");
+  await vi.waitFor(() => expect(t.records.get("in:unread-001")?.state).toBe("cancelled"));
+  read.mockRestore();
+  retry(unread, 12);
+  await vi.waitFor(() => expect(t.node().getState().transfers[unread.id]).toMatchObject({ state: "done", transferred: 63_899 }), { timeout: 20_000 });
+  expect(t.records.get("in:unread-001")?.state).toBe("done");
+  expect((await db.getMessages(t.id)).filter((m) => m.file?.id === unread.id)).toHaveLength(1);
+
+  // 2. Unfinished when the app restarts (the contact takes nothing meanwhile): Retry takes the transfer over.
+  let deaf = false;
+  const handle = t.files.handle.bind(t.files);
+  t.files.handle = async (frame) => { if (deaf && frame.t === "pf-data") return; return handle(frame); };
+  const size = 2 * 1024 * 1024 + 1;
+  const stuck = await put(t, "restart-01", size, 13);
+  await vi.waitFor(() => expect(t.node().getState().transfers[stuck.id]?.transferred).toBeGreaterThan(0), { timeout: 20_000 });
+  deaf = true;
+  await t.restartApp();
+  deaf = false;
+  retry(stuck, 13);
+  await vi.waitFor(() => expect(t.node().getState().transfers[stuck.id]).toMatchObject({ state: "done", transferred: size }), { timeout: 20_000 });
+  expect(JSON.stringify(t.node().getState().transfers)).not.toContain("already active");
+
+  // 3. Cancelled by the contact: Retry leaves the reason, not "already active", and offers no Retry.
+  t.decide = () => "ask";
+  const refused = await put(t, "refused-01", 1000, 14);
+  await vi.waitFor(() => expect(t.node().getState().transfers[refused.id]).toMatchObject({ stage: "asking" }));
+  t.files.cancel("in", "refused-01");
+  await vi.waitFor(() => expect(t.node().getState().transfers[refused.id]).toMatchObject({ state: "failed", error: "Cancelled by your contact" }));
+  retry(refused, 14);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.node().getState().transfers[refused.id]).toMatchObject({ state: "failed", error: "Cancelled by your contact", direction: "out" });
+  expect(t.node().getState().transfers[refused.id].retry).toBeFalsy();
+}, 120_000);

@@ -1736,7 +1736,8 @@ export class GhostlyNode implements EngineImplementation {
       const large = await GhostlyNode.largeFilesAgreed(link), at = Date.now();
       await this.noteDetails(live.stored.id, `me_${timestamp}`, details => ({ ...withSend(details, { at, ...pathSnapshot(live, "datalink"), result: "sent" }), sentAt: at, wire: fileWire(large ? "files/3" : "files/2", file.size) }));
       if (large) {
-        await this.fileDesk.offer(live.stored.id, file, wireId, timestamp);
+        // A transfer that ended for good (cancelled, declined) keeps saying why, rather than a bare failure with Retry.
+        await this.fileDesk.offer(live.stored.id, file, wireId, timestamp).catch((error) => { if (!this.fileDesk.reshow(live.stored.id, file.id)) throw error; });
         return;
       }
       if (file.size > LIMITS.maxFileBytes) {

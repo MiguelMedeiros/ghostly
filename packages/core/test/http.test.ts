@@ -265,7 +265,9 @@ describe("http over the data link", () => {
     const response = await client.request("atlas", { method: "POST", path: "/upload", body: upload });
     expect(response.status).toBe(201);
     expect(await response.bytes()).toEqual(download);
-  });
+    // 1.2 MB through the in-memory link: a second locally, but past the default 5 s on a CI runner whose cores are busy
+    // with the other test files (it failed at 5.2 s beside the files/3 suite).
+  }, 20_000);
 
   it("answers for unknown services, bad paths and bad methods without touching the network", async () => {
     let calls = 0;
