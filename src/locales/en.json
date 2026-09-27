@@ -73,7 +73,9 @@
       "keysHint": "Keys are never shown here.",
       "options": "Message options",
       "copyHint": "Click to copy",
-      "reply": "Reply"
+      "reply": "Reply",
+      "cancelSending": "Cancel sending",
+      "retry": "Send again"
     },
     "options": "Options",
     "menu": {
@@ -118,6 +120,23 @@
       "notice": "Someone reacted to your message",
       "note": "{{name}} reacted {{emoji}} to \"{{snippet}}\"",
       "noteMine": "You reacted {{emoji}} to \"{{snippet}}\""
+    },
+    "delivery": {
+      "sending": "Sending",
+      "waiting": "Waiting for your contact to be online",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "failed": "Not sent",
+      "retry": "Not sent. Send again",
+      "hint": {
+        "sending": "On its way.",
+        "queued": "No receipt yet. Sends again by itself.",
+        "waiting": "Sends by itself when your contact is online.",
+        "held": "Kept for your contact until they are online.",
+        "sent": "Sent. No receipt yet.",
+        "delivered": "Your contact's app received it.",
+        "failed": "Not sent. Tap to send again."
+      }
     }
   },
   "group": {

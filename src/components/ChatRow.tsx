@@ -6,6 +6,7 @@ import { GroupAvatar } from "./GroupAvatar";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
+import { DeliveryIcon, deliveryShape, useDeliveryWords } from "./chat/DeliveryStatus";
 import { TypingText } from "./TypingIndicator";
 import { usePeerTyping } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
@@ -28,32 +29,16 @@ import type { ChatMessage } from "../lib/types";
 const AVATAR = { compact: 46, comfortable: 52 } as const;
 const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" } as const;
 
-/** Where my last message is: sending, sent, received by the contact, or not delivered. */
+/** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
 export function DeliveryMark({ delivery }: { delivery?: ChatMessage["delivery"] }) {
-  const common = { width: 16, height: 11, viewBox: "0 0 16 11", fill: "none", role: "img", "data-testid": "chat-row-delivery" } as const;
-  if (delivery === "failed") {
-    return (
-      <svg {...common} viewBox="0 0 11 11" width={11} aria-label="Not delivered" data-delivery="failed" className="inline shrink-0 me-1 -mt-0.5 text-danger">
-        <circle cx="5.5" cy="5.5" r="5" fill="currentColor" />
-        <path d="M5.5 2.6v3.3M5.5 7.6v.4" stroke="var(--color-sidebar-bg)" strokeWidth="1.4" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (delivery === "sending" || delivery === "queued" || delivery === "waiting") {
-    return (
-      <svg {...common} viewBox="0 0 11 11" width={11} aria-label="Sending" data-delivery="sending" className="inline shrink-0 me-1 -mt-0.5 text-text-muted">
-        <circle cx="5.5" cy="5.5" r="4.6" stroke="currentColor" strokeWidth="1.2" />
-        <path d="M5.5 3v2.7l1.7 1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  const received = delivery === "delivered";
+  const words = useDeliveryWords();
+  const shape = deliveryShape(delivery);
+  const state = delivery ?? "sent";
   return (
-    <svg {...common} aria-label={received ? "Received" : "Sent"} data-delivery={received ? "delivered" : "sent"}
-      className={`inline shrink-0 me-0.5 -mt-0.5 ${received ? "text-link" : "text-text-muted"}`}>
-      <path d="M11.07 0.66L4.98 6.75L2.91 4.68L1.5 6.09L4.98 9.57L12.48 2.07L11.07 0.66Z" fill="currentColor" />
-      {received && <path d="M14.07 0.66L7.98 6.75L7.05 5.82L5.64 7.23L7.98 9.57L15.48 2.07L14.07 0.66Z" fill="currentColor" />}
-    </svg>
+    <span role="img" data-testid="chat-row-delivery" data-delivery={state} aria-label={words.label(state)}
+      className={`inline-flex shrink-0 align-middle -mt-0.5 ${shape === "sent" || shape === "delivered" ? "me-0.5" : "me-1"} ${shape === "failed" ? "text-danger" : shape === "delivered" ? "text-link" : "text-text-muted"}`}>
+      <DeliveryIcon shape={shape} cutout="var(--color-sidebar-bg)" />
+    </span>
   );
 }
 

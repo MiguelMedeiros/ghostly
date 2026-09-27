@@ -22,6 +22,7 @@ import { ReplyQuote } from "./chat/ReplyQuote";
 import { SmileIcon } from "./composer/icons";
 import { ReactAction, ReactionBar, ReactionChips } from "./chat/Reactions";
 import { myReaction, reactionChips } from "../lib/reactions";
+import { DeliveryStatus } from "./chat/DeliveryStatus";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -201,31 +202,6 @@ function TailSvg({ side }: { side: "left" | "right" }) {
   );
 }
 
-/** Ticks sit on the bubble, or (`onPicture`) on the dark chip over a picture, which is dark in every theme. */
-function CheckIcon({ acked, onPicture = false }: { acked: boolean; onPicture?: boolean }) {
-  const ink = onPicture ? (acked ? "text-[#53bdeb]" : "text-[hsla(0,0%,100%,0.9)]") : acked ? "text-link" : "text-text-primary/65";
-  return (
-    <svg
-      width="16"
-      height="11"
-      viewBox="0 0 16 11"
-      className={`shrink-0 ${ink}`}
-      fill="none"
-    >
-      <path
-        d="M11.07 0.66L4.98 6.75L2.91 4.68L1.5 6.09L4.98 9.57L12.48 2.07L11.07 0.66Z"
-        fill="currentColor"
-      />
-      {acked && (
-        <path
-          d="M14.07 0.66L7.98 6.75L7.05 5.82L5.64 7.23L7.98 9.57L15.48 2.07L14.07 0.66Z"
-          fill="currentColor"
-        />
-      )}
-    </svg>
-  );
-}
-
 function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean }) {
   const isVideo = hasVideo;
   const isMissed = type === "call_missed" || type === "call_rejected";
@@ -318,6 +294,18 @@ const downloadIcon = (
   </svg>
 );
 
+const retryIcon = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
+  </svg>
+);
+
+const cancelIcon = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" /><path d="m15 9-6 6M9 9l6 6" />
+  </svg>
+);
+
 /**
  * Saves a copy of the file a message carries (a voice message, a picture, a document). Greyed with the reason
  * while the file is still arriving, when it did not arrive, or when its bytes are gone from this device.
@@ -350,11 +338,12 @@ function DownloadItem({ file, name, sender, onDone }: { file: ChatFile; name: st
 }
 
 /**
- * What can be done to a message, behind its ⋮: answering it, saving the file it carries, its details, and forgetting it here.
+ * What can be done to a message, behind its ⋮: answering it, sending it again or not at all, saving the file it carries,
+ * its details, and forgetting it here.
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download }: {
+function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download, onCancelSend, onRetry }: {
   onDelete?: () => void;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
@@ -364,6 +353,10 @@ function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download }:
   align: "left" | "right";
   /** A message carrying a file: the file, the name to save it under and who sent it. */
   download?: { file: ChatFile; name: string; sender: "me" | "peer" };
+  /** Drops a message of mine that waits to be sent: in the place of Delete, which would say the contact keeps a copy. */
+  onCancelSend?: () => void;
+  /** Sends a message of mine that was not sent again. */
+  onRetry?: () => void;
 }) {
   const { t } = useI18n();
   const chat = useCueChat();
@@ -398,12 +391,18 @@ function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download }:
         {onReact && <MenuItem testId="message-react" onClick={() => { setOpen(false); onReact(); }} icon={<SmileIcon size={16} />}>
           {t("chat.reactions.react")}
         </MenuItem>}
+        {onRetry && <MenuItem testId="message-retry" onClick={() => { setOpen(false); onRetry(); }} icon={retryIcon}>
+          {t("chat.message.retry")}
+        </MenuItem>}
         {download && <DownloadItem {...download} onDone={() => setOpen(false)} />}
         <MenuItem testId="message-details" onClick={() => { setOpen(false); onDetails(); }}
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>}>
           {t("chat.message.details")}
         </MenuItem>
-        {onDelete && <MenuItem testId="message-delete" danger onClick={() => { setOpen(false); setConfirm(true); }}
+        {onCancelSend && <MenuItem testId="message-cancel-sending" danger onClick={() => { setOpen(false); onCancelSend(); }} icon={cancelIcon}>
+          {t("chat.message.cancelSending")}
+        </MenuItem>}
+        {onDelete && !onCancelSend && <MenuItem testId="message-delete" danger onClick={() => { setOpen(false); setConfirm(true); }}
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
           {t("chat.deleteMessage")}
         </MenuItem>}
@@ -477,6 +476,19 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
+  /** A message that was not sent, sent again: its red mark, or its ⋮. */
+  const retry = () => {
+    const link = engine.linkByPeer(peerPubKey);
+    if (link) void engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
+  };
+  /** What waits to be sent, dropped: it never left, so the chat's own delete (the list forgets it too), with no confirmation. */
+  const cancelSending = () => {
+    playCue("deleted", { chat });
+    if (onDelete) { onDelete(); return; }
+    const link = engine.linkByPeer(peerPubKey);
+    if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
+  };
+  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && message.delivery === "failed" ? { onRetry: retry } : {};
   const time = new Date(message.timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -562,7 +574,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>
-      {isMe && <CheckIcon acked={isAcked} />}
+      {isMe && <DeliveryStatus delivery={message.delivery} acked={isAcked} onRetry={retry} />}
     </span>
   );
 
@@ -581,7 +593,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} align="left" download={download} />}
+      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} align="left" download={download} {...sending} />}
       {/* The bubble, and its reactions under it. */}
       <div className={`flex flex-col min-w-0 max-w-[85%] ${isMe ? "items-end" : "items-start"}`}>
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
@@ -661,7 +673,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
-              {isMe && <CheckIcon acked={isAcked} onPicture />}
+              {isMe && <DeliveryStatus delivery={message.delivery} acked={isAcked} onRetry={retry} onPicture />}
             </span>
           </div>
         ) : bigEmoji ? (
@@ -679,27 +691,6 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {timestampEl}
           </div>
         )}
-
-        {isMe && message.delivery && <div className="clear-both pt-1 text-xs text-text-primary/65" role="status">
-          <span>{message.delivery === "delivered" ? "Received by peer" : message.delivery === "held" ? "Held · waiting for your contact" : message.delivery === "sent" ? "Sent · waiting for receipt" : message.delivery === "sending" ? "Sending…" : message.delivery === "queued" ? "Not confirmed yet · sends again by itself" : message.delivery === "waiting" ? "Sends when live" : "Delivery unconfirmed"}</span>
-          {message.delivery === "waiting" && <>
-            {message.deliveryError && <span className="block" data-testid="waiting-reason">{message.deliveryError}</span>}
-            {/* Cancelling is deleting what never left: the chat's own delete, so the list forgets it too. */}
-            <button className="underline text-link cursor-pointer" data-testid="cancel-waiting" onClick={() => {
-              playCue("deleted", { chat });
-              if (onDelete) { onDelete(); return; }
-              const link = engine.linkByPeer(peerPubKey);
-              if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
-            }}>Cancel</button>
-          </>}
-          {message.delivery === "failed" && <>
-            <span className="block">{message.deliveryError}</span>
-            <button className="underline text-link cursor-pointer" onClick={() => {
-              const link = engine.linkByPeer(peerPubKey);
-              if (link) void engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
-            }}>Retry message</button>
-          </>}
-        </div>}
       </div>
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
