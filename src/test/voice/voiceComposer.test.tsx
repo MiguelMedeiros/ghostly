@@ -139,7 +139,7 @@ describe("hold to record", () => {
     await wait(2_000);
     expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
     expect(onSendFile).not.toHaveBeenCalled();
-    expect(screen.getByTestId("voice-send")).toHaveAccessibleName("Send voice message");
+    expect(screen.getByTestId("voice-send")).toHaveAccessibleName("Send");
     expect(media.released()).toBe(false);
   });
 
@@ -221,21 +221,24 @@ describe("hands-free (locked) recording", () => {
   it("pauses without counting the pause, plays what is recorded so far, and resumes", async () => {
     await locked();
     await wait(2_000);
-    fireEvent.click(screen.getByRole("button", { name: "Pause recording" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
     expect(media.recorders[0]!.state).toBe("paused");
     expect(screen.getByTestId("voice-preview-wave")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("voice-preview"));
     await wait(500);
-    expect(screen.getByRole("button", { name: "Pause preview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pause playback" })).toBeInTheDocument();
 
     await wait(10_000);
-    fireEvent.click(screen.getByRole("button", { name: "Resume recording" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(media.recorders[0]!.state).toBe("recording");
     await wait(1_000);
     fireEvent.click(screen.getByTestId("voice-send"));
     await wait(0);
+    // One recording throughout: paused and resumed, never restarted.
+    expect(media.recorders).toHaveLength(1);
+    expect(onSendFile).toHaveBeenCalledOnce();
     const [, voice] = onSendFile.mock.calls[0]!;
     // Two seconds, a pause of ten, one more second.
     expect(voice!.duration).toBeGreaterThanOrEqual(2_900);
@@ -261,6 +264,230 @@ describe("hands-free (locked) recording", () => {
     expect(voice!.duration).toBeLessThanOrEqual(VOICE_LIMITS.maxDurationMs);
     expect(voice!.duration).toBeGreaterThan(VOICE_LIMITS.maxDurationMs - 1_000);
     expect(media.released()).toBe(true);
+  });
+});
+
+/** A real mouse click on the send button: press, let go, then the click the engine adds. */
+async function clickSend() {
+  const button = screen.getByTestId("voice-send");
+  fireEvent.pointerDown(button, mouse);
+  fireEvent.pointerUp(button, mouse);
+  fireEvent.click(button);
+  await wait(0);
+}
+
+describe("one press sends (Miguel: \"I have to click send twice\")", () => {
+  it("click locks, then one click sends exactly one message", async () => {
+    composer();
+    await press(mouse);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(2_000);
+    expect(onSendFile).not.toHaveBeenCalled();
+    await clickSend();
+    expect(onSendFile).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(mic()).toHaveAccessibleName("Record a voice message");
+  });
+
+  it("a slide-up lock whose click never comes does not swallow the first click on send", async () => {
+    composer();
+    await press(mouse);
+    const button = mic();
+    fireEvent.pointerMove(button, { ...mouse, clientY: 400 });
+    // Let go far above the button: no click follows the gesture.
+    fireEvent.pointerUp(button, { ...mouse, clientY: 400 });
+    await wait(2_000);
+    await clickSend();
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
+
+  it("Space sends after a slide-up lock too", async () => {
+    composer();
+    await press(mouse);
+    const button = mic();
+    fireEvent.pointerMove(button, { ...mouse, clientY: 400 });
+    fireEvent.pointerUp(button, { ...mouse, clientY: 400 });
+    await wait(2_000);
+    const send = screen.getByTestId("voice-send");
+    // A key press on a button: keydown, then the click, with no pointer.
+    fireEvent.keyDown(send, { key: " " });
+    fireEvent.click(send);
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
+
+  it("sends as the press ends even if the click is lost, and never twice", async () => {
+    composer();
+    await press(mouse);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(2_000);
+    const send = screen.getByTestId("voice-send");
+    fireEvent.pointerDown(send, mouse);
+    fireEvent.pointerUp(send, mouse);
+    // A second, impatient click while the first is being sent.
+    fireEvent.click(send);
+    fireEvent.pointerDown(send, mouse);
+    fireEvent.pointerUp(send, mouse);
+    fireEvent.click(send);
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    // Nothing was started by the extra click either.
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+  });
+
+  it("a press that leaves the send button and comes back later sends nothing; the next click does", async () => {
+    composer();
+    fireEvent.click(mic());
+    await wait(2_000);
+    const send = screen.getByTestId("voice-send");
+    fireEvent.pointerDown(send, mouse);
+    fireEvent.pointerLeave(send, mouse);
+    fireEvent.pointerUp(send, mouse);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
+    await clickSend();
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
+
+  it("a slow click while the microphone is still waking up records hands-free instead of throwing it away", async () => {
+    let answer!: () => void;
+    const ready = new Promise<void>((resolve) => { answer = resolve; });
+    const real = media.getUserMedia.getMockImplementation()!;
+    media.getUserMedia.mockImplementation(async (constraints) => { await ready; return real(constraints); });
+    composer();
+    const button = mic();
+    fireEvent.pointerDown(button, mouse);
+    await wait(350);
+    fireEvent.pointerUp(button, mouse);
+    fireEvent.click(button);
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
+    answer();
+    await wait(2_000);
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+    await clickSend();
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
+
+  it("a send pressed before the microphone answers is kept, not a silent discard", async () => {
+    let answer!: () => void;
+    const ready = new Promise<void>((resolve) => { answer = resolve; });
+    const real = media.getUserMedia.getMockImplementation()!;
+    media.getUserMedia.mockImplementation(async (constraints) => { await ready; return real(constraints); });
+    composer();
+    fireEvent.click(mic());
+    await wait(0);
+    await clickSend();
+    expect(screen.getByTestId("voice-send")).toHaveAttribute("aria-busy", "true");
+    answer();
+    await wait(0);
+    // Nothing had been recorded yet: it says so rather than vanishing.
+    expect(screen.getByTestId("voice-hint")).toHaveTextContent("Too short to send");
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(media.released()).toBe(true);
+  });
+
+  it("a held mouse still sends on release, once", async () => {
+    composer();
+    await press(mouse);
+    await wait(2_000);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(mic());
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+  });
+});
+
+describe("what each state shows", () => {
+  it("hold: the lock handle opens, and shuts as the finger nears it", async () => {
+    composer();
+    await press();
+    const hint = screen.getByTestId("voice-lock-hint");
+    expect(hint).toHaveAttribute("data-near", "false");
+    fireEvent.pointerMove(mic(), { ...touch, clientY: 450 });
+    expect(hint).toHaveAttribute("data-near", "true");
+  });
+
+  it("locked: the mic is the send button at once, with Discard and Pause beside it, each with a tooltip", async () => {
+    composer();
+    fireEvent.click(mic());
+    const send = screen.getByTestId("voice-send");
+    expect(send).toHaveAccessibleName("Send");
+    expect(send).toHaveAttribute("title", "Send");
+    await wait(1_000);
+    for (const name of ["Discard", "Pause", "Send"]) expect(screen.getByRole("button", { name })).toHaveAttribute("title", name);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    for (const name of ["Discard", "Play", "Resume", "Send"]) expect(screen.getByRole("button", { name })).toHaveAttribute("title", name);
+  });
+
+  it("a slide to cancel ends in the bin, which then goes", async () => {
+    composer();
+    await press();
+    await wait(1_000);
+    fireEvent.pointerMove(mic(), { ...touch, clientX: 150 });
+    expect(screen.getByTestId("voice-binned")).toBeInTheDocument();
+    await wait(1_000);
+    expect(screen.queryByTestId("voice-binned")).not.toBeInTheDocument();
+  });
+});
+
+describe("Esc", () => {
+  async function lockedFor(ms: number) {
+    composer();
+    fireEvent.click(mic());
+    await wait(ms);
+  }
+
+  it("discards a short recording at once", async () => {
+    await lockedFor(2_000);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(media.released()).toBe(true);
+  });
+
+  it("asks first after a few seconds, paused meanwhile; Keep (or Esc again) carries on recording", async () => {
+    await lockedFor(4_000);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    const dialog = screen.getByRole("alertdialog", { name: "Discard voice message?" });
+    expect(dialog).toBeInTheDocument();
+    expect(media.recorders[0]!.state).toBe("paused");
+    expect(screen.getByTestId("voice-confirm-keep")).toHaveFocus();
+    // Enter does not send from behind the question.
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    expect(onSendFile).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(media.recorders[0]!.state).toBe("recording");
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(screen.getByTestId("voice-confirm-keep"));
+    expect(media.recorders[0]!.state).toBe("recording");
+    await wait(1_000);
+    await clickSend();
+    expect(onSendFile).toHaveBeenCalledOnce();
+    expect(media.recorders).toHaveLength(1);
+  });
+
+  it("Discard in the question throws it away", async () => {
+    await lockedFor(4_000);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(screen.getByTestId("voice-confirm-discard"));
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(media.released()).toBe(true);
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
+  it("stays paused after Keep when it was paused before", async () => {
+    await lockedFor(4_000);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(screen.getByTestId("voice-confirm-keep"));
+    expect(media.recorders[0]!.state).toBe("paused");
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
   });
 });
 

@@ -140,6 +140,50 @@ test("voice messages: hold to record, the contact plays it", { tag: ["@feature:f
   expect(await shapes(again)).toBeGreaterThan(3);
 });
 
+test("voice messages: locked, one click on send sends one message (click to lock, or slide up)", { tag: ["@feature:files.voice.record", "@feature:files.paired.send"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("voice-lock-alice"), peer("voice-lock-bob")]);
+  await pair(alice, bob);
+  const page = alice.page;
+  const bar = page.getByTestId("voice-bar");
+  await expect(mic(page)).not.toHaveAttribute("aria-disabled");
+
+  // A click records hands-free, like WhatsApp Web: the mic is the send button at once.
+  await mic(page).click();
+  const send = page.getByTestId("voice-send");
+  await expect(send).toHaveAccessibleName("Send");
+  await expect(send).toHaveAttribute("title", "Send");
+  await expect(bar).toHaveAttribute("data-phase", "recording");
+  await page.waitForTimeout(1_500);
+  // Miguel had to click send twice: one click is all it takes.
+  await send.click();
+  await expect(bar).toHaveCount(0);
+  await expect(voices(alice)).toHaveCount(1);
+  await expect(voices(bob)).toHaveCount(1, { timeout: 30_000 });
+
+  // Held, then slid up to the lock and let go up there: one click on send again.
+  const box = (await mic(page).boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await expect(bar).toHaveAttribute("data-phase", "recording");
+  await expect(page.getByTestId("voice-lock-hint")).toBeVisible();
+  await page.mouse.move(x, y - 60, { steps: 6 });
+  await page.mouse.move(x, y - 130, { steps: 6 });
+  await expect(bar).toHaveAttribute("data-mode", "locked");
+  await page.mouse.up();
+  await page.waitForTimeout(1_200);
+  await expect(bar).toHaveAttribute("data-mode", "locked");
+  await page.getByTestId("voice-send").click();
+  await expect(bar).toHaveCount(0);
+  await expect(voices(alice)).toHaveCount(2);
+
+  // The contact gets exactly those two, nothing sent twice.
+  await expect(voices(bob)).toHaveCount(2, { timeout: 30_000 });
+  await page.waitForTimeout(2_000);
+  await expect(voices(bob)).toHaveCount(2);
+  await expect(voices(alice)).toHaveCount(2);
+});
+
 test("voice messages: hands-free with a click, pause and preview, Enter, Esc; the next one plays on", { tag: ["@feature:files.voice.record", "@feature:files.voice.autoplay", "@feature:files.voice.play"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("voice-free-alice"), peer("voice-free-bob")]);
   await pair(alice, bob);
@@ -158,11 +202,11 @@ test("voice messages: hands-free with a click, pause and preview, Enter, Esc; th
   await mic(page).click();
   await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
   await page.waitForTimeout(1_500);
-  await page.getByRole("button", { name: "Pause recording" }).click();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
   await page.getByTestId("voice-preview").click();
-  await expect(page.getByRole("button", { name: "Pause preview" })).toBeVisible();
-  await page.getByRole("button", { name: "Resume recording" }).click();
+  await expect(page.getByRole("button", { name: "Pause playback", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
   await page.waitForTimeout(1_200);
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("voice-bar")).toHaveCount(0);
