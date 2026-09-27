@@ -19,6 +19,7 @@ import { readForwarded } from "./forwards";
 import { GROUP_EDIT_FRAME, meshMessageRef, validEditText, type GroupIncomingEdit } from "./groupEdits";
 import { validEditNumber } from "./pairedEdits";
 import { MESH_HUBS, meshRendezvous, NO_HUB_POLICY, type MeshHubPolicy } from "./groupHubs";
+import { readReaction, type WireReaction } from "./reactions";
 
 /**
  * One member's view of a `group-mesh/1` group: the membership chain, the epoch
@@ -181,6 +182,14 @@ export const groupMessageId = (sender: string, epoch: number, seq: number) => `$
 const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + 64;
 const MAX_EDIT_BOX = Math.ceil((MAX_EDIT_PLAIN + 16) * 4 / 3) + 4;
 const editAad = (f: Pick<GroupEditFrame, "g" | "e" | "s" | "n" | "v" | "ts">) => JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts]);
+/** What a member signs of its reaction, so that a hub can pass it on (WISP 9xx · Group Mesh § Hubs). */
+const reactionSigned = (g: string, r: WireReaction) => utf8Encode(JSON.stringify(["ghostly-group/1 react", g, r.id, r.e, r.n]));
+/**
+ * A member's reaction as a hub passes it on: signed by the member (`k`), unlike `group-react`, which the edge it comes
+ * on vouches for. A frame of its own, which apps from before hubs drop: they would take it as the hub's reaction.
+ */
+export const GROUP_REACTED_FRAME = "group-reacted";
+export interface GroupReactedFrame extends WireReaction { t: typeof GROUP_REACTED_FRAME; g: string; k: string; sig: string }
 const byeSigned = (f: Omit<GroupByeFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 bye", f.g, f.k, f.e, f.ts]));
 const editSigned = (f: Omit<GroupEditFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts, f.nn, f.c]));
 function isEditFrame(v: unknown): v is GroupEditFrame {
@@ -638,6 +647,24 @@ export class GroupSession {
   byeFrame(now = Date.now()): GroupByeFrame {
     const unsigned = { g: this.id, k: this.myKey, e: this.epoch, ts: now };
     return { t: "group-bye", ...unsigned, sig: toBase64Url(sign(byeSigned(unsigned), this.identity.seed)) };
+  }
+
+  /** My signature on a reaction of mine, beside its wire fields (older apps read only those). */
+  signReaction(reaction: WireReaction): { k: string; sig: string } {
+    return { k: this.myKey, sig: toBase64Url(sign(reactionSigned(this.id, reaction), this.identity.seed)) };
+  }
+
+  /**
+   * A reaction signed by a member still in the roster (not me), with the member and the reaction, or null: what a hub
+   * passes on, and what a member takes from a hub.
+   */
+  signedReaction(raw: unknown): { member: string; reaction: WireReaction; frame: GroupReactedFrame } | null {
+    if (this.state.status !== "active" || !raw || typeof raw !== "object") return null;
+    const f = raw as Record<string, unknown>, reaction = readReaction(f);
+    if (!reaction || f.g !== this.id || typeof f.k !== "string" || !MEMBER_KEY.test(f.k) || f.k === this.myKey || !rosterHas(this.roster, f.k)) return null;
+    if (typeof f.sig !== "string" || f.sig.length !== 86 || !B64.test(f.sig)) return null;
+    try { if (!verify(fromBase64Url(f.sig), reactionSigned(this.id, reaction), publicKeyFromZ32(f.k))) return null; } catch { return null; }
+    return { member: f.k, reaction, frame: { t: GROUP_REACTED_FRAME, g: this.id, k: f.k, ...reaction, sig: f.sig } };
   }
 
   /** A signed leave: the admin removes its member; anyone else passes it on while that member is in the roster. */

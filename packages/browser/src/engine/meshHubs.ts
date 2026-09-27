@@ -1,6 +1,6 @@
 import {
   COMMUNITY_TOPOLOGY, MESH_HUBS, beaconKeys, beaconRecords, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
-  type GroupEdgeFrame, type GroupSession, type Hub,
+  type GroupEdgeFrame, type GroupReactedFrame, type GroupSession, type Hub,
 } from "@ghostly/core";
 import type { StoredGroup } from "../shared/types";
 import type { GroupsHost } from "./groups";
@@ -45,6 +45,8 @@ export const MESH_HUB_TIMINGS: MeshHubTimings = {
   hubWaitMs: 60_000, memberGoneMs: 5 * 60_000, firstReadMs: 30_000, graceMs: 3 * 60_000, keepMetMs: 2 * 60_000, reachEveryMs: 5_000,
 };
 
+/** Signed reactions a hub keeps to say again to a member whose edge opens. */
+const REACTIONS_KEPT = 64;
 /** How long the edge to a member a commit took out stays, for that commit to reach it. */
 const GONE_LINGER_MS = 15_000;
 
@@ -89,6 +91,8 @@ interface HubLive {
   wantedSize: number;
   /** Members a commit just took out: their edge stays a moment, for the commit that tells them (a hub passes it on). */
   gone: Map<string, number>;
+  /** As a hub: the signed reactions I passed on, the latest per member and message, said again to a member back. */
+  reactions: Map<string, GroupReactedFrame>;
 }
 
 /**
@@ -119,7 +123,7 @@ export class MeshHubs {
     let live = this.live.get(groupId);
     if (!live) this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], firstRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
-      seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map() }));
+      seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map() }));
     return live;
   }
 
@@ -390,8 +394,29 @@ export class MeshHubs {
     if (live?.hub && this.large(session)) {
       if (!this.hubs(groupId, session, now).includes(key)) live.members.set(key, now);
       this.sayReach(groupId, session, live, now, key);
+      // Reactions are in no log: what I passed on lately, again, to a member back (it keeps the newest of each).
+      const id = this.host.edges(groupId).get(key);
+      if (id) for (const frame of live.reactions.values()) if (frame.k !== key && rosterHas(session.roster, frame.k)) { try { this.host.sendOnLink(id, frame); } catch { break; } }
     }
     return changed;
+  }
+
+  /**
+   * As a hub, a member's signed reaction goes on to my other edges, the first time I see that number from that member
+   * for that message; and it is kept (the latest `REACTIONS_KEPT`) for members whose edge opens later.
+   */
+  passReaction(groupId: string, session: GroupSession, from: string, frame: GroupReactedFrame): void {
+    const live = this.live.get(groupId);
+    if (!live?.hub) return;
+    const at = `${frame.k} ${frame.id}`, held = live.reactions.get(at);
+    if (held && held.n >= frame.n) return;
+    live.reactions.delete(at);
+    live.reactions.set(at, frame);
+    while (live.reactions.size > REACTIONS_KEPT) live.reactions.delete(live.reactions.keys().next().value!);
+    for (const [key, id] of this.host.edges(groupId)) {
+      if (key === from || key === frame.k || !rosterHas(session.roster, key) || !this.host.linkReady(id)) continue;
+      try { this.host.sendOnLink(id, frame); } catch { /* closing */ }
+    }
   }
 
   /** What a hub says it reaches, and which members' apps take no hubs (kept, so a new hub serves them too). True when `group` changed. */

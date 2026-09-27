@@ -364,7 +364,8 @@ directly (every packet to both; reads from the DHT when every relay fails). Test
 `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces its bootstrap routers,
 `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` replaces HyperDHT's bootstrap nodes, `settings set relays
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
-turns WebRTC off.
+turns WebRTC off. A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
+`GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it).
 
 ## Not yet
 

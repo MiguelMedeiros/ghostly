@@ -1,7 +1,7 @@
 import {
-  GroupSession, GROUP_EDIT_FRAME, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
+  GroupSession, GROUP_EDIT_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
+  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type WireReaction, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -62,6 +62,8 @@ export interface GroupsHost {
   groupEdit?(groupId: string, edit: GroupIncomingEdit): Promise<void> | void;
   /** A private group's edge to `peerKey` came up and both sides said where they are: what is said again on it goes now. */
   edgeUp?(groupId: string, peerKey: string): void;
+  /** A member's reaction in a private group: over its own edge, or signed and passed on by a hub. */
+  groupReaction?(groupId: string, member: string, reaction: WireReaction): Promise<void> | void;
   /**
    * This app stays online (the Desktop app, the CLI): in a private group past 16 members it offers to be a hub
    * (WISP 9xx · Group Mesh § Hubs). A browser tab does not, unless the admin pins it.
@@ -834,9 +836,39 @@ export class Groups {
       return;
     }
     if (!session) return;
+    const t = frame && typeof frame === "object" ? (frame as { t?: unknown }).t : undefined;
+    if (t === GROUP_REACTION_FRAME || t === GROUP_REACTED_FRAME) { await this.reaction(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     const taken = await session.handle(peerKey, frame);
     // As a hub, what was new here goes on to the other edges (WISP 9xx · Group Mesh § Hubs).
     if (taken.length) this.hubs.passOn(groupId, session, peerKey, taken);
+  }
+
+  /**
+   * A reaction: from the member whose edge it came on (`group-react`), or signed by a member and passed on by a hub
+   * (`group-reacted`). As a hub, a signed one goes on to the other edges (WISP 9xx · Group Mesh § Hubs).
+   */
+  private async reaction(groupId: string, session: GroupSession, from: string, raw: Record<string, unknown>): Promise<void> {
+    if (session.status !== "active" || raw.g !== groupId) return;
+    let member: string, reaction: WireReaction;
+    if (raw.t === GROUP_REACTION_FRAME) {
+      const direct = readReaction(raw);
+      if (!direct || !rosterHas(session.roster, from) || from === session.myKey) return;
+      member = from; reaction = direct;
+      const signed = session.signedReaction(raw);
+      if (signed?.member === from) this.hubs.passReaction(groupId, session, from, signed.frame);
+    } else {
+      const signed = session.signedReaction(raw);
+      if (!signed || !this.hubs.enabled) return;
+      member = signed.member; reaction = signed.reaction;
+      this.hubs.passReaction(groupId, session, from, signed.frame);
+    }
+    await this.host.groupReaction?.(groupId, member, reaction);
+  }
+
+  /** My signature on a reaction of mine in a private group, for hubs to pass it on; nothing for a community. */
+  signReaction(groupId: string, reaction: WireReaction): { k: string; sig: string } | Record<string, never> {
+    const session = this.sessions.get(groupId);
+    return session?.status === "active" && this.hubs.enabled ? session.signReaction(reaction) : {};
   }
 
   /** A validly signed commit, by the admin I told, that takes me out of the roster. */

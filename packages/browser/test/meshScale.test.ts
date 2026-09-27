@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { GROUP_LIMITS } from "@ghostly/core";
+import { GROUP_LIMITS, GROUP_MEMBER_CAP, MAX_GROUP_MEMBERS, MESH_HUBS } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, type NetworkModel, type Peer } from "./communityWorld";
 // covers: groups.link.join, groups.send, groups.catch-up, groups.remove-member
 
@@ -14,6 +14,11 @@ import { CommunityWorld, RELAY_NETWORK, type NetworkModel, type Peer } from "./c
  * In `npm test`: 20 members, the network free. Measured, for the PR and the WISP:
  *
  *   MESH_SCALE=8,16,32 MESH_SCALE_OUT=/tmp/mesh.jsonl npx vitest run packages/browser/test/meshScale.test.ts
+ *
+ * With hubs (WISP 9xx · Group Mesh § Hubs): `MESH_HUBS=2` makes the first two members after the admin apps that stay
+ * online (the Desktop app or the CLI; their Pkarr requests are counted, not held to the relays' budget, since they read
+ * the DHT). `MESH_HUBS=0,2` measures both. Past 32 (`MESH_SCALE=64,128`) the harness raises the member cap: what hubs
+ * would cost, not what the apps allow.
  */
 
 interface Report { members: number; network: string; [key: string]: unknown }
@@ -22,11 +27,13 @@ interface Report { members: number; network: string; [key: string]: unknown }
  * `burst`: newcomers open the link four at a time (the admin runs four entry sessions at once), a stress case; else one
  * after another, as bots are added to a group. A burst that does not get in within ten minutes is counted, not failed.
  */
-async function scale(n: number, network: NetworkModel | null, burst = false): Promise<Report> {
-  const report: Report = { members: n, network: network ? "relays" : "free", joins: burst ? "four at a time" : "one at a time" };
+async function scale(n: number, network: NetworkModel | null, burst = false, hubCount = 0): Promise<Report> {
+  const report: Report = { members: n, network: network ? "relays" : "free", joins: burst ? "four at a time" : "one at a time", hubs: hubCount };
   const wall = () => performance.now();
   const world = new CommunityWorld(undefined, network);
   const admin = world.add("admin");
+  const app = (i: number) => (i >= 1 && i <= hubCount ? { staysOnline: true, unmetered: true } : {});
+  const isHub = (p: Peer) => !!p.staysOnline && hubCount > 0 && n > MESH_HUBS.threshold;
   const id = await admin.groups.create("Scale", "mesh");
   const link = await admin.groups.enableLink(id);
   const peers: Peer[] = [admin];
@@ -39,7 +46,7 @@ async function scale(n: number, network: NetworkModel | null, burst = false): Pr
   let stalled = 0;
   const size = burst ? 4 : 1;
   for (let i = 1; i < n; i += size) {
-    const wave = Array.from({ length: Math.min(size, n - i) }, (_, j) => world.add(`p${i + j}`));
+    const wave = Array.from({ length: Math.min(size, n - i) }, (_, j) => world.add(`p${i + j}`, undefined, app(i + j)));
     const started = world.now;
     for (const p of wave) await p.groups.joinByLink(link);
     const joined = new Map<Peer, number>();
@@ -66,8 +73,13 @@ async function scale(n: number, network: NetworkModel | null, burst = false): Pr
     .map(p => `${p.name} ${view(p)?.members.filter(m => m.online).length}/${view(p)?.members.length}`).join("; "));
   report.meshUpSimulatedSeconds = (world.now - simStart) / 1000;
   const edgesOf = (p: Peer) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id).length;
-  report.edgesPerMember = Math.max(...peers.map(edgesOf));
-  expect(report.edgesPerMember).toBe(n - 1);
+  const hubbed = hubCount > 0 && n > MESH_HUBS.threshold;
+  // With hubs, the edges a member no longer needs close once it picked its hubs.
+  if (hubbed) await world.until(() => peers.filter(p => !isHub(p)).every(p => edgesOf(p) <= MESH_HUBS.hubsPerMember), 10 * 60_000, 1000,
+    () => peers.filter(p => !isHub(p) && edgesOf(p) > MESH_HUBS.hubsPerMember).slice(0, 3).map(p => `${p.name} ${edgesOf(p)}`).join("; "));
+  report.edgesPerMember = Math.max(...peers.filter(p => !isHub(p)).map(edgesOf));
+  if (hubbed) report.edgesPerHub = Math.max(...peers.filter(isHub).map(edgesOf));
+  expect(report.edgesPerMember).toBe(hubbed ? MESH_HUBS.hubsPerMember : n - 1);
 
   // Steady state, quiet minutes once joins are over: what a member spends on Pkarr to keep its edges up.
   if (network) {
@@ -77,18 +89,32 @@ async function scale(n: number, network: NetworkModel | null, burst = false): Pr
     await world.run(4 * 60_000);
     world.onSpend = null;
     const per = (p: Peer) => (spent.get(p) ?? 0) / 4;
-    const members = peers.slice(1).map(per).sort((a, b) => a - b);
+    const members = peers.slice(1).filter(p => !isHub(p)).map(per).sort((a, b) => a - b);
     // Each edge also republishes its presence every 4 min (not in the model): a PUT to both relays, 2 requests.
-    report.pkarrPerMemberPerMinute = { median: members[Math.floor(members.length / 2)], max: members[members.length - 1], admin: per(admin), heartbeats: Math.round((n - 1) * 2 / 4 * 10) / 10, budget: 60 };
+    const edges = (p: Peer) => edgesOf(p);
+    report.pkarrPerMemberPerMinute = { median: members[Math.floor(members.length / 2)], max: members[members.length - 1], admin: per(admin),
+      heartbeats: Math.round(Math.max(...peers.filter(p => !isHub(p)).map(edges)) * 2 / 4 * 10) / 10, budget: 60,
+      ...(hubbed ? { hub: Math.max(...peers.filter(isHub).map(per)), hubHeartbeats: Math.round(Math.max(...peers.filter(isHub).map(edges)) * 2 / 4 * 10) / 10 } : {}) };
   }
 
   // Fan-out: everyone says something, everyone reads everyone.
   const frames0 = peers.reduce((s, p) => s + p.sent.frames, 0), bytes0 = peers.reduce((s, p) => s + p.sent.bytes, 0);
+  // What one member's message costs its author (the rest is what hubs pass on), measured on a member that is no hub.
+  const writer = peers[n - 3], writerFrames0 = writer.sent.frames, writerBytes0 = writer.sent.bytes;
+  const hubFrames0 = peers.filter(isHub).map(p => p.sent.frames);
+  await writer.groups.send(id, "one message");
+  await world.run(2_000);
+  report.authorPerMessage = { frames: writer.sent.frames - writerFrames0, bytes: writer.sent.bytes - writerBytes0 };
+  if (hubbed) report.hubFramesPerMessage = Math.max(...peers.filter(isHub).map((p, i) => p.sent.frames - hubFrames0[i]));
+  const frames1 = peers.reduce((s, p) => s + p.sent.frames, 0) - frames0;
+  report.networkFramesPerMessage = frames1;
+  for (const p of peers) expect(world.texts(p, id)).toContain("one message");
+  const fanFrames0 = peers.reduce((s, p) => s + p.sent.frames, 0), fanBytes0 = peers.reduce((s, p) => s + p.sent.bytes, 0);
   t = wall();
   for (const p of peers) await p.groups.send(id, `hello from ${p.name}`);
   await world.run(2_000);
   report.sendWallMsPerMessage = Math.round((wall() - t) / n * 10) / 10;
-  const frames = peers.reduce((s, p) => s + p.sent.frames, 0) - frames0, bytes = peers.reduce((s, p) => s + p.sent.bytes, 0) - bytes0;
+  const frames = peers.reduce((s, p) => s + p.sent.frames, 0) - fanFrames0, bytes = peers.reduce((s, p) => s + p.sent.bytes, 0) - fanBytes0;
   report.framesPerMessage = Math.round(frames / n);
   report.bytesPerMessage = Math.round(bytes / n);
   for (const p of peers) expect(new Set(world.texts(p, id).filter(x => x.startsWith("hello from "))).size).toBe(n);
@@ -109,6 +135,7 @@ async function scale(n: number, network: NetworkModel | null, burst = false): Pr
   const caught = () => [0, 1, 2].every(i => world.texts(absent, id).includes(`status ${i} from ${author.name}`));
   await world.until(caught, 10 * 60_000, 500, () => `catch-up: ${world.texts(absent, id).filter(x => x.startsWith("status")).length}/3`);
   report.catchUpFromOthersSimulatedSeconds = (world.now - simStart) / 1000;
+  // Every member reachable again: over an edge, or through a hub.
   const backUp = () => view(absent)!.members.filter(m => !m.me && m.key !== keyOf(author)).every(m => m.online);
   await world.until(backUp, 15 * 60_000, 1000, () => `back: ${view(absent)!.members.filter(m => m.online).length}/${n}`);
   report.returnAllEdgesUpSimulatedSeconds = (world.now - simStart) / 1000;
@@ -128,7 +155,7 @@ async function scale(n: number, network: NetworkModel | null, burst = false): Pr
   report.saveCloneMs = Math.round((wall() - t) / clones * 100) / 100;
 
   // Removal: the admin removes a member; everyone else moves on, the removed one reads nothing after.
-  const gone = peers[1], goneKey = keyOf(gone);
+  const gone = peers[hubCount + 1], goneKey = keyOf(gone);
   simStart = world.now;
   await admin.groups.remove(id, goneKey);
   const others = peers.filter(p => p !== gone);
@@ -145,7 +172,7 @@ async function scale(n: number, network: NetworkModel | null, burst = false): Pr
   // Nobody hands on what the removed member sent.
   for (const p of others) {
     const state = (await p.store.getGroups()).find(g => g.id === id)?.state;
-    expect(state?.relay?.some(f => f.s === goneKey)).toBe(false);
+    expect(state?.relay?.some(f => f.s === goneKey) ?? false).toBe(false);
   }
 
   report.pkarrOperations = world.pkarrOps;
@@ -155,6 +182,9 @@ async function scale(n: number, network: NetworkModel | null, burst = false): Pr
 }
 
 const SIZES = (process.env.MESH_SCALE ?? "").split(",").map(Number).filter(n => n > 1);
+const HUBS = (process.env.MESH_HUBS ?? "0").split(",").map(Number).filter(n => n >= 0);
+/** Which runs: `MESH_RUNS=free,relays,bursts` (all three by default). */
+const RUNS = (process.env.MESH_RUNS ?? "free,relays,bursts").split(",");
 
 describe("a private group of twenty on headless engines", () => {
   it("joins by the link, delivers to all, catches up from a third member, and excludes the removed", async () => {
@@ -163,9 +193,21 @@ describe("a private group of twenty on headless engines", () => {
   }, 120_000);
 });
 
+describe("a private group of twenty with two hubs", () => {
+  it("members keep two edges, and everything else holds", async () => {
+    const report = await scale(20, null, false, 2);
+    expect(report.edgesPerMember).toBe(2);
+    expect(report.authorPerMessage).toMatchObject({ frames: 2 });
+  }, 120_000);
+});
+
 describe.runIf(SIZES.length > 0)("private group scale, measured", () => {
-  for (const n of SIZES) for (const [network, burst] of [[null, false], [RELAY_NETWORK, false], [RELAY_NETWORK, true]] as const) it(`${n} members, network ${network ? "relays" : "free"}${burst ? ", joins in bursts" : ""}`, async () => {
-    const report = await scale(n, network, burst);
+  const runs = ([["free", null, false], ["relays", RELAY_NETWORK, false], ["bursts", RELAY_NETWORK, true]] as const).filter(([name]) => RUNS.includes(name));
+  for (const n of SIZES) for (const hubs of HUBS) for (const [, network, burst] of runs) it(`${n} members, ${hubs} hubs, network ${network ? "relays" : "free"}${burst ? ", joins in bursts" : ""}`, async () => {
+    // Past 32, a measurement of what hubs would cost: the apps keep the cap.
+    GROUP_MEMBER_CAP.max = Math.max(MAX_GROUP_MEMBERS, n);
+    let report: Report;
+    try { report = await scale(n, network, burst, hubs); } finally { GROUP_MEMBER_CAP.max = MAX_GROUP_MEMBERS; }
     console.log(`MESH_SCALE_REPORT ${JSON.stringify(report)}`);
     if (process.env.MESH_SCALE_OUT) appendFileSync(process.env.MESH_SCALE_OUT, JSON.stringify(report) + "\n");
   }, 30 * 60_000);

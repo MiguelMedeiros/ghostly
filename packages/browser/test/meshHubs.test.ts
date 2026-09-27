@@ -12,15 +12,19 @@ import { CommunityWorld, type Peer } from "./communityWorld";
 interface Built { world: CommunityWorld; id: string; admin: Peer; peers: Peer[] }
 
 /** A group of `n` joined one after another through the admin's link; `hubs` and `legacy` name peers by index (0 is the admin). */
+/** Reactions each peer took, as the app's reactions store would: who, on what, which emoji. */
+const reactions = new Map<Peer, { member: string; id: string; e: string; n: number }[]>();
+
 async function build(n: number, opts: { hubs?: number[]; legacy?: number[] } = {}): Promise<Built> {
   const world = new CommunityWorld();
   const app = (i: number) => ({ staysOnline: opts.hubs?.includes(i), legacy: opts.legacy?.includes(i) });
-  const admin = world.add("admin", undefined, app(0));
+  const hooks = (p: Peer) => ({ groupReaction: (_g: string, member: string, r: { id: string; e: string; n: number }) => { reactions.set(p, [...reactions.get(p) ?? [], { member, ...r }]); } });
+  const admin = world.add("admin", hooks, app(0));
   const id = await admin.groups.create("Hubs", "mesh");
   const link = await admin.groups.enableLink(id);
   const peers = [admin];
   for (let i = 1; i < n; i++) {
-    const p = world.add(`p${i}`, undefined, app(i));
+    const p = world.add(`p${i}`, hooks, app(i));
     await p.groups.joinByLink(link);
     await world.until(() => world.member(p, id), 5 * 60_000, 500);
     peers.push(p);
@@ -62,6 +66,27 @@ describe("hubs in a private group past 16 members", () => {
     expect(others[4].sent.frames - before).toBe(2);
     // Each exactly once, though two hubs passed it on.
     for (const p of peers) expect(world.texts(p, id).filter(t => t === "through the hubs")).toHaveLength(1);
+  }, 180_000);
+
+  it("a reaction, signed by its member, reaches everyone through a hub; an older app never takes it as the hub's", async () => {
+    const b = await build(20, { hubs: [2, 5], legacy: [8] });
+    const { world, id, peers } = b;
+    const old = peers[8], hubs = [peers[2], peers[5]], others = peers.filter(p => p !== old && !hubs.includes(p));
+    await world.until(() => onHubs(b, others) && others.every(p => edgesOf(b, p).length <= MESH_HUBS.hubsPerMember + (p === b.admin ? 1 : 0)), 10 * 60_000, 1000);
+    const reactor = others[3], reactorKey = keyOf(b, reactor);
+    const wire = { id: `${keyOf(b, others[4])}:0:0`, e: "👍", n: 1 };
+    // What the app says on each of the reactor's edges: the wire fields and the member's signature.
+    const frame = { t: "group-react", g: id, ...wire, ...reactor.groups.signReaction(id, wire) };
+    const hub = hubs.find(h => edgesOf(b, reactor).some(e => e.peer === keyOf(b, h)))!;
+    await hub.groups.handleEdgeFrame(id, reactorKey, structuredClone(frame));
+    await world.run(1_000);
+    for (const p of peers.filter(p => p !== reactor && p !== old)) expect(reactions.get(p)?.some(r => r.member === reactorKey && r.id === wire.id && r.e === "👍")).toBe(true);
+    // The older app drops what a hub passes on: nothing in its name, nor in the hub's.
+    expect(reactions.get(old)?.some(r => r.id === wire.id) ?? false).toBe(false);
+    // Forged: another member's name on it, and the same signature.
+    const forged = { ...frame, t: "group-reacted", k: keyOf(b, others[6]) };
+    await others[7].groups.handleEdgeFrame(id, keyOf(b, hub), structuredClone(forged));
+    expect(reactions.get(others[7])?.some(r => r.member === keyOf(b, others[6])) ?? false).toBe(false);
   }, 180_000);
 
   it("a group of 16 stays a full mesh, whatever hubs there could be", async () => {
