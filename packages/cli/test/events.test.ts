@@ -1,11 +1,11 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
-// covers: headless.events, headless.typing
+// covers: headless.events, headless.typing, headless.files
 
 /**
  * The stream derived from the engine's own events: each fact once, with a stable id, across restarts; a first run
@@ -114,5 +114,44 @@ describe("the event stream", () => {
     later.h.baseline(state([link("c9")]), new Map([["c9", [message("c9", "a"), message("c9", "b"), message("c9", "c")]]]));
     expect(later.events.map((e) => e.id)).toEqual(["message.received:c9:c"]);
     expect(readFileSync(join(dir, "e.jsonl"), "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  describe("files", () => {
+    afterEach(() => { vi.useRealTimers(); });
+    const voice = { id: "c1-in-v", name: "Voice.webm", size: 900, mime: "audio/webm", voice: { duration: 11_000, peaks: [0, 40, 255] } };
+    const transfers = (entries: Record<string, unknown>) => ({ ...state([link("c1")]), transfers: entries }) as unknown as EngineState;
+
+    it("a file message carries the file: its id, and a voice note's length and bars", async () => {
+      const { h, events } = await hub("f1.jsonl");
+      h.baseline(state([link("c1")]), new Map([["c1", []]]));
+      h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "peer_v", { text: "🎤 Voice message (0:11)", file: voice })] });
+      expect(events[0]).toMatchObject({ type: "message.received", message: { id: "peer_v", file: { id: "c1-in-v", name: "Voice.webm", size: 900, mime: "audio/webm", voice: { duration: 11_000, peaks: [0, 40, 255] } } } });
+    });
+
+    it("file.done and file.failed name the message and the chat", async () => {
+      const { h, events } = await hub("f2.jsonl");
+      h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "peer_v", { file: voice })]]]));
+      h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "transferring", transferred: 0, size: 900, direction: "in", stage: "queued" } }) });
+      h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" } }) });
+      h.sink.post({ kind: "state", state: transfers({ "c1-in-v": { state: "done", transferred: 900, size: 900, direction: "in" }, "c1-out-w": { state: "failed", transferred: 5, size: 9, error: "Cancelled", retry: true } }) });
+      expect(events.map((e) => [e.type, e.file, e.chat, e.messageId])).toEqual([
+        ["file.stage", "c1-in-v", "c1", "peer_v"],
+        ["file.done", "c1-in-v", "c1", "peer_v"],
+      ]);
+      // The failed one's message was never seen: it waits for it, then goes with it.
+      h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "peer_v", { file: voice }), message("c1", "me_9", { sender: "me", delivery: "sent", file: { id: "c1-out-w", name: "a", size: 9, mime: "text/plain" } })] });
+      expect(events.slice(2).map((e) => [e.type, e.messageId ?? (e.message as { id: string }).id])).toEqual([["message.sent", "me_9"], ["file.failed", "me_9"]]);
+      expect(events[3]).toMatchObject({ chat: "c1", file: "c1-out-w", error: "Cancelled", retry: true });
+    });
+
+    it("a file event whose message never comes goes after a moment, with messageId null", async () => {
+      const { h, events } = await hub("f3.jsonl");
+      h.baseline(state([link("c1")]), new Map([["c1", []]]));
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      h.sink.post({ kind: "state", state: transfers({ "c1-in-z": { state: "transferring", transferred: 0, size: 9, direction: "in", stage: "asking", room: 100 } }) });
+      expect(events).toEqual([]);
+      vi.advanceTimersByTime(2_000);
+      expect(events).toMatchObject([{ type: "file.offered", file: "c1-in-z", chat: "c1", messageId: null, room: 100 }]);
+    });
   });
 });

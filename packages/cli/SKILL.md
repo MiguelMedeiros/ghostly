@@ -45,6 +45,7 @@ reads events as JSON lines and answers with commands that print JSON.
 ```bash
 ghostly profile set --name "My bot"     # the name people see
 ghostly daemon --detach                 # stays online in the background; `ghostly daemon stop` ends it
+ghostly daemon restart                  # after upgrading the CLI: the daemon runs the new code (commands warn on stderr until then)
 ghostly invite create --label alice     # gives {"chat","invite","link"}: send the link to the person
 ghostly chat wait alice --until live    # returns once they joined
 ```
@@ -58,7 +59,7 @@ ghostly send alice "Hello!"                        # a chat by name, id or id pr
 echo "multi-line text" | ghostly send alice --stdin
 ghostly send alice --wait delivered "Got it"       # waits for the contact's app to confirm
 ghostly send alice -- "-text that starts with a dash"
-ghostly typing alice                               # "typing…" on the contact's screen for 6 s; again while composing
+ghostly typing alice --for 30                      # "typing…" on the contact's screen while you compose, up to 30 s
 ghostly typing alice --stop                        # or just send: the message ends it
 ghostly send alice --reply peer_jY7N… "Yes, that one"  # quotes a message of the chat (its id from history or an event)
 ghostly chat history alice --limit 20              # oldest first
@@ -81,6 +82,8 @@ ghostly listen --type message.received            # one JSON object per line, un
 - Useful types: `message.received`, `message.delivery`, `chat.created`, `chat.joined` (a contact arrived: not a
   message, do not answer it as one), `chat.connection`, `group.message` (with `message.mentioned: true` when it
   names this bot), `group.members`, `typing.started` / `typing.stopped` (the contact is writing, or stopped).
+- Files: `message.received` carries `message.file` (`id`, `name`, `size`, `mime`, and for a voice note `voice`:
+  `{duration, peaks}`); `file.done` and `file.failed` carry `file`, `chat` and `messageId`.
 - Hooks: `--exec '<command>'` runs once per event with the event on **stdin** (never in arguments), in order;
   `--webhook http://127.0.0.1:<port>/…` POSTs each event to a local bridge.
 
@@ -108,11 +111,25 @@ ghostly group history Support
 ghostly file send alice ./report.pdf               # a file (paths are this machine's)
 ghostly file send alice ./note.ogg --voice         # a voice note: length and waveform read from the file
 ghostly file send alice ./note.m4a --voice 4200    # or its length given (AAC needs ffmpeg for the waveform)
-ghostly file save <file id> --dir ./inbox          # a received file (message.received carries message.file.id)
-ghostly file accept alice <file id>                # a file over 25 MiB waits for this (file.offered event)
+ghostly file save <file id> --dir ./inbox --wait   # a received file once it is all here (message.received carries message.file.id)
+ghostly file wait <file id> --timeout 120          # exit 0 when done, 1 with the error when it failed, 4 on timeout
+ghostly file accept <file id>                      # a file over 25 MiB waits for this (file.offered event)
 ```
 
 Only accept and save files you expect: they come from other people.
+
+## Quiet for a while
+
+```bash
+ghostly chat disconnect alice --hold 30            # off the direct link for 30 min; short texts still go over the DHT
+ghostly chat connect alice                         # back now (or wait: it ends by itself)
+```
+
+`settings set online false` takes the whole profile offline instead: nothing arrives at all.
+
+## Help
+
+`ghostly help`, `ghostly help file`, `ghostly file save --help`: every command, a group, or one command with its options.
 
 ## Identities and shared apps
 

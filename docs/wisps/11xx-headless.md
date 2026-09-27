@@ -85,10 +85,23 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 - `seq` grows by one per event in a profile, across restarts. `listen --since <seq>` replays what the journal still holds (the last 10,000 events) before following.
 - `id` is stable for the fact it reports: the same message received is the same id whenever the daemon derives it again, so a bot that restarts dedupes by `id`.
-- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `typing.started` and `typing.stopped` (the contact is writing, or stopped, [401](401-paired-chat.md#typing)); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.incoming`, `call.outgoing`, `call.connected`, `call.ended` ([Calls](#calls)); `events.gap` (a replay asked for more than the journal keeps). `file.offered`, `file.stage`, `file.done`, `file.failed` (transfers, by file id). `identity.received`, `identity.status`, `identity.approval`, `identity.progress`.
+- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `typing.started` and `typing.stopped` (the contact is writing, or stopped, [401](401-paired-chat.md#typing)); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.incoming`, `call.outgoing`, `call.connected`, `call.ended` ([Calls](#calls)); `events.gap` (a replay asked for more than the journal keeps). `file.offered`, `file.stage`, `file.done`, `file.failed` (transfers, by file id, each with its `chat` and the `messageId` of the message that carries the file; an event whose message is not stored yet waits for it up to 2 s, then goes with `messageId: null`). `chat.held` and `chat.released` (a [hold](#staying-off-the-direct-link) began or ended).
+- A file message carries its file on `message.received` and `message.sent`: `message.file` is `{id, name, size, mime, voice?}`, and a voice note's `voice` is `{duration, peaks?}` (milliseconds, the 0-255 bars). Before [#358](https://github.com/MiguelMedeiros/ghostly/pull/358) it was `voice: true`; the value is still truthy for a bot that tests it. `identity.received`, `identity.status`, `identity.approval`, `identity.progress`.
 - Which messages were reported is kept in the profile's own store (a database of the CLI's beside the engine's): a restart reports only what is new, a message that arrived while no process derived events (a crash) is reported at the next start, and a profile's first start reports none of the history it already had.
 - As the app's chat screen does, the side that joined says `👋 <name> joined` once the chat first goes live and the other side answers once; each is said once per chat, across restarts.
 - Hooks: `listen --exec "<command>"` runs the command once per event, in order, with the event on its stdin; `listen --webhook <url>` POSTs each event to a local bridge (loopback only); `listen --cursor <file>` records the last event handled (the acknowledgement), and a restarted listener resumes after it. With no daemon running, `listen` becomes the daemon, socket included, so a hook can answer with `ghostly send`.
+
+### Staying off the direct link
+
+`chat disconnect <chat>` closes the live session, and the contact's app redials within seconds. A bot that must stay off the direct link for a while uses `chat disconnect <chat> --hold <minutes>` (up to 10,080): the chat takes its own "DHT only" choice ([400](400-chat.md): either side choosing it keeps both off the live link) and gives it back when the time is up, or on `chat connect`, or on `--hold 0`. The DHT floor still carries short texts; files, calls and typing wait; the contact's app shows the chat as DHT only. The hold is kept in the profile folder (`holds.json`): a restarted daemon takes back a hold whose time is up and times the others again, and never undoes a DHT only the chat had chosen before (that is refused as a hold). `settings online false` is another thing: the whole profile goes offline, DHT included, and nothing arrives.
+
+### Typing kept on
+
+A typing `start` holds 6 s on the contact's side ([401](401-paired-chat.md#typing)). `typing <chat> --for <seconds>` (up to 600) has the daemon say it again, at twice the engine's refresh pace, until the time is up, a message goes to that chat (from any command or `engine` call), or `typing --stop`; when the time is up it says `stop`. A one-shot command stays for that long.
+
+### Versions
+
+`status` answers the daemon's `version`. Every command that goes through a daemon asks for it first and, when it differs from the command's own, says so on stderr (the answer on stdout is unchanged). `daemon restart` stops the running daemon and starts the command's own release in the background.
 
 ## Exit codes (CLI)
 
@@ -98,7 +111,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 | 1 | The engine or the network refused or failed; stdout has `{"error": {...}}` |
 | 2 | Usage: unknown command or bad arguments |
 | 3 | Not found (profile, chat, message) |
-| 4 | Timed out waiting (`--wait`) |
+| 4 | Timed out waiting (`--wait`, `chat wait`, `file wait`) |
 | 5 | Needs confirmation (`--confirm-real`, `--force`) |
 
 ## Parity with the app
@@ -122,7 +135,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Chats | Rich text | Not applicable: text is text; the bot formats it |
 | Chats | Link previews made by the sender | Planned (not in phases 1 to 4; `--preview`) |
 | Chats | Hold for an away contact (S3) | Planned (not in phases 1 to 4) |
-| Files | Send, save to a folder, consent for files over 25 MiB (files/3; the engine re-asks after expiry, #302), pause, resume, cancel, events; voice notes (`--voice [ms]`: length and the 64 waveform bars measured from the file with the recorder's meter, `voicePeaksOf`; WAV, Opus and MP3 decoded in wasm, other audio through `ffmpeg` when present) | Phase 3a |
+| Files | Send, save to a folder, consent for files over 25 MiB (files/3; the engine re-asks after expiry, #302), pause, resume, cancel, events naming their message; `file wait` and `file save --wait`; a file named by its id alone in every file command; voice notes (`--voice [ms]`: length and the 64 waveform bars measured from the file with the recorder's meter, `voicePeaksOf`; WAV, Opus and MP3 decoded in wasm, other audio through `ffmpeg` when present) | Phase 3a |
 | Groups | Create (community with its link, or a private mesh), join by link, leave, forget, accept or decline an invitation, list, send, history, @mentions in and out | Phase 1 (needs WebRTC) |
 | Groups | Admin: remove, make admin, rotate, link on/off/reset, picture; invite a contact | Phase 3a |
 | Payments | Wallet instances per network (the New flow types), list, balance, remove with the #303 protections | Phase 2 (Bark and Fedimint: app only, see below) |

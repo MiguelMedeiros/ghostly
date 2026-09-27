@@ -9,6 +9,8 @@ import {
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
+import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
+import { endTyping, keepTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
 import { IDENTITY_METHODS } from "./identities";
 import { SERVICE_METHODS } from "./services";
@@ -197,7 +199,8 @@ const METHODS: Record<string, Method> = {
     return { chats: state(ctx).links.map(chatJson).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
-    return chatDetailsJson(chatOf(ctx, params));
+    const link = chatOf(ctx, params);
+    return { ...chatDetailsJson(link), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -212,6 +215,8 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
     const replyTo = str(params, "reply");
+    // A kept `typing --for` ends with the message (the engine says stop with it).
+    endTyping(ctx, link.id, false);
     const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
@@ -219,12 +224,21 @@ const METHODS: Record<string, Method> = {
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
     return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null };
   },
-  /** WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there. */
+  /**
+   * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.
+   * `for`: kept that many seconds (a one-shot stays that long), until a message to the chat or a stop.
+   */
   async "chat.typing"(ctx, params) {
     const link = chatOf(ctx, params);
     const typing = !bool(params, "stop");
+    const seconds = params.for === undefined ? 0 : num(params, "for", 0, { min: 1, max: 600 });
+    if (!typing && seconds) throw new CliError("bad_request", "for keeps typing on: not with stop");
+    endTyping(ctx, link.id, false);
     node(ctx).setTyping({ linkId: link.id, typing });
-    return { chat: link.id, typing, live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false };
+    const until = seconds ? Date.now() + seconds * 1000 : null;
+    const kept = seconds ? keepTyping(ctx, link.id, seconds * 1000) : null;
+    if (kept && ctx.mode === "one-shot") await kept;
+    return { chat: link.id, typing, live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}) };
   },
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -263,15 +277,27 @@ const METHODS: Record<string, Method> = {
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     return chatDetailsJson(findChat(state(ctx).links, link.id));
   },
+  /** Reconnects now; a chat held off its direct link (`chat disconnect --hold`) leaves the hold first. */
   async "chat.connect"(ctx, params) {
     const link = chatOf(ctx, params);
+    await releaseHold(ctx, link.id, "connect");
     await node(ctx).connect({ linkId: link.id });
     return chatJson(findChat(state(ctx).links, link.id));
   },
+  /**
+   * Closes the live session; the contact's app may dial again at once. `hold` (minutes): the chat stays off its
+   * direct link that long, on the DHT (its "DHT only" choice, taken back after); 0 ends a hold now.
+   */
   async "chat.disconnect"(ctx, params) {
     const link = chatOf(ctx, params);
-    node(ctx).disconnect({ linkId: link.id });
-    return chatJson(findChat(state(ctx).links, link.id));
+    if (params.hold === undefined) {
+      node(ctx).disconnect({ linkId: link.id });
+      return chatJson(findChat(state(ctx).links, link.id));
+    }
+    const minutes = num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
+    if (minutes === 0) await releaseHold(ctx, link.id, "lifted");
+    else await holdChat(ctx, link, minutes);
+    return { ...chatJson(findChat(state(ctx).links, link.id)), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.verify"(ctx, params) {
     const link = chatOf(ctx, params);

@@ -76,16 +76,16 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
 | `profile create <name> [--use] [--name <shown>]`, `profile list`, `profile use <name>` | Profiles |
 | `profile show`, `profile set [--name <name>] [--share-profile \| --no-share-profile]` | The name contacts see |
-| `daemon [--detach]`, `daemon status`, `daemon stop` | Keep the profile online |
+| `daemon [--detach]`, `daemon status`, `daemon stop`, `daemon restart` | Keep the profile online; `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)) |
 | `invite create [--label <name>]` | A new chat's `ghostly1…` invite and its link |
 | `invite join <invite-or-link> [--label <name>]` | Join a chat (your own invite is refused) |
 | `chat list`, `chat show <chat>` | Chats, and one chat's connection: transports, last attempt, comparison code |
 | `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
 | `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
-| `typing <chat> [--stop]` | Show the contact you are writing: live chats only, it holds 6 s there, so say it again every few seconds; `send` or `--stop` ends it |
+| `typing <chat> [--for s] [--stop]` | Show the contact you are writing: live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a message to the chat or `--stop` ends it |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
-| `chat connect <chat>`, `chat disconnect <chat>` | Reconnect now; close the live session |
+| `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
 | `chat rename <chat> <name>`, `chat remove <chat> --yes` | Name it here; delete it (keys and history) here |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `message retry\|delete\|details <chat> <message>` | One message |
@@ -99,9 +99,10 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin |
 | `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link; the picture |
 | `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]]` | A file, or a voice note (its length and waveform measured from the file unless given) |
-| `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel <chat> <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3) |
-| `file resend <file>`, `file request <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
-| `file save <file> [--dir d \| --path p] [--force]` | Write a received file to disk (never over one without `--force`; an unfinished one says how many bytes are here) |
+| `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3). A file's id names its chat, so `<chat>` may be left out |
+| `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
+| `file wait [<chat>] <file> [--timeout s]` | Wait until a transfer ends: exit `0` when the file is all here, `1` with the transfer's error when it failed (`details.retry`: `file resend` can go on), `4` on timeout (default 300 s) |
+| `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk (never over one without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first) |
 | `profile backup --out <file>`, `profile restore <file> <new profile>` | An encrypted backup (WISP 05 envelope); the passphrase from `--passphrase-file` or `GHOSTLY_BACKUP_PASSPHRASE` |
 | `identity providers`, `identity list` | Kinds of proof and their signers; this profile's proofs |
 | `identity add <provider> [subject] [--signer id] [--field name=value]… [--days n]` | A proof: an in-app signer (NIP-46 and the like) finishes here; a tool or a published record answers with the statement |
@@ -127,8 +128,13 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 
+Help: `ghostly help` lists every command; `ghostly help file` (or `ghostly file --help`) a group; `ghostly help file
+save` (or `ghostly file save --help`) one command, with its options. `-h` works too, except after `--`.
+
 Arguments: an option's value is taken as is, even when it starts with `-`. A positional that starts with `-` is
-refused (a mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash.
+refused (a mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash. An id
+(a chat, group, file, message or draft) may start with a dash: where a command takes one, a word that starts with a
+single `-` and is longer than two characters is the id.
 
 ### Voice notes
 
@@ -139,6 +145,43 @@ bars look like the app's recordings. WAV, Opus in WebM or Ogg and MP3 are decode
 AAC in MP4/M4A and other kinds need `ffmpeg` on the PATH (`GHOSTLY_FFMPEG` names another). When the sound cannot be
 read, a note with a given length goes out flat with a warning on stderr (the socket API answers `warning`), and one
 without is refused (`bad_request`). `--voice` takes the next word only when it is a number.
+
+### Files a bot receives
+
+`message.received` carries the file: `message.file` is `{id, name, size, mime, voice?}`, and a voice note's `voice`
+is `{duration, peaks?}` (milliseconds, and the 0-255 bars; releases before this one said only `voice: true`). The
+`file.*` events name the file's message and chat (`messageId`, `chat`). So a bot answers a voice note without polling:
+
+```bash
+ghostly listen --type message.received --exec '
+  file="$(jq -r ".message.file.id // empty")"
+  [ -n "$file" ] && ghostly file save "$file" --dir ./inbox --wait --timeout 120'
+```
+
+`file wait <file>` alone does the waiting: exit `0` when done, `1` with the error when it failed, `4` on timeout.
+
+### Staying off the direct link
+
+`chat disconnect <chat>` closes the live session, but the contact's app dials again within seconds.
+`chat disconnect <chat> --hold <minutes>` (up to a week) keeps the chat off its direct link for that long: it is the
+chat's own "DHT only" choice (WISP 400: either side choosing it keeps both off the live link), taken back when the
+time is up. Meanwhile text still goes over the DHT (up to 256 bytes a message; longer ones wait), files, calls and
+typing wait, and the contact's app shows the chat as DHT only. `chat connect`, or `--hold 0`, ends it early. The
+hold is kept in the profile folder: a daemon that restarts takes it back when its time is up, and a DHT only the chat
+had chosen itself (`chat transport dht`) is never undone by it. `chat show` answers `heldUntil` (a time in ms, or
+null; `hold` there is the store-and-forward state, something else), and the stream says `chat.held` and
+`chat.released` (`reason`: expired, connect or lifted).
+
+`settings set online false` is different: the whole profile goes offline, every chat, DHT included, and nothing
+arrives until it is back online.
+
+### After an upgrade
+
+A daemon keeps running the code it started with. After upgrading the CLI, every command that goes through an older
+(or newer) daemon still answers, and says on stderr `ghostly: the daemon runs <version> and this command is
+<version>`. `ghostly daemon restart` stops the running daemon (if one runs) and starts this release's in the
+background, as `daemon --detach` does. A daemon kept by a service manager (systemd, launchd) is restarted with the
+service manager instead.
 
 ### The secret guard
 
@@ -190,7 +233,8 @@ refused without it.
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.deleted`, `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.message` (`message.mentioned` when it names this
   profile), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
-  `file.stage`, `file.done`, `file.failed`, `identity.received` and `identity.status` (what a contact
+  `file.stage`, `file.done`, `file.failed` (each with `chat`, `file`, `messageId`), `chat.held` and
+  `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
   showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted`, `group.removed`, `payment.created` and
   `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
   settled|failed, network, method), `call.incoming`, `call.outgoing`, `call.connected` and `call.ended` (voice
@@ -224,7 +268,7 @@ Methods: `status`, `profile.get|set`, `settings.get|set`, `invite.create|join`, 
 delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|request|payRequest|accept`,
 `group.create|join|list|get|history|send|leave|forget|accept|decline`, `wallet.list|create|remove|faucet|history|
 receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `payment.list|check|reclaim`,
-`file.send|list|action|save`, `group.invite|remove|admin|rotate|link|picture`, `profile.picture|backup`,
+`file.send|list|action|wait|save`, `group.invite|remove|admin|rotate|link|picture`, `profile.picture|backup`,
 `identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `service.list|add|remove|enable|share|peer|open|close`,
 `call.start|answer|hangup|list|get|flush|auto`,
 `events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
