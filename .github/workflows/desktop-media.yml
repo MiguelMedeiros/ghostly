@@ -118,6 +118,25 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a npx playwright test -c e2e/playwright.desktop.config.ts video-stream
 
+      # TEMPORARY: what the app does on its own on the runner, before WebDriver drives it.
+      - name: Start the app alone (Windows diagnostics)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          "WebView2: " + (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue).pv
+          & msedgedriver.exe --version
+          $env:GHOSTLY_PROFILE = "e2e-diag"
+          $p = Start-Process -FilePath target\debug\ghostly.exe -PassThru -RedirectStandardOutput app-out.txt -RedirectStandardError app-err.txt
+          Start-Sleep -Seconds 25
+          "alive: $(-not $p.HasExited) exit: $($p.ExitCode)"
+          Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Select-Object Id, StartTime | Format-Table
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          "--- stdout"; Get-Content app-out.txt -Tail 60 -ErrorAction SilentlyContinue
+          "--- stderr"; Get-Content app-err.txt -Tail 60 -ErrorAction SilentlyContinue
+          "--- data"; Get-ChildItem "$env:LOCALAPPDATA\app.ghostly.chat", "$env:APPDATA\app.ghostly.chat" -ErrorAction SilentlyContinue | Select-Object FullName
+          Get-ChildItem -Recurse -Filter ghostly.log "$env:LOCALAPPDATA\app.ghostly.chat", "$env:APPDATA\app.ghostly.chat" -ErrorAction SilentlyContinue | ForEach-Object { "--- $($_.FullName)"; Get-Content $_.FullName -Tail 60 }
+
       - name: Play a 100 MB video from the stored file (Windows)
         if: runner.os == 'Windows'
         run: npx playwright test -c e2e/playwright.desktop.config.ts video-stream
