@@ -4,6 +4,21 @@ Ghost is the small rendezvous and record-exchange primitive; Ghostly is its refe
 
 The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describe the modular boundaries. The wire format is in [PROTOCOL.md](PROTOCOL.md), and how bytes travel is in [TRANSPORTS.md](TRANSPORTS.md).
 
+## At a glance
+
+```
+ Alice                    Mainline DHT (Pkarr)                     Bob
+   │── signed, encrypted record ──▶  rendezvous  ◀── signed, encrypted record ──│
+   │◀══════════ live link: WebRTC · Iroh · HyperDHT (end-to-end encrypted) ═════▶│
+   │               no live path? short texts keep going over the DHT            │
+```
+
+- **Two people meet on the public Mainline DHT** (Pkarr records), then talk directly over WebRTC, Iroh or HyperDHT. If no direct path works, short texts keep flowing over the DHT itself ([the one chat](#the-one-chat)).
+- **Keys:** a fresh key pair per chat, so no key ties your chats together.
+- **Relays are helpers**, not servers that hold your chats. Desktop reads the DHT directly; a browser cannot, so the web app and the extension go through public Pkarr relays. A relay that misbehaves is skipped for a while ([circuit breaker per relay](TRANSPORTS.md#circuit-breaker-per-relay)).
+- **Local first:** history, keys and wallets live on the device, optionally behind a password. There is no Ghostly message server and no account ([where state lives](#where-state-lives)).
+- **End to end:** relays and DHT nodes see ciphertext, timing and IP addresses, never what you say ([security model](#security-model)).
+
 ## Repository
 
 | Path | What |
@@ -70,4 +85,4 @@ There is no Ghostly server in the message path. The DHT is not a durable history
 - **Expiry is not deletion.** Records expire from the network; contacts, observers and local history may keep copies.
 - **Real money is asked for.** Mainnet spends need an explicit confirmation; wallet secrets are sealed with a device key.
 
-Reporting a flaw: [SECURITY.md](../SECURITY.md). Source evidence and limits per platform: [wisps/IMPLEMENTATION.md](wisps/IMPLEMENTATION.md).
+Reporting a flaw: [SECURITY.md](../SECURITY.md). Past audit fixes: [Security review](SECURITY-REVIEW.md). Source evidence and limits per platform: [wisps/IMPLEMENTATION.md](wisps/IMPLEMENTATION.md).

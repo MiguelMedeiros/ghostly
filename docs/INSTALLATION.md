@@ -8,6 +8,7 @@ Open **https://app.ghostly.tools** in any modern browser.
 
 - On a phone, add it to the home screen (Share, *Add to Home Screen* on iOS; ⋮, *Install app* on Android) and it opens like an app.
 - Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
+- **Self-hosted:** `docker compose up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
 
 ## Browser extension (Chrome, Brave, Edge)
 
@@ -40,7 +41,9 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 
 ## CLI
 
-`ghostly-cli` is a compatibility client for bots and scripts ([CLI.md](CLI.md)). It is not on crates.io.
+For a bot on today's Ghostly, use `ghostly` ([packages/cli](../packages/cli/README.md)): the app's engine without a screen, installed from a clone for now.
+
+`ghostly-cli` is the compatibility client for bots and scripts built on v0.4 chats ([CLI.md](CLI.md)). It talks to other CLIs over the v0.4 record format, not to `ghostly1` app chats. It is not on crates.io.
 
 | Platform | Download |
 |---|---|
@@ -54,6 +57,14 @@ Or build it from a clone:
 ```bash
 cargo install --path cli
 ```
+
+## Your first chat
+
+1. Open [app.ghostly.tools](https://app.ghostly.tools) or the Desktop app.
+2. **New**, then copy the invite link (or show its QR code) and send it to a friend.
+3. They open it, or paste it under **Join**. The chat goes live as soon as you find each other.
+
+What a chat can do: [Features](FEATURES.md).
 
 ## Build from source
 
@@ -74,6 +85,20 @@ npm run tauri build      # Desktop, release bundles in target/release/bundle/
 npm run dev -w @ghostly/web   # web app on http://localhost:5180
 npm run build:web             # web app, static files in web/dist
 npm run build:extension       # extension, load extension/dist unpacked
+
+cargo build --release -p ghostly-cli   # ghostly-cli, in target/release/
 ```
 
 The Desktop build bundles the Node runtime that runs it, for HyperDHT (`scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).
+
+Tests and the rest of the workflow: [Contributing](../CONTRIBUTING.md) and [Testing](TESTING.md).
+
+## Troubleshooting
+
+**macOS: "Ghostly.app is damaged and can't be opened".** macOS quarantines apps downloaded outside the App Store. Clear the flag, then open the app again:
+
+```bash
+sudo xattr -cr /Applications/Ghostly.app
+```
+
+Something else? [Open an issue](https://github.com/MiguelMedeiros/ghostly/issues). For a vulnerability, never open an issue: follow [SECURITY.md](../SECURITY.md).
