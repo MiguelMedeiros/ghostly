@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, PaymentPreflightError, parseFedimintRequestPayload, validatePaymentTarget, type GhostLink, type PaymentReview } from "@ghostly/core";
 import { FedimintAdapter } from "../src/engine/paymentAdapters/fedimint";
-import { FEDIMINT_MAINNET_UNAVAILABLE, FedimintWallet, fedimintTiming, historyEntry, normalizeInvite } from "../src/engine/paymentAdapters/fedimintWallet";
+import { FedimintWallet, fedimintTiming, historyEntry, normalizeInvite } from "../src/engine/paymentAdapters/fedimintWallet";
 import { federationInfo } from "../src/engine/paymentAdapters/fedimintSdk";
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
@@ -15,7 +15,7 @@ import type { CashuWallet } from "../src/engine/wallet";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import type { StoredPayment } from "../src/shared/types";
 import { FakeFedimintSdk, type FakeFederation } from "./helpers/fakeFedimint";
-// covers: wallet.fedimint.join, wallet.fedimint.notes, wallet.fedimint.backup, wallet.fedimint.mainnet-off, payments.fedimint.chat, payments.fedimint.lightning, wallet.lightning.fedimint
+// covers: wallet.fedimint.join, wallet.fedimint.notes, wallet.fedimint.backup, wallet.fedimint.mainnet, payments.fedimint.chat, payments.fedimint.lightning, wallet.lightning.fedimint
 
 fedimintTiming.pollMs = 20;
 let fake: FakeFedimintSdk;
@@ -79,10 +79,12 @@ describe("the Fedimint wallet", () => {
     expect(w.view.federations).toEqual([]);
   });
 
-  it("joins nothing on Mainnet yet, and says so", async () => {
+  it("joins a Mainnet federation into the Mainnet wallet, and a test federation there never", async () => {
     const w = await wallet("mainnet");
-    expect(w.view.unavailable).toBe(FEDIMINT_MAINNET_UNAVAILABLE);
-    await expect(w.join(fake.federation({ network: "bitcoin" }).invite)).rejects.toThrow("not available yet");
+    await expect(w.join(federation.invite)).rejects.toThrow("it belongs in a Testnet Fedimint wallet");
+    const real = fake.federation({ name: "Real", network: "bitcoin" });
+    await w.join(real.invite);
+    expect(w.view.federations.map((f) => [f.name, f.network])).toEqual([["Real", "bitcoin"]]);
   });
 
   it("keeps each network's federations in its own wallet, and one sealed mnemonic per network for all of them", async () => {

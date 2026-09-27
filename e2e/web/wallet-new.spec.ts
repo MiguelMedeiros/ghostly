@@ -27,7 +27,7 @@ test("a new profile has no wallet and says how to start; one choice makes Testne
   await expect(deck.locator("[role=tab]")).toHaveCount(3); // Cashu, Lightning through it, USDT
 });
 
-test("New makes a Testnet kind in one click, checked before its card appears, and says what Mainnet does not have yet", { tag: ["@feature:wallet.instances.create", "@feature:wallet.fedimint.mainnet-off"] }, async ({ peer }) => {
+test("New makes a Testnet kind in one click, checked before its card appears, and says what each Mainnet kind asks for", { tag: ["@feature:wallet.instances.create", "@feature:wallet.fedimint.mainnet"] }, async ({ peer }) => {
   const alice = await peer("new-one-click");
   await createWallet(alice, "cashu", "testnet");
   await expect(alice.page.getByTestId("wallet-card-cashu-testnet")).toHaveAttribute("aria-selected", "true");
@@ -38,14 +38,12 @@ test("New makes a Testnet kind in one click, checked before its card appears, an
   await dialog.getByRole("radio", { name: "Testnet" }).click();
   await expect(dialog.getByTestId("new-wallet-type-cashu-status")).toHaveText("Added");
   await dialog.getByRole("radio", { name: "Mainnet" }).click();
-  for (const kind of ["spark", "fedimint"]) {
-    await expect(dialog.getByTestId(`new-wallet-type-${kind}`), kind).toHaveAttribute("aria-disabled", "true");
-    await expect(dialog.getByTestId(`new-wallet-type-${kind}-status`), kind).toHaveText("Not yet");
-    // Its reason, in place of what it is: Mainnet has not been tried with real funds.
-    await expect(dialog.getByTestId(`new-wallet-type-${kind}`), kind).toContainText(/not available yet|not been tried/);
-  }
-  await dialog.getByTestId("new-wallet-type-spark").click({ force: true });
-  await expect(dialog).toBeVisible();
+  // Spark asks for the person's Breez API key, Fedimint for a federation's invite: neither is made in one click.
+  await expect(dialog.getByTestId("new-wallet-type-spark-status")).toHaveText("Create…");
+  await expect(dialog.getByTestId("new-wallet-type-fedimint-status")).toHaveText("Join with invite…");
+  await dialog.getByTestId("new-wallet-type-spark").click();
+  await expect(dialog.getByTestId("new-wallet-api-key")).toBeVisible();
+  await expect(dialog.getByTestId("new-wallet-progress")).toHaveCount(0);
   await alice.page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(alice.page.locator("[data-testid^=wallet-card-spark-]")).toHaveCount(0);

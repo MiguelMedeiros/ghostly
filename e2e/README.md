@@ -488,7 +488,7 @@ few sats that batch costs.
 
 ### Breez (Spark) on Breez's regtest
 
-Breez's nodeless SDK is the `breez` Lightning source (Testnet only). Its regtest is hosted by Breez and
+Breez's nodeless SDK is the `breez` Lightning source (Mainnet with an API key; these tests run Testnet). Its regtest is hosted by Breez and
 Lightspark: **nothing runs locally, no API key**, worthless sats. The Ghostly side makes fresh wallets each run;
 the other side of every payment is a counterpart wallet the test runs from Node with the SDK's Node build
 (`support/breez.ts`, wallets under the system temp folder, `ghostly-breez-e2e/`).

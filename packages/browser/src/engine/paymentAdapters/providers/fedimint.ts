@@ -1,5 +1,5 @@
 import { decodeBolt11, isFederationId } from "@ghostly/core";
-import { FEDIMINT_MAINNET, type FedimintWallet } from "../fedimintWallet";
+import type { FedimintWallet } from "../fedimintWallet";
 import type { LightningInvoice, LightningPaymentRef, LightningPaymentStatus, LightningPayResult, LightningProvider, LightningProviderDescriptor } from "./lightning";
 import { NothingSpentError, PROVIDER_PLATFORMS, SourceConfigError, SourceUnreachableError, isNothingSpentError, type ProviderNetwork } from "./types";
 
@@ -97,7 +97,7 @@ export class FedimintLightning implements LightningProvider {
   async close() { /* the client belongs to the Fedimint wallet, which stays open */ }
 }
 
-export const FEDIMINT_NETWORKS: readonly ProviderNetwork[] = FEDIMINT_MAINNET ? ["bitcoin", "signet", "testnet", "regtest", "mutinynet"] : ["signet", "testnet", "regtest", "mutinynet"];
+export const FEDIMINT_NETWORKS: readonly ProviderNetwork[] = ["bitcoin", "signet", "testnet", "regtest", "mutinynet"];
 
 export const fedimint: LightningProviderDescriptor = {
   id: FEDIMINT_SOURCE,

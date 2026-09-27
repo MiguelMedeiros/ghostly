@@ -50,8 +50,8 @@ Implementation evidence below is what is merged on `dev` on 2026-09-27. Pull req
 | [203](203-lightning.md) | Lightning | Draft | Several Lightning cards per network, one the default for receiving (#314, #317): the mints, NWC, LND, Core Lightning, WebLN, Breez, a Fedimint federation |
 | [204](204-bark.md) | Ark via Bark | Draft | Experimental: Mainnet on Second's server (#305) and Testnet; regtest verified; not compatible with Arkade; exits pending |
 | [205](205-lnurl.md) | Lightning Addresses and LNURL-pay | Draft | Paying an address or LNURL through a Lightning card; strict checks; no receiving |
-| [Fedimint · 2xx planned](2xx-fedimint.md) | Fedimint ecash and Lightning through a federation | Draft | Experimental, Testnet only (#192); web SDK canary; regtest verified (ecash in chats, Lightning through the gateway); Mainnet off |
-| [Spark · 2xx planned](2xx-spark.md) | Spark payments | Draft | Experimental (#188): Spark to Spark (addresses and invoices) through the Breez SDK; Testnet on Breez's regtest; Mainnet not offered yet |
+| [Fedimint · 2xx planned](2xx-fedimint.md) | Fedimint ecash and Lightning through a federation | Draft | Experimental, Mainnet and Testnet (#192); web SDK canary; regtest verified (ecash in chats, Lightning through the gateway) |
+| [Spark · 2xx planned](2xx-spark.md) | Spark payments | Draft | Experimental (#188): Spark to Spark (addresses and invoices) through the Breez SDK; Testnet on Breez's regtest; Mainnet with the person's Breez API key |
 | [300](300-peer-proofs.md) | Identity Proofs | Draft | Experimental provider contract (2026-09-23): made once per profile, shared per contact; the providers below |
 | [301](301-nostr.md) | Nostr | Draft | Experimental provider `nostr` (NIP-07, NIP-46) |
 | [Nostr social · 3xx planned](3xx-nostr-social.md) | Nostr social layer | Draft | Experimental: profile, follows, notes on request; publication through the person's signer, off by default |
@@ -125,8 +125,8 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 | 203 Lightning | Stable 1.0 | Default through the mints; own sources plug in |
 | 204 Bark | Experimental | No exit yet; Mainnet since 2026-09-26 |
 | 205 LNURL-pay | Stable 1.0 | Paying only, strict checks, no wire format |
-| 2xx Fedimint | Experimental | Testnet only, canary SDK |
-| 2xx Spark | Experimental | Testnet only; Mainnet never tried with real funds |
+| 2xx Fedimint | Experimental | Mainnet and Testnet, canary SDK |
+| 2xx Spark | Experimental | Mainnet (your Breez API key) and Testnet |
 | 300 Identity Proofs | Experimental | Contract rebuilt 2026-09-23 |
 | 301 Nostr | Experimental | Provider on the young contract |
 | 3xx Nostr social | Experimental | Read on request, publication off by default |

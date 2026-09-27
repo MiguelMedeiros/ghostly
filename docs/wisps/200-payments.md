@@ -32,8 +32,8 @@ Real money and test coins never meet. Every wallet a client holds is on one of t
 | Ark | Bitcoin | Mutinynet by default; Signet and a local regtest server may be chosen while the wallet is empty |
 | USDT | Ethereum, the canonical contract | Sepolia (Aave's test USDT) by default; a local chain may be chosen while the wallet is empty |
 | Bark | Bitcoin, Second's server `ark.second.tech` | Second's signet server; a local regtest server |
-| Spark | Not offered yet | Breez and Lightspark's hosted regtest |
-| Fedimint | Not offered yet | Federations on test networks, joined by invite |
+| Spark | Bitcoin, with the user's own Breez API key | Breez and Lightspark's hosted regtest |
+| Fedimint | Federations on Bitcoin, joined by invite | Federations on test networks, joined by invite |
 | Lightning | Several cards, each with its own source; the Cashu mints' card comes with a Cashu wallet | The same, on test networks |
 | Bitcoin on-chain source | None until one is chosen | None until one is chosen |
 

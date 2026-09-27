@@ -47,7 +47,7 @@ function splitByNetwork(flat: WalletView, fallback: WalletNetwork): Record<Walle
       bark: on(flat.bark, network, (v) => chainNetwork(v.network, "testnet")),
       spark: on(flat.spark, network, (v) => chainNetwork(v.network, fallback)),
       usdt: on(flat.usdt, network, (v) => v.chainId ? (v.chainId === 1 ? "mainnet" : "testnet") : chainNetwork(v.network, fallback)),
-      fedimint: on(flat.fedimint, network, (v) => v.unavailable ? "mainnet" : chainNetwork(v.federations[0]?.network, fallback)),
+      fedimint: on(flat.fedimint, network, (v) => chainNetwork(v.federations[0]?.network, fallback)),
       bitcoin: on(flat.bitcoin, network, (v) => v.mode ?? fallback),
       // The Cashu mints are Lightning's default source, as in the engine: a network with mints has it.
       lightning: on(flat.lightning, network, (v) => v.mode ?? fallback) ?? (mints.length && !flat.lightning ? { mode: network, providerId: "cashu-mint", status: "ready", offered: [], recent: [] } : undefined),

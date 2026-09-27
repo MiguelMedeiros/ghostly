@@ -34,8 +34,8 @@ wallet twice.
 
 - A source is accepted only if it reports a chain of the card's network (Bitcoin for Mainnet, any test network
   for Testnet). A Mainnet card refuses an invoice of a test network.
-- Where each source runs: the Cashu mints, NWC, Core Lightning, LND and WebLN on Mainnet and Testnet; Fedimint
-  and Breez on Testnet only for now. The table is in
+- Where each source runs: the Cashu mints, NWC, Core Lightning, LND, WebLN, Fedimint and Breez on Mainnet and
+  Testnet (Breez on Mainnet with the person's own API key). The table is in
   [PROVIDERS.md](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md#built-in-providers).
 - A payment is journaled before the source is asked to pay. A source reports either "nothing was spent"
   (safe to retry) or an outcome that is unknown until it is reconciled with the same source; an unknown

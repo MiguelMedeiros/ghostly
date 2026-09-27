@@ -11,14 +11,13 @@ import { choose } from "../select";
 // covers: wallet.instances.create, wallet.instances.networks, wallet.instances.sections, wallet.deck
 
 const made = (type: WalletInstanceView["type"], network: WalletInstanceView["network"]): WalletInstanceView => ({ id: `${type}:${network}`, type, network, config: {} });
-/** What New offers when nothing is made yet: every kind, Spark and Fedimint Testnet only. */
+/** What New offers when nothing is made yet: every kind; Spark on Mainnet asks for a key, no on-chain wallet on the web's Mainnet. */
 const offers = (patch: Partial<Record<string, Partial<WalletOffer>>> = {}): WalletOffer[] =>
   (["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"] as const).flatMap((type) => (["mainnet", "testnet"] as const).map((network) => {
-    const base: WalletOffer = (type === "spark" || type === "fedimint") && network === "mainnet"
-      ? { type, network, available: false, reason: `${type} on Mainnet is not available yet: it has only been tried on test networks.` }
+    const base: WalletOffer = type === "spark" && network === "mainnet" ? { type, network, available: true, needs: "apiKey" }
       : type === "fedimint" ? { type, network, available: true, needs: "invite" }
       : type === "lightning" ? { type, network, available: true, needs: "provider", providers: offered("lightning", network).filter((d) => d.id !== "cashu-mint") }
-      : type === "bitcoin" ? (network === "testnet" ? { type, network, available: true, needs: "provider", providers: offered("onchain", network) } : { type, network, available: false, reason: "No on-chain wallet runs on Mainnet here yet" })
+      : type === "bitcoin" ? (network === "testnet" ? { type, network, available: true, needs: "provider", providers: offered("onchain", network) } : { type, network, available: false, reason: "No on-chain wallet runs on Mainnet here yet. Use Testnet for now." })
       : { type, network, available: true };
     return { ...base, ...patch[`${type}:${network}`] };
   }));
@@ -90,18 +89,20 @@ describe("New, in the header", () => {
     expect(within(dialog).getByTestId("new-wallet-type-lightning-status")).toHaveTextContent("Connect…");
     await user.click(within(dialog).getByTestId("new-wallet-network-mainnet"));
     expect(within(dialog).getByTestId("new-wallet-network")).toHaveAttribute("data-network", "mainnet");
-    expect(within(dialog).getByTestId("new-wallet-type-spark")).toHaveAttribute("aria-disabled", "true");
-    expect(within(dialog).getByTestId("new-wallet-type-spark")).toHaveTextContent("spark on Mainnet is not available yet");
-    expect(within(dialog).getByTestId("new-wallet-type-spark-status")).toHaveTextContent("Not yet");
+    expect(within(dialog).getByTestId("new-wallet-type-bitcoin")).toHaveAttribute("aria-disabled", "true");
+    expect(within(dialog).getByTestId("new-wallet-type-bitcoin")).toHaveTextContent("No on-chain wallet runs on Mainnet here yet.");
+    expect(within(dialog).getByTestId("new-wallet-type-bitcoin-status")).toHaveTextContent("Not yet");
+    expect(within(dialog).getByTestId("new-wallet-type-spark-status")).toHaveTextContent("Create…");
+    expect(within(dialog).getByTestId("new-wallet-type-fedimint-status")).toHaveTextContent("Join with invite…");
     expect(within(dialog).getByTestId("new-wallet-type-cashu-status")).toHaveTextContent("Create");
     // Bark on Bitcoin, one click, with its server's terms named.
     expect(within(dialog).getByTestId("new-wallet-type-bark-status")).toHaveTextContent("Create");
     expect(within(dialog).getByTestId("new-wallet-type-bark")).toHaveTextContent("Second's Ark on Bitcoin. Second's terms apply; start small.");
     // Why not, in one short line; the whole reason on hover.
-    expect(within(dialog).getByTestId("new-wallet-type-spark")).toHaveAttribute("title", expect.stringMatching(/not available yet: it has only been tried on test networks/));
+    expect(within(dialog).getByTestId("new-wallet-type-bitcoin")).toHaveAttribute("title", "No on-chain wallet runs on Mainnet here yet. Use Testnet for now.");
     // A kind that is not there yet makes nothing when clicked.
-    engine.on("walletCreate", () => made("spark", "mainnet"));
-    await user.click(within(dialog).getByTestId("new-wallet-type-spark"));
+    engine.on("walletCreate", () => made("bitcoin", "mainnet"));
+    await user.click(within(dialog).getByTestId("new-wallet-type-bitcoin"));
     expect(engine.callsTo("walletCreate")).toEqual([]);
   });
 
@@ -180,6 +181,25 @@ describe("New, in the header", () => {
     down = false;
     await user.click(screen.getByTestId("new-wallet-retry"));
     expect(engine.callsTo("walletCreate")).toHaveLength(2);
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
+  });
+
+  it("Spark on Mainnet asks for the person's Breez API key, and makes nothing without one", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
+    engine.on("walletCreate", (params) => made(params.type, params.network));
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-network-mainnet"));
+    expect(screen.getByTestId("new-wallet-type-spark")).toHaveTextContent("A Spark wallet (Breez) on Bitcoin, with your Breez API key.");
+    await user.click(screen.getByTestId("new-wallet-type-spark"));
+    expect(engine.callsTo("walletCreate")).toEqual([]);
+    expect(screen.getByTestId("new-wallet-step")).toHaveTextContent("Mainnet Spark");
+    const key = screen.getByTestId("new-wallet-api-key");
+    expect(key).toHaveAttribute("type", "password");
+    expect(screen.getByTestId("new-wallet-create")).toBeDisabled();
+    await user.type(key, "breez-key");
+    await user.click(screen.getByTestId("new-wallet-create"));
+    expect(engine.callsTo("walletCreate")).toEqual([{ type: "spark", network: "mainnet", apiKey: "breez-key" }]);
     await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
   });
 

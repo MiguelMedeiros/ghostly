@@ -20,8 +20,8 @@ Testnet) and on the platforms listed. "Experimental" is the descriptor's `experi
 | id | Kind | Module | Mainnet | Testnet chains | Platforms | Status |
 |---|---|---|---|---|---|---|
 | `cashu-mint` | Lightning | [cashuMint.ts](providers/cashuMint.ts) | yes | the test mints | web, extension, desktop | not flagged |
-| `fedimint` | Lightning | [fedimint.ts](providers/fedimint.ts) | no (`FEDIMINT_MAINNET`) | signet, testnet, regtest, mutinynet | web, extension, desktop | experimental |
-| `breez` | Lightning | [breez.ts](providers/breez.ts) | no (`BREEZ_NETWORKS`) | regtest (Breez and Lightspark's, no API key) | web, extension, desktop | experimental |
+| `fedimint` | Lightning | [fedimint.ts](providers/fedimint.ts) | yes | signet, testnet, regtest, mutinynet | web, extension, desktop | experimental |
+| `breez` | Lightning | [breez.ts](providers/breez.ts) | yes (Breez API key required) | regtest (Breez and Lightspark's, no API key) | web, extension, desktop | experimental |
 | `nwc` | Lightning | [nwc.ts](providers/nwc.ts) | yes | testnet, signet, mutinynet, regtest | web, extension, desktop | not flagged |
 | `core-lightning` | Lightning | [coreLightning.ts](providers/coreLightning.ts) | yes | testnet, signet, regtest | web, extension, desktop | not flagged |
 | `webln` | Lightning | [webln.ts](providers/webln.ts) | yes | testnet, signet, mutinynet, regtest | web | experimental |

@@ -6,31 +6,27 @@ import { paymentCard } from "../support/payments";
 
 /**
  * Fedimint: federations joined by invite code, their ecash in the wallet and in chats, and Lightning through a
- * federation's gateway. A Fedimint wallet is made with New and an invite code; New makes no Mainnet one yet. Money moving needs e2e/infra's federation (a guardian, an LND
+ * federation's gateway. A Fedimint wallet is made with New and an invite code, on either network. Money moving needs e2e/infra's federation (a guardian, an LND
  * gateway and an LND peer with a channel to it: e2e/support/fedimint-regtest) and GHOSTLY_FEDIMINT_REGTEST=1.
  */
 const panel = (p: Peer) => p.page.getByTestId("fedimint-wallet");
 const sats = async (p: Peer) => Number((await panel(p).getByTestId("fedimint-balance").innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
 
-test("Fedimint joins nothing on Mainnet yet, and says so; on Testnet New asks for an invite code", { tag: ["@feature:wallet.fedimint.mainnet-off", "@feature:wallet.instances.create"] }, async ({ peer }) => {
+test("Fedimint on either network: New asks for an invite code and checks it, joining nothing for anyone", { tag: ["@feature:wallet.fedimint.mainnet", "@feature:wallet.instances.create"] }, async ({ peer }) => {
   const alice = await peer("fedimint-mainnet");
   await openWallet(alice);
   await alice.page.getByTestId("wallet-add").click();
   const dialog = alice.page.getByTestId("new-wallet");
-  await dialog.getByRole("radio", { name: "Mainnet" }).click();
   const fedimint = dialog.getByTestId("new-wallet-type-fedimint");
-  await expect(fedimint).toHaveAttribute("aria-disabled", "true");
-  await expect(dialog.getByTestId("new-wallet-type-fedimint-status")).toHaveText("Not yet");
-  await expect(fedimint).toContainText("Fedimint on Mainnet is not available yet");
-  await fedimint.click({ force: true });
-  await expect(dialog.getByTestId("new-wallet-invite")).toHaveCount(0);
-  // In Testnet, nothing is joined for anyone: New waits for an invite code, and checks it.
-  await dialog.getByRole("radio", { name: "Testnet" }).click();
-  await expect(dialog.getByTestId("new-wallet-type-fedimint-status")).toHaveText("Join with invite…");
-  await fedimint.click();
-  await dialog.getByTestId("new-wallet-invite").fill("lnbc1notaninvite");
-  await dialog.getByTestId("new-wallet-create").click();
-  await expect(dialog.getByTestId("new-wallet-error")).toContainText("starts with fed1");
+  for (const network of ["Mainnet", "Testnet"]) {
+    await dialog.getByRole("radio", { name: network }).click();
+    await expect(dialog.getByTestId("new-wallet-type-fedimint-status"), network).toHaveText("Join with invite…");
+    await fedimint.click();
+    await dialog.getByTestId("new-wallet-invite").fill("lnbc1notaninvite");
+    await dialog.getByTestId("new-wallet-create").click();
+    await expect(dialog.getByTestId("new-wallet-error"), network).toContainText("starts with fed1");
+    await dialog.getByTestId("new-wallet-back").click();
+  }
   await alice.page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(alice.page.locator("[data-testid^=wallet-card-fedimint-]")).toHaveCount(0);

@@ -12,8 +12,6 @@ export const WALLET_NAMES: Record<WalletType, string> = {
 /** How long a one-click creation waits on its server before it gives up, saving nothing (tests shorten it). */
 export const createTiming = { timeoutMs: 60_000 };
 
-export const SPARK_MAINNET_NOT_YET = "Spark on Mainnet has not been tried with real funds yet. Create a Testnet Spark wallet (regtest) instead.";
-
 /**
  * The wallets a profile has, read from both networks' views: one per type and network, in the deck's order, and one
  * per Lightning card. A wallet exists once it holds something to open (a seed, a source, a mint); Lightning through

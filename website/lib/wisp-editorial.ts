@@ -193,7 +193,7 @@ export const editorial: Record<string, Entry> = {
   "203-lightning": {
     benefit: "Carry a Lightning invoice in the chat and pay or receive it through the wallet.",
     level: "available",
-    note: "Several Lightning cards per network, one of them the default for receiving: your Cashu mint or your own node or wallet (NWC, LND, Core Lightning, WebLN in the web app, Breez or a Fedimint federation, those two on test networks only). Any other wallet can pay the invoice from its QR code.",
+    note: "Several Lightning cards per network, one of them the default for receiving: your Cashu mint or your own node or wallet (NWC, LND, Core Lightning, WebLN in the web app, Breez (with your own API key on Mainnet) or a Fedimint federation). Any other wallet can pay the invoice from its QR code.",
     feature: inApp("wallets", "Wallets"),
   },
   "204-bark": {
@@ -211,13 +211,13 @@ export const editorial: Record<string, Entry> = {
   "2xx-spark": {
     benefit: "Pay a contact who also has Spark straight from wallet to wallet: instant, off-chain, no Lightning hop.",
     level: "available",
-    note: "Experimental, test networks only: Testnet runs on Breez's hosted regtest with no key; Mainnet is not offered yet. The same wallet can be your Lightning source. Number not yet assigned.",
+    note: "Experimental: Mainnet with your own Breez API key; Testnet runs on Breez's hosted regtest with no key. The same wallet can be your Lightning source. Number not yet assigned.",
     feature: inApp("wallets", "Wallets"),
   },
   "2xx-fedimint": {
     benefit: "Ecash from a federation of guardians you choose: in a chat, and Lightning through the federation's gateway.",
     level: "available",
-    note: "Experimental, test networks only: Mainnet joins no federation yet. You see a federation's name, guardians and network before joining. Number not yet assigned.",
+    note: "Experimental, on Mainnet and Testnet; not yet tried with real funds. You see a federation's name, guardians and network before joining. Number not yet assigned.",
     feature: inApp("wallets", "Wallets"),
   },
   "300-peer-proofs": {

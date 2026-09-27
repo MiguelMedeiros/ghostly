@@ -108,7 +108,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `service add <name> <http://127.0.0.1:port>`, `service share <service> <chat> [--off]`, `service list`, `service remove\|enable` | Share a web app on this machine, per contact |
 | `service peer <chat>`, `service open <chat> <service> [--port p]`, `service close <chat> <service>` | A contact's app on a loopback port here (daemon) |
 | `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
-| `wallet create <type> [--network testnet] [--provider id] [--value name=value]…` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark`, `bitcoin` (BDK), `usdt` |
+| `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `usdt` |
 | `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
 | `wallet faucet <type>`, `wallet add-mint <url> [--primary]` | Test coins; another Cashu mint |
 | `wallet receive <sats>`, `wallet address <type>`, `wallet redeem <token>`, `wallet history` | Receive, and what came and went |

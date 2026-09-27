@@ -49,8 +49,6 @@ export interface FedimintTx {
   paymentId?: string;
 }
 export interface FedimintWalletView {
-  /** Why there is no Fedimint wallet on this network (Mainnet today), shown instead of one. */
-  unavailable?: string;
   federations: FedimintFederationView[];
   /** Sats, every federation of the network. */
   balance: number;
@@ -58,12 +56,6 @@ export interface FedimintWalletView {
   error?: string;
 }
 
-/**
- * Ghostly's Fedimint wallet has only been exercised on test networks, with the SDK's canary build: Mainnet joins
- * no federation yet. Setting this is the whole switch.
- */
-export const FEDIMINT_MAINNET = false;
-export const FEDIMINT_MAINNET_UNAVAILABLE = "Fedimint on Mainnet is not available yet: it has only been tried on test federations. Create a Testnet Fedimint wallet instead.";
 export const MAX_FEDERATIONS = 8;
 /** How long to wait before asking again about an invoice the client answered about at once (tests shorten it). */
 export const fedimintTiming = { pollMs: 10_000 };
@@ -137,12 +129,11 @@ export class FedimintWallet {
 
   async start() { this.saved = await this.load(this.network); this.render(); }
   private async load(mode: WalletMode) { return wrap<StoredFedimint | undefined>((await store(STORES.settings, "readonly")).get(key(mode))); }
-  private unavailable() { return this.network === "mainnet" && !FEDIMINT_MAINNET ? FEDIMINT_MAINNET_UNAVAILABLE : undefined; }
 
   /** Opens every federation of this network. One that does not answer is tried again, the others work meanwhile. */
   ensureReady(): Promise<void> {
     clearTimeout(this.retry);
-    if (this.stopped || this.unavailable()) return Promise.resolve();
+    if (this.stopped) return Promise.resolve();
     return Promise.all((this.saved?.federations ?? []).map((f) => this.open(f).catch(() => undefined))).then(() => {
       if (this.stopped) return;
       void this.refresh();
@@ -200,7 +191,6 @@ export class FedimintWallet {
   }
 
   private render() {
-    const unavailable = this.unavailable();
     const federations: FedimintFederationView[] = (this.saved?.federations ?? []).map(({ database: _database, ...f }) => ({
       ...f,
       balance: sats(this.balances.get(f.id) ?? 0),
@@ -208,7 +198,7 @@ export class FedimintWallet {
       error: this.problems.get(f.id),
       lightning: f.modules.includes("ln"),
     }));
-    this.view = { unavailable, federations, balance: federations.reduce((sum, f) => sum + f.balance, 0), history: this.history, error: this.view.error };
+    this.view = { federations, balance: federations.reduce((sum, f) => sum + f.balance, 0), history: this.history, error: this.view.error };
     this.events.changed();
   }
 
@@ -235,8 +225,6 @@ export class FedimintWallet {
     return info;
   }
   private checkFederation(info: FederationInfo) {
-    const unavailable = this.unavailable();
-    if (unavailable) throw new Error(unavailable);
     if (!isFederationId(info.federationId)) throw new Error("The federation answered with an invalid id");
     if (!info.modules.includes("mint")) throw new Error("This federation has no ecash module this app can use (the v1 mint module)");
     if (!info.network) throw new Error("Could not tell which Bitcoin network this federation is on");
@@ -526,8 +514,6 @@ export class FedimintWallet {
     if (!validateMnemonic(phrase, wordlist)) throw new Error("Invalid recovery phrase");
     if (!invites.length || invites.length > MAX_FEDERATIONS) throw new Error("Add the invite code of each federation to restore");
     await this.serial(async () => {
-      const unavailable = this.unavailable();
-      if (unavailable) throw new Error(unavailable);
       if (this.saved?.federations.length) throw new Error("Restore into a Fedimint wallet that has joined no federation yet; this one will not be replaced");
       if (this.saved) await transact([STORES.settings], (stores) => { stores[STORES.settings].put(this.saved!, `fedimintWallet-retired-${this.network}-${Date.now()}`); });
       const deviceKey = newDeviceKey();

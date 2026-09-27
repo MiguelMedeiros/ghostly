@@ -3,7 +3,7 @@ import { iceServerProblem } from "../shared/ice";
 import type { UsdtPrepared } from "./paymentAdapters/usdt";
 import { ArkWallet, arkMode } from "./paymentAdapters/arkWallet";
 import { BarkWallet, barkMode } from "./paymentAdapters/barkWallet";
-import { FEDIMINT_MAINNET, FEDIMINT_MAINNET_UNAVAILABLE, FedimintWallet } from "./paymentAdapters/fedimintWallet";
+import { FedimintWallet } from "./paymentAdapters/fedimintWallet";
 import { FedimintAdapter, type FedimintPrepared } from "./paymentAdapters/fedimint";
 import { loadFedimintSdk, type FedimintSdk } from "./paymentAdapters/fedimintSdk";
 import type { BarkPrepared } from "./paymentAdapters/bark";
@@ -35,7 +35,7 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
-import { assertConfirmedReal, createTiming, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
+import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
@@ -2063,10 +2063,8 @@ export class GhostlyNode implements EngineImplementation {
       else if (type === "arkade") await this.creating(this.arkWallets[network], () => this.arkWallets[network].createDefaultNow());
       else if (type === "usdt") await this.creating(this.usdtWallets[network], () => this.usdtWallets[network].createDefaultNow());
       else if (type === "bark") await this.creating(this.barkWallets[network], () => this.barkWallets[network].createDefaultNow());
-      else if (type === "spark") {
-        if (network === "mainnet") throw new Error(SPARK_MAINNET_NOT_YET);
-        await this.creating(this.sparkWallets[network], () => this.sparkWallets[network].create({ network: sparkNetworkFor(network) }));
-      } else if (type === "fedimint") {
+      else if (type === "spark") await this.creating(this.sparkWallets[network], () => this.sparkWallets[network].create({ network: sparkNetworkFor(network), apiKey: params.apiKey }));
+      else if (type === "fedimint") {
         if (!params.invite?.trim()) throw new Error("Paste the federation's invite code (fed11…)");
         await this.creating(this.fedimintWallets[network], () => this.fedimintWallets[network].join(params.invite!));
         void this.lightnings[network].ensureReady();
@@ -2249,8 +2247,9 @@ export class GhostlyNode implements EngineImplementation {
     for (const type of WALLET_TYPES) for (const network of WALLET_NETWORKS) {
       const view = networks[network];
       const base = { type, network, exists: has(type, network) };
-      if (type === "spark" && network === "mainnet") offers.push({ ...base, available: false, reason: SPARK_MAINNET_NOT_YET });
-      else if (type === "fedimint") offers.push(network === "mainnet" && !FEDIMINT_MAINNET ? { ...base, available: false, reason: FEDIMINT_MAINNET_UNAVAILABLE } : { ...base, available: true, needs: "invite" });
+      // Spark on Mainnet runs on the person's own Breez API key: New asks for it.
+      if (type === "spark" && network === "mainnet") offers.push({ ...base, available: true, needs: "apiKey" });
+      else if (type === "fedimint") offers.push({ ...base, available: true, needs: "invite" });
       else if (type === "lightning") {
         // A network takes several Lightning cards. The Cashu mints' one comes with a Cashu wallet, and is offered again
         // only to a network that has mints and no such card.

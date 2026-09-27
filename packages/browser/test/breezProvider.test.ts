@@ -47,11 +47,11 @@ describeLightningProvider("Breez (fake SDK)", async () => {
 });
 
 describe("the Breez descriptor", () => {
-  it("is registered, offered in Testnet on every platform, and not in Mainnet yet", () => {
+  it("is registered, offered on both networks on every platform", () => {
     expect(LIGHTNING_PROVIDERS.map((d) => d.id)).toContain(BREEZ_SOURCE);
     for (const platform of ["web", "extension", "desktop"] as const) {
       expect(offeredIn(breez, platform, "testnet")).toBe(true);
-      expect(offeredIn(breez, platform, "mainnet")).toBe(false);
+      expect(offeredIn(breez, platform, "mainnet")).toBe(true);
     }
   });
 

@@ -8,11 +8,10 @@ import { isNothingSpentError, NothingSpentError, type ProviderNetwork, type Prov
 
 export const BREEZ_SOURCE = "breez";
 /**
- * Where the Breez source is offered. Regtest (Breez and Lightspark's, no API key) is the only network it
- * has been exercised on; Breez's Mainnet needs an API key and has never moved real money here, so it is
- * not offered yet. Adding "bitcoin" is the whole switch: the API key field is already required there.
+ * Where the Breez source is offered: Mainnet ("bitcoin", with the person's Breez API key, which the form requires
+ * there) and Breez and Lightspark's hosted regtest (no API key).
  */
-export const BREEZ_NETWORKS: readonly ProviderNetwork[] = ["regtest"];
+export const BREEZ_NETWORKS: readonly ProviderNetwork[] = ["bitcoin", "regtest"];
 /** WebAssembly and HTTPS only: the page, the extension's offscreen document and Tauri's WebView all run it. */
 export const BREEZ_PLATFORMS: readonly ProviderPlatform[] = ["web", "extension", "desktop"];
 

@@ -15,7 +15,7 @@ Route `/wallet` (`src/pages/Wallet.tsx`).
 
 - **Mainnet | Testnet tabs** (#304, `src/components/wallet/NetworkTabs.tsx`). Each tab shows its network's deck. The tab only chooses what is shown; every card pays on its own network.
 - **The deck**: one card per wallet (`src/components/WalletDeck.tsx`, deck mechanics in `src/components/deck/`, shared with the identity cards). The chosen card's panel sits below it: receive, send, options, Remove.
-- **New** in the header (#277, #288) opens a picker: network first (Real money / Test money), then a kind. Each kind says what clicking does ("Create", "Connect…", "Add another…", "Join with invite…", "Added", "Not yet"). Once made, the dialog closes and the new card is dealt in, selected (#309). A new Mainnet Bark wallet opens on its backup rows first.
+- **New** in the header (#277, #288) opens a picker: network first (Real money / Test money), then a kind. Each kind says what clicking does ("Create", "Create…" (Spark on Mainnet asks for a Breez API key first), "Connect…", "Add another…", "Join with invite…", "Added", "Not yet"). Once made, the dialog closes and the new card is dealt in, selected (#309). A new Mainnet Bark wallet opens on its backup rows first.
 - **Remove** (#288) sits in the chosen wallet's panel. See [Removal](#removal-protects-money-in-flight).
 
 ## Lightning cards
@@ -39,11 +39,11 @@ Files under `packages/browser/src/engine/paymentAdapters/`.
 | Lightning: LND | yes | testnet, signet, regtest | `providers/lnd.ts` | [203](wisps/203-lightning.md) |
 | Lightning: Core Lightning | yes | testnet, signet, regtest | `providers/coreLightning.ts` | [203](wisps/203-lightning.md) |
 | Lightning: WebLN (web only) | yes | yes | `providers/webln.ts` | [203](wisps/203-lightning.md) |
-| Lightning: Breez (Spark) | off | regtest | `providers/breez.ts` | [203](wisps/203-lightning.md) |
+| Lightning: Breez (Spark) | yes (your Breez API key) | regtest | `providers/breez.ts` | [203](wisps/203-lightning.md) |
 | Ark (Arkade) | arkade.computer | Mutinynet (mutinynet.arkade.sh) | `arkade.ts`, `arkWallet.ts` | [202](wisps/202-arkade.md) |
 | Bark (Second) | ark.second.tech (#305; Second's terms apply) | signet (ark.signet.2nd.dev) | `bark.ts`, `barkWallet.ts` | [204](wisps/204-bark.md) |
-| Spark | not yet | regtest | `spark.ts`, `sparkWallet.ts` | [2xx](wisps/2xx-spark.md) |
-| Fedimint | off | federations on test networks, joined by invite code | `fedimint.ts`, `fedimintWallet.ts` | [2xx](wisps/2xx-fedimint.md) |
+| Spark | yes (your Breez API key, asked by New) | regtest | `spark.ts`, `sparkWallet.ts` | [2xx](wisps/2xx-spark.md) |
+| Fedimint | yes: federations on Bitcoin, joined by invite code | federations on test networks, joined by invite code | `fedimint.ts`, `fedimintWallet.ts` | [2xx](wisps/2xx-fedimint.md) |
 | Bitcoin: BDK | not offered | signet, mutinynet, regtest (Esplora) | `providers/bdk.ts` | [200](wisps/200-payments.md) |
 | Bitcoin: Bitcoin Core (Desktop only) | yes | testnet, signet, regtest | `providers/bitcoind.ts` | [200](wisps/200-payments.md) |
 | USDT | Ethereum | Sepolia test USDT | `usdt.ts`, `usdtWallet.ts` | [USDT-INTEGRATION.md](USDT-INTEGRATION.md) |

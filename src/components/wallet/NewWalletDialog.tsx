@@ -16,7 +16,7 @@ const ABOUT: Record<WalletType, (network: WalletNetwork) => string> = {
   lightning: () => "Your own Lightning wallet or node: NWC, LND, Core Lightning and more.",
   arkade: (n) => n === "testnet" ? "Arkade on Mutinynet: fast, cheap payments off the chain." : "Arkade on Bitcoin: fast, cheap payments off the chain.",
   bark: (n) => n === "testnet" ? "Second's Ark, on signet." : "Second's Ark on Bitcoin. Second's terms apply; start small.",
-  spark: () => "A Spark wallet (Breez), on regtest.",
+  spark: (n) => n === "testnet" ? "A Spark wallet (Breez), on regtest." : "A Spark wallet (Breez) on Bitcoin, with your Breez API key.",
   bitcoin: () => "On-chain bitcoin: a BDK wallet, or your own node.",
   fedimint: () => "Ecash of a federation you join with its invite code.",
   usdt: (n) => n === "testnet" ? "Test USDT on Sepolia." : "USDT on Ethereum.",
@@ -47,7 +47,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const shortReason = (reason: string) => reason.split(/(?<=\.)\s/)[0];
 
 type Phase = { type: WalletType; state: "busy" | "done" | "error"; step: number; text?: string; made?: WalletInstanceView };
-type Action = "create" | "connect" | "add-another" | "join" | "join-another" | "added" | "off";
+type Action = "create" | "key" | "connect" | "add-another" | "join" | "join-another" | "added" | "off";
 
 /** What clicking a kind does on this network, as its button says it. */
 function actionOf(type: WalletType, offer: WalletOffer | undefined): Action {
@@ -56,15 +56,15 @@ function actionOf(type: WalletType, offer: WalletOffer | undefined): Action {
   // A network takes several Lightning cards: another source (or the same source's other wallet) is one more.
   if (offer.several) return offer.exists ? "add-another" : "connect";
   if (offer.exists) return "added";
-  return offer.needs === "invite" ? "join" : offer.needs === "provider" ? "connect" : "create";
+  return offer.needs === "invite" ? "join" : offer.needs === "provider" ? "connect" : offer.needs === "apiKey" ? "key" : "create";
 }
-const ACTION_LABEL: Record<Action, string> = { create: "Create", connect: "Connect…", "add-another": "Add another…", join: "Join with invite…", "join-another": "Join another…", added: "Added", off: "Not yet" };
+const ACTION_LABEL: Record<Action, string> = { create: "Create", key: "Create…", connect: "Connect…", "add-another": "Add another…", join: "Join with invite…", "join-another": "Join another…", added: "Added", off: "Not yet" };
 const BUSY_LABEL: Record<WalletType, string> = { cashu: "Creating…", lightning: "Connecting…", arkade: "Creating…", bark: "Creating…", spark: "Creating…", bitcoin: "Connecting…", fedimint: "Joining…", usdt: "Creating…" };
 
 /**
  * Wallets → New: whose money first (Real money on Mainnet, or Test money on Testnet), then a kind of wallet, each a
- * card that says what clicking it does: Create (one click, with the network's known-good defaults), Connect… (a
- * source's form), Join with invite…, or why it is not there yet; the ones already made say Added. While a wallet is
+ * card that says what clicking it does: Create (one click, with the network's known-good defaults), Create… (Spark on
+ * Mainnet: the person's Breez API key first), Connect… (a source's form), Join with invite…, or why it is not there yet; the ones already made say Added. While a wallet is
  * made the chosen card says so and the steps show; the engine checks the server before the card appears, and a
  * failure says why once, with Try again, leaving nothing half made. Made, it closes by itself (every kind, real money
  * too) and `onCreated` shows the wallet: the page selects its card, and a wallet to back up opens on its backup rows.
@@ -82,6 +82,7 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
   const [chosen, setChosen] = useState<WalletType | null>(null);
   const [phase, setPhase] = useState<Phase | null>(null);
   const [invite, setInvite] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [providerId, setProviderId] = useState("");
   const busy = phase?.state === "busy";
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -96,7 +97,7 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
   const backdrop = useBackdropDismiss(close);
   const offer = (type: WalletType) => offers.find((o) => o.type === type && o.network === network);
 
-  const create = async (type: WalletType, extra: { invite?: string; providerId?: string; values?: Record<string, string> } = {}) => {
+  const create = async (type: WalletType, extra: { invite?: string; apiKey?: string; providerId?: string; values?: Record<string, string> } = {}) => {
     if (busy) return;
     setPhase({ type, state: "busy", step: 0 });
     later(FIRST_STEP_MS, () => setPhase((p) => p?.type === type && p.state === "busy" ? { ...p, step: 1 } : p));
@@ -167,6 +168,15 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
                 </label>
                 <p className="text-[11px] text-text-muted">Joining trusts the federation's guardians with the sats, like a Cashu mint.</p>
                 <Button type="submit" variant="primary" className="w-full" disabled={busy || !invite.trim()} data-testid="new-wallet-create">{busy ? "Joining…" : "Join and create"}</Button>
+              </form>
+            )}
+            {chosenOffer.needs === "apiKey" && (
+              <form className="space-y-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void create(chosen, { apiKey }); }}>
+                <label className="block text-xs text-text-secondary">Breez API key
+                  <input data-testid="new-wallet-api-key" className={`${input} mt-1 font-mono text-xs`} type="password" autoComplete="new-password" value={apiKey} spellCheck={false} autoFocus disabled={busy} onChange={(e) => setApiKey(e.target.value)} />
+                </label>
+                <p className="text-[11px] text-text-muted">Mainnet needs one: Breez gives them for free.</p>
+                <Button type="submit" variant="primary" className="w-full" disabled={busy || !apiKey.trim()} data-testid="new-wallet-create">{busy ? "Creating…" : "Create"}</Button>
               </form>
             )}
             {chosenOffer.needs === "provider" && (
