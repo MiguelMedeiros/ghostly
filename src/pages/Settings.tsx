@@ -8,6 +8,7 @@ import { noticeSettings, notificationPermission, openNoticeSettings, requestNoti
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
 import { DomainProofSettings } from "../components/DomainProofSettings";
+import { MediaSettings } from "../components/MediaSettings";
 import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
 import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
@@ -338,6 +339,8 @@ export function Settings() {
           <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
         </Row>
       </Section>
+
+      <MediaSettings />
 
       <Section title={t("settings.security")}>
         <Row label={t("settings.linkPreviews")} hint={t("settings.linkPreviewsHint")} info={t("settings.linkPreviewsInfo")} testId="settings-link-previews-row">

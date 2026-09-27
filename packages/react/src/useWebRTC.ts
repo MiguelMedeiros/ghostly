@@ -32,6 +32,11 @@ interface UseWebRTCParams {
    * every path; a compatibility chat's DHT record keeps the default (one host, one server reflexive).
    */
   maxCandidates?: number;
+  /**
+   * The microphone and camera this profile chose, read each time the call asks for one (a `deviceId` constraint;
+   * `ideal` falls back to the default when the device is gone). Only for the page's own capture: `media` picks its own.
+   */
+  devices?: () => { audio?: ConstrainDOMString; video?: ConstrainDOMString };
 }
 
 /** The browser's own WebRTC and capture. */
@@ -77,6 +82,14 @@ function videoTransceiver(pc: RTCPeerConnection): RTCRtpTransceiver | undefined 
   return pc.getTransceivers().find((t) => t.receiver.track.kind === "video" && t.mid !== null);
 }
 
+/** The audio section of the call. */
+function audioTransceiver(pc: RTCPeerConnection): RTCRtpTransceiver | undefined {
+  return pc.getTransceivers().find((t) => t.receiver.track.kind === "audio" && t.mid !== null);
+}
+
+/** Capture from exactly this device, or from the default (null). */
+const exactly = (deviceId: string | null): MediaTrackConstraints | true => (deviceId ? { deviceId: { exact: deviceId } } : true);
+
 export function useWebRTC({
   incomingCallSignal,
   publishCallSignal,
@@ -86,6 +99,7 @@ export function useWebRTC({
   media,
   iceServers,
   maxCandidates,
+  devices,
 }: UseWebRTCParams) {
   const iceServersRef = useRef(iceServers);
   iceServersRef.current = iceServers;
@@ -95,6 +109,14 @@ export function useWebRTC({
   onErrorRef.current = onError;
   const mediaRef = useRef<CallMedia>(media ?? browserMedia);
   mediaRef.current = media ?? browserMedia;
+  const devicesRef = useRef(devices);
+  devicesRef.current = media ? undefined : devices;
+
+  /** What to capture `kind` from: the chosen device, or whatever the default is. */
+  const captureFrom = useCallback((kind: "audio" | "video"): MediaTrackConstraints | true => {
+    const deviceId = devicesRef.current?.()[kind];
+    return deviceId ? { deviceId } : true;
+  }, []);
 
   const [callState, setCallState] = useState<CallState>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -271,7 +293,8 @@ export function useWebRTC({
    * a screen halfway through, as long as the lane was negotiated.
    */
   const showPicture = useCallback(
-    async (next: Picture | null) => {
+    /** `camera`: which one to show, when not the chosen one (a switch from the call's device menu; null the default). */
+    async (next: Picture | null, camera?: string | null) => {
       const pc = pcRef.current;
       const sender = pc ? videoTransceiver(pc)?.sender : undefined;
       if (!pc || !localStreamRef.current || !sender) throw new Error("This call has no video to send on");
@@ -279,7 +302,7 @@ export function useWebRTC({
 
       let track: MediaStreamTrack | null = null;
       if (next === "camera") {
-        track = (await mediaRef.current.getUserMedia({ video: true })).getVideoTracks()[0];
+        track = (await mediaRef.current.getUserMedia({ video: camera === undefined ? captureFrom("video") : exactly(camera) })).getVideoTracks()[0];
       } else if (next === "screen") {
         const { getDisplayMedia } = mediaRef.current;
         if (!getDisplayMedia) throw Object.assign(new Error("Screen sharing is not available here"), { name: "NotSupportedError" });
@@ -321,7 +344,7 @@ export function useWebRTC({
       if (next) callHadVideoRef.current = true;
       publishPicture(next);
     },
-    [setPicture, publishPicture],
+    [setPicture, publishPicture, captureFrom],
   );
 
   /**
@@ -360,7 +383,7 @@ export function useWebRTC({
         addCallEventMessage?.("call_started", withVideo);
 
         // A screen is shared from inside a call (`toggleScreenShare`), never as the way one starts.
-        const stream = await mediaRef.current.getUserMedia({ audio: true, video: withVideo });
+        const stream = await mediaRef.current.getUserMedia({ audio: captureFrom("audio"), video: withVideo && captureFrom("video") });
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         localStreamRef.current = stream;
         setLocalStream(stream);
@@ -405,6 +428,7 @@ export function useWebRTC({
     },
     [
       createPeerConnection,
+      captureFrom,
       setPicture,
       publishCallSignal,
       setFastPoll,
@@ -433,8 +457,8 @@ export function useWebRTC({
         callConnectedEventFiredRef.current = false;
 
         const stream = await mediaRef.current.getUserMedia({
-          audio: true,
-          video: withVideo,
+          audio: captureFrom("audio"),
+          video: withVideo && captureFrom("video"),
         });
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         localStreamRef.current = stream;
@@ -489,6 +513,7 @@ export function useWebRTC({
     },
     [
       createPeerConnection,
+      captureFrom,
       applyRemotePicture,
       setPicture,
       publishCallSignal,
@@ -608,6 +633,43 @@ export function useWebRTC({
     }
   }, [showPicture, stopSharing, setScreenShareError]);
 
+  /**
+   * Sends another microphone (null: the default) in place of the one the call has, with `replaceTrack`: no new
+   * offer, and the peer hears no gap longer than the swap. A muted call stays muted.
+   */
+  const switchMicrophone = useCallback(async (deviceId: string | null) => {
+    const pc = pcRef.current;
+    const sender = pc ? audioTransceiver(pc)?.sender : undefined;
+    if (!pc || !localStreamRef.current || !sender) throw new Error("This call has no microphone to switch");
+    const attempt = attemptRef.current;
+    const track = (await mediaRef.current.getUserMedia({ audio: exactly(deviceId) })).getAudioTracks()[0];
+    if (!track) throw Object.assign(new Error("No microphone"), { name: "NotFoundError" });
+    if (attemptRef.current !== attempt) { track.stop(); return; }
+    track.enabled = localStreamRef.current?.getAudioTracks()[0]?.enabled ?? true;
+    try {
+      await sender.replaceTrack(track);
+    } catch (error) {
+      track.stop();
+      throw error;
+    }
+    // Hung up while the track was swapped: the call's tracks were stopped without this one.
+    if (attemptRef.current !== attempt || !localStreamRef.current) { track.stop(); return; }
+    const current = localStreamRef.current;
+    current.getAudioTracks().forEach((old) => {
+      old.onended = null;
+      old.stop();
+    });
+    const stream = new MediaStream([track, ...current.getVideoTracks()]);
+    localStreamRef.current = stream;
+    setLocalStream(stream);
+  }, []);
+
+  /** Shows another camera (null: the default) in place of the one on; with the camera off there is nothing to swap. */
+  const switchCamera = useCallback(async (deviceId: string | null) => {
+    if (pictureRef.current !== "camera") return;
+    await showPicture("camera", deviceId);
+  }, [showPicture]);
+
   useEffect(() => {
     if (!incomingCallSignal) return;
 
@@ -713,5 +775,9 @@ export function useWebRTC({
     toggleMute,
     toggleVideo,
     toggleScreenShare,
+    /** The microphone and camera can be switched in the call: the page's own capture (not Linux's native media). */
+    canSwitchDevices: !media,
+    switchMicrophone,
+    switchCamera,
   };
 }

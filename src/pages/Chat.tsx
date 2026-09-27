@@ -24,6 +24,8 @@ import { useChat } from "../hooks/useChat";
 import { useChatScroll } from "../hooks/useChatScroll";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { useWebRTC } from "../hooks/useWebRTC";
+import { useCallDevices } from "../hooks/useCallDevices";
+import { preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
@@ -66,6 +68,10 @@ import { TransportLine } from "../components/TransportTimeline";
 import { mergeTimeline } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
 import { cardOn } from "../lib/chatPayments";
+
+/** What a call captures from: the devices the profile chose, read when it asks. */
+const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
+
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
   sessionId: string;
@@ -166,7 +172,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     // The profile's ICE servers (a TURN relay) serve calls too; a signal on the chat session carries every path.
     iceServers: engine.state?.settings.iceServers,
     maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
+    // The microphone and camera this profile chose in Settings → Audio & video.
+    devices: callDevicePreferences,
   });
+  const callDevices = useCallDevices(webrtc);
 
   const callState = webrtc.callState;
   const previousCallState = useRef(callState);
@@ -773,6 +782,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           onToggleMute={webrtc.toggleMute}
           onToggleVideo={webrtc.toggleVideo}
           onToggleScreenShare={webrtc.toggleScreenShare}
+          devices={callDevices}
         />
       )}
 

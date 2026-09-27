@@ -1,4 +1,5 @@
 import { VOICE_LIMITS, VOICE_METER, downsamplePeaks, recordingMime, voiceFileName, voiceLevel, type VoiceMeta } from "@ghostly/core";
+import { preferredDevice } from "./mediaDevices";
 
 /**
  * One voice recording: the microphone, a MediaRecorder in a type every Ghostly can play,
@@ -68,7 +69,8 @@ export class VoiceRecorder {
     if (!this.type || !navigator.mediaDevices?.getUserMedia) throw new MicrophoneError("unsupported", MICROPHONE_MESSAGES.unsupported);
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      // The microphone chosen in Settings → Audio & video, or the default when it is not connected.
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, deviceId: preferredDevice("audioinput") } });
     } catch (error) {
       throw micError(error);
     }

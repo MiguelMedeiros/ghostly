@@ -346,7 +346,28 @@
     "profilePeekHint": "有消息等待其他资料时显示",
     "profilePeekInfo": "此应用会不时通过其他未锁定资料所用的相同中继或 DHT，读取其联系人为它们发布的内容。它只读取：从不打开消息，并跳过已锁定的资料。",
     "profilePeekNotify": "其他资料的通知",
-    "profilePeekNotifyHint": "有消息时显示系统通知"
+    "profilePeekNotifyHint": "有消息时显示系统通知",
+    "media": {
+      "title": "音频和视频",
+      "names": "设备名称",
+      "namesHint": "允许使用麦克风和摄像头即可看到",
+      "allow": "允许",
+      "microphone": "麦克风",
+      "microphoneInfo": "用于通话和语音消息。保存在此设备的此资料中。拔出后，Ghostly 使用系统默认设备。",
+      "camera": "摄像头",
+      "cameraInfo": "用于通话和拍照。保存在此设备的此资料中。",
+      "speaker": "扬声器",
+      "speakerInfo": "通话声音从这里播放。保存在此设备的此资料中。",
+      "systemDefault": "系统默认",
+      "missing": "{{name}} 未连接。正在使用默认设备。",
+      "failed": "无法打开。请确认 Ghostly 有权限使用。",
+      "test": "测试",
+      "stop": "停止",
+      "preview": "预览",
+      "previewLabel": "摄像头预览",
+      "level": "麦克风音量",
+      "testSound": "测试声音"
+    }
   },
   "updates": {
     "available": "Ghostly {{version}} 已发布",
@@ -390,7 +411,13 @@
     "mute": "静音",
     "unmute": "取消静音",
     "camera": "摄像头",
-    "cameraOff": "关闭摄像头"
+    "cameraOff": "关闭摄像头",
+    "devices": {
+      "menu": "设备",
+      "lost": "{{name}} 已断开。正在使用默认设备。",
+      "back": "{{name}} 已重新连接",
+      "switchBack": "切换回去"
+    }
   },
   "share": {
     "title": "分享此聊天",

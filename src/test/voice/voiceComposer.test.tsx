@@ -2,11 +2,12 @@ import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VOICE_LIMITS, type VoiceMeta } from "@ghostly/core";
 import { MessageInput } from "../../components/MessageInput";
+import { chooseDevice } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES } from "../../lib/voiceRecorder";
 import { renderApp } from "../render";
 import { installFakeAudio, installFakeMedia, media, recordableTypes, removeFakeMedia } from "./fakeMedia";
 
-// covers: files.voice.record
+// covers: files.voice.record, settings.media
 
 const onSend = vi.fn<(text: string) => Promise<string | null>>();
 const onSendFile = vi.fn<(file: File, voice?: VoiceMeta) => Promise<string | null>>();
@@ -73,6 +74,19 @@ describe("the mic in the composer", () => {
 });
 
 describe("hold to record", () => {
+  it("records from the microphone chosen in Settings → Audio & video, or the default when none is", async () => {
+    chooseDevice("audioinput", { id: "mic-headset", label: "AirPods" });
+    composer();
+    await press();
+    expect(media.getUserMedia).toHaveBeenCalledWith({ audio: expect.objectContaining({ echoCancellation: true, deviceId: { ideal: "mic-headset" } }) });
+    fireEvent.pointerUp(mic(), touch);
+    await wait(0);
+
+    chooseDevice("audioinput", null);
+    await press();
+    expect(media.getUserMedia).toHaveBeenLastCalledWith({ audio: expect.objectContaining({ deviceId: undefined }) });
+  });
+
   it("records while held and sends on release: a WebM file with its length and waveform", async () => {
     composer();
     await press();

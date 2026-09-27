@@ -40,9 +40,9 @@ test("video call: camera, mute, screen share, hang up", { tag: ["@feature:calls.
   await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
   const camera = await remoteSize(bob);
 
-  await alice.page.getByTitle("Mute").click();
-  await expect(alice.page.getByTitle("Unmute")).toBeVisible();
-  await alice.page.getByTitle("Unmute").click();
+  await alice.page.getByTitle("Mute", { exact: true }).click();
+  await expect(alice.page.getByTitle("Unmute", { exact: true })).toBeVisible();
+  await alice.page.getByTitle("Unmute", { exact: true }).click();
   await alice.page.getByTitle("Turn camera off").click();
   await expect(alice.page.getByTitle("Turn camera on")).toBeVisible();
   await alice.page.getByTitle("Turn camera on").click();

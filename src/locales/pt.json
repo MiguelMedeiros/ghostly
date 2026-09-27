@@ -346,7 +346,28 @@
     "profilePeekHint": "Mostra quando uma mensagem espera outro perfil",
     "profilePeekInfo": "De tempos em tempos, este app lê o que os contatos dos seus outros perfis desbloqueados publicam para eles, pelos mesmos relays ou DHT que esses perfis usam. Só lê: nunca abre uma mensagem, e perfis bloqueados ficam de fora.",
     "profilePeekNotify": "Avisar sobre outros perfis",
-    "profilePeekNotifyHint": "Uma notificação do sistema quando um recebe mensagem"
+    "profilePeekNotifyHint": "Uma notificação do sistema quando um recebe mensagem",
+    "media": {
+      "title": "Áudio e vídeo",
+      "names": "Nomes dos dispositivos",
+      "namesHint": "Permita o microfone e a câmera para vê-los",
+      "allow": "Permitir",
+      "microphone": "Microfone",
+      "microphoneInfo": "Usado em chamadas e mensagens de voz. Fica neste dispositivo, para este perfil. Se for desconectado, o Ghostly usa o padrão do sistema.",
+      "camera": "Câmera",
+      "cameraInfo": "Usada em chamadas e fotos. Fica neste dispositivo, para este perfil.",
+      "speaker": "Alto-falante",
+      "speakerInfo": "Onde as chamadas tocam. Fica neste dispositivo, para este perfil.",
+      "systemDefault": "Padrão do sistema",
+      "missing": "{{name}} não está conectado. Usando o padrão.",
+      "failed": "Não foi possível abrir. Verifique se o Ghostly tem permissão.",
+      "test": "Testar",
+      "stop": "Parar",
+      "preview": "Ver",
+      "previewLabel": "Prévia da câmera",
+      "level": "Nível do microfone",
+      "testSound": "Testar som"
+    }
   },
   "updates": {
     "available": "Ghostly {{version}} disponível",
@@ -390,7 +411,13 @@
     "mute": "Silenciar",
     "unmute": "Ativar som",
     "camera": "Câmera",
-    "cameraOff": "Câmera desligada"
+    "cameraOff": "Câmera desligada",
+    "devices": {
+      "menu": "Dispositivos",
+      "lost": "{{name}} desconectado. Usando o padrão.",
+      "back": "{{name}} voltou",
+      "switchBack": "Voltar a usar"
+    }
   },
   "share": {
     "title": "Compartilhar conversa",

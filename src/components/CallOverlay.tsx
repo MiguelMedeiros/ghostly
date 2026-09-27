@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CallState } from "../lib/types";
 import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
+import type { CallDevices } from "../hooks/useCallDevices";
+import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
+import { useI18n } from "../contexts/I18nContext";
+import { Menu, MenuItem } from "./Menu";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -35,6 +39,8 @@ interface CallOverlayProps {
   onReturnToChat?: () => void;
   /** Where to hang the call window, so it does not go off screen with its chat. */
   layer?: HTMLElement | null;
+  /** The microphone, camera and speaker menu, where the call can switch them (`useCallDevices`). */
+  devices?: CallDevices | null;
 }
 
 const MINI_KEY = "ghostly_call_mini";
@@ -78,6 +84,7 @@ export function CallOverlay({
   pinned = false,
   onReturnToChat,
   layer,
+  devices = null,
 }: CallOverlayProps) {
   // A shared screen has to be seen whole; a face can be cropped to fill the window.
   const [remoteIsWide, setRemoteIsWide] = useState(false);
@@ -135,6 +142,12 @@ export function CallOverlay({
       remoteAudioRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);
+
+  // Both elements play the peer's stream, so both go to the chosen speaker.
+  const speaker = devices?.speaker;
+  useEffect(() => {
+    for (const element of [remoteAudioRef.current, remoteVideoRef.current]) void applySpeaker(element, speaker).catch(() => {});
+  }, [speaker, remoteStream]);
 
   useEffect(() => {
     if (callState !== "connected" || !callStartedAt) {
@@ -278,6 +291,9 @@ export function CallOverlay({
         </p>
       )}
 
+      {/* Where a failed share is explained: that goes first, for its few seconds. */}
+      {devices?.notice && !screenShareError && <DeviceNoticeBar devices={devices} />}
+
       {/* Controls */}
       <div className="call-controls absolute bottom-12 left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
         {/* Mute */}
@@ -369,6 +385,8 @@ export function CallOverlay({
           </button>
         )}
 
+        {devices && <DeviceMenu devices={devices} />}
+
         {/* Screen share: in any connected call, voice or video. Where no screen can be captured (phones) it is not here at all. */}
         {(canShareScreen || screenShareUnavailable) && onToggleScreenShare && (
           <button
@@ -412,5 +430,82 @@ export function CallOverlay({
       </div>
     </div>,
     layer ?? document.body,
+  );
+}
+
+const DEVICE_KINDS_SHOWN: readonly DeviceKind[] = ["audioinput", "videoinput", "audiooutput"];
+const KIND_NAME = { audioinput: "settings.media.microphone", videoinput: "settings.media.camera", audiooutput: "settings.media.speaker" } as const;
+
+/** The call's device menu: which microphone, camera and speaker, switched without leaving the call. */
+function DeviceMenu({ devices }: { devices: CallDevices }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  const label = t("calls.devices.menu");
+  const kinds = DEVICE_KINDS_SHOWN.filter((kind) => kind !== "audiooutput" || devices.speakers);
+  return (
+    <div ref={anchor} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        data-testid="call-devices"
+        aria-label={label}
+        aria-expanded={open}
+        aria-haspopup="true"
+        title={label}
+        className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${open ? "bg-white/25 text-white" : "bg-white/10 text-white hover:bg-white/20"}`}
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
+          <circle cx="15" cy="6" r="2" />
+          <circle cx="9" cy="12" r="2" />
+          <circle cx="17" cy="18" r="2" />
+        </svg>
+      </button>
+      <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="call-devices-menu" label={label} prefer="up" align="start" portal focusFirst>
+        {kinds.map((kind, i) => {
+          const devicesOfKind = devices.list[kind];
+          if (kind !== "audioinput" && devicesOfKind.length === 0) return null;
+          const options = [{ id: "", label: t("settings.media.systemDefault") }, ...devicesOfKind.map((d, n) => ({ id: d.id, label: d.label || `${t(KIND_NAME[kind])} ${n + 1}` }))];
+          return (
+            <div key={kind} role="group" aria-label={t(KIND_NAME[kind])} className={i > 0 ? "mt-1 pt-1 border-t border-border" : ""}>
+              <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">{t(KIND_NAME[kind])}</p>
+              {options.map((option) => {
+                const chosen = devices.current[kind] === option.id;
+                return (
+                  <MenuItem key={option.id || "default"} testId={`call-device-${kind}`} checked={chosen} data={{ "data-device-id": option.id, "data-chosen": String(chosen) }}
+                    icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={chosen ? "text-accent" : "invisible"}><path d="M5 12l5 5L20 7" /></svg>}
+                    onClick={() => { setOpen(false); if (!chosen) devices.choose(kind, option.id); }}>
+                    {option.label}
+                  </MenuItem>
+                );
+              })}
+            </div>
+          );
+        })}
+      </Menu>
+    </div>
+  );
+}
+
+/** A device went away and the default took over, or the chosen one is back, with the way to switch to it. */
+function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
+  const { t } = useI18n();
+  const notice = devices.notice!;
+  const name = notice.name || t(KIND_NAME[notice.kind]);
+  return (
+    <div role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
+      className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
+      <span className="min-w-0 truncate">{t(notice.type === "lost" ? "calls.devices.lost" : "calls.devices.back", { name })}</span>
+      {notice.type === "back" && (
+        <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
+          className="shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
+          {t("calls.devices.switchBack")}
+        </button>
+      )}
+      <button type="button" onClick={devices.dismiss} aria-label={t("common.close")} title={t("common.close")}
+        className="shrink-0 grid place-items-center w-5 h-5 rounded-full text-white/70 hover:text-white cursor-pointer">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+      </button>
+    </div>
   );
 }

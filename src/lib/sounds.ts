@@ -122,6 +122,8 @@ export const SOUNDS = {
 export type SoundName = keyof typeof SOUNDS;
 
 const assets = import.meta.glob<string>("../assets/sounds/*.mp3", {eager:true, query:"?url", import:"default"});
+/** Where a bundled sound's file is, for an element of its own (Settings plays one on the chosen speaker). */
+export const soundUrl = (name: SoundName): string | undefined => assets[`../assets/sounds/${name}.mp3`];
 const decoded = new Map<SoundName, Promise<AudioBuffer>>();
 let context: AudioContext | null = null;
 const playing = new Set<() => void>();

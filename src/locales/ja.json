@@ -346,7 +346,28 @@
     "profilePeekHint": "別のプロフィール宛てのメッセージを知らせます",
     "profilePeekInfo": "このアプリは時々、ロックされていない他のプロフィールの連絡先がそのプロフィール宛てに公開したものを、そのプロフィールと同じリレーまたは DHT で読みます。読むだけで、メッセージを開くことはなく、ロックされたプロフィールは対象外です。",
     "profilePeekNotify": "他のプロフィールを通知",
-    "profilePeekNotifyHint": "メッセージが届いたらシステム通知"
+    "profilePeekNotifyHint": "メッセージが届いたらシステム通知",
+    "media": {
+      "title": "オーディオとビデオ",
+      "names": "デバイス名",
+      "namesHint": "表示するにはマイクとカメラを許可してください",
+      "allow": "許可",
+      "microphone": "マイク",
+      "microphoneInfo": "通話とボイスメッセージに使います。このデバイスのこのプロフィールに保存されます。外れたときはシステムの既定を使います。",
+      "camera": "カメラ",
+      "cameraInfo": "通話と写真に使います。このデバイスのこのプロフィールに保存されます。",
+      "speaker": "スピーカー",
+      "speakerInfo": "通話の音を出す場所です。このデバイスのこのプロフィールに保存されます。",
+      "systemDefault": "システムの既定",
+      "missing": "{{name}} が接続されていません。既定を使用中です。",
+      "failed": "開けませんでした。Ghostly に許可があるか確認してください。",
+      "test": "テスト",
+      "stop": "停止",
+      "preview": "プレビュー",
+      "previewLabel": "カメラのプレビュー",
+      "level": "マイクのレベル",
+      "testSound": "音をテスト"
+    }
   },
   "updates": {
     "available": "Ghostly {{version}} が公開されました",
@@ -390,7 +411,13 @@
     "mute": "ミュート",
     "unmute": "ミュート解除",
     "camera": "カメラ",
-    "cameraOff": "カメラオフ"
+    "cameraOff": "カメラオフ",
+    "devices": {
+      "menu": "デバイス",
+      "lost": "{{name}} が外れました。既定を使用中です。",
+      "back": "{{name}} が戻りました",
+      "switchBack": "元に戻す"
+    }
   },
   "share": {
     "title": "このチャットを共有",
