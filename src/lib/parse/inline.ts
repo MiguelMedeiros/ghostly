@@ -13,6 +13,9 @@ import type { Detector, ParseContext, Segment, SpanStyle } from "./types";
  *    `__init__.py` stay text. Openers left unclosed, and closers with no opener, are text too.
  */
 
+/** What a spoiler reads as where it cannot be tapped: nothing of what it hides. */
+export const SPOILER_PLAIN = "▒▒▒";
+
 /** Which runs of marker characters mean something, and what. A run of any other length is text. */
 const MARKERS: Record<string, SpanStyle> = { "*": "bold", "**": "bold", "_": "italic", "__": "italic", "~~": "strike", "||": "spoiler" };
 const MARKER_CHARS = new Set(["*", "_", "~", "|"]);

@@ -1,5 +1,6 @@
 import { blob } from "./blob";
 import { link } from "./links";
+import { mdLink } from "./mdlink";
 import { mention } from "./mentions";
 import { time } from "./time";
 import type { Detector } from "./types";
@@ -10,6 +11,8 @@ import type { Detector } from "./types";
  * one line in src/components/rich/views.ts; without one it shows as the text it matched).
  */
 export const DETECTORS: readonly Detector[] = [
+  // Before `link`, though it wins by starting first anyway: "[text](https://…)" starts at the bracket.
+  mdLink,
   link,
   blob,
   time,

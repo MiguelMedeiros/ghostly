@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { Atom } from "../../lib/parse";
-import { BlobView, LinkView, TimeView } from "./AtomViews";
+import { BlobView, LinkView, MdLinkView, TimeView } from "./AtomViews";
 import { MentionChip } from "../MentionChip";
 
 export interface AtomViewProps<A extends Atom = Atom> {
@@ -18,6 +18,7 @@ export type AtomView = ComponentType<AtomViewProps<never>>;
  */
 export const VIEWS: Record<string, AtomView> = {
   link: LinkView,
+  "md-link": MdLinkView,
   blob: BlobView,
   time: TimeView,
   "member-mention": MentionChip,
