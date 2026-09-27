@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { fromBase64Url, toBase64Url } from "../src/bytes";
 import { confirmationMatches, confirmationTag, decryptText, edgeParams, encryptText, epochKeys, newEpochSecret, openSecret, sealSecret } from "../src/groupCrypto";
-import { commitHash, commitUntaggedHash, signCommit, verifyChain, verifyCommit, type GroupCommit, type Roster } from "../src/groupCommits";
-import { GROUP_LIMITS, GroupSession, groupMessageId, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame, type GroupState } from "../src/groupSession";
+import { MAX_GROUP_MEMBERS, commitHash, commitUntaggedHash, signCommit, verifyChain, verifyCommit, type GroupCommit, type Roster } from "../src/groupCommits";
+import { GROUP_LIMITS, GroupSession, groupMessageId, type GroupMessageFrame } from "../src/groupSession";
+import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.protocol.crypto, groups.protocol.commits, groups.create, groups.invite, groups.send, groups.catch-up, groups.remove-member, groups.admin-change, groups.rotate, groups.leave
-
-const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 describe("group key schedule", () => {
   it("seals an epoch secret to one member: only that member, with the same context, opens it", () => {
@@ -84,67 +83,13 @@ describe("membership chain", () => {
     const removeSelf = signCommit(tagged(draft(c1, "remove", c1.m.filter(([k]) => k !== admin.pubKeyZ32), admin.pubKeyZ32, admin.pubKeyZ32)), admin.seed);
     expect(verifyCommit(clone(removeSelf), c1)).toHaveProperty("error");
   });
-  it("caps the roster at eight", () => {
+  it("caps the roster at thirty-two (revision 0.9; eight before)", () => {
     let top = genesis;
-    for (let i = 0; i < 7; i++) top = add(top, createIdentity().pubKeyZ32);
-    expect(top.m).toHaveLength(8);
+    for (let i = 0; i < MAX_GROUP_MEMBERS - 1; i++) top = add(top, createIdentity().pubKeyZ32);
+    expect(top.m).toHaveLength(32);
     expect(verifyCommit(clone(add(top, createIdentity().pubKeyZ32)), top)).toHaveProperty("error");
   });
 });
-
-/** Members wired through in-memory edges that can be closed, as a member going offline closes them. */
-class Mesh {
-  readonly sessions = new Map<string, GroupSession>();
-  readonly inbox = new Map<string, GroupIncomingMessage[]>();
-  readonly saved = new Map<string, GroupState>();
-  readonly sentFrames: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
-  readonly changes = new Map<string, number>();
-  private closed = new Set<string>();
-  private pending: Promise<unknown>[] = [];
-  private edge(a: string, b: string): string { return [a, b].sort().join("|"); }
-  setEdge(a: string, b: string, open: boolean): void { if (open) this.closed.delete(this.edge(a, b)); else this.closed.add(this.edge(a, b)); }
-  isOpen(a: string, b: string): boolean { return !this.closed.has(this.edge(a, b)); }
-  add(state: GroupState, name?: string): GroupSession {
-    const session: GroupSession = new GroupSession(state, {
-      save: async s => { this.saved.set(session.myKey, s); },
-      send: (to, frame) => {
-        this.sentFrames.push({ from: session.myKey, to, frame: clone(frame) });
-        const target = this.sessions.get(to);
-        if (!target || !this.isOpen(session.myKey, to)) return;
-        this.pending.push(target.handle(session.myKey, clone(frame)));
-      },
-      message: m => { this.inbox.get(session.myKey)!.push(m); },
-      changed: () => this.changes.set(session.myKey, (this.changes.get(session.myKey) ?? 0) + 1),
-    });
-    this.sessions.set(session.myKey, session);
-    this.inbox.set(session.myKey, []);
-    if (name) void session.setNick(session.myKey, name);
-    return session;
-  }
-  /** Both sides of an edge that just opened introduce themselves. */
-  async open(a: GroupSession, b: GroupSession): Promise<void> {
-    this.setEdge(a.myKey, b.myKey, true);
-    this.pending.push(b.handle(a.myKey, clone(a.syncFrame())), a.handle(b.myKey, clone(b.syncFrame())));
-    await this.settle();
-  }
-  async settle(): Promise<void> {
-    while (this.pending.length) { const batch = this.pending.splice(0); await Promise.all(batch); }
-  }
-  texts(session: GroupSession): string[] { return this.inbox.get(session.myKey)!.map(m => m.text); }
-}
-
-/** Admits `member` into `admin`'s group and opens its edges to everyone already in. */
-async function admit(mesh: Mesh, admin: GroupSession, name: string, invite = admin.inviteFrame()): Promise<GroupSession> {
-  const seed = createIdentity().seedB64;
-  const key = identityFromSeedB64(seed).pubKeyZ32;
-  const welcome = await admin.admit(key);
-  const joined = GroupSession.join({ name: invite.name, admin: invite.admin }, welcome.slice(0, -1), welcome[welcome.length - 1], seed);
-  if ("error" in joined) throw new Error(joined.error);
-  const session = mesh.add(joined.state, name);
-  await mesh.settle();
-  for (const other of session.others) { const peer = mesh.sessions.get(other); if (peer) await mesh.open(session, peer); }
-  return session;
-}
 
 describe("group session", () => {
   it("creates, admits two members and everyone reads everyone", async () => {

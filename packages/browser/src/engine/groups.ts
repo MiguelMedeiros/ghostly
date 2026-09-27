@@ -1,7 +1,7 @@
 import {
-  GroupSession, MAX_GROUP_CHAIN, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
+  GroupSession, MAX_GROUP_CHAIN, MAX_GROUP_MEMBERS, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
+  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -95,6 +95,44 @@ const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_LINGER_MS = 20_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
 const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
+/**
+ * While a member is unreachable, how often a mesh member asks one member it is connected to (in turn) for what that
+ * one received and it did not: messages sent where the two of them were cut apart (WISP 9xx § Catch-up).
+ */
+export const MESH_GOSSIP_MS = 60_000;
+/** How often the edges a mesh roster asks for are checked against the ones that exist (one that failed to open is tried again). */
+const RECONCILE_MS = 30_000;
+/** A member back after this long unreachable is announced to the others (`group-here`), unless someone already did. */
+const HERE_AFTER_MS = 60_000;
+/** A `group-here` about the same member makes its edge look fast at most this often. */
+const EXPECT_AGAIN_MS = 30_000;
+/**
+ * Hints acted on per group and minute, whoever they name: fast looks spend the relays' budget every chat of the app
+ * shares, so a member saying everyone is back every 30 s cannot keep all of my edges polling fast.
+ */
+const HERE_PER_MINUTE = 4;
+
+/**
+ * How much slower a mesh member looks at its edges' Pkarr records than a chat would, for a group of `members`: one
+ * edge per other member, and each app has about 30 requests a minute per relay (20 for background looks). Up to
+ * eight members, as a chat. Past that, a connected edge (its data link carries everything; Pkarr only notices a
+ * re-offer) slows in proportion, and an edge to someone away (read to notice them come back) by the square root:
+ * at 32 members, every four minutes and every minute, so 31 edges cost about 8 reads a minute when everyone is here
+ * and 32 when nobody is. Whoever reaches a member coming back first tells the others (`group-here`), who then look
+ * fast for it (WISP 9xx § Cost per member).
+ */
+export function meshEdgeScale(members: number, connected = true): number {
+  const ratio = Math.max(1, (members - 1) / LEGACY_GROUP_MEMBERS);
+  return connected ? ratio : Math.sqrt(ratio);
+}
+/** A mesh edge's poll pace, read live: it follows the group's size as members come and go. */
+export function meshEdgeIntervals(base: PollIntervals, members: () => number): PollIntervals {
+  return {
+    active: base.active, idle: base.idle, fast: base.fast,
+    get background() { return Math.round(base.background * meshEdgeScale(members(), false)); },
+    get connected() { return Math.round(base.connected * meshEdgeScale(members())); },
+  };
+}
 
 /**
  * Every private group this peer is in, or was invited to: their sessions
@@ -125,6 +163,22 @@ export class Groups {
   private readonly justMet = new Map<string, Set<string>>();
   /** Joiner side: groups whose knock is published, for the stage the joiner is shown. */
   private readonly knocked = new Set<string>();
+  /**
+   * Per mesh group, the member each unreachable member's messages were asked of (in a sync): asked of one member at a
+   * time, not of everyone whose edge opens, so a member coming back is not sent the same messages by every other.
+   */
+  private readonly relayAsked = new Map<string, Map<string, { via: string; at: number }>>();
+  private readonly lastGossip = new Map<string, number>();
+  /** Per mesh group: member key → since when its edge to me is down, and when someone last told me it is here. */
+  private readonly downSince = new Map<string, Map<string, number>>();
+  private readonly hereHeard = new Map<string, Map<string, number>>();
+  /** Per mesh group, when the last `group-here` hints were acted on (at most `HERE_PER_MINUTE` a minute). */
+  private readonly hereActed = new Map<string, number[]>();
+  private gossipTurn = 0;
+  /** The clock of the last tick (the engine's, or a simulation's); the wall clock before the first. */
+  private tickNow = 0;
+  private now(): number { return this.tickNow || Date.now(); }
+  private lastReconcile = 0;
   private ticking = false;
   /** Community groups (`group-community/1`) live in their own engine; this class routes to it. */
   readonly communities: Communities;
@@ -185,6 +239,8 @@ export class Groups {
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
 
   private isCommunity(groupId: string): boolean { return this.communities.has(groupId); }
+  /** Members of a private group's roster (0 for none): what paces its edges (`meshEdgeIntervals`). */
+  meshSize(groupId: string): number { return this.sessions.get(groupId)?.roster.length ?? 0; }
   /** A community group (`group-community/1`) rather than a private one. */
   isCommunityGroup(groupId: string): boolean { return this.isCommunity(groupId); }
   /** Through a community group: an application frame to everyone, or a payload sealed to one member. */
@@ -207,7 +263,7 @@ export class Groups {
 
   // -- what the person does ------------------------------------------------
 
-  /** A new group: a community (the link is the way in, hundreds of members) or a private mesh of up to eight contacts. */
+  /** A new group: a community (the link is the way in, hundreds of members) or a private mesh of up to 32 contacts. */
   async create(name: string, profile: "community" | "mesh" = "community"): Promise<string> {
     if (profile === "community") return this.communities.create(name);
     const state = GroupSession.create(name);
@@ -226,8 +282,10 @@ export class Groups {
     if (!session.isAdmin) throw new Error("Only the admin can invite");
     const group = this.stored.get(groupId)!;
     if (Object.entries(group.contacts ?? {}).some(([key, id]) => id === linkId && rosterHas(session.roster, key))) throw new Error("This contact is already a member");
-    if (session.roster.length + (this.invited.get(groupId)?.size ?? 0) >= 8) throw new Error("A group holds eight members at most");
+    if (session.roster.length + (this.invited.get(groupId)?.size ?? 0) >= MAX_GROUP_MEMBERS) throw new Error(`A group holds ${MAX_GROUP_MEMBERS} members at most`);
     if (!this.host.linkReady(linkId)) throw new Error("Connect to this contact first. Their app needs groups (an updated Ghostly).");
+    const blocked = this.growthBlocked(group, session, session.roster.length + (this.invited.get(groupId)?.size ?? 0) + 1, linkId);
+    if (blocked) throw new Error(blocked);
     this.host.sendOnLink(linkId, session.inviteFrame());
     let set = this.invited.get(groupId);
     if (!set) this.invited.set(groupId, (set = new Set()));
@@ -345,6 +403,11 @@ export class Groups {
     this.pendingEntries.delete(groupId);
     this.knocked.delete(groupId);
     this.justMet.delete(groupId);
+    this.relayAsked.delete(groupId);
+    this.lastGossip.delete(groupId);
+    this.downSince.delete(groupId);
+    this.hereHeard.delete(groupId);
+    this.hereActed.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     this.host.emit();
@@ -444,9 +507,12 @@ export class Groups {
           if (linkId) await this.host.closeEdge(linkId);
         }
         const every = now < (this.warmUntil.get(group.id) ?? 0) ? this.timings.warmPollMs : this.timings.pollMs;
-        if (now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
+        // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
+        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= MAX_GROUP_MEMBERS;
+        if (!busy && now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
+      this.meshTick(now);
       await this.communities.tick(now);
     } finally { this.ticking = false; }
   }
@@ -454,8 +520,15 @@ export class Groups {
   /** An entry session came up with groups on both sides: the admin's side invites over it. */
   entryReady(groupId: string, linkId: string, peer: string): void {
     if (this.isCommunity(groupId)) { this.communities.entryReady(groupId, linkId, peer); return; }
-    const session = this.sessions.get(groupId);
-    if (!session?.isAdmin || !this.pendingEntries.get(groupId)?.has(peer)) return;
+    const session = this.sessions.get(groupId), group = this.stored.get(groupId);
+    if (!session?.isAdmin || !group || !this.pendingEntries.get(groupId)?.has(peer)) return;
+    // An app that takes only eight cannot follow a larger roster: it is not let in past eight (and not answered for a while).
+    if (this.growthBlocked(group, session, session.roster.length + 1, linkId)) {
+      this.pendingEntries.get(groupId)?.delete(peer);
+      this.refused.set(peer, Date.now() + REFUSED_FOR_MS);
+      void this.host.closeEdge(linkId);
+      return;
+    }
     try { this.host.sendOnLink(linkId, session.inviteFrame()); } catch { return; }
     traceJoin(groupId, "invite.sent");
     let set = this.invited.get(groupId);
@@ -502,7 +575,9 @@ export class Groups {
       if (now - ts > KNOCK_TTL_MS || rosterHas(session.roster, key) || this.refused.has(key) || pending?.has(key) || key === entry.link.host) continue;
       const entryIds = new Set(this.host.entries(group.id).values());
       const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
-      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + contactsInvited + (pending?.size ?? 0) >= 8) break;
+      const size = session.roster.length + contactsInvited + (pending?.size ?? 0);
+      // Full, or past eight while a member's app takes only eight (the newcomer's own app is checked on its entry session).
+      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || size >= MAX_GROUP_MEMBERS || this.growthBlocked(group, session, size + 1)) break;
       if (!pending) this.pendingEntries.set(group.id, (pending = new Map()));
       pending.set(key, now);
       this.warmUntil.set(group.id, now + this.timings.warmMs);
@@ -558,13 +633,13 @@ export class Groups {
         // Through the link, the member key must be the one the entry session is pinned to: the one that knocked.
         const entryPeer = this.hostEntry(g, linkId);
         if ([...this.host.entries(g).values()].includes(linkId) && entryPeer !== frame.key) return;
-        if (entryPeer) {
-          if (session.roster.length >= 8) return;
-        } else {
+        if (session.roster.length >= MAX_GROUP_MEMBERS || this.growthBlocked(group, session, session.roster.length + 1, linkId)) return;
+        if (!entryPeer) {
           // The contact's name on our chat is the best name for them until their edge says otherwise.
           await session.setNick(frame.key, this.host.contactName(linkId));
         }
         this.meet(g, frame.key);
+        if (this.host.linkReady(linkId, GROUP_VERSION_LARGE)) this.markLarge(group, frame.key);
         const welcome = await session.admit(frame.key);
         if (!entryPeer) group.contacts = { ...group.contacts, [frame.key]: linkId };
         await this.store.putGroup(group);
@@ -644,7 +719,9 @@ export class Groups {
       if (this.removesMe(groupId, peerKey, frame)) await this.leaveConfirmed(groupId);
       return;
     }
-    await this.sessions.get(groupId)?.handle(peerKey, frame);
+    const session = this.sessions.get(groupId);
+    if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
+    await session?.handle(peerKey, frame);
   }
 
   /** A validly signed commit, by the admin I told, that takes me out of the roster. */
@@ -664,10 +741,142 @@ export class Groups {
       if (peerKey === left.admin) { try { this.host.sendOnLink(linkId, { t: "group-leave", g: groupId }); } catch { /* next time it opens */ } }
       return;
     }
-    const session = this.sessions.get(groupId);
-    if (!session || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
-    try { this.host.sendOnLink(linkId, session.syncFrame()); } catch { /* it closed again */ }
+    const session = this.sessions.get(groupId), group = this.stored.get(groupId);
+    if (!session || !group || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
+    if (this.host.linkReady(linkId, GROUP_VERSION_LARGE) && this.markLarge(group, peerKey)) void this.store.putGroup(group).catch(() => {});
+    try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { /* it closed again */ }
+    this.announceHere(groupId, session, peerKey);
     this.host.emit();
+  }
+
+  /** Records that a member's app takes rosters past eight; true when that is news (the caller saves). */
+  private markLarge(group: StoredGroup, key: string): boolean {
+    if (group.large?.includes(key)) return false;
+    group.large = [...(group.large ?? []), key];
+    return true;
+  }
+
+  /**
+   * Why the group cannot have `size` members yet, or null. Past eight, every other member's app must have said it
+   * takes a larger roster (an older one refuses the commit as malformed and stops following the group), and so must
+   * the newcomer's, on `linkId`.
+   */
+  private growthBlocked(group: StoredGroup, session: GroupSession, size: number, linkId?: string): string | null {
+    if (size > MAX_GROUP_MEMBERS) return `A group holds ${MAX_GROUP_MEMBERS} members at most`;
+    if (size <= LEGACY_GROUP_MEMBERS) return null;
+    if (linkId && !this.host.linkReady(linkId, GROUP_VERSION_LARGE)) return `Their app takes groups of ${LEGACY_GROUP_MEMBERS} at most: they need an updated Ghostly first.`;
+    const large = new Set(group.large ?? []);
+    const behind = session.others.filter(key => !large.has(key));
+    if (!behind.length) return null;
+    const names = behind.slice(0, 3).map(key => session.state.nicks[key] ?? `Member ${key.slice(0, 8)}`).join(", ");
+    return `A group grows past ${LEGACY_GROUP_MEMBERS} only when everyone is on an updated Ghostly. Not seen updated yet: ${names}${behind.length > 3 ? ` and ${behind.length - 3} more` : ""}.`;
+  }
+
+  /**
+   * Since when each member's edge has been down, counted only from an edge that was up (a member I have not reached
+   * since I started is not someone who went away), for `group-here`.
+   */
+  private noteDown(groupId: string, session: GroupSession, away: string[], now: number): void {
+    let down = this.downSince.get(groupId);
+    if (!down) this.downSince.set(groupId, (down = new Map()));
+    for (const key of session.others) {
+      if (!away.includes(key)) down.set(key, 0);
+      else if (down.get(key) === 0) down.set(key, now);
+    }
+  }
+
+  /**
+   * A member whose edge just opened again after a while away: the others are told (`group-here`), so they look fast
+   * for it instead of at the slow pace of a large group's edges. Whoever reaches it first says so; one told a moment
+   * ago stays quiet. Older apps drop the frame.
+   */
+  private announceHere(groupId: string, session: GroupSession, key: string): void {
+    const now = this.now(), down = this.downSince.get(groupId);
+    const since = down?.get(key);
+    down?.set(key, 0);
+    if (!since || now - since < HERE_AFTER_MS || now - (this.hereHeard.get(groupId)?.get(key) ?? -Infinity) < HERE_AFTER_MS) return;
+    const edges = this.host.edges(groupId);
+    for (const other of session.others) {
+      const edge = edges.get(other);
+      if (other === key || !edge || !this.host.linkReady(edge)) continue;
+      try { this.host.sendOnLink(edge, { t: "group-here", g: groupId, k: key }); } catch { /* closing */ }
+    }
+  }
+
+  /** Told that a member is back: my edge to it looks fast a while, unless it is up already. */
+  private heardHere(groupId: string, session: GroupSession, from: string, frame: Record<string, unknown>): void {
+    const key = frame.k;
+    if (typeof key !== "string" || key === session.myKey || key === from || !rosterHas(session.roster, key) || !rosterHas(session.roster, from)) return;
+    let heard = this.hereHeard.get(groupId);
+    if (!heard) this.hereHeard.set(groupId, (heard = new Map()));
+    const now = this.now();
+    if (now - (heard.get(key) ?? -Infinity) < EXPECT_AGAIN_MS) return;
+    heard.set(key, now);
+    const edge = this.host.edges(groupId).get(key);
+    if (!edge || this.host.linkReady(edge)) return;
+    const acted = (this.hereActed.get(groupId) ?? []).filter(at => now - at < 60_000);
+    if (acted.length >= HERE_PER_MINUTE) return;
+    this.hereActed.set(groupId, [...acted, now]);
+    this.host.expectPeer?.(edge);
+  }
+
+  /** Members whose edges to me are down. */
+  private unreachable(groupId: string, session: GroupSession): string[] {
+    const edges = this.host.edges(groupId);
+    return session.others.filter(key => { const edge = edges.get(key); return !edge || !this.host.linkReady(edge); });
+  }
+
+  /**
+   * The unreachable members whose messages `via` should hand on to me: each is asked of one connected member at a
+   * time, so a member whose edges open one after another is not sent the same messages by each of them.
+   */
+  private askOf(groupId: string, session: GroupSession, via: string): string[] {
+    let asked = this.relayAsked.get(groupId);
+    if (!asked) this.relayAsked.set(groupId, (asked = new Map()));
+    const edges = this.host.edges(groupId), now = this.now();
+    const up = (key: string) => { const edge = edges.get(key); return !!edge && this.host.linkReady(edge); };
+    const out: string[] = [];
+    for (const key of this.unreachable(groupId, session)) {
+      if (key === via) continue;
+      // Asked lately of a member still connected (this one included): its answer is on the way.
+      const prior = asked.get(key);
+      if (prior && up(prior.via) && now - prior.at < MESH_GOSSIP_MS) continue;
+      asked.set(key, { via, at: now });
+      out.push(key);
+    }
+    // What this sync asks for is the gossip turn's job too: the next one waits.
+    if (out.length) this.lastGossip.set(groupId, now);
+    return out;
+  }
+
+  /**
+   * While some member is unreachable, one connected member (in turn) is asked, once a `MESH_GOSSIP_MS`, for what it
+   * has from the unreachable ones: a message sent while the author could reach it and not me gets here within that,
+   * without either edge opening again. Edges the roster asks for and that do not exist are opened again.
+   */
+  private meshTick(now: number): void {
+    this.tickNow = now;
+    const reconcile = now - this.lastReconcile >= RECONCILE_MS;
+    if (reconcile) this.lastReconcile = now;
+    for (const [groupId, session] of this.sessions) {
+      if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
+      if (reconcile) {
+        const edges = this.host.edges(groupId);
+        if (session.others.some(key => !edges.has(key))) this.reconcileEdges(groupId);
+      }
+      const away = this.unreachable(groupId, session);
+      this.noteDown(groupId, session, away, now);
+      if (now - (this.lastGossip.get(groupId) ?? -Infinity) < MESH_GOSSIP_MS) continue;
+      const edges = this.host.edges(groupId);
+      const connected = session.others.filter(key => !away.includes(key));
+      if (!away.length || !connected.length) continue;
+      this.lastGossip.set(groupId, now);
+      const via = connected[this.gossipTurn++ % connected.length];
+      const asked = this.relayAsked.get(groupId) ?? new Map<string, { via: string; at: number }>();
+      this.relayAsked.set(groupId, asked);
+      for (const key of away) asked.set(key, { via, at: now });
+      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(away)); } catch { /* it closed: the next turn asks another */ }
+    }
   }
 
   edgeNick(groupId: string, peerKey: string, nick: string | undefined): void {

@@ -99,9 +99,9 @@ describe("GroupMembersDialog", () => {
     expect(screen.getByTestId("group-invite-contact")).toHaveTextContent("Contact · kkkkkk");
   });
 
-  it("invites nobody once members and invitations make eight", () => {
-    const seven = Array.from({ length: 7 }, (_, i) => member({ key: String(i).padEnd(52, "y"), me: i === 0 }));
-    members_(groupView({ status: "active", isAdmin: true, members: seven, invited: ["link-pending"] }), [paired({ id: "link-carol" }), paired({ id: "link-pending" })]);
+  it("invites nobody once members and invitations make 32", () => {
+    const most = Array.from({ length: 31 }, (_, i) => member({ key: String(i).padEnd(52, "y"), me: i === 0 }));
+    members_(groupView({ status: "active", isAdmin: true, members: most, invited: ["link-pending"] }), [paired({ id: "link-carol" }), paired({ id: "link-pending" })]);
     expect(screen.getByTestId("group-invite")).toBeDisabled();
   });
 
@@ -139,8 +139,8 @@ describe("GroupLinkPanel", () => {
   });
 
   it("cannot create a link for a full group", () => {
-    const eight = Array.from({ length: 8 }, (_, i) => member({ key: String(i).padEnd(52, "y") }));
-    renderApp(<GroupLinkPanel group={admin({ members: eight })} />);
+    const full = Array.from({ length: 32 }, (_, i) => member({ key: String(i).padEnd(52, "y") }));
+    renderApp(<GroupLinkPanel group={admin({ members: full })} />);
     expect(screen.getByTestId("group-link-enable")).toHaveTextContent("The group is full");
     expect(screen.getByTestId("group-link-enable")).toBeDisabled();
   });
@@ -163,9 +163,9 @@ describe("GroupLinkPanel", () => {
   });
 
   it("warns that nobody gets in while the group is full", () => {
-    const eight = Array.from({ length: 8 }, (_, i) => member({ key: String(i).padEnd(52, "y") }));
-    renderApp(<GroupLinkPanel group={admin({ entryLink, members: eight })} />);
-    expect(screen.getByTestId("group-link-note")).toHaveTextContent("The group is full (8 of 8): nobody gets in through the link until someone leaves.");
+    const full = Array.from({ length: 32 }, (_, i) => member({ key: String(i).padEnd(52, "y") }));
+    renderApp(<GroupLinkPanel group={admin({ entryLink, members: full })} />);
+    expect(screen.getByTestId("group-link-note")).toHaveTextContent("The group is full (32 of 32): nobody gets in through the link until someone leaves.");
   });
 
   it("replaces the link, or turns it off", async () => {
@@ -219,7 +219,7 @@ describe("NewGroupDialog", () => {
     expect(onCreated).toHaveBeenCalledWith("new-group");
   });
 
-  it("makes a private group (up to eight, contacts or a link) when that kind is picked", async () => {
+  it("makes a private group (up to 32, contacts or a link) when that kind is picked", async () => {
     const { user, engine, onCreated } = open();
     engine.on("createGroup", () => ({ groupId: "small" }));
     expect(screen.getByTestId("new-group-kind-community").querySelector("input")).toBeChecked();

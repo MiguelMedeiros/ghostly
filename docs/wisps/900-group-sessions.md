@@ -8,10 +8,10 @@
 | Updated | 2026-09-24 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | Two profiles: [`group-mesh/1`](9xx-group-mesh.md) (private, up to eight) and [`group-community/1`](9xx-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members |
+| Implementation | Two profiles: [`group-mesh/1`](9xx-group-mesh.md) (private, up to 32) and [`group-community/1`](9xx-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members |
 | Summary | How a group agrees on who is in it, locks out whoever left, and moves messages between members, never through the DHT. |
 | Availability | Available |
-| Notes | Two profiles implemented: group-mesh/1 (private, up to eight members, one admin) and group-community/1 (a link anyone can open, up to 256). Text, a picture and payments between members; web, desktop and extension. |
+| Notes | Two profiles implemented: group-mesh/1 (private, up to 32 members, one admin; a member who was away is caught up by whoever is there) and group-community/1 (a link anyone can open, up to 256). Text, a picture and payments between members; web, desktop and extension. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -33,11 +33,11 @@ Define how a group of Ghostly peers agrees on who is in it, protects what they s
 
 The three contracts stay independent: (a) admission and group security, (b) distribution, (c) authenticated transport between adjacent peers. A group profile names all three and their bounds. Members of one group MUST run the same profile, and **a group declares its profile from its first commit**: a `group-mesh/1` chain is made of version-1 commits, a `group-community/1` chain of version-2 commits, and a group never changes profile. Its link says it too: `group1/…` for the mesh, `group2/…` for a community. The profiles are `group-mesh/1`, a bounded full mesh of [paired-chat/1](401-paired-chat.md) edges, and `group-community/1`, the same edges between members and a few elected hubs. A GossipSub-like flooding profile ([901](901-gossipsub.md)) remains a candidate beyond a few hundred members; bridges between profiles are not assumed.
 
-A profile is negotiated per pairwise session, not per group: an app announces `{ "t": "paired-groups", "v": [1, 2] }` on an open paired session, after the handshake (an app with only the mesh announced `[1]`). Frames of a version flow only where both sides announced it. A contact whose app never announces it cannot be invited and never receives a `group-*` frame. Nothing about 1:1 chat changes.
+A profile is negotiated per pairwise session, not per group: an app announces `{ "t": "paired-groups", "v": [1, 2, 3] }` on an open paired session, after the handshake (an app with only the mesh announced `[1]`; 3 says it takes mesh rosters past eight, [9xx](9xx-group-mesh.md#compatibility)). Frames of a version flow only where both sides announced it. A contact whose app never announces it cannot be invited and never receives a `group-*` frame. Nothing about 1:1 chat changes.
 
 ## Topology of the first profile
 
-A **mesh of dedicated pairwise edges** between members, one per pair, derived by both members from the X25519 secret of their member keys and the group id: rendezvous identities for both sides and the symmetric key of their discovery records. No edge parameters are distributed; the admin cannot compute an edge it is not on; the paired session of an edge is pinned in advance to the roster's member keys, so the only trust step is admission. The mesh is capped at eight members, which is a first-profile bound, not a measured limit: connection cost is quadratic and every edge polls its own rendezvous.
+A **mesh of dedicated pairwise edges** between members, one per pair, derived by both members from the X25519 secret of their member keys and the group id: rendezvous identities for both sides and the symmetric key of their discovery records. No edge parameters are distributed; the admin cannot compute an edge it is not on; the paired session of an edge is pinned in advance to the roster's member keys, so the only trust step is admission. The mesh is capped at 32 members (eight in its first revisions), what was measured to fit each member's share of the public relays: connection cost is quadratic and every edge polls its own rendezvous ([9xx § Cost per member](9xx-group-mesh.md#cost-per-member)).
 
 A relay or rendezvous-based fan-out was considered and rejected for the first profile: it would make the admin's availability a condition for anyone to talk, and it would make an admin change (a member with edges to nobody) impossible without redistributing links. The mesh makes offline catch-up and admin transfer natural.
 
@@ -71,7 +71,7 @@ Live delivery only. A member whose edge was down gets, when the edge opens, the 
 
 In a community, anyone with the link joins and any member can let people in: the link is a bearer capability, and removing someone does not stop them from opening it again; the admin replaces the link to keep them out. In the mesh:
 
-The admin invites, removes and transfers its role; any member leaves. Local blocking is separate from removal. Bounds of the first profile: eight members, 1024 commits, 16 KiB of text, 32 own messages and 128 KiB kept for catch-up, 64 waiting frames and 1 MiB, 16 epoch secrets, 256 sequence numbers of replay window, one catch-up request per member per ten seconds. Coordination failure is visible: a group is `active`, `left`, `removed` or `forked`, with a reason.
+The admin invites, removes and transfers its role; any member leaves. Local blocking is separate from removal. Bounds of the first profile: 32 members (eight before its revision 0.9), 1024 commits, 16 KiB of text, 32 own messages and 128 KiB kept for catch-up and 256 frames of other members' to hand on, 64 waiting frames and 1 MiB, 32 epoch secrets, 256 sequence numbers of replay window, one catch-up request per member per ten seconds. Coordination failure is visible: a group is `active`, `left`, `removed` or `forked`, with a reason.
 
 ## Compatibility and open decisions
 

@@ -39,7 +39,15 @@ export interface GroupCommit {
   sig: string;
 }
 
-export const MAX_GROUP_MEMBERS = 8;
+/**
+ * Members a roster may hold. Apps from before revision 0.9 of the profile refuse a commit whose roster is larger than
+ * `LEGACY_GROUP_MEMBERS` (as malformed), so an admin grows a group past that only when every member's app said it can
+ * (`paired-groups` version `GROUP_VERSION_LARGE`).
+ */
+export const MAX_GROUP_MEMBERS = 32;
+export const LEGACY_GROUP_MEMBERS = 8;
+/** The `paired-groups` version an app announces when it takes mesh rosters of up to `MAX_GROUP_MEMBERS`. */
+export const GROUP_VERSION_LARGE = 3;
 export const MAX_GROUP_CHAIN = 1024;
 export const GROUP_ID = /^[A-Za-z0-9_-]{22}$/;
 export const MEMBER_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;

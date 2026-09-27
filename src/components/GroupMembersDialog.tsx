@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY, MAX_GROUP_PICTURE_LENGTH } from "@ghostly/core";
+import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
@@ -85,7 +85,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
       {contacts.length === 0 && <p className="mt-1 text-sm text-text-muted">Every paired contact is already in, or you have none yet.</p>}
       <ul className="mt-1 max-h-40 space-y-1 overflow-y-auto" data-testid="group-invite-list">
         {contacts.map(link => {
-          const pending = invited.has(link.id), can = !!link.groups && !pending && live.members.length + live.invited.length < 8;
+          const pending = invited.has(link.id), can = !!link.groups && !pending && live.members.length + live.invited.length < MAX_GROUP_MEMBERS;
           return <li key={link.id} data-testid="group-invite-contact" data-link={link.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
             <span className="min-w-0 flex-1 truncate text-sm">{contactName(link)}</span>
             {pending ? <span className="text-xs text-text-muted">Invited…</span>

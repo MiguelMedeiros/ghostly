@@ -287,7 +287,7 @@ export const developers = {
       { name: "Backups and held messages in your S3", cells: [A, A, A, null] },
       { name: "Identity proofs (Nostr, Pubky, domain, OpenPGP, SSH, Bitcoin, DID)", cells: [A, A, A, A] },
       { name: "Public profiles (Nostr, Pubky, Bluesky), Nostr social", cells: [A, A, A, null] },
-      { name: "Private groups (up to 8) and communities (up to 256)", cells: [A, A, A, A] },
+      { name: "Private groups (up to 32) and communities (up to 256)", cells: [A, A, A, A] },
       { name: "Payments in groups", cells: [A, A, A, null] },
     ] as { name: string; cells: (Level | null)[] }[],
     notes: [

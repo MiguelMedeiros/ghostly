@@ -96,7 +96,7 @@ export const GROUPS: {
     order: ["900", "902", "901"],
     icon: "group",
     title: "Groups",
-    blurb: "Private groups of up to eight and communities of up to 256: text, a picture and payments between members.",
+    blurb: "Private groups of up to 32 and communities of up to 256: text, a picture and payments between members.",
   },
   {
     id: "headless",

@@ -76,7 +76,7 @@ describe("commit parsing refuses malformed peer input", () => {
     }
   });
 
-  it("refuses a roster of more than eight members, even if well formed otherwise", () => {
+  it("refuses a roster of more than 32 members, even if well formed otherwise", () => {
     const keys = Array.from({ length: MAX_GROUP_MEMBERS + 1 }, () => createIdentity().pubKeyZ32);
     const raw = { ...clone(addBob), m: sortRoster(keys.map((k, i) => [k, i === 0 ? "admin" : "member"])) };
     expect(verifyCommit(raw, genesis)).toEqual({ error: "Malformed membership commit" });
