@@ -39,11 +39,13 @@ import {
 } from "../lib/settings";
 import { deleteAllSessions, listSessions } from "../lib/storage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { peekEnabled, peekNotifies } from "../lib/profilePeek";
+import { isDesktopApp } from "../lib/externalLink";
 
 export function Settings() {
   const nav = useAppNavigation();
   const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
-    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, randomizeNickname } =
+    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
   const { lock } = useLockScreen();
@@ -53,6 +55,7 @@ export function Settings() {
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
   const canSwitch = !!useServicesPlatform()?.features.profiles;
+  const peekOn = peekEnabled(settings, isDesktopApp());
   const loadPublicProfiles = useLoadPublicProfiles();
   const sendTyping = useSendTyping();
 
@@ -233,6 +236,17 @@ export function Settings() {
         {isMobile && canSwitch && (
           <LinkRow testId="settings-profile-switch" label={t("profileSwitcher.title")} hint={t("profileSwitcher.holdHint")}
             value={listProfiles().length > 1 ? listProfiles().length : undefined} onClick={openProfileSwitcher} />
+        )}
+        {/* WISP 04 § Checking other profiles: reads only; on for Desktop, off for the web and the extension unless turned on. */}
+        {canSwitch && (
+          <Row label={t("settings.profilePeek")} hint={t("settings.profilePeekHint")} info={t("settings.profilePeekInfo")} testId="settings-profile-peek-row">
+            <Switch testId="settings-profile-peek" label={t("settings.profilePeek")} checked={peekOn} onChange={(on) => updateProfilePeek({ enabled: on })} />
+          </Row>
+        )}
+        {canSwitch && peekOn && (
+          <Row label={t("settings.profilePeekNotify")} hint={t("settings.profilePeekNotifyHint")} testId="settings-profile-peek-notify-row">
+            <Switch testId="settings-profile-peek-notify" label={t("settings.profilePeekNotify")} checked={peekNotifies(settings)} onChange={(on) => updateProfilePeek({ notify: on })} />
+          </Row>
         )}
         <Field label={t("settings.defaultNickname")} hint={t("settings.defaultNicknameHint")} htmlFor="settings-nickname">
           <InputGroup>

@@ -11,14 +11,19 @@ import {attentionOutcome,chatOfLink,mutedFor} from "../lib/chatMute";
 import {eventSound,playCue} from "../lib/cues";
 import {setDeckSwitchSound} from "./deck/motion";
 import {useI18n} from "../contexts/I18nContext";
+import {switchProfile} from "../lib/profiles";
+import {PROFILE_NOTICE} from "../lib/profilePeek";
 
 const seen=new Set<string>();
 /** The engine sends live facts separately from replayed snapshots. */
 export function AttentionFeedback(){
   const {t}=useI18n();
   const navigate=useNavigate();
-  // A click on a notification opens its chat.
-  useEffect(()=>onNotificationOpen(chat=>navigate(chat.startsWith("group:")?groupPath(chat.slice(6)):chatPath(chat))),[navigate]);
+  // A click on a notification opens its chat; one about another profile (WISP 04 § Checking other profiles) switches to it.
+  useEffect(()=>onNotificationOpen(chat=>{
+    if(chat.startsWith(PROFILE_NOTICE)){switchProfile(chat.slice(PROFILE_NOTICE.length));return;}
+    navigate(chat.startsWith("group:")?groupPath(chat.slice(6)):chatPath(chat));
+  }),[navigate]);
   useEffect(()=>installAudioGestures(),[]);
   useEffect(()=>{setDeckSwitchSound(()=>playCue("slide"));return ()=>setDeckSwitchSound(undefined);},[]);
   useEffect(()=>engine.onAttention((event:AttentionEvent)=>{

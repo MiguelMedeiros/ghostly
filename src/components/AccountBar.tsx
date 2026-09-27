@@ -74,7 +74,7 @@ export function AccountBar() {
   const switcher = useProfileSwitcher(canSwitch);
   const glances = useProfileGlances();
   const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? "Online" : "Offline"}${
-    canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
+    canSwitch && glances.othersFresh ? `, ${t("profileSwitcher.othersNew")}` : canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
   const walletLabel = unseenSatsLabel(t("tabs.wallets"), unseen);
 
   return (
@@ -101,8 +101,10 @@ export function AccountBar() {
                 }`}
               />
             )}
-            {/* Unread messages left in another profile: a ring on the picture, the switcher says where. */}
-            {canSwitch && glances.othersUnread > 0 && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
+            {/* Unread messages left in another profile: a ring on the picture, the switcher says where. Something new
+                seen waiting for one (WISP 04 § Checking other profiles): the ring and a dot. */}
+            {canSwitch && (glances.othersUnread > 0 || glances.othersFresh > 0) && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
+            {canSwitch && glances.othersFresh > 0 && <span data-testid="account-profile-others-new" aria-hidden="true" className="profile-others-new" />}
           </span>
           <span className="account-label">{profileName}</span>
         </button>

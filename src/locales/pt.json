@@ -341,7 +341,12 @@
     "clear": "Limpar",
     "clearAllDataInfo": "As carteiras não são apagadas: gaste ou faça backup dos seus sats antes, se quiser que eles saiam também.",
     "advanced": "Avançado",
-    "advancedHint": "Rede, relays e consultas de domínio"
+    "advancedHint": "Rede, relays e consultas de domínio",
+    "profilePeek": "Verificar outros perfis",
+    "profilePeekHint": "Mostra quando uma mensagem espera outro perfil",
+    "profilePeekInfo": "De tempos em tempos, este app lê o que os contatos dos seus outros perfis desbloqueados publicam para eles, pelos mesmos relays ou DHT que esses perfis usam. Só lê: nunca abre uma mensagem, e perfis bloqueados ficam de fora.",
+    "profilePeekNotify": "Avisar sobre outros perfis",
+    "profilePeekNotifyHint": "Uma notificação do sistema quando um recebe mensagem"
   },
   "updates": {
     "available": "Ghostly {{version}} disponível",
@@ -484,7 +489,10 @@
     "open": "Abrir perfil",
     "othersUnread": "mensagens não lidas em outro perfil",
     "switching": "Abrindo {{name}}…",
-    "holdHint": "Ou segure Configurações na barra de abas"
+    "holdHint": "Ou segure Configurações na barra de abas",
+    "new": "mensagens novas",
+    "newShort": "Nova",
+    "othersNew": "mensagens novas em outro perfil"
   },
   "pairing": {
     "you": "Você",
@@ -718,5 +726,8 @@
     "shareNoChats": "Nenhuma conversa ainda. Comece uma e compartilhe de novo.",
     "shareOneFile": "1 arquivo",
     "shareFiles": "{{count}} arquivos"
+  },
+  "profilePeek": {
+    "notice": "Mensagem nova em {{name}}"
   }
 }

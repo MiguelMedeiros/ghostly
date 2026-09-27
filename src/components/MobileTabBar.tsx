@@ -84,9 +84,10 @@ export function MobileTabBar() {
           const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`);
           const dot = tab.path === "/identities" && identityAttention;
           const account = tab.path === "/settings" && canSwitch;
-          const others = account && glances.othersUnread > 0;
+          const fresh = account && glances.othersFresh > 0;
+          const others = account && (glances.othersUnread > 0 || fresh);
           const wallet = tab.path === "/wallet";
-          const label = wallet && (unseen.real || unseen.test) ? unseenSatsLabel(t(tab.label), unseen) : dot ? `${t(tab.label)}, ${t("identities.attention")}` : account ? `${t(tab.label)}, ${glances.current.name}${others ? `, ${t("profileSwitcher.othersUnread")}` : ""}` : undefined;
+          const label = wallet && (unseen.real || unseen.test) ? unseenSatsLabel(t(tab.label), unseen) : dot ? `${t(tab.label)}, ${t("identities.attention")}` : account ? `${t(tab.label)}, ${glances.current.name}${fresh ? `, ${t("profileSwitcher.othersNew")}` : others ? `, ${t("profileSwitcher.othersUnread")}` : ""}` : undefined;
           return (
             <button
               key={tab.path}
@@ -107,6 +108,7 @@ export function MobileTabBar() {
                 {account && (
                   <span data-testid="mobile-tab-profile" aria-hidden="true" className="absolute bottom-0 -right-2.5 rounded-full" style={{ boxShadow: `0 0 0 2px var(--theme-panel-header)${others ? ", 0 0 0 3.5px var(--theme-accent)" : ""}` }}>
                     <ProfileBadge entry={glances.current} size={14} avatar={myAvatar} />
+                    {fresh && <span data-testid="mobile-tab-profile-new" className="profile-others-new" />}
                   </span>
                 )}
               </span>

@@ -749,6 +749,9 @@ body {
 /* Another profile left something unread: a ring around the picture, in the accent. */
 .profile-others-ring { position: absolute; inset: -3px; border-radius: 999px; box-shadow: 0 0 0 2px var(--theme-accent); pointer-events: none;
   animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+/* Something new seen waiting for another profile (WISP 04 § Checking other profiles): a dot on the ring, not only the ring. */
+.profile-others-new { position: absolute; top: -4px; right: -4px; width: 9px; height: 9px; border-radius: 999px; background: var(--theme-accent);
+  box-shadow: 0 0 0 2px var(--theme-sidebar-bg, var(--theme-panel-header)); pointer-events: none; animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
 .profile-switcher-popover { animation: profile-switcher-in 140ms ease-out both; transform-origin: bottom left; }
 .profile-switcher-sheet { animation: profile-switcher-sheet-in 180ms ease-out both; max-height: 80vh; overflow-y: auto; }
 @keyframes profile-switcher-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
@@ -767,7 +770,7 @@ body {
 @keyframes profile-switch-out { to { opacity: 0; } }
 .profile-switch-badge { animation: profile-switch-pulse 1.2s ease-in-out infinite; }
 @keyframes profile-switch-pulse { 50% { transform: scale(0.94); } }
-@media (prefers-reduced-motion: reduce) { .profile-others-ring, .profile-switch-badge { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .profile-others-ring, .profile-others-new, .profile-switch-badge { animation: none; } }
 .account-action > svg, .account-action > span:first-child { flex-shrink: 0; }
 
 /* Action affordances, without changing text inputs or disabled controls. */

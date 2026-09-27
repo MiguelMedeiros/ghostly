@@ -341,7 +341,12 @@
     "clear": "Borrar",
     "clearAllDataInfo": "Las billeteras no se borran: gasta o respalda tus sats antes si también quieres que desaparezcan.",
     "advanced": "Avanzado",
-    "advancedHint": "Red, relays y consultas de dominio"
+    "advancedHint": "Red, relays y consultas de dominio",
+    "profilePeek": "Revisar otros perfiles",
+    "profilePeekHint": "Muestra cuando un mensaje espera a otro perfil",
+    "profilePeekInfo": "De vez en cuando, esta app lee lo que los contactos de tus otros perfiles desbloqueados publican para ellos, por los mismos relays o DHT que usan esos perfiles. Solo lee: nunca abre un mensaje, y omite los perfiles bloqueados.",
+    "profilePeekNotify": "Avisar de otros perfiles",
+    "profilePeekNotifyHint": "Una notificación del sistema cuando uno recibe un mensaje"
   },
   "updates": {
     "available": "Ghostly {{version}} disponible",
@@ -484,7 +489,10 @@
     "open": "Abrir perfil",
     "othersUnread": "mensajes sin leer en otro perfil",
     "switching": "Abriendo {{name}}…",
-    "holdHint": "O mantén pulsado Ajustes en la barra de pestañas"
+    "holdHint": "O mantén pulsado Ajustes en la barra de pestañas",
+    "new": "mensajes nuevos",
+    "newShort": "Nuevo",
+    "othersNew": "mensajes nuevos en otro perfil"
   },
   "pairing": {
     "you": "Tú",
@@ -718,5 +726,8 @@
     "shareNoChats": "Aún no hay chats. Empieza uno y vuelve a compartir.",
     "shareOneFile": "1 archivo",
     "shareFiles": "{{count}} archivos"
+  },
+  "profilePeek": {
+    "notice": "Mensaje nuevo en {{name}}"
   }
 }

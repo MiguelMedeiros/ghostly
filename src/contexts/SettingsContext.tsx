@@ -34,6 +34,7 @@ interface SettingsContextValue {
   updateChatListDensity: (density: ChatListDensity) => void;
   updateCheckForUpdates: (check: boolean) => void;
   updateLinkPreviews: (on: boolean) => void;
+  updateProfilePeek: (patch: NonNullable<AppSettings["profilePeek"]>) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
   /** Where this profile's backups go (WISP 1000). */
@@ -105,6 +106,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, linkPreviews }));
   }, []);
 
+  const updateProfilePeek = useCallback((patch: NonNullable<AppSettings["profilePeek"]>) => {
+    setSettings((prev) => ({ ...prev, profilePeek: { ...prev.profilePeek, ...patch } }));
+  }, []);
+
   useEffect(() => {
     document.documentElement.dataset.reduceMotion = String(settings.reduceMotion);
   }, [settings.reduceMotion]);
@@ -139,6 +144,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateChatListDensity,
         updateCheckForUpdates,
         updateLinkPreviews,
+        updateProfilePeek,
         randomizeNickname,
         resetSettings,
         updateBackupStorage,

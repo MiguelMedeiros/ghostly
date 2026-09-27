@@ -341,7 +341,12 @@
     "clear": "Cancella",
     "clearAllDataInfo": "I wallet non vengono eliminati: spendi o fai il backup dei tuoi sats prima, se vuoi che spariscano anche loro.",
     "advanced": "Avanzate",
-    "advancedHint": "Rete, relay e ricerche di dominio"
+    "advancedHint": "Rete, relay e ricerche di dominio",
+    "profilePeek": "Controlla gli altri profili",
+    "profilePeekHint": "Mostra quando un messaggio attende un altro profilo",
+    "profilePeekInfo": "Ogni tanto questa app legge ciò che i contatti dei tuoi altri profili sbloccati pubblicano per loro, sugli stessi relay o DHT usati da quei profili. Legge soltanto: non apre mai un messaggio e salta i profili bloccati.",
+    "profilePeekNotify": "Avvisa per gli altri profili",
+    "profilePeekNotifyHint": "Una notifica di sistema quando uno riceve un messaggio"
   },
   "updates": {
     "available": "Ghostly {{version}} è disponibile",
@@ -484,7 +489,10 @@
     "open": "Apri il profilo",
     "othersUnread": "messaggi non letti in un altro profilo",
     "switching": "Apertura di {{name}}…",
-    "holdHint": "Oppure tieni premuto Impostazioni nella barra delle schede"
+    "holdHint": "Oppure tieni premuto Impostazioni nella barra delle schede",
+    "new": "nuovi messaggi",
+    "newShort": "Nuovo",
+    "othersNew": "nuovi messaggi in un altro profilo"
   },
   "pairing": {
     "you": "Tu",
@@ -718,5 +726,8 @@
     "shareNoChats": "Ancora nessuna chat. Iniziane una, poi condividi di nuovo.",
     "shareOneFile": "1 file",
     "shareFiles": "{{count}} file"
+  },
+  "profilePeek": {
+    "notice": "Nuovo messaggio in {{name}}"
   }
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { profileGlance, type ProfileGlance } from "../lib/profileData";
 import { currentProfile, listProfiles, type ProfileEntry } from "../lib/profiles";
+import { PEEK_EVENT } from "../lib/profilePeek";
 
 /**
  * The account switcher (WISP 04): the profiles saved on this device, one tap from any of them, like the
@@ -23,9 +24,10 @@ export interface OtherProfile { entry: ProfileEntry; glance?: ProfileGlance }
 
 /**
  * The active profile and the others with what can be known of them without starting them (their picture,
- * unread messages left in them, whether they are locked). Re-read when profiles or chats change.
+ * unread messages left in them, new ones seen waiting for them, whether they are locked). Re-read when
+ * profiles or chats change, and when a look at the other profiles found something.
  */
-export function useProfileGlances(): { current: ProfileEntry; others: OtherProfile[]; othersUnread: number } {
+export function useProfileGlances(): { current: ProfileEntry; others: OtherProfile[]; othersUnread: number; othersFresh: number } {
   const [state, setState] = useState(() => ({ current: currentProfile(), others: listProfiles().filter((p) => p.id !== currentProfile().id).map((entry) => ({ entry }) as OtherProfile) }));
   useEffect(() => {
     let alive = true;
@@ -37,12 +39,13 @@ export function useProfileGlances(): { current: ProfileEntry; others: OtherProfi
         .then((others) => { if (alive) setState({ current, others }); });
     };
     load();
-    const events = ["profiles-updated", "settings-updated", "storage"];
+    const events = ["profiles-updated", "settings-updated", "storage", PEEK_EVENT];
     for (const name of events) window.addEventListener(name, load);
     return () => { alive = false; for (const name of events) window.removeEventListener(name, load); };
   }, []);
   const othersUnread = state.others.reduce((sum, o) => sum + (o.glance?.unread ?? 0), 0);
-  return { ...state, othersUnread };
+  const othersFresh = state.others.reduce((sum, o) => sum + (o.glance?.fresh ?? 0), 0);
+  return { ...state, othersUnread, othersFresh };
 }
 
 /**

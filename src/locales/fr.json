@@ -341,7 +341,12 @@
     "clear": "Effacer",
     "clearAllDataInfo": "Les portefeuilles ne sont pas supprimés : dépensez ou sauvegardez vos sats avant si vous voulez qu'ils partent aussi.",
     "advanced": "Avancé",
-    "advancedHint": "Réseau, relais et recherches de domaine"
+    "advancedHint": "Réseau, relais et recherches de domaine",
+    "profilePeek": "Vérifier les autres profils",
+    "profilePeekHint": "Indique quand un message attend un autre profil",
+    "profilePeekInfo": "De temps en temps, cette app lit ce que les contacts de vos autres profils déverrouillés publient pour eux, par les mêmes relais ou DHT que ces profils. Elle ne fait que lire : elle n'ouvre jamais un message, et ignore les profils verrouillés.",
+    "profilePeekNotify": "Notifier pour les autres profils",
+    "profilePeekNotifyHint": "Une notification système quand l'un reçoit un message"
   },
   "updates": {
     "available": "Ghostly {{version}} est disponible",
@@ -484,7 +489,10 @@
     "open": "Ouvrir le profil",
     "othersUnread": "messages non lus dans un autre profil",
     "switching": "Ouverture de {{name}}…",
-    "holdHint": "Ou maintenez Paramètres dans la barre d’onglets"
+    "holdHint": "Ou maintenez Paramètres dans la barre d’onglets",
+    "new": "nouveaux messages",
+    "newShort": "Nouveau",
+    "othersNew": "nouveaux messages dans un autre profil"
   },
   "pairing": {
     "you": "Vous",
@@ -718,5 +726,8 @@
     "shareNoChats": "Pas encore de discussion. Commencez-en une, puis partagez à nouveau.",
     "shareOneFile": "1 fichier",
     "shareFiles": "{{count}} fichiers"
+  },
+  "profilePeek": {
+    "notice": "Nouveau message dans {{name}}"
   }
 }
