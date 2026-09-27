@@ -2073,8 +2073,9 @@ export class GhostlyNode implements EngineImplementation {
   setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.forget(groupId); }
 
-  setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): void {
-    void this.links.get(linkId)?.link?.setCallSignal(signal);
+  /** Rejects when the signal cannot go now (no live session): it is kept and goes on the next one while fresh. */
+  async setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): Promise<void> {
+    await this.links.get(linkId)?.link?.setCallSignal(signal);
   }
 
   /** WISP 401 § Typing: a `stop` always goes (when a `start` stands); a `start` only while the setting is on. */

@@ -35,6 +35,7 @@ export class EventHub {
   private journalLines = 0;
   private readonly listeners = new Set<Listener>();
   private readonly stateListeners = new Set<(state: EngineState) => void>();
+  private readonly callListeners = new Set<(chat: string, signal: string) => void>();
   private seen: Seen = new Map();
   private firstRun = false;
   private chats = new Map<string, ChatShape>();
@@ -102,6 +103,8 @@ export class EventHub {
 
   onEvent(listener: Listener): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   onState(listener: (state: EngineState) => void): () => void { this.stateListeners.add(listener); return () => this.stateListeners.delete(listener); }
+  /** A call signal from a contact's app, as the engine gives it. */
+  onCallSignal(listener: (chat: string, signal: string) => void): () => void { this.callListeners.add(listener); return () => this.callListeners.delete(listener); }
 
   /** Events after `since` still in the journal; a gap event first when older ones were dropped. */
   replay(since: number): GhostlyEvent[] {
@@ -139,13 +142,12 @@ export class EventHub {
     switch (message.kind) {
       case "state": this.stateChanged(message.state); break;
       case "messages": this.messages(message.linkId, message.messages); break;
-      case "call-signal": {
-        let kind: unknown;
-        try { kind = (JSON.parse(message.signal) as { t?: unknown }).t; } catch { kind = undefined; }
-        // A headless Ghostly has no camera or microphone: it only says a call came (WISP 11xx § Parity).
-        if (kind === "o") this.emit("call.offer", `call.offer:${message.linkId}:${this.now()}`, { chat: message.linkId });
+      // Calls (WISP 11xx § Calls): the call manager reports them (call.incoming, call.connected, call.ended).
+      case "call-signal":
+        for (const listener of this.callListeners) {
+          try { listener(message.linkId, message.signal); } catch (error) { process.stderr.write(`ghostly: call error: ${error instanceof Error ? error.stack : String(error)}\n`); }
+        }
         break;
-      }
       default: break;
     }
   }

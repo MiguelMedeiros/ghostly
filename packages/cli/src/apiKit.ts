@@ -1,6 +1,7 @@
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
+import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
 import type { Runtime } from "./runtime/engine";
 
@@ -11,6 +12,8 @@ import type { Runtime } from "./runtime/engine";
 export interface ApiContext {
   runtime: Runtime;
   hub: EventHub;
+  /** Voice calls (WISP 11xx § Calls). */
+  calls: CallManager;
   /** How the host runs: a daemon stays; a one-shot leaves when its command is done. */
   mode: "daemon" | "one-shot";
   version: string;

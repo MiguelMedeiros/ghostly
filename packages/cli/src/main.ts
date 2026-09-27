@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { connect } from "node:net";
 import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
@@ -79,6 +80,7 @@ const SPECIAL: [string, string][] = [
   ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, nick"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret]", "Any call of the app's engine, with its own parameters"],
   ["engine --list", "The engine's calls"],
+  ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--days n]", "Make an identity proof (a tool's or a published one finishes with identity complete)"],
 ];
 
@@ -444,6 +446,31 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   print(result);
 }
 
+/**
+ * `call pipe`: a call's audio socket bridged to stdin and stdout, for shell pipelines. stdout carries audio only (the
+ * contact's, raw PCM); what the command says goes to stderr. It ends when the call does.
+ */
+async function callPipeCommand(argv: string[]): Promise<void> {
+  const parsed = parseArgs(argv, {});
+  const g = globals(parsed);
+  const ref = parsed.positionals.join(" ") || undefined;
+  const client = await connectDaemon(g.paths.socket);
+  if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
+  let calls: { call: string; chat: string; audio: { socket: string; rate: number } | null }[];
+  try { ({ calls } = await client.call("call.list") as { calls: typeof calls }); } finally { client.close(); }
+  const matches = ref ? calls.filter((c) => c.call === ref || c.chat === ref || c.chat.startsWith(ref)) : calls;
+  if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? "More than one call is on: name one" : ref ? `No call ${ref}` : "No call is on");
+  const audio = matches[0].audio;
+  if (!audio) throw new CliError("unavailable", "That call has no audio yet: answer it first");
+  const socket = connect(audio.socket);
+  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  process.stderr.write(`ghostly: call ${matches[0].call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
+  process.stdin.pipe(socket);
+  socket.pipe(process.stdout);
+  socket.on("close", () => exit(0));
+  socket.on("error", () => exit(1));
+}
+
 // ---------- entry ----------
 
 export async function main(input: string[]): Promise<number> {
@@ -458,6 +485,7 @@ export async function main(input: string[]): Promise<number> {
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }
   if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
   if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
+  if (two === "call pipe") { await callPipeCommand(argv.slice(2)); return -1; }
   if (two && TEXT_COMMANDS[two]) { await textCommand(two, argv.slice(2)); return 0; }
   if (two && COMMANDS[two]) { await tableCommand(two, argv.slice(2)); return 0; }
   if (TEXT_COMMANDS[first]) { await textCommand(first, argv.slice(1)); return 0; }

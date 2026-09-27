@@ -50,7 +50,8 @@
     "mpg123-decoder": "1.0.3",
     "node-datachannel": "^0.33.4",
     "nostr-tools": "2.25.2",
-    "opus-decoder": "0.7.12"
+    "opus-decoder": "0.7.12",
+    "opusscript": "0.1.1"
   },
   "devDependencies": {
     "@ghostly/browser": "*",

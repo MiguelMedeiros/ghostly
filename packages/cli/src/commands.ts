@@ -49,6 +49,7 @@ function pairs(values: unknown): Record<string, string> | undefined {
   return out;
 }
 
+const rate: OptionSpec = { type: "number", description: "The audio's sample rate: 48000 (default), 24000, 16000, 12000 or 8000" };
 const force: OptionSpec = { type: "boolean", description: "Send even if the text looks like a seed, a key or ecash" };
 const reply: OptionSpec = { type: "string", description: "Reply to this message (its id, from history or an event)" };
 
@@ -248,6 +249,27 @@ export const COMMANDS: Record<string, Command> = {
   "service peer": { method: "service.peer", usage: "service peer <chat>", summary: "What a contact shares with you", args: ["chat"], params: (_, a) => ({ chat: a.chat }) },
   "service open": { method: "service.open", usage: "service open <chat> <service> [--port p]", summary: "A contact's app on a loopback port here (daemon)", args: ["chat", "service"], options: { port: { type: "number", description: "Local port (default: any free one)" } }, params: ({ options }, a) => ({ chat: a.chat, service: a.service, port: options.port }) },
   "service close": { method: "service.close", usage: "service close <chat> <service>", summary: "Close a contact's app opened here", args: ["chat", "service"], params: (_, a) => ({ chat: a.chat, service: a.service }) },
+
+  "call start": {
+    method: "call.start", usage: "call start <chat> [--rate 48000]", summary: "Call a contact (voice); the result names the call's audio socket (daemon)",
+    args: ["chat"], options: { rate: rate }, params: ({ options }, a) => ({ chat: a.chat, rate: options.rate }),
+  },
+  "call answer": {
+    method: "call.answer", usage: "call answer [<chat|call>] [--rate 48000]", summary: "Answer a call that rings (the only one, or the one named)",
+    args: ["call..."], options: { rate: rate }, params: ({ options }, a) => ({ call: a.call, rate: options.rate }),
+  },
+  "call hangup": { method: "call.hangup", usage: "call hangup [<chat|call>]", summary: "Hang up, or decline a call that rings", args: ["call..."], params: (_, a) => ({ call: a.call }) },
+  "call list": { method: "call.list", usage: "call list", summary: "Calls on now, their audio sockets, and auto-answer" },
+  "call flush": { method: "call.flush", usage: "call flush [<chat|call>]", summary: "Drop the audio queued and not played yet (barge-in)", args: ["call..."], params: (_, a) => ({ call: a.call }) },
+  "call auto": {
+    method: "call.auto", usage: "call auto [on|off] [--from <chat>]... [--rate 48000]", summary: "Answer calls by themselves: from anyone, or the chats named (kept in the profile)",
+    args: ["mode..."], options: { from: { type: "list", description: "Only calls from this chat (again for more)" }, rate: rate },
+    params: ({ options }, a) => {
+      if (a.mode === undefined) return {};
+      if (a.mode !== "on" && a.mode !== "off") throw new CliError("usage", "ghostly call auto [on|off] [--from <chat>]... [--rate n]");
+      return a.mode === "on" ? { on: true, from: options.from, rate: options.rate } : { on: false };
+    },
+  },
 
   "events": {
     method: "events.replay", usage: "events [--since seq]", summary: "Events the journal holds, without following",

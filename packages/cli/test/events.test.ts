@@ -39,7 +39,11 @@ describe("the event stream", () => {
     h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "new"), message("c1", "me_1", { sender: "me", delivery: "delivered" })] });
     h.sink.post({ kind: "state", state: state([link("c1", { textDelivery: "stream", pairing: { status: "ready", transport: "hyperdht/1" }, pairingProgress: { stage: "live" } as never }), link("c2")]) });
     h.sink.post({ kind: "state", state: state([link("c2", { label: "bot" })]) });
+    const signals: [string, string][] = [];
+    h.onCallSignal((chat, signal) => signals.push([chat, signal]));
     h.sink.post({ kind: "call-signal", linkId: "c2", signal: JSON.stringify({ t: "o" }) });
+    // Calls are the call manager's to report (src/calls/manager.ts): the hub hands their signals on.
+    expect(signals).toEqual([["c2", '{"t":"o"}']]);
     expect(events.map((e) => [e.seq, e.id])).toEqual([
       [1, "message.received:c1:new"],
       [2, "message.sent:c1:me_1"],
@@ -50,7 +54,6 @@ describe("the event stream", () => {
       [7, "chat.created:c2"],
       [8, "chat.renamed:c2:1000"],
       [9, "chat.removed:c1"],
-      [10, "call.offer:c2:1000"],
     ]);
     expect(events[0]).toMatchObject({ type: "message.received", chat: "c1", message: { id: "new", from: "peer", text: "t new" } });
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
