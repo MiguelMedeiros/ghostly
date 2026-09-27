@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2.5 |
-| Updated | 2026-09-26 |
+| Revision | 0.2.6 |
+| Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
 | Implementation | The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, `on-dht`, self-upgrade, DHT only per chat; compatibility chats for v0.4 |
@@ -166,6 +166,27 @@ The timeline records what matters to the people in the chat, not every reconnect
 7. **Connection history.** Every event, including what the timeline leaves out (drops it came back from, app starts, failed attempts, the round trip on each stretch), goes to the chat's connection history, shown in its connection panel, newest first.
 8. **Stored rows** written under older rules are compacted by these on load: restart and short-drop rows go, a "lost" and "back" pair becomes one outage row, and the old rows seed the connection history. Messages are untouched.
 
+## Replies
+
+A message may answer an earlier message of the same chat (revision 0.2.6). It carries a **reply**: the id both sides know the original by, a short line of it, and who wrote it. The line lets the reply read on its own when the reader no longer has the original (deleted there, or never received); the id is what the reader trusts.
+
+| Field | Meaning |
+|---|---|
+| `i` | The original's id in this chat as both sides know it: a text's wire id, a payment's id or a file's wire id in a 1:1 chat ([401](401-paired-chat.md#replies)); the message id in a group ([mesh](9xx-group-mesh.md#replies), [community](9xx-group-community.md#replies)). 1 to 128 characters of `A-Z a-z 0-9 _ : . -`. |
+| `s` | A line of the original: plain text on one line (line breaks and runs of spaces become one space), without control, invisible or direction characters (the rules names follow, [401](401-paired-chat.md#name-and-picture)), at most **120** code points, the last an ellipsis when it was cut. A voice message, a file or a payment is quoted by the line its chat shows for it ("🎤 Voice message (0:04)", "📎 report.pdf", "⚡ 100 sats"); a picture sent inline as "🖼️ Picture". |
+| `f` | Who wrote the original: in a 1:1 chat `"sender"` (the reply's author) or `"recipient"` (its reader); in a group, the author's member key. |
+
+A receiver MUST drop a reply that is not an object of these three strings, whose `i` does not match, whose `s` is longer than 2,048 characters, or whose `f` is not one of its chat's authors, and keep the message. It MUST clean and cut `s` again, whatever the sender did. It looks for the original **in this chat only**, by `i`:
+
+- **Found**: the quote shows the original as this device has it (its line, its author), not what the wire said. A tap on the quote scrolls to it and marks it for a moment.
+- **Found, then deleted here**: the quote says "Original message deleted".
+- **Not found** (never received here, or named from another chat): the quote shows the wire's line, marked as not found in this chat. It proves nothing about the original; the app never presents it as checked.
+- **Only the id came** (a reply over the DHT, [403](403-dht-text.md#replies)) and nothing here has it: "Original message not available".
+
+A reply is started from the message's ⋮ (Reply), a reply button beside the message for a pointer, or a swipe towards the end of the line on a touch screen. The composer shows the message being answered above the field, with ✕; Escape lets go of it too, once whatever else the composer has open is closed. A message whose row only this device has (a notice, a group's payment line, an identity shared in the timeline, which is local, [300](300-peer-proofs.md)) cannot be answered. Files, voice messages and payments cannot carry a reply yet: only text does. Ghostly's message rows do not take the keyboard focus, so there is no reply shortcut; the reply button is reachable with Tab.
+
+**Older apps.** The reply is an optional field, which an app from before this revision ignores: it shows the text alone. No quote is copied into the text for it (no "> …" prefix): a reply's text reads on its own in a conversation, as it does when people answer each other without quoting, and a prefix would be shown twice by every app that knows replies, sent to the DHT's 256 bytes, and counted against every bound.
+
 ## Candidate semantics
 
 Future messages need a stable sender-scoped message ID, authenticated channel/participation context, sequence within a sender generation, content type and bounded body. Distinguish locally queued, sent, received, durably stored and read; only advertise receipts actually implemented. Retries reuse IDs. Deduplication retention must cover the declared retry window and survive restart where durable delivery is promised.
@@ -200,6 +221,7 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
+- 0.2.6 (2026-09-27): replies: the original's id, a line of it and its author with a message; checked against this chat only; no text prefix for older apps.
 - 0.2.5 (2026-09-26): after the pin, another key on invite-derived channels (DHT mailbox, signals, a native connection dialled in) is ignored with a passive warning, not a stop; only an authenticated session this side can trust proves a key change.
 - 0.2.4 (2026-09-25): link previews ride layer 1 only; places in a text show as a location card whose map loads on request.
 - 0.2.3 (2026-09-25): transport rows record what matters (first connection, a change of transport, choices, a failed switch, an outage when it ends), not every reconnect or restart; everything else goes to the connection history.

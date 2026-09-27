@@ -72,7 +72,8 @@
       "copied": "Copiado",
       "keysHint": "Chaves nunca aparecem aqui.",
       "options": "Opções da mensagem",
-      "copyHint": "Clique para copiar"
+      "copyHint": "Clique para copiar",
+      "reply": "Responder"
     },
     "options": "Opções",
     "menu": {
@@ -99,6 +100,16 @@
       "localTime": "{{time}} no seu horário",
       "code": "Código",
       "unshowable": "Não foi possível mostrar esta mensagem."
+    },
+    "reply": {
+      "you": "Você",
+      "cancel": "Cancelar resposta",
+      "deleted": "Mensagem original apagada",
+      "unavailable": "Mensagem original indisponível",
+      "unverified": "Não encontrada nesta conversa",
+      "notHere": "A original não está nesta conversa",
+      "jump": "Ir para a mensagem original",
+      "replyingTo": "Respondendo a {{name}}"
     }
   },
   "group": {

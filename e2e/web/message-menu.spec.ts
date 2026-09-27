@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, say, test } from "../support/fixtures";
 
 /**
- * A message's ⋮ menu (Details, Delete message) and its delete confirmation are whole and on top: inside the window
+ * A message's ⋮ menu (Reply, Details, Delete message) and its delete confirmation are whole and on top: inside the window
  * and the chat's message list, and the element under every part of them is theirs, not the list's or the sidebar's.
  * Next to a wide bubble of mine the menu opens towards the chat list; the message list used to cut it off there.
  */

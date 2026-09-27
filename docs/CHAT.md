@@ -66,6 +66,7 @@ Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #2
 - **Voice messages** (#214): the mic takes the Send button's place while the text is empty. Hold to record, slide to cancel, slide up to lock. Recorded as Opus when the browser can; a file that `<audio>` refuses plays through a WAV fallback (`packages/core/src/voice.ts`, `src/lib/voiceDecode.ts`).
 - **Secret guard** (#283): asks before a seed, a private key or a Cashu token goes out as text ([WALLETS.md](WALLETS.md#secret-guard)).
 - **Mentions** (#279): `@` in a group picks a member. A mention is bound to the member's key. Paired chats have no mentions.
+- **Replies** (#347): answer a message from its ⋮ (Reply), the reply button beside it, or a swipe right on a touch screen. The composer shows what you answer (✕ or Escape to let go); the reply's bubble quotes it, and a tap jumps to the original. The reply names the original by the id both sides know it by, with a short line of it, so it still reads where the original is gone ([WISP 400](wisps/400-chat.md#replies)). Only text carries a reply.
 
 ## How messages render
 
@@ -80,6 +81,7 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 | Location cards | `geo:` URIs and Google, Apple or OpenStreetMap links with coordinates. The map loads only on "Show map". | #280 |
 | Mentions | a chip with the member's current name (groups) | #279 |
 | Identity shares | a small ID card in the timeline, local only ([IDENTITIES.md](IDENTITIES.md#sharing-in-a-chat)) | #308 |
+| Reply quotes | the original's author and a line of it above the text; checked against this chat, else marked (not found here, deleted, not available) | #347 |
 
 **Bounds** (#301): JSON at most 4 KiB and 32 levels, URIs past 4 KiB stay text, a peer's timestamp is clamped to now + 5 min, every bubble has its own error boundary (`MessageBoundary`), atoms sit in `<bdi>`, and non-ASCII links show as punycode.
 

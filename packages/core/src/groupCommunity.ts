@@ -9,6 +9,7 @@ import {
 } from "./groupCrypto";
 import { GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
 import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
+import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import {
   encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaFrame,
@@ -277,7 +278,7 @@ export interface CommunityState {
   meta?: GroupMeta;
 }
 
-export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[] }
+export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply }
 /**
  * What an application sends through the group rather than as text: `frame` for everyone in the epoch (the group
  * reads it, as it reads text), or, in `pair`, a payload only `to` can open. Delivered once, like a message: the
@@ -913,18 +914,21 @@ export class CommunitySession {
 
   /**
    * `mentions`: places of the text that name members, sealed with it (`m`). Never everyone in a community. They
-   * count against the text's 16 KiB, so the box stays within what older apps accept.
+   * count against the text's 16 KiB, so the box stays within what older apps accept. `reply`: the message it
+   * answers (`r`), counted the same way.
    */
-  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = []): Promise<{ id: string } | { error: string }> {
+  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       const trimmed = text.trim();
       if (!trimmed) return { error: "Nothing to send" };
       const named = validMentions(wireMentions(mentions), trimmed, false);
-      if (utf8Encode(trimmed).length + mentionsBytes(named) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
-      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}) }), nick, now);
+      const answers = reply && readReply(wireReply(reply), groupReplyAuthor);
+      const replyBytes = answers ? utf8Encode(JSON.stringify(answers)).length : 0;
+      if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
+      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}) }), nick, now);
       if ("error" in sent) return sent;
-      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}) });
+      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}) });
       await this.persist();
       this.hooks.broadcast(sent.frame);
       return { id: sent.id };
@@ -1070,7 +1074,7 @@ export class CommunitySession {
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
     if (payload === null) return false;
-    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown };
+    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown };
     try { parsed = JSON.parse(payload) as typeof parsed; } catch { return false; }
     if (!isObject(parsed)) return false;
     const text = typeof parsed.text === "string" ? parsed.text.slice(0, COMMUNITY_LIMITS.textBytes) : undefined;
@@ -1081,7 +1085,9 @@ export class CommunitySession {
     const id = communityMessageId(raw.s, raw.e, raw.h, raw.n);
     if (text !== undefined) {
       const mentions = validMentions(parsed.m, text, false);
-      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}) });
+      // A reply that does not hold is left out, never the text.
+      const reply = parsed.r === undefined ? undefined : readReply(parsed.r, groupReplyAuthor);
+      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}) });
     }
     else if (isObject(parsed.x)) await this.hooks.app?.({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x });
     else {

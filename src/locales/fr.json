@@ -72,7 +72,8 @@
       "copied": "Copié",
       "keysHint": "Les clés ne sont jamais affichées ici.",
       "options": "Options du message",
-      "copyHint": "Cliquer pour copier"
+      "copyHint": "Cliquer pour copier",
+      "reply": "Répondre"
     },
     "options": "Options",
     "menu": {
@@ -99,6 +100,16 @@
       "localTime": "{{time}} chez vous",
       "code": "Code",
       "unshowable": "Impossible d'afficher ce message."
+    },
+    "reply": {
+      "you": "Vous",
+      "cancel": "Annuler la réponse",
+      "deleted": "Message d'origine supprimé",
+      "unavailable": "Message d'origine indisponible",
+      "unverified": "Introuvable dans cette discussion",
+      "notHere": "L'original n'est pas dans cette discussion",
+      "jump": "Aller au message d'origine",
+      "replyingTo": "Réponse à {{name}}"
     }
   },
   "group": {

@@ -72,7 +72,8 @@
       "copied": "Copiato",
       "keysHint": "Le chiavi non vengono mai mostrate qui.",
       "options": "Opzioni del messaggio",
-      "copyHint": "Clicca per copiare"
+      "copyHint": "Clicca per copiare",
+      "reply": "Rispondi"
     },
     "options": "Opzioni",
     "menu": {
@@ -99,6 +100,16 @@
       "localTime": "{{time}} nel tuo fuso orario",
       "code": "Codice",
       "unshowable": "Impossibile mostrare questo messaggio."
+    },
+    "reply": {
+      "you": "Tu",
+      "cancel": "Annulla risposta",
+      "deleted": "Messaggio originale eliminato",
+      "unavailable": "Messaggio originale non disponibile",
+      "unverified": "Non trovato in questa chat",
+      "notHere": "L'originale non è in questa chat",
+      "jump": "Vai al messaggio originale",
+      "replyingTo": "Risposta a {{name}}"
     }
   },
   "group": {

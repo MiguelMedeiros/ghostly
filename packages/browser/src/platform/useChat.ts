@@ -105,8 +105,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
     };
   }, [linkId]);
 
+  /** `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies). */
   const publish = useCallback(
-    async (message: ChatMessage): Promise<string | null> => {
+    async (message: ChatMessage, replyTo?: string): Promise<string | null> => {
       if (!profile) {
         const updated = addMessage(sessionId, message);
         if (updated) setMessages([...updated.messages]);
@@ -124,6 +125,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
         text: message.text,
         timestamp: message.timestamp,
         ...(profile && message.preview && { preview: message.preview }),
+        ...(profile && replyTo && { replyTo }),
       });
       // Refused: the copy kept here for a legacy chat goes too, so it never shows as sent.
       if (refused && !profile) {
@@ -170,7 +172,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [canAnnounce, linkId, sessionId, messages, announce]);
 
   const sendMessage = useCallback(
-    async (text: string, extra?: { preview?: LinkPreview }): Promise<string | null> => {
+    async (text: string, extra?: { preview?: LinkPreview; replyTo?: string }): Promise<string | null> => {
       if (isBurned) return "Chat has been burned";
       const trimmed = text.trim();
       if (!trimmed) return null;
@@ -192,7 +194,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
             dnsRecords: open ? ["webrtc"] : ["_msgs", "_ts", "_ack", ...(nickRef.current ? ["_nick"] : [])],
             packetTimestamp: timestamp,
           },
-        });
+        }, profile ? extra?.replyTo : undefined);
       } catch (error) {
         return error instanceof Error ? error.message : "Failed to send message. Check your connection.";
       } finally {

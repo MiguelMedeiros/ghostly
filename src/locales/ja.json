@@ -72,7 +72,8 @@
       "copied": "コピーしました",
       "keysHint": "鍵はここには表示されません。",
       "options": "メッセージのオプション",
-      "copyHint": "クリックしてコピー"
+      "copyHint": "クリックしてコピー",
+      "reply": "返信"
     },
     "options": "オプション",
     "menu": {
@@ -99,6 +100,16 @@
       "localTime": "あなたの時刻で {{time}}",
       "code": "コード",
       "unshowable": "このメッセージは表示できませんでした。"
+    },
+    "reply": {
+      "you": "あなた",
+      "cancel": "返信をキャンセル",
+      "deleted": "元のメッセージは削除されました",
+      "unavailable": "元のメッセージは利用できません",
+      "unverified": "このチャットに見つかりません",
+      "notHere": "元のメッセージはこのチャットにありません",
+      "jump": "元のメッセージへ移動",
+      "replyingTo": "{{name}} に返信"
     }
   },
   "group": {

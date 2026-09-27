@@ -4,7 +4,7 @@ import { HoldEngine, emptyHoldState, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import type { HoldStore, StoredBackup } from "../src/backup/storage";
 import type { HoldState, StoredLink } from "../src/shared/types";
-// covers: files.voice.meta, delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
+// covers: chat.replies.wire, files.voice.meta, delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
 
 /**
  * A bucket in memory that hands out presigned addresses the way S3 does, and a relay in memory: two
@@ -46,7 +46,8 @@ interface Side {
   engine: HoldEngine;
   stored: StoredLink;
   messages: Map<string, { text?: string; file?: { name: string; size: number; mime: string }; request?: PaymentRequest; timestamp: number }>;
-  received: { kind: string; id: string; text?: string; name?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; timestamp: number }[];
+  received: { kind: string; id: string; text?: string; name?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; reply?: unknown; timestamp: number }[];
+  replies: Map<string, { i: string; s: string; f: string }>;
   delivery: Map<string, { state: string; error?: string }>;
   files: Map<string, { bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta }>;
   requests: Map<string, PaymentRequest>;
@@ -60,7 +61,7 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
   const transport = relay();
   const buckets = { alice: bucket(), bob: bucket() };
   const make = (mine: StoredLink, storageOn: boolean, own: typeof buckets.alice, other: typeof buckets.alice): Side => {
-    const side: Partial<Side> = { stored: mine, messages: new Map(), received: [], delivery: new Map(), files: new Map(), requests: new Map(), open: false };
+    const side: Partial<Side> = { stored: mine, messages: new Map(), received: [], delivery: new Map(), files: new Map(), requests: new Map(), replies: new Map(), open: false };
     const host: HoldHost = {
       transport,
       storage: () => (storageOn ? { store: own.store, space: "abcdefghijklmnop" } : null),
@@ -69,9 +70,10 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       saveHold: async (_id, hold) => { side.stored = { ...side.stored!, hold: structuredClone(hold) }; },
       delivery: async (_id, messageId, state, error) => { side.delivery!.set(messageId, { state, error }); },
       text: async (_id, messageId) => side.messages!.get(messageId)?.text ?? null,
+      reply: async (_id, messageId) => side.replies!.get(messageId),
       file: async (fileId) => side.files!.get(fileId) ?? null,
       paymentRequest: (paymentId) => side.requests!.get(paymentId) ?? null,
-      receiveText: async (_id, m) => { side.received!.push({ kind: "text", id: m.id, text: m.text, timestamp: m.timestamp }); },
+      receiveText: async (_id, m) => { side.received!.push({ kind: "text", id: m.id, text: m.text, timestamp: m.timestamp, ...(m.reply && { reply: m.reply }) }); },
       receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, bytes, timestamp: f.timestamp, ...(f.voice && { voice: f.voice }) }); return null; },
       receivePaymentRequest: async (_id, request) => { side.received!.push({ kind: "pay-req", id: request.id, request, timestamp: request.timestamp }); },
       changed: () => {},
@@ -92,6 +94,22 @@ const engines: HoldEngine[] = [];
 afterEach(async () => { for (const e of engines.splice(0)) await e.stop(); vi.useRealTimers(); });
 
 describe("store-and-forward engine", () => {
+  it("a held text that replies carries the reply in its sealed header, and the contact gets it beside the text", async () => {
+    const { a, b, buckets } = setup();
+    engines.push(a.engine, b.engine);
+    const reply = { i: "B".repeat(22), s: "the plan for friday", f: "recipient" };
+    a.messages.set("me_r1", { text: "yes, that one", timestamp: 1000 });
+    a.replies.set("me_r1", reply);
+    a.messages.set("me_r2", { text: "and a plain one", timestamp: 2000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-reply-1", messageId: "me_r1", bytes: 13, timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-plain-1", messageId: "me_r2", bytes: 15, timestamp: 2000 });
+    for (const bytes of buckets.alice.store.objects.values()) expect(new TextDecoder("utf-8", { fatal: false }).decode(bytes)).not.toMatch(/the plan/);
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(2));
+    expect(b.received[0]).toMatchObject({ id: "wire-reply-1", text: "yes, that one", reply });
+    expect(b.received[1]).not.toHaveProperty("reply");
+  });
+
   it("holds text, a file and a payment request in order, the contact picks them up in order and the sender sees them delivered", async () => {
     const { a, b, buckets, transport } = setup();
     engines.push(a.engine, b.engine);

@@ -14,6 +14,7 @@ import {
 import type { ChatMessage, ChatSession } from "../../../../src/lib/types";
 import type { LinkView, StoredMessage } from "../shared/types";
 import { engine } from "./engine";
+import { replyRef } from "../shared/replies";
 
 /**
  * The Desktop UI keeps its sessions in localStorage and that stays the list
@@ -51,6 +52,8 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     file: message.file,
     paymentId: message.paymentId,
     ...(message.preview && { preview: message.preview }),
+    ...(modern && replyRef(message) && { ref: replyRef(message) }),
+    ...(message.replyTo && { replyTo: message.replyTo }),
     meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,

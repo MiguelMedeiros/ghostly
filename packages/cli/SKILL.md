@@ -60,6 +60,7 @@ ghostly send alice --wait delivered "Got it"       # waits for the contact's app
 ghostly send alice -- "-text that starts with a dash"
 ghostly typing alice                               # "typing…" on the contact's screen for 6 s; again while composing
 ghostly typing alice --stop                        # or just send: the message ends it
+ghostly send alice --reply peer_jY7N… "Yes, that one"  # quotes a message of the chat (its id from history or an event)
 ghostly chat history alice --limit 20              # oldest first
 ghostly chat list
 ```
@@ -75,6 +76,8 @@ ghostly listen --type message.received            # one JSON object per line, un
 ```
 
 - Dedupe on `id`. Resume after a restart with `--since <seq>`, or pass `--cursor <file>` and it remembers.
+- A reply carries `message.replyTo`: `{id, snippet, from, found}` (`from`: me, peer or null). Answer in the same
+  thread with `ghostly send <chat> --reply "$(jq -r .message.id <<<"$event")" "…"`.
 - Useful types: `message.received`, `message.delivery`, `chat.created`, `chat.joined` (a contact arrived: not a
   message, do not answer it as one), `chat.connection`, `group.message` (with `message.mentioned: true` when it
   names this bot), `group.members`, `typing.started` / `typing.stopped` (the contact is writing, or stopped).
@@ -95,6 +98,7 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
 ghostly group create "Support"                     # a community: {"group","link"}; share the link
 ghostly group join "<group2/… link>"
 ghostly group send Support "hi @Ana" --mention Ana # the mentioned member is written as @name in the text
+ghostly group send Support --reply <message id> "on it"  # a reply in the group
 ghostly group history Support
 ```
 

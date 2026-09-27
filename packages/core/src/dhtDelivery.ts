@@ -36,14 +36,17 @@ export const LIVE_POLL_MS = 5 * 60_000;
  */
 export const ACTIVE_DHT_POLL_MS = 10_000;
 const ID = /^[A-Za-z0-9_-]{22}$/;
+/** What a text may reply to over the DHT: a message, file or payment id of this chat (WISP 401 § Replies). */
+const REPLY_TO = /^[A-Za-z0-9_-]{8,64}$/;
 type Message = [id: string, timestamp: number, text: string];
 /**
  * The ninth element, the author's capability-record revision (WISP 03), is optional; readers ignore
  * trailing elements they do not know. The signature covers all of them. The tenth is the pinned mailbox
  * (WISP 403, revision 0.3): `1`, the author can use it; `2`, the author knows the reader can too, and reads
- * there first. A ninth element then goes as `null` when there is no revision to name.
+ * there first. A ninth element then goes as `null` when there is no revision to name. The eleventh, with a text only,
+ * is the id of the message it replies to (WISP 403 § Replies): the id alone, which the reader looks up in its history.
  */
-type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2];
+type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string];
 /**
  * Before the contact said it can use the pinned mailbox, the invite's mailbox is read. When that held a packet but
  * nothing from the contact (expired, or someone else's), the pinned one is looked in too, no more often than this:
@@ -60,7 +63,8 @@ export interface DhtDeliveryState {
    * there first from `can` on and publishes there from `reads` on; from `seen` on it reads only there.
    */
   peerPinned?: "can" | "reads" | "seen";
-  pending?: { message: Message; expires: number; attempts: number; next: number };
+  /** `reply`: the id of the message the text replies to, published with it (the eleventh element). */
+  pending?: { message: Message; expires: number; attempts: number; next: number; reply?: string };
   /**
    * The receipt this side owes for the contact's last text. `next`: when it forces a publication again (absent: at
    * once). `settled`: the contact's newer envelope no longer carries that text (it has a receipt, on either path, or
@@ -145,7 +149,7 @@ export class DhtDelivery {
     credentials: PairingCredentials; transport: PkarrTransport;
     save(state: DhtDeliveryState): Promise<void>;
     pin(key: string): Promise<void>;
-    message(message: { id: string; text: string; timestamp: number }, packet: DhtPacketFacts): Promise<void>;
+    message(message: { id: string; text: string; timestamp: number; reply?: { i: string } }, packet: DhtPacketFacts): Promise<void>;
     receipt(id: string): Promise<void>;
     changed(view: DhtDeliveryView): void;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -274,27 +278,32 @@ export class DhtDelivery {
     this.active = active;
     if (active && !this.live) void this.tick(); else this.schedule();
   }
-  validate(text: string, timestamp: number, id: string): string | null {
+  validate(text: string, timestamp: number, id: string, reply?: string): string | null {
     // Every chat's first contact runs here too (WISP 403): before the pin the text is sealed with the invite key.
     if (this.options.peerAcceptsText?.() === false) return DHT_TEXT_REFUSED;
-    if (!ID.test(id) || !Number.isSafeInteger(timestamp) || timestamp <= 0) return "Invalid message.";
+    if (!ID.test(id) || !Number.isSafeInteger(timestamp) || timestamp <= 0 || (reply !== undefined && !REPLY_TO.test(reply))) return "Invalid message.";
     if (utf8Encode(text).length > DHT_TEXT_BYTES) return `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
     if (/cashu[AB][A-Za-z0-9_-]+/i.test(text)) return "Payment tokens cannot be sent through DHT delivery.";
     const now = Date.now(), pending = this.state.pending;
     if (pending && pending.expires > now && pending.message[0] !== id) return "One DHT text can await a receipt at a time. Wait for its receipt or expiry before sending another.";
     if (pending?.message[0] === id && pending.expires > now && pending.attempts >= MAX_ATTEMPTS) return "DHT retry budget exhausted. Wait for expiry before retrying this message.";
-    const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now };
-    // Validate the complete encrypted DNS packet before accepting local intent.
-    try { this.records(this.body(this.state.sequence + 1, now, next.expires, next.message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv"), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); }
-    catch (error) { return error instanceof Error ? error.message : String(error); }
-    return null;
+    const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }) };
+    // Validate the complete encrypted DNS packet before accepting local intent. A text near the bound goes without the
+    // id of the message it replies to when both do not fit: the text is what matters.
+    const error = this.packetError(next.message, next.expires, next.reply);
+    return error && next.reply ? this.packetError(next.message, next.expires) : error;
   }
-  async send(text: string, timestamp: number, id: string): Promise<string | null> {
+  private packetError(message: Message, expires: number, reply?: string): string | null {
+    try { this.records(this.body(this.state.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
+    catch (error) { return error instanceof Error ? error.message : String(error); }
+  }
+  async send(text: string, timestamp: number, id: string, reply?: string): Promise<string | null> {
     return this.serialize(async () => {
-      const error = this.validate(text, timestamp, id);
+      const error = this.validate(text, timestamp, id, reply);
       if (error) return error;
       const now = Date.now(), pending = this.state.pending;
-      const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now };
+      let next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }) };
+      if (next.reply && this.packetError(next.message, next.expires, next.reply)) { const { reply: _dropped, ...alone } = next; next = alone; }
       await this.persist({ ...this.state, pending: next }); this.changed();
       // The next read comes at the pace for a text awaiting its receipt.
       try { await this.publish(true); this.schedule(); return null; }
@@ -325,11 +334,12 @@ export class DhtDelivery {
       this.changed();
     });
   }
-  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null): Body {
+  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string): Body {
     const rev = this.options.capsRev?.();
     const body: Body = [1, sequence, issued, expires, this.participation.pubKeyZ32, this.mode, message, receipt];
     // Whether it has a revision to name or not, the ninth element holds the place of the tenth: this side uses the pinned mailbox.
     body.push(rev !== undefined && Number.isSafeInteger(rev) && rev >= 0 ? rev : null, this.state.peerPinned ? 2 : 1);
+    if (message && reply) body.push(reply);
     return body;
   }
   private async publish(force = false): Promise<void> {
@@ -342,7 +352,7 @@ export class DhtDelivery {
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
     if (!force && (!pending || pending.next > now) && !receiptDue && this.controlDue > now) return;
     const expires = pending?.expires ?? now + CONTROL_TTL;
-    const body = this.body(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null);
+    const body = this.body(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply);
     const records = this.records(body);
     // In the pinned mailbox once the contact said it reads there; until then where an older app looks.
     const identity = (this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
@@ -392,7 +402,7 @@ export class DhtDelivery {
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return "none"; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return "none";
     const [body, signature] = envelope as [Body, string];
-    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox] = body;
+    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo] = body;
     const now = Date.now();
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || issued > now + 30_000 || expires <= now || expires - issued > CONTROL_TTL || issued >= expires ||
@@ -427,7 +437,9 @@ export class DhtDelivery {
     if (message) {
       // The text this side owes a receipt for was stored already (the receipt is saved only after it): a retransmission
       // that crossed the receipt, or the same envelope moved to the pinned mailbox, is not handed over twice.
-      if (nextReceipt?.id !== message[0]) await this.options.message({ id: message[0], timestamp: message[1], text: message[2] }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
+      // A reply's id that is not one is dropped, never the text (readers from before ignore the element).
+      const reply = typeof replyTo === "string" && REPLY_TO.test(replyTo) ? { reply: { i: replyTo } } : {};
+      if (nextReceipt?.id !== message[0]) await this.options.message({ id: message[0], timestamp: message[1], text: message[2], ...reply }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
       if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires, attempts: 0 };
       // Asked for again (the text sent anew after a lost session): its receipt goes at once again.
       else if (nextReceipt.settled) { const { settled: _settled, next: _next, ...asked } = nextReceipt; nextReceipt = asked; }

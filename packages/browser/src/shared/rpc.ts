@@ -137,7 +137,8 @@ export interface EngineApi {
   /** `refused`: the text was not kept (it cannot be sent this way); any other error leaves it to be sent later. */
   /** `preview`: a link preview made by this app (WISP 401 § Link previews); checked against the text, dropped if off. */
   /** `messageId`: the message kept in the chat (absent when nothing was kept). */
-  sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview }): { error: string | null; refused?: boolean; messageId?: string };
+  /** `replyTo`: the id of a message of this chat the text answers (WISP 400 § Replies). */
+  sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): { error: string | null; refused?: boolean; messageId?: string };
   retryMessage(params: { linkId: string; messageId: string }): void;
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
@@ -247,7 +248,8 @@ export interface EngineApi {
   /** Joins through a group's link (`group1/…`, or an address carrying it); resolves at once, admission follows. */
   joinGroupByLink(params: { link: string }): { groupId: string };
   /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
-  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[] }): { error: string | null };
+  /** `replyTo`: the id of a message of this group the text answers (WISP 9xx § Replies). */
+  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): { error: string | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
   leaveGroup(params: { groupId: string }): void;
   removeGroupMember(params: { groupId: string; key: string }): void;

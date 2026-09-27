@@ -209,7 +209,8 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
-    const result = await node(ctx).sendMessage({ linkId: link.id, text });
+    const replyTo = str(params, "reply");
+    const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
@@ -324,7 +325,8 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", "The text looks like a secret or a Cashu token; send it with --force if you mean to", { kind: secret.kind });
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
-    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}) });
+    const replyTo = str(params, "reply");
+    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}) });
     if (result.error) throw new CliError("unavailable", result.error);
     return { group: group.id, sent: true };
   },

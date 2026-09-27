@@ -17,6 +17,7 @@ import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
 import type { GroupMention } from "@ghostly/core";
 import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
+import { ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import "./composer/composer.css";
 
@@ -74,6 +75,11 @@ interface MessageInputProps {
   linkPreviews?: boolean;
   /** Typing (a paired chat): true on a keystroke that leaves text, false when the text is cleared or sent. */
   onTyping?: (typing: boolean) => void;
+  /**
+   * The message being answered (WISP 400 § Replies), shown above the field with ✕; Escape cancels too. The page keeps
+   * it and sends it with the text. A new `key` (another message) brings the focus to the field.
+   */
+  reply?: { key: string; name?: string; snippet: string; mine: boolean; onCancel: () => void };
 }
 
 const DEFAULT_MAX = 500;
@@ -103,6 +109,7 @@ export function MessageInput({
   recipient,
   linkPreviews = false,
   onTyping,
+  reply,
 }: MessageInputProps) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -135,6 +142,12 @@ export function MessageInput({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // Answering a message: the words go in the field at once, as in WhatsApp.
+  const replyKey = reply?.key;
+  useEffect(() => {
+    if (replyKey) textareaRef.current?.focus({ preventScroll: true });
+  }, [replyKey]);
 
   useEffect(() => {
     // A draft holding a seed or a key is not written to storage; ecash is, since the draft may be its only copy.
@@ -183,6 +196,8 @@ export function MessageInput({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (picker.onKeyDown(e)) return;
+    // Whatever the composer has open over it closes first; then Escape lets go of the message being answered.
+    if (e.key === "Escape" && reply && !showPanel && !showMenu && !showPayment && !showIdentities) { e.preventDefault(); e.stopPropagation(); reply.onCancel(); return; }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -318,6 +333,7 @@ export function MessageInput({
           </div>
         </div>
       )}
+      {reply && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {linkPreview.draft && <LinkPreviewDraftCard draft={linkPreview.draft} onRemove={linkPreview.remove} />}
       <div className="composer-row flex items-end gap-2 relative">
         {/* One rounded field: the +, the emoji/GIF panel's smiley and the message. */}

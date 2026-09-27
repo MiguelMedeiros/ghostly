@@ -54,10 +54,11 @@ test("a voice message downloads from its ⋮ menu, under a readable name, the sa
   await expect(received.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
   const message = voiceRow(bob);
 
-  // Download, then Details, then Delete last.
+  // Reply, then Download, then Details, then Delete last.
   const items = await openMenu(bob.page, message);
-  expect(items[0]).toBe("message-download");
-  expect(items.indexOf("message-details")).toBe(1);
+  expect(items[0]).toBe("message-reply");
+  expect(items[1]).toBe("message-download");
+  expect(items.indexOf("message-details")).toBe(2);
   await expect(bob.page.getByTestId("message-download")).toBeEnabled();
   await bob.page.keyboard.press("Escape");
 

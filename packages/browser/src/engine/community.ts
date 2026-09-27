@@ -2,9 +2,10 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  type CommunityFrame, type GroupMention, type CommunityState, type GroupEntryLink, type Hub, type Roster,
+  type CommunityFrame, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type Hub, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
+import { groupReply } from "../shared/replies";
 import { mentionAt, mentionFields, type GroupStore, type GroupsHost } from "./groups";
 import { traceJoin } from "./joinTrace";
 
@@ -296,10 +297,10 @@ export class Communities {
     void this.knock(group, since).catch(() => {});
   }
 
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = []): Promise<{ error: string | null }> {
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply): Promise<{ error: string | null }> {
     const live = this.live.get(groupId);
     if (!live) return { error: "You are not in this group yet" };
-    const result = await live.session.sendText(text, this.host.myNick?.(), Date.now(), mentions);
+    const result = await live.session.sendText(text, this.host.myNick?.(), Date.now(), mentions, reply);
     return "error" in result ? { error: result.error } : { error: null };
   }
 
@@ -937,7 +938,7 @@ export class Communities {
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, timestamp));
         await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned) });
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }) });
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, timestamp));
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.

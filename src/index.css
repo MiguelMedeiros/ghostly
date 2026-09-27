@@ -703,6 +703,11 @@ body {
 :root[data-reduce-motion="true"] .typing-dots > span { animation: none; }
 @media (prefers-reduced-motion: reduce) { .typing-dots > span { animation: none; } }
 
+/* The message a reply's quote was tapped for, for a moment (src/lib/replies.ts): a tint, not a motion. */
+[data-message-row] { transition: background-color 0.4s ease-out; }
+[data-message-row][data-reply-flash] { background-color: color-mix(in srgb, var(--color-accent) 16%, transparent); }
+[data-message-row][data-reply-flash] [data-message-bubble] { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
 /* The user's choice in Settings, or the system's. */
 :root[data-reduce-motion="true"] *,
 :root[data-reduce-motion="true"] *::before,

@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.6 |
+| Revision | 0.7 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
@@ -61,6 +61,16 @@ The sender reads the page's Open Graph and Twitter card tags (for YouTube and Vi
 
 The frame with `pv` stays under 56 KiB, below the 60 KiB a session takes: a sender leaves `pv` out rather than send a larger frame. `pv` travels only on this session. The DHT ([403](403-dht-text.md)) and held items ([4xx](4xx-store-and-forward.md)) carry the text without it. Groups ([900](900-group-sessions.md)) do not carry previews yet: their sealed boxes are bounded for 16 KiB of text, and a larger box would make older members drop the frame.
 
+### Replies
+
+A `paired-message` MAY carry `r`, the message it answers ([400](400-chat.md#replies), revision 0.7): `{"i": <id>, "s": <line>, "f": "sender" | "recipient"}`. `i` is the original's id as both sides know it: the `id` of a `paired-message` (22 characters), a payment's `id`, or a file's wire `id`; never the local row id, which each side makes up for itself. `f` is from the side of the reply's author: `"sender"` when the author wrote the original, `"recipient"` when the reader did.
+
+```
+{ "t": "paired-message", "id", "ts", "m", "pv"?, "r"?: { "i", "s", "f" } }
+```
+
+The reader looks for `i` among this chat's own messages only; what it finds there gives the line and the author, and the wire's `s` and `f` are shown only when it finds nothing, marked as unchecked. A reply is a few hundred bytes at most and always goes: when the frame would pass 56 KiB, `pv` is left out, never `r`. Over the DHT only `i` travels ([403](403-dht-text.md#replies)); a held text carries `r` in its header ([4xx](4xx-store-and-forward.md#bundle)). A text sent again after a lost session goes with the same `r`. Older apps ignore the field.
+
 ### Liveness and reconnection
 
 A connection can die without either side being told (a laptop asleep, an app suspended in the background, a network change). While a session is ready, each side sends `{"t":"paired-ping"}` every 15 seconds and answers each one with `{"t":"paired-pong"}`. Any frame from the peer counts as a sign of life. Three pings in a row with nothing back close the session and its connection, and the dialling side tries again. This counts from the open for a peer whose `pair-offer` lists `ping/1` in `extensions`, so a contact that freezes before the first ping (a laptop closed right after connecting) is noticed too; for a peer that does not say so, it counts once that peer has answered a ping, and a peer that never answers one (an older app) is never cut off for it. Missed pings are counted, not timed, so a throttled background tab is not mistaken for a dead peer.
@@ -99,6 +109,7 @@ First contact runs on the DHT and on a stream in parallel, and native transports
 
 ## Revision log
 
+- 0.7 (2026-09-27): replies (`r` on `paired-message`): the original's id, a cleaned line and its author, checked by the reader against this chat.
 - 0.6 (2026-09-27): the typing indicator, `typing/1` and `paired-typing` on the live session only, 1:1 chats.
 - 0.5.1 (2026-09-27): Desktop on Linux offers `calls/1` too, with its own call media (#331).
 - 0.5 (2026-09-25): link previews (`pv` on `paired-message`), made by the sender and never fetched by the reader.

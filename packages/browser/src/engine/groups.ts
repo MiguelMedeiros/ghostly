@@ -1,9 +1,10 @@
 import {
   GroupSession, MAX_GROUP_CHAIN, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type GroupMention, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
+  type GhostRecord, type GroupMention, type WireReply, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
+import { groupReply } from "../shared/replies";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, pictureText, type CommunityTimings } from "./community";
@@ -238,11 +239,11 @@ export class Groups {
     await this.forget(groupId);
   }
 
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = []): Promise<{ error: string | null }> {
-    if (this.isCommunity(groupId)) return this.communities.send(groupId, text, mentions);
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply): Promise<{ error: string | null }> {
+    if (this.isCommunity(groupId)) return this.communities.send(groupId, text, mentions, reply);
     const session = this.sessions.get(groupId);
     if (!session) return { error: "You are not in this group yet" };
-    const result = await session.sendText(text, Date.now(), mentions);
+    const result = await session.sendText(text, Date.now(), mentions, reply);
     return "error" in result ? { error: result.error } : { error: null };
   }
 
@@ -686,7 +687,7 @@ export class Groups {
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, timestamp));
         await this.host.storeMessage({ linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned) });
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }) });
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
       },
       changed: () => { void this.membershipChanged(state.id); },
