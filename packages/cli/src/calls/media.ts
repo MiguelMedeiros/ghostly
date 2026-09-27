@@ -121,6 +121,29 @@ export class CallMedia {
     const { ndc } = stack;
     const bind = process.env.GHOSTLY_CALL_BIND;
     const pc = new ndc.PeerConnection("ghostly-call", { iceServers: callIceServers(options.iceServers), ...(bind ? { bindAddress: bind } : {}) });
+    // Each line says how long after this connection was made it happened: the order of the connection's states and
+    // the contact's answer is what explains a call that failed as it connected. The states are heard from the start.
+    const born = Date.now();
+    const sink = options.log ?? (() => {});
+    const log = (line: string) => sink(`+${Date.now() - born}ms ${line}`);
+    let media: CallMedia | null = null;
+    pc.onSignalingStateChange((state) => { if (!media?.closed) log(`signaling ${state}`); });
+    pc.onIceStateChange((state) => {
+      if (media?.closed) return;
+      let pair: string | null = null;
+      if (state === "connected" || state === "completed") {
+        try { pair = describePair(pc.getSelectedCandidatePair()); } catch { /* none yet */ }
+      }
+      if (media) { media.iceState = state; if (state === "connected" || state === "completed") media.pair = pair; }
+      log(`ice ${state}${pair ? ` over ${pair}` : ""}`);
+    });
+    pc.onStateChange((state) => {
+      if (media?.closed) return;
+      log(`connection ${state}`);
+      if (!media) return;
+      if (state === "connected") options.onState("connected");
+      else if (state === "failed" || state === "closed") options.onState(state);
+    });
     try {
       const payloadType = offer?.ap ?? 111;
       const ssrc = randomBytes(4).readUInt32BE(0) || 1;
@@ -156,28 +179,15 @@ export class CallMedia {
         track: { send: (packet) => { if (track.isOpen()) track.sendMessageBinary(packet); }, onPacket: (listener) => listeners.push(listener) },
         encoder: stack.opus(options.rate), decoder: stack.opus(options.rate), onFrame: options.onFrame, queue: options.queue,
       });
-      const media = new CallMedia(pc, track, videoTrack, local, audio);
-      const log = (media.log = options.log ?? (() => {}));
+      media = new CallMedia(pc, track, videoTrack, local, audio);
+      media.log = log;
       // What each side offered to meet on: when a call does not connect, the log says between which addresses.
       log(`candidates here: ${(local.c ?? []).join(" | ") || "none"}`);
       if (offer) log(`contact's candidates: ${(offer.c ?? []).join(" | ") || "none"}`);
       try { media.iceState = pc.iceState(); } catch { /* keeps "new" */ }
       if (offer) mdnsNote(offer, log);
-      pc.onIceStateChange((state) => {
-        if (media.closed) return;
-        media.iceState = state;
-        if (state === "connected" || state === "completed") {
-          try { media.pair = describePair(pc.getSelectedCandidatePair()); } catch { media.pair = null; }
-          log(`ice ${state}${media.pair ? ` over ${media.pair}` : ""}`);
-        } else log(`ice ${state}`);
-      });
       track.onOpen(() => audio.start());
       if (track.isOpen()) audio.start();
-      pc.onStateChange((state) => {
-        if (media.closed) return;
-        if (state === "connected") options.onState("connected");
-        else if (state === "failed" || state === "closed") options.onState(state);
-      });
       return media;
     } catch (error) {
       pc.close();
@@ -190,6 +200,7 @@ export class CallMedia {
     this.log(`contact's candidates: ${(answer.c ?? []).join(" | ") || "none"}`);
     mdnsNote(answer, this.log);
     this.pc.setRemoteDescription(buildSdpFromSignal(answer), "answer");
+    this.log("answer applied");
   }
 
   get ice(): IceView {
