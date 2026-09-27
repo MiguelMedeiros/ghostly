@@ -180,6 +180,8 @@ A bot or an agent joins a voice call with the apps: the CLI takes part in [601](
 
 **Rules**, the apps' (`useWebRTC`): one call per chat; an offer rings only while that chat has none; an answer counts only after this side's offer; a hang-up ends whatever is on; a signal no newer than the last one handled is ignored; after a hang-up the signal is cleared 5 s later. The contact's app closes its connection as it hangs up, often before its hang-up signal arrives over the chat session: a call whose media closed waits 3 s for that signal, and without one a connection the contact closed still counts as its hang-up.
 
+**Diagnostics.** The daemon's log has, per call, the candidates each side offered, every ICE state and the pair it connected over; `call list` shows the ICE state and the pair (`stats.ice`). WebKit's candidates are mDNS names that often resolve nowhere: a call with the macOS app then connects only when the app's checks reach the CLI, which a VPN as the default route on the same Mac prevents (the app sends from the tunnel's address).
+
 **Evidence.** Unit tests (the queue, RTP, the socket, Opus at 48 and 16 kHz), two call managers over libdatachannel on loopback, two daemons calling each other (`test/twoPeers.test.ts`, with the `call-echo` example), and the web app calling a bot and the bot calling back with a tone each way (`e2e/web/headless-call.spec.ts`, Chromium). A probe also connected Playwright's WebKit (WPE, Linux) to the CLI, with audio both ways. The macOS app (WKWebView) calling the CLI is not tested yet.
 
 ## Wallet SDKs on Node (phase 2)

@@ -333,6 +333,13 @@ kept in the profile's `calls.json`. The media is libdatachannel (node-datachanne
 WebAssembly (`opusscript`); `status` says `calls: false` and `call list` says why where they cannot run.
 `GHOSTLY_CALL_BIND=127.0.0.1` binds the call's media to one address (the tests use loopback).
 
+**When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log has a line per call for
+the candidates each side offered, every ICE state, and the pair it connected over; `call list` shows the ICE state
+and the pair as `stats.ice`. The macOS app and Safari hide their addresses behind mDNS names (`<uuid>.local`) that
+often resolve nowhere, so such a call connects only when the app's own checks reach the CLI. A VPN that is the
+default route (seen with NordVPN on the same Mac as the CLI) makes the app send from the tunnel's address, which
+nothing on that machine can answer: allow local network traffic in the VPN, or pause it.
+
 ## Transports
 
 The engine picks as the app does: WebRTC (libdatachannel), HyperDHT (native, in process), Iroh (the wasm build,
