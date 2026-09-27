@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
-// covers: headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services
+// covers: headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -105,6 +105,23 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listen.waitFor((l) => (l.message as { text?: string } | undefined)?.text === "-dash first");
     const history = ok(await as(bob, "chat", "history", "alice")).messages as { text: string }[];
     expect(history.map((m) => m.text).filter((t) => !t.startsWith("👋"))).toEqual(["hello bob", "from stdin", "-dash first"]);
+    await listen.stop();
+  });
+
+  it("show the contact this side is typing, and its stream says when it started and stopped", async () => {
+    const listen = new Running(["--home", bob, "listen", "--type", "typing.started", "--type", "typing.stopped"], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(ok(await as(alice, "typing", "bob"))).toMatchObject({ chat: chatA, typing: true, live: true, sendTyping: true });
+    expect(await listen.waitFor((l) => l.type === "typing.started")).toMatchObject({ chat: chatB });
+    ok(await as(alice, "typing", "bob", "--stop"));
+    expect(await listen.waitFor((l) => l.type === "typing.stopped")).toMatchObject({ chat: chatB });
+    // A message ends it too, with no stop.
+    const count = (type: string) => listen.lines.filter((l) => l.type === type).length;
+    ok(await as(alice, "typing", "bob"));
+    await expect.poll(() => count("typing.started"), { timeout: 30_000 }).toBe(2);
+    ok(await as(alice, "send", "bob", "done typing", "--wait", "delivered"));
+    await expect.poll(() => count("typing.stopped"), { timeout: 30_000 }).toBe(2);
     await listen.stop();
   });
 

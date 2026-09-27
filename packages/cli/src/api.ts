@@ -69,7 +69,7 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 /** Settings a command may change; the rest are the app's to manage. */
 const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
   relays: "strings", irohRelays: "strings", hyperdhtRelay: "string", readRelays: "boolean",
-  iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", nick: "string",
+  iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
 };
 
 // ---------- transports ----------
@@ -215,6 +215,13 @@ const METHODS: Record<string, Method> = {
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
     return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null };
+  },
+  /** WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there. */
+  async "chat.typing"(ctx, params) {
+    const link = chatOf(ctx, params);
+    const typing = !bool(params, "stop");
+    node(ctx).setTyping({ linkId: link.id, typing });
+    return { chat: link.id, typing, live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false };
   },
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);

@@ -22,7 +22,7 @@ export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
-interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null }
+interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean }
 interface GroupShape { status: string | null; members: string[] }
 
 /**
@@ -169,6 +169,8 @@ export class EventHub {
         this.emit("chat.connection", `chat.connection:${id}:${shape.live ? shape.transport : "down"}:${at}`, { chat: id, live: shape.live, transport: shape.transport, text: link.textDelivery ?? null });
       }
       if (shape.name !== before.name) this.emit("chat.renamed", `chat.renamed:${id}:${this.now()}`, { chat: id, name: shape.name });
+      // The contact started or stopped writing (WISP 401 § Typing): it stops by itself 6 s after its last word.
+      if (shape.typing !== before.typing) this.emit(shape.typing ? "typing.started" : "typing.stopped", `typing.${shape.typing ? "started" : "stopped"}:${id}:${this.now()}`, { chat: id });
     }
     for (const id of [...this.chats.keys()]) {
       if (links.has(id)) continue;
@@ -293,7 +295,7 @@ function deliveryOf(message: StoredMessage): string {
 
 function chatShape(link: LinkView): ChatShape {
   const view = chatJson(link);
-  return { stage: view.stage, live: view.live, transport: view.transport, name: view.name };
+  return { stage: view.stage, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping };
 }
 
 function groupShape(group: GroupView): GroupShape {

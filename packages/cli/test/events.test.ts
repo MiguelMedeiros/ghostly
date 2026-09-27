@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
-// covers: headless.events
+// covers: headless.events, headless.typing
 
 /**
  * The stream derived from the engine's own events: each fact once, with a stable id, across restarts; a first run
@@ -54,6 +54,18 @@ describe("the event stream", () => {
     ]);
     expect(events[0]).toMatchObject({ type: "message.received", chat: "c1", message: { id: "new", from: "peer", text: "t new" } });
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
+  });
+
+  it("says when a contact starts and stops typing, once per change", async () => {
+    const { h, events } = await hub("typing.jsonl");
+    h.baseline(state([link("c1")]), new Map());
+    h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true })]) });
+    h.sink.post({ kind: "state", state: state([link("c1", { peerTyping: true })]) });
+    h.sink.post({ kind: "state", state: state([link("c1")]) });
+    expect(events.map((e) => [e.type, e.id, e.chat])).toEqual([
+      ["typing.started", "typing.started:c1:1000", "c1"],
+      ["typing.stopped", "typing.stopped:c1:1000", "c1"],
+    ]);
   });
 
   it("after a restart: seq goes on, only what is new is reported, and the journal replays", async () => {

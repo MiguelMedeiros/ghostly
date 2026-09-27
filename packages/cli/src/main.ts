@@ -76,7 +76,7 @@ const SPECIAL: [string, string][] = [
   ["daemon stop", "Stop the profile's daemon"],
   ["listen [--since seq] [--cursor file] [--type t]... [--exec cmd] [--webhook url]", "Stream events as JSON lines (starts the profile here if no daemon runs it)"],
   ["settings get [--show-secret]", "The profile's settings"],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, nick"],
+  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, nick"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret]", "Any call of the app's engine, with its own parameters"],
   ["engine --list", "The engine's calls"],
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--days n]", "Make an identity proof (a tool's or a published one finishes with identity complete)"],
