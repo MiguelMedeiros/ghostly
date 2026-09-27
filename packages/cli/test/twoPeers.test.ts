@@ -513,8 +513,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(event.message).toMatchObject({ id: sent.messageId, member: aliceKey, nick: "Alice bot" });
     const history = ok(await as(bob, "group", "history", "Mesh crew")).messages as { id: string; nick: string | null; member?: string }[];
     expect(history.find((m) => m.id === sent.messageId)).toMatchObject({ nick: "Alice bot", member: aliceKey });
-    // The id is what a reply names (ids can start with a dash: --reply=<id> keeps it a value).
-    ok(await as(bob, "group", "send", "Mesh crew", "nice", `--reply=${sent.messageId as string}`));
+    // The id is what a reply names.
+    ok(await as(bob, "group", "send", "Mesh crew", "nice", "--reply", sent.messageId as string));
     const replied = Date.now() + 90_000;
     type Line = { text: string; replyTo?: { id: string; found: boolean } };
     let reply: Line | undefined;

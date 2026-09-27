@@ -105,7 +105,7 @@ ghostly group create "Support"                     # a community: {"group","link
 ghostly group join "<group2/… link>"
 ghostly group send Support "hi @Ana" --mention Ana # the mentioned member is written as @name in the text
                                                    # {"group","messageId","sent"}: keep messageId to reply or react later
-ghostly group send Support --reply=<message id> "on it"  # a reply in the group (=: an id may start with a dash)
+ghostly group send Support --reply <message id> "on it"  # a reply in the group
 ghostly group history Support                      # each message: member (key) and nick (name, from the roster)
 ghostly group show Support                         # link is "<hidden>": it lets anyone join
 ghostly group link Support                         # the link itself, to share on purpose
