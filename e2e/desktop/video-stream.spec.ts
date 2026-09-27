@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { makeBigVideo } from "../support/bigVideo";
 import { desktopHome, expect, openDesktop, test } from "../support/desktop";
-import { playFromStore, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
+import { openDriven, playFromStore, removeFromApp, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
 
 /**
  * A video too large for the page (#381: over 64 MiB) plays and seeks in the Desktop WebView from the stored file,
@@ -19,13 +19,18 @@ const MAX_BODY = 4 * 1024 * 1024;
 const PLACE = { space: "e2e-stream", id: "chat-in-video-1" };
 const DIR = fileURLToPath(new URL("../../test-results/desktop-video", import.meta.url));
 const PIECES_PORT = 49741;
+/** Windows (or `GHOSTLY_E2E_DRIVEN=1`, e.g. on a Mac): the app's own test driver (see `openDriven`). */
+const DRIVER_PORT = 49742;
+const DRIVEN = process.platform === "win32" || process.env.GHOSTLY_E2E_DRIVEN === "1";
 
 test("a 100 MB video plays and seeks from the stored file, a range at a time", { tag: ["@feature:files.video.stream"] }, async () => {
   mkdirSync(DIR, { recursive: true });
   const home = desktopHome("stream");
   const log = `${DIR}/requests.log`;
   rmSync(log, { force: true });
-  const { app, stop } = await openDesktop({ home: home.dir, env: { GHOSTLY_STREAM_LOG: log } });
+  const { app, stop } = DRIVEN
+    ? await openDriven(DRIVER_PORT, { GHOSTLY_STREAM_LOG: log })
+    : await openDesktop({ home: home.dir, env: { GHOSTLY_STREAM_LOG: log } });
   let server: Server | null = null;
   try {
     await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
@@ -41,7 +46,10 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
 
     expect(report.error, JSON.stringify(report.events)).toBeUndefined();
     const loopback = /^http:\/\/127\.0\.0\.1:\d+\//.test(report.url ?? "");
-    expect(report.url).toMatch(process.platform === "linux" ? /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{43}$/ : /^https?:\/\/ghostly-file\.localhost\/[A-Za-z0-9_-]{43}$/);
+    expect(report.url).toMatch(({
+      linux: /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{43}$/,
+      win32: /^https?:\/\/ghostly-file\.localhost\/[A-Za-z0-9_-]{43}$/,
+    } as Record<string, RegExp>)[process.platform] ?? /^ghostly-file:\/\/localhost\/[A-Za-z0-9_-]{43}$/);
     expect(report.duration).toBeCloseTo(video.duration, 0);
     expect(report.seekedTo).toBeGreaterThanOrEqual(89.5);
     expect(report.playedAfterSeek).toBeGreaterThan(91);
@@ -51,6 +59,7 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
     if (!loopback) expect(Math.max(...served.map((request) => request.body))).toBeLessThanOrEqual(MAX_BODY);
     expect(served.some((request) => request.status === 206 && Number(/^bytes=(\d+)/.exec(request.range)?.[1] ?? 0) > 80 * 1024 * 1024)).toBe(true);
   } finally {
+    await removeFromApp(app, PLACE);
     await stop();
     await new Promise((done) => (server ? server.close(done) : done(null)));
     home.remove();

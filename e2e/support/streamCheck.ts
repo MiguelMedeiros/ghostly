@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import type { DesktopApp } from "./desktop";
+import { desktopBinary, type DesktopApp } from "./desktop";
+import { MacDriver } from "./desktopMac";
 
 /**
  * The Desktop checks that a video too large for the page plays and seeks from the stored file (`ghostly-file`,
@@ -44,6 +47,15 @@ export async function storeInApp(app: DesktopApp, port: number, size: number, pl
     port, size, place.space, place.id,
   );
   if (answer?.error) throw new Error(answer.error);
+}
+
+/** Removes what `storeInApp` stored, so a run leaves nothing on the machine. */
+export async function removeFromApp(app: DesktopApp, place: { space: string; id: string }): Promise<void> {
+  await app.executeAsync(
+    `const [space, id, done] = arguments;
+     window.__TAURI_INTERNALS__.invoke("file_bytes_remove", { space, id }).then(() => done(null), () => done(null));`,
+    place.space, place.id,
+  ).catch(() => {});
 }
 
 export interface PlayReport {
@@ -112,6 +124,40 @@ export function playFromStore(app: DesktopApp, place: { space: string; id: strin
      })().then(done, (e) => { video.remove(); done({ error: String(e && e.message || e), events }); });`,
     place.space, place.id, seekTo,
   );
+}
+
+/**
+ * The Desktop binary started by hand and driven through its own test driver (`src-tauri/src/e2e_driver.rs`, a debug
+ * build with `--features e2e-driver`), as the macOS tests are. Windows uses it: tauri-driver's msedgedriver never
+ * attached to the app's WebView2 on the GitHub runner ("DevToolsActivePort file doesn't exist"), while the app itself
+ * ran fine there.
+ */
+export async function openDriven(port: number, env: Record<string, string> = {}): Promise<{ app: MacDriver; stop: () => Promise<void> }> {
+  const token = randomBytes(16).toString("hex");
+  const child = spawn(desktopBinary(), [], {
+    stdio: "ignore",
+    env: { ...process.env, GHOSTLY_PROFILE: "e2e-stream", GHOSTLY_E2E_DRIVER: String(port), GHOSTLY_E2E_DRIVER_TOKEN: token, ...env },
+  });
+  let exited: number | null | undefined;
+  const gone = new Promise<void>((done) => child.on("exit", (code) => { exited = code; done(); }));
+  const stop = async () => {
+    if (exited === undefined) {
+      child.kill();
+      await Promise.race([gone, new Promise((done) => setTimeout(done, 5_000))]);
+    }
+  };
+  const app = new MacDriver(`http://127.0.0.1:${port}`, token);
+  const deadline = Date.now() + 90_000;
+  for (;;) {
+    if (exited !== undefined) throw new Error(`The app exited (${exited}) before it could be driven`);
+    try {
+      if ((await app.execute<string>(`return document.readyState;`)) === "complete") break;
+    } catch (error) {
+      if (Date.now() > deadline) { await stop(); throw error; }
+    }
+    await new Promise((done) => setTimeout(done, 250));
+  }
+  return { app, stop };
 }
 
 /** A request the scheme answered, read from the app's `GHOSTLY_STREAM_LOG` lines. */

@@ -2,7 +2,7 @@ name: Desktop media streaming
 
 # A video too large for the page plays and seeks in the Desktop app from the stored file, read in ranges from the
 # `ghostly-file` scheme (src-tauri/src/file_stream.rs), in each engine's real WebView under the app's own policy:
-# Linux's WebKitGTK and Windows' WebView2, driven by tauri-driver (e2e/desktop/video-stream.spec.ts). Each engine
+# Linux's WebKitGTK (tauri-driver) and Windows' WebView2 (the app's own test driver), e2e/desktop/video-stream.spec.ts. Each engine
 # handles a custom scheme's ranges its own way, so each one is checked. The macOS WKWebView runs the same check in
 # the required "Desktop on macOS" job (e2e/desktop-macos/video-stream.spec.ts).
 #
@@ -98,44 +98,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install tauri-driver
-        shell: bash
+      - name: Install tauri-driver (Linux)
+        if: runner.os == 'Linux'
         run: command -v tauri-driver || cargo install tauri-driver --locked
 
-      # tauri-driver drives WebView2 through Edge's WebDriver, which must match the runner's WebView2.
-      - name: Install msedgedriver (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cargo install --git https://github.com/chippers/msedgedriver-tool --rev 8c4b34f51b45f5cf08013366d703de464ab871d1 --locked
-          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
-          $PWD.Path >> $env:GITHUB_PATH
-
-      - name: Build the Desktop app
+      - name: Build the Desktop app (Linux)
+        if: runner.os == 'Linux'
         run: npm run tauri -- build --debug --no-bundle
+
+      # Windows is driven through the app's own test driver (a debug-only feature), not tauri-driver: msedgedriver
+      # never attached to the app's WebView2 on the runner ("DevToolsActivePort file doesn't exist").
+      - name: Build the Desktop app with its test driver (Windows)
+        if: runner.os == 'Windows'
+        run: npm run tauri -- build --debug --no-bundle --features e2e-driver
 
       - name: Play a 100 MB video from the stored file (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npx playwright test -c e2e/playwright.desktop.config.ts video-stream
-
-      # TEMPORARY: what the app does on its own on the runner, before WebDriver drives it.
-      - name: Start the app alone (Windows diagnostics)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          "WebView2: " + (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue).pv
-          & msedgedriver.exe --version
-          $env:GHOSTLY_PROFILE = "e2e-diag"
-          $p = Start-Process -FilePath target\debug\ghostly.exe -PassThru -RedirectStandardOutput app-out.txt -RedirectStandardError app-err.txt
-          Start-Sleep -Seconds 25
-          "alive: $(-not $p.HasExited) exit: $($p.ExitCode)"
-          Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Select-Object Id, StartTime | Format-Table
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-          "--- stdout"; Get-Content app-out.txt -Tail 60 -ErrorAction SilentlyContinue
-          "--- stderr"; Get-Content app-err.txt -Tail 60 -ErrorAction SilentlyContinue
-          "--- data"; Get-ChildItem "$env:LOCALAPPDATA\app.ghostly.chat", "$env:APPDATA\app.ghostly.chat" -ErrorAction SilentlyContinue | Select-Object FullName
-          Get-ChildItem -Recurse -Filter ghostly.log "$env:LOCALAPPDATA\app.ghostly.chat", "$env:APPDATA\app.ghostly.chat" -ErrorAction SilentlyContinue | ForEach-Object { "--- $($_.FullName)"; Get-Content $_.FullName -Tail 60 }
 
       - name: Play a 100 MB video from the stored file (Windows)
         if: runner.os == 'Windows'
