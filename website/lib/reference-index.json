@@ -897,7 +897,7 @@
     "slug": "501-paired-files",
     "title": "WISP 501: Chat Files",
     "status": "Draft",
-    "updated": "2026-09-26",
+    "updated": "2026-09-27",
     "implementation": "Every chat session: files/3 (any size, consent, resume) and files/2 for older apps; WebRTC and supported native adapters",
     "documentKind": "Profile",
     "dependencies": [
