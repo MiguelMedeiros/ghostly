@@ -62,7 +62,7 @@ function segments(list: Segment[], sentAt: number | undefined, key = ""): React.
 function ListView({ list, sentAt, k }: { list: ListBlock; sentAt: number | undefined; k: string }) {
   const Tag = list.ordered ? "ol" : "ul";
   // Room for the widest marker, so the items' text lines up ("9." and "10.").
-  const widest = list.ordered ? Math.max(...list.items.map((item) => item.marker.length)) : 1;
+  const widest = list.ordered ? list.items.reduce((most, item) => Math.max(most, item.marker.length), 1) : 1;
   return (
     <Tag role="list" data-testid="rich-list" className="rich-list" style={{ "--rich-marker": `${widest}ch` } as React.CSSProperties}>
       {list.items.map((item, i) => (

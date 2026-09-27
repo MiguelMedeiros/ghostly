@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2.7 |
+| Revision | 0.2.8 |
 | Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
@@ -206,6 +206,21 @@ Any message both sides know by an id takes reactions: a text, a voice message, a
 **How it travels.** A 1:1 chat on its live session once both sides say `react/1` ([401](401-paired-chat.md#reactions)), and on the DHT envelopes meanwhile ([403](403-dht-text.md#reactions)); the reactor keeps it until the contact confirms it. A private group over each member's edge ([mesh](9xx-group-mesh.md#reactions)); a community inside a sealed frame of the group ([community](9xx-group-community.md#reactions)). A compatibility chat ([402](402-legacy-chat.md)) has no room for one: it is refused, not kept here only.
 
 **Older apps.** A reaction is a frame or a trailing element an app from before this revision does not know: it drops it, shows nothing, and nothing it shows changes. The reactor still sees its own chip.
+## Message text
+
+A text is sent exactly as typed: nothing below changes the wire, and an app that knows none of it shows the text as written. These are display conventions, so a message reads the same in every app that follows them. A receiver MUST NOT render a message's text as HTML.
+
+| Written | Shows |
+|---|---|
+| `*bold*` or `**bold**`, `_italic_`, `~~strike~~`, `` `code` ``, `\|\|spoiler\|\|` | Formatting, paired within a line and only at word edges (`snake_case_name` stays text) |
+| ```` ``` ```` on a line of its own, then the closing ```` ``` ```` | A code block; nothing inside code is read |
+| `- `, `* ` or `• ` at the start of a line | A bullet list; a 2-space indent puts an item one level under the one before |
+| `1. ` or `2) ` at the start of a line | A numbered list with the author's numbers, never redone ("1.5 kg" is not one: the marker needs a space) |
+| `> ` at the start of a line | A quote the author wrote, with lists and headings inside; not a reply ([Replies](#replies)) |
+| `# `, `## `, `### ` at the start of a line | A bold line, a little larger |
+| `[text](https://…)` | The text as a link |
+
+A link from `[text](…)` MUST be http or https; anything else stays text. The link's host SHOULD be shown on hover or long press. When the text names a host other than the link's (or one the link's host is not under), or holds an invisible or direction character, the receiver SHOULD show the address instead of the text, as the browser reads it (punycode for a non-ASCII host). A preview of a message on one line keeps a list's markers ("•" for any bullet, the author's numbers) and shows a link as its text.
 
 ## Candidate semantics
 
@@ -241,6 +256,7 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
+- 0.2.8 (2026-09-27): message text: the display conventions (formatting, code, lists, quotes, headings, `[text](url)` links), with the link rules; the text is still sent as typed.
 - 0.2.7 (2026-09-27): reactions: one emoji per person per message, the highest number winning; checked emoji; waiting a minute for an unknown message; no unread, no sound.
 - 0.2.6 (2026-09-27): replies: the original's id, a line of it and its author with a message; checked against this chat only; no text prefix for older apps.
 - 0.2.5 (2026-09-26): after the pin, another key on invite-derived channels (DHT mailbox, signals, a native connection dialled in) is ignored with a passive warning, not a stop; only an authenticated session this side can trust proves a key change.

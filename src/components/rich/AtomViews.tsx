@@ -16,11 +16,13 @@ export function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
   );
 }
 
-/** A link's label: its formatting, and a spoiler stays covered (a tap on it would follow the link). */
+/**
+ * A link's label: its formatting, and a spoiler stays covered (a tap on it would follow the link). Code never gets
+ * here: backticks pair before links are looked for.
+ */
 function labelNodes(label: Segment[], key = ""): React.ReactNode[] {
   return label.map((s, i) => {
     const k = key + i;
-    if (s.type === "code") return <code key={k} dir="ltr" className="rich-code">{s.text}</code>;
     if (s.type !== "span") return s.text;
     if (s.style === "spoiler") return SPOILER_PLAIN;
     const inner = labelNodes(s.children, `${k}.`);

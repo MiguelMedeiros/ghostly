@@ -26,7 +26,7 @@ const BLANK = /^\s*$/;
  */
 function proseBlocks(text: string, detectors: readonly Detector[], ctx: ParseContext, quotes: boolean): Block[] {
   const inline = (s: string) => tokenizeInline(s, detectors, ctx);
-  type Unit = { t: "para"; lines: string[] } | { t: "block"; block: Block } | { t: "quote"; lines: string[] };
+  type Unit = { t: "para"; lines: string[] } | { t: "block"; block: Block } | { t: "quote"; lines: string[]; raw: string[] };
   const units: Unit[] = [];
   const lines = text.split("\n");
   // The list being read, its last item (text still open to continuation lines) and that item's last child.
@@ -73,8 +73,8 @@ function proseBlocks(text: string, detectors: readonly Detector[], ctx: ParseCon
     if (quotes && QUOTE.test(line)) {
       const inner = line.replace(/^ {0,3}> ?/, "");
       const unit = last();
-      if (unit?.t === "quote") unit.lines.push(inner);
-      else units.push({ t: "quote", lines: [inner] });
+      if (unit?.t === "quote") { unit.lines.push(inner); unit.raw.push(line); }
+      else units.push({ t: "quote", lines: [inner], raw: [line] });
       continue;
     }
     const h = HEADING.exec(line);
@@ -88,19 +88,27 @@ function proseBlocks(text: string, detectors: readonly Detector[], ctx: ParseCon
   }
   closeList();
 
+  // A quote with nothing in it (">" alone) is the text it was, one paragraph with the lines around it.
+  const merged: Unit[] = [];
+  for (const unit of units) {
+    const now: Unit = unit.t === "quote" && unit.lines.every((l) => BLANK.test(l)) ? { t: "para", lines: unit.raw } : unit;
+    const before = merged[merged.length - 1];
+    if (now.t === "para" && before?.t === "para") before.lines.push(...now.lines);
+    else merged.push(now);
+  }
+
   const blocks: Block[] = [];
-  units.forEach((unit, i) => {
+  merged.forEach((unit, i) => {
     if (unit.t === "block") { blocks.push(unit.block); return; }
     if (unit.t === "quote") {
-      const inner = proseBlocks(unit.lines.join("\n"), detectors, ctx, false);
-      if (inner.length) blocks.push({ type: "quote", blocks: inner });
+      blocks.push({ type: "quote", blocks: proseBlocks(unit.lines.join("\n"), detectors, ctx, false) });
       return;
     }
     let { lines: body } = unit;
     let from = 0;
     let to = body.length;
     if (i > 0) while (from < to && BLANK.test(body[from])) from++;
-    if (i < units.length - 1) while (to > from && BLANK.test(body[to - 1])) to--;
+    if (i < merged.length - 1) while (to > from && BLANK.test(body[to - 1])) to--;
     body = body.slice(from, to);
     const joined = body.join("\n");
     if (joined) blocks.push({ type: "paragraph", segments: inline(joined) });
