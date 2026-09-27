@@ -151,6 +151,12 @@
     "edit": {
       "editing": "Editando",
       "cancel": "Cancelar edición"
+    },
+    "jump": {
+      "count": "{{count}} nuevos",
+      "newOne": "1 mensaje nuevo, desplazar al final",
+      "new": "{{count}} mensajes nuevos, desplazar al final",
+      "bottom": "Desplazar al final"
     }
   },
   "group": {

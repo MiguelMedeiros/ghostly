@@ -151,6 +151,12 @@
     "edit": {
       "editing": "Modifica in corso",
       "cancel": "Annulla modifica"
+    },
+    "jump": {
+      "count": "{{count}} nuovi",
+      "newOne": "1 nuovo messaggio, scorri in fondo",
+      "new": "{{count}} nuovi messaggi, scorri in fondo",
+      "bottom": "Scorri in fondo"
     }
   },
   "group": {

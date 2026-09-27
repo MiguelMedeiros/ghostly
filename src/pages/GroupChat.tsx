@@ -5,6 +5,8 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { JumpToLatest } from "../components/chat/JumpToLatest";
+import { useChatScroll } from "../hooks/useChatScroll";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
@@ -141,7 +143,6 @@ export function GroupChat() {
     const nick = settings.defaultNickname;
     if (engineNick !== undefined && engineNick !== nick) void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
   }, [settings.defaultNickname, engineNick]);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const closeMenu = () => setMenuOpen(false);
 
   useEffect(() => {
@@ -150,9 +151,9 @@ export function GroupChat() {
     void engine.call("groupMessages", { groupId }).then(setMessages).catch(() => {});
     return engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) setMessages(list); });
   }, [groupId]);
-  // A new message scrolls to the bottom; a changed one does not (it would undo a reply's jump).
-  const lastMessageId = messages[messages.length - 1]?.id;
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length, lastMessageId]);
+  // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
+  const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
+  const jump = useChatScroll({ rows: scrollRows, chat: groupId });
   useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
@@ -280,8 +281,9 @@ export function GroupChat() {
           <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">Cancel joining</button>
         </div>
-      </div> : <div data-message-list className="flex-1 overflow-y-auto chat-wallpaper">
-        <div className="max-w-3xl mx-auto py-3">
+      </div> : <div className="relative flex-1 min-h-0 flex flex-col">
+      <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
+        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3">
           {messages.map(m => m.event
             ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group)}</span></div>
             // A note about a payment this device is part of is shown under its own bubble instead.
@@ -295,8 +297,9 @@ export function GroupChat() {
               onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
               onEdit={canEditInGroup(m) && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
               onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName} />)}
-          <div ref={bottomRef} />
         </div>
+      </div>
+      <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
       </div>}
 
       {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}

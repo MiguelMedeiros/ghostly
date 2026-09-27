@@ -151,6 +151,12 @@
     "edit": {
       "editing": "Editing",
       "cancel": "Cancel edit"
+    },
+    "jump": {
+      "count": "{{count}} new",
+      "newOne": "1 new message, scroll to bottom",
+      "new": "{{count}} new messages, scroll to bottom",
+      "bottom": "Scroll to bottom"
     }
   },
   "group": {
