@@ -400,9 +400,11 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
                   {mode === "hold" ? (
                     <>
                       <LiveWaveform levels={levels} bars={24} className="voice-hold-live" />
-                      <span className="voice-slide" style={{ opacity: slideFade, transform: `translateX(${drag.x * direction() * 0.6}px)` }} data-testid="voice-slide">
-                        <svg className="voice-slide-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
-                        Slide to cancel
+                      <span className="voice-slide" style={{ transform: `translateX(${drag.x * direction() * 0.6}px)` }} data-testid="voice-slide">
+                        <span className="voice-slide-fade" style={{ opacity: slideFade }}>
+                          <svg className="voice-slide-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
+                          Slide to cancel
+                        </span>
                       </span>
                     </>
                   ) : (

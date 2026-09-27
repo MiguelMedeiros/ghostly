@@ -93,14 +93,19 @@
 
 .voice-slide {
   margin-inline-start: auto;
+  /* Slid towards the bars, it covers them rather than mixing with them: the bar's own background, never faded. */
+  position: relative;
+  padding-inline-start: 6px;
+  background: inherit;
+  align-self: stretch;
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 13px;
   color: var(--color-text-secondary);
   white-space: nowrap;
-  transition: opacity 80ms linear;
 }
+.voice-slide-fade { display: flex; align-items: center; gap: 4px; transition: opacity 80ms linear; }
 .voice-slide-arrow { animation: voice-nudge 1.2s ease-in-out infinite; }
 @keyframes voice-nudge { 50% { transform: translateX(-4px); } }
 :dir(rtl) .voice-slide-arrow { transform: scaleX(-1); animation: none; }
@@ -126,6 +131,8 @@
   border-radius: 18px;
   background: var(--color-surface);
   color: var(--color-text-secondary);
+  /* An edge too: a dark surface on a dark chat is hard to find by shadow alone. */
+  border: 1px solid var(--color-border-bright);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   animation: fade-in 120ms ease-out;
 }
@@ -221,7 +228,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--color-panel-header);
+  background: var(--composer-well, var(--color-panel-header));
   color: var(--color-danger);
   pointer-events: none;
   animation: voice-bin 700ms ease-in forwards;
