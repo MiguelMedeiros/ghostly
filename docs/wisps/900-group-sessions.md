@@ -71,7 +71,7 @@ Live delivery only. A member whose edge was down gets, when the edge opens, the 
 
 In a community, anyone with the link joins and any member can let people in: the link is a bearer capability, and removing someone does not stop them from opening it again; the admin replaces the link to keep them out. In the mesh:
 
-The admin invites, removes and transfers its role; any member leaves. Local blocking is separate from removal. Bounds of the first profile: eight members, 1024 commits, 16 KiB of text, 32 own messages and 128 KiB kept for catch-up, 64 waiting frames and 1 MiB, 16 epoch secrets, 256 sequence numbers of replay window, one catch-up request per member per ten seconds. Coordination failure is visible: a group is `active`, `left`, `removed` or `forked`, with a reason.
+The admin invites, removes and transfers its role; any member leaves. Local blocking is separate from removal. Bounds of the first profile: 32 members (eight before its revision 0.9), 1024 commits, 16 KiB of text, 32 own messages and 128 KiB kept for catch-up and 256 frames of other members' to hand on, 64 waiting frames and 1 MiB, 32 epoch secrets, 256 sequence numbers of replay window, one catch-up request per member per ten seconds. Coordination failure is visible: a group is `active`, `left`, `removed` or `forked`, with a reason.
 
 ## Compatibility and open decisions
 

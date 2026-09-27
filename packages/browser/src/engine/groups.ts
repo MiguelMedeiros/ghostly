@@ -256,7 +256,7 @@ export class Groups {
 
   // -- what the person does ------------------------------------------------
 
-  /** A new group: a community (the link is the way in, hundreds of members) or a private mesh of up to eight contacts. */
+  /** A new group: a community (the link is the way in, hundreds of members) or a private mesh of up to 32 contacts. */
   async create(name: string, profile: "community" | "mesh" = "community"): Promise<string> {
     if (profile === "community") return this.communities.create(name);
     const state = GroupSession.create(name);

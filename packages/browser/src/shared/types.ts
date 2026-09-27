@@ -175,7 +175,7 @@ export interface GroupView {
   id: string;
   name: string;
   createdAt: number;
-  /** Which kind of group: a private mesh of up to eight (`group-mesh/1`) or a community (`group-community/1`). */
+  /** Which kind of group: a private mesh of up to 32 (`group-mesh/1`) or a community (`group-community/1`). */
   profile: "mesh" | "community";
   /** Absent while it is only an invitation. */
   status?: GroupStatus | "lost";
