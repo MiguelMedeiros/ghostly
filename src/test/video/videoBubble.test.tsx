@@ -111,6 +111,9 @@ describe("a video in the chat", () => {
     fireEvent.click(b!);
     await flush();
     expect(pause.mock.contexts).toContain(firstPlayer);
+    // The first let go of its bytes: only the second is loaded.
+    expect(screen.getAllByTestId("video-player")).toHaveLength(1);
+    expect(firstPlayer.isConnected).toBe(false);
   });
 
   it("when it ends, it goes back to its poster and lets go of its bytes", async () => {

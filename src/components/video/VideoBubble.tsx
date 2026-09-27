@@ -112,7 +112,8 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
     });
   }, [phase, src, unload]);
 
-  useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => videoRef.current?.pause() }), [file.id, play]);
+  // Another video or voice message starts: this one stops and lets go of its bytes, so only one is ever held.
+  useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
 
   // Scrolled away: it stops, and its bytes go (a desktop video is held in memory).
   useEffect(() => { if (visible === false && phase === "playing") unload(); }, [visible, phase, unload]);
