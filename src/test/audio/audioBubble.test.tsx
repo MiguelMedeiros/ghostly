@@ -8,7 +8,7 @@ import type { ChatFile, ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: files.audio.play
+// covers: files.audio.play, files.voice.media-session
 
 const MB = 1024 ** 2;
 let n = 0;
@@ -50,6 +50,30 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("an audio file in the chat", () => {
+  it("playing, it shows on the lock screen and the system's buttons pause it; it lets go when it ends", async () => {
+    const handlers = new Map<string, ((details: { seekTime?: number }) => void) | null>();
+    const session = { metadata: null as unknown, playbackState: "none", setActionHandler: (action: string, handler: ((details: { seekTime?: number }) => void) | null) => { handlers.set(action, handler); }, setPositionState: vi.fn() };
+    Object.defineProperty(navigator, "mediaSession", { configurable: true, value: session });
+    vi.stubGlobal("MediaMetadata", class { constructor(public init: object) {} });
+    try {
+      show(song());
+      fireEvent.click(screen.getByTestId("audio-play"));
+      await flush();
+      expect(session.metadata).toMatchObject({ init: { title: "Ghost Town.mp3", artist: "Ana" } });
+      expect(session.playbackState).toBe("playing");
+      const audio = loaded(10);
+      act(() => handlers.get("pause")!({}));
+      expect(pause).toHaveBeenCalled();
+      expect(session.playbackState).toBe("paused");
+      fireEvent.ended(audio);
+      expect(session.playbackState).toBe("none");
+      expect(handlers.get("play")).toBeNull();
+    } finally {
+      Reflect.deleteProperty(navigator, "mediaSession");
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("is routed to the audio bubble by its type; a voice message keeps its own; MIDI stays a file", () => {
     const message = (file: ChatFile): ChatMessage => ({ id: `peer_${file.id}`, text: `📎 ${file.name}`, sender: "peer", timestamp: 1_700_000_000_000, file });
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
