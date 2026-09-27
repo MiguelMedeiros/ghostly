@@ -41,7 +41,7 @@ export function setSendTyping(on: boolean): Promise<void> {
  * What the composer calls: `true` on a keystroke that leaves text, `false` when the text is cleared or sent; with
  * `"recording"` while a voice note is being recorded (then the contact is told again every second, with no idle
  * stop, until `false`). Typing stops by itself after `TYPING_IDLE_MS` without a keystroke, when `active` goes false
- * (the chat is left), when the page is hidden, and on unmount. A new kind is told at once.
+ * (the chat is left), when the page is hidden (a recording carries on), and on unmount. A new kind is told at once.
  */
 export function useTypingSender(linkId: string | undefined, active = true): (typing: boolean, kind?: TypingKind) => void {
   const state = useRef<{
@@ -82,7 +82,8 @@ export function useTypingSender(linkId: string | undefined, active = true): (typ
   useEffect(() => { if (!active) stop(); }, [active, stop]);
 
   useEffect(() => {
-    const hidden = () => { if (document.visibilityState === "hidden") stop(); };
+    // A recording goes on in the background (hands-free): it ends when the recorder says so, not here.
+    const hidden = () => { if (document.visibilityState === "hidden" && !(state.current.typing && state.current.kind === "recording")) stop(); };
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("pagehide", stop);
     return () => {

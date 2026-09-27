@@ -225,6 +225,14 @@ describe("this side recording a voice note", () => {
     expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
     expect(await said()).toContain("recording");
     expect(await said()).not.toContain("stop");
+    // Another tab: the recording goes on, and so does the word.
+    const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    const told = (await said()).length;
+    await wait(3_000);
+    hidden.mockRestore();
+    expect(await said()).not.toContain("stop");
+    expect((await said()).length).toBeGreaterThan(told);
     fireEvent.click(screen.getByTestId("voice-delete"));
     await wait(0);
     expect((await said()).slice(-1)).toEqual(["stop"]);
