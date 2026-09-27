@@ -583,7 +583,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const id = ok(await as(alice, "group", "send", "Mesh crew", "Deploy: 0 of 3")).messageId as string;
     const shown = Date.now() + 90_000;
     while (Date.now() < shown && !(ok(await as(bob, "group", "history", "Mesh crew")).messages as { id: string }[]).some((m) => m.id === id)) await new Promise((r) => setTimeout(r, 1000));
-    expect(ok(await as(alice, "group", "edit", "Mesh crew", id, "Deploy: 1 of 3"))).toMatchObject({ messageId: id, edits: 1 });
+    expect(ok(await as(alice, "group", "edit", "Mesh crew", id, "Deploy: 1 of 3"))).toMatchObject({ messageId: id, edits: 1, sent: true });
     expect(ok(await as(alice, "group", "edit", "Mesh crew", id, "--text", "Deploy: 2 of 3"))).toMatchObject({ edits: 2 });
     // From stdin, as a bot pipes it.
     expect(ok(await ghostly(["--home", alice, "group", "edit", "Mesh crew", id, "--stdin"], { env, input: "Deploy: done\n" }))).toMatchObject({ edits: 3 });

@@ -38,7 +38,7 @@ describe("GroupEdits on its own", () => {
     const edits = new GroupEdits({
       ...rows(messages),
       changed: () => {},
-      membership: () => ({ me, members: new Set(members), community: false }),
+      membership: () => ({ me, members: new Set(members), community: false, admin: true }),
       send: async (_g, edit, to) => { sent.push({ edit, ...(to && { to }) }); return null; },
       now: () => clock,
     });

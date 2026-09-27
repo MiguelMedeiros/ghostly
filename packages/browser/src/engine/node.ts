@@ -841,7 +841,7 @@ export class GhostlyNode implements EngineImplementation {
     changed: async chat => { this.events.onMessages(chat, await db.getMessages(chat)); },
     membership: groupId => {
       const membership = this.membership(groupId);
-      return membership && { ...membership, community: this.groups.isCommunityGroup(groupId) };
+      return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!this.groups.views().find(g => g.id === groupId)?.isAdmin };
     },
     send: (groupId, edit, to) => this.groups.sendEdit(groupId, edit, to),
   });

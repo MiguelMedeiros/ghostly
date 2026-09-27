@@ -23,8 +23,8 @@ export interface GroupEditsHost {
   patch(chat: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage | undefined>;
   /** The chat's rows changed: the pages hear it. Never a new message: no sound, no unread, no move in the list. */
   changed(chat: string): Promise<void> | void;
-  /** My key in an active group, who is in it now, and whether it is a community. */
-  membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean } | undefined;
+  /** My key in an active group, who is in it now, whether it is a community, and whether I am its admin. */
+  membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean; admin?: boolean } | undefined;
   /** Says an edit to the group (a private group's: to member `to` alone, when given). An error when it could not go now. */
   send(groupId: string, edit: GroupEdit, to?: string): Promise<string | null>;
   now?(): number;
@@ -69,7 +69,8 @@ export class GroupEdits {
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
     if (utf8Encode(text).length > GROUP_EDIT_TEXT_BYTES) return refuse(`Message exceeds ${GROUP_EDIT_TEXT_BYTES} UTF-8 bytes.`);
-    const mentions = carryMentions(message, text, Array.isArray(added) ? added : [], !membership.community);
+    // Everyone: a private group's admin only (the group checks it against the admin of the message's epoch again).
+    const mentions = carryMentions(message, text, Array.isArray(added) ? added : [], !membership.community && !!membership.admin);
     if (text === message.text && JSON.stringify(mentions) === JSON.stringify(message.mentions ?? [])) return { error: null, messageId };
     const seq = (message.edit?.seq ?? 0) + 1;
     if (seq > MAX_EDITS_PER_MESSAGE) return refuse(`This message was edited ${MAX_EDITS_PER_MESSAGE} times, the most one takes.`);
@@ -79,7 +80,8 @@ export class GroupEdits {
       return { text: next.text, edit: next.edit, mentions: mentions.length ? mentions : undefined };
     });
     await this.host.changed(chat);
-    void this.flush(groupId).catch(() => {});
+    // One pass: said now when the pace allows (then it is no longer pending), else a timer says it later.
+    await this.flush(groupId).catch(() => {});
     return { error: null, messageId };
   }
 
