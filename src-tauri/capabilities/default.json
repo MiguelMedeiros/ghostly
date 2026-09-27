@@ -31,6 +31,7 @@
     "allow-resolve-records",
     "allow-set-pkarr-relays",
     "allow-pkarr-status",
+    "allow-pkarr-network-changed",
     "allow-diagnostic-log",
     "allow-local-fetch",
     "allow-bitcoind-rpc",

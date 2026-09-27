@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { publishFailure } from "../src/ghostlink";
 import { BREAKER_ALL_DOWN_PROBE_MS, BREAKER_BASE_MS, BREAKER_MAX_MS, BREAKER_THRESHOLD, DEFAULT_RELAYS, PREVIOUS_DEFAULT_RELAYS, RelayBreaker, RelayTransport, createIdentity, createRelayPayload, currentRelays } from "../src";
 // covers: core.relay-breaker
 
@@ -277,5 +278,44 @@ describe("the default relays", () => {
     for (let i = 0; i < 5; i++) await relay.resolve(id.pubKeyZ32);
     await expect(relay.resolve(id.pubKeyZ32)).rejects.toMatchObject({ code: "discovery-budget" });
     expect(calls).toHaveLength(5);
+  });
+});
+
+describe("when publishing fails, and a new network", () => {
+  it("says the transport's reason, a string included, and the soonest a relay is asked again", () => {
+    expect(publishFailure(new Error("Publish failed on every relay: Error: https://a.test is left alone after failing; asked again in 12 s; Error: https://b.test is left alone after failing; asked again in 7 s")))
+      .toBe("Could not publish connection details: Publish failed on every relay: Error: https://a.test is left alone after failing; Error: https://b.test is left alone after failing. Retrying in 7 s.");
+    // The Desktop's Rust client rejects with a string.
+    expect(publishFailure("Publish error: pkarr.pubky.org: left alone after failing; asked again in 9 s; dht: DHT query timed out"))
+      .toBe("Could not publish connection details: Publish error: pkarr.pubky.org: left alone after failing; dht: DHT query timed out. Retrying in 9 s.");
+    expect(publishFailure(undefined)).toBe("Could not publish connection details: discovery unavailable. Retrying.");
+  });
+
+  it("a publish while every relay is left alone says when one is asked again; a new network asks them all at once", async () => {
+    vi.useFakeTimers();
+    try {
+      let up = false;
+      const puts: string[] = [];
+      const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PUT") puts.push(new URL(String(input)).host);
+        return up ? new Response(null, { status: 204 }) : new Response("down", { status: 500 });
+      }) as typeof fetch;
+      const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: fetchFn, requestsPerMinute: Infinity, log: () => {} });
+      const changes: string[] = [];
+      relay.subscribe((change) => changes.push(change ?? ""));
+      const id = createIdentity();
+      for (let i = 0; i < 3; i++) await relay.publish(id, []).catch(() => {});
+      const error = await relay.publish(id, []).then(() => null, (e: Error) => e.message);
+      expect(error).toMatch(/left alone after failing; asked again in 15 s/);
+      up = true;
+      puts.length = 0;
+      relay.networkChanged();
+      expect(changes.at(-1)).toBe("recovered");
+      await relay.publish(id, []);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(new Set(puts)).toEqual(new Set(["a.test", "b.test"]));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

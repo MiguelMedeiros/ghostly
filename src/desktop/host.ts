@@ -7,6 +7,7 @@ import {
   toBase64,
   toBase64Url,
   type Identity,
+  type DiscoveryChange,
   type DiscoveryStatus,
   type GhostRecord,
   type LocalFetch,
@@ -43,7 +44,7 @@ const STATUS_EVERY_MS = 2_000;
 function createTauriTransport(): PkarrTransport {
   let status: DiscoveryStatus | undefined;
   let askedAt = 0;
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(change?: DiscoveryChange) => void>();
   // What the connection panel shows, asked of Rust now and then; listeners hear of a relay tripping or recovering.
   const refresh = () => {
     if (Date.now() - askedAt < STATUS_EVERY_MS) return;
@@ -51,8 +52,10 @@ function createTauriTransport(): PkarrTransport {
     void invoke<DiscoveryStatus>("pkarr_status").then((next) => {
       const health = (s?: DiscoveryStatus) => JSON.stringify(s?.relays.map((r) => [r.relay, r.state]) ?? []);
       const changed = health(next) !== health(status);
+      // A relay that was failing answers again: links look and publish now rather than at their pace.
+      const recovered = !!status && next.relays.some((r) => r.state === "ok" && status!.relays.some((was) => was.relay === r.relay && was.state !== "ok"));
       status = next;
-      if (changed) for (const listener of listeners) listener();
+      if (changed) for (const listener of listeners) listener(recovered ? "recovered" : "tripped");
     }).catch(() => {});
   };
   return {
@@ -73,6 +76,12 @@ function createTauriTransport(): PkarrTransport {
       return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
     },
     describe: () => ({ protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [] }),
+    networkChanged() {
+      void invoke("pkarr_network_changed").then(() => {
+        askedAt = 0; refresh();
+        for (const listener of listeners) listener("recovered");
+      }).catch(() => {});
+    },
     configure({ relays, readRelays }) {
       void invoke("set_pkarr_relays", { relays, readRelays }).then(() => { askedAt = 0; refresh(); }).catch(() => {});
     },

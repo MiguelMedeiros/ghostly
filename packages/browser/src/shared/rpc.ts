@@ -178,8 +178,11 @@ export interface EngineApi {
   walletRemove(params: WalletRemove): void;
   /** Testnet only: a small fixed amount from the wallet's own test faucet (the test mint, Sepolia's USDT faucet). */
   walletTestCoins(params: WalletTestCoins): TestCoinsResult;
-  /** The app is in front again: chats look now, and dropped ones reconnect at once. */
-  wake(): void;
+  /**
+   * The app is in front again: chats look now, and dropped ones reconnect at once. `network`: the device is back
+   * online (another network, a VPN): what discovery learnt about failing relays on the old one is forgotten too.
+   */
+  wake(params?: { network?: boolean }): void;
   /** Looks once at another profile of this device for messages waiting for it (WISP 04 § Checking other profiles): reads only. */
   peekProfile(params: { profile: string; dbName: string }): import("../engine/profilePeek").PeekResult;
   /** The primary mint is where Lightning invoices are created. */

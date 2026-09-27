@@ -513,6 +513,12 @@
           "markdownDescription": "Enables the paired_native_send command without any pre-configured scope."
         },
         {
+          "description": "Enables the pkarr_network_changed command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pkarr-network-changed",
+          "markdownDescription": "Enables the pkarr_network_changed command without any pre-configured scope."
+        },
+        {
           "description": "Enables the pkarr_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-pkarr-status",
@@ -937,6 +943,12 @@
           "type": "string",
           "const": "deny-paired-native-send",
           "markdownDescription": "Denies the paired_native_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pkarr_network_changed command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pkarr-network-changed",
+          "markdownDescription": "Denies the pkarr_network_changed command without any pre-configured scope."
         },
         {
           "description": "Denies the pkarr_status command without any pre-configured scope.",

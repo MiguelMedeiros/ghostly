@@ -25,7 +25,10 @@
 //! server error, its rate limit) and it is left alone for a minute, twice as
 //! long each time it trips again, five minutes at most; then one request
 //! probes it. Reads with relay reads on go to the DHT while every relay is left
-//! alone.
+//! alone. While every relay is left alone for failing, one of them is asked
+//! anyway every 15 s (`ALL_DOWN_PROBE_EVERY`, as packages/core/src/relayBreaker.ts):
+//! with the DHT out of reach too (UDP blocked, a VPN) that was minutes with no
+//! way to publish at all. A change of network forgets every breaker.
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddrV4;
@@ -100,6 +103,8 @@ const BREAKER_THRESHOLD: u32 = 3;
 /// How long a tripped relay is left alone the first time; doubled on each trip in a row, up to the most.
 const BREAKER_BASE: Duration = Duration::from_secs(60);
 const BREAKER_MAX: Duration = Duration::from_secs(300);
+/// While every relay is left alone for failing, one of them (whose wait ends first) is asked anyway this often.
+const ALL_DOWN_PROBE_EVERY: Duration = Duration::from_secs(15);
 
 /// The DHT as this client reaches it: the Mainline DHT itself, or, in tests, a stand-in behind a Pkarr client.
 #[derive(Clone)]
@@ -171,6 +176,8 @@ struct Inner {
     reads_per_minute: usize,
     /// The relays were named by `GHOSTLY_PKARR_RELAYS`: Settings do not replace them.
     fixed_relays: bool,
+    /// `ALL_DOWN_PROBE_EVERY` (tests shorten it).
+    all_down_probe_every: Duration,
     state: Mutex<State>,
 }
 
@@ -186,6 +193,8 @@ struct State {
     turn: usize,
     /// Where the last read went.
     path: Option<Path>,
+    /// When a relay was last asked because every relay was left alone.
+    last_all_down_probe: Option<Instant>,
 }
 
 /// A lookup's progress, as its watch channel carries it.
@@ -233,6 +242,8 @@ struct Breaker {
     probing: bool,
     kind: Option<Failure>,
     reason: String,
+    /// When it last tripped.
+    tripped_at: Option<Instant>,
 }
 
 /// Where a read went, as the connection panel shows it: `{"via":"dht"}` or `{"via":"relay","relay":…}`.
@@ -372,6 +383,7 @@ impl Pkarr {
             read_relays: read_relays || lookup.is_none(),
             turn: 0,
             path: None,
+            last_all_down_probe: None,
         };
         Ok(Self {
             inner: Arc::new(Inner {
@@ -379,6 +391,7 @@ impl Pkarr {
                 http,
                 reads_per_minute,
                 fixed_relays,
+                all_down_probe_every: ALL_DOWN_PROBE_EVERY,
                 state: Mutex::new(state),
             }),
         })
@@ -403,6 +416,26 @@ impl Pkarr {
                 },
             })
             .collect();
+    }
+
+    /// The network changed (another Wi-Fi, a VPN up or down, back online): what failed on the old one says
+    /// nothing about the new one, so every relay's breaker and rest are forgotten.
+    pub fn network_changed(&self) {
+        let mut state = self.inner.state.lock().unwrap();
+        for relay in state.relays.iter_mut() {
+            relay.budget.breaker = Breaker::default();
+            relay.budget.resting_until = None;
+        }
+        state.last_all_down_probe = None;
+        drop(state);
+        diagnostics::log("pkarr network changed: every relay is asked again");
+    }
+
+    /// Tests: probes while every relay is left alone come this often.
+    #[cfg(test)]
+    fn probing_every(mut self, every: Duration) -> Self {
+        Arc::get_mut(&mut self.inner).unwrap().all_down_probe_every = every;
+        self
     }
 
     /// Where reads go and how each relay is doing.
@@ -776,13 +809,16 @@ impl Pkarr {
         let count = state.relays.len();
         let turn = state.turn;
         state.turn = state.turn.wrapping_add(1);
+        // Every relay left alone for failing: one of them is asked anyway, now and then.
+        let probe = state.all_down_probe(now, self.inner.all_down_probe_every);
         let mut best: Option<(usize, i64)> = None;
         for offset in 0..count {
             let index = (turn + offset) % count;
-            if !state.relays[index]
-                .budget
-                .available(now, self.inner.reads_per_minute)
-            {
+            if !state.relays[index].budget.available_as(
+                now,
+                self.inner.reads_per_minute,
+                probe == Some(index),
+            ) {
                 continue;
             }
             // Unknown counts as plenty: a relay that never said is one to ask.
@@ -795,8 +831,13 @@ impl Pkarr {
             }
         }
         let (index, _) = best?;
+        if probe == Some(index) {
+            state.last_all_down_probe = Some(now);
+            state.relays[index].budget.breaker.probing = true;
+        } else {
+            state.relays[index].budget.breaker.begin(now);
+        }
         let budget = &mut state.relays[index].budget;
-        budget.breaker.begin(now);
         if budgeted {
             budget.spend(now);
         }
@@ -921,16 +962,30 @@ impl Pkarr {
     async fn relay_put(&self, url: &Url, packet: &SignedPacket) -> Result<(), String> {
         let key = packet.public_key();
         let now = Instant::now();
-        let Some(previous) = self.with_budget(url, |budget| {
-            if budget.breaker.blocked(now) {
-                return Err("left alone after failing".to_string());
+        let previous = {
+            let mut state = self.inner.state.lock().unwrap();
+            let every = self.inner.all_down_probe_every;
+            let Some(index) = state.relays.iter().position(|relay| relay.url == *url) else {
+                return Err("no longer in Settings".into());
+            };
+            if state.relays[index].budget.breaker.blocked(now) {
+                // Every relay left alone: one of them is asked anyway, now and then (`all_down_probe`).
+                if state.all_down_probe(now, every) != Some(index) {
+                    let again = state.asked_again_in(index, now, every).as_secs().max(1);
+                    return Err(format!(
+                        "left alone after failing; asked again in {again} s"
+                    ));
+                }
+                state.last_all_down_probe = Some(now);
+                state.relays[index].budget.breaker.probing = true;
+            } else {
+                state.relays[index].budget.breaker.begin(now);
             }
-            budget.breaker.begin(now);
-            Ok(budget.last_put.insert(key.clone(), packet.timestamp()))
-        }) else {
-            return Err("no longer in Settings".into());
+            state.relays[index]
+                .budget
+                .last_put
+                .insert(key.clone(), packet.timestamp())
         };
-        let previous = previous?;
         let target = key_url(url, &key);
         let body = packet.to_relay_payload();
         let send = |replaces: Option<pkarr::Timestamp>| {
@@ -1082,7 +1137,14 @@ impl RelayBudget {
     /// Not resting nor left alone, and this client has reads left for it this minute: `reads_per_minute`
     /// until the relay said its own limit, half of that (within bounds) from then on. No cap stays no cap.
     fn available(&mut self, now: Instant, reads_per_minute: usize) -> bool {
-        if self.resting_until.is_some_and(|until| until > now) || self.breaker.blocked(now) {
+        self.available_as(now, reads_per_minute, false)
+    }
+
+    /// `available`, where `probe` (every relay left alone, and this one's turn to be asked anyway) passes its breaker.
+    fn available_as(&mut self, now: Instant, reads_per_minute: usize, probe: bool) -> bool {
+        if self.resting_until.is_some_and(|until| until > now)
+            || (!probe && self.breaker.blocked(now))
+        {
             return false;
         }
         while self
@@ -1146,10 +1208,70 @@ impl Breaker {
             .saturating_mul(2u32.saturating_pow(self.trips))
             .min(BREAKER_MAX);
         self.open_until = Some(now + wait);
+        self.tripped_at = Some(now);
         self.trips += 1;
         self.failures = 0;
         self.probing = false;
         Some(wait)
+    }
+}
+
+impl State {
+    /// Every relay left alone for failing (none for its rate limit, none with its probe due or out), and
+    /// `every` passed since the last trip and the last such probe: the one whose wait ends first may be asked now.
+    fn all_down_probe(&self, now: Instant, every: Duration) -> Option<usize> {
+        if self.relays.is_empty()
+            || self
+                .last_all_down_probe
+                .is_some_and(|at| now.duration_since(at) < every)
+        {
+            return None;
+        }
+        let mut pick: Option<(usize, Instant)> = None;
+        for (index, relay) in self.relays.iter().enumerate() {
+            let breaker = &relay.budget.breaker;
+            let until = breaker.open_until.filter(|until| *until > now)?;
+            if breaker.probing
+                || breaker.kind != Some(Failure::Error)
+                || breaker
+                    .tripped_at
+                    .is_some_and(|at| now.duration_since(at) < every)
+            {
+                return None;
+            }
+            if pick.is_none_or(|(_, soonest)| until < soonest) {
+                pick = Some((index, until));
+            }
+        }
+        pick.map(|(index, _)| index)
+    }
+
+    /// How long until this relay is asked again: its wait, or the next probe while every relay is left alone.
+    fn asked_again_in(&self, index: usize, now: Instant, every: Duration) -> Duration {
+        let wait = self.relays[index]
+            .budget
+            .breaker
+            .open_until
+            .map_or(Duration::ZERO, |until| until.saturating_duration_since(now));
+        let all_down = self
+            .relays
+            .iter()
+            .all(|relay| relay.budget.breaker.blocked(now));
+        if !all_down {
+            return wait;
+        }
+        let since = self
+            .last_all_down_probe
+            .into_iter()
+            .chain(
+                self.relays
+                    .iter()
+                    .filter_map(|relay| relay.budget.breaker.tripped_at),
+            )
+            .max();
+        wait.min(since.map_or(Duration::ZERO, |at| {
+            (at + every).saturating_duration_since(now)
+        }))
     }
 }
 
@@ -1758,6 +1880,106 @@ mod direct {
         pkarr.publish(&packet(&keypair, "more")).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(requests(&relay, "PUT"), puts, "left alone");
+    }
+
+    /// Both relays and the DHT failing, as on a Mac whose VPN blocks UDP right after a restart (2026-09-27):
+    /// probes every `every` while every relay is left alone.
+    async fn all_down(every: Duration) -> (Relay, Relay, Relay, Pkarr) {
+        let (a, b, dht) = (
+            pkarr_relay().await,
+            pkarr_relay().await,
+            pkarr_relay().await,
+        );
+        for relay in [&a, &b, &dht] {
+            *relay.broken.lock().unwrap() = true;
+        }
+        let pkarr = Pkarr::direct(
+            Dht::StandIn(pkarr_client(&dht)),
+            &[a.url.parse().unwrap(), b.url.parse().unwrap()],
+        )
+        .unwrap()
+        .probing_every(every);
+        let keypair = Keypair::random();
+        for i in 0..BREAKER_THRESHOLD {
+            assert!(pkarr
+                .publish(&packet(&keypair, &i.to_string()))
+                .await
+                .is_err());
+        }
+        let status = pkarr.status();
+        assert!(
+            status.relays.iter().all(|relay| relay.state == "failing"),
+            "{status:?}"
+        );
+        (a, b, dht, pkarr)
+    }
+
+    #[tokio::test]
+    async fn with_every_relay_left_alone_one_is_asked_anyway_now_and_then_and_taken_back_when_it_answers(
+    ) {
+        let every = Duration::from_millis(400);
+        let (a, b, _dht, pkarr) = all_down(every).await;
+        let puts = || requests(&a, "PUT") + requests(&b, "PUT");
+        let before = puts();
+        let keypair = Keypair::random();
+        // Right after the trip: nothing is asked, and the error says when it will be.
+        let error = pkarr.publish(&packet(&keypair, "now")).await.unwrap_err();
+        assert!(
+            error.contains("left alone after failing; asked again in"),
+            "{error}"
+        );
+        assert_eq!(puts(), before);
+        // A wait later, one relay (not both) is asked: it still fails.
+        tokio::time::sleep(every + Duration::from_millis(50)).await;
+        assert!(pkarr.publish(&packet(&keypair, "probe")).await.is_err());
+        assert_eq!(puts(), before + 1, "one probe");
+        // The relays answer again: the next probe gets through, well before the minute the breaker waits.
+        *a.broken.lock().unwrap() = false;
+        *b.broken.lock().unwrap() = false;
+        let started = Instant::now();
+        loop {
+            tokio::time::sleep(every).await;
+            if pkarr.publish(&packet(&keypair, "back")).await.is_ok() {
+                break;
+            }
+            assert!(started.elapsed() < every * 6, "no probe got through");
+        }
+        assert!(pkarr
+            .status()
+            .relays
+            .iter()
+            .any(|relay| relay.state == "ok"));
+    }
+
+    #[tokio::test]
+    async fn a_change_of_network_forgets_every_breaker() {
+        let (a, b, _dht, pkarr) = all_down(Duration::from_secs(60)).await;
+        *a.broken.lock().unwrap() = false;
+        *b.broken.lock().unwrap() = false;
+        let before = requests(&a, "PUT") + requests(&b, "PUT");
+        assert!(
+            pkarr
+                .publish(&packet(&Keypair::random(), "x"))
+                .await
+                .is_err(),
+            "still left alone"
+        );
+        pkarr.network_changed();
+        assert!(pkarr
+            .status()
+            .relays
+            .iter()
+            .all(|relay| relay.state == "ok"));
+        pkarr
+            .publish(&packet(&Keypair::random(), "y"))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            requests(&a, "PUT") + requests(&b, "PUT"),
+            before + 2,
+            "both asked again"
+        );
     }
 
     #[tokio::test]

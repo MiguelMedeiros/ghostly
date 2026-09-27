@@ -384,6 +384,17 @@ export interface GhostLinkOptions {
   events?: GhostLinkEvents;
 }
 
+/**
+ * What a link says when its connection details could not go out: the transport's reason (the Desktop's Rust client
+ * rejects with a string, not an Error), and when it is tried again, the soonest a relay is asked ("asked again in N s").
+ */
+export function publishFailure(error: unknown): string {
+  const reason = error instanceof Error ? error.message : typeof error === "string" && error ? error : "discovery unavailable";
+  const waits = [...reason.matchAll(/asked again in (\d+) s/g)].map((m) => Number(m[1]));
+  const text = reason.replace(/; asked again in \d+ s/g, "").replace(/\.$/, "");
+  return `Could not publish connection details: ${text}. ${waits.length ? `Retrying in ${Math.min(...waits)} s.` : "Retrying."}`;
+}
+
 export class GhostLink {
   readonly session: LinkSession;
   private readonly dht: DhtDelivery | null;
@@ -610,7 +621,7 @@ export class GhostLink {
           if (!signal || !options.params.profile) return;
           this.signalPublishFailed = true;
           events.onPairingState?.({ status: "error",
-            error: `Could not publish connection details: ${error instanceof Error ? error.message : "discovery unavailable"}. Retrying.` });
+            error: publishFailure(error) });
         };
         try {
           if (signal && this.tracker) {
