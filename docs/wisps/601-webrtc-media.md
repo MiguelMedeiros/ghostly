@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 601; editorial family allocation |
 | Status | Draft |
-| Revision | 0.6 |
+| Revision | 0.7 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
@@ -25,7 +25,7 @@ WebRTC is the media path. Voice, camera and screen permission must remain separa
 
 In the chat session ([401](401-paired-chat.md#calls-and-shared-apps)) calls are on while both sides offer `calls/1` on the live session.
 
-Signaling: each compact signal above (offer `o`, answer `a`, hang-up `h`, picture state `v`: the JSON a compatibility chat keeps in `_call`) travels as `{"t":"paired-call","s":"<signal>"}` on the session, at most 8,192 characters. The receiver validates it as it would a `_call` record (anchored patterns, candidates re-serialized from their parts, the 120 second freshness window) and drops anything else, and drops every `paired-call` frame unless both sides offer `calls/1`. Nothing about a call is published on the DHT in this profile. A signal that could not go (the session dropped between two frames) is sent again on the next ready session while it is still fresh; clearing it (after a hang-up) means there is nothing left to say.
+Signaling: each compact signal above (offer `o`, answer `a`, hang-up `h`, picture state `v`: the JSON a compatibility chat keeps in `_call`) travels as `{"t":"paired-call","s":"<signal>"}` on the session, at most 8,192 characters. The receiver validates it as it would a `_call` record (anchored patterns, candidates re-serialized from their parts, the 120 second freshness window) and drops anything else, and drops every `paired-call` frame unless both sides offer `calls/1`. Nothing about a call is published on the DHT in this profile. A signal on the session carries up to eight candidates (a `_call` record keeps one host and one server reflexive, a DHT packet's worth): host candidates on local networks first, then the server reflexive one and relay ones, IPv6, and last the host candidates a browser marks as costly (a VPN tunnel). A computer often has several interfaces, and the one listed first is not always one the contact can reach: on a Mac whose default route is a VPN, it is the tunnel's address, which nothing on that machine can answer. A call uses the STUN servers of the apps and then the profile's own ICE servers (Settings → Network), so a TURN relay set there carries the calls a direct path cannot: a VPN that takes every packet through its tunnel, or a NAT that maps each destination apart. A signal that could not go (the session dropped between two frames) is sent again on the next ready session while it is still fresh; clearing it (after a hang-up) means there is nothing left to say.
 
 Media: always a WebRTC peer connection of its own, separate from the session, whatever carries the chat (WebRTC, Iroh or HyperDHT). Iroh and HyperDHT carry the session's text frames, not RTP; the call's connection gathers its own ICE candidates (STUN) and runs DTLS-SRTP end to end, as in a compatibility chat. The offer and answer carry that connection's DTLS fingerprint inside the authenticated session, so the media is bound to the contact the session authenticated, which a `_call` record read from the DHT does not give. A separate connection also means a transport switch of the chat does not interrupt a call.
 
@@ -51,6 +51,8 @@ The headless CLI ([11xx](11xx-headless.md#calls)) calls and answers in the chat 
 This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of the chat session ([401](401-paired-chat.md)), in browsers and in the Linux Desktop's native media (`src-tauri/src/native_call`, `src/desktop/nativeCalls.ts`). It does not add group calls, an SFU or an end-to-end encrypted forwarding-service claim. See [React call hooks](../../packages/react), [paired calls](../../packages/core/src/pairedCalls.ts). Exercise accept/reject/hangup, stale signals, simultaneous calls, denied permissions and camera/screen transitions on supported platforms, and in the chat session the live-only rule and a contact without `calls/1`.
 
 ## Revision log
+
+- 0.7 (2026-09-27): a signal on the chat session carries up to eight candidates (local networks first, VPN tunnels last, relay included); calls use the profile's ICE servers (a TURN relay) after the apps' STUN servers. Found by the macOS app calling the headless CLI on a Mac with NordVPN as its default route.
 
 - 0.6 (2026-09-27): the headless CLI calls, voice only (11xx § Calls): audio-only offers, video sections answered and dropped, up to eight candidates in a signal. Tested with the web app both ways (e2e/web/headless-call.spec.ts).
 

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   CALL_SIGNAL_MAX_AGE_MS,
+  PAIRED_CALL_CANDIDATES,
+  RTC_CONFIG,
   buildSdpFromSignal,
+  callRtcConfig,
   extractParamsFromSdp,
+  pickCallCandidates,
   parseCallSignal,
   signalHasVideo,
   type CallSignal,
@@ -302,3 +306,52 @@ describe("call signals", () => {
     expect(parseCallSignal(JSON.stringify({ t: "h", ts: 1 }), NOW)).toBeNull();
   });
 });
+
+/** What Chromium gathers on a Mac with a VM bridge, Wi-Fi, Tailscale and a VPN (NordVPN) as its default route. */
+const MAC_WITH_VPN = [
+  "550571598 1 udp 2122194687 192.168.139.3 50243 typ host generation 0 network-id 1",
+  "2340100888 1 udp 2122063615 192.168.0.164 60348 typ host generation 0 network-id 5",
+  "273961055 1 udp 2121998079 192.168.0.161 63386 typ host generation 0 network-id 4 network-cost 10",
+  "1045614580 1 udp 2121867007 100.72.38.95 54886 typ host generation 0 network-id 6 network-cost 50",
+  "3454620636 1 udp 2121801471 10.5.0.2 50574 typ host generation 0 network-id 8 network-cost 50",
+  "114747471 1 udp 2122265343 fd07:b51a:cc66:0:a617:db5e:ab7:e9f1 61448 typ host generation 0 network-id 2",
+  "336885833 1 udp 2121937663 2804:14c:8785:c1e7::1 51839 typ host generation 0 network-id 7",
+  "1579085014 1 tcp 1518214911 192.168.139.3 9 typ host tcptype active generation 0 network-id 1",
+  "4187686296 1 udp 1685593855 187.13.209.68 53505 typ srflx raddr 10.5.0.2 rport 50574 generation 0 network-id 8 network-cost 50",
+  "777 1 udp 41885695 203.0.113.9 3478 typ relay raddr 187.13.209.68 rport 53505 generation 0",
+  "888 1 udp 2122260223 127.0.0.1 5000 typ host generation 0",
+  "999 1 udp 2122260223 169.254.1.1 5000 typ host generation 0",
+];
+
+describe("call candidates on the chat session", () => {
+  it("carry every path: local networks first, then the server reflexive and relay ones, IPv6, and the VPN's last", () => {
+    const picked = pickCallCandidates(MAC_WITH_VPN);
+    expect(picked).toHaveLength(PAIRED_CALL_CANDIDATES);
+    expect(picked.map((c) => c.split(" ")[4])).toEqual([
+      "192.168.139.3", "192.168.0.164", "192.168.0.161", "187.13.209.68", "203.0.113.9", "2804:14c:8785:c1e7::1", "fd07:b51a:cc66:0:a617:db5e:ab7:e9f1", "100.72.38.95",
+    ]);
+    // The related address is informational: never carried.
+    expect(picked.every((c) => !c.includes(" raddr "))).toBe(true);
+    // Room for more: the VPN's tunnel comes last.
+    expect(pickCallCandidates(MAC_WITH_VPN, 12).map((c) => c.split(" ")[4]).slice(-2)).toEqual(["100.72.38.95", "10.5.0.2"]);
+    // Loopback only when asked (the CLI's tests bind to it).
+    expect(pickCallCandidates(MAC_WITH_VPN, 12, { loopback: true }).map((c) => c.split(" ")[4])).toContain("127.0.0.1");
+  });
+
+  it("a signal carries them when it may, and every one survives the receiver's checks", () => {
+    const sdp = [...CHROME_OFFER.split("\r\n").filter((l) => !l.startsWith("a=candidate:")), ...MAC_WITH_VPN.map((c) => `a=candidate:${c}`)].join("\r\n");
+    expect(extractParamsFromSdp(sdp).c).toHaveLength(2);
+    const params = extractParamsFromSdp(sdp, { maxCandidates: PAIRED_CALL_CANDIDATES });
+    expect(params.c).toHaveLength(8);
+    const parsed = parseCallSignal(JSON.stringify({ t: "o", ts: NOW, ...params }), NOW);
+    expect(parsed?.c).toHaveLength(8);
+    expect(buildSdpFromSignal(parsed!).match(/^a=candidate:/gm)?.length).toBe(16);
+  });
+
+  it("a call uses the profile's ICE servers after the apps' STUN servers", () => {
+    expect(callRtcConfig()).toEqual(RTC_CONFIG);
+    const config = callRtcConfig([{ urls: "turn:turn.example.org:3478, turns:turn.example.org:5349", username: "u", credential: "p" }, { urls: " " }]);
+    expect(config.iceServers?.slice(RTC_CONFIG.iceServers!.length)).toEqual([{ urls: ["turn:turn.example.org:3478", "turns:turn.example.org:5349"], username: "u", credential: "p" }]);
+  });
+});
+

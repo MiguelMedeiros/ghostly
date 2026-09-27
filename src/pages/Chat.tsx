@@ -50,7 +50,7 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, isPlayableVideoType, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
@@ -162,6 +162,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
     media: platform?.callMedia?.(),
+    // The profile's ICE servers (a TURN relay) serve calls too; a signal on the chat session carries every path.
+    iceServers: engine.state?.settings.iceServers,
+    maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
   });
 
   const callState = webrtc.callState;

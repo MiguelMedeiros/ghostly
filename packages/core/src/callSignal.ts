@@ -75,7 +75,78 @@ export const RTC_CONFIG: RTCConfiguration = {
   iceCandidatePoolSize: 10,
 };
 
-export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
+/** An ICE server as a profile's settings keep it: one or more URLs in `urls` (space or comma separated). */
+export interface CallIceServer { urls: string | string[]; username?: string; credential?: string }
+
+/**
+ * A call's WebRTC configuration: the apps' STUN servers, then the profile's own (Settings → Network → ICE
+ * servers: a TURN relay, typically). A relay is what connects a call when no direct path works: a VPN that takes
+ * every packet through its tunnel, or a NAT that maps each destination apart.
+ */
+export function callRtcConfig(extra: readonly CallIceServer[] = []): RTCConfiguration {
+  const servers: RTCIceServer[] = [];
+  for (const server of extra) {
+    const urls = (Array.isArray(server.urls) ? server.urls : server.urls.split(/[\s,]+/)).filter(Boolean);
+    if (!urls.length) continue;
+    servers.push({ urls, ...(server.username ? { username: server.username } : {}), ...(server.credential ? { credential: server.credential } : {}) });
+  }
+  return { ...RTC_CONFIG, iceServers: [...(RTC_CONFIG.iceServers ?? []), ...servers] };
+}
+
+/**
+ * How many candidates a signal on the chat session carries (`paired-call`, WISP 601): the receiver takes eight.
+ * A compatibility chat's `_call` record keeps to one host and one server reflexive candidate (a DHT packet's worth).
+ */
+export const PAIRED_CALL_CANDIDATES = 8;
+
+/**
+ * The candidates a signal carries, from the `a=candidate:` values of an SDP, when it may carry up to `max`.
+ *
+ * A computer often has several interfaces (Wi-Fi, Ethernet, VM bridges, Tailscale, a VPN) and the one listed first is
+ * not always one the contact can reach: on a Mac with a VPN as its default route it is the tunnel's address, which
+ * nothing on that machine can answer. So the signal carries every usable path, in this order:
+ *
+ * 1. host candidates on local networks, IPv4 or an mDNS name (at most four);
+ * 2. the first server reflexive candidate, and relay candidates (a TURN server, when the profile has one);
+ * 3. IPv6 host candidates, global ones first (at most two);
+ * 4. host candidates a browser marks as costly (`network-cost` 50 or more: a VPN, or an interface it does not know);
+ * 5. whatever else fits.
+ *
+ * UDP only, loopback, link-local and unspecified addresses left out (loopback kept with `loopback`), the related
+ * address dropped (it is informational, and an IPv6 one broke apps before 0.5).
+ */
+export function pickCallCandidates(candidates: readonly string[], max = PAIRED_CALL_CANDIDATES, { loopback = false } = {}): string[] {
+  const udp = candidates.map((c) => c.trim()).filter((c) => / udp /i.test(c));
+  const address = (c: string) => c.split(" ")[4] ?? "";
+  const type = (c: string) => / typ (\S+)/.exec(c)?.[1];
+  const cost = (c: string) => Number(/ network-cost (\d+)/.exec(c)?.[1] ?? 0);
+  const ipv6 = (c: string) => address(c).includes(":");
+  const usable = (c: string) => {
+    const a = address(c).toLowerCase();
+    if (a === "::" || a === "0.0.0.0" || a.startsWith("169.254.") || a.startsWith("fe80:")) return false;
+    return loopback || !(a === "::1" || a.startsWith("127."));
+  };
+  const hosts = udp.filter((c) => type(c) === "host" && usable(c));
+  const costly = (c: string) => cost(c) >= 50;
+  const groups = [
+    hosts.filter((c) => !ipv6(c) && !costly(c)).slice(0, 4),
+    udp.filter((c) => type(c) === "srflx").slice(0, 1),
+    udp.filter((c) => type(c) === "relay").slice(0, 2),
+    [...hosts.filter((c) => ipv6(c) && !/^f[cd]/i.test(address(c)) && !costly(c)), ...hosts.filter((c) => ipv6(c) && (/^f[cd]/i.test(address(c)) || costly(c)))].slice(0, 2),
+    hosts.filter((c) => !ipv6(c) && costly(c)),
+    hosts,
+  ];
+  const picked: string[] = [];
+  for (const group of groups) for (const c of group) if (picked.length < max && !picked.includes(c)) picked.push(c);
+  return picked.map((c) => c.replace(/ raddr \S+ rport \d+/, ""));
+}
+
+/**
+ * The parameters of a call signal, from an SDP. `maxCandidates` above two (a signal on the chat session) carries
+ * the candidates `pickCallCandidates` chooses; the default keeps a compatibility chat's one host and one server
+ * reflexive candidate.
+ */
+export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback = false }: { maxCandidates?: number; loopback?: boolean } = {}): Partial<CallSignal> {
   const lines = sdp.split("\r\n");
 
   let ufrag = "";
@@ -142,7 +213,7 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
   // Keep packet size under 1000 bytes DHT limit
   // An IPv6 related address (`raddr ::`, WebKit's IPv6 srflx) made apps before 0.5 refuse the whole signal:
   // the related address is informational, so it is left out.
-  const selectedCandidates = [
+  const selectedCandidates = maxCandidates > 2 ? pickCallCandidates(candidates, maxCandidates, { loopback }) : [
     ...hostCandidates.slice(0, 1),
     ...srflxCandidates.slice(0, 1),
   ].map(c => c.replace(/ raddr \S*:\S* rport \d+/, ""));
