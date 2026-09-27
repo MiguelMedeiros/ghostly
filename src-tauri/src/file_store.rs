@@ -69,9 +69,10 @@ impl FileStore {
         file.write_all(bytes).map_err(|e| e.to_string())
     }
 
-    /// What was written so far survives a crash.
+    /// What was written so far survives a crash. Opened for writing: Windows refuses to flush a read-only handle
+    /// (`FlushFileBuffers`, "Access is denied").
     pub fn flush(&self, space: &str, id: &str) -> Result<(), String> {
-        match File::open(self.path(space, id)?) {
+        match OpenOptions::new().write(true).open(self.path(space, id)?) {
             Ok(file) => file.sync_all().map_err(|e| e.to_string()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.to_string()),

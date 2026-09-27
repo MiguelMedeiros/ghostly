@@ -44,7 +44,8 @@ export async function storeInApp(app: DesktopApp, port: number, size: number, pl
   const answer = await app.executeAsync<{ error?: string } | null>(
     `const [port, size, space, id, done] = arguments;
      (async () => {
-       const invoke = window.__TAURI_INTERNALS__.invoke;
+       const invoke = (command, ...rest) => window.__TAURI_INTERNALS__.invoke(command, ...rest)
+         .catch((e) => { throw new Error(command + ": " + (e && e.message || e)); });
        await invoke("file_bytes_remove", { space, id });
        const step = 1024 * 1024;
        for (let offset = 0; offset < size; offset += step) {
