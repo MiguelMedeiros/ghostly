@@ -210,7 +210,7 @@ describe("this side recording a voice note", () => {
     expect(new Set(during)).toEqual(new Set(["recording"]));
     fireEvent.pointerUp(mic(), touch);
     await wait(0);
-    expect((await said()).at(-1)).toBe("stop");
+    expect((await said()).slice(-1)).toEqual(["stop"]);
     const after = (await said()).length;
     await wait(3_000);
     expect(await said()).toHaveLength(after);
@@ -227,7 +227,7 @@ describe("this side recording a voice note", () => {
     expect(await said()).not.toContain("stop");
     fireEvent.click(screen.getByTestId("voice-delete"));
     await wait(0);
-    expect((await said()).at(-1)).toBe("stop");
+    expect((await said()).slice(-1)).toEqual(["stop"]);
   });
 
   it("typing after a recording says typing again at once", async () => {

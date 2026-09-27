@@ -122,8 +122,7 @@ describe("TypingSender", () => {
     expect(sent).toHaveLength(TYPING_SEND_LIMIT);
     expect(sender.stopped()).toEqual(typingFrame("stop"));
     // What the reader sees in the window stays under its limit.
-    let at = 0;
-    const receiver = new TypingReceiver(() => {}, () => at);
+    const receiver = new TypingReceiver(() => {}, () => 0);
     for (const frame of [...sent, typingFrame("stop")]) expect(receiver.receive(frame as Record<string, unknown>)).toBe(true);
     receiver.clear();
     // The window moves on: the word goes again.

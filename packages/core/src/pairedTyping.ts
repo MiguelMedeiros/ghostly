@@ -43,7 +43,8 @@ export interface TypingActivity { kind: TypingKind; status?: string }
 
 export type TypingState = "start" | "stop";
 
-export interface TypingFrame { t: typeof TYPING_FRAME; s: TypingState; kind?: Exclude<TypingKind, "typing">; status?: string }
+// A type, not an interface: it is read back as a plain frame record.
+export type TypingFrame = { t: typeof TYPING_FRAME; s: TypingState; kind?: Exclude<TypingKind, "typing">; status?: string };
 
 /** A scheme (`https://`, `nostr:npub…`, `javascript:`), `www.`, or a tag: a status that holds one is not shown. */
 const LINK_OR_MARKUP = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b(?:mailto|javascript|data|nostr|lightning|bitcoin|ghostly|magnet|tel|sms|file):|<\/?[a-z!]/i;
