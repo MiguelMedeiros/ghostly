@@ -949,18 +949,21 @@ describe("native transports", () => {
   }
   const open = async (...links: GhostLink[]) => vi.waitFor(() => { for (const link of links) expect(link.isDataLinkOpen).toBe(true); });
 
-  it("an incoming native connection opens a paired session, and a second one while open is closed", async () => {
+  it("an incoming native connection opens a paired session, and a second one while open that does not authenticate is closed", async () => {
     const t = nativePair();
     const [ca, cb] = createChannelPair();
     t.ea.onConnection({ channel: ca, binding });
     t.eb.onConnection({ channel: cb, binding });
     await open(t.a, t.b);
     expect(t.onDataLinkState).toHaveBeenLastCalledWith("open");
-    const [extra] = createChannelPair();
+    // A second connection is the contact dialling afresh (its app restarted) only once it proves to be the contact.
+    const [extra, far] = createChannelPair();
     const close = vi.spyOn(extra, "close");
     t.ea.onConnection({ channel: extra, binding });
-    expect(close).toHaveBeenCalled();
+    far.send(JSON.stringify({ t: "pair-offer", v: 1 }));
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
     expect(t.a.isDataLinkOpen).toBe(true);
+    expect(t.b.isDataLinkOpen).toBe(true);
     // A native session going away is reported as the link going idle.
     t.a.disconnect();
     expect(t.onDataLinkState).toHaveBeenLastCalledWith("idle");

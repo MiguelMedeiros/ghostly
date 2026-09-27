@@ -1,12 +1,13 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GhostLink } from "../src/ghostlink";
-import { identityFromSeedB64 } from "../src/identity";
+import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import type { PkarrTransport } from "../src/transport";
 import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, invitationWhere, killRtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
+import { setLinkTraceSink } from "../src/linkTrace";
 
 // covers: chat.paired.reconnect, core.liveness
 
@@ -47,13 +48,13 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
     native: kind === "iroh"
       ? { peerDescriptors: { "iroh/1": peerIroh }, peerTransports: ["iroh/1"], peerFallback: true, automatic: true }
       : { peerTransports: ["webrtc/1"], peerFallback: true, automatic: true },
-    ...(wasLive ? { resume: true } : {}),
+    ...(wasLive ? { resume: kind === "iroh" ? "iroh/1" as const : "webrtc/1" as const } : {}),
     transport: counted(world.pkarr, app.requests),
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
     createPeerConnection: () => fakePeerConnection(name),
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
-  } as ConstructorParameters<typeof GhostLink>[0]);
+  });
   apps.push(app);
   app.link.start();
   app.link.setChatActive(false);
@@ -75,14 +76,18 @@ async function until(check: () => boolean, limit: number): Promise<number> {
   return Date.now() - start;
 }
 
-/** The app ends: gracefully (whatever it says on its way out), or not at all (a crash, a kill). */
-function quit(world: { native: NativeWorld }, app: App, how: "graceful" | "crash"): void {
-  if (how === "graceful") (app.link as unknown as { depart?(): void }).depart?.();
+/**
+ * The app ends: gracefully (it says goodbye and has `DEPART_FLUSH_MS` before it exits, as the Desktop's exit hook and
+ * the CLI's stop give it), or not at all (a crash, a kill). Either way no close of its connections reaches anyone.
+ */
+async function quit(world: { native: NativeWorld }, app: App, how: "graceful" | "crash"): Promise<void> {
+  if (how === "graceful") { app.link.depart(); await run(DEPART_FLUSH_MS); }
   world.native.kill(app.name);
   killRtc(app.name);
   app.stopped = app.link.stop(false);
 }
 
+const DEPART_FLUSH_MS = 300;
 const RESTART_AFTER_MS = 3_000;
 
 interface Result { kind: Kind; restarted: "lower" | "higher"; how: "graceful" | "crash"; downSeenMs: number; liveAgainMs: number; requestsPerMin: number; dialFailures: number }
@@ -105,7 +110,7 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: "graceful
 
   const before = channelOf(stays);
   const quitAt = Date.now();
-  quit(world, goes, how);
+  await quit(world, goes, how);
   const failuresBefore = world.native.dialFailures;
   // When the staying side lets the old session go (it may only do so once the other app is back).
   let downSeenAt = 0;
@@ -128,7 +133,12 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: "graceful
   return result;
 }
 
-beforeEach(useFakeWorld);
+beforeEach(() => {
+  useFakeWorld();
+  // Every step of both links, for reading where the time went.
+  const trace = process.env.RESTART_TRACE;
+  if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n"));
+});
 afterEach(async () => {
   let stopped = false;
   const stopping = Promise.all(apps.splice(0).map(app => app.stopped ?? app.link.stop(false))).finally(() => { stopped = true; });
@@ -139,9 +149,46 @@ afterEach(async () => {
 
 describe.each(["iroh", "webrtc"] as const)("a paired chat over %s after one app restarts", kind => {
   describe.each(["lower", "higher"] as const)("the app with the %s key restarts", restarted => {
-    it.each(["graceful", "crash"] as const)("%s", async how => {
+    it.each(["graceful", "crash"] as const)("%s: live again within the target, on a small discovery budget", async how => {
       const result = await restart(kind, restarted, how);
-      expect(result.liveAgainMs).toBeLessThan(Infinity);
+      // Before (dev at 57bd8d2e): Iroh 61 s (lower) and 28 s (higher), noticed after 30 s; WebRTC 16-18 s.
+      expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(how === "graceful" ? 5_000 : 15_000);
+      if (how === "graceful") expect(result.downSeenMs, "the goodbye ends the session at once").toBeLessThanOrEqual(1_000);
+      // The relays allow 30 requests a minute per client, reads and publishes together, for every chat.
+      expect(result.requestsPerMin).toBeLessThanOrEqual(10);
+      // Nothing dials an app that is not there: a departing app does not redial, the staying one waits for the other back.
+      expect(result.dialFailures).toBe(0);
     }, 240_000);
   });
+});
+
+describe("coming back after a restart, the edges", () => {
+  it("two apps that restart together both knock, and settle on the lower key's connection", async () => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const low = startApp(world, "low", made.inviter, { side: made.joiner, name: "high" }, "iroh", emptyDhtDeliveryState(), true);
+    const high = startApp(world, "high", made.joiner, { side: made.inviter, name: "low" }, "iroh", emptyDhtDeliveryState(), true);
+    // The lower key's knock goes before the other app is up and fails (after `dialFailMs`); the other's waits meanwhile.
+    expect(await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen, 60_000)).toBeLessThanOrEqual(5_000);
+    const [lowChannel, highChannel] = [channelOf(low), channelOf(high)];
+    await run(60_000);
+    // One connection, kept: no side took over from the other afterwards.
+    expect([channelOf(low), channelOf(high)]).toEqual([lowChannel, highChannel]);
+    expect(low.link.isDataLinkOpen && high.link.isDataLinkOpen).toBe(true);
+  }, 120_000);
+
+  it("a dial in from another key than the pinned one leaves the held session as it was", async () => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, "iroh", emptyDhtDeliveryState());
+    const stays = startApp(world, "stays", made.joiner, { side: made.inviter, name: "goes" }, "iroh", emptyDhtDeliveryState());
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    const held = channelOf(stays);
+    // Someone else holding a copy of the invite, with a key of their own, dials the endpoint the record names.
+    const stranger = startApp(world, "stranger", { ...made.inviter, seedB64: createIdentity().seedB64 }, { side: made.joiner, name: "stays" }, "iroh", emptyDhtDeliveryState(), true);
+    await run(20_000);
+    expect(stranger.link.isDataLinkOpen).toBe(false);
+    expect(channelOf(stays)).toBe(held);
+    expect(goes.link.isDataLinkOpen && stays.link.isDataLinkOpen).toBe(true);
+  }, 120_000);
 });

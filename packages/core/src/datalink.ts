@@ -35,6 +35,11 @@ export interface DataLinkOptions {
    * is right there reading its invite, uses a short one until it is over.
    */
   attemptTimeoutMs?: () => number | undefined;
+  /**
+   * The open connection went `disconnected` (true: ICE consent checks unanswered, the contact may be gone or its app
+   * restarted; the connection is given `DISCONNECT_GRACE_MS`), or came back from it (false).
+   */
+  onDisconnected?: (disconnected: boolean) => void;
 }
 
 export const CONNECT_TIMEOUT_MS = 90_000;
@@ -162,10 +167,11 @@ export class DataLink {
 
     pc.addEventListener("connectionstatechange", () => {
       if (this.pc !== pc) return;
-      if (this.disconnectTimer) clearTimeout(this.disconnectTimer);
+      if (this.disconnectTimer) { clearTimeout(this.disconnectTimer); if (pc.connectionState === "connected") this.options.onDisconnected?.(false); }
       this.disconnectTimer = null;
       if (pc.connectionState === "failed" || pc.connectionState === "closed") this.reset();
       else if (pc.connectionState === "disconnected") {
+        if (this.state === "open") this.options.onDisconnected?.(true);
         this.disconnectTimer = setTimeout(() => {
           if (this.pc === pc) this.reset();
         }, DISCONNECT_GRACE_MS);

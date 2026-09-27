@@ -58,6 +58,11 @@ const FAST_POLL_MAX_MS = 45_000;
  * (30 s on the relays), once on a group's entry session and once more per member edge.
  */
 export const EXPECT_PEER_MS = 30_000;
+/**
+ * How long a link keeps looking at the active pace after its contact went away from a live session (it said goodbye,
+ * or the session dropped): an app that restarts is back within this, and its dial or offer is seen in seconds.
+ */
+export const WATCH_PEER_MS = 2 * 60_000;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
 const PUBLISH_RETRY_MS = 4_000;
@@ -158,6 +163,7 @@ export class LinkSession {
   private readonly startedAt = Date.now();
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
+  private watchUntil = 0;
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private connected = false;
@@ -269,6 +275,15 @@ export class LinkSession {
     this.pollNow();
   }
 
+  /**
+   * The contact just left a live session, and is likely coming back (an app restarting): fast for `EXPECT_PEER_MS`,
+   * then the active pace until `WATCH_PEER_MS` passed, whatever the chat's pace would be.
+   */
+  watchPeer(): void {
+    this.watchUntil = Math.max(this.watchUntil, Date.now() + WATCH_PEER_MS);
+    this.expectPeer();
+  }
+
   /** The data link carries chat and services while it is up. */
   setDataLinkOpen(open: boolean): void {
     this.connected = open;
@@ -358,6 +373,7 @@ export class LinkSession {
     // Connected peers signal over the data link; no reason to hurry Pkarr.
     if (this.connected) return "connected";
     if (Date.now() < this.fastPollUntil) return "fast";
+    if (Date.now() < this.watchUntil) return "active";
     // Someone who just sent an invite may look elsewhere while waiting: the join still comes in quickly.
     if (!this.active && this.presence.lastPacketAt === 0 && Date.now() - this.startedAt < AWAITING_PEER_MS) return "active";
     if (!this.active) return "background";
