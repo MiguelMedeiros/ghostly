@@ -19,7 +19,7 @@ import type { GhostRecord, SignedPacket } from "./pkarr";
  */
 /**
  * `group`: a group's request (its edges' signaling, a knock, a community's shared records). A transport with a
- * request budget keeps the last part of each minute for a 1:1 chat that is using it; one without ignores it.
+ * request budget keeps the last part of each minute for a 1:1 chat it had to hold back; one without ignores it.
  */
 /** What changed in how discovery goes: a relay tripped (left alone), or one answered again. */
 export type DiscoveryChange = "tripped" | "recovered";

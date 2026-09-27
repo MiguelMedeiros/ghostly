@@ -50,10 +50,11 @@ export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
  */
 export const WRITE_FIRST_MS = 5_000;
 /**
- * While a 1:1 chat is using a relay (a request of its signaling or delivery, neither `background` nor `group`, in the
- * last minute), group requests leave it the last this many of the minute. A profile in several groups starts an edge
- * per member, and their first polls spent a fresh app's minute in seconds: a message then waited for the next one.
- * With no chat about, groups get the whole budget.
+ * Once the budget refused a 1:1 chat's request on a relay (its signaling or delivery, neither `background` nor
+ * `group`), group requests leave it the last this many of each minute there, for a minute. Groups that spend the whole
+ * budget spend it over the minute, so the chat then takes the next request that frees, within seconds, and has room
+ * for what follows (the receipt). Until a chat is refused, groups have the whole budget: a community door alone costs
+ * about 22 requests a minute, and a reserve kept for a chat with nothing to send starved a new group's edges.
  */
 export const CHAT_RESERVE = 10;
 /** A relay that fails at the network level is left alone for this long. */
@@ -103,8 +104,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentBackground = new Map<string, number[]>();
   /** When a link's write was last refused on each relay (`chat <relay>`, `group <relay>`), while it waits for the budget. */
   private readonly writeWaiting = new Map<string, number>();
-  /** When a 1:1 chat last asked each relay for a request: for the next minute, groups leave it `CHAT_RESERVE`. */
-  private readonly chatAsked = new Map<string, number>();
+  /** When the budget last refused a 1:1 chat's request on each relay: for the next minute, groups leave it `CHAT_RESERVE`. */
+  private readonly chatRefused = new Map<string, number>();
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
   private readonly lastPut = new Map<string, bigint>();
   private readonly perMinute: number;
@@ -368,14 +369,14 @@ export class RelayTransport implements PkarrTransport {
 
   /**
    * Discovery reads and writes share a bounded per-relay request budget; background requests only part of it, and
-   * groups leave a chat that is using the relay its reserve. A link's write the budget refused goes before any read
+   * groups leave a chat the budget refused its reserve. A link's write the budget refused goes before any read
    * once a request is free again.
    */
   private take(relay: string, who: Asker): boolean {
     const now = Date.now();
-    if (!who.background && !who.group) this.chatAsked.set(relay, now);
     const writer = firstWriter(who);
     if (this.heldFor(relay, who, now) > 0) {
+      if (!who.background && !who.group) this.chatRefused.set(relay, now);
       if (writer) this.writeWaiting.set(`${writer} ${relay}`, now);
       return false;
     }
@@ -403,8 +404,8 @@ export class RelayTransport implements PkarrTransport {
     let wait = over(recent, limit);
     if (who.background) wait = Math.max(wait, over(recentBackground, this.backgroundPerMinute));
     if (who.group) {
-      const chatFor = (this.chatAsked.get(relay) ?? -Infinity) + 60_000 - now;
-      if (chatFor > 0) wait = Math.max(wait, Math.min(chatFor, over(recent, limit - this.reserveOf(relay))));
+      const reserved = (this.chatRefused.get(relay) ?? -Infinity) + 60_000 - now;
+      if (reserved > 0) wait = Math.max(wait, Math.min(reserved, over(recent, limit - this.reserveOf(relay))));
     }
     const writer = firstWriter(who);
     const waiting = (lane: "chat" | "group") => {
