@@ -195,8 +195,52 @@ fn main() {
             }
         })
         .invoke_handler(only_main(commands!()))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(on_run_event);
+}
+
+/// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
+const DEPART_MS: u64 = 400;
+/// How long exiting waits, at most, for the native connections to close.
+const CLOSE_MS: u64 = 500;
+
+/// Leaving well: contacts hear this app go at once, and watch for it to come back (a restart is back
+/// in seconds), rather than noticing when their liveness gives up a minute later.
+/// - An exit the loop is asked for (the last window closed, `app.exit`): held for `DEPART_MS` while the
+///   page says goodbye on every live session (`paired-bye`), then let through.
+/// - Every exit, that one or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
+///   from `applicationWillTerminate`): the native connections close, so each contact sees its close.
+fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static DEPARTING: AtomicBool = AtomicBool::new(false);
+    match event {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
+            if DEPARTING.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            let Some(window) = app.get_webview_window("main") else {
+                return;
+            };
+            api.prevent_exit();
+            let _ = window.eval("window.dispatchEvent(new Event('ghostly-departing'))");
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(DEPART_MS)).await;
+                app.exit(code.unwrap_or(0));
+            });
+        }
+        tauri::RunEvent::Exit => {
+            let transports = app
+                .state::<paired_transport::TransportState>()
+                .inner()
+                .clone();
+            tauri::async_runtime::block_on(
+                transports.shutdown(std::time::Duration::from_millis(CLOSE_MS)),
+            );
+        }
+        _ => {}
+    }
 }
 
 /// The IPC path a page takes, run against the real capabilities: a window

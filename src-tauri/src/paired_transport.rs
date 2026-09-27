@@ -135,6 +135,21 @@ impl TransportState {
             socket.connection.close(0u32.into(), b"closed");
         }
     }
+    /// The app is exiting: every connection is closed and every endpoint stopped, so each contact's
+    /// app hears a close at once (QUIC's CONNECTION_CLOSE) instead of timing out 30 s later, and
+    /// starts watching for this app to come back. Bounded by `within`: exiting never waits on a
+    /// relay that does not answer.
+    pub async fn shutdown(&self, within: Duration) {
+        let peers: Vec<Peer> = {
+            let mut inner = self.inner.lock().unwrap();
+            for (_, (_, socket)) in inner.sockets.drain() {
+                socket.connection.close(0u32.into(), b"app exiting");
+            }
+            inner.peers.drain().map(|(_, peer)| peer).collect()
+        };
+        let closing = close_all(peers);
+        let _ = tokio::time::timeout(within, closing).await;
+    }
     /// Binds an endpoint for `seed` and accepts on it. `local_only` keeps it on
     /// this machine's loopback, with no relay (tests).
     async fn start(
@@ -185,6 +200,15 @@ impl TransportState {
         );
         Ok(Started { id, descriptor })
     }
+}
+
+async fn close_all(peers: Vec<Peer>) {
+    let mut closing = tokio::task::JoinSet::new();
+    for peer in peers {
+        peer.listener.abort();
+        closing.spawn(async move { peer.endpoint.close().await });
+    }
+    while closing.join_next().await.is_some() {}
 }
 
 #[tauri::command]
@@ -361,6 +385,38 @@ mod tests {
                 "Invalid transport seed"
             );
         }
+    }
+
+    /// An app exiting closes what it has: the contact's app sees its connection closed at once,
+    /// not after QUIC's 30 s idle timeout, and watches for this app to come back.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn exiting_closes_every_connection_so_the_contact_hears_it_at_once() {
+        let (leaving, staying) = (app(), app());
+        let (alice, _, _) = start(&leaving, 3).await;
+        let (_bob, bob_address, bob_seen) = start(&staying, 4).await;
+        connect(&leaving, alice, &bob_address).await.unwrap();
+        let accepted = event(&bob_seen, kind("open")).await["id"].clone();
+
+        let started = std::time::Instant::now();
+        leaving
+            .state::<TransportState>()
+            .shutdown(Duration::from_secs(2))
+            .await;
+        let closed = event(&bob_seen, kind("closed")).await;
+        assert_eq!(closed["id"], accepted);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+        // Nothing is left to dial or be dialled on.
+        assert!(leaving
+            .state::<TransportState>()
+            .inner
+            .lock()
+            .unwrap()
+            .peers
+            .is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
