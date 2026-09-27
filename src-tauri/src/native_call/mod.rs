@@ -24,12 +24,16 @@ pub struct CallSupport {
     missing: Option<String>,
 }
 
+/// Whether calls are native here, and if this machine lacks something for them. Async: the first check on a
+/// machine builds GStreamer's plugin registry (a fraction of a second), which must not hold the UI thread.
 #[tauri::command]
-pub fn native_call_support() -> CallSupport {
+pub async fn native_call_support() -> CallSupport {
     #[cfg(target_os = "linux")]
     return CallSupport {
         native: true,
-        missing: engine::missing(),
+        missing: tauri::async_runtime::spawn_blocking(engine::missing)
+            .await
+            .unwrap_or_else(|e| Some(e.to_string())),
     };
     #[cfg(not(target_os = "linux"))]
     CallSupport {
