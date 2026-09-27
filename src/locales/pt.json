@@ -150,6 +150,12 @@
     "edit": {
       "editing": "Editando",
       "cancel": "Cancelar edição"
+    },
+    "jump": {
+      "count": "{{count}} novas",
+      "newOne": "1 mensagem nova, rolar até o fim",
+      "new": "{{count}} mensagens novas, rolar até o fim",
+      "bottom": "Rolar até o fim"
     }
   },
   "group": {

@@ -150,6 +150,12 @@
     "edit": {
       "editing": "正在编辑",
       "cancel": "取消编辑"
+    },
+    "jump": {
+      "count": "{{count}} 条新消息",
+      "newOne": "1 条新消息，滚动到底部",
+      "new": "{{count}} 条新消息，滚动到底部",
+      "bottom": "滚动到底部"
     }
   },
   "group": {

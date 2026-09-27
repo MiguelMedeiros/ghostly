@@ -21,6 +21,8 @@ import { contactArrived } from "../lib/pairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
+import { useChatScroll } from "../hooks/useChatScroll";
+import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
@@ -84,7 +86,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const nav = useAppNavigation();
   const { t, language } = useI18n();
   const { settings } = useSettings();
-  const bottomRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const session = useMemo(() => (sessionId ? loadSession(sessionId) : null), [sessionId]);
@@ -387,11 +388,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const closeMenu = () => setMenuOpen(false);
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
-  // A new message scrolls to the bottom; a receipt or a delivery state does not (it would undo a reply's jump).
-  const lastMessageId = messages[messages.length - 1]?.id;
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, lastMessageId]);
+  // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
+  const scrollRows = useMemo(() => messages.map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
+  const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible });
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
   const sceneOn = pairing.scene;
@@ -618,8 +617,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       )}
 
       {/* Messages */}
-      <div data-message-list className="flex-1 overflow-y-auto chat-wallpaper">
-        <div className="max-w-3xl mx-auto py-3">
+      <div className="relative flex-1 min-h-0 flex flex-col">
+      <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
+        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3">
           {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
             <p data-testid="chat-created" className="mb-3 px-4 text-center text-[11px] text-text-muted">
               <time dateTime={new Date(session.createdAt).toISOString()}>
@@ -672,8 +672,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               reactionName={reactionName}
             />
           ))}
-          <div ref={bottomRef} />
         </div>
+      </div>
+      <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
       </div>
 
       {chatPeer?.hold && (chatPeer.hold.outstanding > 0 || chatPeer.hold.error) && (
