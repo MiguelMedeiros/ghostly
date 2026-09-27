@@ -19,9 +19,10 @@ const RATE = 48000;
 /** The page's microphone is a tone, and the contact's audio is kept where the test can measure it. */
 async function tapCallAudio(page: Page, hz: number): Promise<void> {
   await page.evaluate((hz) => {
-    const w = window as unknown as { __ctx: AudioContext; __remote: MediaStream | null };
+    const w = window as unknown as { __ctx: AudioContext; __remote: MediaStream | null; __connections: number };
     w.__ctx = new AudioContext();
     w.__remote = null;
+    w.__connections = 0;
     // On the prototype: an instance override was sometimes bypassed (#230).
     MediaDevices.prototype.getUserMedia = async function () {
       await w.__ctx.resume();
@@ -37,6 +38,7 @@ async function tapCallAudio(page: Page, hz: number): Promise<void> {
     const Native = window.RTCPeerConnection;
     const Tapped = function (this: unknown, config?: RTCConfiguration) {
       const pc = new Native(config);
+      w.__connections++;
       pc.addEventListener("track", (event) => { if (event.track.kind === "audio") w.__remote = new MediaStream([event.track]); });
       return pc;
     } as unknown as typeof RTCPeerConnection;
@@ -152,6 +154,45 @@ test("a person on the web calls a headless bot, and the bot calls back: audio bo
     // One line per call, in the person's chat.
     await expect(chat(person).getByText("Audio call ended")).toHaveCount(2);
     expect(await bot.event((e) => e.type === "call.ended" && e.call === placed.call)).toMatchObject({ reason: "hangup" });
+  } finally {
+    await bot.stop();
+  }
+});
+
+test("the bot's first answer is refused as libdatachannel refuses one: the bot offers again and the page starts over", { tag: ["@feature:headless.calls", "@feature:headless.web-interop", "@feature:calls.paired"] }, async ({ peer, relay }) => {
+  const url = await relay.listen();
+  // The bot refuses the first answer it gets, as libdatachannel 0.24.5 can (packages/cli/src/calls/manager.ts, `redial`).
+  const bot = new HeadlessBot({ GHOSTLY_CALL_REFUSE_ANSWERS: "1" });
+  try {
+    await bot.start(url, "Voice bot");
+    const person = await peer("callee");
+    const invite = await bot.run("invite", "create", "--label", "person");
+    await person.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+    await pasteInvite(person.page, invite.invite as string);
+    await bot.run("chat", "wait", invite.chat as string, "--until", "live", "--timeout", "120");
+    await expect(person.page.getByTestId("call-audio")).toBeEnabled({ timeout: 90_000 });
+    await tapCallAudio(person.page, PAGE_HZ);
+
+    const placed = await bot.run("call", "start", invite.chat as string, "--rate", "16000");
+    await expect(person.page.getByText("Incoming audio call...")).toBeVisible();
+    await person.page.getByTitle("Accept audio call").click();
+    // The page answered twice: once on the connection the bot refused, once on a new one for the bot's second offer.
+    await bot.event((e) => e.type === "call.connected" && e.call === placed.call);
+    expect(bot.events.filter((e) => e.type === "call.ended")).toEqual([]);
+    await expect.poll(() => person.page.evaluate(() => (window as unknown as { __connections: number }).__connections)).toBe(2);
+    await expect(person.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+    const program1 = await program((placed.audio as { socket: string }).socket);
+    program1.socket.write(tone(BOT_HZ, 16000, 6000));
+    await expect.poll(() => program1.heard().length, { timeout: 20_000 }).toBeGreaterThan(640 * 100);
+    expect(dominantHz(program1.heard().subarray(-640 * 50), 16000)).toBeCloseTo(PAGE_HZ, -1);
+    await expect.poll(() => pageHears(person.page), { timeout: 20_000 }).toBeGreaterThan(BOT_HZ - 15);
+
+    await bot.run("call", "hangup");
+    await program1.ended;
+    await expect(person.page.getByTitle("End call")).toHaveCount(0);
+    // One call, one line: starting over is not a second call.
+    await expect(chat(person).getByText("Audio call ended")).toHaveCount(1);
   } finally {
     await bot.stop();
   }

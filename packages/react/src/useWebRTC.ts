@@ -56,6 +56,13 @@ export const SCREEN_SHARE_ERROR_MS = 8000;
 const REFUSED_WITHOUT_PICKER_MS = 300;
 
 /**
+ * An answered call whose connection fails before it ever connected waits this long for the caller's second offer
+ * before it gives up. A headless Ghostly (libdatachannel 0.24.5) can refuse a good answer and fail the handshake with
+ * it (packages/cli/src/calls/manager.ts, `redial`); it then offers again once, on a new connection.
+ */
+export const RESTART_GRACE_MS = 8000;
+
+/**
  * What to tell the person when sharing the screen failed, or null when there is nothing to tell: closing the
  * picker, or saying no to it, is a choice and not an error.
  */
@@ -148,6 +155,12 @@ export function useWebRTC({
   /** A share is being started or stopped: the picker may be open. */
   const shareBusyRef = useRef(false);
   const screenShareErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The offer we answered and whether we answered with the camera, while the call has not connected. */
+  const answeredRef = useRef<{ offer: CallSignal; withVideo: boolean } | null>(null);
+  /** Whether this call already started over on a caller's second offer: a second failure is final. */
+  const restartedRef = useRef(false);
+  /** The wait for a second offer after the answered call's connection failed (`RESTART_GRACE_MS`). */
+  const restartGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setScreenShareError = useCallback((message: string | null) => {
     if (screenShareErrorTimerRef.current) clearTimeout(screenShareErrorTimerRef.current);
@@ -172,8 +185,16 @@ export function useWebRTC({
    */
   const attemptRef = useRef(0);
 
+  const clearRestartGrace = useCallback(() => {
+    if (restartGraceRef.current) clearTimeout(restartGraceRef.current);
+    restartGraceRef.current = null;
+  }, []);
+
   const cleanupConnection = useCallback(() => {
     attemptRef.current++;
+    clearRestartGrace();
+    answeredRef.current = null;
+    restartedRef.current = false;
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => {
         t.onended = null;
@@ -196,7 +217,7 @@ export function useWebRTC({
     pictureBeforeShareRef.current = null;
     setScreenShareError(null);
     setCallStartedAt(null);
-  }, [setPicture, setScreenShareError]);
+  }, [setPicture, setScreenShareError, clearRestartGrace]);
 
   /** The lane is open once both sides have described it and our half may send. */
   const refreshVideoLane = useCallback(() => {
@@ -224,6 +245,35 @@ export function useWebRTC({
   const createPeerConnection = useCallback(() => {
     const pc = mediaRef.current.createPeerConnection(callRtcConfig(iceServersRef.current));
 
+    const connectedNow = () => {
+      clearRestartGrace();
+      answeredRef.current = null;
+      updateCallState("connected");
+      refreshVideoLane();
+      setCallStartedAt(Date.now());
+      setFastPoll(false);
+      if (!callConnectedEventFiredRef.current) {
+        callConnectedEventFiredRef.current = true;
+        addCallEventMessage?.("call_connected", callHadVideoRef.current);
+      }
+    };
+
+    const failed = () => {
+      // An answered call that never connected waits for the caller's second offer (see RESTART_GRACE_MS), once.
+      if (answeredRef.current && !restartedRef.current && callStateRef.current === "connecting") {
+        if (!restartGraceRef.current) restartGraceRef.current = setTimeout(() => { restartGraceRef.current = null; giveUp(); }, RESTART_GRACE_MS);
+        return;
+      }
+      giveUp();
+    };
+
+    const giveUp = () => {
+      cleanupConnection();
+      updateCallState("idle");
+      publishCallSignal(null);
+      setFastPoll(false);
+    };
+
     pc.ontrack = (event) => {
       setRemoteStream((prev) => {
         if (event.streams[0]) {
@@ -238,44 +288,22 @@ export function useWebRTC({
     pc.onicecandidate = () => {};
 
     pc.oniceconnectionstatechange = () => {
+      // A connection this call replaced (a second offer, see `restartAnswer`) has nothing more to say.
+      if (pcRef.current !== pc) return;
       const state = pc.iceConnectionState;
 
-      if (state === "connected" || state === "completed") {
-        updateCallState("connected");
-        refreshVideoLane();
-        setCallStartedAt(Date.now());
-        setFastPoll(false);
-        if (!callConnectedEventFiredRef.current) {
-          callConnectedEventFiredRef.current = true;
-          addCallEventMessage?.("call_connected", callHadVideoRef.current);
-        }
-      } else if (state === "failed" || state === "closed") {
-        cleanupConnection();
-        updateCallState("idle");
-        publishCallSignal(null);
-        setFastPoll(false);
-      }
+      if (state === "connected" || state === "completed") connectedNow();
+      else if (state === "failed" || state === "closed") failed();
     };
 
     pc.onconnectionstatechange = () => {
+      if (pcRef.current !== pc) return;
       const state = pc.connectionState;
 
       if (state === "connected") {
-        if (callStateRef.current === "connecting" || callStateRef.current === "answering") {
-          updateCallState("connected");
-          refreshVideoLane();
-          setCallStartedAt(Date.now());
-          setFastPoll(false);
-          if (!callConnectedEventFiredRef.current) {
-            callConnectedEventFiredRef.current = true;
-            addCallEventMessage?.("call_connected", callHadVideoRef.current);
-          }
-        }
+        if (callStateRef.current === "connecting" || callStateRef.current === "answering") connectedNow();
       } else if (state === "failed") {
-        cleanupConnection();
-        updateCallState("idle");
-        publishCallSignal(null);
-        setFastPoll(false);
+        failed();
       }
     };
 
@@ -283,7 +311,7 @@ export function useWebRTC({
 
     pcRef.current = pc;
     return pc;
-  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane]);
+  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace]);
 
   const stopSharingRef = useRef<() => Promise<void>>(async () => {});
 
@@ -438,6 +466,69 @@ export function useWebRTC({
     ],
   );
 
+  /** A new connection for the call, with its own stream, that answers `offer`: true once the answer is published. */
+  const answerOffer = useCallback(
+    async (offer: CallSignal, stream: MediaStream, withVideo: boolean, cancelled: () => boolean): Promise<boolean> => {
+      const pc = createPeerConnection();
+      stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
+      stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
+
+      await pc.setRemoteDescription({ type: "offer", sdp: buildSdpFromSignal(offer) });
+
+      // Answering an offer with no camera of our own leaves the video section
+      // receive-only; opening it keeps our side of the lane free for later.
+      const video = videoTransceiver(pc);
+      if (video && video.direction !== "sendrecv") video.direction = "sendrecv";
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await waitForIceGathering(pc);
+      if (cancelled()) return false;
+
+      const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current });
+      const signal: CallSignal = { t: "a", ts: Date.now(), ...params, v: withVideo ? 1 : 0 };
+      if (withVideo) signal.k = "c";
+      publishCallSignal(JSON.stringify(signal));
+      refreshVideoLane();
+      return true;
+    },
+    [createPeerConnection, publishCallSignal, refreshVideoLane],
+  );
+
+  /**
+   * The caller offered again while our answered call was still connecting: a headless Ghostly does that once, on a
+   * new connection, when libdatachannel refused our answer (see RESTART_GRACE_MS). The call starts over on a new
+   * connection with the same microphone and camera; the old connection is closed first.
+   */
+  const restartAnswer = useCallback(
+    async (offer: CallSignal) => {
+      const answered = answeredRef.current;
+      const stream = localStreamRef.current;
+      if (!answered || !stream) return;
+      const attempt = ++attemptRef.current;
+      const cancelled = () => attemptRef.current !== attempt;
+      restartedRef.current = true;
+      clearRestartGrace();
+      const old = pcRef.current;
+      pcRef.current = null;
+      old?.close();
+      setRemoteStream(null);
+      try {
+        applyRemotePicture(offer);
+        if (!(await answerOffer(offer, stream, answered.withVideo, cancelled))) return;
+        answeredRef.current = { offer, withVideo: answered.withVideo };
+      } catch (error) {
+        if (cancelled()) return;
+        onErrorRef.current?.(error);
+        cleanupConnection();
+        updateCallState("idle");
+        publishCallSignal(null);
+        setFastPoll(false);
+      }
+    },
+    [answerOffer, applyRemotePicture, clearRestartGrace, cleanupConnection, updateCallState, publishCallSignal, setFastPoll],
+  );
+
   const acceptCall = useCallback(
     async (withVideo: boolean) => {
       const offer = pendingOfferRef.current;
@@ -465,41 +556,8 @@ export function useWebRTC({
         setLocalStream(stream);
         setPicture(withVideo ? "camera" : null);
 
-        const pc = createPeerConnection();
-        stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
-        stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
-
-        const offerSdp = buildSdpFromSignal(offer);
-
-        await pc.setRemoteDescription({
-          type: "offer",
-          sdp: offerSdp,
-        });
-
-        // Answering an offer with no camera of our own leaves the video section
-        // receive-only; opening it keeps our side of the lane free for later.
-        const video = videoTransceiver(pc);
-        if (video && video.direction !== "sendrecv") video.direction = "sendrecv";
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await waitForIceGathering(pc);
-        if (cancelled()) return;
-
-        const sdp = pc.localDescription!.sdp;
-        const params = extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current });
-
-        const signal: CallSignal = {
-          t: "a",
-          ts: Date.now(),
-          ...params,
-          v: withVideo ? 1 : 0,
-        };
-        if (withVideo) signal.k = "c";
-
-        const signalStr = JSON.stringify(signal);
-        publishCallSignal(signalStr);
-        refreshVideoLane();
+        if (!(await answerOffer(offer, stream, withVideo, cancelled))) return;
+        answeredRef.current = { offer, withVideo };
         // Read again (the check above narrowed it to "incoming"): ICE may have connected while our answer gathered.
         if ((callStateRef.current as CallState) === "answering") updateCallState("connecting");
         pendingOfferRef.current = null;
@@ -512,12 +570,10 @@ export function useWebRTC({
       }
     },
     [
-      createPeerConnection,
+      answerOffer,
       captureFrom,
       applyRemotePicture,
       setPicture,
-      publishCallSignal,
-      refreshVideoLane,
       updateCallState,
       cleanupConnection,
       setFastPoll,
@@ -696,6 +752,10 @@ export function useWebRTC({
       addCallEventMessage?.("call_received", offerHasVideo);
       updateCallState("incoming");
       setFastPoll(true);
+    } else if (signal.t === "o" && callStateRef.current === "connecting" && answeredRef.current && signal.ts > answeredRef.current.offer.ts) {
+      // The caller started over on a new connection (see `restartAnswer`).
+      lastProcessedSignalRef.current = signal.ts;
+      void restartAnswer(signal);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
       if (signal.ts > myOfferTimestampRef.current) {
         lastProcessedSignalRef.current = signal.ts;
@@ -712,7 +772,7 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer]);
 
   useEffect(() => {
     const attempts = attemptRef;
@@ -721,6 +781,7 @@ export function useWebRTC({
       attempts.current++;
       if (hangupTimerRef.current) clearTimeout(hangupTimerRef.current);
       if (screenShareErrorTimerRef.current) clearTimeout(screenShareErrorTimerRef.current);
+      if (restartGraceRef.current) clearTimeout(restartGraceRef.current);
 
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => {
