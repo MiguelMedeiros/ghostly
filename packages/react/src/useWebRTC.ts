@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
-  RTC_CONFIG,
+  callRtcConfig,
   extractParamsFromSdp,
   buildSdpFromSignal,
   parseCallSignal,
@@ -10,6 +10,7 @@ import {
   type CallSignal,
   type CallEventType,
   type CallMedia,
+  type CallIceServer,
 } from "@ghostly/core";
 
 /** What a peer can put on the video lane of a call. */
@@ -24,6 +25,13 @@ interface UseWebRTCParams {
   onError?: (error: unknown) => void;
   /** Where the media comes from, when not the browser's own WebRTC (Ghostly Desktop on Linux). */
   media?: CallMedia | null;
+  /** The profile's own ICE servers (a TURN relay), tried after the apps' STUN servers. */
+  iceServers?: readonly CallIceServer[];
+  /**
+   * How many candidates a signal carries: `PAIRED_CALL_CANDIDATES` on a chat session, whose frames have room for
+   * every path; a compatibility chat's DHT record keeps the default (one host, one server reflexive).
+   */
+  maxCandidates?: number;
 }
 
 /** The browser's own WebRTC and capture. */
@@ -76,7 +84,13 @@ export function useWebRTC({
   addCallEventMessage,
   onError,
   media,
+  iceServers,
+  maxCandidates,
 }: UseWebRTCParams) {
+  const iceServersRef = useRef(iceServers);
+  iceServersRef.current = iceServers;
+  const maxCandidatesRef = useRef(maxCandidates);
+  maxCandidatesRef.current = maxCandidates;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const mediaRef = useRef<CallMedia>(media ?? browserMedia);
@@ -186,7 +200,7 @@ export function useWebRTC({
   }, []);
 
   const createPeerConnection = useCallback(() => {
-    const pc = mediaRef.current.createPeerConnection(RTC_CONFIG);
+    const pc = mediaRef.current.createPeerConnection(callRtcConfig(iceServersRef.current));
 
     pc.ontrack = (event) => {
       setRemoteStream((prev) => {
@@ -365,7 +379,7 @@ export function useWebRTC({
         if (cancelled()) return;
 
         const sdp = pc.localDescription!.sdp;
-        const params = extractParamsFromSdp(sdp);
+        const params = extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current });
 
         const offerTs = Date.now();
         myOfferTimestampRef.current = offerTs;
@@ -449,7 +463,7 @@ export function useWebRTC({
         if (cancelled()) return;
 
         const sdp = pc.localDescription!.sdp;
-        const params = extractParamsFromSdp(sdp);
+        const params = extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current });
 
         const signal: CallSignal = {
           t: "a",

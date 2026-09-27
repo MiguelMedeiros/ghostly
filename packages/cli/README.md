@@ -344,6 +344,12 @@ often resolve nowhere, so such a call connects only when the app's own checks re
 default route (seen with NordVPN on the same Mac as the CLI) makes the app send from the tunnel's address, which
 nothing on that machine can answer: allow local network traffic in the VPN, or pause it.
 
+**A TURN relay.** Calls use the apps' STUN servers, then the profile's own ICE servers:
+`ghostly settings set iceServers '[{"urls":"turn:turn.example.org:3478","username":"…","credential":"…"}]'` (the
+same setting chats use). A relay connects the calls no direct path can: a VPN that takes every packet through its
+tunnel, a NAT that maps each destination apart. The media stays encrypted end to end; the relay sees both
+addresses and when and how much is sent.
+
 ## Transports
 
 The engine picks as the app does: WebRTC (libdatachannel), HyperDHT (native, in process), Iroh (the wasm build,

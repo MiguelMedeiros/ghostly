@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CallAudio, type RtpTrack } from "../src/calls/audio";
-import { loadCallStack, signalCandidates, type CallStack } from "../src/calls/media";
+import { callIceServers, loadCallStack, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter, sequenceDelta, TICKS_PER_FRAME, type RtpPacket } from "../src/calls/rtp";
 import { dominantHz, level, tone } from "./support/tone";
@@ -112,21 +112,19 @@ describe("RTP", () => {
   });
 });
 
-describe("candidates in a signal", () => {
-  it("puts every IPv4 host first, then the server reflexive one, then IPv6, up to eight", () => {
-    const sdp = [
-      "a=candidate:3 1 UDP 2116025855 fd7a:115c:a1e0::6232:265f 5000 typ host",
-      "a=candidate:1 1 UDP 2114977791 192.168.0.161 5000 typ host",
-      "a=candidate:2 1 UDP 2114977535 100.72.38.95 5000 typ host",
-      "a=candidate:9 1 UDP 1678768127 187.13.209.68 29257 typ srflx raddr 0.0.0.0 rport 0",
-      "a=candidate:4 1 UDP 2114977023 169.254.3.1 5000 typ host",
-      "a=candidate:5 1 TCP 2114977023 192.168.0.9 5000 typ host tcptype passive",
-    ].join("\r\n");
-    expect(signalCandidates(sdp)).toEqual([
-      "1 1 UDP 2114977791 192.168.0.161 5000 typ host",
-      "2 1 UDP 2114977535 100.72.38.95 5000 typ host",
-      "9 1 UDP 1678768127 187.13.209.68 29257 typ srflx",
-      "3 1 UDP 2116025855 fd7a:115c:a1e0::6232:265f 5000 typ host",
+describe("a call's ICE servers", () => {
+  it("the apps' STUN servers first, then the profile's TURN and STUN servers as libdatachannel takes them", () => {
+    expect(callIceServers()).toEqual(["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]);
+    expect(callIceServers([
+      { urls: "turn:turn.example.org:3478 turn:turn.example.org:443?transport=tcp", username: "u", credential: "p" },
+      { urls: "turns:relay.example.org", username: "u", credential: "p" },
+      { urls: "stun:stun.example.org" },
+      { urls: "https://not-ice" },
+    ]).slice(2)).toEqual([
+      { hostname: "turn.example.org", port: 3478, username: "u", password: "p", relayType: "TurnUdp" },
+      { hostname: "turn.example.org", port: 443, username: "u", password: "p", relayType: "TurnTcp" },
+      { hostname: "relay.example.org", port: 5349, username: "u", password: "p", relayType: "TurnTls" },
+      "stun:stun.example.org:3478",
     ]);
   });
 });

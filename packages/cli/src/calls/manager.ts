@@ -250,6 +250,7 @@ export class CallManager {
       rate: call.rate,
       queue,
       log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
+      iceServers: this.host.engine.getState().settings?.iceServers ?? [],
       onFrame: (frame) => call.socket?.write(frame),
       onState: (state) => {
         if (call.ended) return;

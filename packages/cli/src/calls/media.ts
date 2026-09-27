@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import type { PeerConnection, Track } from "node-datachannel";
-import { buildSdpFromSignal, extractParamsFromSdp, RTC_CONFIG, type CallSignal } from "@ghostly/core";
+import type { IceServer, PeerConnection, Track } from "node-datachannel";
+import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CANDIDATES, RTC_CONFIG, type CallIceServer, type CallSignal } from "@ghostly/core";
 import { CallAudio, type OpusCodec } from "./audio";
 import type { CallRate, PlaybackQueue } from "./pcm";
 
@@ -40,31 +40,26 @@ export function loadCallStack(): Promise<CallStack | string> {
   })());
 }
 
-/** The STUN servers the apps' calls use (RTC_CONFIG), as libdatachannel spells them. */
-function iceServers(): string[] {
-  return (RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()).slice(0, 2);
-}
-
 /**
- * The candidates a signal carries. The apps keep one host and one server reflexive candidate (a DHT packet's worth);
- * a signal on the chat session may carry eight, and a headless Ghostly on a server or a laptop often has several
- * interfaces (Docker, VPNs, Tailscale) of which the first is not the one the contact reaches. So: every IPv4 host
- * candidate first, then the server reflexive one, then IPv6 hosts, up to eight. The related address is left out.
+ * The ICE servers of a call, as libdatachannel takes them: the apps' STUN servers (RTC_CONFIG; libjuice uses the
+ * first), then the profile's own (Settings `iceServers`: a TURN relay, typically), as the apps' calls use them.
  */
-export function signalCandidates(sdp: string, { loopback = false } = {}): string[] {
-  const lines = sdp.split(/\r?\n/).filter((line) => line.startsWith("a=candidate:")).map((line) => line.slice("a=candidate:".length).trim());
-  const udp = lines.filter((c) => / udp /i.test(c));
-  const address = (c: string) => c.split(" ")[4] ?? "";
-  const type = (c: string) => / typ (\S+)/.exec(c)?.[1];
-  const ipv4 = (c: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(address(c));
-  const usable = (c: string) => (loopback || !/^(169\.254\.|fe80:|::1$|127\.)/i.test(address(c))) && address(c) !== "::" && address(c) !== "0.0.0.0";
-  const hosts = udp.filter((c) => type(c) === "host" && usable(c));
-  const picked = [
-    ...hosts.filter(ipv4).slice(0, 6),
-    ...udp.filter((c) => type(c) === "srflx").slice(0, 1),
-    ...hosts.filter((c) => !ipv4(c)),
-  ].slice(0, 8);
-  return picked.map((c) => c.replace(/ raddr \S+ rport \d+/, ""));
+export function callIceServers(extra: readonly CallIceServer[] = []): (string | IceServer)[] {
+  const out: (string | IceServer)[] = (RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()).slice(0, 2);
+  for (const server of callRtcConfig(extra).iceServers?.slice(RTC_CONFIG.iceServers?.length ?? 0) ?? []) {
+    for (const url of [server.urls].flat()) {
+      const m = /^(stun|turns?):([^:?\s]+)(?::(\d+))?(?:\?transport=(udp|tcp))?$/i.exec(url);
+      if (!m) continue;
+      const scheme = m[1].toLowerCase(), hostname = m[2], transport = m[4]?.toLowerCase();
+      if (scheme === "stun") { out.push(`stun:${hostname}:${m[3] ?? 3478}`); continue; }
+      out.push({
+        hostname, port: Number(m[3] ?? (scheme === "turns" ? 5349 : 3478)),
+        ...(server.username ? { username: server.username } : {}), ...(typeof server.credential === "string" ? { password: server.credential } : {}),
+        relayType: scheme === "turns" ? "TurnTls" : transport === "tcp" ? "TurnTcp" : "TurnUdp",
+      });
+    }
+  }
+  return out;
 }
 
 export type MediaState = "connected" | "failed" | "closed";
@@ -76,6 +71,8 @@ export interface MediaOptions {
   onState(state: MediaState): void;
   /** The call's queue of the program's audio. */
   queue?: PlaybackQueue;
+  /** The profile's own ICE servers (Settings `iceServers`), after the apps' STUN servers. */
+  iceServers?: readonly CallIceServer[];
   /** A line about the connection (candidates, ICE states, the pair it runs on), for the daemon's log. */
   log?(line: string): void;
 }
@@ -123,7 +120,7 @@ export class CallMedia {
   private static async create(stack: CallStack, options: MediaOptions, offer: CallSignal | null): Promise<CallMedia> {
     const { ndc } = stack;
     const bind = process.env.GHOSTLY_CALL_BIND;
-    const pc = new ndc.PeerConnection("ghostly-call", { iceServers: iceServers(), ...(bind ? { bindAddress: bind } : {}) });
+    const pc = new ndc.PeerConnection("ghostly-call", { iceServers: callIceServers(options.iceServers), ...(bind ? { bindAddress: bind } : {}) });
     try {
       const payloadType = offer?.ap ?? 111;
       const ssrc = randomBytes(4).readUInt32BE(0) || 1;
@@ -146,9 +143,10 @@ export class CallMedia {
       await gathered;
       const sdp = pc.localDescription()?.sdp;
       if (!sdp) throw new Error("No local description");
-      const params = extractParamsFromSdp(sdp);
-      // Bound to loopback (tests, GHOSTLY_CALL_BIND=127.0.0.1): that is the one candidate there is.
-      const local: Partial<CallSignal> = { ...params, c: signalCandidates(sdp, { loopback: !!bind }), ss: [ssrc] };
+      // Every path, as a signal on the chat session may carry (pickCallCandidates); bound to loopback (the tests,
+      // GHOSTLY_CALL_BIND=127.0.0.1), that is the one candidate there is.
+      const params = extractParamsFromSdp(sdp, { maxCandidates: PAIRED_CALL_CANDIDATES, loopback: !!bind });
+      const local: Partial<CallSignal> = { ...params, ss: [ssrc] };
       // An answer lists the offer's sections, video too: the rebuilt SDP must have as many as the offer.
       if (offer?.m) local.m = [...offer.m];
       const listeners: ((packet: Buffer) => void)[] = [];
