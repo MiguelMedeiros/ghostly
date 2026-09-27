@@ -299,6 +299,36 @@ pub fn respond(
         .unwrap()
 }
 
+/// With `GHOSTLY_STREAM_LOG` set to a file, one line per request is added to it: what the engine asked for, and how
+/// much went back. The Desktop checks read it to see that no answer carried the whole file.
+pub fn trace(request: &Request<Vec<u8>>, response: &Response<Vec<u8>>) {
+    use std::io::Write;
+    let Some(path) = std::env::var_os("GHOSTLY_STREAM_LOG") else {
+        return;
+    };
+    let text = |value: Option<&header::HeaderValue>| {
+        value
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("-")
+            .to_string()
+    };
+    let line = format!(
+        "[ghostly-file] {} range={} -> {} content-range={} body={}\n",
+        request.method(),
+        text(request.headers().get(header::RANGE)).replace(' ', ""),
+        response.status().as_u16(),
+        text(response.headers().get(header::CONTENT_RANGE)).replace(' ', "_"),
+        response.body().len()
+    );
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
 /// A token to play a stored file through the scheme.
 #[tauri::command]
 pub fn file_bytes_stream_open<R: tauri::Runtime>(

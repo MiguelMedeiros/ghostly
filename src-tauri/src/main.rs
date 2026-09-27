@@ -206,6 +206,7 @@ fn main() {
                             .body(Vec::new())
                             .unwrap(),
                     };
+                    file_stream::trace(&request, &response);
                     responder.respond(response);
                 });
             },
