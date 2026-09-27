@@ -380,7 +380,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
           ) : (
             <>
               {locked && (
-                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label="Discard" title="Discard" onClick={() => cancel()}>
+                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label="Discard" title="Discard" disabled={sending} onClick={() => cancel()}>
                   <BinIcon />
                 </button>
               )}
@@ -456,6 +456,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        // A press that leaves the send button is not a press on it: letting go back on it later sends nothing.
+        onPointerLeave={() => { sendPressRef.current = null; }}
         onClick={onClick}
         onKeyDown={onKeyDown}
         onContextMenu={(event) => event.preventDefault()}

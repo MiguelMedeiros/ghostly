@@ -337,6 +337,21 @@ describe("one press sends (Miguel: \"I have to click send twice\")", () => {
     expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
   });
 
+  it("a press that leaves the send button and comes back later sends nothing; the next click does", async () => {
+    composer();
+    fireEvent.click(mic());
+    await wait(2_000);
+    const send = screen.getByTestId("voice-send");
+    fireEvent.pointerDown(send, mouse);
+    fireEvent.pointerLeave(send, mouse);
+    fireEvent.pointerUp(send, mouse);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
+    await clickSend();
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
+
   it("a slow click while the microphone is still waking up records hands-free instead of throwing it away", async () => {
     let answer!: () => void;
     const ready = new Promise<void>((resolve) => { answer = resolve; });

@@ -88,7 +88,6 @@
   animation: voice-blink 1s ease-in-out infinite;
   flex: none;
 }
-.voice-bar[data-phase="paused"] .voice-bar-dot { animation: none; opacity: 0.45; }
 @keyframes voice-blink { 50% { opacity: 0.2; } }
 
 .voice-slide {
