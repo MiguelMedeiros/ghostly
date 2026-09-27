@@ -509,8 +509,6 @@ export class GhostLink {
   private lostUntil = 0;
   /** This app is going away (`depart`): no more dials. */
   private leaving = false;
-  /** When the open WebRTC connection went `disconnected` (0: it is not). */
-  private rtcShakySince = 0;
   /** `resume` still to act on: the first dial after the start goes to it, and a native one is knocked on. */
   private resuming: PairedTransport | undefined;
   /** Until then, a dial waits for the native endpoint `resuming` names to start (it is knocked on as it does). */
@@ -688,12 +686,10 @@ export class GhostLink {
       // Asked as each attempt starts: once the first pairing is over, the contact reads at its chat's pace (30 s in the
       // background), and a short offer would be withdrawn before it looked.
       attemptTimeoutMs: () => this.tracker && !this.tracker.done ? PAIRING_ATTEMPT_MS : undefined,
-      // The contact may have restarted: its new packet (and its offer, when it dials) is read now, not at the minute
-      // pace of a live chat. A new packet from it while this lasts ends the session (`peerPacketArrived`).
+      // The contact may have restarted: its offer (a restarted app offers whatever its key, `resume`) is read now, not
+      // at the minute pace of a live chat, and answered at once, which ends the dead session (`DataLink.handleSignal`).
       onDisconnected: disconnected => {
-        this.rtcShakySince = 0;
         if (!disconnected || this.activeBinding || !this.channel) return;
-        this.rtcShakySince = Date.now();
         traceLink(this.myPubKeyZ32, "rtc-disconnected", {});
         this.session.pollNow();
       },
@@ -1648,7 +1644,10 @@ export class GhostLink {
     if (role === "inviter") {
       this.peerSeenAt ||= Date.now();
       if (Date.now() - this.peerSeenAt < INVITER_DIAL_GRACE_MS) { this.session.expectPeer(); return; }
-    } else if (role !== "joiner" && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) {
+    } else if (role !== "joiner" && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming) {
+      // Back after a restart (`resume`), this side dials once whatever its key: the contact may still hold the old
+      // session, and would not dial. A WebRTC offer from it reaches that session as "the contact lost the connection"
+      // (`DataLink.handleSignal`), and two offers crossing are settled by key there.
       // The other side dials as soon as it sees me. A packet of its that is new to me and fresh says it just
       // (re)appeared, so its offer is a poll away; an old one (a contact online for a while, as when this app
       // starts) says nothing is coming now, and looking fast for it would only spend the relays' budget.
@@ -2514,18 +2513,8 @@ export class GhostLink {
   private peerPacketArrived(presence: PeerPresence): void {
     const before = this.peerPacketSeen;
     this.peerPacketSeen = presence.lastPacketAt;
-    if (!before || presence.lastPacketAt === before || !presence.online || this.dialing) return;
+    if (!before || presence.lastPacketAt === before || !presence.online || this.dialing || this.channel) return;
     if (!this.options.pairing?.credentials.peerKey || Date.now() - presence.lastPacketAt >= EXPECT_PEER_MS) return;
-    if (this.channel) {
-      // A WebRTC session that stopped answering, and a new packet from the contact meanwhile: its app started again.
-      // The session is over now, not when the connection's grace runs out.
-      const channel = this.channel;
-      if (!this.rtcShakySince || this.activeBinding) return;
-      traceLink(this.myPubKeyZ32, "peer-restarted", { transport: "webrtc/1" });
-      this.rtcShakySince = 0;
-      this.dropDeadSession(channel);
-      return;
-    }
     if (Date.now() > this.lostUntil) return;
     this.lostUntil = 0;
     traceLink(this.myPubKeyZ32, "peer-back", {});
@@ -2569,7 +2558,6 @@ export class GhostLink {
 
   private detach(): void {
     this.stopLiveness();
-    this.rtcShakySince = 0;
     const wasNative = !!this.activeBinding;
     this.applicationOpen = false;
     this.dht?.setLive(false);

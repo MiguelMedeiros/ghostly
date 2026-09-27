@@ -143,7 +143,7 @@
     "slug": "100-transports",
     "title": "WISP 100: Transport Negotiation",
     "status": "Draft",
-    "updated": "2026-09-25",
+    "updated": "2026-09-27",
     "implementation": "Experimental: rank-sum negotiation, the DHT floor, background retry and upgrade in every new chat; relayed transports; a choice made while not live travels in the capability record",
     "dependencies": [
       "01-ghost-core.md",

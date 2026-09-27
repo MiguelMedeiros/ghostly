@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 100; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.5 |
-| Updated | 2026-09-25 |
+| Revision | 0.6 |
+| Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [403](403-dht-text.md) |
 | Implementation | Experimental: rank-sum negotiation, the DHT floor, background retry and upgrade in every new chat; relayed transports; a choice made while not live travels in the capability record |
@@ -62,6 +62,18 @@ A transport that fails three attempts in a row while the contact is online MUST 
 While `live`, the chat does not probe for a higher-ranked transport by itself; it changes only when the current one drops or someone switches ([transport switch](TRANSPORT-INCREMENT.md#agreement-and-fallback)). Probing while live was considered and decided against (below).
 
 **After a drop, both sides end on the same transport, whichever side dials.** A standing explicit choice is one made in the Connection menu and carried as a switch intent (the higher intent wins; on a tie, the lower rendezvous key). The redial tries that choice's transport first, then the rest by rank sum. With both sides on Automatic, the rank sum alone decides, and it is symmetric. When the new session is ready, both sides agree again from their current policies, as for any fresh session. A switch still in flight when the link dropped, or one that was kept on a fallback transport, does not carry over. If the session is not on the agreed transport, the coordinator moves it once, and the timeline shows one line for coming back. This is not probing: it applies choices already made, at the moment the chat changes transport anyway. With no explicit choice on either side, nothing moves.
+
+### Back after a restart (revision 0.6)
+
+An app that quits or crashes with the chat live leaves its contact holding a session that is dead. Before revision 0.6 the contact noticed only when its liveness gave up or the transport timed out (30 s for Iroh), refused the restarted app's dial meanwhile, and the dial's wait (20 s, then 40 s) made the way back a minute or more. Now:
+
+1. **Goodbye.** An app going away sends `paired-bye` on every live session first ([401](401-paired-chat.md#liveness-and-reconnection)); a Desktop whose quit cannot wait (macOS ends the process) closes its native connections instead, which its contacts see at once. The contact ends the session and **watches**: its signaling pace for 30 s, then the active pace, for 2 minutes in all. The dialling side dials once a packet newer than the one the contact left behind shows it back.
+2. **A dial in takes over a held session.** A connection dialled in from the pinned contact while a session is held is the contact with no session of its own: it authenticates first, then replaces the held one. One that does not authenticate is closed and changes nothing. Before the pin, a held session keeps the chat.
+3. **Resume.** A chat that was live when the app last ran (its connection history ends on a live stretch) dials that transport first, once, by **either** side, whichever key it has: the contact may still hold the old session and would not dial. A native one is dialled as soon as its endpoint starts, and a resume dial that does not connect is not counted as a failure (the contact may be away). A WebRTC offer reaches the contact's held session as "the contact lost the connection", which it answers ([101](101-webrtc.md)); two offers crossing keep the lower key's.
+4. **Crossed dials.** When both sides dial at once, the lower rendezvous key's connection carries the chat on both sides. The lower key's side keeps the contact's connection waiting until its own connects (then drops it), fails, or 3 seconds pass (then takes it).
+5. **After any drop,** the contact is watched the same way, and the first new packet from it ends the wait failed attempts built up, once per drop. A WebRTC connection gone `disconnected` (the contact's app may have crashed) reads the contact's packet at once rather than at the minute pace of a live chat, so a restarted contact's offer is answered then.
+
+Measured in process (two links, relay pace, chat in the background), from the restart to live on both sides: Iroh 28-61 s before, under 1 s after (2 s when the quit only closed its connections); WebRTC 16-18 s before, 2-5 s after, a crash included. Discovery stays at 3-7 requests a minute. Two browser pages (e2e): a reload about 3 s before and after (the browser closes the connection itself); a crashed tab 18-19 s before, about 3 s after.
 
 ### Why a chat is not live (revision 0.5)
 
@@ -153,6 +165,8 @@ Fix canonical encodings, adapter IDs, timeout/retry values, simultaneous negotia
 
 ## Conformance
 
+Revision 0.6: an app that quits, is quit, or crashes, and starts again is live again with its contact within 5 s (graceful or closed) or 15 s (a crash), on Iroh and WebRTC, whichever side has the lower key, within the relays' budget; a dial in from another key than the pinned one leaves the held session as it was; two apps that restart together settle on one connection.
+
 Revision 0.5: a choice made while not live shows on the contact as one row and is dialled first by whichever side dials; a browser whose WebRTC cannot reach a desktop goes live over relayed Iroh once the desktop's record names its relay, including when the relay came after the endpoint started.
 
 Revision 0.4: a transport chosen with Fallback off before the contact's record names it is waited for, not failed, and the chat ends live on it once the contact has it, with no action and no connection error in between; one the contact's app lacks is said so, with Automatic offered; a switch whose transport did not connect is retried until it does.
@@ -167,6 +181,7 @@ Reverse offer arrival order and still choose the same result; exercise disjoint 
 
 ## Revision log
 
+- 0.6 (2026-09-27): back after a restart: goodbye and watch, a dial in from the pinned contact takes over a held session, resume dials by either side, crossed dials settled by key.
 - 0.5 (2026-09-25): a choice made while not live travels in the capability record, is told once on the contact, is dialled first, and begins the next session as a switch intent; each side keeps and shows why its last attempt to go live did not.
 - 0.4 (2026-09-25): a chosen transport not reached yet is waited for, never failed: why it waits, when it is retried, where the chat is meanwhile (live on a fallback, or on the DHT with Fallback off), and no timeline rows for it.
 - 0.3 (2026-09-25): relayed transports: rank after direct ones, fallback after a failed WebRTC attempt, shown as relayed.
