@@ -40,23 +40,102 @@
 .reader-glossary:hover {
   color: var(--text);
 }
-.reader-all summary {
-  cursor: pointer;
+.reader-all-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.reader-all-head > p {
   font-family: var(--font-jetbrains), ui-monospace, monospace;
   font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--dim);
-  margin-bottom: 10px;
+}
+.reader-all-toggle {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.reader-all-toggle:hover {
+  color: var(--text);
 }
 .reader-all-group {
-  margin-bottom: 16px;
+  margin-bottom: 2px;
 }
-.reader-all-group > p {
-  font-size: 12px;
+.reader-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--muted);
-  margin-bottom: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.reader-group-head:hover,
+.reader-all-group[data-open="true"] > .reader-group-head {
+  color: var(--text);
+}
+.reader-group-head:hover {
+  background: var(--surface-2);
+}
+.reader-group-head:focus-visible,
+.reader-all-toggle:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
+}
+.reader-group-chevron {
+  flex: none;
+  color: var(--dim);
+  transition: transform 0.2s ease;
+}
+.reader-all-group[data-open="true"] .reader-group-chevron {
+  transform: rotate(90deg);
+}
+.reader-group-count {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--dim);
+}
+/* A closed group keeps its links in the page, for crawlers, but out of sight and out of the tab order. */
+.reader-group-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows 0.22s ease,
+    visibility 0s linear 0.22s;
+}
+.reader-all-group[data-open="true"] > .reader-group-panel {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition:
+    grid-template-rows 0.22s ease,
+    visibility 0s;
+}
+.reader-group-panel > ul {
+  min-height: 0;
+  overflow: hidden;
+}
+.reader-all-group[data-open="true"] > .reader-group-panel > ul {
+  padding-bottom: 10px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-group-panel,
+  .reader-all-group[data-open="true"] > .reader-group-panel,
+  .reader-group-chevron {
+    transition: none;
+  }
 }
 .reader-all ul {
   display: grid;
@@ -260,6 +339,12 @@
   .reader-all {
     border-top: 1px solid var(--line);
     padding-top: 20px;
+  }
+  .reader-group-head {
+    min-height: 44px;
+  }
+  .reader-all-toggle {
+    padding: 10px 8px;
   }
 }
 @media (max-width: 640px) {
