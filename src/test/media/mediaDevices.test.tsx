@@ -288,6 +288,9 @@ describe("a headset plugged in and out during a call", () => {
     chooseDevice("audiooutput", { id: "out-headset", label: "AirPods" });
     const { hook } = await callWithDevices();
     await waitFor(() => expect(hook.result.current.devices?.speaker).toBe("out-headset"));
+    // A call that starts on the chosen speaker has nothing to say about it.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(hook.result.current.devices?.notice).toBeNull();
 
     act(() => devices.unplug("out-headset"));
     await waitFor(() => expect(hook.result.current.devices?.speaker).toBeUndefined());

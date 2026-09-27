@@ -135,11 +135,12 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       return;
     }
 
-    // The chosen device is here, and the call is not using it: offer it back, once.
+    // The chosen device is back (it went, or was missing when the call started), and the call is not using it: offer
+    // it, once. Only after a loss: a call still setting up its speaker has nothing to offer.
     const now: Partial<Record<DeviceKind, string | undefined>> = { audioinput: mic, videoinput: showing ? camera : undefined, audiooutput: sink };
     for (const kind of ["audioinput", "videoinput", "audiooutput"] as const) {
       const chosen = choices[kind];
-      if (!chosen || (kind === "videoinput" && !showing) || (kind === "audiooutput" && !canPickSpeaker())) continue;
+      if (!chosen || !offered.current.has(`${kind}:missing`) || (kind === "videoinput" && !showing) || (kind === "audiooutput" && !canPickSpeaker())) continue;
       if (kind !== "audiooutput" && now[kind] === undefined) continue;
       const { id } = resolveDevice(kind, next, choices);
       if (!id || id === now[kind] || offered.current.has(`${kind}:${id}`)) continue;
