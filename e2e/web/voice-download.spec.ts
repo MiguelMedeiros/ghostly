@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { Download, Locator, Page } from "@playwright/test";
+import { mp3Info } from "../../src/test/voice/mp3Info";
 import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { decodeInPage } from "../support/voice-media.mjs";
 
 /** The same fake microphone as voice-messages.spec.ts: a voice-like tone on a loop. */
 const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.url));
@@ -30,9 +32,9 @@ async function openMenu(page: Page, message: Locator): Promise<string[]> {
   return menu.locator("[data-menu-item]").evaluateAll((items) => items.map((item) => item.getAttribute("data-testid") ?? ""));
 }
 
-async function download(page: Page, message: Locator): Promise<Download> {
+async function download(page: Page, message: Locator, row = "message-download"): Promise<Download> {
   await openMenu(page, message);
-  const [file] = await Promise.all([page.waitForEvent("download"), page.getByTestId("message-download").click()]);
+  const [file] = await Promise.all([page.waitForEvent("download", { timeout: 30_000 }), page.getByTestId(row).click()]);
   await expect(page.getByTestId("message-menu")).toHaveCount(0);
   return file;
 }
@@ -54,12 +56,23 @@ test("a voice message downloads from its ⋮ menu, under a readable name, the sa
   await expect(received.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
   const message = voiceRow(bob);
 
-  // Reply, then Download, then Details, then Delete last.
+  // Reply, then Download and Download as MP3, then Details, then Delete last.
   const items = await openMenu(bob.page, message);
   expect(items[0]).toBe("message-reply");
   expect(items[1]).toBe("message-download");
-  expect(items.indexOf("message-details")).toBe(2);
+  expect(items[2]).toBe("message-download-mp3");
+  expect(items.indexOf("message-details")).toBe(3);
   await expect(bob.page.getByTestId("message-download")).toBeEnabled();
+  await expect(bob.page.getByTestId("message-download-mp3")).toBeEnabled();
+  // Five rows, each on one line and none cut (the menus rule, as e2e/web/menus.spec.ts checks the others).
+  expect(items).toHaveLength(5);
+  const texts = await bob.page.getByTestId("message-menu").locator("[data-menu-text]").evaluateAll((els) => els.map((text) => ({
+    text: text.textContent,
+    lines: Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)),
+    cut: text.scrollWidth > text.clientWidth,
+  })));
+  expect(texts.map((t) => t.text)).toContain("Download as MP3");
+  expect(texts.filter((t) => t.lines !== 1 || t.cut)).toEqual([]);
   await bob.page.keyboard.press("Escape");
 
   const got = await download(bob.page, message);
@@ -72,6 +85,17 @@ test("a voice message downloads from its ⋮ menu, under a readable name, the sa
   const sent = await download(alice.page, voiceRow(alice));
   expect(sent.suggestedFilename()).toMatch(name);
   expect((await readFile((await sent.path())!)).equals(bytes)).toBe(true);
+
+  // As MP3: converted on Bob's side, named the same way, one channel, as long as the recording.
+  const converted = await download(bob.page, message, "message-download-mp3");
+  expect(converted.suggestedFilename()).toBe(got.suggestedFilename().replace(/\.\w+$/, ".mp3"));
+  const mp3 = await readFile((await converted.path())!);
+  const info = mp3Info(mp3);
+  expect(info).toMatchObject({ mono: true, sampleRate: 24_000, bitrate: 64 });
+  const decoded = await bob.page.evaluate(decodeInPage, [{ name: "received", mime: "audio/webm", base64: bytes.toString("base64") }]);
+  const original = (decoded as Record<string, { duration: number; error?: string }>).received!;
+  expect(original.error).toBeUndefined();
+  expect(Math.abs(info.durationMs / (original.duration * 1000) - 1)).toBeLessThan(0.05);
 
   // A text message carries no file: nothing to download.
   await say(alice, "just words");

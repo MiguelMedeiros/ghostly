@@ -27,18 +27,18 @@ function tone(seconds: number, sampleRate = MP3_SAMPLE_RATE): Float32Array {
 }
 
 describe("encodeMp3", () => {
-  it("turns the recording used by the e2e microphone into a mono MP3 of the same length", () => {
+  it("turns the recording used by the e2e microphone into a mono MP3 of the same length", async () => {
     const { samples, sampleRate } = sampleWav();
     expect(sampleRate).toBe(16_000);
-    const mp3 = encodeMp3(samples, sampleRate);
+    const mp3 = await encodeMp3(samples, sampleRate);
     const info = mp3Info(mp3);
     expect(info).toMatchObject({ mono: true, sampleRate, bitrate: MP3_KBPS });
     expect(info.durationMs / ((samples.length / sampleRate) * 1000)).toBeCloseTo(1, 1);
     expect(Math.abs(info.durationMs / 2_000 - 1)).toBeLessThan(0.05);
   });
 
-  it.each([1.7, 60])("writes %s s of voice at 24 kHz and 64 kbit/s as that long, frame after valid frame", (seconds) => {
-    const mp3 = encodeMp3(tone(seconds));
+  it.each([1.7, 60])("writes %s s of voice at 24 kHz and 64 kbit/s as that long, frame after valid frame", async (seconds) => {
+    const mp3 = await encodeMp3(tone(seconds));
     const info = mp3Info(mp3);
     expect(info).toMatchObject({ mono: true, sampleRate: 24_000, bitrate: 64 });
     expect(Math.abs(info.durationMs / (seconds * 1000) - 1)).toBeLessThan(0.05);
@@ -47,21 +47,21 @@ describe("encodeMp3", () => {
     expect(mp3.length).toBeLessThan(seconds * 8_000 * 1.05 + 400);
   });
 
-  it("clips samples past full scale instead of wrapping them", () => {
+  it("clips samples past full scale instead of wrapping them", async () => {
     const loud = tone(1).map((sample) => sample * 10);
-    expect(mp3Info(encodeMp3(loud)).mono).toBe(true);
+    expect(mp3Info(await encodeMp3(loud)).mono).toBe(true);
   });
 
-  it("writes a valid file for silence and for nothing at all", () => {
-    expect(mp3Info(encodeMp3(new Float32Array(MP3_SAMPLE_RATE))).mono).toBe(true);
-    expect(() => encodeMp3(new Float32Array(0))).not.toThrow();
+  it("writes a valid file for silence and for nothing at all", async () => {
+    expect(mp3Info(await encodeMp3(new Float32Array(MP3_SAMPLE_RATE))).mono).toBe(true);
+    await expect(encodeMp3(new Float32Array(0))).resolves.toBeInstanceOf(Uint8Array);
   });
 });
 
 describe("mp3Info", () => {
-  it("refuses bytes that are not MP3 frames, and a frame cut short", () => {
+  it("refuses bytes that are not MP3 frames, and a frame cut short", async () => {
     expect(() => mp3Info(new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]))).toThrow(/sync/);
-    const mp3 = encodeMp3(tone(0.5));
+    const mp3 = await encodeMp3(tone(0.5));
     expect(() => mp3Info(mp3.subarray(0, mp3.length - 10))).toThrow(/cut short/);
   });
 });

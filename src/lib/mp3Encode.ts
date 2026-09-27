@@ -1,9 +1,8 @@
-import { Mp3Encoder } from "@breezystack/lamejs";
-
 /**
  * A voice message as MP3, for players that know no Opus. One channel at 24 kHz and 64 kbit/s is plenty for a
  * voice (the recording itself is 32 kbit/s Opus). The encoder is LAME in JavaScript (@breezystack/lamejs,
- * LGPL-3.0, unmodified), which only the conversion worker (`voiceMp3.worker.ts`) loads.
+ * LGPL-3.0, unmodified), loaded on first use and only by the conversion worker (`voiceMp3.worker.ts`), so
+ * the page's code that only needs these numbers never carries it.
  */
 export const MP3_SAMPLE_RATE = 24_000;
 export const MP3_KBPS = 64;
@@ -12,7 +11,8 @@ export const MP3_KBPS = 64;
 const STEP = 576 * 20;
 
 /** MP3 bytes of mono samples (-1…1) at `sampleRate`. */
-export function encodeMp3(samples: Float32Array, sampleRate = MP3_SAMPLE_RATE, kbps = MP3_KBPS): Uint8Array<ArrayBuffer> {
+export async function encodeMp3(samples: Float32Array, sampleRate = MP3_SAMPLE_RATE, kbps = MP3_KBPS): Promise<Uint8Array<ArrayBuffer>> {
+  const { Mp3Encoder } = await import("@breezystack/lamejs");
   const encoder = new Mp3Encoder(1, sampleRate, kbps);
   const parts: Uint8Array[] = [];
   const block = new Int16Array(STEP);
