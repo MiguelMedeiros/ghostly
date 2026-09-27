@@ -9,7 +9,7 @@ import { idSlot, TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
-// covers: headless.edit
+// covers: headless.edit, groups.edit
 
 /** `ghostly edit`, and what the stream and the history say about an edited message (WISP 400 § Edits). */
 const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" }, ...fields }) as unknown as LinkView;
@@ -85,5 +85,49 @@ describe("an edited message in the stream and the history", () => {
     post([peer({ text: "v3", edit: { seq: 3, at: 4, history: [] } }), row({ text: "Done", delivery: "delivered", edit: { seq: 1, at: 5, history: [], pending: true } })]);
     post([peer({ text: "v3", edit: { seq: 3, at: 4, history: [] } }), row({ text: "Done", delivery: "delivered", edit: { seq: 1, at: 5, history: [] } })]);
     expect(events.map((e) => [e.type, e.delivery ?? e.edits ?? null])).toEqual([["message.sent", null], ["message.delivery", "delivered"], ["message.edited", 1]]);
+  });
+});
+
+describe("ghostly group edit", () => {
+  const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
+    members: [{ key: "mekey", role: "admin", me: true, online: true, missing: 0 }, { key: "bobkey", nick: "Bob", role: "member", me: false, online: true, missing: 0 }] };
+  const groupRow = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "group:g1", id: "mekey:1:0", text: "Deploy: done", sender: "me", member: "mekey", timestamp: 1, via: "datalink", ...fields });
+  function groupFake(result: { error: string | null; refused?: boolean } = { error: null }, messages = [groupRow({ edit: { seq: 2, at: 5, history: [] } })]) {
+    const node = {
+      getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+      groupMessages: vi.fn(async () => messages),
+      editMessage: vi.fn(async () => result),
+    };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    return { ctx, node };
+  }
+
+  it("names the group, then the message, then the text; --mention names more members", async () => {
+    expect(TEXT_COMMANDS["group edit"]).toMatchObject({ method: "group.edit", target: "group", message: true });
+    expect(parseArgs(["Crew", "mekey:1:0", "--stdin", "--mention", "Bob"], TEXT_COMMANDS["group edit"].options).options).toMatchObject({ stdin: true, mention: ["Bob"] });
+    const { ctx, node } = groupFake();
+    expect(await callApi(ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "Deploy: done @Bob", mentions: ["Bob"] })).toEqual({ group: "g1", messageId: "mekey:1:0", edits: 2, sent: true });
+    expect(node.editMessage).toHaveBeenCalledWith({ linkId: "group:g1", messageId: "mekey:1:0", text: "Deploy: done @Bob", mentions: [{ k: "bobkey", o: 13, l: 4 }] });
+    expect(await callApi(groupFake(undefined, [groupRow({ edit: { seq: 3, at: 5, history: [], pending: true } })]).ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "x" })).toMatchObject({ edits: 3, sent: false });
+    await expect(callApi(groupFake({ error: "Only your own text messages can be edited", refused: true }).ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" })).rejects.toMatchObject({ code: "refused" });
+  });
+
+  let dir: string;
+  beforeAll(async () => { dir = mkdtempSync(join(tmpdir(), "ghostly-group-edits-")); await openPersistentIndexedDb(join(dir, "db")); });
+
+  it("the stream says group.message.edited once per edit number, never a new group.message", async () => {
+    const hub = new EventHub(join(dir, "g.jsonl"), () => 1000, "g.jsonl");
+    await hub.open();
+    const events: GhostlyEvent[] = [];
+    hub.onEvent((e) => events.push(e));
+    hub.baseline({ links: [], groups: [group], settings: {}, transport: {} } as unknown as EngineState, new Map([["group:g1", []]]));
+    const bobs = (fields: Partial<StoredMessage>) => groupRow({ id: "bobkey:1:0", sender: "peer", member: "bobkey", text: "v0", ...fields });
+    const post = (messages: StoredMessage[]) => hub.sink.post({ kind: "messages", linkId: "group:g1", messages });
+    post([bobs({})]);
+    post([bobs({ text: "v1", edit: { seq: 1, at: 2, history: [] } })]);
+    post([bobs({ text: "v1", edit: { seq: 1, at: 2, history: [] } })]);
+    post([bobs({ text: "v3", edit: { seq: 3, at: 4, history: [] } })]);
+    expect(events.map((e) => [e.type, e.edits ?? null])).toEqual([["group.message", null], ["group.message.edited", 1], ["group.message.edited", 3]]);
+    expect(events[2]).toMatchObject({ id: "group.message.edited:g1:bobkey:1:0:3", group: "g1", messageId: "bobkey:1:0", message: { text: "v3", edits: 3, nick: "Bob" } });
   });
 });

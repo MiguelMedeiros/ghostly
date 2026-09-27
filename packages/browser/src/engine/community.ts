@@ -2,7 +2,7 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  type CommunityFrame, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type Hub, type Roster,
+  type CommunityFrame, type GroupEdit, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type Hub, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -310,6 +310,14 @@ export class Communities {
     if (!live) throw new Error("You are not in this group yet");
     const result = await live.session.sendApp(frame, this.host.myNick?.());
     if ("error" in result) throw new Error(result.error);
+  }
+
+  /** An edit of my message, through the group like any frame (WISP 9xx · Group Community § Edits). An error when it cannot go now. */
+  async sendEdit(groupId: string, edit: GroupEdit): Promise<string | null> {
+    const live = this.live.get(groupId);
+    if (!live) return "You are not in this group yet";
+    const result = await live.session.sendEdit({ id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k }, this.host.myNick?.());
+    return "error" in result ? result.error : null;
   }
 
   /** A payload for one member only, sealed to them and carried by the group (hubs relay it, members keep it for them). */

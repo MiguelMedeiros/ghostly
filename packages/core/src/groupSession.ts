@@ -15,6 +15,8 @@ import {
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } from "./replies";
+import { GROUP_EDIT_FRAME, meshMessageRef, validEditText, type GroupIncomingEdit } from "./groupEdits";
+import { validEditNumber } from "./pairedEdits";
 
 /**
  * One member's view of a `group-mesh/1` group: the membership chain, the epoch
@@ -53,6 +55,11 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
  * carries its frame, so the edge vouches for it. Older apps ignore the field.
  */
 export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string } }
+/**
+ * An edit of message `<s>:<e>:<n>` by its author (WISP 9xx § Edits): edit number `v`, the new text (and its mentions)
+ * as JSON `{ text, m? }` sealed under the key of the message's epoch `e`, signed by the author.
+ */
+export interface GroupEditFrame { t: "group-edit"; g: string; e: number; s: string; n: number; v: number; ts: number; nn: string; c: string; sig: string }
 export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupCommit; secret?: SealedSecret }
 /** `mt`: which metadata statement I hold (`groupMetaTag`); apps without metadata leave it out. */
 export interface GroupSyncFrame { t: "group-sync"; g: string; e: number; h: string; have: Record<string, Record<string, number>>; secrets: number[]; mt?: string }
@@ -64,7 +71,7 @@ export interface GroupDeclineFrame { t: "group-decline"; g: string }
 export interface GroupChainFrame { t: "group-chain"; g: string; commits: GroupCommit[] }
 export interface GroupWelcomeFrame { t: "group-welcome"; g: string; name: string; commits: GroupCommit[]; secrets: { e: number; s: SealedSecret }[] }
 export interface GroupRemovedFrame { t: "group-removed"; g: string }
-export type GroupEdgeFrame = GroupMessageFrame | GroupCommitFrame | GroupSyncFrame | GroupSecretsFrame | GroupLeaveFrame | GroupMetaFrame;
+export type GroupEdgeFrame = GroupMessageFrame | GroupEditFrame | GroupCommitFrame | GroupSyncFrame | GroupSecretsFrame | GroupLeaveFrame | GroupMetaFrame;
 export type GroupAdmissionFrame = GroupInviteFrame | GroupAcceptFrame | GroupDeclineFrame | GroupChainFrame | GroupWelcomeFrame | GroupRemovedFrame;
 
 export type GroupStatus = "active" | "left" | "removed" | "forked";
@@ -102,6 +109,8 @@ export interface GroupSessionHooks {
   send(to: string, frame: GroupEdgeFrame): void;
   /** Store before it resolves: replay state advances only afterwards. */
   message(message: GroupIncomingMessage): Promise<void> | void;
+  /** An edit of a member's message, authenticated as its author (WISP 9xx § Edits). Apps without edits leave it out. */
+  edit?(edit: GroupIncomingEdit): Promise<void> | void;
   /** Roster, epoch or status changed. */
   changed(): void;
   /** The group's picture changed (set, replaced or removed), by `by`. */
@@ -125,6 +134,19 @@ const secretAad = (g: string, e: number, member: string) => JSON.stringify(["gho
 const messageAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify([f.g, f.e, f.s, f.n, f.ts]);
 const messageSigned = (f: Omit<GroupMessageFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 msg", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c]));
 export const groupMessageId = (sender: string, epoch: number, seq: number) => `${sender}:${epoch}:${seq}`;
+/** An edit's box holds the text and its mentions as JSON: room for a text whose every character JSON escapes. */
+const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + 64;
+const MAX_EDIT_BOX = Math.ceil((MAX_EDIT_PLAIN + 16) * 4 / 3) + 4;
+const editAad = (f: Pick<GroupEditFrame, "g" | "e" | "s" | "n" | "v" | "ts">) => JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts]);
+const editSigned = (f: Omit<GroupEditFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts, f.nn, f.c]));
+function isEditFrame(v: unknown): v is GroupEditFrame {
+  if (!v || typeof v !== "object") return false;
+  const f = v as Record<string, unknown>;
+  return f.t === GROUP_EDIT_FRAME && typeof f.g === "string" && GROUP_ID.test(f.g) && Number.isSafeInteger(f.e) && (f.e as number) >= 0 &&
+    typeof f.s === "string" && MEMBER_KEY.test(f.s) && Number.isSafeInteger(f.n) && (f.n as number) >= 0 && validEditNumber(f.v) &&
+    Number.isSafeInteger(f.ts) && (f.ts as number) > 0 && typeof f.nn === "string" && f.nn.length === 32 && B64.test(f.nn) &&
+    typeof f.c === "string" && f.c.length <= MAX_EDIT_BOX && B64.test(f.c) && typeof f.sig === "string" && f.sig.length === 86 && B64.test(f.sig);
+}
 
 function isSealed(v: unknown): v is SealedSecret {
   return !!v && typeof v === "object" && ["e", "n", "c"].every(k => typeof (v as Record<string, unknown>)[k] === "string" && B64.test((v as Record<string, string>)[k]) && (v as Record<string, string>)[k].length <= 128);
@@ -144,6 +166,8 @@ export class GroupSession {
   /** Frames for an epoch, or a secret, not here yet. In memory only. */
   private waiting: { from: string; frame: GroupMessageFrame }[] = [];
   private waitingBytes = 0;
+  /** Edits for an epoch, or a secret, not here yet: tried again with the frames above. In memory only. */
+  private waitingEdits: { from: string; frame: GroupEditFrame }[] = [];
   private pendingCommits = new Map<number, GroupCommitFrame>();
   /** When each member was last asked to catch me up, so a stream of unreadable frames is one question, not a loop. */
   private asked = new Map<string, number>();
@@ -387,6 +411,36 @@ export class GroupSession {
     });
   }
 
+  /**
+   * Says an edit of one of my messages (WISP 9xx § Edits): edit `v`, the whole new text and its mentions, sealed under
+   * the key of the message's epoch and signed, to every member of that epoch still in the group, or to `to` alone (an
+   * edge that just opened). Someone admitted after the message cannot open it and is not sent it. The message's
+   * epoch key must still be here: past `GROUP_LIMITS.secrets` epochs a message cannot be edited.
+   */
+  sendEdit(messageId: string, edit: { v: number; ts: number; text: string; mentions?: readonly GroupMention[] }, to?: string): Promise<{ sent: number } | { error: string }> {
+    return this.serialize(async () => {
+      if (this.state.status !== "active") return { error: this.state.statusReason ?? "You are no longer in this group" };
+      const ref = meshMessageRef(messageId);
+      const commit = ref && this.state.chain[ref.e];
+      if (!ref || ref.s !== this.myKey || !commit || !rosterHas(commit.m, this.myKey)) return { error: "Only your own messages can be edited" };
+      if (!validEditNumber(edit.v)) return { error: "This message was edited too many times" };
+      const text = edit.text.trim();
+      if (!validEditText(text)) return { error: text ? "Message exceeds 16 KiB" : "An edit cannot be empty" };
+      const secret = this.secret(ref.e);
+      if (!secret) return { error: "This message is too old to edit: its epoch's key is gone" };
+      const named = validMentions(wireMentions(edit.mentions ?? []), text, rosterAdmin(commit.m) === this.myKey);
+      const plain = JSON.stringify({ text, ...(named.length ? { m: named } : {}) });
+      if (utf8Encode(plain).length > MAX_EDIT_PLAIN) return { error: "Message exceeds 16 KiB" };
+      const header = { g: this.id, e: ref.e, s: this.myKey, n: ref.n, v: edit.v, ts: edit.ts };
+      const { n: nn, c } = encryptText(epochKeys(secret, this.id, ref.e).message, editAad(header), plain);
+      const unsigned = { ...header, nn, c };
+      const frame: GroupEditFrame = { t: GROUP_EDIT_FRAME, ...unsigned, sig: toBase64Url(sign(editSigned(unsigned), this.identity.seed)) };
+      const members = (to === undefined ? this.others : [to]).filter(key => key !== this.myKey && rosterHas(this.roster, key) && rosterHas(commit.m, key));
+      for (const key of members) this.hooks.send(key, frame);
+      return { sent: members.length };
+    });
+  }
+
   /** What to tell a member whose edge just opened: where I am, and what I have from everyone. */
   syncFrame(): GroupSyncFrame {
     const have: Record<string, Record<string, number>> = {};
@@ -415,6 +469,7 @@ export class GroupSession {
       if (frame.g !== this.id) return;
       switch (frame.t) {
         case "group-msg": return this.receiveMessage(from, raw);
+        case GROUP_EDIT_FRAME: return this.receiveEdit(from, raw);
         case "group-commit": return this.receiveCommit(from, raw as GroupCommitFrame);
         case "group-sync": return this.receiveSync(from, raw as GroupSyncFrame);
         case "group-secrets": return this.receiveSecrets(raw as GroupSecretsFrame);
@@ -445,6 +500,35 @@ export class GroupSession {
     await this.hooks.message({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}) });
     this.markSeen(raw);
     await this.persist();
+  }
+
+  /**
+   * An edit from the member the edge is pinned to, of one of its own messages: believed only while it is still in the
+   * roster (someone removed edits nothing), for an epoch it and I were both members of, with a valid signature and a
+   * box that opens. One for an epoch or a secret not here yet waits, as a message does.
+   */
+  private async receiveEdit(from: string, raw: unknown): Promise<void> {
+    if (!isEditFrame(raw) || raw.s !== from || raw.s === this.myKey || !rosterHas(this.roster, raw.s)) return;
+    if (raw.e > this.epoch) { this.parkEdit(from, raw); return; }
+    const commit = this.state.chain[raw.e];
+    if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
+    if (!verify(fromBase64Url(raw.sig), editSigned(raw), publicKeyFromZ32(raw.s))) return;
+    const secret = this.secret(raw.e);
+    if (!secret) { if (raw.e >= this.epoch - GROUP_LIMITS.secrets) this.parkEdit(from, raw); return; }
+    const plain = decryptText(epochKeys(secret, this.id, raw.e).message, editAad(raw), raw.nn, raw.c);
+    if (plain === null) return;
+    let body: { text?: unknown; m?: unknown };
+    try { body = JSON.parse(plain) as typeof body; } catch { return; }
+    if (!body || typeof body !== "object" || !validEditText(body.text)) return;
+    const k = validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s);
+    await this.hooks.edit?.({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}) });
+  }
+
+  private parkEdit(from: string, frame: GroupEditFrame): void {
+    if (frame.e > this.epoch + GROUP_LIMITS.secrets) return;
+    this.waitingEdits = [...this.waitingEdits.filter(w => !(w.frame.s === frame.s && w.frame.e === frame.e && w.frame.n === frame.n && w.frame.v <= frame.v)), { from, frame }]
+      .slice(-GROUP_LIMITS.outlog);
+    this.ask(from);
   }
 
   private openMentions(key: Uint8Array, raw: GroupMessageFrame, text: string, everyone: boolean): GroupMention[] {
@@ -501,10 +585,13 @@ export class GroupSession {
   private async replayWaiting(): Promise<void> {
     await this.metaFollowsChain();
     const ready = this.waiting.filter(w => w.frame.e <= this.epoch && !!this.state.secrets[w.frame.e]);
-    if (!ready.length) return;
     this.waiting = this.waiting.filter(w => !ready.includes(w));
     this.waitingBytes = this.waiting.reduce((sum, w) => sum + w.frame.c.length, 0);
     for (const { from, frame } of ready) await this.receiveMessage(from, frame);
+    // Edits after the messages they change.
+    const edits = this.waitingEdits.filter(w => w.frame.e <= this.epoch && !!this.state.secrets[w.frame.e]);
+    this.waitingEdits = this.waitingEdits.filter(w => !edits.includes(w));
+    for (const { from, frame } of edits) await this.receiveEdit(from, frame);
   }
 
   private async receiveCommit(from: string, frame: GroupCommitFrame): Promise<void> {

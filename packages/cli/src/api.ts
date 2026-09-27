@@ -403,6 +403,25 @@ const METHODS: Record<string, Method> = {
     if (result.error) throw new CliError("unavailable", result.error);
     return { group: group.id, messageId: result.messageId ?? null, sent: true };
   },
+  /**
+   * WISP 9xx § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
+   * (a private group's over the edges that are up, the others when theirs open; a community's through the group).
+   * `mentions`: members the new text names beyond those the message named. `sent`: no longer waiting for the pace.
+   */
+  async "group.edit"(ctx, params) {
+    const group = groupOf(ctx, params);
+    const messageId = str(params, "message", true);
+    const text = str(params, "text", true);
+    if (!bool(params, "force")) {
+      const secret = findSecret(text);
+      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
+    }
+    const mentions = mentionsFor(text, list(params, "mentions"), group);
+    const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
+    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
+    return { group: group.id, messageId, edits: message?.edit?.seq ?? 0, sent: !!message && !message.edit?.pending };
+  },
   async "group.react"(ctx, params) {
     const group = groupOf(ctx, params);
     return { group: group.id, ...(await react(ctx, `group:${group.id}`, params)) };

@@ -128,14 +128,14 @@ export class EditQueue {
  * The contact's edits of messages not here yet (an edit that overtook its message on another path), per chat: kept
  * `EDIT_BUFFER_MS` at most, the highest number per message, `EDIT_BUFFER_MAX` messages at most.
  */
-export class EditBuffer {
-  private held = new Map<string, Map<string, { edit: WireEdit; until: number }>>();
+export class EditBuffer<T extends { id: string; e: number } = WireEdit> {
+  private held = new Map<string, Map<string, { edit: T; until: number }>>();
 
   constructor(private readonly now: () => number = Date.now) {}
 
-  hold(linkId: string, edit: WireEdit): void {
+  hold(linkId: string, edit: T): void {
     const now = this.now();
-    const chat = this.held.get(linkId) ?? new Map<string, { edit: WireEdit; until: number }>();
+    const chat = this.held.get(linkId) ?? new Map<string, { edit: T; until: number }>();
     for (const [id, entry] of chat) if (entry.until <= now) chat.delete(id);
     const known = chat.get(edit.id);
     if (known && known.edit.e >= edit.e) return;
@@ -145,7 +145,7 @@ export class EditBuffer {
   }
 
   /** The edit held for this message, if it is still fresh; it is no longer held. */
-  take(linkId: string, wireId: string): WireEdit | undefined {
+  take(linkId: string, wireId: string): T | undefined {
     const chat = this.held.get(linkId), entry = chat?.get(wireId);
     if (!chat || !entry) return undefined;
     chat.delete(wireId);

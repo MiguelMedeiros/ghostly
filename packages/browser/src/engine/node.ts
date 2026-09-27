@@ -39,6 +39,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
+import { COMMUNITY_EDIT_FRAME, parseCommunityEdit } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, wireReaction, type WireReaction } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
@@ -145,6 +146,7 @@ import { Groups } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
 import { Reactions, latestReaction } from "./reactions";
+import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
@@ -805,7 +807,10 @@ export class GhostlyNode implements EngineImplementation {
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeMessage(message),
     emit: () => this.emitState(),
-    communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame) : this.communityPay.receiveApp(groupId, sender, frame),
+    communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
+      : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
+      : this.communityPay.receiveApp(groupId, sender, frame),
+    groupEdit: async (groupId, { sender, ...edit }) => { await this.groupEdits.receive(groupId, sender, edit); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
   });
 
@@ -825,6 +830,27 @@ export class GhostlyNode implements EngineImplementation {
     onNote: (groupId, author, frame) => this.groupPayments.receive(groupId, author, frame),
     emit: () => this.emitState(),
   });
+
+  /**
+   * Edits in groups (WISP 9xx § Edits): mine said to the group at the pace allowed, the members' on their messages.
+   * Never a new message: no sound, no unread.
+   */
+  private readonly groupEdits = new GroupEdits({
+    messages: chat => db.getMessages(chat),
+    patch: (chat, id, change) => db.patchMessage(chat, id, change),
+    changed: async chat => { this.events.onMessages(chat, await db.getMessages(chat)); },
+    membership: groupId => {
+      const membership = this.membership(groupId);
+      return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!this.groups.views().find(g => g.id === groupId)?.isAdmin };
+    },
+    send: (groupId, edit, to) => this.groups.sendEdit(groupId, edit, to),
+  });
+
+  /** A community member's edit, signed by them: of their own message, and only while they are a member. */
+  private async receiveCommunityEdit(groupId: string, sender: string, frame: Record<string, unknown>): Promise<void> {
+    const edit = parseCommunityEdit(frame, sender);
+    if (edit) await this.groupEdits.receive(groupId, sender, edit);
+  }
 
   /** My key in an active group, and who is in it. */
   private membership(groupId: string): { me: string; members: ReadonlySet<string> } | undefined {
@@ -1071,6 +1097,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.hold.stop();
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
     for (const queue of this.editQueues.values()) queue.stop();
+    this.groupEdits.stop();
     await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(true); await live.caps?.stop(); }));
   }
 
@@ -1536,13 +1563,15 @@ export class GhostlyNode implements EngineImplementation {
    * (`editsFor`) once the chat is live and both sides offer edit/1. Only texts, at most `MAX_EDITS_PER_MESSAGE` times each,
    * and never empty (deleting is for that). What an edit says is checked like a message: its length, its preview.
    */
-  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[] }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId } = params;
-    const live = this.links.get(linkId);
     const refuse = (error: string) => ({ error, refused: true });
+    // A group's (WISP 9xx § Edits): said to its members, with the mentions the new text keeps or adds.
+    if (typeof linkId === "string" && linkId.startsWith("group:")) return this.groupEdits.edit(linkId.slice("group:".length), params.messageId, params.text, Array.isArray(params.mentions) ? params.mentions : []);
+    const live = this.links.get(linkId);
     if (!live) return refuse("No such chat");
     if (!live.stored.profile) return refuse("Editing needs a current chat; this compatibility chat cannot edit.");
-    if (live.stored.group || linkId.startsWith("group:")) return refuse("Editing works in 1:1 chats");
+    if (live.stored.group) return refuse("No such chat");
     if (typeof params.messageId !== "string" || typeof params.text !== "string") return refuse("No message to edit");
     const messages = await db.getMessages(linkId);
     const message = messages.find(m => m.id === params.messageId) ?? messages.find(m => m.sender === "me" && m.wireId === params.messageId);
@@ -2347,7 +2376,7 @@ export class GhostlyNode implements EngineImplementation {
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
   rotateGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.rotate(groupId); }
   setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
-  forgetGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.forget(groupId); }
+  forgetGroup({ groupId }: { groupId: string }): Promise<void> { this.groupEdits.forget(groupId); return this.groups.forget(groupId); }
 
   /** Rejects when the signal cannot go now (no live session): it is kept and goes on the next one while fresh. */
   async setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): Promise<void> {
@@ -3267,6 +3296,8 @@ export class GhostlyNode implements EngineImplementation {
             else {
               this.groups.edgeReady(group, peer, linkId); void this.groupPayments.edgeReady(group, linkId).catch(() => {});
               if (!this.groups.isCommunityGroup(group)) void this.resendGroupReactions(group, linkId).catch(() => {});
+              // My latest edits too: a private group has no catch-up for them.
+              if (!this.groups.isCommunityGroup(group)) void this.groupEdits.resend(group, peer).catch(() => {});
             }
           }
           this.emitState();
@@ -3791,8 +3822,9 @@ export class GhostlyNode implements EngineImplementation {
     }
     this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
     this.emitState();
-    // Reactions that came before it are shown now.
+    // Reactions that came before it are shown now, and a member's edit.
     await this.reactions.stored(message);
+    await this.groupEdits.stored(message);
   }
 
   private servicesChanged(): void {

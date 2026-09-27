@@ -162,12 +162,12 @@ function EditGlyph() {
  * "edited" beside the time of an edited text (WISP 400 § Edits); the time of the edit on hover, or that the contact has
  * not been shown it yet. The earlier versions are in the message's details.
  */
-function EditedMark({ edit }: { edit: NonNullable<ChatMessage["edit"]> }) {
+function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean }) {
   const { t } = useI18n();
   const time = new Date(edit.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
     <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
-      title={edit.pending ? t("chat.message.editPending") : t("chat.message.editedAt", { time })}>
+      title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
       {t("chat.message.edited")}
     </span>
   );
@@ -620,7 +620,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   const timestampEl = (
     <span className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
-      {message.edit && <EditedMark edit={message.edit} />}
+      {message.edit && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>

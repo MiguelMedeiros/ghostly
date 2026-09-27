@@ -84,7 +84,8 @@
       "edit": "Edit",
       "edited": "edited",
       "editedAt": "Edited {{time}}",
-      "editPending": "Not shown to your contact yet"
+      "editPending": "Not shown to your contact yet",
+      "editPendingGroup": "Not sent to the group yet"
     },
     "options": "Options",
     "menu": {

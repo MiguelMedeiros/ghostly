@@ -91,7 +91,7 @@ interface MessageInputProps {
    * A message of mine being edited (WISP 400 § Edits): its text fills the field, the draft waits and comes back after.
    * Enter saves through `onSave`; ✕ or Escape leaves it. Either way `onClose` ends it. A new `key` edits another one.
    */
-  edit?: { key: string; text: string; snippet: string; onSave: (text: string, extra?: { preview?: LinkPreview }) => Promise<string | null>; onClose: () => void };
+  edit?: { key: string; text: string; snippet: string; onSave: (text: string, extra?: { preview?: LinkPreview; mentions?: GroupMention[] }) => Promise<string | null>; onClose: () => void };
   /** ↑ in an empty field: edit my last message, as in Slack and Telegram. */
   onEditLast?: () => void;
 }
@@ -219,8 +219,11 @@ export function MessageInput({
     const found = confirmed ? null : findSecret(text);
     if (found) { setSecret({ finding: found }); return; }
     if (edit) {
-      const err = await edit.onSave(text, linkPreview.preview ? { preview: linkPreview.preview } : undefined);
-      if (err) showToast(err); else { linkPreview.reset(); endEdit(); }
+      // In a group, members named with @ while editing go with it; those the message named already stay by themselves.
+      const named = picker.compose(text);
+      const extra = { ...(linkPreview.preview && { preview: linkPreview.preview }), ...(named.length && { mentions: named }) };
+      const err = await edit.onSave(text, Object.keys(extra).length ? extra : undefined);
+      if (err) showToast(err); else { picker.reset(); linkPreview.reset(); endEdit(); }
       return;
     }
     const named = picker.compose(text);

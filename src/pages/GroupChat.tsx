@@ -27,6 +27,7 @@ import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { replySnippet, type GroupMention } from "@ghostly/core";
 import { quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { canEditInGroup } from "@ghostly/browser/shared/edits";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -38,7 +39,8 @@ function toChatMessage(message: StoredMessage, group: GroupView, myName = ""): C
   const mentions = mentionViews(message.text, message.mentions, names, message.sender === "me");
   return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, paymentId: message.paymentId,
     nick: message.sender === "peer" && message.member ? (member ? memberName(member) : `Member ${message.member.slice(0, 8)}`) : undefined,
-    ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }) };
+    ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }),
+    ...(message.edit && { edit: message.edit }) };
 }
 
 /** A member as a reply's quote names them: me, the roster's name, or the start of a key no longer in the roster. */
@@ -113,7 +115,9 @@ export function GroupChat() {
   const [messages, setMessages] = useState<StoredMessage[]>([]);
   /** The message the composer answers (WISP 9xx § Replies). */
   const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
-  useEffect(() => setReplyingTo(null), [groupId]);
+  /** The message of mine the composer edits (WISP 9xx § Edits). */
+  const [editing, setEditing] = useState<StoredMessage | null>(null);
+  useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
   const quoteIndex = useMemo(() => replyIndex(messages, true), [messages]);
   const [showMembers, setShowMembers] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -288,7 +292,8 @@ export function GroupChat() {
               {noteIdOf(state, m.paymentId) === m.paymentId && notes.get(m.paymentId) && <GroupPaymentCaption note={notes.get(m.paymentId)!} group={group} />}
             </div>
             : <MessageBubble key={m.id} message={toChatMessage(m, group, settings.defaultNickname)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`}
-              onReply={replyTarget(m, true) ? () => setReplyingTo(m) : undefined} quote={quoteOf(m)}
+              onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
+              onEdit={canEditInGroup(m) && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
               onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName} />)}
           <div ref={bottomRef} />
         </div>
@@ -297,6 +302,14 @@ export function GroupChat() {
       {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: replySnippet(replyingTo.text),
           mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined}
+        // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.
+        edit={editing ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
+          onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
+            .catch((e: unknown) => ({ error: e instanceof Error ? e.message : "Could not edit the message" }))).error } : undefined}
+        onEditLast={group.canSend ? () => {
+          const last = [...messages].reverse().find(canEditInGroup);
+          if (last) { setReplyingTo(null); setEditing(last); }
+        } : undefined}
         fileUnavailable="Files are not part of groups yet"
         paymentsUnavailable={others.length === 0 ? "Nobody else is in the group yet" : undefined}
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}

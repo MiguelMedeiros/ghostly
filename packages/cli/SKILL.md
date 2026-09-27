@@ -68,6 +68,8 @@ ghostly react alice peer_jY7N… --remove            # takes it back
 id=$(ghostly send alice "Working: 0 of 3" | jq -r .messageId)   # a status message…
 ghostly edit alice "$id" --text "Working: 2 of 3"  # …updated in place: the contact sees one message, marked edited
 echo "Done: 3 of 3" | ghostly edit alice "$id" --stdin
+gid=$(ghostly group send crew "Deploy: 0 of 3" | jq -r .messageId)  # the same in a group…
+ghostly group edit crew "$gid" --text "Deploy: done"      # …every member sees one message, marked edited
 ghostly chat history alice --limit 20              # oldest first
 ghostly chat list
 ```
@@ -86,7 +88,7 @@ ghostly listen --type message.received            # one JSON object per line, un
 - A reply carries `message.replyTo`: `{id, snippet, from, found}` (`from`: me, peer or null). Answer in the same
   thread with `ghostly send <chat> --reply "$(jq -r .message.id <<<"$event")" "…"`.
 - An edited message (the contact's or mine) comes as `message.edited`, once per edit, with `edits` (how many) and
-  `message.text` as it is now; `chat history` shows the latest text with `edits` and `editedAt`.
+  `message.text` as it is now (in a group: `group.message.edited`, with `group`); `chat history` shows the latest text with `edits` and `editedAt`.
 - Useful types: `message.received`, `message.delivery`, `chat.created`, `chat.joined` (a contact arrived: not a
   message, do not answer it as one), `chat.connection`, `group.message` (with `message.mentioned: true` when it
   names this bot), `group.members`, `typing.started` / `typing.stopped` (the contact is writing, or stopped; a start has `kind`: typing, recording or thinking),

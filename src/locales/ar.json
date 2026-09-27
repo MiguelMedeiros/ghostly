@@ -84,7 +84,8 @@
       "edit": "تعديل",
       "edited": "معدّلة",
       "editedAt": "عُدّلت {{time}}",
-      "editPending": "لم تظهر لجهة الاتصال بعد"
+      "editPending": "لم تظهر لجهة الاتصال بعد",
+      "editPendingGroup": "لم تُرسل إلى المجموعة بعد"
     },
     "options": "خيارات",
     "menu": {

@@ -335,12 +335,16 @@ export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "g
     options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, ...wait },
   },
   "edit": {
-    method: "chat.edit", target: "chat", message: true, args: ["chat", "message", "text..."], usage: "edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed]", summary: "Replace the text of a message you sent (1:1 chats; the id send gave)",
+    method: "chat.edit", target: "chat", message: true, args: ["chat", "message", "text..."], usage: "edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed]", summary: "Replace the text of a message you sent (the id send gave; in a group, group edit)",
     options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, wait: { type: "string", description: "none or confirmed (default: none with a daemon, confirmed without)" }, timeout: wait.timeout },
   },
   "group send": {
     method: "group.send", target: "group", args: ["group", "text..."], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--stdin] [--force]", summary: "Send to a group; mention members written as @name in the text",
     options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" } },
+  },
+  "group edit": {
+    method: "group.edit", target: "group", message: true, args: ["group", "message", "text..."], usage: "group edit <group> <message> [text... | --text <text> | --stdin] [--mention <member>]... [--force]", summary: "Replace the text of a message you sent to a group (the id group send gave)",
+    options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, mention: { type: "list", description: "A member newly named as @name in the text (those the message named stay)" } },
   },
 };
 
