@@ -13,7 +13,7 @@ import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, typ
  *
  * Devices are GStreamer's, listed by Rust (`nativeDevices`) and known by name: a device's id is its name, and
  * the page passes the name of the one chosen. Rust uses the default when there is none by that name, and the
- * tracks' `getSettings().deviceId` says which one is in use ("" the default), as a browser's would.
+ * tracks' `getSettings().deviceId` says which one is in use ("default" the default), as a browser's would.
  */
 
 /** What Rust says about calls on this machine. */
@@ -135,7 +135,8 @@ function reporting(track: MediaStreamTrack, wanted: string | null): void {
   wantedOf.set(track, wanted);
   usedOf.set(track, wanted);
   const settings = track.getSettings?.bind(track);
-  track.getSettings = () => ({ ...(settings?.() ?? {}), deviceId: usedOf.get(track) ?? "" });
+  // "default", as browsers call the system's default: the call's device menu offers a chosen one back from it.
+  track.getSettings = () => ({ ...(settings?.() ?? {}), deviceId: usedOf.get(track) ?? "default" });
 }
 
 async function openCamera(device: string | null = null): Promise<MediaStreamTrack> {

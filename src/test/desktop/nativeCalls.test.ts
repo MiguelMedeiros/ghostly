@@ -244,7 +244,7 @@ describe("the devices, which are GStreamer's and known by name", () => {
     pc.addTrack(camera);
     await pc.createOffer();
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_offer", { id: pc.id, camera: 7, microphone: "USB Microphone", speaker: "Headphones" });
-    expect(microphone.getSettings().deviceId).toBe("");
+    expect(microphone.getSettings().deviceId).toBe("default");
   });
 
   it("switches the microphone in Rust when the call's audio sender gets another one, muted if it was", async () => {
