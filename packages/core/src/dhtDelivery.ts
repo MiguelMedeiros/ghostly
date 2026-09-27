@@ -10,6 +10,7 @@ import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPack
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
+import { validEditNumber } from "./pairedEdits";
 
 export type DeliveryMode = "stream" | "dht";
 export const DHT_TEXT_BYTES = 256;
@@ -52,9 +53,15 @@ type Message = [id: string, timestamp: number, text: string];
  * and no edit.
  */
 type DhtReaction = [id: string, emoji: string, n: number];
-type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string | null, edit?: null, reactions?: DhtReaction[], reactionsTaken?: number | null];
+type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string | null, edit?: DhtEdit | null, reactions?: DhtReaction[], reactionsTaken?: number | null];
 /** An envelope's plaintext past this is not read (`receive`): what rides along must stay under it. */
 const MAX_ENVELOPE_PLAINTEXT = 900;
+/**
+ * The twelfth element, with a text only: the text is an edit (WISP 403 § Edits), the new text of the message with this id,
+ * edit number `e`. The eleventh then goes as `null` when the text replies to nothing. An app from before edits would show
+ * the text as a message of its own: it is sent only to a contact whose capability record lists `edit/1`.
+ */
+type DhtEdit = [id: string, e: number];
 /**
  * Before the contact said it can use the pinned mailbox, the invite's mailbox is read. When that held a packet but
  * nothing from the contact (expired, or someone else's), the pinned one is looked in too, no more often than this:
@@ -72,7 +79,7 @@ export interface DhtDeliveryState {
    */
   peerPinned?: "can" | "reads" | "seen";
   /** `reply`: the id of the message the text replies to, published with it (the eleventh element). */
-  pending?: { message: Message; expires: number; attempts: number; next: number; reply?: string };
+  pending?: { message: Message; expires: number; attempts: number; next: number; reply?: string; edit?: DhtEdit };
   /**
    * The receipt this side owes for the contact's last text. `next`: when it forces a publication again (absent: at
    * once). `settled`: the contact's newer envelope no longer carries that text (it has a receipt, on either path, or
@@ -161,7 +168,7 @@ export class DhtDelivery {
     credentials: PairingCredentials; transport: PkarrTransport;
     save(state: DhtDeliveryState): Promise<void>;
     pin(key: string): Promise<void>;
-    message(message: { id: string; text: string; timestamp: number; reply?: { i: string } }, packet: DhtPacketFacts): Promise<void>;
+    message(message: { id: string; text: string; timestamp: number; reply?: { i: string }; edit?: { i: string; e: number } }, packet: DhtPacketFacts): Promise<void>;
     receipt(id: string): Promise<void>;
     changed(view: DhtDeliveryView): void;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -296,31 +303,33 @@ export class DhtDelivery {
     this.active = active;
     if (active && !this.live) void this.tick(); else this.schedule();
   }
-  validate(text: string, timestamp: number, id: string, reply?: string): string | null {
+  validate(text: string, timestamp: number, id: string, reply?: string, edit?: DhtEdit): string | null {
     // Every chat's first contact runs here too (WISP 403): before the pin the text is sealed with the invite key.
     if (this.options.peerAcceptsText?.() === false) return DHT_TEXT_REFUSED;
     if (!ID.test(id) || !Number.isSafeInteger(timestamp) || timestamp <= 0 || (reply !== undefined && !REPLY_TO.test(reply))) return "Invalid message.";
+    if (edit !== undefined && (reply !== undefined || !ID.test(edit[0]) || !validEditNumber(edit[1]))) return "Invalid message.";
     if (utf8Encode(text).length > DHT_TEXT_BYTES) return `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
     if (/cashu[AB][A-Za-z0-9_-]+/i.test(text)) return "Payment tokens cannot be sent through DHT delivery.";
     const now = Date.now(), pending = this.state.pending;
     if (pending && pending.expires > now && pending.message[0] !== id) return "One DHT text can await a receipt at a time. Wait for its receipt or expiry before sending another.";
     if (pending?.message[0] === id && pending.expires > now && pending.attempts >= MAX_ATTEMPTS) return "DHT retry budget exhausted. Wait for expiry before retrying this message.";
-    const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }) };
+    const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }) };
     // Validate the complete encrypted DNS packet before accepting local intent. A text near the bound goes without the
-    // id of the message it replies to when both do not fit: the text is what matters.
-    const error = this.packetError(next.message, next.expires, next.reply);
+    // id of the message it replies to when both do not fit: the text is what matters. An edit never goes without its
+    // element: it would read as a new message.
+    const error = this.packetError(next.message, next.expires, next.reply, next.edit);
     return error && next.reply ? this.packetError(next.message, next.expires) : error;
   }
-  private packetError(message: Message, expires: number, reply?: string): string | null {
-    try { this.records(this.body(this.state.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
+  private packetError(message: Message, expires: number, reply?: string, edit?: DhtEdit): string | null {
+    try { this.records(this.body(this.state.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
     catch (error) { return error instanceof Error ? error.message : String(error); }
   }
-  async send(text: string, timestamp: number, id: string, reply?: string): Promise<string | null> {
+  async send(text: string, timestamp: number, id: string, reply?: string, edit?: DhtEdit): Promise<string | null> {
     return this.serialize(async () => {
-      const error = this.validate(text, timestamp, id, reply);
+      const error = this.validate(text, timestamp, id, reply, edit);
       if (error) return error;
       const now = Date.now(), pending = this.state.pending;
-      let next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }) };
+      let next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now, ...(reply && { reply }), ...(edit && { edit }) };
       if (next.reply && this.packetError(next.message, next.expires, next.reply)) { const { reply: _dropped, ...alone } = next; next = alone; }
       await this.persist({ ...this.state, pending: next }); this.changed();
       // The next read comes at the pace for a text awaiting its receipt.
@@ -362,30 +371,33 @@ export class DhtDelivery {
       this.changed();
     });
   }
-  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, reactions: readonly WireReaction[] = []): Body {
+  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, reactions: readonly WireReaction[] = [], edit?: DhtEdit): Body {
     const rev = this.options.capsRev?.();
     const body: Body = [1, sequence, issued, expires, this.participation.pubKeyZ32, this.mode, message, receipt];
     // Whether it has a revision to name or not, the ninth element holds the place of the tenth: this side uses the pinned mailbox.
     body.push(rev !== undefined && Number.isSafeInteger(rev) && rev >= 0 ? rev : null, this.state.peerPinned ? 2 : 1);
     const taken = this.state.reactionsTaken;
-    if (reactions.length || taken) body.push(message && reply ? reply : null, null, reactions.map(r => [r.id, r.e, r.n] as DhtReaction), taken ?? null);
-    else if (message && reply) body.push(reply);
+    if (reactions.length || taken) body.push(message && reply ? reply : null, message && edit ? edit : null, reactions.map(r => [r.id, r.e, r.n] as DhtReaction), taken ?? null);
+    else {
+      if (message && (reply || edit)) body.push(reply ?? null);
+      if (message && edit) body.push(edit);
+    }
     return body;
   }
   /**
    * The envelope with as many of this side's pending reactions as fit, oldest first: the packet's budget and what a
    * reader reads (`MAX_ENVELOPE_PLAINTEXT`) both bound it. The contact confirms up to the newest it carried.
    */
-  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string): { body: Body; records: GhostRecord[]; reactions: number } {
+  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, edit?: DhtEdit): { body: Body; records: GhostRecord[]; reactions: number } {
     const pending = (this.options.reactions?.() ?? []).slice(0, REACTION_LIMITS.dht);
     for (let count = pending.length; count > 0; count--) {
-      const body = this.body(sequence, issued, expires, message, receipt, reply, pending.slice(0, count));
+      const body = this.body(sequence, issued, expires, message, receipt, reply, pending.slice(0, count), edit);
       try {
         const records = this.records(body);
         if (utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT) return { body, records, reactions: count };
       } catch { /* one fewer */ }
     }
-    const body = this.body(sequence, issued, expires, message, receipt, reply);
+    const body = this.body(sequence, issued, expires, message, receipt, reply, [], edit);
     return { body, records: this.records(body), reactions: 0 };
   }
   private async publish(force = false): Promise<void> {
@@ -398,7 +410,7 @@ export class DhtDelivery {
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
     if (!force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && this.controlDue > now) return;
     const expires = pending?.expires ?? now + CONTROL_TTL;
-    const { body, records, reactions } = this.fitted(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply);
+    const { body, records, reactions } = this.fitted(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit);
     const reactionsWereDue = this.reactionsDue;
     // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
     // to say those were taken (the engine announces the rest then).
@@ -452,7 +464,7 @@ export class DhtDelivery {
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return "none"; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return "none";
     const [body, signature] = envelope as [Body, string];
-    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, , reactions, reactionsTaken] = body;
+    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken] = body;
     const now = Date.now();
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || issued > now + 30_000 || expires <= now || expires - issued > CONTROL_TTL || issued >= expires ||
@@ -489,7 +501,9 @@ export class DhtDelivery {
       // that crossed the receipt, or the same envelope moved to the pinned mailbox, is not handed over twice.
       // A reply's id that is not one is dropped, never the text (readers from before ignore the element).
       const reply = typeof replyTo === "string" && REPLY_TO.test(replyTo) ? { reply: { i: replyTo } } : {};
-      if (nextReceipt?.id !== message[0]) await this.options.message({ id: message[0], timestamp: message[1], text: message[2], ...reply }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
+      // An edit's element that is not one leaves a text of its own, as an app from before edits reads it.
+      const edit = Array.isArray(editOf) && editOf.length === 2 && typeof editOf[0] === "string" && ID.test(editOf[0]) && validEditNumber(editOf[1]) ? { edit: { i: editOf[0], e: editOf[1] } } : {};
+      if (nextReceipt?.id !== message[0]) await this.options.message({ id: message[0], timestamp: message[1], text: message[2], ...reply, ...edit }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
       if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires, attempts: 0 };
       // Asked for again (the text sent anew after a lost session): its receipt goes at once again.
       else if (nextReceipt.settled) { const { settled: _settled, next: _next, ...asked } = nextReceipt; nextReceipt = asked; }

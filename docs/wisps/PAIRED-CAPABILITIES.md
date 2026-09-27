@@ -6,6 +6,7 @@
 > - **Payments per network:** a request or payment names its network, Mainnet or Testnet (older apps leave it out), and each rail is its own method (Cashu, Lightning, Arkade, Bark, Spark, Fedimint, on-chain, USDT); see [200](200-payments.md).
 > - **Calls and shared apps:** `calls/1` and `services/1` (#207), in the same frame.
 > - **Typing indicator:** `typing/1`, in the same frame too ([401](401-paired-chat.md#typing)).
+> - **Edits:** `edit/1`, in the same frame, and in the layer-0 capability record for edits on the DHT floor ([401](401-paired-chat.md#edits), [403](403-dht-text.md#edits)).
 
 `paired-chat/1` now negotiates `files/2` and `payments/1` in its authenticated offer. Both endpoints must advertise support. Old text-only endpoints still pair and chat; new actions stay unavailable with them. External proofs and identities remain outside this change. Calls (`calls/1`) and hosted HTTP (`services/1`) came later, announced after the handshake in a `paired-capabilities` frame ([401](401-paired-chat.md#calls-and-shared-apps)), since the offer's 16 entries are full for apps before 0.5. Pair confirmation, pins, bootstrap and transport preferences are unchanged.
 

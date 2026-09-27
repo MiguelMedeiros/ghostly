@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 403; editorial family allocation |
 | Status | Draft |
-| Revision | 0.5 |
+| Revision | 0.6 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
@@ -71,6 +71,14 @@ Reactions ([400](400-chat.md#reactions), revision 0.5) ride on the envelopes whi
 
 Reactions add no envelope of their own when one goes anyway: they ride on texts, receipts and the envelopes that keep the mode current. A reaction made while nothing else goes publishes one envelope, once the publication spacing allows; a text that leaves no room carries none, and the next envelope does. Readers from before ignore both elements (they accept up to 16).
 
+## Edits
+
+An edit of a text ([400](400-chat.md#edits), revision 0.6) may go on the floor while the chat is not live, to a contact whose capability record ([03](03-capabilities.md#layer-0-capability-record)) lists `edit/1`. It goes as a text of its own: the new text, under an id made from the edited message's id and the edit's number (the first 16 bytes of SHA-256 of `ghostly-edit/1:<id>:<e>`, in base64url), so every send of that edit and its receipt match. The signed body's optional **twelfth** element says what it is: `[<id>, <e>]`, the edited message's id (22 characters) and the edit's number (1 to 100). The eleventh element then goes as `null` (an edit replies to nothing).
+
+A reader that takes edits applies it as the live frame does ([401](401-paired-chat.md#edits)): the contact's message with that id only, the highest number winning. It receipts the text's id as for any text. A twelfth element that is not such a pair leaves a text of its own. An app from before edits would show the edit as a new message, which is why it goes only to a contact whose record says `edit/1`; an older app's record never does.
+
+The author sends an edit on the floor only after its message's receipt, since the reader must have the message to find it. The element costs about 40 bytes of the packet: a text near 256 bytes does not fit with it, and its edit waits for a live session instead, never going without the element. It takes the floor's one text slot like any text, with the same retries and expiry; a confirmation of the same edit on the live session ends them.
+
 ## When text goes over the DHT
 
 | Chat state ([400](400-chat.md#states-of-a-chat)) | A new text of at most 256 bytes | A longer text |
@@ -117,6 +125,7 @@ DHT only avoids stream discovery/dialing. Native clients read the Mainline DHT d
 
 ## Revision log
 
+- 0.6 (2026-09-27): edits ride as a text of their own id with a twelfth element naming the edited message and its number, only to a contact whose record lists `edit/1`.
 - 0.5 (2026-09-27): reactions ride as the thirteenth element (the author's, not yet confirmed, as many as fit) with the fourteenth saying which of the reader's were taken; the twelfth is kept for edits.
 - 0.4 (2026-09-27): a text's reply rides as the eleventh element, its id only, left out when the packet has no room for it.
 - 0.3 (2026-09-26): another key on the invite mailbox after the pin is ignored, not a stop; pinned mailboxes, told by the envelope's tenth element, so a copy of the invite cannot overwrite the contact's texts.

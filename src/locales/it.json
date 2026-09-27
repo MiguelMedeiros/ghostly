@@ -78,7 +78,11 @@
       "copyHint": "Clicca per copiare",
       "reply": "Rispondi",
       "cancelSending": "Annulla invio",
-      "retry": "Invia di nuovo"
+      "retry": "Invia di nuovo",
+      "edit": "Modifica",
+      "edited": "modificato",
+      "editedAt": "Modificato alle {{time}}",
+      "editPending": "Il tuo contatto non lo vede ancora"
     },
     "options": "Opzioni",
     "menu": {
@@ -140,6 +144,10 @@
         "delivered": "L'app del tuo contatto l'ha ricevuto.",
         "failed": "Non inviato. Tocca per inviarlo di nuovo."
       }
+    },
+    "edit": {
+      "editing": "Modifica in corso",
+      "cancel": "Annulla modifica"
     }
   },
   "group": {

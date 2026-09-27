@@ -323,10 +323,14 @@ export const COMMANDS: Record<string, Command> = {
 };
 
 /** Commands that take text (argument or stdin), with the secret guard and delivery waits. */
-export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "group"; usage: string; summary: string; args: string[]; options: Record<string, OptionSpec> }> = {
+export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "group"; message?: true; usage: string; summary: string; args: string[]; options: Record<string, OptionSpec> }> = {
   "send": {
     method: "chat.send", target: "chat", args: ["chat", "text..."], usage: "send <chat> [text...] [--reply <message>] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin)",
     options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, ...wait },
+  },
+  "edit": {
+    method: "chat.edit", target: "chat", message: true, args: ["chat", "message", "text..."], usage: "edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed]", summary: "Replace the text of a message you sent (1:1 chats; the id send gave)",
+    options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, wait: { type: "string", description: "none or confirmed (default: none with a daemon, confirmed without)" }, timeout: wait.timeout },
   },
   "group send": {
     method: "group.send", target: "group", args: ["group", "text..."], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--stdin] [--force]", summary: "Send to a group; mention members written as @name in the text",

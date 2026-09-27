@@ -45,6 +45,21 @@ export function ReplyQuote({ quote }: { quote: QuoteView }) {
   );
 }
 
+/** The message being edited (WISP 400 § Edits), above the composer's field, with ✕ to leave it as it is (Escape does it too). */
+export function EditBar({ snippet, onCancel }: { snippet: string; onCancel: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div data-testid="composer-edit" role="status" aria-label={t("chat.edit.editing")}
+      className="mb-2 flex items-stretch gap-1 overflow-hidden rounded-lg bg-surface-alt animate-fade-in">
+      <span className="min-w-0 flex-1"><QuoteBody name={t("chat.edit.editing")} snippet={snippet} mine /></span>
+      <button type="button" data-testid="composer-edit-cancel" onClick={onCancel} aria-label={t("chat.edit.cancel")} title={t("chat.edit.cancel")}
+        className="shrink-0 w-9 flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-0 text-lg leading-none">
+        &times;
+      </button>
+    </div>
+  );
+}
+
 /** The message being answered, above the composer's field, with ✕ to answer nothing after all (Escape does it too). */
 export function ReplyBar({ name, snippet, mine, onCancel }: { name?: string; snippet: string; mine: boolean; onCancel: () => void }) {
   const { t } = useI18n();

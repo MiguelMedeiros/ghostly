@@ -39,9 +39,10 @@ import { EXPECT_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type P
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { TYPING_FRAME, TypingReceiver, TypingSender } from "./pairedTyping";
+import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { traceLink } from "./linkTrace";
@@ -243,6 +244,16 @@ export interface GhostLinkEvents {
   onReactionsTaken?(n: number): void | Promise<void>;
   /** Both sides offer `react/1` on the open session (true), or no longer (false). */
   onReactionsSupport?(supported: boolean): void;
+  /**
+   * The contact edited one of its messages (`edit/1`, WISP 401 § Edits), already checked. True: confirm it now (it
+   * was shown, or was not newer, or its message is gone); false: not yet (its message is not here), and
+   * `confirmEdit` says so once it is.
+   */
+  onMessageEdit?(edit: WireEdit): boolean | Promise<boolean>;
+  /** The contact confirmed edit `e` of one of this side's messages. */
+  onEditReceipt?(id: string, e: number): void | Promise<void>;
+  /** Both sides offer `edit/1` on the open session (true), or no longer (false). */
+  onEditSupport?(supported: boolean): void;
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -316,6 +327,8 @@ export interface GhostLinkOptions {
   typingSupport?: boolean;
   /** Offer `react/1` on paired sessions: reactions to messages (1:1 chats, not group edges). */
   reactionsSupport?: boolean;
+  /** Offer `edit/1` on paired sessions: sent texts can be edited (1:1 chats, not group edges). */
+  editSupport?: boolean;
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -443,6 +456,8 @@ export class GhostLink {
   private readonly typingReceiver = new TypingReceiver(typing => this.options.events?.onPeerTyping?.(typing));
   /** Reaction frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly reactionsReceived = new ReactionWindow(REACTION_LIMITS.receive);
+  /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
+  private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   /** When the ping awaiting its pong went, and the round trip last measured on this session. */
@@ -502,7 +517,12 @@ export class GhostLink {
           if (!this.isDataLinkOpen && this.tracker?.progress.stage !== "on-dht") this.tracker?.onDht("waiting");
         }, DHT_PIN_GRACE_MS);
       },
-      message: async (message, packet) => { await options.events?.onMessage?.({ ...message, via: "pkarr", packet }); },
+      message: async (message, packet) => {
+        // An edit (WISP 403 § Edits) is not a message of its own: it changes one, on an app that takes edits.
+        const { edit, ...text } = message;
+        if (edit && options.editSupport) { await options.events?.onMessageEdit?.({ id: edit.i, e: edit.e, ts: message.timestamp, m: message.text }); return; }
+        await options.events?.onMessage?.({ ...text, via: "pkarr", packet });
+      },
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
       changed: view => {
         options.events?.onDhtDelivery?.(view);
@@ -1715,6 +1735,7 @@ export class GhostLink {
     if (this.options.largeFilesSupport) offered.push(FILES_CAPABILITY);
     if (this.options.typingSupport) offered.push(TYPING_CAPABILITY);
     if (this.options.reactionsSupport) offered.push(REACTIONS_CAPABILITY);
+    if (this.options.editSupport) offered.push(EDIT_CAPABILITY);
     return offered;
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
@@ -1744,6 +1765,27 @@ export class GhostLink {
   }
   /** The contact is typing now, as it said on this session. */
   get peerTyping(): boolean { return this.typingReceiver.peerTyping; }
+  /** Both sides offer `edit/1` on the open session: edits can be said and confirmed. */
+  get supportsEdits(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(EDIT_CAPABILITY); }
+  /**
+   * Says an edit of one of this side's messages (WISP 401 § Edits): on the live session once both sides offer `edit/1`;
+   * while not live, on the DHT floor when `dht` says the contact's app takes edits there (WISP 403 § Edits). An error
+   * when it could not go now; the caller keeps it and says it again later.
+   */
+  async sendEdit(edit: WireEdit, { dht = false }: { dht?: boolean } = {}): Promise<string | null> {
+    if (!this.options.params.profile) return "Edits need a current chat";
+    if (this.channel && this.isDataLinkOpen) {
+      if (!this.supportsEdits) return "Your contact's app does not show edits yet";
+      try { this.channel.send(editFrame(edit)); return null; } catch { return "The connection closed before sending"; }
+    }
+    if (dht && this.dht && this.textDelivery === "dht") return this.dht.send(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
+    return "Edits go when you are live";
+  }
+  /** Confirms an edit of the contact's that waited for its message (`onMessageEdit` returned false). */
+  confirmEdit(id: string, e: number): void {
+    if (!this.channel || !this.supportsEdits) return;
+    try { this.channel.send(editedFrame(id, e)); } catch { /* the contact says it again */ }
+  }
   /**
    * This side is typing (true) or stopped (false). Said only on the live session and only when both sides offer
    * `typing/1`; never on the DHT. A `start` goes at most every few seconds, a `stop` only after a `start`.
@@ -1816,6 +1858,7 @@ export class GhostLink {
     }
     if (changed.includes(TYPING_CAPABILITY) && !this.supportsTyping) { this.typingSender.reset(); this.typingReceiver.clear(); }
     if (changed.includes(REACTIONS_CAPABILITY)) this.options.events?.onReactionsSupport?.(this.supportsReactions);
+    if (changed.includes(EDIT_CAPABILITY)) this.options.events?.onEditSupport?.(this.supportsEdits);
     this.emitPairingState();
   }
   /** Both sides announced groups on this session and it is open. */
@@ -2116,6 +2159,23 @@ export class GhostLink {
           if (frame?.t === REACTED_FRAME) {
             const n = parseReactedFrame(frame);
             if (n !== null) await this.options.events?.onReactionReceipt?.(n);
+            return;
+          }
+          if (frame?.t === EDIT_FRAME) {
+            // Counted before it is read: a flood of malformed frames costs as much as one of edits.
+            if (!this.supportsEdits || !this.editsReceived.take()) return;
+            const edit = parseEditFrame(frame);
+            if (!edit) return;
+            if (await this.options.events?.onMessageEdit?.(edit) && this.channel === channel && this.isDataLinkOpen)
+              channel.send(editedFrame(edit.id, edit.e));
+            return;
+          }
+          if (frame?.t === EDITED_FRAME) {
+            const receipt = parseEditedFrame(frame);
+            if (!receipt) return;
+            await this.options.events?.onEditReceipt?.(receipt.id, receipt.e);
+            // The same edit waiting on the DHT floor is not published again.
+            await this.dht?.acknowledge(dhtEditId(receipt.id, receipt.e));
             return;
           }
           if (frame?.t === PAIRED_CALL_FRAME) {

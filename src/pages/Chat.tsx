@@ -74,6 +74,11 @@ interface ChatProps {
   callLayer: HTMLElement | null;
 }
 
+/** A text of mine this chat can edit (WISP 400 § Edits): one the engine sent under its wire id, not a file, a payment or a notice. */
+function editableText(message: ChatMessage): boolean {
+  return message.sender === "me" && !!message.ref && message.id === `me_${message.ref}` && !message.file && !message.paymentId && !message.systemEvent && !message.callEvent;
+}
+
 export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps) {
   const nav = useAppNavigation();
   const { t, language } = useI18n();
@@ -292,6 +297,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [showServices, setShowServices] = useState(false);
   /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
+  const [editing, setEditing] = useState<ChatMessage | null>(null);
   const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
@@ -368,6 +375,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setCodeCopied(false);
     setMenuOpen(false);
     setReplyingTo(null);
+    setEditing(null);
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
@@ -650,7 +658,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               peerNick={contactNick}
               onDelete={() => forgetMessage(row.message.id)}
               // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
-              onReply={paired && replyTarget(row.message) ? () => setReplyingTo(row.message) : undefined}
+              onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
+              onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}
               quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
               // The same: a compatibility chat has no room for a reaction.
               onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
@@ -682,6 +691,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           return error;
         }}
         reply={replyBar}
+        // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
+        edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
+          onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
+            .catch((e: unknown) => ({ error: e instanceof Error ? e.message : "Could not edit the message" }))).error } : undefined}
+        onEditLast={paired && chatLink ? () => {
+          const last = [...messages].reverse().find(editableText);
+          if (last) { setReplyingTo(null); setEditing(last); }
+        } : undefined}
         // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
         disabled={isSending || (paired && (!!chatStop || engine.state?.settings.online === false))}
         disabledPlaceholder="Message…"

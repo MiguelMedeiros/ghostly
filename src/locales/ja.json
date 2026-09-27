@@ -78,7 +78,11 @@
       "copyHint": "クリックしてコピー",
       "reply": "返信",
       "cancelSending": "送信を取り消す",
-      "retry": "もう一度送信"
+      "retry": "もう一度送信",
+      "edit": "編集",
+      "edited": "編集済み",
+      "editedAt": "{{time}}に編集",
+      "editPending": "まだ相手に表示されていません"
     },
     "options": "オプション",
     "menu": {
@@ -140,6 +144,10 @@
         "delivered": "相手のアプリが受信しました。",
         "failed": "未送信。タップしてもう一度送信。"
       }
+    },
+    "edit": {
+      "editing": "編集中",
+      "cancel": "編集をキャンセル"
     }
   },
   "group": {

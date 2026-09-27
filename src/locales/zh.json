@@ -78,7 +78,11 @@
       "copyHint": "点击复制",
       "reply": "回复",
       "cancelSending": "取消发送",
-      "retry": "重新发送"
+      "retry": "重新发送",
+      "edit": "编辑",
+      "edited": "已编辑",
+      "editedAt": "编辑于 {{time}}",
+      "editPending": "对方还看不到"
     },
     "options": "选项",
     "menu": {
@@ -140,6 +144,10 @@
         "delivered": "联系人的应用已收到。",
         "failed": "未发送。点按即可重新发送。"
       }
+    },
+    "edit": {
+      "editing": "正在编辑",
+      "cancel": "取消编辑"
     }
   },
   "group": {

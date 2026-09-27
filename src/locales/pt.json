@@ -78,7 +78,11 @@
       "copyHint": "Clique para copiar",
       "reply": "Responder",
       "cancelSending": "Cancelar envio",
-      "retry": "Enviar de novo"
+      "retry": "Enviar de novo",
+      "edit": "Editar",
+      "edited": "editada",
+      "editedAt": "Editada às {{time}}",
+      "editPending": "Ainda não aparece para seu contato"
     },
     "options": "Opções",
     "menu": {
@@ -140,6 +144,10 @@
         "delivered": "O app do seu contato recebeu.",
         "failed": "Não enviada. Toque para enviar de novo."
       }
+    },
+    "edit": {
+      "editing": "Editando",
+      "cancel": "Cancelar edição"
     }
   },
   "group": {

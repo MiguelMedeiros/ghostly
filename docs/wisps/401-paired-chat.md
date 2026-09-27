@@ -4,11 +4,11 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.9 |
+| Revision | 0.10 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
-| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3` and the typing indicator (`typing/1`) on the live session. |
+| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`) and edits (`edit/1`) on the live session. |
 | Summary | The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT. |
 | Availability | Available |
 | Notes | Every new chat on web, desktop and extension, calls included while it is live. |
@@ -110,16 +110,35 @@ Reactions ([400](400-chat.md#reactions), revision 0.8) go on this session once b
 
 `id` is the message's id as both sides know it (a reply's `i`, [above](#replies)); `e` one emoji, or `""` to take the reaction back; `n` the reactor's number. The reader takes a reaction (shows it, keeps it for a message not here yet, or finds it older than what it shows) and confirms its `n`; one it could not keep (no room left to wait) goes unconfirmed. It counts reaction frames before it reads them and drops those past 30 in 10 seconds unconfirmed, so a flood costs as much as the limit. The reactor keeps every reaction not confirmed (the newest per message, at most 32, in the order of their numbers), says them on each new session, again after 30 seconds without a receipt, and at most 20 in 10 seconds; off this session they ride on the DHT envelopes ([403](403-dht-text.md#reactions)). Both frames count only on the authenticated session with the pinned contact. Neither carries a message ID: older apps drop both, and a reactor whose contact never says `react/1` keeps its reactions waiting (and on the envelopes) without showing anything odd. Group edges never offer it: groups carry reactions in their own frames ([900](900-group-sessions.md)).
 
+### Edits
+
+A text can be edited after it was sent (revision 0.10; what an edit is, [400](400-chat.md#edits)). Both sides list `edit/1` in `paired-capabilities`; then the author sends the whole new text of one of its `paired-message`s, and the reader confirms the number it took:
+
+```
+{ "t": "paired-edit", "id", "e", "ts", "m", "pv"? }
+{ "t": "paired-edited", "id", "e" }
+```
+
+`id` is the edited message's `id` (22 characters). `e` is the edit's number, an integer from 1 to 100, counted by the author for that message. `ts` is when the author made the edit (milliseconds; the reader takes a time ahead of its clock as now). `m` is the whole new text, trimmed, not empty, at most 16 KiB of UTF-8. `pv` is a link preview of the new text ([Link previews](#link-previews)), left out when the frame would pass 56 KiB. Both frames have an id, but a `t` older apps do not know: they drop them.
+
+- **Only the contact's own messages.** The frame counts only on the authenticated session with the pinned contact ([400](400-chat.md) requirement 8), and the reader looks `id` up among the messages **that contact** sent in this chat. An id of one of the reader's own messages, or of another chat, finds nothing.
+- **The reader.** It MUST ignore a frame that breaks the bounds above, or comes while `edit/1` is not agreed. A preview that does not hold for `m` is dropped, never the edit. When `e` is higher than the message's current number it shows `m` and keeps the version it replaces; otherwise the message stays as it is. Either way it confirms with `paired-edited`. It also confirms an edit of a message it deleted, so the author stops sending it. An edit whose message is not there yet (it may come another way, the DHT or held storage) waits for it for 60 seconds, at most 32 per chat, unconfirmed; it is confirmed once shown. A reader drops edit frames past 30 in 10 seconds, unconfirmed, so a flood costs it nothing and a well-behaved author sends them again.
+- **The author.** It sends the latest version of each message only, oldest edit first, at most 10 frames in 10 seconds per chat; the rest wait. What is not confirmed goes again like an unconfirmed message (the outbox's policy: the backoff, 8 sends, a week; [PAIRED-CHAT-INCREMENT](PAIRED-CHAT-INCREMENT.md)) in a queue of its own, and at once on a new session, after the messages that session sends again, so the contact has the message first. A message that never left (`waiting`) carries its latest text when it goes. While the session is down, an edit may go on the DHT floor instead ([403](403-dht-text.md#edits)); a confirmation on either path settles both.
+- **Why the session frame and not the offer.** `edit/1` is in `paired-capabilities`, like `typing/1`, rather than in the offer's `extensions`: it is something this session carries, said after the transcript is signed and bound to the connection, and the offer's lists are full for older apps.
+
+Groups do not carry edits yet: 1:1 chats first. A mesh or community edit needs its own frame inside the group's sealed boxes, and a rule for members who joined after the message.
+
 ## Runtime boundary and compatibility
 
 First contact runs on the DHT and on a stream in parallel, and native transports are tried from their descriptors in the capability record ([100](100-transports.md)). Compatibility chats use [402](402-legacy-chat.md) and never this session. DHT text uses [403](403-dht-text.md), preserving conversation/history without treating DHT as a stream adapter. Files and payments are negotiated in the offer; calls and shared apps after it ([above](#calls-and-shared-apps)).
 
 ## Evidence and checks
 
-[Paired implementation profile](PAIRED-CHAT-INCREMENT.md), [paired session](../../packages/core/src/pairedSession.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [durable outbox](../../packages/browser/src/engine/outbox.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [paired calls](../../packages/core/src/pairedCalls.ts), [typing](../../packages/core/src/pairedTyping.ts), [reactions](../../packages/core/src/reactions.ts). Exercise commit-before-ack, duplicate IDs, disconnect before receipt, restart, adapter switch and unsupported capability rejection.
+[Paired implementation profile](PAIRED-CHAT-INCREMENT.md), [paired session](../../packages/core/src/pairedSession.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [durable outbox](../../packages/browser/src/engine/outbox.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [paired calls](../../packages/core/src/pairedCalls.ts), [typing](../../packages/core/src/pairedTyping.ts), [reactions](../../packages/core/src/reactions.ts), [edits](../../packages/core/src/pairedEdits.ts) and [the edit queue](../../packages/browser/src/engine/edits.ts). Exercise commit-before-ack, duplicate IDs, disconnect before receipt, restart, adapter switch and unsupported capability rejection.
 
 ## Revision log
 
+- 0.10 (2026-09-27): edits, `edit/1` with `paired-edit` and `paired-edited` on the live session: the whole new text numbered per message, only the contact's own messages, a receive limit, an edit before its message waits a minute.
 - 0.9 (2026-09-27): a file (a voice message included) can be a reply: `r` on its announcement, as on a text.
 - 0.8 (2026-09-27): reactions, `react/1` with `paired-reaction` and `paired-reacted`, confirmed by number, capped per window.
 - 0.7 (2026-09-27): replies (`r` on `paired-message`): the original's id, a cleaned line and its author, checked by the reader against this chat.

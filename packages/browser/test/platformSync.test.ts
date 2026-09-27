@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../../../src/lib/types";
 import type { LinkView, StoredMessage } from "../src/shared/types";
-// covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage, chat.paired.nickname-sync
+// covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage, chat.paired.nickname-sync, chat.edit
 
 /**
  * Keeping the UI's localStorage sessions and the peer's links in step. The page
@@ -201,6 +201,20 @@ describe("mirroring what the peer stores into the chat", () => {
     );
     expect(stored.messages).toHaveLength(1);
     expect(stored.messages[0]).toMatchObject({ id: "mine", delivery: "failed", deliveryError: "offline" });
+  });
+
+  it("puts an edit's new text in place: the same message, nothing new to read, and the preview follows", async () => {
+    const shown = { id: "peer_x", sender: "peer" as const, text: "v0 https://a.example/", timestamp: 10, preview: { u: "https://a.example/" } };
+    const stored = await mirror([message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [{ at: 10, text: "v0 https://a.example/" }] } })], { messages: [shown] });
+    expect(stored.messages).toHaveLength(1);
+    expect(stored.messages[0]).toMatchObject({ id: "peer_x", text: "v2", timestamp: 10, edit: { seq: 2 } });
+    expect(stored.messages[0].preview).toBeUndefined();
+    expect(changes).toBe(1);
+    // The same edit again changes nothing; my edit being confirmed does.
+    changes = 0;
+    engine.messageListeners[0]("link-1", [message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [] } })]);
+    expect(changes).toBe(0);
+    expect(sync.toChatMessage(message({ id: "me_y", sender: "me", edit: { seq: 1, at: 5, history: [], pending: true } }), "peer-1", "me-1", true).edit).toEqual({ seq: 1, at: 5, history: [], pending: true });
   });
 
   it("does not rewrite the chat when nothing changed", async () => {

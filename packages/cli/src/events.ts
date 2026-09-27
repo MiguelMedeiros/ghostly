@@ -290,7 +290,7 @@ export class EventHub {
     for (const message of messages) {
       present.add(message.id);
       if (message.file && this.fileMessages.get(message.file.id) !== message.id) { this.fileMessages.set(message.file.id, message.id); files.push([message.file.id, message.id]); }
-      const state = deliveryOf(message), before = known.get(message.id);
+      const state = stateOf(message), before = known.get(message.id);
       if (before === state) continue;
       known.set(message.id, state);
       changes.push([message.id, state]);
@@ -305,8 +305,12 @@ export class EventHub {
           const type = notice ? (message.sender === "peer" ? "chat.joined" : "chat.announced") : message.sender === "peer" ? "message.received" : "message.sent";
           this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json, ...(notice ? { name: notice[1] ?? null } : {}) });
         }
-      } else if (message.sender === "me" && !group) {
-        this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${state}`, { chat, messageId: message.id, delivery: state, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
+      } else if (!group) {
+        const [delivery, edits] = splitState(state), [was, edited] = splitState(before);
+        // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number.
+        if (edits > edited) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json });
+        if (message.sender === "me" && delivery !== was)
+          this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
       }
     }
     for (const id of [...known.keys()]) {
@@ -354,6 +358,15 @@ export class EventHub {
 
 function deliveryOf(message: StoredMessage): string {
   return message.sender === "peer" ? "received" : message.delivery ?? "sent";
+}
+
+/** What the seen set keeps of a message: its delivery, and its edit number once edited (`sent#e3`). */
+function stateOf(message: StoredMessage): string {
+  return message.edit ? `${deliveryOf(message)}#e${message.edit.seq}` : deliveryOf(message);
+}
+function splitState(state: string): [string, number] {
+  const at = state.lastIndexOf("#e");
+  return at === -1 ? [state, 0] : [state.slice(0, at), Number(state.slice(at + 2)) || 0];
 }
 
 function chatShape(link: LinkView): ChatShape {

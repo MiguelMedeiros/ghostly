@@ -14,7 +14,7 @@ export interface DetailRow {
   /** The row can be copied: this is what goes to the clipboard (the whole value, where the row shows it short). */
   copy?: string;
 }
-export type DetailSectionId = "identity" | "path" | "timing" | "wire" | "crypto" | "delivery" | "file" | "voice" | "payment" | "dht" | "hold" | "group" | "call";
+export type DetailSectionId = "identity" | "edits" | "path" | "timing" | "wire" | "crypto" | "delivery" | "file" | "voice" | "payment" | "dht" | "hold" | "group" | "call";
 export interface DetailSection { id: DetailSectionId; title: string; rows: DetailRow[] }
 export interface DetailsModel {
   /** One plain-words line: how the message went. */
@@ -171,6 +171,14 @@ export function buildDetails(message: ChatMessage, view: MessageDetailsView | nu
     link ? idRow("Chat id", link.id) : view?.group ? idRow("Group id", view.group.id) : undefined,
     link?.profile ? { label: "Chat profile", value: `${link.profile}${link.deliveryMode === "dht" ? " · DHT only" : ""}` } : link ? { label: "Chat profile", value: "compatibility chat (Ghostly 0.4)" } : undefined,
     view ? { label: "Text size", value: formatBytes(view.message.textBytes) } : undefined,
+  ]);
+
+  // An edited text (WISP 400 § Edits): how often, when last, and every earlier version kept, oldest first.
+  const edit = message.edit;
+  if (edit) add("edits", "Edits", [
+    { label: "Edits", value: `${edit.seq}, the last at ${formatTime(edit.at)}` },
+    edit.pending ? { label: "Contact", value: "Not shown yet: it goes when the chat is live and their app shows edits" } : undefined,
+    ...edit.history.map((version): DetailRow => ({ label: `${version.at === message.timestamp ? "Original" : "Before"}, ${formatTime(version.at)}`, value: version.text, copy: version.text })),
   ]);
 
   const last = d?.sends?.[d.sends.length - 1];
