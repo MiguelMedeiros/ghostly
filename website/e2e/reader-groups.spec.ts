@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
  * the page but out of the tab order, and the whole thing works from the keyboard and at phone width.
  */
 
-const DRAFT = "/developers/wisps/wisp-203-lightning";
+const DRAFT = "/developers/wisps/203-lightning";
 
 const group = (page: Page, id: string) => page.locator(`.reader-all-group[data-group="${id}"]`);
 const head = (page: Page, id: string) => group(page, id).locator(".reader-group-head");
@@ -98,7 +98,8 @@ test("reader groups: from the keyboard", async ({ page }) => {
   await head(page, "meet").focus();
   await page.keyboard.press("Space");
   await expect(head(page, "meet")).toHaveAttribute("aria-expanded", "false");
-  // Closed: Tab skips its links and lands on the next header.
+  // Closed (once the closing has played): Tab skips its links and lands on the next header.
+  await expect(group(page, "meet").locator("a").first()).toBeHidden();
   await page.keyboard.press("Tab");
   await expect(head(page, "connect")).toBeFocused();
 });
@@ -122,7 +123,10 @@ test("reader groups: reduced motion opens without a transition", async ({ page }
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(DRAFT);
   const panel = group(page, "meet").locator(".reader-group-panel");
-  expect(await panel.evaluate((el) => getComputedStyle(el).transitionDuration)).toMatch(/^0s(, 0s)*$/);
+  const durations = await panel.evaluate((el) => getComputedStyle(el).transitionDuration.split(",").map((d) => parseFloat(d)));
+  for (const seconds of durations) expect(seconds).toBeLessThan(0.01);
+  await head(page, "meet").click();
+  await expect(group(page, "meet").locator("a").first()).toBeVisible();
 });
 
 test.describe(() => {
