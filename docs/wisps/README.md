@@ -85,7 +85,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-27. Pull req
 | [800](800-invite-join.md) | Invite and Join | Draft | Bearer `ghostly1` invite that pins the inviter's participation key (#210); a copy cannot stop a paired chat (#302); admission protocol proposed |
 | [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Every new chat makes a `ghostly1…` code (#210); `pair1/`, `pair2d/` and v0.4 codes still read |
 | [900](900-group-sessions.md) | Group Session Negotiation | Draft | Two profiles implemented: text, @mentions (#279), a group picture and payments between members; admin changes final in a community (#300) |
-| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its link `group-entry/1`: up to eight members; core, engine and UI; unit and four-browser e2e; web, extension and desktop; replies, reactions and edits (#347, #354, #378) |
+| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its link `group-entry/1`: up to 32 members; core, engine and UI; unit and four-browser e2e; web, extension and desktop; replies, reactions and edits (#347, #354, #378) |
 | [Group Community · 9xx planned](9xx-group-community.md) | Group Community Distribution Profile | Draft | `group-community/1` (#153): a link anyone can open, admission by any member, elected hubs, up to 256 members; unit, six-browser e2e and a headless load test; replies, reactions and edits (#347, #354, #378) |
 | [GossipSub · 9xx planned](901-gossipsub.md) | GossipSub Transport | Draft | Proposed; no adapter |
 | [1000](1000-storage.md) | Storage Contract | Draft | Experimental: object contract, naming and adapter rules |
@@ -100,7 +100,7 @@ Dependencies in headers describe the candidate modular design. Conditional depen
 1. **00-03, 100-101:** review process/Core/key lifecycle, then capability/transport agreement and the WebRTC binding. Exit: exact profiles and two independent implementations with downgrade, invite and reconnect tests.
 2. **102-103:** demonstrate interchangeable data adapters using the same application capability. Exit: measured supported platforms, endpoint authentication and policy-respecting failure/fallback; not just sockets connecting.
 3. **300-302:** demonstrate optional external proofs and no-proof sessions. Exit: independent verification, replay/rotation tests and explicit correlation tradeoffs. Keet remains gated by API feasibility in 303.
-4. **Groups:** 800 and 901 remain review drafts. 900 has two implemented profiles: the [group mesh](9xx-group-mesh.md) (up to eight members) and the [group community](9xx-group-community.md) (up to 256), each with text, a picture and payments between members. Files and calls in groups, more than one admin and channels need their own scope decision.
+4. **Groups:** 800 and 901 remain review drafts. 900 has two implemented profiles: the [group mesh](9xx-group-mesh.md) (up to 32 members) and the [group community](9xx-group-community.md) (up to 256), each with text, a picture and payments between members. Files and calls in groups, more than one admin and channels need their own scope decision.
 
 400, 500, 600, 700 and 200/201/203 document existing application capabilities and their modular evolution. These milestones do not promise implementation dates or claim that all adapters exist. Group security, topology and abuse limits must be validated before release claims.
 
@@ -160,7 +160,7 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 | 800 Invite and Join | Stable 1.0 | The `ghostly1` bearer invite; admission protocol still proposed |
 | 801 Invitation Profiles | Stable 1.0 | One invite format |
 | 900 Group Sessions | Experimental | Groups merged from 2026-09-24, still changing (#300 on 2026-09-26) |
-| 9xx Group Mesh | Experimental | Up to eight, one admin |
+| 9xx Group Mesh | Experimental | Up to 32, one admin |
 | 9xx Group Community | Experimental | Cap measured by a load test, hubs new |
 | 9xx GossipSub | Experimental | No code; stays a Draft proposal |
 | 1000 Storage Contract | Experimental | Used by backups and held items only |

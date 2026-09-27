@@ -142,7 +142,7 @@ import type { WalletRemoval } from "../shared/walletRemoval";
 import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
-import { Groups } from "./groups";
+import { Groups, meshEdgeIntervals } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
 import { Reactions, latestReaction } from "./reactions";
@@ -3274,7 +3274,8 @@ export class GhostlyNode implements EngineImplementation {
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
       transport: this.transport,
       nick: this.sharedNick,
-      pollIntervals: this.pollIntervals,
+      // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 9xx § Cost per member).
+      pollIntervals: entry || this.groups.isCommunityGroup(group) ? this.pollIntervals : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),
       autoConnect: true,
       // An entry session carries one admission and closes. The member's side always dials (the joiner's key is
       // drawn so), and the joiner's packet is already there: its offer goes in its first packet.

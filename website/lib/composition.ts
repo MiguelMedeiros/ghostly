@@ -119,7 +119,7 @@ export const BLOCKS: Block[] = [
   b("storage", "keep", `Storage: file${D}S3`, ["1000-storage", "1001-local-storage", "1002-s3-storage"], "Where sealed bundles wait: a file you keep or an S3-compatible bucket, which also holds messages for an away contact."),
 
   // Groups
-  b("groups", "groups", "Groups", ["900-group-sessions", "9xx-group-mesh", "9xx-group-community"], "Two kinds: a private group of up to eight, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture and payments between members; no files or calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension and desktop."),
+  b("groups", "groups", "Groups", ["900-group-sessions", "9xx-group-mesh", "9xx-group-community"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture and payments between members; no files or calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension and desktop."),
   b("gossipsub", "groups", "GossipSub", ["901-gossipsub"], "A candidate distribution layer for larger groups, off the DHT."),
 
   // SDK, apps & catalogs

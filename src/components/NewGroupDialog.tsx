@@ -7,7 +7,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 type Kind = "community" | "mesh";
 const KINDS: { kind: Kind; title: string; body: string }[] = [
   { kind: "community", title: "Community", body: `A link anyone can open, even while you are away: any member lets people in. Up to ${COMMUNITY_LIMITS.members} members.` },
-  { kind: "mesh", title: "Private", body: "Up to eight people, from your contacts or your link, which works while your app is open. Everyone connects to everyone." },
+  { kind: "mesh", title: "Private", body: "Up to 32 people, from your contacts or your link, which works while your app is open. Everyone connects to everyone." },
 ];
 
 /** Names a new group and says which kind. It opens on its link, the way people come in. */

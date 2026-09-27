@@ -121,7 +121,7 @@ export const COMMANDS: Record<string, Command> = {
   "message details": { method: "chat.details", usage: "message details <chat> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
 
   "group create": {
-    method: "group.create", usage: "group create <name...> [--mesh]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to eight",
+    method: "group.create", usage: "group create <name...> [--mesh]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
     args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" } },
     params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community" }),
   },

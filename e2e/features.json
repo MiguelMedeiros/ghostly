@@ -266,7 +266,7 @@
     {"id":"groups.create","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Create a private group"},
     {"id":"groups.invite","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Invite contacts; accept or decline an invitation"},
     {"id":"groups.send","wisp":"902","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Everyone reads everyone over the member mesh"},
-    {"id":"groups.catch-up","wisp":"902","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A member who was away catches up from the author's bounded log"},
+    {"id":"groups.catch-up","wisp":"902","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A member who was away catches up from any member who holds what it missed"},
     {"id":"groups.remove-member","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The admin removes a member"},
     {"id":"groups.admin-change","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The admin hands the role to another member"},
     {"id":"groups.rotate","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Epoch rotation: a new secret sealed per member"},
