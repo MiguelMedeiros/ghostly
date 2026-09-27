@@ -1,8 +1,8 @@
 import type { Localized } from "@/lib/i18n";
 
 /**
- * Homepage copy. Every capability claim was checked against the code on `dev`,
- * the 0.5.0 release: the page says what the app does, and states each limit
+ * Homepage copy. Every capability claim was checked against the code on `dev`
+ * (the v1.0 release) and the statuses in docs/wisps/ADAPTER-ROADMAP.md: the page says what the app does, and states each limit
  * (test networks, missing features) in the line it applies to.
  */
 
@@ -59,7 +59,7 @@ const en = {
       {
         title: "A public network with no owner.",
         body: "The apps meet on the Mainline DHT, which millions of BitTorrent users already share. There is no Ghostly server in the middle.",
-        note: "Browsers reach it through public Pkarr relays.",
+        note: "The desktop app reads it directly. Browsers use public Pkarr relays.",
       },
       {
         title: "Small, signed, sealed notes.",
@@ -133,7 +133,14 @@ const en = {
         icon: "chat",
         title: "Say it your way.",
         body: "Private one-to-one conversations with delivery receipts and local history. No phone number, no public profile.",
-        extra: "Voice messages, pinned keys, names and pictures, and messages held for a contact who is away.",
+        extra: "Voice messages, pinned keys, names and pictures, sounds you can mute, and messages held for a contact who is away.",
+      },
+      {
+        id: "messages",
+        icon: "spark",
+        title: "Paste it. See it.",
+        body: "Rich text, and a card for what you paste: an invite, a payment request, a Nostr profile, a link with its preview.",
+        extra: "Your app makes the preview, so your contact's app never opens the link. A seed or a private key asks before it goes.",
       },
       {
         id: "files",
@@ -147,28 +154,28 @@ const en = {
         icon: "video",
         title: "Be a little closer.",
         body: "Voice, video and screen sharing, one to one. Turn the camera on or share your screen without calling again.",
-        extra: "Screen sharing needs a computer. Calls ring in every chat while it is live (not on the DHT); groups don't ring yet.",
+        extra: "In the browser, the extension and the desktop app, Linux included. Screen sharing needs a computer, not Linux yet. A call rings while the chat is live, not over the DHT. No group calls yet.",
       },
       {
         id: "sats",
         icon: "bolt",
         title: "A little thank-you.",
         body: "Send or request sats right in the conversation: ecash, a Lightning invoice, or from the wallet you already use.",
-        extra: "Your own Lightning node or wallet (NWC, LND, Core Lightning, WebLN, Breez), Lightning addresses, paying from any wallet, Ark, Spark, Fedimint, USDT and on-chain bitcoin. Some run on test networks only.",
+        extra: "Real and test wallets side by side, one tab per network, test coins a tap away. Several Lightning cards (NWC, LND, Core Lightning, WebLN, Breez), Lightning addresses, Ark, Spark, Fedimint, USDT and on-chain bitcoin. Some run on test networks only.",
       },
       {
         id: "groups",
         icon: "group",
         title: "Bring the whole group.",
         body: "A private group of up to eight, or a community of up to 256 that anyone with its link can join. Invite people from your chats or share the link.",
-        extra: "Text, a group picture and payments between members. No files or calls in groups yet.",
+        extra: "Text, @mentions, a group picture and payments between members. No files or calls in groups yet.",
       },
       {
         id: "identities",
         icon: "badge",
         title: "Prove who you are. Only to whom you choose.",
-        body: "Attach an outside identity to your profile once (a Nostr or Pubky key, a domain, an OpenPGP or SSH key, a Bitcoin address) and share it with one contact at a time. Their app verifies it on the device.",
-        extra: "Never required to talk. Withdraw it from one chat, or revoke it everywhere.",
+        body: "Attach an outside identity to your profile once (a Nostr or Pubky key, a domain, an OpenPGP or SSH key, a Bitcoin address, a DID) and share it with one contact at a time. Their app verifies it on the device.",
+        extra: "A shared card lands in the chat with its public profile: picture, name, posts. Never required to talk. Withdraw it from one chat, or revoke it everywhere.",
       },
       {
         id: "services",
@@ -206,13 +213,13 @@ const en = {
     },
     look: {
       title: "Make it look like you.",
-      note: "Four themes · light or dark · eight languages · app lock",
+      note: "Four themes · light or dark · eight languages · sounds · app lock",
     },
   },
   wallets: {
     title: "One wallet, many ways to pay.",
     lead: "Each payment method is its own card, with its own rules. Pick one to see what it does and how ready it is.",
-    testnet: "A Testnet switch moves every wallet to test networks at once.",
+    testnet: "Real and test wallets live side by side, one tab per network. On Testnet, a button brings free test coins.",
     cards: [
       {
         id: "cashu",
@@ -229,7 +236,7 @@ const en = {
         kind: "invoices",
         net: "main" as Net,
         network: "Mainnet",
-        body: "Pay and receive Lightning invoices from the chat, and pay Lightning addresses.",
+        body: "Pay and receive Lightning invoices from the chat, and pay Lightning addresses. Keep several cards; one is the default for receiving.",
         limits: "The source is your Cashu mint, or your own node or wallet: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only), Breez (regtest only) or Fedimint (test networks only). Any other wallet can pay your invoice from its QR code.",
       },
       {
@@ -239,25 +246,25 @@ const en = {
         net: "main" as Net,
         network: "Mainnet · experimental",
         body: "Review and approve an exact Ark payment through a pinned operator.",
-        limits: "Experimental. New profiles get a Bitcoin mainnet Ark wallet automatically, but payments were tested only on a local test network, and there is no unilateral exit yet.",
+        limits: "Experimental. One click from New: Bitcoin mainnet, or Mutinynet on Testnet. Payments were tested only on a local test network, and there is no unilateral exit yet.",
       },
       {
         id: "bark",
         name: "Bark",
         kind: "Second's Ark",
-        net: "test" as Net,
-        network: "Test networks only",
+        net: "main" as Net,
+        network: "Mainnet · experimental",
         body: "A second Ark provider beside Arkade: same idea, another server, its own way of paying.",
-        limits: "Experimental, on Second's signet server or a local regtest; Mainnet makes no Bark wallet yet. Not interchangeable with Arkade: a Bark wallet cannot pay an Arkade address.",
+        limits: "Experimental. Mainnet on Second's Bitcoin server, checked against a stand-in server so far; Testnet on its signet. No unilateral exit yet. A Bark wallet cannot pay an Arkade address.",
       },
       {
         id: "spark",
         name: "Spark",
         kind: "wallet to wallet",
-        net: "key" as Net,
-        network: "Mainnet with your own key",
+        net: "test" as Net,
+        network: "Test networks only",
         body: "Bitcoin on Spark, from one Spark wallet to another in a chat. Each request carries a Spark invoice made for it.",
-        limits: "Experimental. Testnet opens a regtest wallet by itself; Mainnet needs your own Breez API key and is labelled real money. The same wallet can be your Lightning source too.",
+        limits: "Experimental. A Testnet wallet runs on regtest; Mainnet is not offered yet, since it was never tried with real funds. The same wallet can be your Lightning source too.",
       },
       {
         id: "fedimint",
