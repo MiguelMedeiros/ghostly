@@ -39,7 +39,7 @@ export function MoneyNetworkTag({ network, chain }: { network?: WalletNetwork; c
   const test = network === "testnet";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${test ? "border-dashed border-text-primary/45 bg-black/15" : "border-accent/70 text-accent"}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${test ? "border-dashed border-text-primary/45 bg-black/15" : "border-accent/70 money-ink-mainnet"}`}
       data-testid="money-network"
       data-network={network}
     >
