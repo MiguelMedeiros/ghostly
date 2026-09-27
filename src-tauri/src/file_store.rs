@@ -374,7 +374,7 @@ pub async fn file_bytes_save<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
-    // covers: files.storage
+    // covers: files.storage, files.download
     use super::*;
 
     fn store() -> (FileStore, PathBuf) {
@@ -497,6 +497,11 @@ mod tests {
         assert_eq!(suggested_name(" .bashrc"), "bashrc");
         assert_eq!(suggested_name("invoice\u{202e}fdp.exe"), "invoicefdp.exe");
         assert_eq!(suggested_name(""), "file");
+        // A downloaded voice message's name (made by the app) goes through as it is.
+        assert_eq!(
+            suggested_name("Ghostly voice 2026-09-27 14.01.30.webm"),
+            "Ghostly voice 2026-09-27 14.01.30.webm"
+        );
         fs::remove_dir_all(dir).ok();
     }
 }

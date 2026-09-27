@@ -35,7 +35,7 @@ export async function downloadFile(platform: ServicesPlatform, file: ChatFile, n
   const blob = await platform.getFile(file.id);
   if (!blob) return "missing";
   const type = safeBlobType(blob.type);
-  const url = URL.createObjectURL(blob.type === type ? blob : blob.slice(0, blob.size, type));
+  const url = URL.createObjectURL(blob.type === type ? blob : new Blob([blob], { type }));
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
