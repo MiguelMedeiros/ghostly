@@ -14,7 +14,9 @@ import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
-import type { ChatMessage } from "../lib/types";
+import { downloadFile, downloadName, downloadState } from "../lib/fileDownload";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import type { ChatFile, ChatMessage } from "../lib/types";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -215,12 +217,54 @@ function formatDuration(ms: number): string {
 /** The chat's scrolling list of messages: a message's menus stay inside it (see `Menu`'s `within`). */
 export const MESSAGE_LIST = "[data-message-list]";
 
+const downloadIcon = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
 /**
- * What can be done to a message, behind its ⋮: its details, and forgetting it here. The deletion is local, so the
- * menu says so before it happens: nothing is sent, and the contact keeps their copy. Both popovers are drawn over
- * the page (the list scrolls and would cut them off) and kept inside the message list.
+ * Saves a copy of the file a message carries (a voice message, a picture, a document). Greyed with the reason
+ * while the file is still arriving, when it did not arrive, or when its bytes are gone from this device.
  */
-function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; onDetails: () => void; align: "left" | "right" }) {
+function DownloadItem({ file, name, sender, onDone }: { file: ChatFile; name: string; sender: "me" | "peer"; onDone: () => void }) {
+  const { t } = useI18n();
+  const platform = useServicesPlatform();
+  const [missing, setMissing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const state = downloadState(platform?.getTransfer(file.id) ?? null, sender);
+  const reason = missing ? t("chat.message.downloadMissing")
+    : state === "arriving" ? t("chat.message.downloadArriving")
+    : state === "failed" ? t("chat.message.downloadFailed")
+    : undefined;
+  const run = () => {
+    if (!platform || busy) return;
+    setBusy(true);
+    void downloadFile(platform, file, name)
+      .then((result) => { if (result === "missing") setMissing(true); else onDone(); })
+      .catch(() => setMissing(true))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <MenuItem testId="message-download" onClick={run} disabled={!platform || !!reason} hint={reason} title={reason ?? name}
+      data={{ "data-download-state": missing ? "missing" : state }} icon={downloadIcon}>
+      {t("chat.message.download")}
+    </MenuItem>
+  );
+}
+
+/**
+ * What can be done to a message, behind its ⋮: saving the file it carries, its details, and forgetting it here.
+ * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
+ * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
+ */
+function MessageMenu({ onDelete, onDetails, align, download }: {
+  onDelete?: () => void;
+  onDetails: () => void;
+  align: "left" | "right";
+  /** A message carrying a file: the file, the name to save it under and who sent it. */
+  download?: { file: ChatFile; name: string; sender: "me" | "peer" };
+}) {
   const { t } = useI18n();
   const chat = useCueChat();
   const [open, setOpen] = useState(false);
@@ -248,6 +292,7 @@ function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; on
         </svg>
       </button>
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t("chat.message.options")}>
+        {download && <DownloadItem {...download} onDone={() => setOpen(false)} />}
         <MenuItem testId="message-details" onClick={() => { setOpen(false); onDetails(); }}
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>}>
           {t("chat.message.details")}
@@ -324,6 +369,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     minute: "2-digit",
   });
   const contentType = imgError || message.file || message.paymentId ? "text" : detectContentType(message.text);
+  const download = message.file && !isSystem
+    ? { file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const }
+    : undefined;
   const detailsPanel = details && (
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
       picture={contentType === "image"} onClose={() => setDetails(false)} returnFocus={rowRef.current} />
@@ -412,7 +460,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       data-sender={isMe ? "me" : "peer"}
       className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}
     >
-      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="left" />}
+      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="left" download={download} />}
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
       <div
         data-message-bubble
@@ -526,7 +574,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </>}
         </div>}
       </div>
-      {!isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
+      {!isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" download={download} />}
       {detailsPanel}
     </div>
   );

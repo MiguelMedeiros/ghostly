@@ -325,11 +325,11 @@ export const servicesPlatform: ServicesPlatform | null = {
     // Files stored before received types were cleaned up may still carry the peer's type.
     return storedBlob(stored, safeBlobType(stored.blob?.type || stored.metadata?.mime || ""));
   },
-  async saveFile(fileId) {
+  async saveFile(fileId, name) {
     const stored = await fileStore.get(fileId);
     const bytes = stored?.bytes && await fileBytesOf(stored.bytes);
     if (!stored?.metadata || !bytes?.save) return null;
-    return bytes.save(fileId, stored.metadata.name);
+    return bytes.save(fileId, name ?? stored.metadata.name);
   },
 
   wallet: walletPlatform(),

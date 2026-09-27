@@ -61,6 +61,10 @@
     "deleteMessageHint": "يُحذف من هذا الجهاز فقط. تبقى النسخة لدى جهة اتصالك.",
     "message": {
       "details": "التفاصيل",
+      "download": "تنزيل",
+      "downloadArriving": "لم يُستلم بعد",
+      "downloadFailed": "لم يصل",
+      "downloadMissing": "غير موجود على هذا الجهاز",
       "detailsTitle": "تفاصيل الرسالة",
       "detailsClose": "إغلاق",
       "copyJson": "نسخ الكل بصيغة JSON",

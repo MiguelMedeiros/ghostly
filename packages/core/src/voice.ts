@@ -90,12 +90,24 @@ export function recordingMime(isTypeSupported: (mime: string) => boolean): { rec
 
 const EXTENSIONS: Record<string, string> = { "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/mpeg": "mp3", "audio/aac": "aac", "audio/wav": "wav" };
 
-/** A name for the file, for whoever saves it or runs a Ghostly that shows it as a file. */
-export function voiceFileName(mime: string, timestamp: number): string {
+function voiceName(prefix: string, mime: string, timestamp: number): string {
   const date = new Date(timestamp);
   const pad = (n: number) => String(n).padStart(2, "0");
   const stamp = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}.${pad(date.getMinutes())}.${pad(date.getSeconds())}`;
-  return `Voice message ${stamp}.${EXTENSIONS[baseMime(mime)] ?? "audio"}`;
+  return `${prefix} ${stamp}.${EXTENSIONS[baseMime(mime)] ?? "audio"}`;
+}
+
+/** A name for the file, for whoever saves it or runs a Ghostly that shows it as a file. */
+export function voiceFileName(mime: string, timestamp: number): string {
+  return voiceName("Voice message", mime, timestamp);
+}
+
+/**
+ * The name a downloaded voice message is saved under, made here from the message's time and its
+ * type (the sender's own name for it is not used): "Ghostly voice 2026-09-27 14.01.30.webm".
+ */
+export function voiceDownloadName(mime: string, timestamp: number): string {
+  return voiceName("Ghostly voice", mime, timestamp);
 }
 
 /** `0:07`, `12:45`: minutes and seconds, as a player shows them. */

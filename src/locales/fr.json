@@ -61,6 +61,10 @@
     "deleteMessageHint": "Supprimé uniquement ici. Votre contact garde sa copie.",
     "message": {
       "details": "Détails",
+      "download": "Télécharger",
+      "downloadArriving": "Pas encore reçu",
+      "downloadFailed": "N’est pas arrivé",
+      "downloadMissing": "Absent de cet appareil",
       "detailsTitle": "Détails du message",
       "detailsClose": "Fermer",
       "copyJson": "Tout copier en JSON",
