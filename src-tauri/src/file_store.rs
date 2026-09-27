@@ -41,6 +41,11 @@ impl FileStore {
         Ok(self.folder(space)?.join(check_id(id)?))
     }
 
+    /// Where a stored file is, for serving it in ranges (`file_stream.rs`): checked like every other access.
+    pub fn path_of(&self, space: &str, id: &str) -> Result<PathBuf, String> {
+        self.path(space, id)
+    }
+
     /// Writes `bytes` at `offset`, which must be the file's length: files grow in order only.
     pub fn append(&self, space: &str, id: &str, offset: u64, bytes: &[u8]) -> Result<(), String> {
         if bytes.len() as u64 > MAX_STEP {
@@ -332,7 +337,15 @@ pub fn file_bytes_remove_where<R: tauri::Runtime>(
     space: String,
     prefix: String,
 ) -> Result<(), String> {
-    store(&app)?.remove_where(&space, &prefix)
+    use tauri::Manager;
+    store(&app)?.remove_where(&space, &prefix)?;
+    // A profile's files all gone: so are the tokens that played them.
+    if prefix.is_empty() {
+        if let Some(grants) = app.try_state::<crate::file_stream::StreamGrants>() {
+            grants.close_space(&space);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

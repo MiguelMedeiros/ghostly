@@ -72,8 +72,18 @@ describe("the Content-Security-Policy of every shell", () => {
     for (const name of readdirSync(folder).filter(f => f.endsWith(".mp3"))) expect(statSync(join(folder, name)).size, name).toBeGreaterThan(4096);
   });
 
-  it("names media-src on Desktop, rather than leaning on default-src", () => {
-    expect(directives(policies.desktop()).get("media-src")).toEqual(["'self'", "blob:"]);
+  // covers: files.video.stream
+  it("names media-src on Desktop, rather than leaning on default-src: blobs and the stored-file scheme, nothing wider", () => {
+    // `ghostly-file` serves a stored file in ranges (src-tauri/src/file_stream.rs): `ghostly-file://localhost/…` on
+    // macOS and Linux, `http://ghostly-file.localhost/…` on Windows, where WebView2 takes no custom scheme.
+    expect(directives(policies.desktop()).get("media-src")).toEqual(["'self'", "blob:", "ghostly-file:", "http://ghostly-file.localhost"]);
+  });
+
+  it("gives the stored-file scheme to no other kind of fetch, and to no other shell", () => {
+    const desktop = directives(policies.desktop());
+    for (const [name, sources] of desktop) if (name !== "media-src") expect(sources.join(" "), name).not.toContain("ghostly-file");
+    expect(policies.web()).not.toContain("ghostly-file");
+    expect(policies.extension()).not.toContain("ghostly-file");
   });
 
   it("the parser reads a policy as a browser does", () => {

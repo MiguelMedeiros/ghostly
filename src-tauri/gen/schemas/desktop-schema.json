@@ -267,6 +267,18 @@
           "markdownDescription": "Enables the file_bytes_size command without any pre-configured scope."
         },
         {
+          "description": "Enables the file_bytes_stream_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-stream-close",
+          "markdownDescription": "Enables the file_bytes_stream_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_stream_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-stream-open",
+          "markdownDescription": "Enables the file_bytes_stream_open command without any pre-configured scope."
+        },
+        {
           "description": "Enables the file_bytes_truncate command without any pre-configured scope.",
           "type": "string",
           "const": "allow-file-bytes-truncate",
@@ -697,6 +709,18 @@
           "type": "string",
           "const": "deny-file-bytes-size",
           "markdownDescription": "Denies the file_bytes_size command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_stream_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-stream-close",
+          "markdownDescription": "Denies the file_bytes_stream_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_stream_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-stream-open",
+          "markdownDescription": "Denies the file_bytes_stream_open command without any pre-configured scope."
         },
         {
           "description": "Denies the file_bytes_truncate command without any pre-configured scope.",

@@ -64,6 +64,8 @@
     "allow-file-bytes-remove-where",
     "allow-file-bytes-room",
     "allow-file-bytes-save",
+    "allow-file-bytes-stream-open",
+    "allow-file-bytes-stream-close",
     "allow-native-call-support",
     "allow-native-camera-open",
     "allow-native-camera-close",
