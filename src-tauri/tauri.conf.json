@@ -17,7 +17,8 @@
         "height": 700,
         "minWidth": 400,
         "minHeight": 500,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "acceptFirstMouse": true
       }
     ],
     "security": {
