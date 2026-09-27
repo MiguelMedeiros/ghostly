@@ -206,6 +206,7 @@ Any message both sides know by an id takes reactions: a text, a voice message, a
 **How it travels.** A 1:1 chat on its live session once both sides say `react/1` ([401](401-paired-chat.md#reactions)), and on the DHT envelopes meanwhile ([403](403-dht-text.md#reactions)); the reactor keeps it until the contact confirms it. A private group over each member's edge ([mesh](9xx-group-mesh.md#reactions)); a community inside a sealed frame of the group ([community](9xx-group-community.md#reactions)). A compatibility chat ([402](402-legacy-chat.md)) has no room for one: it is refused, not kept here only.
 
 **Older apps.** A reaction is a frame or a trailing element an app from before this revision does not know: it drops it, shows nothing, and nothing it shows changes. The reactor still sees its own chip.
+
 ## Message text
 
 A text is sent exactly as typed: nothing below changes the wire, and an app that knows none of it shows the text as written. These are display conventions, so a message reads the same in every app that follows them. A receiver MUST NOT render a message's text as HTML.
