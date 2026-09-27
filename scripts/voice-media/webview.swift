@@ -18,6 +18,15 @@ let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 let config = WKWebViewConfiguration()
 config.mediaTypesRequiringUserActionForPlayback = []
+// Nobody sees this page, so macOS (App Nap) and WebKit (hidden-page throttling) would slow its timers and
+// its media down to seconds apart; Ghostly's window is on screen, so this page must run as one that is.
+let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "media checks")
+for name in ["_setHiddenPageDOMTimerThrottlingEnabled:", "_setPageVisibilityBasedProcessSuppressionEnabled:"] {
+  let selector = NSSelectorFromString(name)
+  guard config.preferences.responds(to: selector) else { continue }
+  typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+  unsafeBitCast(config.preferences.method(for: selector), to: Setter.self)(config.preferences, selector, false)
+}
 let done = Done()
 config.userContentController.add(done, name: "done")
 let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 400, height: 300), configuration: config)

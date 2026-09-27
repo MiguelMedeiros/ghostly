@@ -90,15 +90,17 @@ export async function playInPage(fixtures) {
 
 /**
  * In the page: plays each fixture muted at `rate` (2× by default) with the pitch kept, as the voice bubble's speed pill does,
- * and reports what the engine made of it: `{ [name]: { rate, preservesPitch, speed, error? } }`. `rate` and
+ * and reports what the engine made of it: `{ [name]: { rate, preservesPitch, speed, speeds, pooled, error? } }`. `rate` and
  * `preservesPitch` are read back from the element (an engine without them reports 1 and undefined); `speed` is
  * how many seconds of the recording played per second of wall clock, so 2 means it really plays twice as fast.
+ * The clock is read every 10 ms and a line is fitted through the moments it moved: `timeupdate` arrives up to
+ * 250 ms late, and WebKit moves a WebM clock in half-second steps, so two readings alone can be far off either
+ * way. The last move is left out, since the clock jumps to the end before the play has caught up. The recording
+ * is played `attempts` times: `speeds` times each play, `pooled` fits all of them together, and `speed` is the
+ * fastest of those, since a busy machine can stall the audio and slow a play but never speed it up.
  */
-export async function rateInPage(fixtures, rate = 2) {
-  const out = {};
-  for (const { name, mime, base64 } of fixtures) {
-    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+export async function rateInPage(fixtures, rate = 2, { attempts = 3 } = {}) {
+  const once = (url) => new Promise((resolve) => {
     const audio = new Audio();
     audio.muted = true;
     audio.preservesPitch = true;
@@ -106,26 +108,58 @@ export async function rateInPage(fixtures, rate = 2) {
     audio.src = url;
     audio.defaultPlaybackRate = rate;
     audio.playbackRate = rate;
-    const result = await new Promise((resolve) => {
-      const timer = setTimeout(() => resolve({ error: `stuck at ${audio.currentTime.toFixed(2)} s` }), 8_000);
-      const finish = (value) => { clearTimeout(timer); resolve(value); };
-      let first = null;
-      audio.addEventListener("error", () => finish({ error: `MediaError ${audio.error?.code} ${audio.error?.message ?? ""}`.trim() }));
-      const timed = () => ({ speed: Math.round(((audio.currentTime - first.time) / ((performance.now() - first.at) / 1000)) * 100) / 100 });
-      audio.addEventListener("timeupdate", () => {
-        if (!first) { if (audio.currentTime > 0) first = { at: performance.now(), time: audio.currentTime }; return; }
-        if (performance.now() - first.at >= 400) finish(timed());
-      });
-      // A short recording ends first: timed to its end, when there was long enough to time.
-      audio.addEventListener("ended", () => finish(first && performance.now() - first.at >= 150 ? timed() : { error: "ended before it could be timed" }));
-      audio.play().catch((error) => finish({ error: `play() ${error?.name}: ${error?.message}` }));
-    });
-    // Read from the engine's own property: on an engine without one, the value set above is only a plain field.
-    const pitch = "preservesPitch" in HTMLMediaElement.prototype ? audio.preservesPitch : "webkitPreservesPitch" in HTMLMediaElement.prototype ? audio.webkitPreservesPitch : undefined;
-    out[name] = { rate: audio.playbackRate, preservesPitch: pitch, ...result };
-    audio.pause();
-    audio.removeAttribute("src");
+    const moves = [];
+    const poll = setInterval(() => {
+      const time = audio.currentTime;
+      if (time > 0 && (!moves.length || time > moves[moves.length - 1].time)) moves.push({ at: performance.now(), time });
+    }, 10);
+    const timer = setTimeout(() => finish({ error: `stuck at ${audio.currentTime.toFixed(2)} s` }), 8_000);
+    const finish = (value) => {
+      clearInterval(poll);
+      clearTimeout(timer);
+      // Read from the engine's own property: on an engine without one, the value set above is only a plain field.
+      const pitch = "preservesPitch" in HTMLMediaElement.prototype ? audio.preservesPitch : "webkitPreservesPitch" in HTMLMediaElement.prototype ? audio.webkitPreservesPitch : undefined;
+      const read = { rate: audio.playbackRate, preservesPitch: pitch };
+      audio.pause();
+      audio.removeAttribute("src");
+      resolve({ ...read, ...value });
+    };
+    audio.addEventListener("error", () => finish({ error: `MediaError ${audio.error?.code} ${audio.error?.message ?? ""}`.trim() }));
+    audio.addEventListener("ended", () => finish({ points: moves.slice(0, -1) }));
+    audio.play().catch((error) => finish({ error: `play() ${error?.name}: ${error?.message}` }));
+  });
+  // The least-squares slope of media time over wall time, each play with its own start: one play of a short
+  // recording moves a WebM clock only two or three times, so the plays are pooled as well as timed one by one.
+  const slope = (plays) => {
+    let sxy = 0;
+    let sxx = 0;
+    for (const points of plays) {
+      const mx = points.reduce((sum, p) => sum + p.at, 0) / points.length;
+      const my = points.reduce((sum, p) => sum + p.time, 0) / points.length;
+      for (const p of points) { sxy += (p.at - mx) * (p.time - my); sxx += (p.at - mx) ** 2; }
+    }
+    return sxx > 0 ? Math.round((sxy / sxx) * 1000 * 100) / 100 : undefined;
+  };
+  const out = {};
+  for (const { name, mime, base64 } of fixtures) {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    const plays = [];
+    let last;
+    for (let i = 0; i < attempts; i++) {
+      last = await once(url);
+      // A recording that cannot play will not play the next time either.
+      if (!last.points) break;
+      plays.push(last.points);
+    }
     URL.revokeObjectURL(url);
+    const { points, error, ...read } = last;
+    const speeds = plays.map((p) => (p.length >= 3 && p[p.length - 1].at - p[0].at >= 300 ? slope([p]) : null));
+    const moved = plays.filter((p) => p.length >= 2);
+    const pooled = moved.reduce((sum, p) => sum + p.length, 0) >= 4 ? slope(moved) : null;
+    const timed = [...speeds, pooled].filter((v) => v != null);
+    out[name] = timed.length ? { ...read, speed: Math.max(...timed), speeds, pooled }
+      : { ...read, error: error ?? `too short to time (${plays.map((p) => p.length).join("+")} clock moves)`, speeds, pooled };
   }
   return out;
 }
