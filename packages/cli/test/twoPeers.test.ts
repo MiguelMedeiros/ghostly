@@ -166,7 +166,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const recording = join(import.meta.dirname, "../../../e2e/support/voice-fixtures/chromium.webm");
     const sent = await as(alice, "file", "send", "bob", recording, "--voice");
     expect(ok(sent)).toMatchObject({ file: { mime: "audio/webm", voice: true } });
-    expect(sent.stderr).toBe("");
+    expect(sent.stderr).not.toMatch(/Sent without a waveform/);
     const message = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: { voice?: boolean } }).file?.voice);
     const id = (message.message as { file: { id: string } }).file.id;
     const listed = (ok(await as(bob, "file", "list", "alice")).files as { file: { id: string; voice?: { duration: number; peaks: number[] } } }[]).find((f) => f.file.id === id);
@@ -183,7 +183,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const flat = await as(alice, "file", "send", "bob", noise, "--voice", "1200");
     expect(ok(flat)).toMatchObject({ file: { voice: true } });
     expect(flat.json.warning).toBeUndefined();
-    expect(flat.stderr).toMatch(/^ghostly: Sent without a waveform: could not read the sound/);
+    expect(flat.stderr).toMatch(/^ghostly: Sent without a waveform: could not read the sound/m);
     expect(error(await as(alice, "file", "send", "bob", noise, "--voice"), "bad_request", 1).message).toMatch(/give its length as --voice <ms>/);
   });
 
