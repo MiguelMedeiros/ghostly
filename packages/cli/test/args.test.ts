@@ -29,6 +29,15 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["--voice=soon"], options!)).toThrow(/takes a number/);
   });
 
+  it("takes ids that start with a single dash where the command says ids come, never as text", () => {
+    const draft = "-guUzRbBsj7cpq-yPjgCUQ";
+    expect(parseArgs(["identity", draft, "--stdin"], { stdin: { type: "boolean", description: "" } }, { ids: Infinity })).toEqual({ positionals: ["identity", draft], options: { stdin: true } });
+    expect(parseArgs([draft, "hello"], {}, { ids: 1 }).positionals).toEqual([draft, "hello"]);
+    expect(() => parseArgs(["group", "-oops"], {}, { ids: 1 })).toThrow(/Unknown option -oops/);
+    expect(() => parseArgs(["-x"], {}, { ids: Infinity })).toThrow(/Unknown option -x/);
+    expect(() => parseArgs(["--nope"], {}, { ids: Infinity })).toThrow(/Unknown option --nope/);
+  });
+
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
     const spec = { force: { type: "boolean" as const, description: "" }, mention: { type: "list" as const, description: "" } };
     expect(parseArgs(["-p", "bot", "g", "--mention", "a", "--no-force", "--mention", "b", "--pretty"], spec).options).toEqual({ profile: "bot", mention: ["a", "b"], force: false, pretty: true });

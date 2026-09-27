@@ -25,8 +25,11 @@ export const GLOBAL_OPTIONS: Record<string, OptionSpec> = {
  * The value of an option is taken as is even when it starts with `-` (base64url keys and seeds do one time in 64:
  * the ghostly-cli lesson of #208). A positional that starts with `-` is refused instead of sent: a mistyped flag
  * must not reach a contact as text. Put `--` before a message that starts with a dash.
+ *
+ * `ids`: how many leading positionals are ids, taken even when they start with a single dash (a base64url group id
+ * or draft does one time in 64); a word of two characters (`-x`) is still an option. Text never is an id.
  */
-export function parseArgs(argv: readonly string[], spec: Record<string, OptionSpec>): Parsed {
+export function parseArgs(argv: readonly string[], spec: Record<string, OptionSpec>, { ids = 0 }: { ids?: number } = {}): Parsed {
   const all = { ...GLOBAL_OPTIONS, ...spec };
   const byShort = new Map(Object.entries(all).filter(([, s]) => s.short).map(([name, s]) => [s.short!, name]));
   const positionals: string[] = [];
@@ -71,7 +74,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
       } else options[name] = value;
       continue;
     }
-    if (arg.startsWith("-") && arg !== "-") throw new CliError("usage", `Unknown option ${arg} (put -- before text that starts with a dash)`);
+    if (arg.startsWith("-") && arg !== "-" && !(positionals.length < ids && !arg.startsWith("--"))) throw new CliError("usage", `Unknown option ${arg} (put -- before text that starts with a dash)`);
     positionals.push(arg);
   }
   return { positionals, options };

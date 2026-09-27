@@ -132,7 +132,9 @@ Help: `ghostly help` lists every command; `ghostly help file` (or `ghostly file 
 save` (or `ghostly file save --help`) one command, with its options. `-h` works too, except after `--`.
 
 Arguments: an option's value is taken as is, even when it starts with `-`. A positional that starts with `-` is
-refused (a mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash.
+refused (a mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash. An id
+(a chat, group, file, message or draft) may start with a dash: where a command takes one, a word that starts with a
+single `-` and is longer than two characters is the id.
 
 ### Voice notes
 

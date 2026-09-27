@@ -445,7 +445,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
 
 async function textCommand(name: string, argv: string[]): Promise<void> {
   const spec = TEXT_COMMANDS[name];
-  const parsed = parseArgs(argv, spec.options);
+  const parsed = parseArgs(argv, spec.options, { ids: 1 });
   const g = globals(parsed);
   pretty = g.pretty;
   const [target, ...words] = parsed.positionals;
@@ -515,7 +515,8 @@ async function identityAddCommand(argv: string[]): Promise<void> {
 
 async function tableCommand(name: string, argv: string[]): Promise<void> {
   const command = COMMANDS[name];
-  const parsed = parseArgs(argv, command.options ?? {});
+  // Every positional of these commands names something (or is a name), none is text for a contact.
+  const parsed = parseArgs(argv, command.options ?? {}, { ids: Infinity });
   const g = globals(parsed);
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
