@@ -152,6 +152,7 @@ import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
 import { HoldEngine } from "./hold";
 import { TransportLog } from "./transportLog";
+import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
@@ -346,6 +347,8 @@ export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
   private readonly transport: PkarrTransport;
   private readonly relays: RelayTransport | null;
+  /** Other profiles of this device, looked at for new messages (WISP 04 § Checking other profiles). */
+  private readonly profilePeek: ProfilePeek;
   private readonly pollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
@@ -906,6 +909,8 @@ export class GhostlyNode implements EngineImplementation {
     // Relays are a setting only where relays are the transport.
     this.relays = options.transport ? null : new RelayTransport();
     this.transport = options.transport ?? this.relays!;
+    this.profilePeek = new ProfilePeek({ transport: this.transport, direct: !!this.transport.configure, online: () => this.settings.online !== false,
+      readPath: () => readPathOf(this.relays ? { relays: this.relays.describe().relays } : this.settings, !!this.transport.configure) });
     this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
     this.localFetch = options.localFetch ?? webLocalFetch;
     (this.hold as unknown as { host: { transport: PkarrTransport } }).host.transport = this.transport;
@@ -1416,6 +1421,14 @@ export class GhostlyNode implements EngineImplementation {
     if (linkId) this.links.get(linkId)?.link?.wake();
     // The chat on screen carries its connection story in the state.
     this.emitState();
+  }
+
+  /**
+   * One look at another profile of this device for messages waiting for it (WISP 04 § Checking other profiles): reads
+   * only, over this profile's read path, and only when that profile reads the same way. The UI paces it.
+   */
+  peekProfile({ profile, dbName }: { profile: string; dbName: string }): Promise<PeekResult> {
+    return this.profilePeek.peek(profile, dbName);
   }
 
   /** The window or tab is back in front: every chat looks now, and dropped ones reconnect at once. */

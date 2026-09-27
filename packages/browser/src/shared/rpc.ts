@@ -180,6 +180,8 @@ export interface EngineApi {
   walletTestCoins(params: WalletTestCoins): TestCoinsResult;
   /** The app is in front again: chats look now, and dropped ones reconnect at once. */
   wake(): void;
+  /** Looks once at another profile of this device for messages waiting for it (WISP 04 § Checking other profiles): reads only. */
+  peekProfile(params: { profile: string; dbName: string }): import("../engine/profilePeek").PeekResult;
   /** The primary mint is where Lightning invoices are created. */
   walletSetPrimaryMint(params: { url: string }): void;
   walletRemoveMint(params: { url: string }): void;
