@@ -85,6 +85,33 @@ test("a call switches the microphone and the speaker without dropping", { tag: [
   // The choice made in the call is the profile's from now on.
   expect(await alice.page.evaluate(() => Object.keys(localStorage).filter((k) => k.endsWith("media_devices")).map((k) => localStorage.getItem(k)).join())).toContain(first);
 
+  // The headset goes: Chromium's fake devices cannot be unplugged, so the page stops listing it and says the
+  // devices changed. The call falls back to the default microphone and says so, and offers it back once it returns.
+  await unplug(alice, first);
+  await expect(alice.page.getByTestId("call-device-notice")).toHaveAttribute("data-type", "lost");
+  await expect(alice.page.getByTestId("call-device-notice")).toContainText("Fake Audio Input 1 disconnected");
+  await alice.page.getByTestId("call-devices").click();
+  await expect(mics.first()).toHaveAttribute("aria-checked", "true");
+  await alice.page.keyboard.press("Escape");
+  await unplug(alice, null);
+  await expect(alice.page.getByTestId("call-device-notice")).toHaveAttribute("data-type", "back");
+  await testInfo.attach("call-device-back", { body: await alice.page.screenshot(), contentType: "image/png" });
+  await alice.page.getByTestId("call-device-switch-back").click();
+  await alice.page.getByTestId("call-devices").click();
+  await expect(mics.and(alice.page.locator(`[data-device-id="${first}"]`))).toHaveAttribute("aria-checked", "true");
+  await alice.page.keyboard.press("Escape");
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
   await alice.page.getByTitle("End call").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
+
+/** The page stops (or, with null, starts again) listing this device, and hears that the devices changed. */
+const unplug = (peer: Peer, deviceId: string | null) =>
+  peer.page.evaluate((deviceId) => {
+    const media = navigator.mediaDevices as MediaDevices & { real?: MediaDevices["enumerateDevices"]; hidden?: string | null };
+    media.real ??= media.enumerateDevices.bind(media);
+    media.hidden = deviceId;
+    media.enumerateDevices = async () => (await media.real!()).filter((d) => d.deviceId !== media.hidden);
+    media.dispatchEvent(new Event("devicechange"));
+  }, deviceId);
