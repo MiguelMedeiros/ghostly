@@ -305,13 +305,13 @@ export const COMMANDS: Record<string, Command> = {
 };
 
 /** Commands that take text (argument or stdin), with the secret guard and delivery waits. */
-export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "group"; usage: string; summary: string; options: Record<string, OptionSpec> }> = {
+export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "group"; usage: string; summary: string; args: string[]; options: Record<string, OptionSpec> }> = {
   "send": {
-    method: "chat.send", target: "chat", usage: "send <chat> [text...] [--reply <message>] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin)",
+    method: "chat.send", target: "chat", args: ["chat", "text..."], usage: "send <chat> [text...] [--reply <message>] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin)",
     options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, ...wait },
   },
   "group send": {
-    method: "group.send", target: "group", usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--stdin] [--force]", summary: "Send to a group; mention members written as @name in the text",
+    method: "group.send", target: "group", args: ["group", "text..."], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--stdin] [--force]", summary: "Send to a group; mention members written as @name in the text",
     options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" } },
   },
 };
@@ -321,6 +321,29 @@ function cursor(value: unknown): string | number | undefined {
   if (value === undefined) return undefined;
   const text = String(value);
   return /^\d{10,}$/.test(text) ? Number(text) : text;
+}
+
+/**
+ * Positionals that name something by its id (a chat or a group also by a prefix or its name). The ids are the
+ * engine's and the contacts', and drafts, payments and groups are base64url, which starts with `-` one time in 64:
+ * in these a word that starts with a dash is the value. A mistyped flag there names nothing and fails as not found;
+ * text, names and paths stay strict.
+ */
+const ID_ARGS = new Set(["chat", "message", "group", "member", "payment", "file", "draft", "id", "card", "service", "call"]);
+
+/**
+ * Which of a command's positionals take an id, by index (a trailing `...` one covers the rest). An optional `name?`
+ * shifts the others, so it counts only where it and what may come in its place are all ids.
+ */
+export function idSlot(command: { args?: string[] }): (index: number) => boolean {
+  const names = (command.args ?? []).map((name) => name.replace(/\?$/, ""));
+  const shift = (command.args ?? []).filter((name) => name.endsWith("?")).length;
+  const rest = names.findIndex((name) => name.endsWith("..."));
+  const at = (index: number) => {
+    const name = rest !== -1 && index >= rest ? names[rest].slice(0, -3) : names[index];
+    return name !== undefined && ID_ARGS.has(name);
+  };
+  return (index) => at(index) && (shift === 0 || index + shift >= names.length || at(index + shift));
 }
 
 /**

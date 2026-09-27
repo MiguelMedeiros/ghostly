@@ -133,10 +133,10 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 Help: `ghostly help` lists every command; `ghostly help file` (or `ghostly file --help`) a group; `ghostly help file
 save` (or `ghostly file save --help`) one command, with its options. `-h` works too, except after `--`.
 
-Arguments: an option's value is taken as is, even when it starts with `-`. A positional that starts with `-` is
-refused (a mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash. An id
-(a chat, group, file, message or draft) may start with a dash: where a command takes one, a word that starts with a
-single `-` and is longer than two characters is the id.
+Arguments: an option's value is taken as is, even when it starts with `-`. So is an id in a positional that takes
+one (`<chat>`, `<group>`, `<message>`, `<file>`, `<payment>`, `<draft>`, `<id>`, …): drafts, payments and groups
+are base64url, which starts with `-` one time in 64. Any other positional that starts with `-` is refused (a
+mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash.
 
 ### Voice notes
 

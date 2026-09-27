@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { callApi, redactSettings } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
-import { COMMANDS, positionals, TEXT_COMMANDS } from "./commands";
+import { COMMANDS, idSlot, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -445,7 +445,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
 
 async function textCommand(name: string, argv: string[]): Promise<void> {
   const spec = TEXT_COMMANDS[name];
-  const parsed = parseArgs(argv, spec.options, { ids: 1 });
+  const parsed = parseArgs(argv, spec.options, idSlot(spec));
   const g = globals(parsed);
   pretty = g.pretty;
   const [target, ...words] = parsed.positionals;
@@ -515,8 +515,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
 
 async function tableCommand(name: string, argv: string[]): Promise<void> {
   const command = COMMANDS[name];
-  // Every positional of these commands names something (or is a name), none is text for a contact.
-  const parsed = parseArgs(argv, command.options ?? {}, { ids: Infinity });
+  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
   const g = globals(parsed);
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
@@ -549,7 +548,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
  * contact's, raw PCM); what the command says goes to stderr. It ends when the call does.
  */
 async function callPipeCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, {});
+  const parsed = parseArgs(argv, {}, idSlot({ args: ["call..."] }));
   const g = globals(parsed);
   const ref = parsed.positionals.join(" ") || undefined;
   const client = await connectDaemon(g.paths.socket);
