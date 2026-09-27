@@ -11,6 +11,7 @@ class NativeChannel implements FrameChannel {
   private queue = Promise.resolve();
   private closed = false;
   bufferedAmount = 0;
+  readonly sendBudget = 120 * 1024;
   onClose: FrameChannel["onClose"] = null;
   constructor(readonly id: number, private endpointId: () => number, private kind: "iroh" | "hyperdht") {}
   get onMessage() { return this.reader; }
@@ -25,7 +26,7 @@ class NativeChannel implements FrameChannel {
     else this.close();
   }
   send(data: string | Uint8Array) {
-    if (typeof data !== "string" || this.closed || this.bufferedAmount + data.length > 120 * 1024)
+    if (typeof data !== "string" || this.closed || this.bufferedAmount + data.length > this.sendBudget)
       throw new Error("Native channel is closed or its send budget is full");
     this.bufferedAmount += data.length;
     this.queue = this.queue.then(async () => {

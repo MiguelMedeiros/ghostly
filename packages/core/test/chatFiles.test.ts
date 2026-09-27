@@ -78,8 +78,21 @@ interface Side {
  * Two chats joined by an ordered, lossy-on-drop wire, each frame through JSON as on a session. Each side
  * handles its frames one at a time, as the paired session does.
  */
-function wire(options: { keepBytes?: boolean; drop?: (frame: Record<string, unknown>, from: "a" | "b") => boolean } = {}) {
+function wire(options: {
+  keepBytes?: boolean;
+  drop?: (frame: Record<string, unknown>, from: "a" | "b") => boolean;
+  /**
+   * A channel like the native and iroh ones: frames past this many queued bytes are refused, and what is queued only
+   * drains on a later turn of the event loop (a timer), never while promises keep running.
+   */
+  budget?: number;
+  /** With `budget`: the host says when the channel has room, as GhostLink's `filesWritable` does. */
+  writable?: boolean;
+} = {}) {
   let open = true;
+  const queued = { a: 0, b: 0 };
+  const drains = { a: [] as (() => void)[], b: [] as (() => void)[] };
+  const refusals = { a: 0, b: 0 };
   const inbox = { a: [] as string[], b: [] as string[] };
   const busy = { a: false, b: false };
   let outstanding = 0, maxOutstanding = 0;
@@ -105,6 +118,19 @@ function wire(options: { keepBytes?: boolean; drop?: (frame: Record<string, unkn
     const host: ChatFilesHost = {
       send: (frame) => {
         if (!open) return false;
+        if (options.budget) {
+          const bytes = JSON.stringify(frame).length;
+          if (queued[name] + bytes > options.budget) {
+            // A sender that tries again at once never lets the timer below run: stop it here instead of hanging.
+            if (++refusals[name] > 5_000) throw new Error("the sender keeps sending into a full channel");
+            return false;
+          }
+          queued[name] += bytes;
+          setTimeout(() => {
+            queued[name] -= bytes;
+            if (!queued[name]) for (const drained of drains[name].splice(0)) drained();
+          }, 1);
+        }
         // Kept without the bytes: the harness must not hold the file either.
         side.sent.push(frame.t === "pf-data" ? { t: frame.t, id: frame.id, offset: frame.offset } : frame);
         if (frame.t === "pf-data") { outstanding = (frame.offset as number) + FILE_LIMITS.chunkBytes; }
@@ -122,6 +148,9 @@ function wire(options: { keepBytes?: boolean; drop?: (frame: Record<string, unkn
       openSource: async (record) => side.sources.get(record.id)!,
       changed: (record, transferred) => { side.records.set(`${record.direction}:${record.id}`, record); side.transferred.set(`${record.direction}:${record.id}`, transferred); },
       room: async () => 10 * 1024 ** 3,
+      ...(options.budget && options.writable && {
+        writable: async () => { while (queued[name] >= options.budget! / 4) await new Promise<void>((resolve) => drains[name].push(resolve)); },
+      }),
     };
     side.files = new ChatFiles(host);
     side.files.restore(restored);
@@ -132,6 +161,7 @@ function wire(options: { keepBytes?: boolean; drop?: (frame: Record<string, unkn
   const w = {
     a: sides.a, b: sides.b,
     get maxOutstanding() { return maxOutstanding; },
+    refusals,
     attach() { open = true; sides.a.files.attach(); sides.b.files.attach(); },
     /** The session drops: both sides see it, and what was on the wire is lost. */
     drop() { open = false; inbox.a.length = inbox.b.length = 0; sides.a.files.detach(); sides.b.files.detach(); },
@@ -338,6 +368,47 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     w.attach();
     await until(() => state(w.a, "out", "restart2") === "done");
     expect(state(w.b, "in", "restart2")).toBe("done");
+  });
+
+  it("a channel with a small send budget (native, iroh) never freezes the sender: it waits for room, then goes on", async () => {
+    // What froze Miguel's Desktop app on 2026-09-27: a 115 KB voice note over iroh/1. The sixth data frame did not fit
+    // the 120 KiB budget, and the sender tried again in a loop of promises that never let the budget drain.
+    const w = wire({ keepBytes: true, budget: 120 * 1024, writable: true });
+    w.attach();
+    send(w, file("voice-115", 115_395));
+    await until(() => state(w.a, "out", "voice-115") === "done");
+    expect(state(w.b, "in", "voice-115")).toBe("done");
+    expect(Uint8Array.from(w.b.disks.get("voice-115")!.bytes!)).toEqual(pattern(0, 115_395));
+    expect(w.refusals.a).toBe(0);
+  });
+
+  it("a host that does not say when the channel has room: a refused frame is tried again later, not at once", async () => {
+    const w = wire({ budget: 120 * 1024 });
+    w.attach();
+    const size = 2 * 1024 * 1024 + 7;
+    send(w, file("budget-2", size));
+    await until(() => state(w.a, "out", "budget-2") === "done");
+    expect(state(w.b, "in", "budget-2")).toBe("done");
+    // One refusal per pause, each followed by a wait: nowhere near a loop.
+    expect(w.refusals.a).toBeGreaterThan(0);
+    expect(w.refusals.a).toBeLessThanOrEqual(Math.ceil(size / FILE_LIMITS.chunkBytes));
+  });
+
+  it("a pump waiting for room on a session that went does not keep the next session's transfer from going", async () => {
+    let stuck = true;
+    const w = wire({ budget: 120 * 1024, writable: true });
+    const host = (w.a.files as unknown as { host: ChatFilesHost }).host;
+    const writable = host.writable!;
+    // The first session's channel never drains: its pump waits for ever.
+    host.writable = () => (stuck ? new Promise<void>(() => {}) : writable());
+    w.attach();
+    send(w, file("wedged-1", 300_000));
+    await until(() => state(w.a, "out", "wedged-1") === "active");
+    w.drop();
+    stuck = false;
+    w.attach();
+    await until(() => state(w.a, "out", "wedged-1") === "done");
+    expect(state(w.b, "in", "wedged-1")).toBe("done");
   });
 
   it("a lost chunk (a transport switch) makes the receiver say where it stands, and the sender goes back", async () => {

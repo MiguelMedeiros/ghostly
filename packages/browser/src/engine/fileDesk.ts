@@ -21,6 +21,8 @@ import { fileWire } from "./messageDetails";
 export interface FileDeskDeps {
   /** Sends a files/3 frame on the chat's open session; false when there is none. */
   send(linkId: string, frame: Record<string, unknown>): boolean;
+  /** Resolves once the chat's open session can take another data frame (its send budget has room). */
+  writable?(linkId: string): Promise<void>;
   /** Bytes the contact sent that are stored here without asking (files/2 included): the budget files/3 fills. */
   receivedBytes(linkId: string): number;
   /** Wire ids this chat used already, in either direction. */
@@ -75,6 +77,7 @@ export class FileDesk {
       openSource: (record) => this.openSource(linkId, record),
       changed: (record, transferred, progress) => this.changed(linkId, record, transferred, progress),
       room: async () => (await fileBytes()).room(),
+      writable: () => this.deps.writable?.(linkId) ?? Promise.resolve(),
     });
     this.chats.set(linkId, made);
     chat = made;

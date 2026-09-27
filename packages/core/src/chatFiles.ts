@@ -47,6 +47,8 @@ export const FILE_LIMITS = {
   ackEveryBytes: 128 * 1024,
   /** A sender reads its file this much at a time. */
   readBytes: 1024 * 1024,
+  /** The session refused a data frame (its send budget was full): the sender looks again after this long. */
+  sendRetryMs: 250,
 } as const;
 
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -136,6 +138,12 @@ export interface ChatFilesHost {
   changed(record: FileTransferRecord, transferred: number, progress: boolean): void;
   /** Bytes a file may still take here, or null when the platform does not say. */
   room?(): Promise<number | null>;
+  /**
+   * Resolves once the session can take another data frame without crowding out everything else on it. Channels with a
+   * small send budget (native, iroh) refuse frames past it; sending into a full one again at once spun a loop of
+   * promises that never let the budget drain, and froze the app.
+   */
+  writable?(): Promise<void>;
   now?(): number;
 }
 
@@ -144,9 +152,15 @@ interface Outgoing {
   next: number;
   /** Bumped whenever sending stops or restarts: a read that finishes late sends nothing. */
   generation: number;
-  pumping: boolean;
+  /**
+   * The generation a pump runs for. A pump still waiting on a session that went (a send that never drains) belongs to
+   * an older generation, and does not keep the next session's pump from starting.
+   */
+  pumping?: number;
   block?: { start: number; bytes: Uint8Array };
   timer?: ReturnType<typeof setTimeout>;
+  /** A pump that paused on a refused frame starts again. */
+  wake?: ReturnType<typeof setTimeout>;
 }
 
 interface Incoming {
@@ -196,7 +210,7 @@ export class ChatFiles {
   restore(records: FileTransferRecord[]): void {
     for (const record of records) {
       const entry: Entry = { record: { ...record } };
-      if (record.direction === "out") entry.out = { next: record.confirmed, generation: 0, pumping: false };
+      if (record.direction === "out") entry.out = { next: record.confirmed, generation: 0 };
       else entry.in = { written: record.confirmed, stored: record.confirmed, acked: record.confirmed, checkpointed: record.confirmed, writing: Promise.resolve() };
       this.entries.set(key(record.direction, record.id), entry);
     }
@@ -247,7 +261,7 @@ export class ChatFiles {
     this.attached = false;
     this.peerRoomValue = null;
     for (const entry of this.entries.values()) {
-      if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); entry.out.next = entry.record.confirmed; }
+      if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
       if (entry.in && !transferEnded(entry.record)) void this.checkpoint(entry);
     }
   }
@@ -277,7 +291,7 @@ export class ChatFiles {
     if (this.entries.has(key("out", file.id))) throw new Error("File transfer already active");
     const entry: Entry = {
       record: { id: file.id, direction: "out", file, state: "queued", confirmed: 0, since: this.now(), ...(digest && { digest }) },
-      out: { next: 0, generation: 0, pumping: false },
+      out: { next: 0, generation: 0 },
     };
     this.entries.set(key("out", file.id), entry);
     this.changed(entry);
@@ -337,23 +351,31 @@ export class ChatFiles {
 
   private async pump(entry: Entry): Promise<void> {
     const out = entry.out!;
-    if (out.pumping) return;
-    out.pumping = true;
-    const generation = out.generation;
+    if (out.pumping === out.generation) return;
+    const generation = out.pumping = out.generation;
+    clearTimeout(out.wake);
+    let refused = false;
     try {
       while (this.shouldPump(entry) && generation === out.generation) {
         const offset = out.next;
         const chunk = await this.chunkAt(entry, offset);
+        await this.host.writable?.();
         if (generation !== out.generation || !this.shouldPump(entry) || out.next !== offset) break;
-        if (!this.send({ t: "pf-data", id: entry.record.id, offset, data: toBase64Url(chunk) })) break;
+        if (!this.send({ t: "pf-data", id: entry.record.id, offset, data: toBase64Url(chunk) })) { refused = true; break; }
         out.next = offset + chunk.length;
       }
     } catch (error) {
-      this.send({ t: "pf-abort", id: entry.record.id });
-      this.end(entry, "failed", `Could not read the file: ${error instanceof Error ? error.message : String(error)}`);
+      if (generation === out.generation) {
+        this.send({ t: "pf-abort", id: entry.record.id });
+        this.end(entry, "failed", `Could not read the file: ${error instanceof Error ? error.message : String(error)}`);
+      }
     } finally {
-      out.pumping = false;
-      if (this.shouldPump(entry)) void this.pump(entry);
+      if (out.pumping === generation) out.pumping = undefined;
+      if (generation === out.generation && this.shouldPump(entry)) {
+        // A refused frame is tried again later, never at once: at once, nothing else would run until it went.
+        if (refused) out.wake = setTimeout(() => void this.pump(entry), FILE_LIMITS.sendRetryMs);
+        else void this.pump(entry);
+      }
     }
   }
 
@@ -635,7 +657,7 @@ export class ChatFiles {
     record.state = state;
     record.error = error;
     record.pausedBy = record.waitingFor = undefined;
-    if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); entry.out.block = undefined; entry.out.source = undefined; }
+    if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; }
     this.changed(entry);
   }
 
@@ -707,7 +729,8 @@ export class ChatFiles {
     if (record.state !== "failed") return;
     // The digest is taken again from the source: the one sent last time may be what was wrong.
     Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, since: this.now() });
-    entry.out = { next: 0, generation: entry.out!.generation + 1, pumping: false };
+    clearTimeout(entry.out!.timer); clearTimeout(entry.out!.wake);
+    entry.out = { next: 0, generation: entry.out!.generation + 1 };
     this.changed(entry);
     if (this.attached) this.announce(entry);
   }

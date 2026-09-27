@@ -367,6 +367,11 @@ export interface FrameChannel {
   readonly bufferedAmount: number;
   /** Resolves once the send buffer has drained below the low water mark. */
   drained(): Promise<void>;
+  /**
+   * Bytes the channel queues before `send` throws (the native and iroh channels). Absent: it buffers freely, as a
+   * WebRTC data channel does, and a sender only keeps under `LIMITS.sendHighWaterMark`.
+   */
+  readonly sendBudget?: number;
   close(): void;
   onMessage: ((data: string | Uint8Array) => void) | null;
   onClose: (() => void) | null;
