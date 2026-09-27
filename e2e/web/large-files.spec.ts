@@ -161,3 +161,76 @@ test("a declined offer says so to the sender; a transfer cancelled by the sender
   // Nothing of it stays on Bob's side.
   await expect.poll(async () => Object.keys(await opfsFiles(bob)).length).toBe(0);
 });
+
+/** Ghostly's own Offline switch, on the Services page, then back to the chat: the link goes, or may come back. */
+async function setOnline(p: Peer, online: boolean): Promise<void> {
+  await p.page.getByTestId("account-services").click();
+  const toggle = p.page.getByTestId("online-toggle");
+  if ((await toggle.textContent())?.includes(online ? "Offline" : "Online")) await toggle.click();
+  await expect(toggle).toHaveText(online ? "Online" : "Offline");
+  await p.page.goBack();
+  await expect(p.page.getByPlaceholder("Message…")).toBeVisible();
+}
+
+test("cut mid-way, a file goes on by itself; restarted, the sender can Send again and the receiver Ask again, one bubble each", { tag: ["@feature:files.large.resume", "@feature:files.large.resend", "@feature:files.large.request"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(420_000);
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  const name = "cut and resumed.bin";
+  const path = testInfo.outputPath(name);
+  const size = 150 * 1024 * 1024;
+  const sha = await generate(path, size);
+  await alice.page.getByTestId("file-input").setInputFiles(path);
+  const incoming = () => bob.page.getByTestId("file-bubble").filter({ hasText: name });
+  const outgoing = () => alice.page.getByTestId("file-bubble").filter({ hasText: name });
+  await incoming().getByTestId("file-accept").click({ timeout: 60_000 });
+
+  // 1. Cut (Bob goes offline), then back: it goes on by itself, with nothing to press.
+  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(10);
+  await setOnline(bob, false);
+  await expect(outgoing().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
+  const cut = await percent(incoming());
+  await setOnline(bob, true);
+  await expect.poll(() => percent(incoming()), { timeout: 150_000 }).toBeGreaterThan(cut + 5);
+  await expect(outgoing().getByTestId("file-resend")).toHaveCount(0);
+
+  // 2. Cut again, and Alice's app restarts: unfinished since it started, her bubble offers Send again.
+  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(40);
+  await setOnline(bob, false);
+  await expect(outgoing().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
+  const second = await percent(incoming());
+  await alice.page.reload();
+  await expect(outgoing().getByTestId("file-resend")).toBeVisible({ timeout: 30_000 });
+  // What she sees is what Bob confirmed, kept across the restart: not zero.
+  expect(await percent(outgoing())).toBeGreaterThan(cut);
+  await outgoing().getByTestId("file-resend").click();
+  await expect(outgoing().getByRole("alert")).toHaveCount(0);
+  await setOnline(bob, true);
+  await expect.poll(() => percent(incoming()), { timeout: 150_000 }).toBeGreaterThan(second + 5);
+  await expect(outgoing().getByTestId("file-resend")).toHaveCount(0, { timeout: 30_000 });
+
+  // 3. Cut from Alice's side this time, and Bob's app restarts: his bubble offers Ask again.
+  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(70);
+  await setOnline(alice, false);
+  await expect(incoming().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
+  await bob.page.reload();
+  await expect(incoming().getByTestId("file-request")).toBeVisible({ timeout: 30_000 });
+  await incoming().getByTestId("file-request").click();
+  await expect(incoming().getByRole("alert")).toHaveCount(0);
+  await setOnline(alice, true);
+
+  await expect(incoming().getByTestId("file-save")).toBeVisible({ timeout: 200_000 });
+  await expect(outgoing().getByTestId("file-status")).toHaveText("150.0 MB", { timeout: 60_000 });
+  // One message each side, however many times it was offered and asked for.
+  await expect(incoming()).toHaveCount(1);
+  await expect(outgoing()).toHaveCount(1);
+  const download = bob.page.waitForEvent("download");
+  await incoming().getByTestId("file-save").click();
+  const saved = await (await download).path();
+  expect(statSync(saved).size).toBe(size);
+  expect(await hashFile(saved)).toBe(sha);
+  await bob.page.reload();
+  await expect(incoming()).toHaveCount(1, { timeout: 30_000 });
+});

@@ -808,8 +808,8 @@ export class ChatFiles {
   }
 
   /**
-   * "Ask again": a file that stopped arriving is asked for again from where it stands here. files/3 has this already:
-   * a receiver's `pf-accept` moves the sender to its offset, and an app that knows nothing more ignores nothing new.
+   * "Ask again": a file that stopped arriving is asked for again from where it stands here. No new frame: a receiver's
+   * `pf-accept` already moves any files/3 sender to its offset.
    * True when it went now.
    */
   request(id: string): boolean {
