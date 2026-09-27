@@ -114,7 +114,8 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
     setPhase(null); setChosen(type);
     setProviderId(offer(type)?.providers?.[0]?.id ?? "");
   };
-  const switchNetwork = (next: WalletNetwork) => { if (busy || next === network) return; setNetwork(next); setChosen(null); setPhase(null); };
+  // Leaving the key step forgets the Breez API key typed there.
+  const switchNetwork = (next: WalletNetwork) => { if (busy || next === network) return; setNetwork(next); setChosen(null); setPhase(null); setApiKey(""); };
 
   const chosenOffer = chosen ? offer(chosen) : undefined;
   const descriptor = chosenOffer?.providers?.find((p) => p.id === providerId);
@@ -153,7 +154,7 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
 
         {chosen && chosenOffer ? (
           <div className="space-y-3" data-testid="new-wallet-step">
-            <button type="button" data-testid="new-wallet-back" disabled={busy} onClick={() => { setChosen(null); setPhase(null); }} className="text-xs text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">← All kinds of wallet</button>
+            <button type="button" data-testid="new-wallet-back" disabled={busy} onClick={() => { setChosen(null); setPhase(null); setApiKey(""); }} className="text-xs text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">← All kinds of wallet</button>
             <div className="flex items-center gap-3">
               <Mark type={chosen} />
               <div className="min-w-0">

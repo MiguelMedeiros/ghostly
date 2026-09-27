@@ -197,7 +197,12 @@ describe("New, in the header", () => {
     const key = screen.getByTestId("new-wallet-api-key");
     expect(key).toHaveAttribute("type", "password");
     expect(screen.getByTestId("new-wallet-create")).toBeDisabled();
-    await user.type(key, "breez-key");
+    // Going back forgets what was typed.
+    await user.type(key, "typed-then-left");
+    await user.click(screen.getByTestId("new-wallet-back"));
+    await user.click(screen.getByTestId("new-wallet-type-spark"));
+    expect(screen.getByTestId("new-wallet-api-key")).toHaveValue("");
+    await user.type(screen.getByTestId("new-wallet-api-key"), "breez-key");
     await user.click(screen.getByTestId("new-wallet-create"));
     expect(engine.callsTo("walletCreate")).toEqual([{ type: "spark", network: "mainnet", apiKey: "breez-key" }]);
     await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
