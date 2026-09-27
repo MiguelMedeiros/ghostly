@@ -55,6 +55,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     ...(modern && replyRef(message) && { ref: replyRef(message) }),
     ...(message.replyTo && { replyTo: message.replyTo }),
     ...(message.reactions && { reactions: message.reactions }),
+    ...(message.edit && { edit: message.edit }),
     meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,
@@ -88,6 +89,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
         previous.delivery = message.delivery;
         previous.deliveryError = message.deliveryError;
+        updated = true;
+      }
+      // An edit (WISP 400 § Edits): the new text in place, never a new message, so nothing counts as unread.
+      if (message.edit && (previous.edit?.seq !== message.edit.seq || !!previous.edit?.pending !== !!message.edit.pending)) {
+        previous.text = message.text;
+        previous.edit = message.edit;
+        if (message.preview) previous.preview = message.preview; else delete previous.preview;
         updated = true;
       }
       if (mapped.systemEvent && previous.systemEvent?.pubKey !== mapped.systemEvent.pubKey) {

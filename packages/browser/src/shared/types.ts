@@ -635,6 +635,8 @@ export interface StoredMessage {
    * key. One taken back stays with an empty emoji, so an older reaction arriving late does not bring it back.
    */
   reactions?: Record<string, MessageReaction>;
+  /** A text edited after it was sent (WISP 400 § Edits): `text` is the latest version. */
+  edit?: MessageEdit;
 }
 
 /** One person's reaction to a message: the emoji ("" once taken back), their number (the highest wins), when it came. */
@@ -651,6 +653,19 @@ export interface ReactionNote {
   /** The message was mine. */
   mine: boolean;
 }
+
+/** How a message was edited (WISP 400 § Edits). */
+export interface MessageEdit {
+  /** The edit shown: its number (1 for the first; the highest one wins) and when its author made it. */
+  seq: number;
+  at: number;
+  /** Earlier versions, oldest first (the newest `EDIT_HISTORY_KEEP`): when each was written, and its text. */
+  history: MessageVersion[];
+  /** Mine: the contact has not confirmed this edit yet. It goes by itself once the chat is live and both sides offer edit/1. */
+  pending?: true;
+}
+
+export interface MessageVersion { at: number; text: string }
 
 /**
  * The message a reply answers, as kept with the reply (WISP 400 § Replies). What the replier's app saw of it goes

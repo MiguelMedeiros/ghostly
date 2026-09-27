@@ -47,6 +47,8 @@ export interface ChatMessage {
   replyTo?: import("@ghostly/browser/shared/types").MessageReply;
   /** Reactions to it, one per person (WISP 400 § Reactions): `me`, `peer`, or a member's key. */
   reactions?: Record<string, import("@ghostly/browser/shared/types").MessageReaction>;
+  /** An edited text (WISP 400 § Edits): `text` is the latest version; the earlier ones are in the history. */
+  edit?: import("@ghostly/browser/shared/types").MessageEdit;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

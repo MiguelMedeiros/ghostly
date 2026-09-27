@@ -47,6 +47,8 @@ interface MessageBubbleProps {
   onReact?: (emoji: string) => void;
   /** Who reacted, as the chat names them: `peer`, or a member's key. */
   reactionName?: (by: string) => string;
+  /** Edits this message (WISP 400 § Edits): its ⋮ says Edit. Only a text of mine in a 1:1 chat. */
+  onEdit?: () => void;
 }
 
 /** How long a finger holds a message before its quick bar (or, where it takes no reaction, its details) opens. */
@@ -143,6 +145,29 @@ function ReplyGlyph() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100">
       <path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
     </svg>
+  );
+}
+
+function EditGlyph() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+/**
+ * "edited" beside the time of an edited text (WISP 400 § Edits); the time of the edit on hover, or that the contact has
+ * not been shown it yet. The earlier versions are in the message's details.
+ */
+function EditedMark({ edit }: { edit: NonNullable<ChatMessage["edit"]> }) {
+  const { t } = useI18n();
+  const time = new Date(edit.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return (
+    <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
+      title={edit.pending ? t("chat.message.editPending") : t("chat.message.editedAt", { time })}>
+      {t("chat.message.edited")}
+    </span>
   );
 }
 
@@ -350,11 +375,13 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download, onCancelSend, onRetry }: {
+function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, align, download, onCancelSend, onRetry }: {
   onDelete?: () => void;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
   onReply?: () => void;
+  /** Edits it (WISP 400 § Edits): after Reply. */
+  onEdit?: () => void;
   /** Opens the reactions' quick bar (WISP 400 § Reactions): after Reply. */
   onReact?: () => void;
   align: "left" | "right";
@@ -394,6 +421,9 @@ function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download, o
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t("chat.message.options")}>
         {onReply && <MenuItem testId="message-reply" onClick={() => { setOpen(false); onReply(); }} icon={<ReplyGlyph />}>
           {t("chat.message.reply")}
+        </MenuItem>}
+        {onEdit && <MenuItem testId="message-edit" onClick={() => { setOpen(false); onEdit(); }} icon={<EditGlyph />}>
+          {t("chat.message.edit")}
         </MenuItem>}
         {onReact && <MenuItem testId="message-react" onClick={() => { setOpen(false); onReact(); }} icon={<SmileIcon size={16} />}>
           {t("chat.reactions.react")}
@@ -457,7 +487,7 @@ export function MessageBubble(props: MessageBubbleProps) {
   );
 }
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId, onReply, quote, onReact, reactionName }: MessageBubbleProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId, onReply, quote, onEdit, onReact, reactionName }: MessageBubbleProps) {
   const { t } = useI18n();
   const chat = useCueChat();
   // Only what arrives while you watch moves; history is just there.
@@ -588,6 +618,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   const timestampEl = (
     <span className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
+      {message.edit && <EditedMark edit={message.edit} />}
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>
@@ -610,7 +641,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} align="left" download={download} {...sending} />}
+      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} align="left" download={download} {...sending} />}
       {/* The bubble, and its reactions under it. */}
       <div className={`flex flex-col min-w-0 max-w-[85%] ${isMe ? "items-end" : "items-start"}`}>
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}

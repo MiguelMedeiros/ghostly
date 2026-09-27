@@ -139,6 +139,11 @@ export interface EngineApi {
   /** `messageId`: the message kept in the chat (absent when nothing was kept). */
   /** `replyTo`: the id of a message of this chat the text answers (WISP 400 § Replies). */
   sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): { error: string | null; refused?: boolean; messageId?: string };
+  /**
+   * Edits a text of mine in a 1:1 chat (WISP 400 § Edits): the new text here at once, and to the contact once both
+   * sides offer edit/1 on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit.
+   */
+  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview }): { error: string | null; refused?: boolean; messageId?: string };
   retryMessage(params: { linkId: string; messageId: string }): void;
   /**
    * Reacts to a message (WISP 400 § Reactions): `linkId` a chat's link or `group:<id>`, `messageId` the message's id

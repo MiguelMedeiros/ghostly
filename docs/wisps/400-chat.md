@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2.8 |
+| Revision | 0.2.9 |
 | Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
@@ -223,6 +223,20 @@ A text is sent exactly as typed: nothing below changes the wire, and an app that
 
 A link from `[text](…)` MUST be http or https; anything else stays text. The link's host SHOULD be shown on hover or long press. When the text names a host other than the link's (or one the link's host is not under), or holds an invisible or direction character, the receiver SHOULD show the address instead of the text, as the browser reads it (punycode for a non-ASCII host). A preview of a message on one line keeps a list's markers ("•" for any bullet, the author's numbers) and shows a link as its text.
 
+## Edits
+
+A person can edit a text they sent in a 1:1 chat (revision 0.2.9), and a bot can rewrite a status message in place ("Working: 2 of 5", then "Done"). An edit replaces the **whole** text; the message keeps its id, its place in the timeline and its time.
+
+- **Who.** Only the author edits a message. The reader looks the edit's id up among the **contact's** messages of this chat only, and the edit comes on the session authenticated with the pinned contact ([401](401-paired-chat.md#edits)) or in a DHT envelope signed by it ([403](403-dht-text.md#edits)), so a contact can never change one of mine, nor a message of another chat.
+- **What.** Texts only: not a file, a voice message, a payment, a notice or an identity shared in the timeline. The new text follows the rules of a message: at most 16 KiB, never empty (deleting is for that), the same checks when it is shown (mentions, the renderer's bounds, parser cards, the secret guard on the author's side before it goes).
+- **Order.** Each edit of a message has a number, 1 for the first, counted by its author. The highest number wins, whatever order edits arrive in; one that is not higher is confirmed and changes nothing. A message takes at most **100** edits. There is no time limit: a bot's status can be updated for as long as its job runs.
+- **History.** The reader keeps the versions an edit replaced (the newest 20, within 64 KiB of text), shown with their time in the message's details. An edit made while an earlier one had not gone yet replaces it: only the latest version goes, so the reader's history may skip versions the author made in between.
+- **Attention.** An edit is not a new message: it never rings or plays a sound, never counts as unread, and never moves the chat in the list. The chat list's line shows the new text when the edited message is the last one. A quote of the message ([replies](#replies)) shows its current text; a link preview comes with the new text or goes, and parser cards read the new text.
+- **Delivery.** An edit goes on the live session once both apps say `edit/1`, or, while the chat is not live, on the DHT floor to a contact whose capability record lists `edit/1` (a text of at most about 200 bytes there). It is sent again, like an unconfirmed message, until the contact confirms it (within the same week, [401](401-paired-chat.md#edits)); a sender paces them (10 in 10 seconds per chat) and a reader drops a flood unconfirmed. An edit that arrives before its message waits for it for a minute.
+- **The author's side.** The new text shows at once, with an "edited" mark beside the time; until the contact confirms the latest edit the mark says it has not been shown yet. The edit is started from the message's ⋮ (Edit) or with ↑ in an empty composer (the last text of mine); the composer then shows what is being edited, Enter saves, and ✕ or Escape leaves the message as it was and gives back the draft.
+
+**Older apps.** An app from before this revision gets nothing: it offers no `edit/1`, so no edit is sent to it, and it keeps the text it has. The edit waits on the author's side and goes once the contact's app shows edits. No second message with the new text is sent instead: a bot rewriting a status would fill an older app's chat with copies.
+
 ## Candidate semantics
 
 Future messages need a stable sender-scoped message ID, authenticated channel/participation context, sequence within a sender generation, content type and bounded body. Distinguish locally queued, sent, received, durably stored and read; only advertise receipts actually implemented. Retries reuse IDs. Deduplication retention must cover the declared retry window and survive restart where durable delivery is promised.
@@ -257,6 +271,7 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
+- 0.2.9 (2026-09-27): edits: the whole new text of one of the author's texts, numbered per message (highest wins, at most 100), no time limit; never rings, never unread; nothing to older apps.
 - 0.2.8 (2026-09-27): message text: the display conventions (formatting, code, lists, quotes, headings, `[text](url)` links), with the link rules; the text is still sent as typed.
 - 0.2.7 (2026-09-27): reactions: one emoji per person per message, the highest number winning; checked emoji; waiting a minute for an unknown message; no unread, no sound.
 - 0.2.6 (2026-09-27): replies: the original's id, a line of it and its author with a message; checked against this chat only; no text prefix for older apps.

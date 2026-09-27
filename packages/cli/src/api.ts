@@ -22,6 +22,18 @@ import { chatDetailsJson, chatJson, groupJson, groupMessageJson, messageJson, ty
 const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
 
 /** Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). */
+/** Waits until the contact confirmed the latest edit of one of my messages (it is no longer pending). */
+async function waitForEdit(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<StoredMessage> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const message = (await node(ctx).getMessages(chat)).find((m) => m.id === messageId);
+    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    if (!message.edit?.pending) return message;
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact has not confirmed the edit yet. It goes by itself once the chat is live and the contact's app shows edits, while this profile is online`, { messageId, edits: message.edit.seq });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 async function waitForMessage(ctx: ApiContext, chat: string, messageId: string, target: "sent" | "delivered", ms: number): Promise<StoredMessage> {
   const want = DELIVERY_RANK[target];
   const look = (message: StoredMessage | undefined) => {
@@ -223,6 +235,26 @@ const METHODS: Record<string, Method> = {
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
     return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null };
+  },
+  /**
+   * WISP 400 § Edits: the whole new text of one of my texts in a 1:1 chat. It shows here at once and reaches the contact
+   * once the chat is live and both apps offer edit/1; `--wait confirmed` waits for the contact to confirm it.
+   */
+  async "chat.edit"(ctx, params) {
+    const link = chatOf(ctx, params);
+    const messageId = str(params, "message", true);
+    const text = str(params, "text", true);
+    if (!bool(params, "force")) {
+      const secret = findSecret(text);
+      if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
+    }
+    const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
+    const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
+    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    const id = result.messageId ?? messageId;
+    let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === id);
+    if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
+    return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed: !!message && !message.edit?.pending };
   },
   /**
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.

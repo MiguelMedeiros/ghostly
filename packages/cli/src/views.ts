@@ -104,6 +104,11 @@ export interface MessageJson {
   replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean };
   /** Reactions to it, one per person (WISP 400 § Reactions): `by` is `me`, `peer` or a member's key. */
   reactions?: { by: string; emoji: string; at: number }[];
+  /** An edited text (WISP 400 § Edits): `text` is the latest version, `edits` its number, `editedAt` when it was made. */
+  edits?: number;
+  editedAt?: number;
+  /** Mine: the contact has not confirmed the latest edit yet. */
+  editPending?: boolean;
 }
 
 export function messageJson(message: StoredMessage): MessageJson {
@@ -127,6 +132,7 @@ export function messageJson(message: StoredMessage): MessageJson {
     ...(message.replyTo ? { replyTo: { id: message.replyTo.messageId ?? message.replyTo.id, snippet: message.replyTo.snippet, from: message.replyTo.from ?? null,
       ...(message.replyTo.member ? { member: message.replyTo.member } : {}), found: !!message.replyTo.messageId } } : {}),
     ...(reactionsJson(message).length ? { reactions: reactionsJson(message) } : {}),
+    ...(message.edit ? { edits: message.edit.seq, editedAt: message.edit.at, ...(message.edit.pending ? { editPending: true } : {}) } : {}),
   };
 }
 

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
-// covers: files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions
+// covers: files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -270,6 +270,28 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect((await shown()).reactions).toBeUndefined();
     error(await as(alice, "react", "bob", theirs.id, "not an emoji"), "bad_request", 1);
     error(await as(alice, "react", "bob", "no-such-message", "👍"), "not_found", 3);
+    await listen.stop();
+  });
+
+  it("update a status in place: send it, edit it three times, the contact sees the last text and each edit once", async () => {
+    const listen = new Running(["--home", bob, "listen", "--type", "message.edited"], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    const id = ok(await as(alice, "send", "bob", "Working: 0 of 3", "--wait", "delivered")).messageId as string;
+    expect(ok(await as(alice, "edit", "bob", id, "Working: 1 of 3", "--wait", "confirmed"))).toMatchObject({ chat: chatA, messageId: id, confirmed: true });
+    expect(ok(await as(alice, "edit", "bob", id, "--text", "Working: 2 of 3", "--wait", "confirmed"))).toMatchObject({ edits: 2, confirmed: true });
+    // From stdin, as a bot pipes it.
+    expect(ok(await ghostly(["--home", alice, "edit", "bob", id, "--stdin", "--wait", "confirmed"], { env, input: "Done: 3 of 3\n" }))).toMatchObject({ edits: 3, confirmed: true });
+    await expect.poll(() => listen.lines.length, { timeout: 30_000 }).toBe(3);
+    expect(listen.lines.map((l) => [l.chat, l.edits, (l.message as { text: string }).text]))
+      .toEqual([[chatB, 1, "Working: 1 of 3"], [chatB, 2, "Working: 2 of 3"], [chatB, 3, "Done: 3 of 3"]]);
+    const last = (ok(await as(bob, "chat", "history", "alice")).messages as { text: string; edits?: number; editedAt?: number }[]).at(-1)!;
+    expect(last).toMatchObject({ text: "Done: 3 of 3", edits: 3 });
+    expect(last.editedAt).toBeGreaterThan(0);
+    error(await as(alice, "edit", "bob", "nope", "anything"), "refused", 1);
+    error(await as(alice, "edit", "bob", id), "usage", 2);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(listen.lines).toHaveLength(3);
     await listen.stop();
   });
 

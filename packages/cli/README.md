@@ -82,6 +82,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `chat list`, `chat show <chat>` | Chats, and one chat's connection: transports, last attempt, comparison code |
 | `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
 | `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
+| `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
 | `typing <chat> [--for s] [--stop]` | Show the contact you are writing: live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a message to the chat or `--stop` ends it |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
@@ -234,7 +235,8 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
 - Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,
   waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
   announced itself; not a message), `chat.announced`, `message.received`, `message.sent`, `message.delivery`
-  (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.deleted`, `group.created`,
+  (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.edited` (a text changed in place, the
+  contact's or mine: once per edit number, with `edits` and the message as it is now), `message.deleted`, `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.message` (`message.member` is the author's key,
   `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
   `file.stage`, `file.done`, `file.failed` (each with `chat`, `file`, `messageId`), `chat.held` and

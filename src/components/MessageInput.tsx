@@ -19,7 +19,7 @@ import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
 import type { GroupMention } from "@ghostly/core";
 import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
-import { ReplyBar } from "./chat/ReplyQuote";
+import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
@@ -84,6 +84,13 @@ interface MessageInputProps {
    * it and sends it with the text. A new `key` (another message) brings the focus to the field.
    */
   reply?: { key: string; name?: string; snippet: string; mine: boolean; onCancel: () => void };
+  /**
+   * A message of mine being edited (WISP 400 § Edits): its text fills the field, the draft waits and comes back after.
+   * Enter saves through `onSave`; ✕ or Escape leaves it. Either way `onClose` ends it. A new `key` edits another one.
+   */
+  edit?: { key: string; text: string; snippet: string; onSave: (text: string, extra?: { preview?: LinkPreview }) => Promise<string | null>; onClose: () => void };
+  /** ↑ in an empty field: edit my last message, as in Slack and Telegram. */
+  onEditLast?: () => void;
 }
 
 const DEFAULT_MAX = 500;
@@ -114,6 +121,8 @@ export function MessageInput({
   linkPreviews = false,
   onTyping,
   reply,
+  edit,
+  onEditLast,
 }: MessageInputProps) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -158,12 +167,31 @@ export function MessageInput({
     if (replyKey) textareaRef.current?.focus({ preventScroll: true });
   }, [replyKey]);
 
+  // Editing: the message's words in the field, the caret at their end; the draft is kept aside until the edit ends.
+  const editKey = edit?.key, editText = edit?.text;
+  const draftAside = useRef<string | null>(null);
+  useEffect(() => {
+    if (!editKey || editText === undefined) return;
+    if (draftAside.current === null) draftAside.current = textareaRef.current?.value ?? "";
+    caretRef.current = editText.length;
+    setText(editText);
+    textareaRef.current?.focus({ preventScroll: true });
+  }, [editKey, editText]);
+  const endEdit = () => {
+    const draft = draftAside.current ?? "";
+    draftAside.current = null;
+    setText(draft);
+    edit?.onClose();
+  };
+
+  const editing = !!edit;
   useEffect(() => {
     // A draft holding a seed or a key is not written to storage; ecash is, since the draft may be its only copy.
-    if (draftId) { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); }
+    // Not while editing: the draft is the one kept aside.
+    if (draftId && !editing) { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); }
     const input=textareaRef.current;
     if(input && text) { input.style.height="auto"; input.style.height=`${Math.min(input.scrollHeight,120)}px`; }
-  }, [draftId,text]);
+  }, [draftId,text,editing]);
 
   // An emoji goes in where the caret was; the caret stays after it.
   useLayoutEffect(() => {
@@ -187,6 +215,11 @@ export function MessageInput({
     if (maxBytes && bytes > maxBytes) { showToast(`This text is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}; shorten it or use a live connection. Your draft is kept.`); return; }
     const found = confirmed ? null : findSecret(text);
     if (found) { setSecret({ finding: found }); return; }
+    if (edit) {
+      const err = await edit.onSave(text, linkPreview.preview ? { preview: linkPreview.preview } : undefined);
+      if (err) showToast(err); else { linkPreview.reset(); endEdit(); }
+      return;
+    }
     const named = picker.compose(text);
     const err = await (named.length ? onSend(text, named) : linkPreview.preview ? onSend(text, undefined, { preview: linkPreview.preview }) : onSend(text));
     if (err) {
@@ -206,7 +239,14 @@ export function MessageInput({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (picker.onKeyDown(e)) return;
     // Whatever the composer has open over it closes first; then Escape lets go of the message being answered.
-    if (e.key === "Escape" && reply && !showPanel && !showMenu && !showPayment && !showIdentities) { e.preventDefault(); e.stopPropagation(); reply.onCancel(); return; }
+    const nothingOpen = !showPanel && !showMenu && !showPayment && !showIdentities;
+    if (e.key === "Escape" && edit && nothingOpen) { e.preventDefault(); e.stopPropagation(); endEdit(); return; }
+    if (e.key === "Escape" && reply && nothingOpen) { e.preventDefault(); e.stopPropagation(); reply.onCancel(); return; }
+    if (e.key === "ArrowUp" && onEditLast && !edit && !text && nothingOpen && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      onEditLast();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -217,7 +257,8 @@ export function MessageInput({
     const value = e.target.value;
     if (value.length <= Math.max(maxLength, 16_384)) {
       setText(value);
-      onTyping?.(value.trim() !== "");
+      // Editing a sent message is not writing a new one.
+      if (!edit) onTyping?.(value.trim() !== "");
       picker.onCaret();
     } else if (value.length - text.length > 1) {
       showToast(
@@ -292,7 +333,8 @@ export function MessageInput({
 
   /** Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. */
   const offerFiles = (files: File[]): boolean => {
-    if (!onSendFile || disabled || !files.length) return false;
+    // An edit is text only: files wait until it ends.
+    if (!onSendFile || disabled || !files.length || edit) return false;
     if (fileUnavailable) { showToast(fileUnavailable); return true; }
     closeAll();
     setAttached((was) => [...(was ?? []), ...files]);
@@ -306,7 +348,7 @@ export function MessageInput({
    * files or a picture from the page).
    */
   const takePaste = (data: DataTransfer | null): boolean => {
-    if (locked) return false;
+    if (locked || edit) return false;
     const files = pastedFiles(data);
     if (files) return offerFiles(files);
     if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
@@ -457,7 +499,8 @@ export function MessageInput({
           </div>
         </div>
       )}
-      {reply && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
+      {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
+      {reply && !edit && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {linkPreview.draft && <LinkPreviewDraftCard draft={linkPreview.draft} onRemove={linkPreview.remove} />}
       <div className="composer-row flex items-end gap-2 relative">
         {/* One rounded field: the +, the emoji/GIF panel's smiley and the message. */}

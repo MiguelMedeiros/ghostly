@@ -4,7 +4,7 @@
  * `capabilities`, and a full offer is already there, so these travel in one frame on the authenticated
  * session instead, the way `paired-payments` and `paired-groups` do:
  *
- *     {"t":"paired-capabilities","c":["calls/1","services/1","files/3","typing/1","react/1"]}
+ *     {"t":"paired-capabilities","c":["calls/1","services/1","files/3","typing/1","react/1","edit/1"]}
  *
  * Each side sends it on every ready session, and again whenever what it offers changes. Something is on
  * only while both sides list it; a peer that never sends the frame (an older app) offers nothing here.
@@ -28,10 +28,13 @@ export const TYPING_CAPABILITY = "typing/1";
 /** Reactions to messages: `paired-reaction` frames on this session, 1:1 chats only (WISP 401 § Reactions, `reactions.ts`). */
 export const REACTIONS_CAPABILITY = "react/1";
 
-export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY;
+/** Editing sent texts: `paired-edit` frames on this session, 1:1 chats only (WISP 401 § Edits, `pairedEdits.ts`). */
+export const EDIT_CAPABILITY = "edit/1";
+
+export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY;
 
 /** Every capability this app knows on a session: what `receive` reports changes of. */
-export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY];
+export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY];
 
 export const SESSION_CAPABILITIES_FRAME = "paired-capabilities";
 

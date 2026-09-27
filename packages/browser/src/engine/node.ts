@@ -33,6 +33,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
+import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, type WireEdit } from "@ghostly/core";
 import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
@@ -132,6 +133,8 @@ import type {
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
+import { canEdit, takesPeerEdit, withEdit } from "../shared/edits";
+import { EditBuffer, EditQueue } from "./edits";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
@@ -375,6 +378,10 @@ export class GhostlyNode implements EngineImplementation {
   /** Keys this engine warmed with an empty packet, and when. */
   private readonly warmedKeys = new Map<string, number>();
   private readonly outboxes = new Map<string, Outbox>();
+  /** My edits on their way, per 1:1 chat (WISP 400 § Edits). */
+  private readonly editQueues = new Map<string, EditQueue>();
+  /** The contacts' edits of messages not here yet. */
+  private readonly editBuffer = new EditBuffer();
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
   /** files/3 in every chat: offers, resumable transfers, checked by digest (WISP 501 rev 0.3). */
@@ -1054,6 +1061,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.nativeQueue;
     await this.hold.stop();
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
+    for (const queue of this.editQueues.values()) queue.stop();
     await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(true); await live.caps?.stop(); }));
   }
 
@@ -1337,6 +1345,9 @@ export class GhostlyNode implements EngineImplementation {
     if (!live) return;
     void this.outboxes.get(linkId)?.stop();
     this.outboxes.delete(linkId);
+    this.editQueues.get(linkId)?.stop();
+    this.editQueues.delete(linkId);
+    this.editBuffer.forget(linkId);
     void live.link?.stop(true); void live.caps?.stop();
     this.links.delete(linkId);
     this.identities.forget(linkId);
@@ -1493,6 +1504,11 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** A paired row's reply as it goes on the wire again (a resend, a hold). */
+  /** `localStorage["ghostly-test-no-edit"]`: this app offers no edit/1, as an older one (the e2e's old contact). Nothing else reads it. */
+  private static testNoEdit(): boolean {
+    try { return typeof localStorage !== "undefined" && localStorage.getItem("ghostly-test-no-edit") === "1"; } catch { return false; }
+  }
+
   private static wireReply(message: StoredMessage): WireReply | undefined {
     return message.replyTo && pairedWireReply(message.replyTo);
   }
@@ -1504,6 +1520,102 @@ export class GhostlyNode implements EngineImplementation {
   private chatStopped(live: LiveLink): string | null {
     if (live.pairing?.keyMismatch) return live.pairing.error ?? "This chat stopped: your contact's key changed.";
     return null;
+  }
+
+  /**
+   * Edits a text of mine in a 1:1 chat (WISP 400 § Edits): the new text shows here at once, and goes to the contact
+   * (`editsFor`) once the chat is live and both sides offer edit/1. Only texts, at most `MAX_EDITS_PER_MESSAGE` times each,
+   * and never empty (deleting is for that). What an edit says is checked like a message: its length, its preview.
+   */
+  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+    const { linkId } = params;
+    const live = this.links.get(linkId);
+    const refuse = (error: string) => ({ error, refused: true });
+    if (!live) return refuse("No such chat");
+    if (!live.stored.profile) return refuse("Editing needs a current chat; this compatibility chat cannot edit.");
+    if (live.stored.group || linkId.startsWith("group:")) return refuse("Editing works in 1:1 chats");
+    if (typeof params.messageId !== "string" || typeof params.text !== "string") return refuse("No message to edit");
+    const messages = await db.getMessages(linkId);
+    const message = messages.find(m => m.id === params.messageId) ?? messages.find(m => m.sender === "me" && m.wireId === params.messageId);
+    if (!message || !canEdit(message)) return refuse("Only your own text messages can be edited");
+    const text = params.text.trim();
+    if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
+    if (new TextEncoder().encode(text).length > LIMITS.maxChatMessageBytes) return refuse(`Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`);
+    const stop = this.chatStopped(live);
+    if (stop) return { error: stop };
+    const preview = params.preview === undefined ? undefined : parseLinkPreview(params.preview, text);
+    if (text === message.text && (preview?.u ?? "") === (message.preview?.u ?? "")) return { error: null, messageId: message.id };
+    const seq = (message.edit?.seq ?? 0) + 1;
+    if (seq > MAX_EDITS_PER_MESSAGE) return refuse(`This message was edited ${MAX_EDITS_PER_MESSAGE} times, the most one takes.`);
+    const edited = withEdit(message, { seq, at: Date.now(), text, preview, pending: true });
+    await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview }));
+    this.events.onMessages(linkId, await db.getMessages(linkId));
+    void this.editsFor(linkId).flush().catch(() => {});
+    return { error: null, messageId: message.id };
+  }
+
+  /**
+   * An edit from the contact (WISP 400 § Edits), already checked on the session that authenticated it. It can only
+   * change the contact's own messages: the id is looked up among them, never among mine. True: confirm it (shown, not
+   * newer than what shows, or its message was deleted here); false: its message is not here yet, and it waits a minute.
+   */
+  private async receiveEdit(linkId: string, edit: WireEdit): Promise<boolean> {
+    const live = this.links.get(linkId);
+    if (!live?.stored.profile || live.stored.group) return false;
+    const id = `peer_${edit.id}`;
+    if (live.stored.deletedIds?.includes(id)) return true;
+    const message = (await db.getMessages(linkId)).find(m => m.id === id);
+    if (!message) { this.editBuffer.hold(linkId, edit); return false; }
+    await this.applyPeerEdit(linkId, message, edit);
+    return true;
+  }
+
+  /** The contact's edit on its message here, when it is newer than what shows. Not a new message: no sound, no unread, no move. */
+  private async applyPeerEdit(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
+    if (!takesPeerEdit(message) || (message.edit?.seq ?? 0) >= edit.e) return;
+    const updated = await db.patchMessage(linkId, message.id, current => {
+      if (!takesPeerEdit(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
+      const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, preview: edit.pv });
+      return { text: next.text, edit: next.edit, preview: next.preview };
+    });
+    if (updated) this.events.onMessages(linkId, await db.getMessages(linkId));
+  }
+
+  /** The contact's capability record says its app takes edits on the DHT floor too (WISP 403 § Edits). */
+  private takesDhtEdits(live: LiveLink | undefined): boolean {
+    return !!live?.caps?.peer?.capabilities.includes(EDIT_CAPABILITY);
+  }
+
+  /** My edits in one 1:1 chat on their way to the contact. */
+  private editsFor(linkId: string): EditQueue {
+    let queue = this.editQueues.get(linkId);
+    if (!queue) {
+      queue = new EditQueue({
+        read: () => db.getMessages(linkId),
+        ready: () => {
+          const live = this.links.get(linkId), link = live?.link;
+          return !!link && (link.supportsEdits || (link.textDelivery === "dht" && this.takesDhtEdits(live)));
+        },
+        send: (edit, message) => {
+          const live = this.links.get(linkId), link = live?.link;
+          if (!link) return "You are offline";
+          // On the DHT floor an edit follows its message's receipt: the contact must have the message to find it.
+          if (!link.isDataLinkOpen && message.delivery && message.delivery !== "delivered") return "Waits for its message's receipt";
+          return link.sendEdit(edit, { dht: this.takesDhtEdits(live) });
+        },
+        receiptMs: () => this.links.get(linkId)?.link?.isDataLinkOpen ? 20_000 : DHT_MESSAGE_TTL,
+        settle: async (messageId, seq) => {
+          const updated = await db.patchMessage(linkId, messageId, current => {
+            if (!current.edit?.pending || current.edit.seq !== seq) return null;
+            const { pending: _done, ...edit } = current.edit;
+            return { edit };
+          });
+          if (updated) this.events.onMessages(linkId, await db.getMessages(linkId));
+        },
+      });
+      this.editQueues.set(linkId, queue);
+    }
+    return queue;
   }
 
   async retryMessage({ linkId, messageId }: { linkId: string; messageId: string }): Promise<void> {
@@ -3210,6 +3322,8 @@ export class GhostlyNode implements EngineImplementation {
       // 1:1 chats only: group edges (startEdge) never offer it.
       typingSupport: true,
       reactionsSupport: this.options.reactions !== false,
+      // 1:1 chats only, as typing. `ghostly-test-no-edit` makes this app an older one for the e2e.
+      editSupport: !GhostlyNode.testNoEdit(),
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
@@ -3270,7 +3384,10 @@ export class GhostlyNode implements EngineImplementation {
         },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
-        onDhtDelivery: () => { if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}); this.observeTransport(linkId); this.emitState(); },
+        onDhtDelivery: () => {
+          if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}).then(() => this.editQueues.get(linkId)?.flush()).catch(() => {});
+          this.observeTransport(linkId); this.emitState();
+        },
         onHold: (state) => this.hold.peerSaid(linkId, state),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
@@ -3289,7 +3406,8 @@ export class GhostlyNode implements EngineImplementation {
         onTransportSwitched: () => {
           // Frames of the old channel may have been cut short: what the contact has not confirmed goes again at
           // once over the new one (it acknowledges a repeated id without showing it twice), and so do payments.
-          if (stored.profile && !stored.group) void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {});
+          if (stored.profile && !stored.group) void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {})
+            .then(() => this.editsFor(linkId).flush({ reopened: true })).catch(() => {});
           void this.desk.replay(linkId).catch(() => {});
           this.observeTransport(linkId);
         },
@@ -3327,7 +3445,15 @@ export class GhostlyNode implements EngineImplementation {
           live.poll = { polling, nextAt: Date.now() + nextInMs, interval: nextInMs || live.poll.interval };
           this.emitState();
         },
-        onMessageReceipt: id => this.outboxFor(linkId).received(id),
+        onMessageReceipt: async id => {
+          await this.outboxFor(linkId).received(id);
+          // An edit that went on the DHT floor under an id of its own; and a message that waited went: its edit may follow.
+          if (stored.profile && !stored.group) await this.editsFor(linkId).receivedOnDht(id).catch(() => {});
+          if (stored.profile && !stored.group) void this.editsFor(linkId).flush().catch(() => {});
+        },
+        onMessageEdit: stored.profile && !stored.group ? edit => this.receiveEdit(linkId, edit) : undefined,
+        onEditReceipt: stored.profile && !stored.group ? (id, e) => this.editsFor(linkId).received(id, e) : undefined,
+        onEditSupport: supported => { if (supported && stored.profile && !stored.group) void this.editsFor(linkId).flush({ reopened: true }).catch(() => {}); },
         onPeerAck: (ack) => {
           if (stored.profile) return;
           if (ack === live.peerAck) return;
@@ -3346,7 +3472,9 @@ export class GhostlyNode implements EngineImplementation {
           // Dropped to the DHT: what the contact's app accepts there is read again (WISP 03).
           if (state !== "open" && was === "open") live.caps?.refresh();
           // Back live: what the contact has not confirmed goes again at once, under the same ids.
-          if (stored.profile && !stored.group && state === "open") void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {});
+          // Edits after the messages they change: the contact knows the message first.
+          if (stored.profile && !stored.group && state === "open") void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {})
+            .then(() => this.editsFor(linkId).flush({ reopened: true })).catch(() => {});
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.observeTransport(linkId);
           this.emitState();
@@ -3463,6 +3591,8 @@ export class GhostlyNode implements EngineImplementation {
       versions: [1],
       transports: this.runnableTransports(live),
       capabilities: ["chat/1", DHT_TEXT_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
+        // Edits on the DHT floor too (WISP 403 § Edits): an app from before would show one as a new message.
+        ...(GhostlyNode.testNoEdit() ? [] : [EDIT_CAPABILITY]),
         ...(cashu || lightning ? ["payments/1"] : []), ...(cashu ? ["payments-cashu/1"] : []), ...(lightning ? ["payments-lightning/1"] : [])],
       extensions: ["ping/1"],
       descriptors: capsDescriptors(live?.link?.nativeDescriptors),
@@ -3640,6 +3770,12 @@ export class GhostlyNode implements EngineImplementation {
     if (!(await db.addMessage(message))) return;
     if (message.sender === "peer") this.messageFeedback("message", message);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
+    // An edit that came before its message is shown now, and confirmed.
+    const early = message.sender === "peer" && message.id.startsWith("peer_") ? this.editBuffer.take(message.linkId, message.id.slice(5)) : undefined;
+    if (early) {
+      await this.applyPeerEdit(message.linkId, message, early);
+      live?.link?.confirmEdit(early.id, early.e);
+    }
     this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
     this.emitState();
     // Reactions that came before it are shown now.

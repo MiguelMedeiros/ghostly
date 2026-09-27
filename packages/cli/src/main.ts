@@ -449,21 +449,26 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, spec.options, idSlot(spec));
   const g = globals(parsed);
   pretty = g.pretty;
-  const [target, ...words] = parsed.positionals;
-  if (!target) throw new CliError("usage", `ghostly ${spec.usage}`);
+  const [target, ...rest] = parsed.positionals;
+  // `edit` names the message before the text.
+  const [message, ...words] = spec.message ? rest : [undefined, ...rest];
+  if (!target || (spec.message && !message)) throw new CliError("usage", `ghostly ${spec.usage}`);
   let text = words.join(" ");
-  if (parsed.options.stdin || (!text && !process.stdin.isTTY)) {
+  if (parsed.options.text !== undefined) {
+    if (text || parsed.options.stdin) throw new CliError("usage", "Give the text once: as arguments, --text or stdin");
+    text = String(parsed.options.text);
+  } else if (parsed.options.stdin || (!text && !process.stdin.isTTY)) {
     if (text) throw new CliError("usage", "Give the text as arguments or on stdin, not both");
     text = (await readStdin()).replace(/\n$/, "");
   }
   if (!text.trim()) throw new CliError("usage", `No text: ghostly ${spec.usage}`);
-  const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true };
+  const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true, ...(message !== undefined && { message }) };
   if (spec.target === "group") params.mentions = parsed.options.mention ?? [];
   if (parsed.options.reply !== undefined) params.reply = parsed.options.reply;
   print(await withSession(g, (s) => {
     if (spec.target === "chat") {
       // A one-shot leaves once its command is done: by default it stays until the message went out.
-      params.wait = parsed.options.wait ?? (s.mode === "one-shot" ? "sent" : "none");
+      params.wait = parsed.options.wait ?? (s.mode === "one-shot" ? (spec.message ? "confirmed" : "sent") : "none");
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     }
     return s.call(spec.method, params);
