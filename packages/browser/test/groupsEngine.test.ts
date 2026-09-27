@@ -37,6 +37,8 @@ class World {
   /** Pkarr reads, per peer. */
   readonly resolves = new Map<string, number>();
   readonly chats = new Map<string, [string, string]>();
+  /** Contact chats whose other app announces groups up to version 2 only (rosters of eight). */
+  readonly oldChats = new Set<string>();
   private queue: (() => Promise<unknown>)[] = [];
 
   private counterpart(entry: Entry): { name: string; linkId: string } | undefined {
@@ -68,7 +70,7 @@ class World {
         if (!target) throw new Error("nobody there");
         this.queue.push(() => target.groups.handleEdgeFrame(edge.state.id, keyOf(edge.state), copy));
       },
-      linkReady: linkId => this.chats.has(linkId) || peer.edges.has(linkId) || (peer.entries.has(linkId) && !!this.counterpart(peer.entries.get(linkId)!)),
+      linkReady: (linkId, version = 1) => (version < 3 || !this.oldChats.has(linkId)) && (this.chats.has(linkId) || peer.edges.has(linkId) || (peer.entries.has(linkId) && !!this.counterpart(peer.entries.get(linkId)!))),
       contactName: linkId => this.chats.has(linkId) ? `contact:${linkId}` : undefined,
       edges: groupId => new Map([...peer.edges.entries()].filter(([, e]) => e.state.id === groupId).map(([id, e]) => [e.peer, id])),
       openEdge: async (state, key) => { const id = `edge:${name}:${key.slice(0, 8)}`; peer.edges.set(id, { peer: key, state }); return id; },
@@ -206,15 +208,19 @@ describe("group roster changes: only the admin, and someone removed reads nothin
 });
 
 describe("invitations: what the admission exchange ignores", () => {
-  it("a group holds eight: the eighth invitation while seven are pending is refused", async () => {
+  it("a group holds 32, and grows past eight only for apps that take it (revision 0.8)", async () => {
     const world = new World();
     const alice = world.add("alice");
     await alice.load();
     const groupId = await alice.create("Ghosts", "mesh");
     for (let i = 0; i < 7; i++) { world.chats.set(`chat-${i}`, ["alice", `p${i}`]); await world.add(`p${i}`).load(); await alice.invite(groupId, `chat-${i}`); }
-    world.chats.set("chat-7", ["alice", "p7"]); world.add("p7");
-    await expect(alice.invite(groupId, "chat-7")).rejects.toThrow(/eight members/);
-    expect(view(alice).invited).toHaveLength(7);
+    // The ninth member's app announced groups up to version 2: it would refuse a roster of nine as malformed.
+    world.chats.set("chat-old", ["alice", "old"]); world.add("old"); world.oldChats.add("chat-old");
+    await expect(alice.invite(groupId, "chat-old")).rejects.toThrow(/groups of 8 at most/);
+    for (let i = 7; i < 31; i++) { world.chats.set(`chat-${i}`, ["alice", `p${i}`]); world.add(`p${i}`); await alice.invite(groupId, `chat-${i}`); }
+    expect(view(alice).invited).toHaveLength(31);
+    world.chats.set("chat-31", ["alice", "p31"]); world.add("p31");
+    await expect(alice.invite(groupId, "chat-31")).rejects.toThrow(/32 members at most/);
   });
 
   it("a declined invitation leaves the admin's pending list, and the invitee keeps nothing", async () => {

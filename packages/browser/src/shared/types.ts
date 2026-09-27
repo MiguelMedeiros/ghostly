@@ -118,6 +118,11 @@ export interface StoredGroup {
   /** Member key → the contact chat that invited them (or me): the path for courtesy notices. */
   contacts?: Record<string, string>;
   /**
+   * Members whose apps said (`paired-groups` version 3, on their edge or the link that admitted them) that they take
+   * rosters past eight: an admin grows the group past eight only when every other member is here (WISP 9xx § Bounds).
+   */
+  large?: string[];
+  /**
    * I left: the group is gone from the list and its history from the device. What is kept is the
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
    * a leave said while the admin was away still reaches it.
