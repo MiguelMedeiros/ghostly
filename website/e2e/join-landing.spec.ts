@@ -31,14 +31,14 @@ function watchLeaks(context: BrowserContext) {
 }
 
 /** Chose the Ghostly app on an earlier visit. */
-async function preferApp(context: BrowserContext) {
-  await context.addInitScript(() => localStorage.setItem("ghostly.join.open", "app"));
+async function preferApp(page: Page) {
+  await page.goto("/");
+  await page.evaluate(() => localStorage.setItem("ghostly.join.open", "app"));
 }
 
 test.describe("join page", () => {
   test("a scanned invite opens the chat in the web app by itself, and the code never leaves this browser", async ({ page, context }) => {
     const leaks = watchLeaks(context);
-    let analytics = "";
     await standInApp(page);
     await page.goto(`/#${CODE}`);
     const dialog = page.getByTestId("join-landing");
@@ -50,11 +50,12 @@ test.describe("join page", () => {
     await expect(dialog.getByTestId("join-cancel")).toBeFocused();
     await expect(dialog.getByTestId("join-go-now")).toHaveAttribute("rel", "noreferrer");
     await expect(dialog.getByText("The invite stays in this browser. It was never sent to ghostly.tools.")).toBeVisible();
-    analytics = await page.evaluate(() => JSON.stringify((window as { dataLayer?: unknown }).dataLayer ?? []));
+    const analytics = await page.evaluate(() => JSON.stringify((window as { dataLayer?: unknown }).dataLayer ?? []));
+    const entries = await page.evaluate(() => history.length);
     await expect(page).toHaveURL(`${APP}/#${CODE}`, { timeout: 10_000 });
     expect(analytics.toLowerCase()).not.toContain(SECRET);
     // replace, not a new entry: Back does not come back to the countdown.
-    expect(await page.evaluate(() => history.length)).toBe(1);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
     expect(leaks).toEqual([]);
   });
 
@@ -97,8 +98,8 @@ test.describe("join page", () => {
     expect(await page.evaluate(() => localStorage.getItem("ghostly.join.open"))).toBe("app");
   });
 
-  test("a device that chose the Ghostly app: no countdown, the app first", async ({ page, context }) => {
-    await preferApp(context);
+  test("a device that chose the Ghostly app: no countdown, the app first", async ({ page }) => {
+    await preferApp(page);
     await page.goto(`/#${CODE}`);
     await expect(page.getByTestId("join-landing")).toBeVisible();
     await expect(page.getByTestId("join-going")).toHaveCount(0);
@@ -108,8 +109,8 @@ test.describe("join page", () => {
     await expect(page.getByTestId("join-landing")).toBeVisible();
   });
 
-  test("choosing the browser again forgets the app", async ({ page, context }) => {
-    await preferApp(context);
+  test("choosing the browser again forgets the app", async ({ page }) => {
+    await preferApp(page);
     await standInApp(page);
     await page.goto(`/#${CODE}`);
     await page.getByTestId("join-browser").click();

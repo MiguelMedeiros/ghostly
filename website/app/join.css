@@ -131,7 +131,9 @@
   text-decoration: underline;
   text-underline-offset: 3px;
   cursor: pointer;
+  display: inline-block;
   padding: 10px 4px;
+  white-space: nowrap;
 }
 .join-link:hover,
 .join-link:focus-visible {

@@ -74,10 +74,14 @@ function JoinDialog({ check }: { check: InviteCheck }) {
   // Seconds left before the web app opens; null once cancelled, or when it never counts (a refusal, or the app is preferred).
   const [left, setLeft] = useState<number | null>(() => (check.ok && !preferApp ? GO_SECONDS : null));
   const href = check.ok ? `${APP_URL}/#${check.code}` : "";
+  const counting = left !== null;
+  // The dialog's own focusing steps want an `autofocus` attribute, which React never writes: the element
+  // marked data-autofocus takes the focus on opening, and again when the countdown gives way to the choices.
   useEffect(() => {
     const element = dialog.current;
     if (element && !element.open) element.showModal();
-  }, []);
+    element?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+  }, [counting]);
   useEffect(() => {
     if (left === null) return;
     // replace, not a click on the link: no click for analytics to see, and Back does not return here.
@@ -115,7 +119,7 @@ function JoinDialog({ check }: { check: InviteCheck }) {
         <h2 id="join-title" className="join-title">{t.refusedTitle}</h2>
         <p role="alert" className="join-lead" data-testid="join-refused">{t.refused[check.reason]}</p>
         <div className="join-actions">
-          <a className="btn" href={`${"/"}#download`} onClick={close} autoFocus>
+          <a className="btn" href={`${"/"}#download`} onClick={close} data-autofocus>
             <Icon name="download" /> {t.download}
           </a>
         </div>
@@ -124,13 +128,13 @@ function JoinDialog({ check }: { check: InviteCheck }) {
   }
   const browser = (primary: boolean) => (
     <a className={primary ? "btn btn--primary" : "btn"} href={href} rel="noreferrer" data-testid="join-browser"
-      onClick={() => remember(null)} autoFocus={primary}>
+      onClick={() => remember(null)} data-autofocus={primary || undefined}>
       <Icon name="globe" /> {t.browser}
     </a>
   );
   const app = (primary: boolean) => (
     <button type="button" className={primary ? "btn btn--primary" : "btn"} onClick={() => void copy(check.code)}
-      data-testid="join-desktop" autoFocus={primary}>
+      data-testid="join-desktop" data-autofocus={primary || undefined}>
       <Icon name="desktop" /> {t.desktop}
     </button>
   );
@@ -146,7 +150,7 @@ function JoinDialog({ check }: { check: InviteCheck }) {
         <Ghost who="boo" size={88} mood="happy" />
       </div>
       <h2 id="join-title" className="join-title">{t.title}</h2>
-      {left !== null ? (
+      {counting ? (
         <>
           <div className="join-going" data-testid="join-going">
             {/* Said once; the number that ticks is for the eyes only. */}
@@ -160,7 +164,7 @@ function JoinDialog({ check }: { check: InviteCheck }) {
             <a className="btn btn--primary" href={href} rel="noreferrer" data-testid="join-go-now" onClick={() => remember(null)}>
               {t.goNow}
             </a>
-            <button type="button" className="btn" onClick={() => setLeft(null)} data-testid="join-cancel" autoFocus>
+            <button type="button" className="btn" onClick={() => setLeft(null)} data-testid="join-cancel" data-autofocus>
               {t.cancel}
             </button>
           </div>

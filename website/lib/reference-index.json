@@ -1045,7 +1045,7 @@
     "slug": "801-invitation-profiles",
     "title": "WISP 801: Implemented Invitation Profiles",
     "status": "Draft",
-    "updated": "2026-09-25",
+    "updated": "2026-09-27",
     "implementation": "Every current app creates only ghostly1… codes and links, and reads by the rules below (pair1/, pair2d/ and v0.4 codes still accepted as input)",
     "documentKind": "Profile",
     "dependencies": [

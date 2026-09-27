@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 801; editorial family allocation |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-25 |
+| Revision | 0.3 |
+| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [800](800-invite-join.md), [400](400-chat.md), [403](403-dht-text.md) |
 | Implementation | Every current app creates only `ghostly1…` codes and links, and reads by the rules below (`pair1/`, `pair2d/` and v0.4 codes still accepted as input) |
@@ -64,6 +64,8 @@ https://ghostly.tools/#ghostly1p…
 ```
 
 The code travels in the fragment, which browsers never send to the server. A decoder takes everything after the last `#`, as the `pair1/` decoder did. In a QR, the link is encoded as three segments: `HTTPS://GHOSTLY.TOOLS/` alphanumeric, `#` in byte mode, the code alphanumeric; that is QR version 9, the same as a `https://app.ghostly.tools/#/chat/pair1/…` link. The canonical host is `ghostly.tools` (Q11); `app.ghostly.tools/#ghostly1…` is read too. The page at either host MUST keep the fragment out of analytics, logs and referrers, and hand it to the app without a server round trip.
+
+**The page at `ghostly.tools`.** A script in the page's head takes the code out of the address (`history.replaceState`) before analytics load, so it never reaches a page view, a referrer or the history. The page then reads the code by the rules below. A code it refuses is never handed on: the page says why. A code it reads opens in the web app by itself: the page says "Opening the chat in 3" for 3 seconds, with Cancel (focused) and Open now, then goes to `https://app.ghostly.tools/#ghostly1…` with `location.replace` (no click for analytics to count, and Back does not return to the countdown). So a phone that scans an invite QR lands in the chat with no tap (Q12). Cancel, or the small "Open in the Ghostly app" and "Download Ghostly" links, stop the countdown. "Open in the Ghostly app" copies the code for the app's Join, and the device remembers that choice (`localStorage` `ghostly.join.open` = `app`, never the code): its next invite shows the choices with the app first and no countdown, until "Open in your browser" is chosen again. The QR and the copied link keep the canonical host.
 
 **Test vector** (synthetic bytes, not keys: seed `00 01 … 1f`, rendezvous key `20 21 … 3f`, secret `40 41 … 5f`, participation key `60 61 … 7f`; a codec vector only, since a decoder checks lengths and leaves key validity to first use, as today). Version 1, 220 characters:
 
@@ -134,6 +136,7 @@ The stronger single-use admission state machine, atomic global use limits, group
 | Q9 | The code carries the inviter's participation public key; version 1 is the 128-byte, 220-character layout | The joiner pins the inviter from the code, so someone else holding a copy can no longer answer as the inviter; the QR stays the size of a `pair1/` code's |
 | Q10 | A current app never makes a 0.4-readable (prefix-less) code | The web app is replaced by the next release; desktop users on 0.4 can make the code themselves or update |
 | Q11 | The canonical link is `https://ghostly.tools/#ghostly1…`; `app.ghostly.tools/#ghostly1…` is read too; the fragment stays out of analytics | The site's page can offer what a newcomer needs (open in the desktop app, open in the browser, get Ghostly), and the shorter host keeps the QR smaller |
+| Q12 | On the site's page a readable code opens in the web app after a 3 second countdown with Cancel; a device that chose the Ghostly app is remembered and gets no countdown. The QR keeps the canonical host | A scanned QR opens the chat with no tap, while the site still refuses a bad code before any pairing starts and the QR stays version 9. Encoding `app.ghostly.tools` in the QR instead would skip that check (the web app pairs as soon as it reads a code) and add four characters to the QR |
 
 ## Evidence and checks
 
@@ -141,5 +144,6 @@ The stronger single-use admission state machine, atomic global use limits, group
 
 ## Revision log
 
+- 0.3 (2026-09-27): the site's page opens a readable code in the web app after a cancellable countdown, and remembers a device that chose the Ghostly app (Q12).
 - 0.2 (2026-09-25): one invite format, a bech32m `ghostly1…` string with its version inside (replacing a first `pair3/` draft); exact layout, lengths, QR and link form; reading rules and messages both ways; versioning rule; Q8 to Q11 decided; version 1 is the 220-character layout with the inviter's participation key.
 - 0.1 (2026-09-22): `pair1/`, `pair2d/` and legacy imports.
