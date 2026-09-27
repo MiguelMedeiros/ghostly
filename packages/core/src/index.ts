@@ -67,6 +67,7 @@ export * from "./groupCommits";
 export * from "./groupSession";
 export * from "./groupMentions";
 export * from "./replies";
+export * from "./reactions";
 export * from "./groupEntry";
 export * from "./groupCommunity";
 export * from "./communityRendezvous";
