@@ -175,7 +175,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
     const { a, b } = pairOfManagers();
     b.calls.setAuto({ on: true });
     await a.calls.start("chat-ab", {});
-    await until(() => a.events.find((e) => e.type === "call.connected"));
+    await until(() => a.events.find((e) => e.type === "call.connected")).catch((e) => { throw new Error(`${e.message}\nA: ${JSON.stringify(a.events)}\nB: ${JSON.stringify(b.events)}\nsignals A ${a.signals.length} B ${b.signals.length}`); });
     await b.calls.stopAll();
     expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "stopped" });
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });

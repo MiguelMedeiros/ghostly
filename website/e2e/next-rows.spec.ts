@@ -34,7 +34,17 @@ for (const { width, height, sideBySide, phone } of SIZES) {
           return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
         }, y);
       }
-      await expect(page.locator('#next .nx-item[data-reveal="hidden"]')).toHaveCount(0);
+      // A row still hidden gets its own visit: under load the page can hydrate after the walk went by (a row below the
+      // window then turns hidden), and pictures that load late make the section taller than the walk measured.
+      await expect(async () => {
+        await page.evaluate(async () => {
+          for (const li of document.querySelectorAll('#next .nx-item[data-reveal="hidden"]')) {
+            li.scrollIntoView({ block: "center", behavior: "instant" });
+            await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+          }
+        });
+        await expect(page.locator('#next .nx-item[data-reveal="hidden"]')).toHaveCount(0, { timeout: 1_000 });
+      }).toPass({ timeout: 20_000 });
       await page.waitForTimeout(700); // the last row's fade-in transition
 
       const rows: Row[] = await page.evaluate(() =>
