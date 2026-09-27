@@ -346,7 +346,28 @@
     "profilePeekHint": "Mostra quando un messaggio attende un altro profilo",
     "profilePeekInfo": "Ogni tanto questa app legge ciò che i contatti dei tuoi altri profili sbloccati pubblicano per loro, sugli stessi relay o DHT usati da quei profili. Legge soltanto: non apre mai un messaggio e salta i profili bloccati.",
     "profilePeekNotify": "Avvisa per gli altri profili",
-    "profilePeekNotifyHint": "Una notifica di sistema quando uno riceve un messaggio"
+    "profilePeekNotifyHint": "Una notifica di sistema quando uno riceve un messaggio",
+    "media": {
+      "title": "Audio e video",
+      "names": "Nomi dei dispositivi",
+      "namesHint": "Consenti microfono e fotocamera per vederli",
+      "allow": "Consenti",
+      "microphone": "Microfono",
+      "microphoneInfo": "Usato per chiamate e messaggi vocali. Resta su questo dispositivo, per questo profilo. Se viene scollegato, Ghostly usa quello predefinito del sistema.",
+      "camera": "Fotocamera",
+      "cameraInfo": "Usata per chiamate e foto. Resta su questo dispositivo, per questo profilo.",
+      "speaker": "Altoparlante",
+      "speakerInfo": "Dove suonano le chiamate. Resta su questo dispositivo, per questo profilo.",
+      "systemDefault": "Predefinito di sistema",
+      "missing": "{{name}} non è collegato. Uso quello predefinito.",
+      "failed": "Impossibile aprirlo. Controlla che Ghostly abbia il permesso.",
+      "test": "Prova",
+      "stop": "Ferma",
+      "preview": "Anteprima",
+      "previewLabel": "Anteprima della fotocamera",
+      "level": "Livello del microfono",
+      "testSound": "Prova audio"
+    }
   },
   "updates": {
     "available": "Ghostly {{version}} è disponibile",
@@ -390,7 +411,13 @@
     "mute": "Disattiva audio",
     "unmute": "Attiva audio",
     "camera": "Fotocamera",
-    "cameraOff": "Fotocamera disattivata"
+    "cameraOff": "Fotocamera disattivata",
+    "devices": {
+      "menu": "Dispositivi",
+      "lost": "{{name}} scollegato. Uso quello predefinito.",
+      "back": "{{name}} è tornato",
+      "switchBack": "Torna a usarlo"
+    }
   },
   "share": {
     "title": "Condividi questa chat",

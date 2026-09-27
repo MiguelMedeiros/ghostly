@@ -1,0 +1,134 @@
+import { getPrefix } from "./storage";
+
+/*
+ * Which microphone, camera and speaker this profile uses, on this device. A device is kept by its `deviceId`, with
+ * its name beside it: the name says which one is missing when it is unplugged, and finds it again when a browser
+ * gave it a new id. Nothing chosen (or a device that is gone) is the system's default. Never synced, never sent.
+ */
+
+export type DeviceKind = "audioinput" | "videoinput" | "audiooutput";
+export const DEVICE_KINDS: readonly DeviceKind[] = ["audioinput", "videoinput", "audiooutput"];
+
+export interface ChosenDevice { id: string; label: string }
+export type DeviceChoices = Partial<Record<DeviceKind, ChosenDevice>>;
+
+/** A device as the pickers list it. */
+export interface Device { id: string; label: string }
+
+/** Sent on this page when a choice changes (another page of the app sees `storage`). */
+export const DEVICES_EVENT = "media-devices-updated";
+
+const key = () => `${getPrefix()}media_devices`;
+
+export function loadDeviceChoices(): DeviceChoices {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(key()) ?? "{}");
+    if (!parsed || typeof parsed !== "object") return {};
+    const choices: DeviceChoices = {};
+    for (const kind of DEVICE_KINDS) {
+      const entry = (parsed as Record<string, unknown>)[kind] as Partial<ChosenDevice> | undefined;
+      if (entry && typeof entry.id === "string" && entry.id && typeof entry.label === "string") choices[kind] = { id: entry.id, label: entry.label };
+    }
+    return choices;
+  } catch {
+    return {};
+  }
+}
+
+/** Remembers `device` for `kind`, or the system's default for null. */
+export function chooseDevice(kind: DeviceKind, device: ChosenDevice | null): void {
+  const choices = loadDeviceChoices();
+  if (device?.id) choices[kind] = { id: device.id, label: device.label };
+  else delete choices[kind];
+  try { localStorage.setItem(key(), JSON.stringify(choices)); } catch { /* chosen for now, not remembered */ }
+  window.dispatchEvent(new Event(DEVICES_EVENT));
+}
+
+/** The ids browsers give their own "follow the system" entries, which the default option already is. */
+const PSEUDO = new Set(["default", "communications"]);
+
+export const hasMediaDevices = () => typeof navigator !== "undefined" && typeof navigator.mediaDevices?.enumerateDevices === "function";
+
+/** Whether this engine can send sound to a chosen speaker (Chromium does; Safari and older WebKit may not). */
+export const canPickSpeaker = () => typeof HTMLMediaElement !== "undefined" && typeof (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId === "function";
+
+export interface DeviceList {
+  audioinput: Device[];
+  videoinput: Device[];
+  audiooutput: Device[];
+  /** The name the browser gives the default of each kind ("Default - MacBook Pro Microphone"), when it says. */
+  defaults: Partial<Record<DeviceKind, string>>;
+  /** The browser named them: the page may use the microphone or camera. Before that, ids and names are empty. */
+  named: boolean;
+}
+
+export const EMPTY_DEVICES: DeviceList = { audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: false };
+
+/** What the browser has, per kind, the default entries left out. */
+export function groupDevices(infos: readonly MediaDeviceInfo[]): DeviceList {
+  const list: DeviceList = { audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: infos.some((d) => !!d.label) };
+  for (const info of infos) {
+    const kind = info.kind as DeviceKind;
+    if (!DEVICE_KINDS.includes(kind)) continue;
+    if (PSEUDO.has(info.deviceId)) {
+      if (info.deviceId === "default" && info.label) list.defaults[kind] = info.label;
+      continue;
+    }
+    // Without permission there is one nameless entry per kind: nothing to pick yet.
+    if (!info.deviceId) continue;
+    if (!list[kind].some((d) => d.id === info.deviceId)) list[kind].push({ id: info.deviceId, label: info.label });
+  }
+  return list;
+}
+
+export async function listDevices(): Promise<DeviceList> {
+  if (!hasMediaDevices()) return EMPTY_DEVICES;
+  try {
+    return groupDevices(await navigator.mediaDevices.enumerateDevices());
+  } catch {
+    return EMPTY_DEVICES;
+  }
+}
+
+/**
+ * The device `kind` uses now: the chosen one when the browser lists it (by id, or else by name), else the default
+ * (`id` undefined), with `missing` naming the chosen one that is not there. When the browser has not named its
+ * devices yet it cannot tell: the choice is used as a preference.
+ */
+export function resolveDevice(kind: DeviceKind, list: DeviceList, choices: DeviceChoices = loadDeviceChoices()): { id?: string; missing?: string } {
+  const chosen = choices[kind];
+  if (!chosen) return {};
+  if (!list.named) return { id: chosen.id };
+  const devices = list[kind];
+  if (devices.some((d) => d.id === chosen.id)) return { id: chosen.id };
+  const renamed = chosen.label ? devices.find((d) => d.label === chosen.label) : undefined;
+  if (renamed) return { id: renamed.id };
+  return { missing: chosen.label || chosen.id };
+}
+
+/**
+ * The `deviceId` constraint for what `kind` should capture from, or undefined for the default. `ideal`: a chosen
+ * device that is gone gives the default, never an error; whoever asked can compare the track's `deviceId`.
+ */
+export function preferredDevice(kind: "audioinput" | "videoinput", choices: DeviceChoices = loadDeviceChoices()): ConstrainDOMString | undefined {
+  const id = choices[kind]?.id;
+  return id ? { ideal: id } : undefined;
+}
+
+/** The device a live track captures from, where the engine says. */
+export function trackDevice(track: MediaStreamTrack | undefined): string | undefined {
+  try {
+    return track?.getSettings?.().deviceId || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Sends `element`'s sound to the speaker `id` ("" the default). Engines without speaker choice keep the default. */
+export async function applySpeaker(element: HTMLMediaElement | null, id: string | undefined): Promise<void> {
+  const target = element as (HTMLMediaElement & { setSinkId?: (id: string) => Promise<void>; sinkId?: string }) | null;
+  if (!target?.setSinkId) return;
+  const next = id ?? "";
+  if ((target.sinkId ?? "") === next) return;
+  await target.setSinkId(next);
+}

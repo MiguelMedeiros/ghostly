@@ -346,7 +346,28 @@
     "profilePeekHint": "Muestra cuando un mensaje espera a otro perfil",
     "profilePeekInfo": "De vez en cuando, esta app lee lo que los contactos de tus otros perfiles desbloqueados publican para ellos, por los mismos relays o DHT que usan esos perfiles. Solo lee: nunca abre un mensaje, y omite los perfiles bloqueados.",
     "profilePeekNotify": "Avisar de otros perfiles",
-    "profilePeekNotifyHint": "Una notificación del sistema cuando uno recibe un mensaje"
+    "profilePeekNotifyHint": "Una notificación del sistema cuando uno recibe un mensaje",
+    "media": {
+      "title": "Audio y vídeo",
+      "names": "Nombres de los dispositivos",
+      "namesHint": "Permite el micrófono y la cámara para verlos",
+      "allow": "Permitir",
+      "microphone": "Micrófono",
+      "microphoneInfo": "Se usa en llamadas y mensajes de voz. Se guarda en este dispositivo, para este perfil. Si se desconecta, Ghostly usa el predeterminado del sistema.",
+      "camera": "Cámara",
+      "cameraInfo": "Se usa en llamadas y fotos. Se guarda en este dispositivo, para este perfil.",
+      "speaker": "Altavoz",
+      "speakerInfo": "Donde suenan las llamadas. Se guarda en este dispositivo, para este perfil.",
+      "systemDefault": "Predeterminado del sistema",
+      "missing": "{{name}} no está conectado. Usando el predeterminado.",
+      "failed": "No se pudo abrir. Comprueba que Ghostly tenga permiso.",
+      "test": "Probar",
+      "stop": "Detener",
+      "preview": "Ver",
+      "previewLabel": "Vista previa de la cámara",
+      "level": "Nivel del micrófono",
+      "testSound": "Probar sonido"
+    }
   },
   "updates": {
     "available": "Ghostly {{version}} disponible",
@@ -390,7 +411,13 @@
     "mute": "Silenciar",
     "unmute": "Activar sonido",
     "camera": "Cámara",
-    "cameraOff": "Cámara apagada"
+    "cameraOff": "Cámara apagada",
+    "devices": {
+      "menu": "Dispositivos",
+      "lost": "{{name}} desconectado. Usando el predeterminado.",
+      "back": "{{name}} ha vuelto",
+      "switchBack": "Volver a usarlo"
+    }
   },
   "share": {
     "title": "Compartir este chat",

@@ -346,7 +346,28 @@
     "profilePeekHint": "Indique quand un message attend un autre profil",
     "profilePeekInfo": "De temps en temps, cette app lit ce que les contacts de vos autres profils déverrouillés publient pour eux, par les mêmes relais ou DHT que ces profils. Elle ne fait que lire : elle n'ouvre jamais un message, et ignore les profils verrouillés.",
     "profilePeekNotify": "Notifier pour les autres profils",
-    "profilePeekNotifyHint": "Une notification système quand l'un reçoit un message"
+    "profilePeekNotifyHint": "Une notification système quand l'un reçoit un message",
+    "media": {
+      "title": "Audio et vidéo",
+      "names": "Noms des appareils",
+      "namesHint": "Autorisez le micro et la caméra pour les voir",
+      "allow": "Autoriser",
+      "microphone": "Micro",
+      "microphoneInfo": "Utilisé pour les appels et les messages vocaux. Gardé sur cet appareil, pour ce profil. S’il est débranché, Ghostly utilise celui par défaut du système.",
+      "camera": "Caméra",
+      "cameraInfo": "Utilisée pour les appels et les photos. Gardée sur cet appareil, pour ce profil.",
+      "speaker": "Haut-parleur",
+      "speakerInfo": "Où les appels sont joués. Gardé sur cet appareil, pour ce profil.",
+      "systemDefault": "Par défaut du système",
+      "missing": "{{name}} n’est pas connecté. Appareil par défaut utilisé.",
+      "failed": "Impossible de l’ouvrir. Vérifiez que Ghostly y a accès.",
+      "test": "Tester",
+      "stop": "Arrêter",
+      "preview": "Aperçu",
+      "previewLabel": "Aperçu de la caméra",
+      "level": "Niveau du micro",
+      "testSound": "Tester le son"
+    }
   },
   "updates": {
     "available": "Ghostly {{version}} est disponible",
@@ -390,7 +411,13 @@
     "mute": "Couper le son",
     "unmute": "Activer le son",
     "camera": "Caméra",
-    "cameraOff": "Caméra désactivée"
+    "cameraOff": "Caméra désactivée",
+    "devices": {
+      "menu": "Appareils",
+      "lost": "{{name}} débranché. Appareil par défaut utilisé.",
+      "back": "{{name}} est de retour",
+      "switchBack": "Revenir"
+    }
   },
   "share": {
     "title": "Partager cette discussion",

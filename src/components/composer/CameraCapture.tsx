@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { preferredDevice } from "../../lib/mediaDevices";
 
 /**
  * Whether this device has a camera to take a photo with. Browsers list their devices before any permission
@@ -39,7 +40,8 @@ export function CameraCapture({ onSend, onClose }: { onSend: (file: File) => voi
   useEffect(() => {
     if (photo) return;
     let live = true;
-    navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }).then((s) => {
+    // The camera chosen in Settings → Audio & video, or the default when it is not connected.
+    navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, deviceId: preferredDevice("videoinput") }, audio: false }).then((s) => {
       if (!live) { s.getTracks().forEach((track) => track.stop()); return; }
       stream.current = s;
       if (video.current) { video.current.srcObject = s; void video.current.play().catch(() => {}); }
