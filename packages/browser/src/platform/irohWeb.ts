@@ -82,6 +82,7 @@ class IrohWebChannel implements FrameChannel {
   private queue = Promise.resolve();
   private closed = false;
   bufferedAmount = 0;
+  readonly sendBudget = SEND_BUDGET;
   onClose: FrameChannel["onClose"] = null;
   constructor(private conn: WasmConn, private forget: () => void) { void this.read(); }
   get onMessage() { return this.reader; }

@@ -598,7 +598,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.file?.voice ? (
           <div className="clearfix">
-            <VoiceBubble file={{ ...message.file, voice: message.file.voice }} sender={isMe ? "me" : "peer"} />
+            <VoiceBubble file={{ ...message.file, voice: message.file.voice }} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} />
             {timestampEl}
           </div>
         ) : message.file ? (

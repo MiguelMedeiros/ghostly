@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
-// covers: headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing
+// covers: files.large.resend, files.large.request, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -141,6 +141,11 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(sha(saved.path as string)).toBe(sha(small));
     error(await as(bob, "file", "save", incoming.id, "--dir", bob), "confirm", 5);
     expect((sent.file as { size: number }).size).toBe(200_000);
+    // Sending again or asking again: by the file's id alone, each only on its own side, and not for a file that arrived.
+    expect(error(await as(alice, "file", "resend", (sent.file as { id: string }).id), "refused", 1).message).toBe("Nothing to send again: it arrived whole");
+    expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    error(await as(bob, "file", "resend", incoming.id), "bad_request", 1);
+    error(await as(bob, "file", "request", "nochat-in-nothing"), "not_found", 3);
 
     const large = join(alice, "big.bin");
     writeFileSync(large, randomBytes(26 * 1024 * 1024));

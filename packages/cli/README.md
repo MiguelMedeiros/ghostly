@@ -100,7 +100,8 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link; the picture |
 | `file send <chat> <path> [--name n] [--mime t] [--voice <ms> [--peaks …]]` | A file, or a voice note |
 | `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel <chat> <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3) |
-| `file save <file> [--dir d \| --path p] [--force]` | Write a received file to disk (never over one without `--force`) |
+| `file resend <file>`, `file request <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
+| `file save <file> [--dir d \| --path p] [--force]` | Write a received file to disk (never over one without `--force`; an unfinished one says how many bytes are here) |
 | `profile backup --out <file>`, `profile restore <file> <new profile>` | An encrypted backup (WISP 05 envelope); the passphrase from `--passphrase-file` or `GHOSTLY_BACKUP_PASSPHRASE` |
 | `identity providers`, `identity list` | Kinds of proof and their signers; this profile's proofs |
 | `identity add <provider> [subject] [--signer id] [--field name=value]… [--days n]` | A proof: an in-app signer (NIP-46 and the like) finishes here; a tool or a published record answers with the statement |

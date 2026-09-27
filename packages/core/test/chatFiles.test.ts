@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { appendFileSync } from "node:fs";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, FILE_LIMITS, refusalText, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
+import { ChatFiles, FILE_LIMITS, refusalText, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
-// covers: files.large.offer, files.large.resume, files.large.integrity, files.large.limits
+// covers: files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request
 
 /** Deterministic bytes for any range: files of any size exist without being held. */
 function pattern(offset: number, length: number): Uint8Array {
@@ -78,8 +80,21 @@ interface Side {
  * Two chats joined by an ordered, lossy-on-drop wire, each frame through JSON as on a session. Each side
  * handles its frames one at a time, as the paired session does.
  */
-function wire(options: { keepBytes?: boolean; drop?: (frame: Record<string, unknown>, from: "a" | "b") => boolean } = {}) {
+function wire(options: {
+  keepBytes?: boolean;
+  drop?: (frame: Record<string, unknown>, from: "a" | "b") => boolean;
+  /**
+   * A channel like the native and iroh ones: frames past this many queued bytes are refused, and what is queued only
+   * drains on a later turn of the event loop (a timer), never while promises keep running.
+   */
+  budget?: number;
+  /** With `budget`: the host says when the channel has room, as GhostLink's `filesWritable` does. */
+  writable?: boolean;
+} = {}) {
   let open = true;
+  const queued = { a: 0, b: 0 };
+  const drains = { a: [] as (() => void)[], b: [] as (() => void)[] };
+  const refusals = { a: 0, b: 0 };
   const inbox = { a: [] as string[], b: [] as string[] };
   const busy = { a: false, b: false };
   let outstanding = 0, maxOutstanding = 0;
@@ -105,6 +120,19 @@ function wire(options: { keepBytes?: boolean; drop?: (frame: Record<string, unkn
     const host: ChatFilesHost = {
       send: (frame) => {
         if (!open) return false;
+        if (options.budget) {
+          const bytes = JSON.stringify(frame).length;
+          if (queued[name] + bytes > options.budget) {
+            // A sender that tries again at once never lets the timer below run: stop it here instead of hanging.
+            if (++refusals[name] > 5_000) throw new Error("the sender keeps sending into a full channel");
+            return false;
+          }
+          queued[name] += bytes;
+          setTimeout(() => {
+            queued[name] -= bytes;
+            if (!queued[name]) for (const drained of drains[name].splice(0)) drained();
+          }, 1);
+        }
         // Kept without the bytes: the harness must not hold the file either.
         side.sent.push(frame.t === "pf-data" ? { t: frame.t, id: frame.id, offset: frame.offset } : frame);
         if (frame.t === "pf-data") { outstanding = (frame.offset as number) + FILE_LIMITS.chunkBytes; }
@@ -122,6 +150,10 @@ function wire(options: { keepBytes?: boolean; drop?: (frame: Record<string, unkn
       openSource: async (record) => side.sources.get(record.id)!,
       changed: (record, transferred) => { side.records.set(`${record.direction}:${record.id}`, record); side.transferred.set(`${record.direction}:${record.id}`, transferred); },
       room: async () => 10 * 1024 ** 3,
+      ...(options.budget && options.writable && {
+        writable: () => queued[name] < options.budget! / 4 ? undefined
+          : (async () => { while (queued[name] >= options.budget! / 4) await new Promise<void>((resolve) => drains[name].push(resolve)); })(),
+      }),
     };
     side.files = new ChatFiles(host);
     side.files.restore(restored);
@@ -132,6 +164,7 @@ function wire(options: { keepBytes?: boolean; drop?: (frame: Record<string, unkn
   const w = {
     a: sides.a, b: sides.b,
     get maxOutstanding() { return maxOutstanding; },
+    refusals,
     attach() { open = true; sides.a.files.attach(); sides.b.files.attach(); },
     /** The session drops: both sides see it, and what was on the wire is lost. */
     drop() { open = false; inbox.a.length = inbox.b.length = 0; sides.a.files.detach(); sides.b.files.detach(); },
@@ -340,6 +373,130 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.b, "in", "restart2")).toBe("done");
   });
 
+  it("a channel with a small send budget (native, iroh) never freezes the sender: it waits for room, then goes on", async () => {
+    // What froze Miguel's Desktop app on 2026-09-27: a 115 KB voice note over iroh/1. The sixth data frame did not fit
+    // the 120 KiB budget, and the sender tried again in a loop of promises that never let the budget drain.
+    const w = wire({ keepBytes: true, budget: 120 * 1024, writable: true });
+    w.attach();
+    send(w, file("voice-115", 115_395));
+    await until(() => state(w.a, "out", "voice-115") === "done");
+    expect(state(w.b, "in", "voice-115")).toBe("done");
+    expect(Uint8Array.from(w.b.disks.get("voice-115")!.bytes!)).toEqual(pattern(0, 115_395));
+    expect(w.refusals.a).toBe(0);
+  });
+
+  it("a host that does not say when the channel has room: a refused frame is tried again later, not at once", async () => {
+    const w = wire({ budget: 120 * 1024 });
+    w.attach();
+    const size = 2 * 1024 * 1024 + 7;
+    send(w, file("budget-2", size));
+    await until(() => state(w.a, "out", "budget-2") === "done");
+    expect(state(w.b, "in", "budget-2")).toBe("done");
+    // One refusal per pause, each followed by a wait: nowhere near a loop.
+    expect(w.refusals.a).toBeGreaterThan(0);
+    expect(w.refusals.a).toBeLessThanOrEqual(Math.ceil(size / FILE_LIMITS.chunkBytes));
+  });
+
+  it("a pump waiting for room on a session that went does not keep the next session's transfer from going", async () => {
+    let stuck = true;
+    const w = wire({ budget: 120 * 1024, writable: true });
+    const host = (w.a.files as unknown as { host: ChatFilesHost }).host;
+    const writable = host.writable!;
+    // The first session's channel never drains: its pump waits for ever.
+    host.writable = () => (stuck ? new Promise<void>(() => {}) : writable());
+    w.attach();
+    send(w, file("wedged-1", 300_000));
+    await until(() => state(w.a, "out", "wedged-1") === "active");
+    w.drop();
+    stuck = false;
+    w.attach();
+    await until(() => state(w.a, "out", "wedged-1") === "done");
+    expect(state(w.b, "in", "wedged-1")).toBe("done");
+  });
+
+  it("Send again: a transfer that stopped moving is offered again, and goes on from the bytes the receiver holds", async () => {
+    let lose = true, lost = 0;
+    // Data past 1.5 MiB is lost (a session that stopped carrying it) until the test lets it through.
+    const w = wire({ drop: (frame, from) => {
+      if (!lose || from !== "a" || frame.t !== "pf-data" || (frame.offset as number) < 1.5 * 1024 * 1024) return false;
+      lost++;
+      return true;
+    } });
+    w.attach();
+    const size = 3 * 1024 * 1024 + 5;
+    send(w, file("stall-01", size));
+    let sent = -1;
+    await until(() => { const now = w.a.sent.length; const still = lost > 0 && now === sent; sent = now; return still; });
+    const had = w.b.disks.get("stall-01")!.length;
+    expect(had).toBeLessThan(size);
+    lose = false;
+    const sentBefore = w.a.sent.length;
+    expect(w.a.files.resend("stall-01")).toBe(true);
+    await until(() => state(w.a, "out", "stall-01") === "done");
+    // Done here means the receiver's SHA-256 of what it stored matched.
+    expect(state(w.b, "in", "stall-01")).toBe("done");
+    // Offered again under the same id; the receiver said where it stood, and nothing below that went again.
+    const after = w.a.sent.slice(sentBefore);
+    expect(after[0]).toMatchObject({ t: "pf-offer", id: "stall-01" });
+    expect(w.b.sent.filter((f) => f.t === "pf-accept").at(-1)!.offset).toBe(had);
+    expect(after.filter((f) => f.t === "pf-data" && (f.offset as number) < had)).toEqual([]);
+  });
+
+  it("Send again with no session: nothing goes now, and it is offered on the next session", async () => {
+    const w = wire();
+    send(w, file("offline1", 40_000));
+    expect(w.a.files.resend("offline1")).toBe(false);
+    w.attach();
+    await until(() => state(w.a, "out", "offline1") === "done");
+  });
+
+  it("Ask again: a file that stopped arriving is asked for from where it stands here", async () => {
+    let lose = true, lost = 0;
+    // Data past 1.5 MiB is lost (a session that stopped carrying it) until the test lets it through.
+    const w = wire({ drop: (frame, from) => {
+      if (!lose || from !== "a" || frame.t !== "pf-data" || (frame.offset as number) < 1.5 * 1024 * 1024) return false;
+      lost++;
+      return true;
+    } });
+    w.attach();
+    const size = 3 * 1024 * 1024 + 9;
+    send(w, file("ask-0001", size));
+    let sent = -1;
+    await until(() => { const now = w.a.sent.length; const still = lost > 0 && now === sent; sent = now; return still; });
+    const had = w.b.disks.get("ask-0001")!.length;
+    lose = false;
+    const asked = w.b.sent.length;
+    expect(w.b.files.request("ask-0001")).toBe(true);
+    await until(() => state(w.b, "in", "ask-0001") === "done");
+    expect(state(w.a, "out", "ask-0001")).toBe("done");
+    expect(w.b.sent.slice(asked).find((f) => f.t === "pf-accept")).toEqual({ t: "pf-accept", id: "ask-0001", offset: had });
+    // Nothing to ask for once it is here, or while the person still decides.
+    expect(w.b.files.request("ask-0001")).toBe(false);
+  });
+
+  it("nothing arriving and the sender not offering again: the receiver asks by itself after a quiet spell", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let lose = true, lost = 0;
+    // The sender's own offers again never arrive (an older app, one stuck): only the receiver can put them back in step.
+    // Data past 1.5 MiB is lost until the test lets it through.
+    const w = wire({ drop: (frame, from) => {
+      if (from !== "a") return false;
+      if (frame.t === "pf-offer") return w.a.sent.filter((f) => f.t === "pf-offer").length > 1;
+      if (lose && frame.t === "pf-data" && (frame.offset as number) >= 1.5 * 1024 * 1024) { lost++; return true; }
+      return false;
+    } });
+    w.attach();
+    send(w, file("nudge-01", 3 * 1024 * 1024));
+    // Until the sender has filled its window and waits: nothing moves on its own now.
+    let sent = -1;
+    await until(() => { const now = w.a.sent.length; const still = lost > 0 && now === sent; sent = now; return still; });
+    lose = false;
+    const accepts = w.b.sent.filter((f) => f.t === "pf-accept").length;
+    await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs + 10);
+    await until(() => state(w.a, "out", "nudge-01") === "done");
+    expect(w.b.sent.filter((f) => f.t === "pf-accept").length).toBeGreaterThan(accepts);
+  });
+
   it("a lost chunk (a transport switch) makes the receiver say where it stands, and the sender goes back", async () => {
     let lost = false;
     const w = wire({ keepBytes: true, drop: (frame) => {
@@ -495,6 +652,28 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
   });
 });
 
+describe("when a transfer counts as stuck", () => {
+  const at = 1_000_000;
+  const record = (over: Partial<FileTransferRecord>): FileTransferRecord => ({ id: "stuck-01", direction: "out", file: file("stuck-01", 1000), state: "active", confirmed: 0, since: 0, ...over });
+  it.each<[string, Partial<FileTransferRecord>, number, boolean, boolean]>([
+    ["moving", {}, at - 1_000, false, false],
+    ["quiet for the stall time", {}, at - FILE_LIMITS.stallMs, false, true],
+    ["kept from before a restart, not moved since", {}, at, true, true],
+    ["waiting for a session, quiet", { state: "queued" }, at - FILE_LIMITS.stallMs, false, true],
+    ["sent whole, the receiver never said it checked out", { state: "verifying" }, at - FILE_LIMITS.stallMs, false, true],
+    ["received whole and being checked here", { state: "verifying", direction: "in" }, at - FILE_LIMITS.stallMs, true, false],
+    ["the contact decides", { state: "asking" }, 0, true, false],
+    ["paused", { state: "paused", pausedBy: "peer" }, 0, true, false],
+    ["failed (it has Retry)", { state: "failed" }, 0, true, false],
+    ["done", { state: "done" }, 0, true, false],
+  ])("%s", (_, over, movedAt, restored, stuck) => {
+    expect(transferStalled(record(over), movedAt, restored, at)).toBe(stuck);
+  });
+  it("waits longer than the automatic offer again, so that goes first", () => {
+    expect(FILE_LIMITS.stallMs).toBeGreaterThan(FILE_LIMITS.idleMs);
+  });
+});
+
 /** 256 MiB in CI; `GHOSTLY_BIG_FILE_MB=1024` for the full gigabyte (about 45 s here). */
 describe("a large file, generated as it is read", () => {
   const SIZE = Number(process.env.GHOSTLY_BIG_FILE_MB ?? 256) * 1024 * 1024;
@@ -505,12 +684,18 @@ describe("a large file, generated as it is read", () => {
     w.attach();
     const digest = patternDigest(SIZE);
     send(w, file("gigabyte", SIZE), digest);
+    // What is held, not garbage not collected yet: that depends on when the collector runs (and on what the tests
+    // before this one left), and swung from 23 to 115 MiB between runs of the same code.
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    gc();
     const base = process.memoryUsage();
     let peak = 0;
     const sample = setInterval(() => {
+      gc();
       const m = process.memoryUsage();
       peak = Math.max(peak, m.heapUsed + m.arrayBuffers - base.heapUsed - base.arrayBuffers);
-    }, 20);
+    }, 250);
     try {
       await until(() => (w.b.transferred.get("in:gigabyte") ?? 0) > SIZE / 2, 240_000);
       w.drop();

@@ -1,5 +1,5 @@
 import { formatFileSize } from "./format";
-import type { FileTransferState } from "./platform";
+import type { FileAction, FileTransferState } from "./platform";
 import type { ChatFile } from "./types";
 
 /** "3 min left", "2 h 5 min left", "less than a minute left". */
@@ -29,6 +29,8 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, p
     case "paused": return `${transfer.pausedBy === "peer" ? `Paused by ${peerName}` : "Paused"} · ${done} of ${size}`;
     case "verifying": return `Checking the file… ${size}`;
   }
+  // Nothing moved for a while (or since the app started): said, so the person knows why "Send again" is there.
+  if (transfer.stalled) return `Not moving · ${done} of ${size}`;
   const parts = [`${done} of ${size}`];
   if (transfer.rate && transfer.rate > 0) {
     parts.push(`${formatFileSize(Math.round(transfer.rate))}/s`);
@@ -36,4 +38,15 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, p
     if (left) parts.push(left);
   }
   return parts.join(" · ");
+}
+
+/**
+ * What a stuck files/3 transfer offers its person: "Send again" (sending) or "Ask again" (receiving), with a one-line
+ * hint. Either goes on from what the receiver holds; null when it is moving, or waits for a person.
+ */
+export function stalledAction(transfer: FileTransferState | null): { action: Extract<FileAction, "resend" | "request">; label: string; hint: string } | null {
+  if (transfer?.state !== "transferring" || !transfer.stalled || !transfer.direction) return null;
+  return transfer.direction === "out"
+    ? { action: "resend", label: "Send again", hint: "Offers it again. It goes on from what your contact already has." }
+    : { action: "request", label: "Ask again", hint: "Asks your contact for the rest. What arrived stays." };
 }

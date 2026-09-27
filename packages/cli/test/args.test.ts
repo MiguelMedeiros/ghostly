@@ -38,6 +38,8 @@ describe("the argument parser", () => {
   it("names positionals, joins a trailing one, and says what is missing", () => {
     expect(positionals(COMMANDS["chat rename"], ["abc", "My", "bot"])).toEqual({ chat: "abc", name: "My bot" });
     expect(positionals(COMMANDS["chat rename"], ["abc"])).toEqual({ chat: "abc", name: undefined });
+    expect(COMMANDS["file resend"].params!({ positionals: [], options: {} }, positionals(COMMANDS["file resend"], ["c1-out-x"]))).toEqual({ file: "c1-out-x", action: "resend" });
+    expect(COMMANDS["file request"].params!({ positionals: [], options: {} }, positionals(COMMANDS["file request"], ["c1-in-y"]))).toEqual({ file: "c1-in-y", action: "request" });
     expect(() => positionals(COMMANDS["message delete"], ["abc"])).toThrow(/Missing <message>/);
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
   });

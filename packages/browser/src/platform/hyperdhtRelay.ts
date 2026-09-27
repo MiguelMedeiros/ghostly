@@ -146,6 +146,7 @@ class RelayedChannel implements FrameChannel {
     socket.on("drain", () => { this.pendingBytes = 0; });
   }
   get bufferedAmount(): number { return this.pendingBytes; }
+  readonly sendBudget = SEND_BUDGET;
   get onMessage() { return this.reader; }
   set onMessage(reader: FrameChannel["onMessage"]) {
     this.reader = reader;

@@ -1725,6 +1725,25 @@ export class GhostLink {
     if (!this.supportsLargeFiles || !this.channel) return false;
     try { this.channel.send(JSON.stringify(frame)); return true; } catch { return false; }
   }
+  /**
+   * Resolves once the open session can take another files/3 data frame; undefined when it can now. A channel with a send budget (native and
+   * iroh ones throw past 120 KiB) gives files a quarter of it, so a ping, a message or any other frame still fits
+   * while a file goes; others keep under the high water mark, as files/2 does.
+   */
+  filesWritable(): Promise<void> | undefined {
+    const channel = this.channel;
+    if (!channel) return;
+    const cap = channel.sendBudget ? channel.sendBudget / 4 : LIMITS.sendHighWaterMark;
+    // Room now: nothing to wait for, and nothing made for each frame of a large file.
+    if (channel.bufferedAmount < cap) return;
+    return (async () => {
+      while (this.channel === channel && channel.bufferedAmount >= cap) {
+        await channel.drained().catch(() => {});
+        // A drain that resolved above the cap (a low water mark higher than it) is not waited on in a loop of promises.
+        if (this.channel === channel && channel.bufferedAmount >= cap) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    })();
+  }
   /** What each side offers on the open session, for showing why something is unavailable. `peer` is null until it says. */
   get sessionOffers(): { mine: SessionCapability[]; peer: string[] | null } {
     const known = KNOWN_SESSION_CAPABILITIES;

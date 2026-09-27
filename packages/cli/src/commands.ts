@@ -198,6 +198,8 @@ export const COMMANDS: Record<string, Command> = {
   "file pause": { method: "file.action", usage: "file pause <chat> <file>", summary: "Pause a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "pause" }) },
   "file resume": { method: "file.action", usage: "file resume <chat> <file>", summary: "Resume a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resume" }) },
   "file cancel": { method: "file.action", usage: "file cancel <chat> <file>", summary: "Cancel a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "cancel" }) },
+  "file resend": { method: "file.action", usage: "file resend <file>", summary: "Send again a file that stopped moving or failed: it goes on from what the contact holds", args: ["file"], params: (_, a) => ({ file: a.file, action: "resend" }) },
+  "file request": { method: "file.action", usage: "file request <file>", summary: "Ask again for a file that stopped arriving: it goes on from what is here", args: ["file"], params: (_, a) => ({ file: a.file, action: "request" }) },
   "file save": {
     method: "file.save", usage: "file save <file> [--dir d | --path p] [--force]", summary: "Write a received file to disk (never over a file without --force)",
     args: ["file"], options: { dir: { type: "string", description: "Into this folder, under its own name" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" } },

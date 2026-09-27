@@ -101,6 +101,9 @@ export interface NetworkSettings {
   readRelays?: boolean;
 }
 
+/** What a person can do to a files/3 transfer: `resend` a stuck one they send, `request` again one they receive. */
+export type FileAction = "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request";
+
 export interface FileTransferState {
   state: "transferring" | "done" | "failed";
   transferred: number;
@@ -120,7 +123,11 @@ export interface FileTransferState {
   /** Receiving, `asking`: bytes this device can still take for files, when it says. */
   room?: number | null;
   /** Failed, and it can be sent again. */
-  retry?: boolean;
+  retry?: boolean;  /**
+   * files/3, unfinished and not moving for a while (or not since the app started): the sender can send it again
+   * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
+   */
+  stalled?: boolean;
 }
 
 export interface MintInfo {
@@ -429,8 +436,8 @@ export interface ServicesPlatform {
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   retryFile?(fileId: string): Promise<void>;
   getTransfer(fileId: string): FileTransferState | null;
-  /** files/3: answers an offer, or pauses, resumes or cancels a transfer. */
-  fileAction?(fileId: string, action: "accept" | "decline" | "pause" | "resume" | "cancel"): Promise<void>;
+  /** files/3: answers an offer, or pauses, resumes, cancels, sends again or asks again for a transfer. */
+  fileAction?(fileId: string, action: FileAction): Promise<void>;
   /** Why a file of this size cannot go to this contact now, or null when it can (checked before sending). */
   fileTooLarge?(peerPubKeyZ32: string, size: number): string | null;
   /** The file to show or save, backed by storage. Null when it is gone, or too large to hand out here (see `saveFile`). */
