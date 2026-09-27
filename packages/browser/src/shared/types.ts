@@ -851,6 +851,11 @@ export interface Settings {
    */
   publicProfiles?: boolean;
   /**
+   * Whether paired contacts are told when this profile is typing (WISP 401 § Typing). Absent means yes; off,
+   * nothing is said, and a contact's typing is still shown.
+   */
+  sendTyping?: boolean;
+  /**
    * Where items are held for away contacts (WISP 4xx): the profile's S3 storage and its random space
    * (WISP 1000/1002), as set up under Profile → Backups. Kept here for the peer, which may run outside the
    * page; never copied into a backup.
@@ -1085,6 +1090,8 @@ export interface LinkView {
   sessionOffers?: { mine: string[]; peer: string[] | null };
   /** Paired chats: why a call cannot be placed right now, or null when it can. */
   callsUnavailable?: string | null;
+  /** Paired 1:1 chats: the contact is typing now (`typing/1` on the live session). Absent otherwise. Never stored. */
+  peerTyping?: boolean;
   availableTransports?: PairedTransport[];
   /** Transports a session with this contact would cross a relay on (a browser's HyperDHT or Iroh): a fallback, and shown as relayed. */
   relayedTransports?: PairedTransport[];

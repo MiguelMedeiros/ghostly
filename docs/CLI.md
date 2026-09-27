@@ -92,6 +92,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 
 Main types: `message.received`, `message.delivery`, `chat.pairing`, `chat.connection`, `chat.joined`,
+`typing.started` and `typing.stopped`,
 `group.message` (with `mentioned`), `group.members`, `file.offered`, `file.done`, `payment.created`,
 `payment.updated`, `identity.received`, `call.offer`. The full list is in the
 [package README](../packages/cli/README.md#events).

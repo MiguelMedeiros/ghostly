@@ -58,6 +58,8 @@ ghostly send alice "Hello!"                        # a chat by name, id or id pr
 echo "multi-line text" | ghostly send alice --stdin
 ghostly send alice --wait delivered "Got it"       # waits for the contact's app to confirm
 ghostly send alice -- "-text that starts with a dash"
+ghostly typing alice                               # "typing…" on the contact's screen for 6 s; again while composing
+ghostly typing alice --stop                        # or just send: the message ends it
 ghostly chat history alice --limit 20              # oldest first
 ghostly chat list
 ```
@@ -75,7 +77,7 @@ ghostly listen --type message.received            # one JSON object per line, un
 - Dedupe on `id`. Resume after a restart with `--since <seq>`, or pass `--cursor <file>` and it remembers.
 - Useful types: `message.received`, `message.delivery`, `chat.created`, `chat.joined` (a contact arrived: not a
   message, do not answer it as one), `chat.connection`, `group.message` (with `message.mentioned: true` when it
-  names this bot), `group.members`.
+  names this bot), `group.members`, `typing.started` / `typing.stopped` (the contact is writing, or stopped).
 - Hooks: `--exec '<command>'` runs once per event with the event on **stdin** (never in arguments), in order;
   `--webhook http://127.0.0.1:<port>/…` POSTs each event to a local bridge.
 

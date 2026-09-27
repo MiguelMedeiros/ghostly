@@ -44,6 +44,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     sendMessage = vi.fn(async () => null);
     validateText = vi.fn(() => null);
     setCallSignal = vi.fn(async () => {});
+    setTyping = vi.fn();
     confirmPair = vi.fn(async () => {});
     peerAllowsPayment = vi.fn((m: string) => m === "cashu");
     allowsPayment = vi.fn(() => true);

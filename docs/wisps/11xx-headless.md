@@ -4,8 +4,8 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.6 |
-| Updated | 2026-09-26 |
+| Revision | 0.6.1 |
+| Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
@@ -85,7 +85,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 - `seq` grows by one per event in a profile, across restarts. `listen --since <seq>` replays what the journal still holds (the last 10,000 events) before following.
 - `id` is stable for the fact it reports: the same message received is the same id whenever the daemon derives it again, so a bot that restarts dedupes by `id`.
-- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.offer`; `events.gap` (a replay asked for more than the journal keeps). `file.offered`, `file.stage`, `file.done`, `file.failed` (transfers, by file id). `identity.received`, `identity.status`, `identity.approval`, `identity.progress`.
+- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `typing.started` and `typing.stopped` (the contact is writing, or stopped, [401](401-paired-chat.md#typing)); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.offer`; `events.gap` (a replay asked for more than the journal keeps). `file.offered`, `file.stage`, `file.done`, `file.failed` (transfers, by file id). `identity.received`, `identity.status`, `identity.approval`, `identity.progress`.
 - Which messages were reported is kept in the profile's own store (a database of the CLI's beside the engine's): a restart reports only what is new, a message that arrived while no process derived events (a crash) is reported at the next start, and a profile's first start reports none of the history it already had.
 - As the app's chat screen does, the side that joined says `👋 <name> joined` once the chat first goes live and the other side answers once; each is said once per chat, across restarts.
 - Hooks: `listen --exec "<command>"` runs the command once per event, in order, with the event on its stdin; `listen --webhook <url>` POSTs each event to a local bridge (loopback only); `listen --cursor <file>` records the last event handled (the acknowledgement), and a restarted listener resumes after it. With no daemon running, `listen` becomes the daemon, socket included, so a hook can answer with `ghostly send`.

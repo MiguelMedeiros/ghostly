@@ -4,11 +4,11 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.5.1 |
+| Revision | 0.6 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
-| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`) and `files/3` on the live session. |
+| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3` and the typing indicator (`typing/1`) on the live session. |
 | Summary | The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT. |
 | Availability | Available |
 | Notes | Every new chat on web, desktop and extension, calls included while it is live. |
@@ -79,16 +79,27 @@ These are not in the offer's `capabilities`, which are full at 16 for older apps
 
 Both need a live session. On the DHT ([403](403-dht-text.md)), or while connecting, there is no call and no shared app, and an app SHOULD say so where the action is ("Calls need a live connection"), and why when the contact's app is the reason.
 
+### Typing
+
+A contact can see that the other side is writing (revision 0.6). Both sides list `typing/1` in `paired-capabilities`; then either side may send `{"t":"paired-typing","s":"start"}` and `{"t":"paired-typing","s":"stop"}` on this session. It is presence, not a message: it carries no message ID (older apps drop it), is never stored, never counted as unread, never held ([4xx](4xx-store-and-forward.md)) and never sent on the DHT ([403](403-dht-text.md)). While the session is down there is no typing indicator. A side that does not offer `typing/1`, or whose contact does not, sends none.
+
+The writer sends `start` when a keystroke leaves text in the composer, again at most every 3 seconds while the typing goes on, and `stop` once, after a `start`, when the text is cleared, the message is sent, the chat is left, the app goes to the background, or nothing was typed for 5 seconds. The reader shows the contact typing from a `start` until a `stop`, a message from that contact, the end of the session, or 6 seconds with no new `start`, so a dropped link never leaves it showing. A reader MUST ignore a frame whose `s` is anything else, and SHOULD drop typing frames past a small rate (Ghostly: 8 in 10 seconds). The frame counts only on the authenticated session with the pinned contact ([400](400-chat.md) requirement 8): a connection that has not authenticated as that key never reaches it.
+
+Each local profile ([04](04-profiles.md)) decides whether contacts are told (on by default; Settings, "Send typing indicator"). Off, it sends no `start`, ends any standing one with a `stop`, and still shows its contacts' typing: the choice is about what this side says, not what it hears.
+
+Groups ([900](900-group-sessions.md)) do not carry it yet. A mesh group would send one frame per member edge for every refresh, and a community's typing would tell every member, most of them strangers, when each person is present; both need their own decision on cost and privacy.
+
 ## Runtime boundary and compatibility
 
 First contact runs on the DHT and on a stream in parallel, and native transports are tried from their descriptors in the capability record ([100](100-transports.md)). Compatibility chats use [402](402-legacy-chat.md) and never this session. DHT text uses [403](403-dht-text.md), preserving conversation/history without treating DHT as a stream adapter. Files and payments are negotiated in the offer; calls and shared apps after it ([above](#calls-and-shared-apps)).
 
 ## Evidence and checks
 
-[Paired implementation profile](PAIRED-CHAT-INCREMENT.md), [paired session](../../packages/core/src/pairedSession.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [durable outbox](../../packages/browser/src/engine/outbox.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [paired calls](../../packages/core/src/pairedCalls.ts). Exercise commit-before-ack, duplicate IDs, disconnect before receipt, restart, adapter switch and unsupported capability rejection.
+[Paired implementation profile](PAIRED-CHAT-INCREMENT.md), [paired session](../../packages/core/src/pairedSession.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [durable outbox](../../packages/browser/src/engine/outbox.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [paired calls](../../packages/core/src/pairedCalls.ts), [typing](../../packages/core/src/pairedTyping.ts). Exercise commit-before-ack, duplicate IDs, disconnect before receipt, restart, adapter switch and unsupported capability rejection.
 
 ## Revision log
 
+- 0.6 (2026-09-27): the typing indicator, `typing/1` and `paired-typing` on the live session only, 1:1 chats.
 - 0.5.1 (2026-09-27): Desktop on Linux offers `calls/1` too, with its own call media (#331).
 - 0.5 (2026-09-25): link previews (`pv` on `paired-message`), made by the sender and never fetched by the reader.
 - 0.4 (2026-09-25): `files/3` announced in `paired-capabilities` too ([501](501-paired-files.md) 0.3).

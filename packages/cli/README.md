@@ -82,6 +82,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `chat list`, `chat show <chat>` | Chats, and one chat's connection: transports, last attempt, comparison code |
 | `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
 | `send <chat> [text…] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin) |
+| `typing <chat> [--stop]` | Show the contact you are writing: live chats only, it holds 6 s there, so say it again every few seconds; `send` or `--stop` ends it |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat connect <chat>`, `chat disconnect <chat>` | Reconnect now; close the live session |
@@ -118,7 +119,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
 | `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
 | `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
-| `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, … |
+| `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 
 Arguments: an option's value is taken as is, even when it starts with `-`. A positional that starts with `-` is
@@ -169,7 +170,7 @@ refused without it.
 - `seq` grows by one per event in the profile, across restarts; `id` is the same whenever the same fact is reported.
   Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled.
 - Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,
-  waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `chat.joined` (the contact's app
+  waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
   announced itself; not a message), `chat.announced`, `message.received`, `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.deleted`, `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.message` (`message.mentioned` when it names this

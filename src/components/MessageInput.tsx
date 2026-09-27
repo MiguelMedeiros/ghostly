@@ -72,6 +72,8 @@ interface MessageInputProps {
   mentions?: ComposerMentions;
   /** A link in the draft gets a preview made here, sent with the message (a paired chat, with the setting on). */
   linkPreviews?: boolean;
+  /** Typing (a paired chat): true on a keystroke that leaves text, false when the text is cleared or sent. */
+  onTyping?: (typing: boolean) => void;
 }
 
 const DEFAULT_MAX = 500;
@@ -100,6 +102,7 @@ export function MessageInput({
   paymentsUnavailable,
   recipient,
   linkPreviews = false,
+  onTyping,
 }: MessageInputProps) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -169,6 +172,7 @@ export function MessageInput({
     } else {
       picker.reset();
       linkPreview.reset();
+      onTyping?.(false);
       setText("");
       if(draftId) setSessionDraft(draftId, "");
       if (textareaRef.current) {
@@ -189,6 +193,7 @@ export function MessageInput({
     const value = e.target.value;
     if (value.length <= Math.max(maxLength, 16_384)) {
       setText(value);
+      onTyping?.(value.trim() !== "");
       picker.onCaret();
     } else if (value.length - text.length > 1) {
       showToast(
@@ -210,6 +215,7 @@ export function MessageInput({
     if (next.length > Math.max(maxLength, 16_384)) return;
     caretRef.current = start + emoji.length;
     setText(next);
+    onTyping?.(true);
     // On a phone the keyboard would cover the panel: the field takes the focus only on a wide screen.
     if (!phone) input?.focus({ preventScroll: true });
   };

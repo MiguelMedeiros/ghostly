@@ -38,7 +38,8 @@ import { EXPECT_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type P
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { TYPING_FRAME, TypingReceiver, TypingSender } from "./pairedTyping";
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { traceLink } from "./linkTrace";
@@ -220,6 +221,8 @@ export interface GhostLinkEvents {
   onHold?(state: { peerAllows: boolean; peerTop?: number }): void | Promise<void>;
   onPeerAck?(ackTimestamp: number): void;
   onCallSignal?(signal: string): void;
+  /** The contact started or stopped typing (`typing/1`, WISP 401 § Typing); only changes, never stored. */
+  onPeerTyping?(typing: boolean): void;
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -289,6 +292,8 @@ export interface GhostLinkOptions {
   servicesSupport?: boolean;
   /** Offer `files/3` on paired sessions: files of any size, offered, resumed and checked (`chatFiles.ts`). */
   largeFilesSupport?: boolean;
+  /** Offer `typing/1` on paired sessions: say and show when either side is writing (1:1 chats, not group edges). */
+  typingSupport?: boolean;
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -409,6 +414,9 @@ export class GhostLink {
   /** What each side announced after the handshake (`paired-capabilities`): calls, services. */
   private readonly sessionCapabilities = new SessionCapabilities(() => this.offeredCapabilities());
   private readonly pairedCalls = new PairedCalls();
+  /** Typing on this session (`typing/1`): when to say `start` again, and the contact's word with its timeout. */
+  private readonly typingSender = new TypingSender();
+  private readonly typingReceiver = new TypingReceiver(typing => this.options.events?.onPeerTyping?.(typing));
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   /** When the ping awaiting its pong went, and the round trip last measured on this session. */
@@ -1672,6 +1680,7 @@ export class GhostLink {
     if (this.options.callsSupport) offered.push(CALLS_CAPABILITY);
     if (this.options.servicesSupport) offered.push(SERVICES_CAPABILITY);
     if (this.options.largeFilesSupport) offered.push(FILES_CAPABILITY);
+    if (this.options.typingSupport) offered.push(TYPING_CAPABILITY);
     return offered;
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
@@ -1680,6 +1689,20 @@ export class GhostLink {
   get supportsServices(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(SERVICES_CAPABILITY); }
   /** Both sides offer `files/3` on the open session: files of any size, offered and resumed. */
   get supportsLargeFiles(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(FILES_CAPABILITY); }
+  /** Both sides offer `typing/1` on the open session: typing can be said and shown. */
+  get supportsTyping(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(TYPING_CAPABILITY); }
+  /** The contact is typing now, as it said on this session. */
+  get peerTyping(): boolean { return this.typingReceiver.peerTyping; }
+  /**
+   * This side is typing (true) or stopped (false). Said only on the live session and only when both sides offer
+   * `typing/1`; never on the DHT. A `start` goes at most every few seconds, a `stop` only after a `start`.
+   */
+  setTyping(typing: boolean): void {
+    if (!this.options.params.profile) return;
+    const frame = typing ? (this.supportsTyping ? this.typingSender.typing() : null) : this.typingSender.stopped();
+    if (!frame || !this.channel || !this.supportsTyping) return;
+    try { this.channel.send(JSON.stringify(frame)); } catch { /* the session is going; the contact's timeout ends it */ }
+  }
   /** Whether files/3 was agreed on the session open now; kept to say when that changes. */
   private filesOpen = false;
   private emitFilesSession(again = false): void {
@@ -1695,7 +1718,7 @@ export class GhostLink {
   }
   /** What each side offers on the open session, for showing why something is unavailable. `peer` is null until it says. */
   get sessionOffers(): { mine: SessionCapability[]; peer: string[] | null } {
-    const known = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY] as const;
+    const known = KNOWN_SESSION_CAPABILITIES;
     return { mine: this.offeredCapabilities(),
       peer: this.isDataLinkOpen && this.sessionCapabilities.peerAnnounced ? known.filter(c => this.sessionCapabilities.peerOffers(c)) : null };
   }
@@ -1721,6 +1744,7 @@ export class GhostLink {
       const pending = this.pairedCalls.pending();
       if (pending) try { this.channel.send(JSON.stringify(pending)); } catch { /* the next session */ }
     }
+    if (changed.includes(TYPING_CAPABILITY) && !this.supportsTyping) { this.typingSender.reset(); this.typingReceiver.clear(); }
     this.emitPairingState();
   }
   /** Both sides announced groups on this session and it is open. */
@@ -1909,6 +1933,7 @@ export class GhostLink {
           this.peerPaymentMethods = null; this.peerNetworks = null;
           this.peerHoldOverride = null;
           this.sessionCapabilities.reset();
+          this.typingSender.reset(); this.typingReceiver.clear();
           this.pairedHttp?.close();
           this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch);
           this.emitPairingState();
@@ -2003,6 +2028,11 @@ export class GhostLink {
             if (changed) this.sessionCapabilitiesChanged(changed);
             return;
           }
+          if (frame?.t === TYPING_FRAME) {
+            // Only on the authenticated session with the pinned contact, and only once both said typing/1.
+            if (this.supportsTyping) this.typingReceiver.receive(frame);
+            return;
+          }
           if (frame?.t === PAIRED_CALL_FRAME) {
             const signal = this.supportsCalls ? parsePairedCallFrame(frame) : null;
             if (signal) this.options.events?.onCallSignal?.(signal);
@@ -2066,6 +2096,8 @@ export class GhostLink {
             typeof frame.ts === "number" && Number.isSafeInteger(frame.ts) && frame.ts > 0) {
             // A bad preview is dropped, never the message (older apps ignore `pv` altogether).
             const preview = frame.pv === undefined ? undefined : parseLinkPreview(frame.pv, frame.m);
+            // What the contact was typing arrived: it is not typing any more.
+            this.typingReceiver.clear();
             await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }) });
             if (this.channel === channel && this.isDataLinkOpen)
               channel.send(JSON.stringify({ t: "paired-received", id: frame.id }));
@@ -2195,6 +2227,7 @@ export class GhostLink {
     this.peerServicesOverride = null;
     this.peerNickOverride = null;
     this.sessionCapabilities.reset();
+    this.typingSender.reset(); this.typingReceiver.clear();
     this.emitFilesSession();
     if (this.peerGroupVersions) { this.peerGroupVersions = null; this.options.events?.onGroupsSupport?.(false); }
     this.session.setDataLinkOpen(false);

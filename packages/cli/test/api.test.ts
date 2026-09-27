@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
-// covers: headless.api, headless.engine-passthrough, headless.secret-guard
+// covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
 const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", ...fields }) as unknown as LinkView;
@@ -26,6 +26,7 @@ function fake(messages: StoredMessage[] = []) {
     payRequest: vi.fn(async () => undefined),
     storeMessage: vi.fn(),
     updateSettings: vi.fn(async () => undefined),
+    setTyping: vi.fn(),
   };
   const ctx = {
     runtime: { server: { node }, paths: { name: "default" } },
@@ -54,6 +55,15 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.send", { chat: "Alice", text: "hi" })).toEqual({ chat: "chat-one", messageId: "me_1", delivery: "sending" });
     await callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow", force: true });
     expect(node.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("typing tells the engine this side writes, or stopped, and says whether the chat is live", async () => {
+    const { ctx, node } = fake();
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, live: false, sendTyping: true });
+    expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: true });
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice", stop: true })).toMatchObject({ typing: false });
+    expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: false });
+    await expect(callApi(ctx, "chat.typing", { chat: "zed" })).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("send waits for the delivery it was asked for, and fails with the engine's words", async () => {

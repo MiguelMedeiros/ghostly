@@ -1353,6 +1353,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!trimmed) return { error: null };
 
     const timestamp = params.timestamp ?? Date.now();
+    // Sent: whatever this side was typing is done (the contact clears it on the message too).
+    if (live.stored.profile) live.link.setTyping(false);
     if (live.stored.profile) return this.sendChatText(live, trimmed, timestamp, params.preview === undefined ? undefined : parseLinkPreview(params.preview, trimmed));
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
     // What the DHT cannot carry is refused before it is kept: it must not show as sent.
@@ -2016,6 +2018,13 @@ export class GhostlyNode implements EngineImplementation {
 
   setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): void {
     void this.links.get(linkId)?.link?.setCallSignal(signal);
+  }
+
+  /** WISP 401 § Typing: a `stop` always goes (when a `start` stands); a `start` only while the setting is on. */
+  setTyping({ linkId, typing }: { linkId: string; typing: boolean }): void {
+    const live = this.links.get(linkId);
+    if (!live?.stored.profile || live.stored.group) return;
+    live.link?.setTyping(typing === true && this.settings.sendTyping !== false);
   }
 
   setFastPoll({ linkId, fast }: { linkId: string; fast: boolean }): void {
@@ -2691,6 +2700,13 @@ export class GhostlyNode implements EngineImplementation {
       if (settings.shareProfile !== false) delete this.settings.shareProfile;
       await db.putSettings(this.settings);
     }
+    // Send typing indicator: absent means on; turned off, a `start` standing anywhere is ended now.
+    if (settings.sendTyping !== undefined) {
+      if (settings.sendTyping !== false) delete this.settings.sendTyping;
+      else this.settings.sendTyping = false;
+      await db.putSettings(this.settings);
+      if (settings.sendTyping === false) for (const live of this.links.values()) live.link?.setTyping(false);
+    }
     // Load public profiles: absent means on; turned off, nothing read before is kept.
     if (settings.publicProfiles !== undefined) {
       if (settings.publicProfiles !== false) delete this.settings.publicProfiles;
@@ -2973,6 +2989,8 @@ export class GhostlyNode implements EngineImplementation {
       callsSupport: this.options.callsSupport ?? typeof RTCPeerConnection !== "undefined",
       callsMissing: this.options.callsUnavailable,
       largeFilesSupport: true,
+      // 1:1 chats only: group edges (startEdge) never offer it.
+      typingSupport: true,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
@@ -3153,6 +3171,8 @@ export class GhostlyNode implements EngineImplementation {
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
+        // Presence, not a message: only the state shows it, nothing is stored or counted.
+        onPeerTyping: () => this.emitState(),
         // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
         onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
         onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),
@@ -3419,6 +3439,7 @@ export class GhostlyNode implements EngineImplementation {
       groups: live.link?.groupsSupport ?? false,
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
       callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
+      ...(stored.profile && !stored.group && live.link?.peerTyping ? { peerTyping: true } : {}),
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,

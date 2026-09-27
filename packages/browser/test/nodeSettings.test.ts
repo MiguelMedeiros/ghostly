@@ -5,7 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
-// covers: settings.nickname, settings.network.relays, settings.network.turn, app.offline-switch, delivery.hold.enable, transport.preference, payments.chat.methods, chats.list.rename, chats.list.delete, chat.paired.delete-message, services.share, services.stop
+// covers: settings.nickname, settings.network.relays, settings.network.turn, app.offline-switch, delivery.hold.enable, transport.preference, payments.chat.methods, chats.list.rename, chats.list.delete, chat.paired.delete-message, services.share, services.stop, settings.send-typing, chat.typing
 
 /** A connected contact: what the engine calls on it, recorded. */
 function stubLink(overrides: Record<string, unknown> = {}) {
@@ -16,7 +16,7 @@ function stubLink(overrides: Record<string, unknown> = {}) {
     allowsPayment: vi.fn(() => true), paymentEnabled: vi.fn(() => true),
     setDeliveryMode: vi.fn(async () => {}), setTransportPreference: vi.fn(async () => {}), setPaymentMethods: vi.fn(),
     setHoldSupport: vi.fn(), setNick: vi.fn(), setAvatar: vi.fn(), refreshServices: vi.fn(async () => {}),
-    stop: vi.fn(async () => {}), wake: vi.fn(), session,
+    stop: vi.fn(async () => {}), wake: vi.fn(), setTyping: vi.fn(), session,
     request: vi.fn(async () => ({ status: 200 })), sendMessage: vi.fn(async () => null),
     ...overrides,
   };
@@ -122,6 +122,48 @@ describe("settings", () => {
     expect(groupsHost.myNick()).toBe("Ghost 2");
     // On is the default: it is not stored.
     expect(await db.getSettings()).not.toHaveProperty("shareProfile");
+  });
+
+  it("typing: said while Send typing indicator is on, only a stop once it is off; the switch is stored only when off", async () => {
+    const { node } = engine();
+    const link = stubLink();
+    const chat = await addChat(node, link);
+    node.setTyping({ linkId: chat.id, typing: true });
+    expect(link.setTyping).toHaveBeenLastCalledWith(true);
+    await node.updateSettings({ settings: { sendTyping: false } });
+    // Turning it off ends what stands at once.
+    expect(link.setTyping).toHaveBeenLastCalledWith(false);
+    expect((await db.getSettings()).sendTyping).toBe(false);
+    link.setTyping.mockClear();
+    node.setTyping({ linkId: chat.id, typing: true });
+    expect(link.setTyping.mock.calls).toEqual([[false]]);
+    await node.updateSettings({ settings: { sendTyping: true } });
+    expect(await db.getSettings()).not.toHaveProperty("sendTyping");
+    node.setTyping({ linkId: chat.id, typing: true });
+    expect(link.setTyping).toHaveBeenLastCalledWith(true);
+  });
+
+  it("typing: sending a message ends it; a group edge or an unknown chat is never told", async () => {
+    const { node } = engine();
+    const link = stubLink();
+    const chat = await addChat(node, link);
+    node["sendChatText"] = vi.fn(async () => ({ error: null })) as never;
+    await node.sendMessage({ linkId: chat.id, text: "hi" });
+    expect(link.setTyping).toHaveBeenLastCalledWith(false);
+    const edge = stubLink();
+    const group = await addChat(node, edge, { group: { id: "g", role: "member" } as never });
+    node.setTyping({ linkId: group.id, typing: true });
+    node.setTyping({ linkId: "nope", typing: true });
+    expect(edge.setTyping).not.toHaveBeenCalled();
+  });
+
+  it("typing: the chat shows the contact typing only while its link says so", async () => {
+    const { node } = engine();
+    const link = stubLink({ peerTyping: false });
+    const chat = await addChat(node, link);
+    expect(node.getState().links.find(l => l.id === chat.id)?.peerTyping).toBeUndefined();
+    link.peerTyping = true;
+    expect(node.getState().links.find(l => l.id === chat.id)?.peerTyping).toBe(true);
   });
 
   it("removing the held-message storage removes it from the saved settings", async () => {

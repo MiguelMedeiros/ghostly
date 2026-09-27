@@ -79,6 +79,10 @@ export const COMMANDS: Record<string, Command> = {
     options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { chat }) => ({ chat, yes: options.yes === true }),
   },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
+  "typing": {
+    method: "chat.typing", usage: "typing <chat> [--stop]", summary: "Show the contact you are writing (live chats; again every few seconds, send or --stop ends it)", args: ["chat"],
+    options: { stop: { type: "boolean", description: "Say you stopped" } }, params: ({ options }, { chat }) => ({ chat, stop: options.stop === true }),
+  },
   "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "chat disconnect": { method: "chat.disconnect", usage: "chat disconnect <chat>", summary: "Close a chat's live session", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "chat verify": {
