@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-call-accept"
+description = "Enables the native_call_accept command without any pre-configured scope."
+commands.allow = ["native_call_accept"]
+
+[[permission]]
+identifier = "deny-native-call-accept"
+description = "Denies the native_call_accept command without any pre-configured scope."
+commands.deny = ["native_call_accept"]

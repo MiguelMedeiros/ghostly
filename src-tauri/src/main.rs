@@ -14,6 +14,7 @@ mod hyperdht;
 mod link_preview;
 mod lnd;
 mod local_fetch;
+mod native_call;
 mod notifications;
 mod oidc;
 mod paired_transport;
@@ -110,6 +111,17 @@ macro_rules! commands {
             file_store::file_bytes_remove_where,
             file_store::file_bytes_room,
             file_store::file_bytes_save,
+            native_call::native_call_support,
+            native_call::native_camera_open,
+            native_call::native_camera_close,
+            native_call::native_call_open,
+            native_call::native_call_offer,
+            native_call::native_call_answer,
+            native_call::native_call_accept,
+            native_call::native_call_mute,
+            native_call::native_call_camera,
+            native_call::native_call_stats,
+            native_call::native_call_close,
         ]
     };
 }
@@ -280,13 +292,18 @@ mod tests {
         // Past what one `json!` expands.
         arguments["relays"] = serde_json::json!([]);
         arguments["readRelays"] = serde_json::json!(false);
+        arguments["frames"] = serde_json::json!("__CHANNEL__:1");
+        arguments["offer"] = serde_json::json!("x");
+        arguments["answer"] = serde_json::json!("x");
+        arguments["muted"] = serde_json::json!(false);
+        arguments["camera"] = serde_json::json!(null);
         arguments
     }
 
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 58, "{declared:?}");
+        assert_eq!(declared.len(), 69, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

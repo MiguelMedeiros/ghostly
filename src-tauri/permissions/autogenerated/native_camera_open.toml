@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-camera-open"
+description = "Enables the native_camera_open command without any pre-configured scope."
+commands.allow = ["native_camera_open"]
+
+[[permission]]
+identifier = "deny-native-camera-open"
+description = "Denies the native_camera_open command without any pre-configured scope."
+commands.deny = ["native_camera_open"]

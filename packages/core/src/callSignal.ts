@@ -43,6 +43,19 @@ export type CallEventType =
   | "call_missed"
   | "call_rejected";
 
+/**
+ * Where a call's media comes from: the browser's own WebRTC and capture, or a stand-in with the same shape.
+ * Ghostly Desktop on Linux brings one: WebKitGTK has no WebRTC there, so GStreamer runs the call (WISP 601).
+ */
+export interface CallMedia {
+  createPeerConnection(config: RTCConfiguration): RTCPeerConnection;
+  getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
+  /** Left out where the screen cannot be shared. */
+  getDisplayMedia?(options: DisplayMediaStreamOptions): Promise<MediaStream>;
+  /** Why the screen cannot be shared, where it cannot: the call window shows it on the share button, turned off. */
+  screenUnavailable?: string;
+}
+
 export function compressSdp(sdp: string): string {
   return btoa(sdp);
 }

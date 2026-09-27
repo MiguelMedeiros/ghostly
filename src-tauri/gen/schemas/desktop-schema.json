@@ -309,6 +309,72 @@
           "markdownDescription": "Enables the local_fetch command without any pre-configured scope."
         },
         {
+          "description": "Enables the native_call_accept command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-accept",
+          "markdownDescription": "Enables the native_call_accept command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_answer command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-answer",
+          "markdownDescription": "Enables the native_call_answer command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_camera command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-camera",
+          "markdownDescription": "Enables the native_call_camera command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-close",
+          "markdownDescription": "Enables the native_call_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_mute command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-mute",
+          "markdownDescription": "Enables the native_call_mute command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_offer command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-offer",
+          "markdownDescription": "Enables the native_call_offer command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-open",
+          "markdownDescription": "Enables the native_call_open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-stats",
+          "markdownDescription": "Enables the native_call_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_support command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-support",
+          "markdownDescription": "Enables the native_call_support command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_camera_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-camera-close",
+          "markdownDescription": "Enables the native_camera_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_camera_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-camera-open",
+          "markdownDescription": "Enables the native_camera_open command without any pre-configured scope."
+        },
+        {
           "description": "Enables the native_notification_permission command without any pre-configured scope.",
           "type": "string",
           "const": "allow-native-notification-permission",
@@ -655,6 +721,72 @@
           "type": "string",
           "const": "deny-local-fetch",
           "markdownDescription": "Denies the local_fetch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_accept command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-accept",
+          "markdownDescription": "Denies the native_call_accept command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_answer command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-answer",
+          "markdownDescription": "Denies the native_call_answer command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_camera command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-camera",
+          "markdownDescription": "Denies the native_call_camera command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-close",
+          "markdownDescription": "Denies the native_call_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_mute command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-mute",
+          "markdownDescription": "Denies the native_call_mute command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_offer command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-offer",
+          "markdownDescription": "Denies the native_call_offer command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-open",
+          "markdownDescription": "Denies the native_call_open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-stats",
+          "markdownDescription": "Denies the native_call_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_support command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-support",
+          "markdownDescription": "Denies the native_call_support command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_camera_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-camera-close",
+          "markdownDescription": "Denies the native_camera_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_camera_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-camera-open",
+          "markdownDescription": "Denies the native_camera_open command without any pre-configured scope."
         },
         {
           "description": "Denies the native_notification_permission command without any pre-configured scope.",

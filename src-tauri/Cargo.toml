@@ -43,6 +43,15 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net"] }
 # A Mainline DHT of a few nodes on this machine, for the DHT-direct tests.
 mainline = "8"
 
+# Calls on Linux (src/native_call), whose WebKitGTK is built without WebRTC: WebRTC in Rust, media in GStreamer.
+[target.'cfg(target_os = "linux")'.dependencies]
+gstreamer = "0.25"
+gstreamer-app = "0.25"
+webrtc = "0.21"
+rtc = "0.21"
+async-trait = "0.1"
+bytes = "1"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3"

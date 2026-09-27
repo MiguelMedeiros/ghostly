@@ -3,6 +3,7 @@ import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
 import type { AtprotoHost } from "./proofs/atproto/oauth";
+import type { CallMedia } from "@ghostly/core";
 
 /**
  * What differs between the places this peer runs. The extension keeps the
@@ -64,6 +65,11 @@ export interface BrowserHost {
    * extension); the desktop app reads natively because WKWebView asks for a second click.
    */
   readClipboardText?(): Promise<string>;
+  /**
+   * Where calls get their media, when not from the page's own WebRTC. Ghostly Desktop on Linux: WebKitGTK has
+   * no WebRTC there, and GStreamer runs the calls. Left out where the page has it.
+   */
+  callMedia?: CallMedia;
   /** Signing in with an OpenID Connect provider for an identity proof. Left out where the platform cannot. */
   oidc?: OidcHost;
   /** Signing in to the person's AT Protocol server (Bluesky or another PDS) for an identity proof. Left out where the platform cannot. */

@@ -61,6 +61,17 @@ const COMMANDS: &[&str] = &[
     "file_bytes_remove_where",
     "file_bytes_room",
     "file_bytes_save",
+    "native_call_support",
+    "native_camera_open",
+    "native_camera_close",
+    "native_call_open",
+    "native_call_offer",
+    "native_call_answer",
+    "native_call_accept",
+    "native_call_mute",
+    "native_call_camera",
+    "native_call_stats",
+    "native_call_close",
 ];
 
 fn main() {

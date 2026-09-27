@@ -417,6 +417,8 @@ export interface ServicesPlatform {
    * `readClipboardText` in `clipboard.ts`, which picks the way and checks the click.
    */
   readClipboardText(): Promise<string> | null;
+  /** Where calls get their media, when not from the page's own WebRTC (Ghostly Desktop on Linux). Null: the page's. */
+  callMedia?(): import("@ghostly/core").CallMedia | null;
   /** Largest file that can be sent, in bytes. */
   maxFileBytes: number;
   /**
