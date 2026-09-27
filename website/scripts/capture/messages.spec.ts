@@ -13,7 +13,7 @@ import { CAST, chat, go, pair, person, say, sceneImage, shot, toBottom, type Pee
 /** `from` sends `text`; `to` shows `seen` (the text as drawn: marks and links turn into formatting and cards). */
 async function send(from: Peer, to: Peer, text: string, seen: string) {
   await say(from, text);
-  await expect(chat(to).getByTestId("message-text").filter({ hasText: seen }).last()).toBeVisible({ timeout: 60_000 });
+  await expect(chat(to).locator("[data-message-row]").filter({ hasText: seen }).last()).toBeVisible({ timeout: 60_000 });
 }
 
 const ARTICLE = "https://gazette.example/old-house-by-the-lake";

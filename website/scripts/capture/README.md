@@ -39,6 +39,7 @@ funded is reported and shot as the app shows it.
 | Spec | Shots | Section |
 | --- | --- | --- |
 | `chat.spec.ts` | `chat`, `file` (desktop and `-mobile`) | Home, "Say it your way" and "Send the actual thing": Boo's chats with four friends, the one with Casper open, then a photo |
+| `messages.spec.ts` | `messages`, `messages-mobile` | "Paste it. See it.": Casper's formatted text, a link with the preview his app made (a `.example` page answered inside his browser only), an invite card and a `bitcoin:` request, from Boo's side |
 | `calls.spec.ts` | `call`, `call-mobile` | "Be a little closer": an audio call (a legacy chat, the only kind that rings) |
 | `sats.spec.ts` | `sats`, `sats-mobile` | "A little thank-you": eight wallets funded, 2,100 sats received in the chat, a request paid over Ark, the payment deck open |
 | `services.spec.ts` | `services-chat`, `services-mobile` | "Made here. Open there.": a photo gallery on Boo's computer shared with Casper in the extension; the phone shows what sharing needs |
