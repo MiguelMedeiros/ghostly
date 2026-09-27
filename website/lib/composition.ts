@@ -121,7 +121,7 @@ export const BLOCKS: Block[] = [
 /** What the headless `ghostly` CLI runs (docs/wisps/11xx-headless.md, "Parity with the app"). */
 const CLI_BLOCKS = [
   "core", "keys", "invite", "ghostly1", "caps", "webrtc", "iroh", "hyperdht", "dhttext", "chat", "paired", "onechat", "files",
-  "cashu", "lightning", "lnproviders", "lnurl", "onchain", "arkade", "spark", "usdt", "testnet",
+  "cashu", "lightning", "lnurl", "onchain", "arkade", "spark", "usdt", "testnet",
   "proofs", "nostr", "proofkinds", "did", "pubky", "http", "profiles", "backups", "groups", "headless",
 ];
 

@@ -268,7 +268,7 @@ const en = {
       { name: "Host / open a local app", cells: [null, A, A, A] },
       { name: "A wallet per network, real money confirmed first", cells: [A, A, A, A] },
       { name: "Cashu & Lightning, several Lightning cards", cells: [A, A, A, A] },
-      { name: "Your own Lightning source (NWC, LND, CLN, WebLN, Breez, Fedimint)", cells: [A, A, A, A] },
+      { name: "Your own Lightning source (NWC, LND, CLN, WebLN, Breez, Fedimint)", cells: [A, A, A, null] },
       { name: "Lightning addresses, paying from another wallet", cells: [A, A, A, A] },
       { name: "Arkade, Spark & USDT wallets", cells: [A, A, A, A] },
       { name: "Bark & Fedimint wallets", cells: [A, A, A, null] },
