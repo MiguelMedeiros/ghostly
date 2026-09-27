@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } f
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
-import { chatJson, groupJson, messageJson } from "./views";
+import { chatJson, groupJson, groupMessageJson, messageJson } from "./views";
 import { paymentJson } from "./wallets";
 
 /**
@@ -295,7 +295,7 @@ export class EventHub {
       known.set(message.id, state);
       changes.push([message.id, state]);
       if (quiet) continue;
-      const json = messageJson(message);
+      const json = group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : messageJson(message);
       if (before === undefined) {
         if (group) {
           const type = message.event ? "group.event" : message.sender === "peer" ? "group.message" : "group.sent";

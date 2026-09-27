@@ -17,7 +17,7 @@ import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { WALLET_METHODS } from "./wallets";
-import { chatDetailsJson, chatJson, groupJson, messageJson } from "./views";
+import { chatDetailsJson, chatJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
 
 const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
 
@@ -340,15 +340,16 @@ const METHODS: Record<string, Method> = {
     const { groupId } = await node(ctx).joinGroupByLink({ link: str(params, "link", true) });
     return { group: groupId };
   },
-  async "group.list"(ctx) {
-    return { groups: state(ctx).groups.map(groupJson).sort((a, b) => b.lastMessageAt - a.lastMessageAt) };
+  async "group.list"(ctx, params) {
+    const showSecret = bool(params, "showSecret");
+    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt) };
   },
   async "group.get"(ctx, params) {
-    return groupJson(groupOf(ctx, params));
+    return groupJson(groupOf(ctx, params), bool(params, "showSecret"));
   },
   async "group.history"(ctx, params) {
     const group = groupOf(ctx, params);
-    return history(await node(ctx).groupMessages({ groupId: group.id }), params);
+    return history(await node(ctx).groupMessages({ groupId: group.id }), params, (m) => groupMessageJson(m, group));
   },
   async "group.send"(ctx, params) {
     const group = groupOf(ctx, params);
@@ -361,7 +362,7 @@ const METHODS: Record<string, Method> = {
     const replyTo = str(params, "reply");
     const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}) });
     if (result.error) throw new CliError("unavailable", result.error);
-    return { group: group.id, sent: true };
+    return { group: group.id, messageId: result.messageId ?? null, sent: true };
   },
   async "group.react"(ctx, params) {
     const group = groupOf(ctx, params);
@@ -429,7 +430,7 @@ async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{
   return { messageId, emoji: emoji || null, removed };
 }
 
-function history(messages: StoredMessage[], params: Params) {
+function history(messages: StoredMessage[], params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
   const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
   const before = params.before;
   const after = params.after;
@@ -446,7 +447,7 @@ function history(messages: StoredMessage[], params: Params) {
   cut(after, "after");
   const more = after !== undefined && after !== null ? list.length > limit : list.length > limit;
   const page = after !== undefined && after !== null ? list.slice(0, limit) : list.slice(-limit);
-  return { messages: page.map(messageJson), more };
+  return { messages: page.map((m) => json(m)), more };
 }
 
 export { findChat, findGroup } from "./apiKit";

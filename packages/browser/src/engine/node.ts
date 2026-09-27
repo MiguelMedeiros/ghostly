@@ -2117,7 +2117,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.settings.online) throw new Error("Go online to join a group");
     return { groupId: await this.groups.joinByLink(link) };
   }
-  async sendGroupMessage({ groupId, text, mentions, replyTo }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): Promise<{ error: string | null }> {
+  async sendGroupMessage({ groupId, text, mentions, replyTo }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): Promise<{ error: string | null; messageId?: string }> {
     if (typeof text !== "string") return { error: "Nothing to send" };
     // A reply names a message of this group, by its author's member key (WISP 9xx § Replies).
     const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);

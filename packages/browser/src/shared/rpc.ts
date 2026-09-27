@@ -255,7 +255,7 @@ export interface EngineApi {
   joinGroupByLink(params: { link: string }): { groupId: string };
   /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
   /** `replyTo`: the id of a message of this group the text answers (WISP 9xx § Replies). */
-  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): { error: string | null };
+  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): { error: string | null; messageId?: string };
   groupMessages(params: { groupId: string }): StoredMessage[];
   leaveGroup(params: { groupId: string }): void;
   removeGroupMember(params: { groupId: string; key: string }): void;
