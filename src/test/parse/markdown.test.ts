@@ -193,8 +193,21 @@ describe("[text](url) links", () => {
     expect(labelMisleads("10.0.0.1", "https://ghostly.tools")).toBe(true);
     expect(labelMisleads("‮moc.elppa", "https://evil.example")).toBe(true);
     expect(labelMisleads("docs​", "https://ghostly.tools")).toBe(true);
-    // A file name reads as a host: the address shows, the safe side.
-    expect(labelMisleads("report.pdf", "https://ghostly.tools/report.pdf")).toBe(true);
+    // Dots and letters a browser reads as ASCII ones.
+    expect(labelMisleads("ghostly\u3002tools", "https://evil.example")).toBe(true);
+    expect(labelMisleads("ghostly\u2024tools", "https://evil.example")).toBe(true);
+    expect(labelMisleads("\uff47\uff48\uff4f\uff53\uff54\uff4c\uff59.tools", "https://evil.example")).toBe(true);
+    expect(labelMisleads("\uff47\uff48\uff4f\uff53\uff54\uff4c\uff59.tools", "https://ghostly.tools")).toBe(false);
+    // A country domain that is also a file extension counts unless it ends a path.
+    expect(labelMisleads("paypal.md", "https://evil.example")).toBe(true);
+    expect(labelMisleads("secure/paypal.com", "https://evil.example")).toBe(true);
+    expect(labelMisleads("//paypal.md", "https://evil.example")).toBe(true);
+  });
+
+  it("leaves file names alone", () => {
+    for (const label of ["report.pdf", "Node.js", "package.json", "docs/CHAT.md", "src/lib/parse/blocks.ts", "scripts/run.sh"]) {
+      expect(labelMisleads(label, "https://github.com/MiguelMedeiros/ghostly")).toBe(false);
+    }
   });
 
   it("previews as its text in the chat list", () => {
