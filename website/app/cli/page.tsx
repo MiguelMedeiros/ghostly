@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
 import { CliPage } from "@/components/cli/CliPage";
 import { cli } from "@/content/cli";
-import { alternates } from "@/lib/i18n";
 
 export const metadata: Metadata = {
-  title: cli.en.meta.title,
-  description: cli.en.meta.description,
-  alternates: alternates("/cli", "en"),
+  title: cli.meta.title,
+  description: cli.meta.description,
+  alternates: { canonical: "/cli" },
 };
 
 export default function Page() {
-  return <CliPage locale="en" />;
+  return <CliPage />;
 }

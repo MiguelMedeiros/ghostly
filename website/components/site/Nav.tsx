@@ -62,7 +62,7 @@ export function Nav({ locale }: { locale: Locale }) {
     { href: href(locale, "/developers"), label: t.developers, match: /^\/developers$/ },
     { href: href(locale, "/developers/catalog"), label: t.wisps, match: /^\/developers\/(catalog|wisps)/ },
     { href: href(locale, "/roadmap"), label: t.roadmap, match: /^\/roadmap/ },
-    { href: href(locale, "/cli"), label: t.cli, match: /^\/cli/ },
+    { href: "/cli", label: t.cli, match: /^\/cli/ },
   ];
 
   return (

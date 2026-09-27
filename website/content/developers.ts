@@ -531,7 +531,7 @@ const ptBr: DevCopy = {
           { label: "packages/sdk", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/sdk" },
           { label: "native-transports", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/native-transports" },
           { label: "cli", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/cli" },
-          { label: "Guia da CLI", href: "/pt-br/cli" },
+          { label: "Guia da CLI (em inglês)", href: "/cli" },
         ],
       },
     ],

@@ -80,7 +80,7 @@ const ptBr: ShellCopy = {
         overview: "Construa com o Ghostly",
         catalog: "Catálogo de WISPs",
         protocol: "Docs do protocolo (em inglês)",
-        cli: "CLI",
+        cli: "CLI (em inglês)",
         roadmap: "Roadmap",
         github: "GitHub",
         releases: "Versões",

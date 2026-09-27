@@ -336,7 +336,7 @@ const en = {
       body: "Chrome, Brave, Edge",
       cta: "Add to Chrome",
     },
-    cli: { title: "Command line", body: "For scripts, bots and agents.", cta: "CLI guide", href: "/cli" },
+    cli: { title: "Command line", body: "For scripts, bots and agents.", cta: "CLI guide" },
     all: "All release files",
     conversation: [
       { side: "boo", text: "Boo! 👻" },
@@ -527,7 +527,7 @@ const ptBr: HomeCopy = {
         title: "Dê voz ao seu código.",
         body: "O motor do próprio app sem tela, para scripts, bots e agentes: convites, chats, grupos, arquivos e pagamentos, com cada evento numa linha JSON.",
         extra: "Precisa de Node. Compilada do código até o pacote npm ser publicado.",
-        link: { label: "Guia da CLI", href: "/pt-br/cli" },
+        link: { label: "Guia da CLI (em inglês)", href: "/cli" },
       },
     ],
   },
@@ -680,7 +680,7 @@ const ptBr: HomeCopy = {
       body: "Chrome, Brave, Edge",
       cta: "Adicionar ao Chrome",
     },
-    cli: { title: "Linha de comando", body: "Para scripts, bots e agentes.", cta: "Guia da CLI", href: "/pt-br/cli" },
+    cli: { title: "Linha de comando", body: "Para scripts, bots e agentes.", cta: "Guia da CLI (em inglês)" },
     all: "Todos os arquivos da versão",
     conversation: [
       { side: "boo", text: "Buu! 👻" },

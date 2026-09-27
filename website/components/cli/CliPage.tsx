@@ -3,14 +3,13 @@ import { Shell } from "@/components/site/Shell";
 import { LevelBadge } from "@/components/site/Level";
 import { Reveal } from "@/components/home/Reveal";
 import { cli, scope, COMMANDS, ECHO_BOT, INSTALL, LINKS, SESSION } from "@/content/cli";
-import { href, type Locale } from "@/lib/i18n";
 import { CopyButton } from "./CopyButton";
 import "@/app/cli.css";
 
-export function CliPage({ locale }: { locale: Locale }) {
-  const t = cli[locale];
+export function CliPage() {
+  const t = cli;
   return (
-    <Shell locale={locale}>
+    <Shell>
       <section className="cl-hero">
         <div className="wrap cl-hero-grid">
           <div className="cl-hero-copy">
@@ -91,7 +90,7 @@ export function CliPage({ locale }: { locale: Locale }) {
         <ul className="cl-scope">
           {scope.map((s) => (
             <li key={s.key}>
-              <LevelBadge level={s.level} locale={locale} small />
+              <LevelBadge level={s.level} small />
               <span>{t.scope.items[s.key]}</span>
             </li>
           ))}
@@ -119,7 +118,7 @@ export function CliPage({ locale }: { locale: Locale }) {
             </a>
           </li>
           <li>
-            <Link className="link-arrow" href={href(locale, "/developers/wisps/11xx-headless")}>
+            <Link className="link-arrow" href="/developers/wisps/11xx-headless">
               {t.links.wisp} →
             </Link>
           </li>

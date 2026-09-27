@@ -1,4 +1,3 @@
-import type { Localized } from "@/lib/i18n";
 import type { Level } from "@/lib/status";
 
 /**
@@ -58,7 +57,7 @@ const SCOPE: { level: Level; key: string }[] = [
   { level: "planned", key: "binary" },
 ];
 
-const en = {
+export const cli = {
   meta: {
     title: "Ghostly CLI: the app's engine for bots",
     description:
@@ -122,71 +121,5 @@ const en = {
   },
 };
 
-export type CliCopy = typeof en;
-
-const ptBr: CliCopy = {
-  meta: {
-    title: "Ghostly CLI: o motor do app para bots",
-    description:
-      "ghostly roda o motor do próprio app Ghostly sem tela: convites, chats, grupos, arquivos e pagamentos para scripts, bots e agentes de IA, com cada evento numa linha JSON.",
-  },
-  hero: {
-    eyebrow: "Linha de comando",
-    title: "Ghostly para bots.",
-    lead: "ghostly roda o motor do próprio app sem tela. Seu script ganha os mesmos convites, chats, grupos e pagamentos do app, e cada evento numa linha JSON.",
-    install: "Instalar",
-    guide: "Guia completo",
-    term: "Exemplo de sessão do ghostly",
-  },
-  install: {
-    title: "Instalar",
-    hint: "Node 22.12 ou mais novo. Compilado do código até o pacote npm ser publicado.",
-    copy: "Copiar",
-    copied: "Copiado",
-  },
-  commands: {
-    title: "Quatro comandos",
-    hints: [
-      "Mantém seu perfil online.",
-      "Um convite ghostly1 que abre no app.",
-      "Envia uma mensagem. Todo comando responde em JSON.",
-      "Transmite os eventos, uma linha JSON cada.",
-    ],
-  },
-  bot: {
-    title: "Um bot de eco",
-    lead: "Cada evento chega no stdin do gancho, nunca nos argumentos, então o texto de um contato não alcança o shell.",
-    payment: "Um bot de pagamentos, com moedas de teste",
-    echo: "O bot de eco",
-  },
-  scope: {
-    title: "O que ele cobre",
-    items: {
-      chats: "Convites e um só chat, pelos transportes do app",
-      groups: "Grupos, com menções e ferramentas de admin",
-      files: "Arquivos e mensagens de voz",
-      pay: "Carteiras e pagamentos (Mainnet só com --confirm-real)",
-      ids: "Provas de identidade",
-      services: "Apps web compartilhados",
-      npm: "Uma versão no npm",
-      dht: "Ler a DHT direto (por enquanto, relays)",
-      wallets: "Carteiras Bark e Fedimint",
-      binary: "Um binário único, sem Node",
-    },
-  },
-  links: {
-    title: "Leia mais",
-    guide: "Guia (em inglês)",
-    reference: "Todos os comandos e eventos (em inglês)",
-    agents: "Skill para agentes de IA (em inglês)",
-    wisp: "WISP 11xx: o contrato",
-  },
-  legacy: {
-    title: "Procurando o ghostly-cli?",
-    body: "O ghostly-cli em Rust é o cliente de compatibilidade para chats da v0.4. Ele só lê convites ghost:// e não pareia com o app. Continua funcionando para os bots feitos com ele.",
-    link: "ghostly-cli",
-  },
-};
-
-export const cli: Localized<CliCopy> = { en, "pt-br": ptBr };
 export const scope = SCOPE;
+export type CliCopy = typeof cli;

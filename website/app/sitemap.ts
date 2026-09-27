@@ -23,7 +23,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     entry("/roadmap", 0.8),
     ...references.map((ref) => entry(`/developers/wisps/${ref.slug}`, 0.6)),
     { url: `${BASE}/docs`, changeFrequency: "weekly", priority: 0.7 },
-    entry("/cli", 0.7),
+    { url: `${BASE}/cli`, changeFrequency: "weekly", priority: 0.7 },
     { url: `${BASE}/privacy`, changeFrequency: "yearly", priority: 0.3 },
   ];
 }
