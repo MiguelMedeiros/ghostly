@@ -35,7 +35,8 @@ window.contentView = web
 let html = try! String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)
 // An origin of its own, so the policy's 'self' means something (a custom scheme would not run the page).
 web.loadHTMLString(html, baseURL: URL(string: "https://tauri.localhost/"))
-DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+// Long enough for every play to report being stuck (8 s each) rather than time out with nothing to show.
+DispatchQueue.main.asyncAfter(deadline: .now() + 180) {
   print("{\"error\":\"timed out\"}")
   exit(2)
 }
