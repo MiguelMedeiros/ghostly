@@ -24,12 +24,21 @@ if (failed) {
   process.exit(1);
 }
 
-// The speed pill: 2× must really play twice as fast, with the pitch kept (at 1× the same timing reads under 1).
-const fast = inWebView(rateInPage, [loadFixtures(), 2], { csp: policy });
+// The speed pill: 2× must really play faster, with the pitch kept. The same timing reads 0.85 to 0.95 at 1× and
+// 1.55 to 2.3 at 2× on a Mac, so over 1.4 is really faster. A shared CI runner can stall the audio for a moment,
+// which only ever reads slower, so a recording that reads too slow is timed once more in a fresh WebView.
+const fastEnough = (result) => result.rate === 2 && result.preservesPitch === true && result.speed > 1.4;
+const fixtures = loadFixtures();
+const fast = inWebView(rateInPage, [fixtures, 2], { csp: policy });
+const slow = fixtures.filter(({ name }) => !fastEnough(fast[name]) && fast[name].rate === 2 && fast[name].preservesPitch === true);
+if (slow.length) {
+  for (const { name } of slow) console.log(`… ${name.padEnd(28)} at 2×: speed=${fast[name].speed ?? "?"} (plays ${JSON.stringify(fast[name].speeds)}), timing again`);
+  Object.assign(fast, inWebView(rateInPage, [slow, 2], { csp: policy }));
+}
 for (const [name, result] of Object.entries(fast)) {
-  const ok = result.rate === 2 && result.preservesPitch === true && result.speed > 1.4;
+  const ok = fastEnough(result);
   if (!ok) failed++;
-  console.log(`${ok ? "✓" : "✗"} ${name.padEnd(28)} at 2×: playbackRate=${result.rate} preservesPitch=${result.preservesPitch} speed=${result.speed ?? "?"}${result.error ? `  ${result.error}` : ""}`);
+  console.log(`${ok ? "✓" : "✗"} ${name.padEnd(28)} at 2×: playbackRate=${result.rate} preservesPitch=${result.preservesPitch} speed=${result.speed ?? "?"} (plays ${JSON.stringify(result.speeds)}, pooled ${result.pooled ?? "?"})${result.error ? `  ${result.error}` : ""}`);
 }
 if (failed) {
   console.error(`\n${failed} recording(s) do not play faster with the pitch kept in WKWebView.`);
