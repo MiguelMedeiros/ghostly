@@ -86,6 +86,8 @@ Every client keeps one per relay (`packages/core/src/relayBreaker.ts`, and the s
 
 - Three failures in a row (no answer, a server error, or the relay's 429) trip it.
 - The relay is then left alone for 1 minute, doubling on each trip up to 5 minutes. One probe goes out after the wait; an answer closes the breaker.
+- While every relay is left alone for failing (none only for its rate limit), one of them, the one whose wait ends first, is asked anyway every 15 seconds: with nothing else to try, the long wait only delayed noticing that the relays answer again. A group's edge stayed down for minutes after the relays stopped answering HTTP 500 (2026-09-27). The Desktop reads the DHT meanwhile.
+- A relay that answers again tells the links: each looks at once and publishes what it could not, instead of waiting for its own pace. A relay that answers a kind of request (a read, a write) is no longer kept out of the next one of that kind by an earlier network failure.
 - 404, 409, 412 and 428 are normal answers and never count.
 - Reads rotate among healthy relays. On a Desktop with relay reads on, reads go to the DHT while every relay is tripped.
 - Trips are logged by relay and reason, never with a key.

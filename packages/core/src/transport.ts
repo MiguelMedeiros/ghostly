@@ -17,6 +17,9 @@ import type { GhostRecord, SignedPacket } from "./pkarr";
  * ask a second one when the first had nothing new: relays behind one name do not all serve a fresh
  * packet at the same moment.
  */
+/** What changed in how discovery goes: a relay tripped (left alone), or one answered again. */
+export type DiscoveryChange = "tripped" | "recovered";
+
 export interface PkarrRequestOptions { background?: boolean; urgent?: boolean }
 
 /**
@@ -55,8 +58,11 @@ export interface PkarrTransport {
   describe(): { protocol: string; relays: string[] };
   /** How reads go and how each relay is doing, for the connection panel; absent where nothing is known. */
   discovery?(): DiscoveryStatus;
-  /** Called when that changes in a way worth showing (a relay trips or recovers); returns the unsubscribe. */
-  subscribe?(listener: () => void): () => void;
+  /**
+   * Called when that changes in a way worth showing (a relay trips or recovers), with `"recovered"` when a relay
+   * answered again after failing: links then look and publish at once rather than at their pace. Returns the unsubscribe.
+   */
+  subscribe?(listener: (change?: DiscoveryChange) => void): () => void;
   /**
    * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.
