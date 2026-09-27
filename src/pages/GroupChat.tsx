@@ -38,7 +38,7 @@ function toChatMessage(message: StoredMessage, group: GroupView, myName = ""): C
   const mentions = mentionViews(message.text, message.mentions, names, message.sender === "me");
   return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, paymentId: message.paymentId,
     nick: message.sender === "peer" && message.member ? (member ? memberName(member) : `Member ${message.member.slice(0, 8)}`) : undefined,
-    ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }) };
+    ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }) };
 }
 
 /** A member as a reply's quote names them: me, the roster's name, or the start of a key no longer in the roster. */
@@ -168,6 +168,9 @@ export function GroupChat() {
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm text-text-muted">This group is gone from this device.</div>;
   const nameOf = replyNames(group, t("chat.reply.you"));
   const quoteOf = (m: StoredMessage): QuoteView | undefined => m.replyTo && quoteFor(m.replyTo, quoteIndex, nameOf);
+  // Reactions (WISP 9xx § Reactions): one per member per message, named by the roster.
+  const react = (messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); };
+  const reactionName = (by: string) => nameOf("peer", by) ?? by.slice(0, 8);
 
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
@@ -285,7 +288,8 @@ export function GroupChat() {
               {noteIdOf(state, m.paymentId) === m.paymentId && notes.get(m.paymentId) && <GroupPaymentCaption note={notes.get(m.paymentId)!} group={group} />}
             </div>
             : <MessageBubble key={m.id} message={toChatMessage(m, group, settings.defaultNickname)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`}
-              onReply={replyTarget(m, true) ? () => setReplyingTo(m) : undefined} quote={quoteOf(m)} />)}
+              onReply={replyTarget(m, true) ? () => setReplyingTo(m) : undefined} quote={quoteOf(m)}
+              onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName} />)}
           <div ref={bottomRef} />
         </div>
       </div>}

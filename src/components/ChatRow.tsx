@@ -12,7 +12,8 @@ import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { groupReadAt } from "../lib/groups";
+import { groupReadAt, memberName } from "../lib/groups";
+import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
 
@@ -288,6 +289,10 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   };
   const status = invitation ? (invitation.viaLink ? (invitation.admin ? "Joining…" : group.profile === "community" ? (invitation.stage === "answered" ? "A member is letting you in…" : "Waiting to be let in…") : invitation.stage === "answered" ? "The admin's app answered…" : "Waiting for the admin's app…") : invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
     : group.status !== "active" ? group.statusReason ?? group.status : `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
+  // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
+  const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
+  const reactor = reacted && group.members.find(m => m.key === reacted.by);
+  const note = reacted && reactionNoteText(reacted, reactor ? memberName(reactor) : `Member ${reacted.by.slice(0, 8)}`, t);
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || "A group"} className={rowClass(active, density)}>
@@ -302,7 +307,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
           status={muted && <MutedMark label={t("mute.bell")} />}
           timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}
-          preview={<span className="text-text-muted">{status}</span>}
+          preview={note ? <span data-testid="group-row-note" className="text-text-muted">{note}</span> : <span className="text-text-muted">{status}</span>}
           trailing={unread && <span className="flex items-center gap-1.5">
             {mention && <span data-testid="group-row-mention" data-muted={mentionQuiet || undefined} aria-label={t("mentions.unread")} title={t("mentions.unread")} role="img"
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold leading-none ${mentionQuiet ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>@</span>}

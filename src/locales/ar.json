@@ -110,6 +110,14 @@
       "notHere": "الرسالة الأصلية ليست في هذه الدردشة",
       "jump": "الانتقال إلى الرسالة الأصلية",
       "replyingTo": "الرد على {{name}}"
+    },
+    "reactions": {
+      "react": "تفاعل",
+      "more": "المزيد من الرموز",
+      "chipLabel": "{{emoji}}: {{names}}",
+      "notice": "تفاعل أحدهم مع رسالتك",
+      "note": "تفاعل {{name}} بـ {{emoji}} مع \"{{snippet}}\"",
+      "noteMine": "تفاعلت بـ {{emoji}} مع \"{{snippet}}\""
     }
   },
   "group": {

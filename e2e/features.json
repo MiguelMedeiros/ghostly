@@ -641,6 +641,8 @@
     "src/components/MessageInput.tsx": ["*"],
     "src/components/MentionChip.tsx": ["groups.mentions"],
     "{src/lib/replies.ts,src/components/chat/ReplyQuote.tsx,packages/browser/src/shared/replies.ts}": ["chat.replies","groups.replies"],
+    "{src/components/chat/Reactions.tsx,src/lib/reactions.ts}": ["chat.reactions","groups.reactions"],
+    "packages/browser/src/engine/reactions.ts": ["chat.reactions.wire","groups.protocol.reactions"],
     "src/lib/parse/mentions.ts": ["groups.mentions"],
     "src/components/ChatConnection.tsx": ["*"],
     "src/components/ConnectionIcon.tsx": ["chat.paired.status","transport.indicator","groups.connection"],

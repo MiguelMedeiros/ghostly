@@ -110,6 +110,14 @@
       "notHere": "元のメッセージはこのチャットにありません",
       "jump": "元のメッセージへ移動",
       "replyingTo": "{{name}} に返信"
+    },
+    "reactions": {
+      "react": "リアクション",
+      "more": "その他の絵文字",
+      "chipLabel": "{{emoji}}: {{names}}",
+      "notice": "あなたのメッセージにリアクションがありました",
+      "note": "{{name}}が「{{snippet}}」に{{emoji}}でリアクション",
+      "noteMine": "「{{snippet}}」に{{emoji}}でリアクションしました"
     }
   },
   "group": {

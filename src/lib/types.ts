@@ -45,6 +45,8 @@ export interface ChatMessage {
   ref?: string;
   /** The message this one answers (WISP 400 § Replies). */
   replyTo?: import("@ghostly/browser/shared/types").MessageReply;
+  /** Reactions to it, one per person (WISP 400 § Reactions): `me`, `peer`, or a member's key. */
+  reactions?: Record<string, import("@ghostly/browser/shared/types").MessageReaction>;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;
@@ -75,6 +77,11 @@ export interface ChatSession {
    * the chat list says so in its place and the chat moves up. Not a message, so not unread.
    */
   identitySharedAt?: number;
+  /**
+   * The chat's latest reaction (WISP 400 § Reactions), from the engine: the chat list says it in the preview's place
+   * while it is newer than the last message, and the chat moves up. Not a message, so not unread.
+   */
+  lastReaction?: import("@ghostly/browser/shared/types").ReactionNote;
   /** The contact's name: what they last said they go by, or else read out of their messages. */
   nick?: string;
   /**

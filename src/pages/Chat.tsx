@@ -417,6 +417,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const shownName = shown.name;
   // A reply's quote and the composer's bar name the author as this chat does.
   const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? shownName : undefined;
+  // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
+  const react = (messageId: string, emoji: string) => {
+    if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
+  };
+  const reactionName = (by: string) => by === "peer" ? shownName : by.slice(0, 8);
   const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: replySnippet(replyingTo.text),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
@@ -647,6 +652,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
               onReply={paired && replyTarget(row.message) ? () => setReplyingTo(row.message) : undefined}
               quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
+              // The same: a compatibility chat has no room for a reaction.
+              onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
+              reactionName={reactionName}
             />
           ))}
           <div ref={bottomRef} />

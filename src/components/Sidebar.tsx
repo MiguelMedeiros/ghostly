@@ -31,6 +31,7 @@ import { chatPath } from "../lib/url";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
+import { reactionNoteText } from "../lib/reactions";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
@@ -256,7 +257,8 @@ export function Sidebar() {
               keyLabel={peerKey}
               peerPubKey={session.peerPubKeyB64}
               lastMessage={lastMsg}
-              note={(session.identitySharedAt ?? 0) > (lastMsg?.timestamp ?? 0) ? t("sidebar.sharedIdentity") : undefined}
+              note={(session.lastReaction?.at ?? 0) > Math.max(lastMsg?.timestamp ?? 0, session.identitySharedAt ?? 0) ? reactionNoteText(session.lastReaction!, peerLabel, t)
+                : (session.identitySharedAt ?? 0) > (lastMsg?.timestamp ?? 0) ? t("sidebar.sharedIdentity") : undefined}
               time={formatListTime(session.lastSyncAt ?? session.createdAt)}
               unread={unread}
               pinned={isSessionPinned(session.id)}

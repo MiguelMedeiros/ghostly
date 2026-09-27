@@ -110,6 +110,14 @@
       "notHere": "L'original n'est pas dans cette discussion",
       "jump": "Aller au message d'origine",
       "replyingTo": "Réponse à {{name}}"
+    },
+    "reactions": {
+      "react": "Réagir",
+      "more": "Plus d’emoji",
+      "chipLabel": "{{emoji}} : {{names}}",
+      "notice": "Quelqu’un a réagi à votre message",
+      "note": "{{name}} a réagi {{emoji}} à « {{snippet}} »",
+      "noteMine": "Vous avez réagi {{emoji}} à « {{snippet}} »"
     }
   },
   "group": {

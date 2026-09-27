@@ -110,6 +110,14 @@
       "notHere": "原消息不在此聊天中",
       "jump": "转到原消息",
       "replyingTo": "回复 {{name}}"
+    },
+    "reactions": {
+      "react": "回应",
+      "more": "更多表情",
+      "chipLabel": "{{emoji}}：{{names}}",
+      "notice": "有人回应了你的消息",
+      "note": "{{name}} 对“{{snippet}}”回应了 {{emoji}}",
+      "noteMine": "你对“{{snippet}}”回应了 {{emoji}}"
     }
   },
   "group": {

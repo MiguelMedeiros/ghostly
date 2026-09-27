@@ -110,6 +110,14 @@
       "notHere": "The original is not in this chat",
       "jump": "Go to the original message",
       "replyingTo": "Replying to {{name}}"
+    },
+    "reactions": {
+      "react": "React",
+      "more": "More emoji",
+      "chipLabel": "{{emoji}}: {{names}}",
+      "notice": "Someone reacted to your message",
+      "note": "{{name}} reacted {{emoji}} to \"{{snippet}}\"",
+      "noteMine": "You reacted {{emoji}} to \"{{snippet}}\""
     }
   },
   "group": {

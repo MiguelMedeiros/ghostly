@@ -54,6 +54,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     ...(message.preview && { preview: message.preview }),
     ...(modern && replyRef(message) && { ref: replyRef(message) }),
     ...(message.replyTo && { replyTo: message.replyTo }),
+    ...(message.reactions && { reactions: message.reactions }),
     meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,
@@ -71,13 +72,19 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
 
   let changed = false;
   for (const message of messages) {
+    const previous = session.messages.find(m => m.id === message.id);
+    // Reactions change rows of any kind, mine included (WISP 400 § Reactions).
+    const reacted = !!previous && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
+    if (reacted) previous.reactions = message.reactions;
     // Reviewed payments originate in the engine (including recovery), without
     // the chat composer's optimistic message or text-delivery status.
-    if (message.sender !== "peer" && !message.delivery && !message.paymentId) continue;
+    if (message.sender !== "peer" && !message.delivery && !message.paymentId) {
+      if (reacted) { saveSession(session); changed = true; }
+      continue;
+    }
     const mapped = toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
-    const previous = session.messages.find(m => m.id === message.id);
     if (previous) {
-      let updated = false;
+      let updated = reacted;
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
         previous.delivery = message.delivery;
         previous.deliveryError = message.deliveryError;
@@ -99,7 +106,24 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   }
   if (mirrorPeerNick(session.id, link)) changed = true;
   if (mirrorIdentityShare(session, link)) changed = true;
+  if (mirrorReaction(session, link)) changed = true;
   if (changed) notifySessionsChanged();
+}
+
+/**
+ * The chat's latest reaction, for the chat list: its note, and its place, as a message would move it. Not a message,
+ * so the unread count stays.
+ */
+function mirrorReaction(session: ChatSession, link: LinkView): boolean {
+  const note = link.lastReaction;
+  if (!note || note.at <= (session.lastReaction?.at ?? 0)) return false;
+  const fresh = loadSession(session.id);
+  if (!fresh) return false;
+  fresh.lastReaction = note;
+  fresh.lastSyncAt = Math.max(fresh.lastSyncAt ?? 0, note.at);
+  saveSession(fresh);
+  session.lastReaction = note;
+  return true;
 }
 
 /**
@@ -156,6 +180,7 @@ async function reconcile(): Promise<void> {
     if (live && session.deliveryMode !== live.deliveryMode) { session.deliveryMode = live.deliveryMode; saveSession(session); }
     if (live && mirrorPeerNick(session.id, live)) renamed = true;
     if (live && mirrorIdentityShare(session, live)) renamed = true;
+    if (live && mirrorReaction(session, live)) renamed = true;
     if (session.profile && live?.pairing?.peerKey && ["ready", "waiting"].includes(live.pairing.status)) forgetInviteCode(session.id);
     if (engine.linkByPeer(session.peerPubKeyB64) || ensuring.has(session.id)) continue;
     ensuring.add(session.id);

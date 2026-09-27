@@ -40,8 +40,8 @@ export function AttentionFeedback(){
       if(event.type==="cue"){ if(event.cue) playCue(event.cue,{chat,key:event.id}); return; }
       const notifications=loadSettings().notifications;
       const outcome=attentionOutcome(event.type,muted,notifications,background);
-      if(outcome.sound) playSound(eventSound({...event,type:event.type},notifications));
-      if(outcome.notice) await showPrivateNotification(event.id,t("settings.privateNotice"),chat);
+      if(outcome.sound && event.type!=="reaction") playSound(eventSound({...event,type:event.type},notifications));
+      if(outcome.notice) await showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat);
     };
     if(navigator.locks) void navigator.locks.request("ghostly-feedback",run);
     else void run();
