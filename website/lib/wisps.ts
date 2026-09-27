@@ -2,7 +2,6 @@ import numbering from "./wisp-numbering.json";
 import index from "./reference-index.json";
 import { editorial, GROUPS, type GroupId } from "./wisp-editorial";
 import type { Level } from "./status";
-import type { Localized } from "./i18n";
 
 /**
  * The WISP catalogue, derived from `docs/wisps/numbering.json` (which drafts
@@ -32,10 +31,10 @@ export type Wisp = {
   summary?: string;
   notices: string[];
   dependencies: string[];
-  benefit?: Localized<string>;
+  benefit?: string;
   level: Level | null;
-  note?: Localized<string>;
-  feature?: Localized<{ label: string; href: string }>;
+  note?: string;
+  feature?: { label: string; href: string };
   video?: { src: string; poster?: string; chapters?: { at: number; title: string }[] };
 };
 

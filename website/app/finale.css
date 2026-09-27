@@ -162,11 +162,6 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   margin-top: 22px;
   max-width: 12em;
 }
-/* Portuguese runs longer ("Você já é um fantasma." is 22 characters); capped a
-   little under the English volume it stays on two lines inside the wrap. */
-.fin-title:lang(pt) {
-  font-size: min(var(--t-display), 112px);
-}
 .fin-title-line {
   display: block;
 }

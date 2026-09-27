@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
 import { RoadmapPage } from "@/components/roadmap/RoadmapPage";
 import { roadmap } from "@/content/roadmap";
-import { alternates } from "@/lib/i18n";
 
 export const metadata: Metadata = {
-  title: roadmap.en.meta.title,
-  description: roadmap.en.meta.description,
-  alternates: alternates("/roadmap", "en"),
+  title: roadmap.meta.title,
+  description: roadmap.meta.description,
+  alternates: { canonical: "/roadmap" },
 };
 
 export default function Page() {
-  return <RoadmapPage locale="en" />;
+  return <RoadmapPage />;
 }

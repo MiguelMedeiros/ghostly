@@ -5,7 +5,6 @@ import { Ghost } from "@/components/ghost/Ghost";
 import { Reveal } from "@/components/home/Reveal";
 import { ReferenceMarkdown } from "@/components/reader/Markdown";
 import { roadmap } from "@/content/roadmap";
-import { href, type Locale } from "@/lib/i18n";
 import type { Level } from "@/lib/status";
 import candidates from "@/lib/roadmap-candidates.json";
 import { timeline } from "@/content/roadmap-timeline";
@@ -15,14 +14,14 @@ import { Timeline } from "./Timeline";
 import "@/app/developers.css";
 import "@/app/roadmap.css";
 
-export function RoadmapPage({ locale }: { locale: Locale }) {
-  const t = roadmap[locale];
+export function RoadmapPage() {
+  const t = roadmap;
   const sections = [...new Set(candidates.map((c) => c.section))];
   const titleOf = (id: string) => t.tracks.find((x) => x.id === id);
-  const tl = timeline[locale];
+  const tl = timeline;
   const wispRefs = wisps.map((w) => ({ slug: w.slug, number: w.number, name: w.name }));
   return (
-    <Shell locale={locale}>
+    <Shell>
       <section className="rm-hero">
         <div className="wrap rm-hero-grid">
           <div className="rm-hero-copy">
@@ -50,7 +49,7 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
           {tl.mapTitle}
         </h2>
         <p className="muted">{tl.mapLead}</p>
-        <BlockGrid mode="stages" t={tl.grid} locale={locale} wisps={wispRefs} />
+        <BlockGrid mode="stages" t={tl.grid} wisps={wispRefs} />
       </section>
 
       <section className="wrap rm-block" id="timeline" aria-labelledby="timeline-title">
@@ -58,7 +57,7 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
           {tl.timelineTitle}
         </h2>
         <p className="muted">{tl.timelineLead}</p>
-        <Timeline locale={locale} />
+        <Timeline />
       </section>
 
       <section className="wrap rm-tracks" aria-label={t.eyebrow}>
@@ -79,7 +78,7 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
                     <ul>
                       {track.now.map((i) => (
                         <li key={i.text}>
-                          <LevelBadge level={i.level} locale={locale} small /> <span>{i.text}</span>
+                          <LevelBadge level={i.level} small /> <span>{i.text}</span>
                         </li>
                       ))}
                     </ul>
@@ -89,7 +88,7 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
                     <ul>
                       {track.next.map((i) => (
                         <li key={i.text}>
-                          <LevelBadge level={i.level} locale={locale} small /> <span>{i.text}</span>
+                          <LevelBadge level={i.level} small /> <span>{i.text}</span>
                         </li>
                       ))}
                     </ul>
@@ -143,13 +142,13 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
                           )}
                         </span>
                         <span className="dim mono rm-cand-kind">{c.kind}</span>
-                        <LevelBadge level={c.level as Level} locale={locale} small />
+                        <LevelBadge level={c.level as Level} small />
                       </summary>
                       <div className="rm-cand-body" lang="en">
                         <p className="dim mono">
                           {c.note ? `${c.status}: ${c.note}` : c.status} · {t.inventory.sourceStatus}
                         </p>
-                        <ReferenceMarkdown body={c.body} sourcePath="docs/wisps/ADAPTER-ROADMAP.md" locale={locale} idPrefix={`${c.id}-`} />
+                        <ReferenceMarkdown body={c.body} sourcePath="docs/wisps/ADAPTER-ROADMAP.md" idPrefix={`${c.id}-`} />
                       </div>
                     </details>
                   </li>
@@ -158,7 +157,7 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
           </div>
         ))}
         <p>
-          <Link className="link-arrow" href={href(locale, "/developers/wisps/adapter-roadmap")}>
+          <Link className="link-arrow" href={"/developers/wisps/adapter-roadmap"}>
             {t.inventory.source} →
           </Link>
         </p>

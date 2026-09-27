@@ -1,20 +1,19 @@
 import { Ghost } from "@/components/ghost/Ghost";
 import { LevelBadge } from "@/components/site/Level";
 import { PHASE_LEVEL, PHASES, timeline, type Phase } from "@/content/roadmap-timeline";
-import type { Locale } from "@/lib/i18n";
 import type { Level } from "@/lib/status";
 
 type Item = string | { text: string; level: Level };
 const text = (i: Item) => (typeof i === "string" ? i : i.text);
 const levelOf = (i: Item, phase: Phase) => (typeof i === "string" ? PHASE_LEVEL[phase] : i.level);
 
-function Chip({ item, phase, color, locale, lane }: { item: Item; phase: Phase; color: string; locale: Locale; lane?: string }) {
+function Chip({ item, phase, color, lane }: { item: Item; phase: Phase; color: string; lane?: string }) {
   const own = levelOf(item, phase);
   return (
     <li className="tl-chip" style={{ "--lane": color } as React.CSSProperties}>
       {lane && <span className="tl-chip-lane">{lane}</span>}
       <span>{text(item)}</span>
-      {own !== PHASE_LEVEL[phase] && <LevelBadge level={own} locale={locale} small />}
+      {own !== PHASE_LEVEL[phase] && <LevelBadge level={own} small />}
     </li>
   );
 }
@@ -23,8 +22,8 @@ function Chip({ item, phase, color, locale, lane }: { item: Item; phase: Phase; 
  * Stages from left to right, areas from top to bottom. On a phone the same
  * data becomes a vertical timeline, one stage after another.
  */
-export function Timeline({ locale }: { locale: Locale }) {
-  const t = timeline[locale];
+export function Timeline() {
+  const t = timeline;
   // A stage nobody has anything in (today: "being built", with everything merged) is left out.
   const phases = PHASES.filter((p) => t.lanes.some((lane) => lane.items[p]?.length));
   return (
@@ -59,7 +58,7 @@ export function Timeline({ locale }: { locale: Locale }) {
                   {lane.items[p]?.length ? (
                     <ul>
                       {lane.items[p]!.map((item) => (
-                        <Chip key={text(item)} item={item} phase={p} color={lane.color} locale={locale} />
+                        <Chip key={text(item)} item={item} phase={p} color={lane.color} />
                       ))}
                     </ul>
                   ) : (
@@ -87,7 +86,7 @@ export function Timeline({ locale }: { locale: Locale }) {
               <p>{t.phases[p].sub}</p>
               <ul>
                 {items.map(({ item, lane }) => (
-                  <Chip key={lane.id + text(item)} item={item} phase={p} color={lane.color} locale={locale} lane={lane.title} />
+                  <Chip key={lane.id + text(item)} item={item} phase={p} color={lane.color} lane={lane.title} />
                 ))}
               </ul>
             </li>

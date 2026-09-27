@@ -47,7 +47,6 @@ const FEATHER_STEPS = 6;
 const SHADE: [number, number] = [0.72, 0.92];
 // A record shows only its seal while the passer-by's centre is within 1.5 sizes; the swap happens by 1.85.
 const SEAL_REACH: [number, number] = [1.5, 1.85];
-// The network's name is the same in every locale.
 const CAPTION = "MAINLINE DHT";
 
 function layout(portrait: boolean): Layout {

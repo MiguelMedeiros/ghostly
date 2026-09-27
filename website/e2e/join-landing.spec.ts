@@ -85,10 +85,9 @@ test.describe("join page", () => {
     });
   }
 
-  test("in Portuguese on /pt-br", async ({ page }) => {
+  test("an invite link from the old /pt-br pages opens in English", async ({ page }) => {
     await page.goto(`/pt-br#${CODE}`);
-    await expect(page.getByRole("heading", { name: "Você recebeu um convite para conversar" })).toBeVisible();
-    await page.goto(`/pt-br#${V2}`);
-    await expect(page.getByTestId("join-refused")).toHaveText("Este convite foi criado por um Ghostly mais novo. Atualize para entrar.");
+    await expect(page.getByRole("heading", { name: "You're invited to a chat" })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/");
   });
 });

@@ -1,6 +1,5 @@
-import type { Localized } from "@/lib/i18n";
 
-const en = {
+export const catalog = {
   meta: {
     title: "WISP catalog",
     description: "Every Ghostly WISP draft: searchable, grouped by family, with specification status kept apart from what actually runs.",
@@ -52,58 +51,4 @@ const en = {
   },
 };
 
-export type CatalogCopy = typeof en;
-
-const ptBr: CatalogCopy = {
-  meta: {
-    title: "Catálogo de WISPs",
-    description: "Todos os rascunhos WISP do Ghostly: com busca, agrupados por família, com o status da especificação separado do que realmente roda.",
-  },
-  eyebrow: "Catálogo de WISPs",
-  title: "Todos os contratos, num só lugar.",
-  lead: "Cada WISP é um contrato aberto que qualquer app pode implementar. Aqui estão todos, por família. Toque num para ler.",
-  axes: "Duas perguntas separadas: todo documento é uma especificação em Draft; o selo diz se o que ele descreve roda no app.",
-  search: "Busque por número, nome ou função",
-  searchLabel: "Buscar no catálogo",
-  family: "Família",
-  kind: "Tipo",
-  level: "Disponibilidade",
-  all: "Todos",
-  kinds: { Contract: "Contrato", Adapter: "Adapter", Profile: "Perfil", Process: "Processo" },
-  process: "Documento de processo",
-  results: "{n} de {t} rascunhos",
-  none: "Nada encontrado. Tente um número como 401 ou uma palavra como “arquivos”.",
-  clear: "Limpar filtros",
-  unassigned: "número a definir",
-  unassignedHelp: "Um rascunho planejado cujo número público ainda não foi atribuído; o nome antigo do arquivo continua para os links.",
-  implements: "implementa {n}",
-  notClassified: "Ainda não revisado para o site",
-  read: "Ler",
-  inventory: {
-    title: "Inventário de adapters",
-    lead: "Candidatos do roadmap de adapters. Listados aqui para os links continuarem funcionando; o roadmap explica ordem e dependências. Candidato não é compromisso.",
-    cta: "Ver o roadmap",
-  },
-  sources: "Fontes do catálogo",
-  map: {
-    drafts: "rascunhos",
-    contract: "Bloco grande: o contrato, a regra comum da família",
-    adapter: "Bloco pequeno: um adapter ou perfil, uma forma concreta de cumprir",
-    color: "Cor: se já funciona no app",
-  },
-  listTitle: "Busca e lista completa",
-  glossary: {
-    title: "Glossário",
-    hint: "WISP, capability, adapter, perfil, provider, plugin",
-    items: [
-      { id: "wisp", term: "WISP", gloss: "Um contrato que qualquer um implementa", key: "WISP 03" },
-      { id: "capability", term: "Capability", gloss: "O que um cliente rodando oferece", key: "files/2" },
-      { id: "adapter", term: "Adapter", gloss: "Uma tecnologia por trás de um contrato", key: "webrtc/1" },
-      { id: "profile", term: "Perfil de protocolo", gloss: "As regras exatas de wire em uso", key: "paired-chat/1" },
-      { id: "provider", term: "Provider / signer", gloss: "Quem opera um serviço ou assina por ele", key: "mint Cashu" },
-      { id: "plugin", term: "Plugin", gloss: "Adapters empacotados e compilados num build", key: "registerAdapters()" },
-    ],
-  },
-};
-
-export const catalog: Localized<CatalogCopy> = { en, "pt-br": ptBr };
+export type CatalogCopy = typeof catalog;

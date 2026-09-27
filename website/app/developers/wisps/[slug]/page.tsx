@@ -8,12 +8,12 @@ export const dynamicParams = false;
 export const generateStaticParams = readerParams;
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  return readerMetadata((await params).slug, "en");
+  return readerMetadata((await params).slug);
 }
 
 export default async function Page({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const reference = findReference(slug);
   if (!reference) notFound();
-  return <ReaderPage reference={reference} requested={slug} locale="en" />;
+  return <ReaderPage reference={reference} requested={slug} />;
 }

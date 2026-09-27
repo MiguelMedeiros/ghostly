@@ -6,7 +6,6 @@ import { Icon } from "@/components/site/icons";
 import { APP_URL } from "@/content/shell";
 import { join } from "@/content/join";
 import { checkInvite, type InviteCheck } from "@/lib/invite";
-import { href, type Locale } from "@/lib/i18n";
 import "@/app/join.css";
 
 declare global {
@@ -29,14 +28,14 @@ const taken = () => window.__ghostlyInvite ?? null;
  * travels in the fragment, which no browser sends to a server. A script in the layout takes it out of
  * the address before analytics load; this dialog reads it and offers the ways to open it.
  */
-export function JoinLanding({ locale }: { locale: Locale }) {
+export function JoinLanding() {
   const invite = useSyncExternalStore(subscribe, taken, () => null);
   if (!invite) return null;
-  return <JoinDialog key={invite} locale={locale} check={checkInvite(invite)} />;
+  return <JoinDialog key={invite} check={checkInvite(invite)} />;
 }
 
-function JoinDialog({ locale, check }: { locale: Locale; check: InviteCheck }) {
-  const t = join[locale];
+function JoinDialog({ check }: { check: InviteCheck }) {
+  const t = join;
   const dialog = useRef<HTMLDialogElement>(null);
   const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
   useEffect(() => {
@@ -81,7 +80,7 @@ function JoinDialog({ locale, check }: { locale: Locale; check: InviteCheck }) {
                 {t.desktopCopyFailed} <code className="join-code">{check.code}</code>
               </p>
             )}
-            <a className="btn" href={`${href(locale, "/")}#download`} onClick={close} data-testid="join-download">
+            <a className="btn" href={`${"/"}#download`} onClick={close} data-testid="join-download">
               <Icon name="download" /> {t.download}
             </a>
           </div>
@@ -92,7 +91,7 @@ function JoinDialog({ locale, check }: { locale: Locale; check: InviteCheck }) {
           <h2 id="join-title" className="join-title">{t.refusedTitle}</h2>
           <p role="alert" className="join-lead" data-testid="join-refused">{t.refused[check.reason]}</p>
           <div className="join-actions">
-            <a className="btn" href={`${href(locale, "/")}#download`} onClick={close} autoFocus>
+            <a className="btn" href={`${"/"}#download`} onClick={close} autoFocus>
               <Icon name="download" /> {t.download}
             </a>
           </div>

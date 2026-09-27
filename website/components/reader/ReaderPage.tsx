@@ -6,7 +6,6 @@ import { Shell } from "@/components/site/Shell";
 import { LevelBadge } from "@/components/site/Level";
 import { reader } from "@/content/reader";
 import { catalog } from "@/content/catalog";
-import { href, type Locale } from "@/lib/i18n";
 import numbering from "@/lib/wisp-numbering.json";
 import type { Reference } from "@/lib/references";
 import { GROUPS, wispByFile, wisps, type Wisp } from "@/lib/wisps";
@@ -32,17 +31,17 @@ function outline(body: string) {
   return items;
 }
 
-function WispLink({ w, locale }: { w: Wisp; locale: Locale }) {
+function WispLink({ w }: { w: Wisp }) {
   return (
-    <Link href={href(locale, `/developers/wisps/${w.slug}`)}>
+    <Link href={`/developers/wisps/${w.slug}`}>
       <span className="mono">{w.number}</span> {w.name}
     </Link>
   );
 }
 
-export async function ReaderPage({ reference, requested, locale }: { reference: Reference; requested: string; locale: Locale }) {
-  const t = reader[locale];
-  const kinds = catalog[locale].kinds;
+export async function ReaderPage({ reference, requested }: { reference: Reference; requested: string }) {
+  const t = reader;
+  const kinds = catalog.kinds;
   const body = await readFile(path.join(process.cwd(), "public/reference", reference.file), "utf8");
   const w = wispByFile(reference.file);
   const order = wisps.indexOf(w as Wisp);
@@ -65,19 +64,19 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
   const sourceUrl = `${REPO_URL}/blob/dev/${reference.sourcePath}`;
 
   return (
-    <Shell locale={locale}>
+    <Shell>
       <div className="wrap reader">
         <nav className="reader-crumbs" aria-label="Breadcrumb">
-          <Link href={href(locale, "/developers")}>{t.developers}</Link>
+          <Link href={"/developers"}>{t.developers}</Link>
           <span aria-hidden="true">/</span>
-          <Link href={href(locale, "/developers/catalog")}>{t.catalog}</Link>
+          <Link href={"/developers/catalog"}>{t.catalog}</Link>
           <span aria-hidden="true">/</span>
           <span aria-current="page">{w ? `WISP ${w.number}` : t.reference}</span>
         </nav>
 
         <div className="reader-layout">
           <aside className="reader-side">
-            <Link className="reader-glossary" href={`${href(locale, "/developers/catalog")}#glossary`}>
+            <Link className="reader-glossary" href={`${"/developers/catalog"}#glossary`}>
               {t.glossary} →
             </Link>
             <details className="reader-all" open>
@@ -88,11 +87,11 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                   if (!items.length) return null;
                   return (
                     <div key={g.id} className="reader-all-group">
-                      <p>{g.title[locale]}</p>
+                      <p>{g.title}</p>
                       <ul>
                         {items.map((x) => (
                           <li key={x.id} data-child={Boolean(x.parent)}>
-                            <Link href={href(locale, `/developers/wisps/${x.slug}`)} aria-current={x.slug === w?.slug ? "page" : undefined}>
+                            <Link href={`/developers/wisps/${x.slug}`} aria-current={x.slug === w?.slug ? "page" : undefined}>
                               <span className="mono">{x.number}</span>
                               {x.name}
                             </Link>
@@ -120,7 +119,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                     <span className="chip">{w.status}</span>
                     <span className="chip">{kinds[w.kind] ?? w.kind}</span>
                     {!w.assigned && <span className="chip chip--warn">{t.unassigned}</span>}
-                    {w.level && <LevelBadge level={w.level} locale={locale} />}
+                    {w.level && <LevelBadge level={w.level} />}
                     {w.updated && (
                       <span className="dim reader-updated">
                         {t.updated} {w.updated}
@@ -132,15 +131,14 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                 )}
               </div>
               <p className="reader-scope">{w ? t.draftNote : t.supportNote}</p>
-              {t.englishDocs && <p className="reader-lang">{t.englishDocs}</p>}
               {moved && <p className="reader-moved">{t.moved}</p>}
             </header>
 
             {w && (
               <section className="reader-summary" aria-label={t.inShort}>
                 <h2 className="reader-summary-title mono">{t.inShort}</h2>
-                {w.benefit && <p className="reader-benefit">{w.benefit[locale]}</p>}
-                {w.note && <p className="reader-note">{w.note[locale]}</p>}
+                {w.benefit && <p className="reader-benefit">{w.benefit}</p>}
+                {w.note && <p className="reader-note">{w.note}</p>}
                 {w.notices.map((n) => (
                   <p key={n} className="reader-notice">
                     {n}
@@ -157,7 +155,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                     <div>
                       <dt>{t.inApp}</dt>
                       <dd>
-                        <Link href={w.feature[locale].href}>{w.feature[locale].label} →</Link>
+                        <Link href={w.feature.href}>{w.feature.label} →</Link>
                       </dd>
                     </div>
                   )}
@@ -165,7 +163,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                     <div>
                       <dt>{t.implementsContract}</dt>
                       <dd>
-                        <WispLink w={parent} locale={locale} />
+                        <WispLink w={parent} />
                       </dd>
                     </div>
                   )}
@@ -174,7 +172,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                       <dt>{t.depends}</dt>
                       <dd className="reader-links">
                         {deps.map((d) => (
-                          <WispLink key={d.id} w={d} locale={locale} />
+                          <WispLink key={d.id} w={d} />
                         ))}
                       </dd>
                     </div>
@@ -184,7 +182,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                       <dt>{t.children}</dt>
                       <dd className="reader-links">
                         {children.map((d) => (
-                          <WispLink key={d.id} w={d} locale={locale} />
+                          <WispLink key={d.id} w={d} />
                         ))}
                       </dd>
                     </div>
@@ -194,7 +192,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                       <dt>{t.usedBy}</dt>
                       <dd className="reader-links">
                         {usedBy.map((d) => (
-                          <WispLink key={d.id} w={d} locale={locale} />
+                          <WispLink key={d.id} w={d} />
                         ))}
                       </dd>
                     </div>
@@ -238,7 +236,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
               {legacyHeadings.map((id) => (
                 <span key={id} id={id} />
               ))}
-              <ReferenceMarkdown body={body} sourcePath={reference.sourcePath} locale={locale} repoLabel={t.repo} />
+              <ReferenceMarkdown body={body} sourcePath={reference.sourcePath} repoLabel={t.repo} />
             </div>
 
             <footer className="reader-foot">
@@ -250,7 +248,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
               </div>
               <nav className="reader-pager" aria-label="Continue reading">
                 {prev && (
-                  <Link href={href(locale, `/developers/wisps/${prev.slug}`)} className="reader-pager-prev">
+                  <Link href={`/developers/wisps/${prev.slug}`} className="reader-pager-prev">
                     <small>← {t.prev}</small>
                     <span>
                       <span className="mono">{prev.number}</span> {prev.name}
@@ -258,7 +256,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                   </Link>
                 )}
                 {next && (
-                  <Link href={href(locale, `/developers/wisps/${next.slug}`)} className="reader-pager-next">
+                  <Link href={`/developers/wisps/${next.slug}`} className="reader-pager-next">
                     <small>{t.next} →</small>
                     <span>
                       <span className="mono">{next.number}</span> {next.name}
@@ -266,7 +264,7 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
                   </Link>
                 )}
               </nav>
-              <Link className="link-arrow" href={href(locale, "/developers/catalog")}>
+              <Link className="link-arrow" href={"/developers/catalog"}>
                 {t.back}
               </Link>
             </footer>

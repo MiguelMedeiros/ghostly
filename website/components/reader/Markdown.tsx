@@ -3,7 +3,6 @@ import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import GithubSlugger from "github-slugger";
 import { resolveReferenceUrl } from "@/lib/references";
-import { href, type Locale } from "@/lib/i18n";
 
 function textOf(node: ReactNode): string {
   return Children.toArray(node)
@@ -48,22 +47,17 @@ function Diagram({ source }: { source: string }) {
     </figure>
   );
 }
-function localize(url: string, locale: Locale): string {
-  return url.startsWith("/developers/") ? href(locale, url) : url;
-}
 
 /** Renders a synced reference document with anchored headings and in-site links. */
 export function ReferenceMarkdown({
   body,
   sourcePath,
   idPrefix = "",
-  locale = "en",
   repoLabel = "repository",
 }: {
   body: string;
   sourcePath: string;
   idPrefix?: string;
-  locale?: Locale;
   repoLabel?: string;
 }) {
   type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[]; data?: { hProperties?: Record<string, string> } };
@@ -132,7 +126,7 @@ export function ReferenceMarkdown({
       skipHtml
       components={components}
       urlTransform={(url) =>
-        defaultUrlTransform(url.startsWith("#") ? `#${idPrefix}${url.slice(1)}` : localize(resolveReferenceUrl(url, sourcePath), locale))
+        defaultUrlTransform(url.startsWith("#") ? `#${idPrefix}${url.slice(1)}` : resolveReferenceUrl(url, sourcePath))
       }
     >
       {body}

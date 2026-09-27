@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BLOCKS, DIMS, PRESETS, type Block, type PresetId } from "@/lib/composition";
-import { href, type Locale } from "@/lib/i18n";
 import { LEVELS, type Level } from "@/lib/status";
 import { LevelBadge } from "@/components/site/Level";
 import { shell } from "@/content/shell";
@@ -45,12 +44,10 @@ const PRESET_COUNTS = Object.fromEntries(PRESETS.map((p) => [p.id, BLOCKS.filter
 export function BlockGrid({
   mode,
   t,
-  locale,
   wisps,
 }: {
   mode: "compose" | "stages";
   t: GridLabels;
-  locale: Locale;
   wisps: WispRef[];
 }) {
   const calm = useCalm();
@@ -75,7 +72,7 @@ export function BlockGrid({
     return () => window.clearTimeout(id);
   }, [playing, stage, calm]);
 
-  const levels = shell[locale].levels;
+  const levels = shell.levels;
   const count = t.included.replace("{n}", String(on.size)).replace("{t}", String(BLOCKS.length));
 
   const detail = (bl: Block) => {
@@ -84,12 +81,12 @@ export function BlockGrid({
       <div className="bgrid-detail" role="region" aria-label={bl.name}>
         <div className="bgrid-detail-head">
           <h4>{bl.name}</h4>
-          <LevelBadge level={bl.level} locale={locale} small />
+          <LevelBadge level={bl.level} small />
           <button type="button" className="bgrid-close" onClick={() => setSelected(null)} aria-label={t.close}>
             ×
           </button>
         </div>
-        <p>{bl.enables[locale]}</p>
+        <p>{bl.enables}</p>
         <p className="bgrid-specs">
           <span className="dim">
             {bl.wisps.length ? t.specs : t.noSpec}
@@ -101,13 +98,13 @@ export function BlockGrid({
             const number = w?.number ?? slug.split("-")[0];
             const name = w?.name ?? REF_NAMES[slug];
             return name ? (
-              <Link key={slug} href={href(locale, `/developers/wisps/${slug}`)}>
+              <Link key={slug} href={`/developers/wisps/${slug}`}>
                 <span className="mono">{number}</span> {name}
               </Link>
             ) : null;
           })}
           {bl.refs?.map((slug) => (
-            <Link key={slug} href={href(locale, `/developers/wisps/${slug}`)}>
+            <Link key={slug} href={`/developers/wisps/${slug}`}>
               {t.docs}: {REF_NAMES[slug] ?? slug}
             </Link>
           ))}
@@ -123,7 +120,7 @@ export function BlockGrid({
           <div className="composer-presets" role="radiogroup" aria-label={t.presets}>
             {PRESETS.map((p) => (
               <button key={p.id} role="radio" aria-checked={p.id === preset} className="preset" onClick={() => setPreset(p.id)}>
-                {p.title[locale]}
+                {p.title}
                 <span className="bgrid-preset-n mono" aria-hidden="true">
                   {PRESET_COUNTS[p.id]}
                 </span>
@@ -131,7 +128,7 @@ export function BlockGrid({
             ))}
           </div>
           <p className="composer-blurb">
-            {PRESETS.find((p) => p.id === preset)!.blurb[locale]}{" "}
+            {PRESETS.find((p) => p.id === preset)!.blurb}{" "}
             <span className="bgrid-count mono">
               <span className="dim">· {count}</span>
             </span>
@@ -185,7 +182,7 @@ export function BlockGrid({
             <div className="bgrid-row" key={d.id} style={{ "--c": d.color } as React.CSSProperties}>
               <div className="bgrid-dim">
                 <span className="bgrid-dim-dot" aria-hidden="true" />
-                {d.title[locale]}
+                {d.title}
               </div>
               <div className="bgrid-blocks">
                 {blocks.map((bl) => (

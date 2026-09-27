@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { Icon } from "@/components/site/icons";
-import { href, type Locale } from "@/lib/i18n";
 import { LEVELS } from "@/lib/status";
 import { GROUPS, wisps } from "@/lib/wisps";
 import { shell } from "@/content/shell";
@@ -29,8 +28,8 @@ function short(name: string) {
  * tile is the family's contract; small tiles are adapters and profiles. The
  * tile's color says whether what it describes runs in the app.
  */
-export function WispMap({ t, locale }: { t: CatalogCopy; locale: Locale }) {
-  const levels = shell[locale].levels;
+export function WispMap({ t }: { t: CatalogCopy }) {
+  const levels = shell.levels;
   const counts = LEVELS.map((l) => ({ l, n: wisps.filter((w) => w.level === l).length })).filter((c) => c.n);
   return (
     <div className="wmap">
@@ -65,13 +64,13 @@ export function WispMap({ t, locale }: { t: CatalogCopy; locale: Locale }) {
             <section key={g.id} className="wmap-family" aria-labelledby={`wmap-${g.id}`}>
               <header>
                 <Icon name={g.icon} />
-                <h3 id={`wmap-${g.id}`}>{g.title[locale]}</h3>
+                <h3 id={`wmap-${g.id}`}>{g.title}</h3>
               </header>
               <ul className="wmap-tiles">
                 {items.map((w) => (
                   <li key={w.id} className={isLead(w.id) ? "wmap-tile-wrap wmap-tile-wrap--lead" : "wmap-tile-wrap"}>
                     <Link
-                      href={href(locale, `/developers/wisps/${w.slug}`)}
+                      href={`/developers/wisps/${w.slug}`}
                       className="wmap-tile"
                       data-level={w.level ?? "none"}
                       data-kind={w.kind}

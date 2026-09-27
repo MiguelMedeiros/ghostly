@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
  * - Next, Previous, the dots and the keys move between the eight steps; going
  *   back plays the step being left in reverse (the picture's `--t` goes down,
  *   not jumps).
- * - Every step, in English and Portuguese, has its title, what goes on the wire
+ * - Every step has its title, what goes on the wire
  *   and links to the WISPs it cites.
  * - Reduced motion: each step is its finished frame at once, nothing runs.
  * - At desktop, upright (the Claude app's browser panel) and phone sizes the
@@ -134,65 +134,48 @@ test("play all goes through the steps and stops at the end", async ({
   await expect(current(page)).toHaveAttribute("data-step-id", "floor");
 });
 
-for (const [path, sample] of [
-  [
-    "/developers",
-    {
-      title: "Rank the transports",
-      wire: "3 + 1 = 4, direct: goes first",
-      wisp: "/developers/wisps/100-transports",
-    },
-  ],
-  [
-    "/pt-br/developers",
-    {
-      title: "Ordenar os transportes",
-      wire: "3 + 1 = 4, direto: vai primeiro",
-      wisp: "/pt-br/developers/wisps/100-transports",
-    },
-  ],
-] as const) {
-  test.describe(() => {
-    test.use({ reducedMotion: "reduce" });
-    test(`every step has its content and WISP links on ${path}`, async ({
-      page,
-    }) => {
-      const root = await open(page, path);
-      for (let i = 0; i < STEP_IDS.length; i++) {
-        const card = current(page);
-        await expect(card).toHaveAttribute("data-step-id", STEP_IDS[i]);
-        await expect(card.locator(".psx-title")).not.toBeEmpty();
-        await expect(card.locator(".psx-body")).not.toBeEmpty();
-        expect(
-          await card.locator(".psx-wire dt").count(),
-        ).toBeGreaterThanOrEqual(3);
-        const links = card.locator(".psx-wisp");
-        expect(await links.count()).toBeGreaterThanOrEqual(1);
-        for (const href of await links.evaluateAll((els) =>
-          els.map((e) => e.getAttribute("href") ?? ""),
-        )) {
-          expect(href).toMatch(
-            path.startsWith("/pt-br")
-              ? /^\/pt-br\/developers\/wisps\/[\w-]+$/
-              : /^\/developers\/wisps\/[\w-]+$/,
-          );
-        }
-        if (STEP_IDS[i] === "transport") {
-          await expect(card.locator(".psx-title")).toHaveText(sample.title);
-          await expect(card.locator(".psx-wire")).toContainText(sample.wire);
-          await expect(card.locator(`a[href="${sample.wisp}"]`)).toHaveText(
-            "WISP 100",
-          );
-        }
-        if (i < STEP_IDS.length - 1)
-          await root.locator('[data-action="next"]').click();
+const sample = {
+  title: "Rank the transports",
+  wire: "3 + 1 = 4, direct: goes first",
+  wisp: "/developers/wisps/100-transports",
+};
+
+test.describe(() => {
+  test.use({ reducedMotion: "reduce" });
+  test("every step has its content and WISP links on /developers", async ({
+    page,
+  }) => {
+    const root = await open(page);
+    for (let i = 0; i < STEP_IDS.length; i++) {
+      const card = current(page);
+      await expect(card).toHaveAttribute("data-step-id", STEP_IDS[i]);
+      await expect(card.locator(".psx-title")).not.toBeEmpty();
+      await expect(card.locator(".psx-body")).not.toBeEmpty();
+      expect(
+        await card.locator(".psx-wire dt").count(),
+      ).toBeGreaterThanOrEqual(3);
+      const links = card.locator(".psx-wisp");
+      expect(await links.count()).toBeGreaterThanOrEqual(1);
+      for (const href of await links.evaluateAll((els) =>
+        els.map((e) => e.getAttribute("href") ?? ""),
+      )) {
+        expect(href).toMatch(/^\/developers\/wisps\/[\w-]+$/);
       }
-      // A WISP link opens its rendered page.
-      const res = await page.request.get(sample.wisp);
-      expect(res.status()).toBe(200);
-    });
+      if (STEP_IDS[i] === "transport") {
+        await expect(card.locator(".psx-title")).toHaveText(sample.title);
+        await expect(card.locator(".psx-wire")).toContainText(sample.wire);
+        await expect(card.locator(`a[href="${sample.wisp}"]`)).toHaveText(
+          "WISP 100",
+        );
+      }
+      if (i < STEP_IDS.length - 1)
+        await root.locator('[data-action="next"]').click();
+    }
+    // A WISP link opens its rendered page.
+    const res = await page.request.get(sample.wisp);
+    expect(res.status()).toBe(200);
   });
-}
+});
 
 test.describe("reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
@@ -233,9 +216,6 @@ const VIEWPORTS = [
   { name: "tablet 768x1024", width: 768, height: 1024, stage: "land" },
   { name: "phone 390x844", width: 390, height: 844, stage: "port" },
   { name: "phone 360x740", width: 360, height: 740, stage: "port" },
-  // Portuguese runs longer.
-  { name: "desktop 1440x900 pt-br", width: 1440, height: 900, stage: "land", path: "/pt-br/developers" },
-  { name: "phone 360x740 pt-br", width: 360, height: 740, stage: "port", path: "/pt-br/developers" },
 ] as const;
 
 for (const vp of VIEWPORTS) {
@@ -247,7 +227,7 @@ for (const vp of VIEWPORTS) {
     test(`nothing overlaps or leaves the stage at ${vp.name}`, async ({
       page,
     }) => {
-      const root = await open(page, "path" in vp ? vp.path : "/developers");
+      const root = await open(page);
       const svg = root.locator(`svg.psx-svg--${vp.stage}`);
       await expect(svg).toBeVisible();
       await expect(

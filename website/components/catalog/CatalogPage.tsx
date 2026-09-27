@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
 import { catalog } from "@/content/catalog";
-import { href, type Locale } from "@/lib/i18n";
 import numbering from "@/lib/wisp-numbering.json";
 import candidates from "@/lib/roadmap-candidates.json";
 import { GROUPS, wisps, wispCount } from "@/lib/wisps";
@@ -10,8 +9,8 @@ import { Glossary } from "./Glossary";
 import { WispMap } from "./WispMap";
 import "@/app/catalog.css";
 
-export function CatalogPage({ locale }: { locale: Locale }) {
-  const t = catalog[locale];
+export function CatalogPage() {
+  const t = catalog;
   const rows: CatalogRow[] = wisps.map((w) => {
     const old = numbering.find((n) => n.file === w.file)?.oldId;
     // Old numeric fragments stay only where no current draft uses the same id.
@@ -26,17 +25,17 @@ export function CatalogPage({ locale }: { locale: Locale }) {
       group: w.group,
       parent: w.parent,
       status: w.status,
-      benefit: w.benefit?.[locale],
-      note: w.note?.[locale],
+      benefit: w.benefit,
+      note: w.note,
       implementation: w.implementation,
       level: w.level,
       legacyIds,
     };
   });
-  const groups = GROUPS.map((g) => ({ id: g.id, title: g.title[locale], blurb: g.blurb[locale], icon: g.icon }));
+  const groups = GROUPS.map((g) => ({ id: g.id, title: g.title, blurb: g.blurb, icon: g.icon }));
 
   return (
-    <Shell locale={locale}>
+    <Shell>
       <section className="catalog-hero">
         <div className="wrap">
           <span className="eyebrow">{t.eyebrow}</span>
@@ -46,14 +45,14 @@ export function CatalogPage({ locale }: { locale: Locale }) {
         </div>
       </section>
       <div className="wrap">
-        <WispMap t={t} locale={locale} />
+        <WispMap t={t} />
         <h2 className="h-card catalog-list-title" id="list">
           {t.listTitle}
         </h2>
         <p className="catalog-axes">
           <span className="chip">Draft</span> {t.axes}
         </p>
-        <Catalog rows={rows} groups={groups} t={t} locale={locale} />
+        <Catalog rows={rows} groups={groups} t={t} />
 
         <section className="catalog-inventory" id="inventory" aria-labelledby="inventory-title">
           <h2 id="inventory-title" className="h-card">
@@ -63,21 +62,21 @@ export function CatalogPage({ locale }: { locale: Locale }) {
           <ul className="inventory-list">
             {candidates.map((c) => (
               <li key={c.id} id={c.id}>
-                <Link href={`${href(locale, "/roadmap")}#${c.id}`}>{c.title}</Link>
+                <Link href={`${"/roadmap"}#${c.id}`}>{c.title}</Link>
                 <span className="dim mono">{c.note ? `${c.status}: ${c.note}` : c.status}</span>
               </li>
             ))}
           </ul>
           <p>
-            <Link className="link-arrow" href={href(locale, "/roadmap")}>
+            <Link className="link-arrow" href={"/roadmap"}>
               {t.inventory.cta} →
             </Link>
             <span className="dim"> · {t.sources}: </span>
-            <Link href={href(locale, "/developers/wisps/readme")}>README</Link>
+            <Link href={"/developers/wisps/readme"}>README</Link>
             <span className="dim"> · </span>
-            <Link href={href(locale, "/developers/wisps/numbering")}>NUMBERING</Link>
+            <Link href={"/developers/wisps/numbering"}>NUMBERING</Link>
             <span className="dim"> · </span>
-            <Link href={href(locale, "/developers/wisps/implementation")}>IMPLEMENTATION</Link>
+            <Link href={"/developers/wisps/implementation"}>IMPLEMENTATION</Link>
           </p>
         </section>
       </div>

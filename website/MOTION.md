@@ -299,7 +299,7 @@ the playhead only decides how the pictures catch up with it.
 - Actors live in the act backdrop and move only between poses in
   `components/story/poses.ts`; on top of the playhead they carry the `body`
   spring.
-- For any range that depends on state (orientation, locale), use the function
+- For any range that depends on state (orientation), use the function
   form of `useTransform`: motion turns array ranges on scroll values into a
   native scroll animation fixed at mount.
 

@@ -12,7 +12,7 @@ import { measure, settleKey, type Rect } from "./scene-measure";
 const W = 2560;
 const H = 1440;
 const CHAPTERS = ["invite", "dht", "agree", "alive", "open"] as const;
-const PAGES = ["/", "/developers", "/developers/catalog", "/roadmap", "/cli", "/pt-br"];
+const PAGES = ["/", "/developers", "/developers/catalog", "/roadmap", "/cli"];
 /** No story shape comes nearer the window's edge than this share of its width. */
 const EDGE = 0.05;
 
@@ -95,7 +95,7 @@ for (const path of PAGES) {
     await page.goto(path, { waitUntil: "networkidle" });
     // The story's copy panels are pinned: bring each into view once, so each is measured where it is read.
     const found: string[] = [];
-    const ids = path === "/" || path === "/pt-br" ? ["hero", ...CHAPTERS] : [];
+    const ids = path === "/" ? ["hero", ...CHAPTERS] : [];
     if (!ids.length) found.push(...(await page.evaluate(outsideColumn)).out);
     for (const id of ids) {
       await scrollChapter(page, id, 0.5);
