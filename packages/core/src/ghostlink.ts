@@ -9,6 +9,7 @@ import { TRANSPORTS, rankTransports, relayedTransports, transportOrder, type Nat
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
 import { parseLinkPreview, type LinkPreview } from "./linkPreview";
+import { pairedReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, verifyPairedSignal } from "./pairedSignal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
@@ -98,6 +99,11 @@ export interface IncomingMessage {
   packet?: DhtPacketFacts;
   /** The link preview the sender's app attached (`pv`, WISP 401 § Link previews), already checked against the text. */
   preview?: LinkPreview;
+  /**
+   * The message this one answers (`r`, WISP 401 § Replies), its line cleaned. Over the DHT only the id comes
+   * (`s` empty, `f` absent): the receiver finds the rest in its own history.
+   */
+  reply?: WireReply | { i: string };
 }
 
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
@@ -105,12 +111,14 @@ export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
 
 /**
  * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
- * with it: the text matters, the card does not.
+ * with it: the text matters, the card does not. A reply (`r`, WISP 401 § Replies) is a few hundred bytes at most
+ * and always goes.
  */
-export function pairedMessageFrame(id: string, ts: number, m: string, preview?: LinkPreview): string {
-  const plain = JSON.stringify({ t: "paired-message", id, ts, m });
+export function pairedMessageFrame(id: string, ts: number, m: string, preview?: LinkPreview, reply?: WireReply): string {
+  const r = reply && { r: wireReply(reply) };
+  const plain = JSON.stringify({ t: "paired-message", id, ts, m, ...r });
   if (!preview) return plain;
-  const withPreview = JSON.stringify({ t: "paired-message", id, ts, m, pv: preview });
+  const withPreview = JSON.stringify({ t: "paired-message", id, ts, m, pv: preview, ...r });
   return withPreview.length <= MAX_PAIRED_MESSAGE_FRAME ? withPreview : plain;
 }
 
@@ -790,8 +798,8 @@ export class GhostLink {
   }
   /** A session is ready, but on a transport the policies do not allow: it coordinates a switch and carries nothing else. */
   private get sessionBlocked(): boolean { return this.paired?.state.status === "ready" && !this.currentTransportAllowed(); }
-  validateText(text: string, timestamp: number, id: string): string | null {
-    if (this.textDelivery === "dht") return this.dht!.validate(text, timestamp, id);
+  validateText(text: string, timestamp: number, id: string, reply?: WireReply): string | null {
+    if (this.textDelivery === "dht") return this.dht!.validate(text, timestamp, id, reply?.i);
     return this.canSendText ? null : "No authenticated text delivery method is available.";
   }
   get canSendText(): boolean { return this.textDelivery !== "unavailable"; }
@@ -1350,12 +1358,13 @@ export class GhostLink {
   /**
    * Chat goes over the data link when it is up, through Pkarr otherwise. A `preview` (WISP 401 § Link previews) goes
    * only with a paired message on the live session, and only while the frame stays within what a session takes;
-   * the DHT has no room for one, and the text goes without it.
+   * the DHT has no room for one, and the text goes without it. A `reply` (WISP 401 § Replies) goes whole on the
+   * session; on the DHT only its id does, which the contact looks up in its own history.
    */
-  async sendMessage(text: string, timestamp = Date.now(), stableId?: string, preview?: LinkPreview): Promise<string | null> {
+  async sendMessage(text: string, timestamp = Date.now(), stableId?: string, preview?: LinkPreview, reply?: WireReply): Promise<string | null> {
     const trimmed = text.trim();
     if (!trimmed) return null;
-    if (this.textDelivery === "dht" && this.dht) return this.dht.send(trimmed, timestamp, stableId ?? toBase64Url(randomBytes(16)));
+    if (this.textDelivery === "dht" && this.dht) return this.dht.send(trimmed, timestamp, stableId ?? toBase64Url(randomBytes(16)), reply?.i);
     if (this.options.params.profile && !this.isDataLinkOpen) return "Confirm the peer and connect before sending. This chat never falls back to DHT messages.";
     if (this.options.params.profile && this.channel) {
       if (utf8Encode(trimmed).length > LIMITS.maxChatMessageBytes) return "Message exceeds 16 KiB";
@@ -1363,7 +1372,7 @@ export class GhostLink {
       const id = stableId ?? toBase64Url(randomBytes(16));
       if (!/^[A-Za-z0-9_-]{22}$/.test(id)) return "Invalid message ID";
       this.pairedPending.set(id, timestamp);
-      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview)); return null; }
+      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview, reply)); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
     }
     if (this.channel && trimmed.length <= LIMITS.maxChatMessageBytes / 4) {
@@ -2098,7 +2107,9 @@ export class GhostLink {
             const preview = frame.pv === undefined ? undefined : parseLinkPreview(frame.pv, frame.m);
             // What the contact was typing arrived: it is not typing any more.
             this.typingReceiver.clear();
-            await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }) });
+            // The same for a reply: one that does not hold is left out (older apps ignore `r`).
+            const reply = frame.r === undefined ? undefined : readReply(frame.r, pairedReplyAuthor);
+            await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }), ...(reply && { reply }) });
             if (this.channel === channel && this.isDataLinkOpen)
               channel.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {

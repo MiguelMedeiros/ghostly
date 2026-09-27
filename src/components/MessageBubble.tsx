@@ -17,6 +17,8 @@ import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState } from "../lib/fileDownload";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
+import type { QuoteView } from "../lib/replies";
+import { ReplyQuote } from "./chat/ReplyQuote";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -29,6 +31,10 @@ interface MessageBubbleProps {
   onDelete?: () => void;
   /** The engine's link for the message's details; found from `peerPubKey` when left out (groups name theirs). */
   linkId?: string;
+  /** Answers this message: its ⋮ says Reply, a pointer finds a reply button beside it, a finger swipes it right. */
+  onReply?: () => void;
+  /** The message this one answers, as the chat shows it (`quoteFor`). */
+  quote?: QuoteView;
 }
 
 /** How long a finger holds a message before its details open. */
@@ -58,6 +64,84 @@ function useLongPress(fire: () => void) {
     // The browser's own long-press menu would sit on top of the details.
     onContextMenu: (e: React.MouseEvent) => { if (fired.current || start.current) e.preventDefault(); },
   };
+}
+
+/** How far a finger drags a message towards the reading direction's end before letting go answers it. */
+export const SWIPE_REPLY_PX = 56;
+/** The furthest a swiped message follows the finger. */
+const SWIPE_MAX_PX = 80;
+
+/**
+ * Swipe to reply on a touch screen (or a pen), as in WhatsApp: the message follows the finger sideways and, let go
+ * past `SWIPE_REPLY_PX`, answers. A drag that starts up or down is the list scrolling, and is left alone.
+ */
+function useSwipeReply(fire?: () => void) {
+  const start = useRef<{ x: number; y: number; sign: 1 | -1 } | null>(null);
+  const swiping = useRef(false);
+  const [dx, setDx] = useState(0);
+  const [sign, setSign] = useState<1 | -1>(1);
+  const reset = () => { start.current = null; swiping.current = false; setDx(0); };
+  if (!fire) return { dx: 0, offset: 0, handlers: {} };
+  // Towards the end of the line: right, or left in a right-to-left language.
+  const along = (e: ReactPointerEvent<HTMLElement>) => start.current!.sign * (e.clientX - start.current!.x);
+  return {
+    dx,
+    offset: sign * dx,
+    handlers: {
+      onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+        if (e.pointerType === "mouse" || e.button !== 0 || (e.target as HTMLElement).closest("button, a, input, audio, video")) return;
+        const rtl = getComputedStyle(e.currentTarget).direction === "rtl" ? -1 : 1;
+        start.current = { x: e.clientX, y: e.clientY, sign: rtl }; swiping.current = false; setSign(rtl);
+      },
+      onPointerMove: (e: ReactPointerEvent<HTMLElement>) => {
+        if (!start.current) return;
+        const x = along(e), y = Math.abs(e.clientY - start.current.y);
+        if (!swiping.current) {
+          if (y > 12 && y > Math.abs(x)) { start.current = null; return; }
+          if (x < 12 || x < y * 1.5) return;
+          swiping.current = true;
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* a synthetic pointer has none */ }
+        }
+        setDx(Math.max(0, Math.min(SWIPE_MAX_PX, x)));
+      },
+      onPointerUp: (e: ReactPointerEvent<HTMLElement>) => {
+        const done = swiping.current && start.current && along(e) >= SWIPE_REPLY_PX;
+        reset();
+        if (done) fire();
+      },
+      onPointerCancel: reset,
+    },
+  };
+}
+
+/** Both gestures on one row: each handler of each, in turn. */
+function mergeHandlers<T extends Record<string, ((e: never) => void) | undefined>>(...all: Partial<T>[]): Partial<T> {
+  const merged: Record<string, (e: never) => void> = {};
+  for (const handlers of all) for (const [name, handler] of Object.entries(handlers)) {
+    if (!handler) continue;
+    const before = merged[name];
+    merged[name] = before ? (e: never) => { before(e); (handler as (e: never) => void)(e); } : handler as (e: never) => void;
+  }
+  return merged as Partial<T>;
+}
+
+function ReplyGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100">
+      <path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </svg>
+  );
+}
+
+/** Reply, beside a message, for a pointer: shown while the message is hovered or the button has the focus. */
+function ReplyAction({ onReply }: { onReply: () => void }) {
+  const { t } = useI18n();
+  return (
+    <button type="button" data-testid="message-reply-action" onClick={onReply} title={t("chat.message.reply")} aria-label={t("chat.message.reply")}
+      className="self-center shrink-0 p-1 rounded-full text-text-muted hover:text-text-primary transition-all cursor-pointer max-md:hidden md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
+      <ReplyGlyph />
+    </button>
+  );
 }
 
 const IMAGE_URL_RE =
@@ -255,13 +339,15 @@ function DownloadItem({ file, name, sender, onDone }: { file: ChatFile; name: st
 }
 
 /**
- * What can be done to a message, behind its ⋮: saving the file it carries, its details, and forgetting it here.
+ * What can be done to a message, behind its ⋮: answering it, saving the file it carries, its details, and forgetting it here.
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDetails, align, download }: {
+function MessageMenu({ onDelete, onDetails, onReply, align, download }: {
   onDelete?: () => void;
   onDetails: () => void;
+  /** Answers the message (WISP 400 § Replies): the first row. */
+  onReply?: () => void;
   align: "left" | "right";
   /** A message carrying a file: the file, the name to save it under and who sent it. */
   download?: { file: ChatFile; name: string; sender: "me" | "peer" };
@@ -293,6 +379,9 @@ function MessageMenu({ onDelete, onDetails, align, download }: {
         </svg>
       </button>
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t("chat.message.options")}>
+        {onReply && <MenuItem testId="message-reply" onClick={() => { setOpen(false); onReply(); }} icon={<ReplyGlyph />}>
+          {t("chat.message.reply")}
+        </MenuItem>}
         {download && <DownloadItem {...download} onDone={() => setOpen(false)} />}
         <MenuItem testId="message-details" onClick={() => { setOpen(false); onDetails(); }}
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>}>
@@ -345,7 +434,7 @@ export function MessageBubble(props: MessageBubbleProps) {
   );
 }
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId }: MessageBubbleProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId, onReply, quote }: MessageBubbleProps) {
   const chat = useCueChat();
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
@@ -360,6 +449,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const rowRef = useRef<HTMLDivElement>(null);
   const openDetails = () => setDetails(true);
   const press = useLongPress(openDetails);
+  const swipe = useSwipeReply(onReply);
   const [imgError, setImgError] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const isMe = message.sender === "me";
@@ -378,7 +468,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       picture={contentType === "image"} onClose={() => setDetails(false)} returnFocus={rowRef.current} />
   );
   const rowProps = {
-    ref: rowRef, onDoubleClick: openDetails, ...press, "data-details-open": details || undefined,
+    ref: rowRef, onDoubleClick: openDetails, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
     // The second click of a double click would select a word of the message under the details.
     onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
   };
@@ -459,9 +549,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {...rowProps}
       data-message-row
       data-sender={isMe ? "me" : "peer"}
-      className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}
+      className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${onReply ? "touch-pan-y" : ""} ${swipe.dx > 0 ? "overflow-x-clip" : ""} ${enter}`}
     >
-      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="left" download={download} />}
+      {swipe.dx > 0 && (
+        // What letting go does, uncovered as the message moves.
+        <span data-testid="swipe-reply-hint" aria-hidden="true" className="self-center shrink-0 text-text-muted" style={{ opacity: Math.min(1, swipe.dx / SWIPE_REPLY_PX) }}>
+          <ReplyGlyph />
+        </span>
+      )}
+      {isMe && onReply && <ReplyAction onReply={onReply} />}
+      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} align="left" download={download} />}
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
       <div
         data-message-bubble
@@ -480,6 +577,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         style={{
           boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)",
+          ...(swipe.dx > 0 && { transform: `translateX(${swipe.offset}px)` }),
         }}
       >
         <TailSvg side={isMe ? "right" : "left"} />
@@ -490,6 +588,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             ~{message.nick || peerNick}
           </div>
         )}
+
+        {quote && <ReplyQuote quote={quote} />}
 
         {message.paymentId ? (
           <div className="clearfix">
@@ -575,7 +675,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </>}
         </div>}
       </div>
-      {!isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" download={download} />}
+      {!isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} align="right" download={download} />}
+      {!isMe && onReply && <ReplyAction onReply={onReply} />}
       {detailsPanel}
     </div>
   );

@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 403; editorial family allocation |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-26 |
+| Revision | 0.4 |
+| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
 | Implementation | The floor and first contact of every new chat (web, extension, desktop); DHT only per chat; pinned mailboxes. Native clients read the Mainline DHT directly; browsers go through Pkarr relays. |
@@ -59,6 +59,12 @@ A newer packet under a mailbox key replaces the older one, and a copy of the inv
 
 The move costs one extra read per poll only while it is under way (the contact said `1` or `2` but was not seen in the pinned mailbox yet).
 
+## Replies
+
+A text that answers another ([400](400-chat.md#replies), revision 0.4) carries only the original's id, as the signed body's optional **eleventh** element (the ninth and tenth are then present, the ninth `null` when there is no revision to name): 8 to 64 characters of `A-Z a-z 0-9 _ -`. No line and no author travel: the packet has no room for them, and the reader finds both in its own history. An envelope without a text carries no eleventh element. A reader drops an eleventh element that is not such an id and keeps the text; readers from before ignore it (they accept a body of up to 16 elements).
+
+The id costs about 30 bytes of the 1,000-byte packet. A text near the 256 bytes, whose packet does not fit with it, goes **without** it: the text is what matters. Since the reader keeps the first copy of a text it gets, the same text sent again on layer 1 later does not bring the reply back; the reply shows as a plain text on that side.
+
 ## When text goes over the DHT
 
 | Chat state ([400](400-chat.md#states-of-a-chat)) | A new text of at most 256 bytes | A longer text |
@@ -105,6 +111,7 @@ DHT only avoids stream discovery/dialing. Native clients read the Mainline DHT d
 
 ## Revision log
 
+- 0.4 (2026-09-27): a text's reply rides as the eleventh element, its id only, left out when the packet has no room for it.
 - 0.3 (2026-09-26): another key on the invite mailbox after the pin is ignored, not a stop; pinned mailboxes, told by the envelope's tenth element, so a copy of the invite cannot overwrite the contact's texts.
 - 0.2 (2026-09-25): the floor and first contact of every chat; states instead of invite modes; queueing, expiry per state, poll pace, DHT only as a per-chat choice.
 - 0.1 (2026-09-22): bounded DHT text profile.

@@ -101,10 +101,10 @@ Main types: `message.received`, `message.delivery`, `chat.pairing`, `chat.connec
 
 | Area | Commands |
 |---|---|
-| Invites and chats | `invite create\|join`, `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`), `message retry\|delete\|details` |
+| Invites and chats | `invite create\|join`, `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `message retry\|delete\|details` |
 | Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`; relays and ICE servers with `settings set` |
 | Files and voice | `file send <chat> <path>`, `file send … --voice <ms>`, `file accept\|decline\|pause\|resume\|cancel`, `file save`. Files over 25 MiB wait for `file accept` |
-| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join`, `group send … --mention <member>`, `group history`; admin: `group invite\|remove\|admin\|rotate\|link\|picture` |
+| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join`, `group send … --mention <member> --reply <message>`, `group history`; admin: `group invite\|remove\|admin\|rotate\|link\|picture` |
 | Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|usdt`, `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history`, `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
 | Identities | `identity providers\|list\|add\|complete`, `identity share\|withdraw <chat> <id>`, `identity contact <chat>` |

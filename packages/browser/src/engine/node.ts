@@ -39,7 +39,7 @@ import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNe
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
-import { fileMessageText, parseLinkPreview, pairedMessageFrame, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
   currentRelays,
@@ -105,6 +105,7 @@ import type {
   MessageDetails,
   MessageDetailsView,
   MessageFile,
+  MessageReply,
   MessageSend,
   GroupView,
   Settings,
@@ -128,6 +129,7 @@ import type {
   PublicPostsView,
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
+import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
@@ -573,6 +575,10 @@ export class GhostlyNode implements EngineImplementation {
       this.emitState();
     },
     text: async (linkId, messageId) => (await db.getMessages(linkId)).find((m) => m.id === messageId)?.text ?? null,
+    reply: async (linkId, messageId) => {
+      const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+      return message && GhostlyNode.wireReply(message);
+    },
     file: async (fileId) => {
       const stored = await fileStore.get(fileId);
       if (!stored?.metadata) return null;
@@ -581,6 +587,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     paymentRequest: (paymentId): PaymentRequest | null => this.desk.requestFor(paymentId),
     receiveText: (linkId, message, held) => this.storeMessage({ linkId, id: `peer_${message.id}`, text: message.text, sender: "peer", timestamp: message.timestamp, via: "hold",
+      ...(message.reply && { replyTo: receivedPairedReply(message.reply) }),
       details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: utf8Encode(message.text).length, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }) } }),
     receiveFile: async (linkId, wire, bytes, digest, held) => {
       const live = this.links.get(linkId);
@@ -1345,7 +1352,7 @@ export class GhostlyNode implements EngineImplementation {
     }));
   }
 
-  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
     if (!live?.link) return { error: "You are offline" };
@@ -1355,7 +1362,14 @@ export class GhostlyNode implements EngineImplementation {
     const timestamp = params.timestamp ?? Date.now();
     // Sent: whatever this side was typing is done (the contact clears it on the message too).
     if (live.stored.profile) live.link.setTyping(false);
-    if (live.stored.profile) return this.sendChatText(live, trimmed, timestamp, params.preview === undefined ? undefined : parseLinkPreview(params.preview, trimmed));
+    if (live.stored.profile) {
+      // A reply names a message of this chat, as both sides know it (WISP 400 § Replies); anything else is refused.
+      const reply = params.replyTo === undefined ? undefined : await this.replyFor(linkId, params.replyTo);
+      if (typeof reply === "string") return { error: reply, refused: true };
+      return this.sendChatText(live, trimmed, timestamp, params.preview === undefined ? undefined : parseLinkPreview(params.preview, trimmed), reply);
+    }
+    // A compatibility chat's records have no room for a reply (WISP 402): said, rather than sent without it.
+    if (params.replyTo !== undefined) return { error: "Replies need a current chat; this compatibility chat sends text only.", refused: true };
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
     // What the DHT cannot carry is refused before it is kept: it must not show as sent.
     const bytes = new TextEncoder().encode(trimmed).length;
@@ -1379,7 +1393,7 @@ export class GhostlyNode implements EngineImplementation {
    * both sides allow it; otherwise kept as `waiting` ("Sends when live") and sent by itself, in order, once
    * the chat can carry it. Only what must never wait, or a security stop, is refused.
    */
-  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview, reply?: MessageReply): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { link } = live, linkId = live.stored.id;
     if (!link) return { error: "You are offline" };
     const bytes = new TextEncoder().encode(trimmed).length;
@@ -1388,10 +1402,11 @@ export class GhostlyNode implements EngineImplementation {
     if (stop) return { error: stop };
     const wireId = toBase64Url(randomBytes(16)), id = `me_${wireId}`;
     const delivery = link.isDataLinkOpen ? "stream" : link.textDelivery === "dht" ? "dht" : "unavailable";
+    const answers = reply && { replyTo: reply };
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
-      const validationError = link.validateText(trimmed, timestamp, wireId);
+      const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
       if (!validationError) {
-        await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: delivery === "dht" ? "pkarr" : "datalink", delivery: "sending", ...(preview && { preview }) });
+        await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: delivery === "dht" ? "pkarr" : "datalink", delivery: "sending", ...(preview && { preview }), ...answers });
         await this.outboxFor(linkId).transmit(id);
         // The durable row carries delivery errors and an explicit retry action.
         return { error: null, messageId: id };
@@ -1400,7 +1415,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (this.holdingFor(live) && bytes <= HOLD_LIMITS.maxTextBytes) {
       // Longer than the DHT carries, and both sides allow held items: it waits in this device's storage, sealed for them.
-      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending", ...(preview && { preview }) });
+      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending", ...(preview && { preview }), ...answers });
       // The durable row carries the outcome; the promise only says whether it could start.
       void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
       return { error: null, messageId: id };
@@ -1408,9 +1423,40 @@ export class GhostlyNode implements EngineImplementation {
     const reason = delivery === "dht" && bytes <= DHT_TEXT_BYTES ? "Waits for the text before it to be confirmed."
       : delivery === "dht" ? `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries: it is sent when you are live.`
       : "Sent when your contact is reachable.";
-    await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "datalink", delivery: "waiting", deliveryError: reason, ...(preview && { preview }) });
+    await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "datalink", delivery: "waiting", deliveryError: reason, ...(preview && { preview }), ...answers });
     await this.outboxFor(linkId).wait(id, reason);
     return { error: null, messageId: id };
+  }
+
+  /**
+   * The message of a chat a reply answers, by its id here or the id both sides know it by (`replyRef`): what the
+   * reply keeps of it, or why there is nothing to reply to. A group's reply needs the author's member key too.
+   */
+  private async replyFor(linkId: string, messageId: unknown): Promise<MessageReply | string> {
+    if (typeof messageId !== "string" || !messageId) return "No message to reply to";
+    const messages = await db.getMessages(linkId);
+    const original = messages.find(m => m.id === messageId) ?? messages.find(m => replyRef(m) === messageId);
+    const ref = original && replyRef(original);
+    if (!original || !ref) return "That message is not in this chat, or cannot be replied to";
+    if (linkId.startsWith("group:") && !original.member) return "That message cannot be replied to";
+    return replyToOriginal(original, ref);
+  }
+
+  /**
+   * A received reply, or one sent before its original was here, against this chat's own history: the original found
+   * here gives the line and the author (and it is then checked); one not found keeps what the wire said, unchecked.
+   */
+  private async resolveReply(message: StoredMessage): Promise<StoredMessage> {
+    const reply = message.replyTo;
+    if (!reply || reply.messageId) return message;
+    const original = (await db.getMessages(message.linkId)).find(m => m.id !== message.id && replyRef(m) === reply.id);
+    if (!original) return message;
+    return { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }) } };
+  }
+
+  /** A paired row's reply as it goes on the wire again (a resend, a hold). */
+  private static wireReply(message: StoredMessage): WireReply | undefined {
+    return message.replyTo && pairedWireReply(message.replyTo);
   }
 
   /**
@@ -1477,7 +1523,9 @@ export class GhostlyNode implements EngineImplementation {
         if (!link) return "You are offline. It is sent again once you are back.";
         // The path as it is when the message goes: the details keep it, whatever the session does after.
         const at = Date.now(), snapshot = pathSnapshot(live, message.via);
-        const error = await link.sendMessage(message.text, message.timestamp, message.wireId, ...(message.preview ? [message.preview] : []));
+        const reply = GhostlyNode.wireReply(message);
+        const error = reply ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply)
+          : await link.sendMessage(message.text, message.timestamp, message.wireId, ...(message.preview ? [message.preview] : []));
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
         return error;
       }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
@@ -1489,7 +1537,7 @@ export class GhostlyNode implements EngineImplementation {
         ready: message => {
           const live = this.links.get(linkId), link = live?.link;
           if (message.via === "pkarr" && live?.stored.deliveryMode !== "dht" && link?.textDelivery !== "stream") return false;
-          return !!link?.canSendText && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId);
+          return !!link?.canSendText && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId, GhostlyNode.wireReply(message));
         },
         requeueExpired: () => this.links.get(linkId)?.stored.deliveryMode !== "dht",
         via: message => {
@@ -1553,7 +1601,7 @@ export class GhostlyNode implements EngineImplementation {
     const wire: MessageDetails["wire"] = snapshot.path === "dht" ? { frame: "_dm envelope", protocol: "dht-text/1", plaintextBytes, ...(dht && { wireBytes: dht.packetBytes }) }
       : snapshot.path === "legacy-dht" ? { frame: "_msgs record", protocol: "legacy/1", plaintextBytes }
       : snapshot.path === "legacy-datalink" ? { frame: "m", protocol: "legacy/1", plaintextBytes }
-      : { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(pairedMessageFrame(message.wireId ?? "", message.timestamp, message.text, message.preview)).length };
+      : { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(pairedMessageFrame(message.wireId ?? "", message.timestamp, message.text, message.preview, GhostlyNode.wireReply(message))).length };
     return this.noteDetails(linkId, message.id, details => ({ ...withSend(details, send), ...(!error && { sentAt: at, wire }),
       ...(dht && { dht: { seq: dht.seq, issued: dht.issued, expires: dht.expires, packetBytes: dht.packetBytes, nonce: dht.nonce, recordKey: dht.recordKey, records: dht.records } }) }));
   }
@@ -1778,6 +1826,8 @@ export class GhostlyNode implements EngineImplementation {
     const messageStored = this.storeMessage({
       linkId,
       id: `peer_${wire.timestamp}`,
+      // The id both sides know the file by: what a reply to it names (WISP 400 § Replies).
+      wireId: wire.id,
       text: fileMessageText(file),
       sender: "peer",
       timestamp: wire.timestamp,
@@ -2004,9 +2054,12 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.settings.online) throw new Error("Go online to join a group");
     return { groupId: await this.groups.joinByLink(link) };
   }
-  sendGroupMessage({ groupId, text, mentions }: { groupId: string; text: string; mentions?: GroupMention[] }): Promise<{ error: string | null }> {
-    if (typeof text !== "string") return Promise.resolve({ error: "Nothing to send" });
-    return this.groups.send(groupId, text, Array.isArray(mentions) ? mentions : []);
+  async sendGroupMessage({ groupId, text, mentions, replyTo }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): Promise<{ error: string | null }> {
+    if (typeof text !== "string") return { error: "Nothing to send" };
+    // A reply names a message of this group, by its author's member key (WISP 9xx § Replies).
+    const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);
+    if (typeof reply === "string") return { error: reply };
+    return this.groups.send(groupId, text, Array.isArray(mentions) ? mentions : [], reply && { i: reply.id, s: reply.snippet, f: reply.member! });
   }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
   leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
@@ -3168,6 +3221,7 @@ export class GhostlyNode implements EngineImplementation {
             nick: message.nick,
             details: GhostlyNode.receivedTextDetails(!!stored.profile, message),
             ...(message.preview && { preview: message.preview }),
+            ...(stored.profile && message.reply && { replyTo: receivedPairedReply(message.reply) }),
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
@@ -3402,6 +3456,8 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return;
+    // A reply's original, looked for in this chat only: one named from elsewhere is simply not found here.
+    message = await this.resolveReply(message);
     // Its details begin here: the path a received message came over, or the one a payment goes over right now.
     if (message.sender === "peer" && live && !message.details?.received) message = { ...message, details: { ...message.details, received: { at: Date.now(), ...pathSnapshot(live, message.via) } } };
     else if (message.sender === "me" && message.paymentId && !message.delivery && live && !message.details?.sends) {

@@ -96,6 +96,11 @@ export interface MessageJson {
   file?: { id: string; name: string; size: number; mime: string; voice?: boolean };
   paymentId?: string;
   event?: unknown;
+  /**
+   * The message this one answers (WISP 400 § Replies). `id`: the original's message id here when it is in this chat
+   * (`found`), else the id the reply named. `from`: null when nothing says (only the id came, over the DHT).
+   */
+  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean };
 }
 
 export function messageJson(message: StoredMessage): MessageJson {
@@ -116,6 +121,8 @@ export function messageJson(message: StoredMessage): MessageJson {
     ...(message.file ? { file: { id: message.file.id, name: message.file.name, size: message.file.size, mime: message.file.mime, ...(message.file.voice ? { voice: true } : {}) } } : {}),
     ...(message.paymentId ? { paymentId: message.paymentId } : {}),
     ...(message.event ? { event: message.event } : {}),
+    ...(message.replyTo ? { replyTo: { id: message.replyTo.messageId ?? message.replyTo.id, snippet: message.replyTo.snippet, from: message.replyTo.from ?? null,
+      ...(message.replyTo.member ? { member: message.replyTo.member } : {}), found: !!message.replyTo.messageId } } : {}),
   };
 }
 

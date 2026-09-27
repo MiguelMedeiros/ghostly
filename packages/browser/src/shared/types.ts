@@ -620,6 +620,29 @@ export interface StoredMessage {
   details?: MessageDetails;
   /** A link preview that came with the text (WISP 401 § Link previews): made by the sender's app, never fetched here. */
   preview?: LinkPreview;
+  /** The message this one answers (WISP 400 § Replies). */
+  replyTo?: MessageReply;
+}
+
+/**
+ * The message a reply answers, as kept with the reply (WISP 400 § Replies). What the replier's app saw of it goes
+ * with the reply; the receiver keeps its own view of the original when it has it (`messageId`), and the line and the
+ * author then come from there, not from the wire.
+ */
+export interface MessageReply {
+  /** The original's id in this chat as both sides know it: a paired chat's wire, file or payment id; a group message id. */
+  id: string;
+  /** A line of the original, plain and short (`replySnippet`); empty when only its id came (over the DHT). */
+  snippet: string;
+  /** Who wrote the original; absent when nothing says (only its id came, and it is not here). */
+  from?: "me" | "peer";
+  /** A group's original: its author's member key. */
+  member?: string;
+  /**
+   * The original here, when it was found in this chat as the reply was kept (always, for a reply sent here). Without
+   * it the line is only what the replier's app said: shown, but marked as not checked.
+   */
+  messageId?: string;
 }
 
 /**

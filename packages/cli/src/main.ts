@@ -360,6 +360,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (!text.trim()) throw new CliError("usage", `No text: ghostly ${spec.usage}`);
   const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true };
   if (spec.target === "group") params.mentions = parsed.options.mention ?? [];
+  if (parsed.options.reply !== undefined) params.reply = parsed.options.reply;
   print(await withSession(g, (s) => {
     if (spec.target === "chat") {
       // A one-shot leaves once its command is done: by default it stays until the message went out.

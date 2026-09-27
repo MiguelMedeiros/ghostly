@@ -4,8 +4,8 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.5 |
-| Updated | 2026-09-25 |
+| Revision | 0.6 |
+| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
 | Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts) and, for the group's link (`group-entry/1`), [`groupEntry.ts`](../../packages/core/src/groupEntry.ts); engine, UI and four-browser e2e in [`packages/browser`](../../packages/browser/src/engine/groups.ts) and [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts); web, extension and desktop share it |
@@ -117,6 +117,16 @@ It is sealed with XChaCha20-Poly1305 under the same epoch message key, with a no
 
 **Notifications.** A message that names the reader (or everyone) is a mention. It notifies as any message does. While the group is muted it still does, if the group's "Still notify me when I'm mentioned" is on, as it is unless turned off. That choice, like the mute, is the device's and is never sent. An unread mention puts an `@` beside the group in the chat list.
 
+## Replies
+
+A message may answer an earlier message of the group ([400](400-chat.md#replies), revision 0.6): `{ "i": <message id>, "s": <line>, "f": <author's member key> }`, where the message id is `<sender key>:<epoch>:<seq>`. It travels like the mentions, sealed in an optional field of its own:
+
+```
+{ "t": "group-msg", …, "sig", "m"?: { "n", "c" }, "r"?: { "n": <nonce>, "c": <box> } }
+```
+
+under the epoch message key, with a nonce of its own and `["ghostly-group/1 reply", g, e, s, n, ts]` as associated data, outside the signature older apps check. A box that does not open, or holds no valid reply (an `f` that is not a member key included), is no reply; the message is taken all the same. Replies and mentions go together: "@Bob yes" can answer Alice's message and name Bob. A member finds the original among the group's messages it has; an original from before it joined, or from an epoch it cannot read, is shown from the wire's line, marked as not found here.
+
 ## Catch-up
 
 When an edge opens, each side sends what it knows:
@@ -185,7 +195,7 @@ Each change leaves an event line in the group's history ("Alice changed the grou
 
 ## Compatibility
 
-Groups are announced after the paired handshake, on the open session, as `{ "t": "paired-groups", "v": [1] }`, the way `paired-payments` is, so a full handshake offer stays within the sixteen capabilities older apps accept. An app without groups drops the announcement and every `group-*` frame (they carry no `id`), keeps chatting 1:1, and is shown as needing an update to be invited. No 1:1 behavior changes. Payments on edges came after groups (revision 0.3): an app from before offers none on its edges, drops `group-pay`, and simply sees no payments; nothing else changes for it. Metadata came in revision 0.4: an app from before drops `group-meta`, leaves `mt` out of its syncs and is sent none, and its chain rules are unchanged. Mentions came in revision 0.5: an app from before ignores `m` (it checks the fields it knows, and the signature covers only those), shows the `@Name` as text and notifies as for any message.
+Groups are announced after the paired handshake, on the open session, as `{ "t": "paired-groups", "v": [1] }`, the way `paired-payments` is, so a full handshake offer stays within the sixteen capabilities older apps accept. An app without groups drops the announcement and every `group-*` frame (they carry no `id`), keeps chatting 1:1, and is shown as needing an update to be invited. No 1:1 behavior changes. Payments on edges came after groups (revision 0.3): an app from before offers none on its edges, drops `group-pay`, and simply sees no payments; nothing else changes for it. Metadata came in revision 0.4: an app from before drops `group-meta`, leaves `mt` out of its syncs and is sent none, and its chain rules are unchanged. Mentions came in revision 0.5: an app from before ignores `m` (it checks the fields it knows, and the signature covers only those), shows the `@Name` as text and notifies as for any message. Replies came in revision 0.6 and are ignored the same way (`r`).
 
 ## Bounds
 

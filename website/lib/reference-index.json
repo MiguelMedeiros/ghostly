@@ -757,7 +757,7 @@
     "slug": "400-chat",
     "title": "WISP 400: Chat Messaging",
     "status": "Draft",
-    "updated": "2026-09-26",
+    "updated": "2026-09-27",
     "implementation": "The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, on-dht, self-upgrade, DHT only per chat; compatibility chats for v0.4",
     "dependencies": [
       "01-ghost-core.md",
@@ -826,7 +826,7 @@
     "slug": "403-dht-text",
     "title": "WISP 403: DHT Text",
     "status": "Draft",
-    "updated": "2026-09-26",
+    "updated": "2026-09-27",
     "implementation": "The floor and first contact of every new chat (web, extension, desktop); DHT only per chat; pinned mailboxes. Native clients read the Mainline DHT directly; browsers go through Pkarr relays.",
     "documentKind": "Profile",
     "dependencies": [
@@ -847,7 +847,7 @@
     "slug": "4xx-store-and-forward",
     "title": "WISP 4xx: Store-and-Forward for an Away Contact",
     "status": "Draft",
-    "updated": "2026-09-25",
+    "updated": "2026-09-27",
     "implementation": "Experimental: hold/1 in web, extension and desktop clients; exercised against a local S3-compatible server",
     "documentKind": "Profile",
     "dependencies": [
@@ -1116,7 +1116,7 @@
     "slug": "9xx-group-community",
     "title": "WISP 9xx: Group Community Distribution Profile",
     "status": "Draft",
-    "updated": "2026-09-26",
+    "updated": "2026-09-27",
     "implementation": "group-community/1: core protocol in groupCommunity.ts and communityRendezvous.ts; engine in community.ts, payments in communityPay.ts; UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test",
     "documentKind": "Profile",
     "dependencies": [
@@ -1140,7 +1140,7 @@
     "slug": "9xx-group-mesh",
     "title": "WISP 9xx: Group Mesh Distribution Profile",
     "status": "Draft",
-    "updated": "2026-09-25",
+    "updated": "2026-09-27",
     "implementation": "group-mesh/1: core protocol in packages/core and, for the group's link (group-entry/1), groupEntry.ts; engine, UI and four-browser e2e in packages/browser and e2e/web/groups.spec.ts; web, extension and desktop share it",
     "documentKind": "Profile",
     "dependencies": [

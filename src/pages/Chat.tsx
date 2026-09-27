@@ -25,6 +25,8 @@ import { useWebRTC } from "../hooks/useWebRTC";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { quoteFor, replyIndex, replyTarget, type NameOf } from "../lib/replies";
+import { replySnippet } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
@@ -288,6 +290,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   /** One of mine tapped in the timeline: the composer's picker opens on it. */
   const [myIdentity, setMyIdentity] = useState<{ id: string; at: number }>();
   const [showServices, setShowServices] = useState(false);
+  /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
@@ -362,14 +367,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setConfirmDelete(false);
     setCodeCopied(false);
     setMenuOpen(false);
+    setReplyingTo(null);
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
+  // A new message scrolls to the bottom; a receipt or a delivery state does not (it would undo a reply's jump).
+  const lastMessageId = messages[messages.length - 1]?.id;
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages.length, lastMessageId]);
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
   const sceneOn = pairing.scene;
@@ -407,6 +415,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params.peerPubKeyB64) }) });
   const isAnonymous = shown.from === "key";
   const shownName = shown.name;
+  // A reply's quote and the composer's bar name the author as this chat does.
+  const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? shownName : undefined;
+  const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: replySnippet(replyingTo.text),
+    mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
@@ -631,6 +643,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               peerPubKey={params.peerPubKeyB64}
               peerNick={contactNick}
               onDelete={() => forgetMessage(row.message.id)}
+              // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
+              onReply={paired && replyTarget(row.message) ? () => setReplyingTo(row.message) : undefined}
+              quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
             />
           ))}
           <div ref={bottomRef} />
@@ -650,8 +665,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         key={sessionId}
         // Said to the contact on the live session only; stops when the text goes, the chat is left or the page is hidden.
         onTyping={paired ? onTyping : undefined}
-        // A paired chat has no mentions; a link preview made in the composer goes with the text.
-        onSend={(text, _mentions, extra) => sendMessage(text, extra)}
+        // A paired chat has no mentions; a link preview made in the composer goes with the text, and so does a reply.
+        onSend={async (text, _mentions, extra) => {
+          const answering = replyingTo;
+          const error = await sendMessage(text, answering ? { ...extra, replyTo: answering.id } : extra);
+          if (!error && answering) setReplyingTo(current => current === answering ? null : current);
+          return error;
+        }}
+        reply={replyBar}
         // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
         disabled={isSending || (paired && (!!chatStop || engine.state?.settings.online === false))}
         disabledPlaceholder="Message…"

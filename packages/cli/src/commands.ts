@@ -50,6 +50,7 @@ function pairs(values: unknown): Record<string, string> | undefined {
 }
 
 const force: OptionSpec = { type: "boolean", description: "Send even if the text looks like a seed, a key or ecash" };
+const reply: OptionSpec = { type: "string", description: "Reply to this message (its id, from history or an event)" };
 
 export const COMMANDS: Record<string, Command> = {
   "status": { method: "status", usage: "status", summary: "The profile, its chats and whether a daemon runs it" },
@@ -255,12 +256,12 @@ export const COMMANDS: Record<string, Command> = {
 /** Commands that take text (argument or stdin), with the secret guard and delivery waits. */
 export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "group"; usage: string; summary: string; options: Record<string, OptionSpec> }> = {
   "send": {
-    method: "chat.send", target: "chat", usage: "send <chat> [text...] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin)",
-    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, ...wait },
+    method: "chat.send", target: "chat", usage: "send <chat> [text...] [--reply <message>] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin)",
+    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, ...wait },
   },
   "group send": {
-    method: "group.send", target: "group", usage: "group send <group> [text...] [--mention <member>]... [--stdin] [--force]", summary: "Send to a group; mention members written as @name in the text",
-    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" } },
+    method: "group.send", target: "group", usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--stdin] [--force]", summary: "Send to a group; mention members written as @name in the text",
+    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" } },
   },
 };
 

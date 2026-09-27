@@ -41,6 +41,10 @@ export interface ChatMessage {
   mentions?: import("./parse/mentions").MentionView[];
   /** A link preview made by the sender's app and carried with the text (WISP 401 § Link previews). */
   preview?: import("@ghostly/core").LinkPreview;
+  /** The id both sides of the chat know this message by, which a reply to it names (the engine's `replyRef`). */
+  ref?: string;
+  /** The message this one answers (WISP 400 § Replies). */
+  replyTo?: import("@ghostly/browser/shared/types").MessageReply;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

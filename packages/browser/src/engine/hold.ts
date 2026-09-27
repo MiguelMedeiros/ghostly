@@ -1,4 +1,4 @@
-import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseVoiceMeta, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, readManifest, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type VoiceMeta } from "@ghostly/core";
+import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseVoiceMeta, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, pairedReplyAuthor, readManifest, readReply, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type VoiceMeta, type WireReply } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
@@ -20,7 +20,9 @@ export interface HoldHost {
   text(linkId: string, messageId: string): Promise<string | null>;
   file(fileId: string): Promise<{ bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta } | null>;
   paymentRequest(paymentId: string): PaymentRequest | null;
-  receiveText(linkId: string, message: { id: string; text: string; timestamp: number }, held?: HeldFacts): Promise<void>;
+  /** The reply a held text carries on the wire (WISP 400 § Replies), if it is one. */
+  reply?(linkId: string, messageId: string): Promise<WireReply | undefined>;
+  receiveText(linkId: string, message: { id: string; text: string; timestamp: number; reply?: WireReply }, held?: HeldFacts): Promise<void>;
   /** Returns why it was not kept (room, a reused id), or null when it was. */
   receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta }, bytes: Uint8Array, digest: string, held?: HeldFacts): Promise<string | null>;
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
@@ -222,6 +224,9 @@ export class HoldEngine {
         const text = await this.host.text(linkId, entry.messageId);
         if (text === null) return fail("The message is gone");
         body = utf8Encode(text);
+        // A reply rides in the header's meta, which older apps leave alone for a text.
+        const reply = await this.host.reply?.(linkId, entry.messageId);
+        if (reply) meta = { r: reply };
       } else if (entry.kind === "file") {
         const file = await this.host.file(entry.ref!);
         if (!file) return fail("The file is gone");
@@ -410,7 +415,10 @@ export class HoldEngine {
         if (header.seq !== seq || header.id !== id || header.kind !== kind) throw new HoldRefusedError("format", "The item does not match the manifest");
         // Stored before the sequence advances: a crash in between stores it again, which the id dedups.
         const held: HeldFacts = { seq, bytes, expires };
-        if (header.kind === "text") await this.host.receiveText(linkId, { id: header.id, text: utf8Decode(body), timestamp: header.ts }, held);
+        if (header.kind === "text") {
+          const reply = readReply((header.meta as { r?: unknown } | null)?.r, pairedReplyAuthor);
+          await this.host.receiveText(linkId, { id: header.id, text: utf8Decode(body), timestamp: header.ts, ...(reply && { reply }) }, held);
+        }
         else if (header.kind === "file") {
           const meta = header.meta as { name: string; size: number; mime: string; voice?: unknown };
           const voice = parseVoiceMeta(meta.voice, meta.mime);
