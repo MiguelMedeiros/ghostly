@@ -208,7 +208,7 @@ describe("group roster changes: only the admin, and someone removed reads nothin
 });
 
 describe("invitations: what the admission exchange ignores", () => {
-  it("a group holds 32, and grows past eight only for apps that take it (revision 0.8)", async () => {
+  it("a group holds 32, and grows past eight only for apps that take it (revision 0.9)", async () => {
     const world = new World();
     const alice = world.add("alice");
     await alice.load();

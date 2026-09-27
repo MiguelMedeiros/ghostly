@@ -1,7 +1,7 @@
 import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /**
- * Any member catches up the others (WISP 9xx group mesh, revision 0.8): a member whose app was closed gets, when it
+ * Any member catches up the others (WISP 9xx group mesh, revision 0.9): a member whose app was closed gets, when it
  * opens again, what an author sent meanwhile even though the author's app is closed by then too. The third member,
  * who was there, hands it on. Before, only the author re-sent, and only while both were open.
  */

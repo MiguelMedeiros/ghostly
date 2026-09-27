@@ -83,7 +83,7 @@ describe("membership chain", () => {
     const removeSelf = signCommit(tagged(draft(c1, "remove", c1.m.filter(([k]) => k !== admin.pubKeyZ32), admin.pubKeyZ32, admin.pubKeyZ32)), admin.seed);
     expect(verifyCommit(clone(removeSelf), c1)).toHaveProperty("error");
   });
-  it("caps the roster at thirty-two (revision 0.8; eight before)", () => {
+  it("caps the roster at thirty-two (revision 0.9; eight before)", () => {
     let top = genesis;
     for (let i = 0; i < MAX_GROUP_MEMBERS - 1; i++) top = add(top, createIdentity().pubKeyZ32);
     expect(top.m).toHaveLength(32);

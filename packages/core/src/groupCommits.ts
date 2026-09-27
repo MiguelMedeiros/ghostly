@@ -40,7 +40,7 @@ export interface GroupCommit {
 }
 
 /**
- * Members a roster may hold. Apps from before revision 0.8 of the profile refuse a commit whose roster is larger than
+ * Members a roster may hold. Apps from before revision 0.9 of the profile refuse a commit whose roster is larger than
  * `LEGACY_GROUP_MEMBERS` (as malformed), so an admin grows a group past that only when every member's app said it can
  * (`paired-groups` version `GROUP_VERSION_LARGE`).
  */

@@ -38,7 +38,7 @@ export const GROUP_LIMITS = {
   waitingBytes: 1024 * 1024,
   /** Epoch secrets kept: past this, older epochs cannot be read or handed on. */
   secrets: 32,
-  /** Secrets in one `group-secrets` frame: apps from before revision 0.8 drop a frame with more. */
+  /** Secrets in one `group-secrets` frame: apps from before revision 0.9 drop a frame with more. */
   secretsPerFrame: 16,
   /**
    * Other members' messages kept to hand on to a member who missed them (any member catches up the others): count
@@ -66,7 +66,7 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
  * carries its frame, so the edge vouches for it. Older apps ignore the field.
  */
 /**
- * `xs`: the author's signature over the whole frame, the boxes of `m` and `r` included (revision 0.8). A frame handed
+ * `xs`: the author's signature over the whole frame, the boxes of `m` and `r` included (revision 0.9). A frame handed
  * on by another member keeps its boxes only with it: the edge it arrives on is not the author's and vouches for nothing.
  */
 export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; xs?: string }
@@ -79,7 +79,7 @@ export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupC
 /**
  * `mt`: which metadata statement I hold (`groupMetaTag`); apps without metadata leave it out. `miss`: sequence numbers
  * below the highest in `have` that never arrived, per sender and epoch. `ask`: members whose messages I want the
- * receiver to hand on (their edges to me are down); apps from before revision 0.8 send neither and are handed nothing.
+ * receiver to hand on (their edges to me are down); apps from before revision 0.9 send neither and are handed nothing.
  */
 export interface GroupSyncFrame { t: "group-sync"; g: string; e: number; h: string; have: Record<string, Record<string, number>>; secrets: number[]; mt?: string; miss?: Record<string, Record<string, number[]>>; ask?: string[] }
 export interface GroupSecretsFrame { t: "group-secrets"; g: string; secrets: { e: number; s: SealedSecret }[] }
@@ -112,7 +112,7 @@ export interface GroupState {
   seqEpoch: number;
   /** My own frames, newest last, for members who missed them. */
   sent: GroupMessageFrame[];
-  /** Other members' frames, in the order they arrived, for members who missed them. Absent in states from before revision 0.8. */
+  /** Other members' frames, in the order they arrived, for members who missed them. Absent in states from before revision 0.9. */
   relay?: GroupMessageFrame[];
   /** Sender → epoch → highest sequence seen and the ones seen below it. */
   seen: Record<string, Record<string, { high: number; window: number[] }>>;
@@ -781,7 +781,7 @@ export class GroupSession {
       const commit = this.state.chain[e], secret = this.secret(e);
       this.hooks.send(from, { t: "group-commit", g: this.id, commit, ...(secret && rosterHas(commit.m, from) ? { secret: sealSecret(from, secret, secretAad(this.id, e, from)) } : {}) });
     }
-    // Secrets of epochs they were in but do not hold, sixteen to a frame (what apps from before revision 0.8 take).
+    // Secrets of epochs they were in but do not hold, sixteen to a frame (what apps from before revision 0.9 take).
     const theirs = new Set(Array.isArray(frame.secrets) ? frame.secrets.filter(n => Number.isSafeInteger(n)) : []);
     const secrets = this.readableEpochs.filter(e => e <= frame.e && !theirs.has(e) && rosterHas(this.state.chain[e].m, from))
       .map(e => ({ e, s: sealSecret(from, this.secret(e)!, secretAad(this.id, e, from)) }));

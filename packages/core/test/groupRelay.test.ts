@@ -8,7 +8,7 @@ import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.catch-up, groups.remove-member, groups.protocol.mentions
 
 /*
- * Revision 0.8 of the mesh profile (WISP 9xx § Catch-up): any member hands on what another missed, not only its
+ * Revision 0.9 of the mesh profile (WISP 9xx § Catch-up): any member hands on what another missed, not only its
  * author, when asked (`ask` in the sync); the author's `xs` vouches for the mention and reply boxes of a frame handed
  * on; someone out of the roster is neither handed on nor taken from a third member; rosters of up to 32.
  */
@@ -49,7 +49,7 @@ describe("any member catches up the others", { timeout: 60_000 }, () => {
     expect(mesh.texts(bob)).toHaveLength(3);
   });
 
-  it("hands on nothing to a sync that asks for nobody (apps from before revision 0.8)", async () => {
+  it("hands on nothing to a sync that asks for nobody (apps from before revision 0.9)", async () => {
     const { mesh, alice, bob, carol } = await three();
     away(mesh, bob, [alice, carol]);
     await carol.sendText("while bob is away"); await mesh.settle();
@@ -177,7 +177,7 @@ describe("rosters past eight", () => {
     expect(LEGACY_GROUP_MEMBERS).toBe(8);
   }, 120_000);
 
-  it("hands secrets on sixteen to a frame, what apps from before revision 0.8 take", async () => {
+  it("hands secrets on sixteen to a frame, what apps from before revision 0.9 take", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Ghosts"), "Alice");
     const bob = await admit(mesh, alice, "Bob");

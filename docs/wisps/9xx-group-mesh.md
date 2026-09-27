@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.8 |
+| Revision | 0.9 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
@@ -36,7 +36,7 @@ Payments between two members are part of it (§ Payments): the money travels on 
 | Epoch message key, confirm key | Derived from the secret with HKDF-SHA-256, salted by group id and epoch | Same |
 | Edge parameters | The pair, for the life of the group | The two members only |
 
-The committer generates a fresh secret for every commit (admission, removal, role transfer, rotation) and seals it to each member of the **new** roster. A removed member is sent the commit, so it learns it is out, without a secret. A new member's welcome carries the secret of the epoch that admits it and nothing earlier. Secrets of the last 32 epochs are kept (sixteen before revision 0.8) so a member can hand them on during catch-up; older epochs become unreadable.
+The committer generates a fresh secret for every commit (admission, removal, role transfer, rotation) and seals it to each member of the **new** roster. A removed member is sent the commit, so it learns it is out, without a secret. A new member's welcome carries the secret of the epoch that admits it and nothing earlier. Secrets of the last 32 epochs are kept (sixteen before revision 0.9) so a member can hand them on during catch-up; older epochs become unreadable.
 
 The commit carries a **confirmation tag**: HMAC-SHA-256, under the epoch's confirm key, of the commit without its tag. A member that unseals a secret checks the tag before keeping it, so a member relaying a secret cannot hand out a wrong one, and the admin's signature covers the tag.
 
@@ -46,7 +46,7 @@ The commit carries a **confirmation tag**: HMAC-SHA-256, under the epoch's confi
 
 A commit is `{ v, g, e, p, k, m, by, s?, ts, c, sig }`: version 1, group id, epoch (its index in the chain), the hash of the previous commit (empty for the genesis), a kind (`create`, `add`, `remove`, `role`, `rotate`), the whole roster after it as sorted `[key, role]` pairs, the committer, the member concerned, a timestamp, the confirmation tag and the committer's Ed25519 signature over the canonical tuple `[v, g, e, p, k, m, by, s, ts, c]`. The hash is SHA-256 of that same tuple.
 
-Rules a receiver enforces, in this order: shape (at most 32 members, eight before revision 0.8; exactly one admin, sorted, distinct), group id, `e` is the next index, `p` matches, the committer is the admin of the previous roster, the roster is exactly the previous roster with the change applied (an admin cannot remove or demote itself; `rotate` names nobody), and the signature verifies. A chain is verified from its genesis; a chain is at most 1024 commits.
+Rules a receiver enforces, in this order: shape (at most 32 members, eight before revision 0.9; exactly one admin, sorted, distinct), group id, `e` is the next index, `p` matches, the committer is the admin of the previous roster, the roster is exactly the previous roster with the change applied (an admin cannot remove or demote itself; `rotate` names nobody), and the signature verifies. A chain is verified from its genesis; a chain is at most 1024 commits.
 
 **Trust anchor.** The invitation arrives over the inviter's authenticated contact chat, naming the inviter's member key as the admin. The welcome's chain must admit the joiner in a commit signed by that key. Everything else about the roster is what the admin says: a member key with no owner never connects and never signs, but its presence in the list is the admin's claim.
 
@@ -91,7 +91,7 @@ A member leaves by wiping its secrets at once and sending `{ "t": "group-leave",
 { "t": "group-msg", "g", "e", "s": <sender member key>, "n": <sequence in epoch>, "ts", "nn": <nonce>, "c": <box>, "sig", "xs"? }
 ```
 
-Text is trimmed UTF-8 of at most 16 KiB, encrypted with XChaCha20-Poly1305 under the epoch message key with the JSON of `[g, e, s, n, ts]` as associated data, then signed by the sender over `["ghostly-group/1 msg", g, e, s, n, ts, nn, c]`. Since revision 0.8 the sender also signs the whole frame, the boxes of the mentions (`m`) and the reply (`r`) included, as `xs` over `["ghostly-group/1 msg+", g, e, s, n, ts, nn, c, m.n, m.c, r.n, r.c]` (an absent box is two empty strings). `sig` stays what older apps check; `xs` is what lets another member hand the frame on with its boxes (§ Catch-up). Sequence numbers start at 0 in every epoch and are the sender's; the stable id of a message is `<sender>:<epoch>:<sequence>`.
+Text is trimmed UTF-8 of at most 16 KiB, encrypted with XChaCha20-Poly1305 under the epoch message key with the JSON of `[g, e, s, n, ts]` as associated data, then signed by the sender over `["ghostly-group/1 msg", g, e, s, n, ts, nn, c]`. Since revision 0.9 the sender also signs the whole frame, the boxes of the mentions (`m`) and the reply (`r`) included, as `xs` over `["ghostly-group/1 msg+", g, e, s, n, ts, nn, c, m.n, m.c, r.n, r.c]` (an absent box is two empty strings). `sig` stays what older apps check; `xs` is what lets another member hand the frame on with its boxes (§ Catch-up). Sequence numbers start at 0 in every epoch and are the sender's; the stable id of a message is `<sender>:<epoch>:<sequence>`.
 
 A receiver accepts a frame from the edge of the member it names as sender, or handed on by another member (§ Catch-up); only for an epoch the sender and the receiver were both members of; only once per `(sender, epoch, sequence)`, remembering the highest sequence and the 256 below it per sender and epoch; and only with a valid signature and a ciphertext that opens. A frame for an epoch ahead of the receiver's chain, or one whose secret has not arrived, waits (64 frames, 1 MiB) while the receiver asks the sender to catch it up, at most once every ten seconds per member. Anything else is dropped without a reply.
 
@@ -160,9 +160,9 @@ When an edge opens, each side sends what it knows:
   "miss"?: { <sender>: { <epoch>: [ <seq>, … ] } }, "ask"?: [ <member key>, … ] }
 ```
 
-The side that is ahead answers with the commits the other lacks (each with the secret sealed for the other when it was in that epoch's roster and the secret is still held), `{ "t": "group-secrets", "g", "secrets": [ … ] }` for epochs the other was in but does not hold (at most sixteen to a frame, what apps from before revision 0.8 take), and its **own** messages the other lacks, from its bounded log and only for epochs the other was a member of. A member behind on the chain asks in turn.
+The side that is ahead answers with the commits the other lacks (each with the secret sealed for the other when it was in that epoch's roster and the secret is still held), `{ "t": "group-secrets", "g", "secrets": [ … ] }` for epochs the other was in but does not hold (at most sixteen to a frame, what apps from before revision 0.9 take), and its **own** messages the other lacks, from its bounded log and only for epochs the other was a member of. A member behind on the chain asks in turn.
 
-**Any member hands on (revision 0.8).** A message whose author's edge to me is down can come from anyone else who received it:
+**Any member hands on (revision 0.9).** A message whose author's edge to me is down can come from anyone else who received it:
 
 1. **What is kept.** Each member keeps the frames of other members it accepted, as they arrived and with only the fields of a message frame: 256 frames and 256 KiB, the oldest going first. When a commit takes someone out of the roster, their frames leave the log.
 2. **What is asked.** A sync may name members in `ask`: those whose edges to the sender are down. The receiver answers with the frames of those members it keeps that the sender lacks: above the sender's `have` for that sender and epoch, or listed in its `miss` (sequence numbers below the highest that never arrived, the newest 32 per sender and epoch). Only for epochs the sender was a member of, and only for members in both rosters.
@@ -258,7 +258,7 @@ Measured on headless engines (the real `Groups` and `GroupSession`, links and Pk
 
 Without the relays' limits (the Desktop reads the DHT) every join takes about 2 s and a returning member is caught up in under a second. A message sent and taken by every member costs, all engines in one Node process, 8 ms at 8 members, 18 ms at 16 and 52 ms at 32 (signing once, sealing once, one signature check and one decryption per receiver); saving a member's state is a copy of at most the 256 frames it hands on and 256 KiB. On the headless CLI ([`meshGroup.test.ts`](../../packages/cli/test/meshGroup.test.ts)) three daemons join and connect every pair in about 17 s on a local relay, and a member whose daemon restarted gets a status whose author had stopped from the third member once its edges are back (91 s here, most of it the edges re-forming after the restart). WKWebView (the macOS app) has not been measured: it runs the same engine, and each edge is one `RTCPeerConnection` with one data channel.
 
-A full mesh costs each member one edge per other member: its connection, its Pkarr record and its polls. On public relays each app allows itself 30 requests a minute per relay (20 for background looks). Past about 32 members a member's edges alone would spend that budget, and a message costs one copy per member. A larger group is the [community profile](9xx-group-community.md) (hubs, one edge per member), or a mesh whose members open edges only to a few relaying members, which is an open decision below.
+A full mesh costs each member one edge per other member: its connection, its Pkarr record and its polls. Past eight members an app reads its edges' records more slowly (revision 0.9): a connected edge (its data link carries everything; Pkarr only notices a new offer) in proportion to the group's size, an edge to someone away by its square root, so at 32 members every four minutes and every minute. A member whose edge to someone opens again after a minute or more of that one being unreachable tells the other members it is connected to, `{ "t": "group-here", "g", "k": <member key> }`, and a member told looks at its own edge to that member at the fast pace for a while (at most once every 30 seconds per member); one told a moment ago says nothing itself, so a return is announced about once. The admin reads the link's knocks only while one of its four entry sessions is free. Older apps drop `group-here`. On public relays each app allows itself 30 requests a minute per relay (20 for background looks). Past about 32 members a member's edges alone would spend that budget, and a message costs one copy per member. A larger group is the [community profile](9xx-group-community.md) (hubs, one edge per member), or a mesh whose members open edges only to a few relaying members, which is an open decision below.
 
 ## Security and privacy
 
@@ -282,6 +282,8 @@ Private payments in a group (no note, or amounts hidden); more metadata (renamin
 
 ## Revision log
 
+- 0.9 (2026-09-27): up to 32 members (past eight only when every member's app announces `paired-groups` version 3); any member hands on what another missed (`ask`, `miss`, `xs`), removed members neither handed on nor taken from a third member; a large mesh paces its edges and announces who is back (`group-here`) (#373).
+- 0.8 (2026-09-27): edits of sent messages, `group-edit` (#378).
 - 0.7 (2026-09-27): reactions: a frame of their own on each of the reactor's edges, one emoji per member per message, not in the message log (#354).
 - 0.6 (2026-09-27): replies: a sealed `r` box beside the mentions' `m` on `group-msg` (#347).
 - 0.5 (2026-09-25): @mentions bound to member keys, in a sealed `m` box (#279).
