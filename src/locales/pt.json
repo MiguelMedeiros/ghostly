@@ -61,6 +61,11 @@
     "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele.",
     "message": {
       "details": "Detalhes",
+      "download": "Baixar",
+      "downloadArriving": "Ainda não recebido",
+      "downloadPreparing": "Ainda em preparo",
+      "downloadFailed": "Não chegou",
+      "downloadMissing": "Não está neste dispositivo",
       "detailsTitle": "Detalhes da mensagem",
       "detailsClose": "Fechar",
       "copyJson": "Copiar tudo como JSON",

@@ -61,6 +61,11 @@
     "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。",
     "message": {
       "details": "詳細",
+      "download": "ダウンロード",
+      "downloadArriving": "まだ受信していません",
+      "downloadPreparing": "準備中です",
+      "downloadFailed": "届きませんでした",
+      "downloadMissing": "この端末にありません",
       "detailsTitle": "メッセージの詳細",
       "detailsClose": "閉じる",
       "copyJson": "すべてJSONとしてコピー",

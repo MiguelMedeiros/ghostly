@@ -7,6 +7,7 @@ import {
   formatVoiceDuration,
   parseVoiceMeta,
   recordingMime,
+  voiceDownloadName,
   voiceFileName,
 } from "../src/voice";
 // covers: files.voice.meta
@@ -128,6 +129,14 @@ describe("names and times", () => {
     expect(voiceFileName("audio/mp4", ts)).toMatch(/\.m4a$/);
     expect(voiceFileName("audio/ogg", ts)).toMatch(/\.ogg$/);
     expect(voiceFileName("audio/unknown", ts)).toMatch(/\.audio$/);
+  });
+
+  it("names a downloaded voice message from its time, in its own container", () => {
+    // covers: files.download
+    const ts = new Date(2026, 8, 27, 14, 1, 30).getTime();
+    expect(voiceDownloadName("audio/webm", ts)).toBe("Ghostly voice 2026-09-27 14.01.30.webm");
+    expect(voiceDownloadName("audio/wav", ts)).toBe("Ghostly voice 2026-09-27 14.01.30.wav");
+    expect(voiceDownloadName("audio/ogg;codecs=opus", ts)).toMatch(/\.ogg$/);
   });
 
   it("shows minutes and seconds", () => {

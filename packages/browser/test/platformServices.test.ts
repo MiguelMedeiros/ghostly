@@ -2,10 +2,11 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "@ghostly/core";
 import { setBrowserHost, type BrowserHost } from "../src/host";
+import { registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
 import type { EngineState, LinkView } from "../src/shared/types";
-// covers: services.add, services.share, files.size-limit, wallet.cashu.mint.manage
+// covers: services.add, services.share, files.size-limit, wallet.cashu.mint.manage, files.download
 
 /** What the shared UI calls, with the peer connection replaced by a recorder. */
 const fake = vi.hoisted(() => ({
@@ -177,6 +178,33 @@ describe("sending files", () => {
     expect((await services.getFile("page"))?.type).toBe("application/octet-stream");
     expect((await services.getFile("pic"))?.type).toBe("image/png");
     expect(await services.getFile("nothing")).toBeNull();
+  });
+  it("saves a small file through the system's dialog where there is one (Desktop), from a copy it then removes", async () => {
+    const staged = new Map<string, Blob>();
+    const native = {
+      kind: "native",
+      stage: vi.fn(async (id: string, blob: Blob) => { staged.set(id, blob); return "digest"; }),
+      save: vi.fn(async (id: string, _name: string) => staged.has(id)),
+      remove: vi.fn(async (id: string) => { staged.delete(id); }),
+    } as unknown as FileBytes;
+    await fileStore.put({ id: "voice", linkId: "l", blob: new Blob(["opus"], { type: "audio/webm" }), createdAt: 1, metadata: { name: "Voice message.webm", size: 4, mime: "audio/webm", timestamp: 1 } });
+    // The web keeps no save dialog: the UI downloads the Blob itself.
+    expect(await services.saveFile!("voice", "Ghostly voice.webm")).toBeNull();
+    registerFileBytes("native", async () => native, true);
+    try {
+      expect(await services.saveFile!("voice", "Ghostly voice.webm")).toBe(true);
+      const [copy] = vi.mocked(native.stage).mock.calls[0]!;
+      expect(copy).toMatch(/^save-[0-9a-f-]+$/);
+      expect(native.save).toHaveBeenCalledWith(copy, "Ghostly voice.webm");
+      expect(native.remove).toHaveBeenCalledWith(copy);
+      expect(staged.size).toBe(0);
+      // Without a name, the file's own.
+      await services.saveFile!("voice");
+      expect(vi.mocked(native.save).mock.calls[1]![1]).toBe("Voice message.webm");
+    } finally {
+      registerFileBytes("native", async () => null);
+      resetFileBytes();
+    }
   });
 });
 

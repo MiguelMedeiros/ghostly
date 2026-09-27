@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { PREVIEWABLE_IMAGE } from "@ghostly/core";
+import { PREVIEWABLE_IMAGE, sanitizeFileName } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
+import { downloadFile } from "../lib/fileDownload";
 import { fileStatus } from "../lib/fileStatus";
 import type { ChatFile } from "../lib/types";
 
@@ -50,9 +51,11 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
     setActionError("");
     void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
   };
+  /** The same path as Download in the message's menu: the system's save dialog where there is one, else a download. */
   const save = () => {
+    if (!platform) return;
     setActionError("");
-    void platform?.saveFile?.(file.id).then((saved) => { if (saved === null) setMissing(true); })
+    void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setMissing(true); })
       .catch((error: Error) => setActionError(String(error.message ?? error)));
   };
 
@@ -91,8 +94,8 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
           <a
             href={blobUrl ?? undefined}
             download={blobUrl ? file.name : undefined}
-            onClick={blobUrl ? undefined : (event) => { event.preventDefault(); save(); }}
-            role={blobUrl ? undefined : "button"}
+            onClick={(event) => { event.preventDefault(); save(); }}
+            role="button"
             data-testid="file-save"
             className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
             title="Save"

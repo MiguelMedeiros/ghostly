@@ -98,7 +98,7 @@ describe("FileBubble: files/3", () => {
     try {
       show({ state: "done", transferred: 4.2 * GB, size: 4.2 * GB });
       fireEvent.click(await screen.findByTestId("file-save"));
-      expect(saveFile).toHaveBeenCalledWith("chat1-in-abc");
+      expect(saveFile).toHaveBeenCalledWith("chat1-in-abc", "movie.mkv");
       expect(screen.getByTestId("file-status")).toHaveTextContent("4.2 GB");
     } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
   });
