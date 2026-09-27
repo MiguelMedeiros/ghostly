@@ -98,7 +98,7 @@ async function scale(n: number, network: NetworkModel | null, burst = false, hub
   }
 
   // Fan-out: everyone says something, everyone reads everyone.
-  const frames0 = peers.reduce((s, p) => s + p.sent.frames, 0), bytes0 = peers.reduce((s, p) => s + p.sent.bytes, 0);
+  const frames0 = peers.reduce((s, p) => s + p.sent.frames, 0);
   // What one member's message costs its author (the rest is what hubs pass on), measured on a member that is no hub.
   const writer = peers[n - 3], writerFrames0 = writer.sent.frames, writerBytes0 = writer.sent.bytes;
   const hubFrames0 = peers.filter(isHub).map(p => p.sent.frames);

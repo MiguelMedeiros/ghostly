@@ -1,6 +1,6 @@
 import {
   COMMUNITY_TOPOLOGY, MESH_HUBS, beaconKeys, beaconRecords, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
-  type GroupEdgeFrame, type GroupReactedFrame, type GroupSession, type Hub,
+  type GhostRecord, type GroupEdgeFrame, type GroupReactedFrame, type GroupSession, type Hub,
 } from "@ghostly/core";
 import type { StoredGroup } from "../shared/types";
 import type { GroupsHost } from "./groups";
@@ -259,9 +259,10 @@ export class MeshHubs {
   private async read(groupId: string, session: GroupSession, live: HubLive, now: number): Promise<void> {
     live.lastRead = now;
     const keys = beaconKeys(session.rendezvous!, groupId);
-    const records = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null);
-    if (records === null) return;
-    live.beacon = readBeacon(keys, records);
+    // Nothing there (no hub has written it yet) is a reading; a request that failed (the relays' budget) is not.
+    let records: GhostRecord[] | null;
+    try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch { return; }
+    live.beacon = readBeacon(keys, records ?? []);
     live.firstRead = true;
     this.noteHubs(live, session, now);
   }
@@ -279,9 +280,9 @@ export class MeshHubs {
     const keys = beaconKeys(rv, groupId);
     let existing = live.beacon;
     if (live.lastRead !== now) {
-      const records = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null);
-      if (records === null) return;
-      existing = readBeacon(keys, records);
+      let records: GhostRecord[] | null;
+      try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch { return; }
+      existing = readBeacon(keys, records ?? []);
     }
     const policy = session.hubPolicy;
     const hubs = mergeBeacon(existing, session.myKey, listed ? { key: session.myKey, ts: now, load: live.members.size, since: live.hubSince || now } : null, now,
