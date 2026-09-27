@@ -142,12 +142,15 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(world.peers.get("bob")!.edges.size).toBe(1);
 
     await world.meet();
-    expect(await alice.send(groupId, "hello bob")).toEqual({ error: null });
-    expect(await bob.send(groupId, "hello alice")).toEqual({ error: null });
+    const first = await alice.send(groupId, "hello bob");
+    expect(first).toEqual({ error: null, messageId: expect.any(String) });
+    expect(await bob.send(groupId, "hello alice")).toEqual({ error: null, messageId: expect.any(String) });
     await world.settle();
     expect(world.texts("alice")).toEqual(["hello bob", "hello alice"]);
     expect(world.texts("bob")).toEqual(["hello bob", "hello alice"]);
     expect((await alice.messages(groupId)).filter(m => !m.event).map(m => m.sender)).toEqual(["me", "peer"]);
+    // The id send answers is the one both sides keep the message under (what replies and reactions name).
+    for (const side of [alice, bob]) expect((await side.messages(groupId)).find(m => m.id === first.messageId)?.text).toBe("hello bob");
 
     // Leaving: the group is gone from Bob's list and history at once; the admin removes him and closes the edges.
     await bob.leave(groupId);
@@ -207,8 +210,8 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     await world.meet();
     const bobKey = bob.views()[0].myKey!;
     const mentions = [{ k: bobKey, o: 0, l: 4 }];
-    expect(await alice.send(groupId, "@Bob look", mentions)).toEqual({ error: null });
-    expect(await alice.send(groupId, "no one", [])).toEqual({ error: null });
+    expect(await alice.send(groupId, "@Bob look", mentions)).toEqual({ error: null, messageId: expect.any(String) });
+    expect(await alice.send(groupId, "no one", [])).toEqual({ error: null, messageId: expect.any(String) });
     await world.settle();
     const onBob = world.peers.get("bob")!.messages.filter(m => !m.event);
     expect(onBob.map(m => [m.text, m.mentions, m.mentioned])).toEqual([["@Bob look", mentions, true], ["no one", undefined, undefined]]);
@@ -271,7 +274,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(expecting("carol")).toEqual([aliceKey]);
     expect(expecting("alice")).toEqual([bobKey, carolKey].sort());
     expect(expecting("bob")).toEqual([aliceKey]);
-    expect(await carol.send(groupId, "hi from a stranger")).toEqual({ error: null });
+    expect(await carol.send(groupId, "hi from a stranger")).toEqual({ error: null, messageId: expect.any(String) });
     await world.settle();
     expect(world.texts("alice")).toContain("hi from a stranger");
     expect(world.texts("bob")).toContain("hi from a stranger");
@@ -468,7 +471,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       // Bob, away for all of it, is caught up by Carol when they meet.
       await world.meet(); await world.settle();
       expect(bob.views()[0].members.map(m => [m.key, m.role])).toEqual(carol.views()[0].members.map(m => [m.key, m.role]));
-      expect(await carol.send(groupId, "still here")).toEqual({ error: null });
+      expect(await carol.send(groupId, "still here")).toEqual({ error: null, messageId: expect.any(String) });
       await world.settle();
       expect(world.texts("bob")).toContain("still here");
     });
