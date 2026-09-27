@@ -180,6 +180,9 @@ export class NativePeerConnection extends EventTarget {
   private closed = false;
   private muted = false;
   private offer: string | null = null;
+  /** Descriptions Rust is still working on; states heard meanwhile wait (`hold`). */
+  private describing = 0;
+  private heldState: string | null = null;
   private readonly audio: Lane;
   private readonly video: Lane;
 
@@ -228,10 +231,31 @@ export class NativePeerConnection extends EventTarget {
     return track ? cameraOf.get(track) ?? null : null;
   }
 
+  /**
+   * Runs a description call, holding the ICE states heard meanwhile until the caller has seen it resolve. A
+   * browser cannot connect before `setRemoteDescription` resolves; Rust on the same machine connects within a
+   * millisecond, and "connected" arrived before the call hook, back from its await, set "connecting" over it.
+   */
+  private async hold<T>(work: () => Promise<T>): Promise<T> {
+    this.describing++;
+    try {
+      return await work();
+    } finally {
+      this.describing--;
+      // After the caller's own continuation: a timer, not a microtask.
+      setTimeout(() => {
+        const state = this.heldState;
+        if (this.describing || state === null) return;
+        this.heldState = null;
+        this.relay(state);
+      });
+    }
+  }
+
   async createOffer(): Promise<RTCSessionDescriptionInit> {
     await this.opened;
     this.started = true;
-    const sdp = await invoke<string>("native_call_offer", { id: this.id, camera: this.camera() });
+    const sdp = await this.hold(() => invoke<string>("native_call_offer", { id: this.id, camera: this.camera() }));
     if (this.muted) await this.mute(true);
     return { type: "offer", sdp };
   }
@@ -240,7 +264,8 @@ export class NativePeerConnection extends EventTarget {
     if (!this.offer) throw named("There is no offer to answer", "InvalidStateError");
     await this.opened;
     this.started = true;
-    const sdp = await invoke<string>("native_call_answer", { id: this.id, offer: this.offer, camera: this.camera() });
+    const offer = this.offer;
+    const sdp = await this.hold(() => invoke<string>("native_call_answer", { id: this.id, offer, camera: this.camera() }));
     if (this.muted) await this.mute(true);
     this.negotiated();
     return { type: "answer", sdp };
@@ -259,7 +284,7 @@ export class NativePeerConnection extends EventTarget {
       this.lanes();
       return;
     }
-    await invoke("native_call_accept", { id: this.id, answer: description.sdp ?? "" });
+    await this.hold(() => invoke("native_call_accept", { id: this.id, answer: description.sdp ?? "" }));
     this.negotiated();
   }
 
@@ -306,6 +331,12 @@ export class NativePeerConnection extends EventTarget {
       return;
     }
     if (typeof ice !== "string") return;
+    if (this.describing) this.heldState = ice;
+    else this.relay(ice);
+  }
+
+  private relay(ice: string): void {
+    if (this.closed) return;
     const next = connectionStateOf(ice);
     if (next.ice !== this.iceConnectionState) {
       this.iceConnectionState = next.ice;

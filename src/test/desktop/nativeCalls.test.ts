@@ -127,6 +127,28 @@ describe("the RTCPeerConnection stand-in", () => {
     expect(connection).toHaveBeenCalledTimes(2);
   });
 
+  it("holds a state heard while Rust takes the answer until the caller has seen it taken", async () => {
+    // On one machine Rust connects before the answer's invoke returns; the call hook sets "connecting" when it
+    // returns, so a "connected" relayed before that would be written over and the call would never connect.
+    let accepted!: () => void;
+    tauri.invoke.mockImplementation(async (command) => {
+      if (command === "native_call_accept") await new Promise<void>((done) => { accepted = done; });
+      return command === "native_call_offer" ? "sdp" : undefined;
+    });
+    const pc = new NativePeerConnection({});
+    const seen: string[] = [];
+    pc.oniceconnectionstatechange = () => seen.push(`ice ${pc.iceConnectionState}`);
+    await pc.createOffer();
+    const answering = pc.setRemoteDescription({ type: "answer", sdp: "their answer" }).then(() => seen.push("answer taken"));
+    await vi.waitFor(() => expect(accepted).toBeTypeOf("function"));
+    tauri.channels[0].onmessage(json({ ice: "checking" }));
+    tauri.channels[0].onmessage(json({ ice: "connected" }));
+    expect(seen).toEqual([]);
+    accepted();
+    await answering;
+    await vi.waitFor(() => expect(seen).toEqual(["answer taken", "ice connected"]));
+  });
+
   it("mutes the microphone in Rust once the call has started", async () => {
     const pc = new NativePeerConnection({});
     await pc.mute(true);
