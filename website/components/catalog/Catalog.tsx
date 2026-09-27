@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/site/icons";
 import { LevelBadge } from "@/components/site/Level";
-import { href, type Locale } from "@/lib/i18n";
 import { LEVELS, type Level } from "@/lib/status";
 import type { GroupId } from "@/lib/wisp-editorial";
 import type { CatalogCopy } from "@/content/catalog";
@@ -31,7 +30,7 @@ export type CatalogGroup = { id: GroupId; title: string; blurb: string; icon: st
 
 const KINDS = ["Contract", "Adapter", "Profile", "Process"];
 
-export function Catalog({ rows, groups, t, locale }: { rows: CatalogRow[]; groups: CatalogGroup[]; t: CatalogCopy; locale: Locale }) {
+export function Catalog({ rows, groups, t }: { rows: CatalogRow[]; groups: CatalogGroup[]; t: CatalogCopy }) {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState<GroupId | "all">("all");
   const [kind, setKind] = useState<string>("all");
@@ -93,7 +92,7 @@ export function Catalog({ rows, groups, t, locale }: { rows: CatalogRow[]; group
               <option value="all">{t.all}</option>
               {LEVELS.map((l) => (
                 <option key={l} value={l}>
-                  {shell[locale].levels[l]}
+                  {shell.levels[l]}
                 </option>
               ))}
             </select>
@@ -145,7 +144,7 @@ export function Catalog({ rows, groups, t, locale }: { rows: CatalogRow[]; group
                   </span>
                   <div className="catalog-main">
                     <h3>
-                      <Link href={href(locale, `/developers/wisps/${r.slug}`)}>{r.name}</Link>
+                      <Link href={`/developers/wisps/${r.slug}`}>{r.name}</Link>
                     </h3>
                     <p className="catalog-benefit">{r.benefit ?? r.implementation}</p>
                     {r.note && <p className="catalog-note">{r.note}</p>}
@@ -157,7 +156,7 @@ export function Catalog({ rows, groups, t, locale }: { rows: CatalogRow[]; group
                     </div>
                   </div>
                   <div className="catalog-level">
-                    {r.level ? <LevelBadge level={r.level} locale={locale} small /> : <span className="dim catalog-na">{r.kind === "Process" ? t.process : t.notClassified}</span>}
+                    {r.level ? <LevelBadge level={r.level} small /> : <span className="dim catalog-na">{r.kind === "Process" ? t.process : t.notClassified}</span>}
                   </div>
                 </li>
               ))}

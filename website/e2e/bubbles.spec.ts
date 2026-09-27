@@ -3,17 +3,14 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Speech bubbles stay whole on screen: Boo's line in the hero (drawn in the
  * act backdrop on desktop, a still bubble on phones and touch screens) and the
- * finale's dialogue, at every width and in both languages. The bubble box
+ * finale's dialogue, at every width. The bubble box
  * includes its tail. Boo himself, glow included, stays whole on screen and
  * clear of the copy at every aspect ratio. Each test sets its own viewport, so
  * it runs under the desktop project.
  */
 type Box = { l: number; t: number; r: number; b: number };
 
-const LOCALES = [
-  { path: "/", line: "Is anyone out there?" },
-  { path: "/pt-br", line: "Tem alguém aí?" },
-];
+const HERO_LINE = "Is anyone out there?";
 
 // Widths from the review brief, each at a common height, squarish, tall, short and very wide
 // desktop windows (the stage is cropped differently in each), plus two phones held sideways.
@@ -88,71 +85,67 @@ async function heroBubble(page: Page, line: string) {
   });
 }
 
-for (const { path, line } of LOCALES) {
-  test.describe(`hero bubble ${path}`, () => {
-    for (const vp of VIEWPORTS) {
-      test(`${vp.width}×${vp.height}${vp.touch ? " touch" : ""}`, async ({ browser }) => {
-        const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, hasTouch: !!vp.touch, isMobile: !!vp.touch });
-        const page = await ctx.newPage();
-        await page.goto(path);
-        // Let the hero copy finish rising in before measuring it.
-        await page.waitForTimeout(1500);
-        const m = await heroBubble(page, line);
-        expect(inside(m.bubble, vp.width, vp.height), `bubble ${JSON.stringify(m.bubble)} leaves the ${vp.width}×${vp.height} viewport`).toBe(true);
-        expect(m.px, "bubble text size").toBeGreaterThanOrEqual(12);
-        for (const c of m.copy) expect(apart(m.bubble, c), `bubble ${JSON.stringify(m.bubble)} overlaps copy ${JSON.stringify(c)}`).toBe(true);
-        // Above Boo's face: the bubble (tail included) ends in the top fifth of the ghost at most.
-        const face = m.boo.t + (m.boo.b - m.boo.t) * 0.2;
-        expect(m.bubble.b, "bubble reaches Boo's face").toBeLessThanOrEqual(face);
-        // ...and its tail points at him.
-        expect(m.tip, `bubble tail at x ${m.tip} misses Boo ${JSON.stringify(m.boo)}`).toBeGreaterThanOrEqual(m.boo.l);
-        expect(m.tip, `bubble tail at x ${m.tip} misses Boo ${JSON.stringify(m.boo)}`).toBeLessThanOrEqual(m.boo.r);
-        // Boo himself is whole on screen, glow included, below the nav and clear of the copy.
-        expect(inside(m.boo, vp.width, vp.height), `Boo ${JSON.stringify(m.boo)} leaves the ${vp.width}×${vp.height} viewport`).toBe(true);
-        expect(inside(m.glow, vp.width, vp.height), `Boo's glow ${JSON.stringify(m.glow)} leaves the ${vp.width}×${vp.height} viewport`).toBe(true);
-        expect(m.boo.t, "Boo's head under the nav").toBeGreaterThanOrEqual(m.nav);
-        for (const c of m.copy) expect(apart(m.boo, c), `Boo ${JSON.stringify(m.boo)} overlaps copy ${JSON.stringify(c)}`).toBe(true);
-        await ctx.close();
-      });
-    }
-  });
-}
-
-// The finale plays eight lines, one at a time; every one must be whole on screen.
-for (const { path } of LOCALES) {
-  for (const vp of [
-    { width: 320, height: 568 },
-    { width: 1440, height: 900 },
-  ]) {
-    test(`finale bubbles ${path} ${vp.width}×${vp.height}`, async ({ browser }) => {
-      const ctx = await browser.newContext({ viewport: vp, hasTouch: vp.width < 860, isMobile: vp.width < 860 });
+test.describe("hero bubble /", () => {
+  for (const vp of VIEWPORTS) {
+    test(`${vp.width}×${vp.height}${vp.touch ? " touch" : ""}`, async ({ browser }) => {
+      const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, hasTouch: !!vp.touch, isMobile: !!vp.touch });
       const page = await ctx.newPage();
-      await page.goto(path, { waitUntil: "networkidle" });
-      const center = () => page.evaluate(() => document.querySelector(".fin-stage")!.scrollIntoView({ block: "center" }));
-      await center();
-      const seen = new Map<string, Box>();
-      const deadline = Date.now() + 40_000;
-      while (seen.size < 8 && Date.now() < deadline) {
-        const on = await page.evaluate(() =>
-          [...document.querySelectorAll<HTMLElement>(".fin-bubble[data-on='true']")]
-            .filter((e) => e.textContent)
-            .map((e) => {
-              const r = e.getBoundingClientRect();
-              return { text: e.textContent!, box: { l: r.left, t: r.top, r: r.right, b: r.bottom } };
-            }),
-        );
-        for (const { text, box } of on) {
-          const prev = seen.get(text);
-          // Keep the widest box a line had (it scales in).
-          if (!prev || box.r - box.l > prev.r - prev.l) seen.set(text, box);
-        }
-        // Images above can still shift the page; keep the stage centred until the dialogue starts.
-        if (!seen.size) await center();
-        await page.waitForTimeout(200);
-      }
-      expect(seen.size, "lines seen").toBe(8);
-      for (const [text, box] of seen) expect(box.l >= 0 && box.r <= vp.width, `"${text}" ${JSON.stringify(box)} leaves the ${vp.width}px viewport`).toBe(true);
+      await page.goto("/");
+      // Let the hero copy finish rising in before measuring it.
+      await page.waitForTimeout(1500);
+      const m = await heroBubble(page, HERO_LINE);
+      expect(inside(m.bubble, vp.width, vp.height), `bubble ${JSON.stringify(m.bubble)} leaves the ${vp.width}×${vp.height} viewport`).toBe(true);
+      expect(m.px, "bubble text size").toBeGreaterThanOrEqual(12);
+      for (const c of m.copy) expect(apart(m.bubble, c), `bubble ${JSON.stringify(m.bubble)} overlaps copy ${JSON.stringify(c)}`).toBe(true);
+      // Above Boo's face: the bubble (tail included) ends in the top fifth of the ghost at most.
+      const face = m.boo.t + (m.boo.b - m.boo.t) * 0.2;
+      expect(m.bubble.b, "bubble reaches Boo's face").toBeLessThanOrEqual(face);
+      // ...and its tail points at him.
+      expect(m.tip, `bubble tail at x ${m.tip} misses Boo ${JSON.stringify(m.boo)}`).toBeGreaterThanOrEqual(m.boo.l);
+      expect(m.tip, `bubble tail at x ${m.tip} misses Boo ${JSON.stringify(m.boo)}`).toBeLessThanOrEqual(m.boo.r);
+      // Boo himself is whole on screen, glow included, below the nav and clear of the copy.
+      expect(inside(m.boo, vp.width, vp.height), `Boo ${JSON.stringify(m.boo)} leaves the ${vp.width}×${vp.height} viewport`).toBe(true);
+      expect(inside(m.glow, vp.width, vp.height), `Boo's glow ${JSON.stringify(m.glow)} leaves the ${vp.width}×${vp.height} viewport`).toBe(true);
+      expect(m.boo.t, "Boo's head under the nav").toBeGreaterThanOrEqual(m.nav);
+      for (const c of m.copy) expect(apart(m.boo, c), `Boo ${JSON.stringify(m.boo)} overlaps copy ${JSON.stringify(c)}`).toBe(true);
       await ctx.close();
     });
   }
+});
+
+// The finale plays eight lines, one at a time; every one must be whole on screen.
+for (const vp of [
+  { width: 320, height: 568 },
+  { width: 1440, height: 900 },
+]) {
+  test(`finale bubbles / ${vp.width}×${vp.height}`, async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: vp, hasTouch: vp.width < 860, isMobile: vp.width < 860 });
+    const page = await ctx.newPage();
+    await page.goto("/", { waitUntil: "networkidle" });
+    const center = () => page.evaluate(() => document.querySelector(".fin-stage")!.scrollIntoView({ block: "center" }));
+    await center();
+    const seen = new Map<string, Box>();
+    const deadline = Date.now() + 40_000;
+    while (seen.size < 8 && Date.now() < deadline) {
+      const on = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>(".fin-bubble[data-on='true']")]
+          .filter((e) => e.textContent)
+          .map((e) => {
+            const r = e.getBoundingClientRect();
+            return { text: e.textContent!, box: { l: r.left, t: r.top, r: r.right, b: r.bottom } };
+          }),
+      );
+      for (const { text, box } of on) {
+        const prev = seen.get(text);
+        // Keep the widest box a line had (it scales in).
+        if (!prev || box.r - box.l > prev.r - prev.l) seen.set(text, box);
+      }
+      // Images above can still shift the page; keep the stage centred until the dialogue starts.
+      if (!seen.size) await center();
+      await page.waitForTimeout(200);
+    }
+    expect(seen.size, "lines seen").toBe(8);
+    for (const [text, box] of seen) expect(box.l >= 0 && box.r <= vp.width, `"${text}" ${JSON.stringify(box)} leaves the ${vp.width}px viewport`).toBe(true);
+    await ctx.close();
+  });
 }

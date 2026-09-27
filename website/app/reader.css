@@ -127,8 +127,7 @@
 .reader-updated {
   font-size: 13px;
 }
-.reader-scope,
-.reader-lang {
+.reader-scope {
   color: var(--dim);
   font-size: 14px;
 }

@@ -25,13 +25,13 @@ After `npm run build`, restart a running dev server: reader routes are static
 
 | Path | What |
 |---|---|
-| `app/` | Routes. English at the root, Brazilian Portuguese under `app/pt-br/` (thin wrappers around the same page components). |
+| `app/` | Routes. The site is English only; old `/pt-br` URLs redirect to their English pages (`next.config.ts`). |
 | `components/home/` | Homepage: the hero and four story chapters in two acts (invite, DHT; agree, alive), the app screenshots, your space with the wallet deck, the open layer stack and the finale with its download panel. |
 | `components/story/` | The film's machinery. `Act` pins one full-bleed backdrop behind its chapters and keeps one Boo and one Casper in it; `SceneFrame` is a chapter (full-bleed stage, floating copy panel, step mapping); `poses.ts` is the blocking table (actors, camera, focal point per chapter, landscape and portrait); `Statement` is the sentence between the acts. |
 | `components/dev/` | `/developers`: protocol loop, composition board, negotiation demo, path, availability table. |
 | `components/catalog/`, `components/reader/`, `components/roadmap/` | Catalog (with the six-word glossary at `#glossary`, linked from the reader), WISP reader, roadmap. |
 | `components/ghost/Ghost.tsx` | Boo and Casper. `components/site/GhostPet.tsx` is the original pointer ghost, kept as it was. |
-| `content/*.ts` | All copy, one object per locale. A missing translation is a type error. |
+| `content/*.ts` | All copy, one object per page. |
 | `lib/wisps.ts` | The catalog model, built from `docs/wisps/numbering.json` and the documents. |
 | `lib/wisp-editorial.ts` | Per-WISP benefit line, availability and optional video metadata. |
 | `lib/composition.ts` | Blocks and presets of the composition board. |
@@ -78,7 +78,7 @@ Two motion traps worth knowing: motion scales SVG groups about their own
 bounding box, so any scaled `motion.g` positioned by its top-left spreads
 `VIEW_BOX_ORIGIN` into its style; and `useTransform(scroll, [range], [out])`
 becomes a native scroll-linked animation fixed at mount, so a range that depends
-on state (orientation, locale) must use the function form.
+on state (orientation) must use the function form.
 
 Debug helpers, not shipped: `.shots.mjs` (screenshots of any page at scroll
 fractions), `.spine.mjs` (each chapter at chosen sub-progress values),

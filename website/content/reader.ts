@@ -1,6 +1,5 @@
-import type { Localized } from "@/lib/i18n";
 
-const en = {
+export const reader = {
   developers: "Developers",
   catalog: "WISP catalog",
   reference: "Reference",
@@ -27,39 +26,6 @@ const en = {
   video: "Video lesson",
   chapters: "Chapters",
   repo: "repository",
-  englishDocs: "",
 };
 
-export type ReaderCopy = typeof en;
-
-const ptBr: ReaderCopy = {
-  developers: "Desenvolvedores",
-  catalog: "Catálogo de WISPs",
-  reference: "Referência",
-  inShort: "Em resumo",
-  implementation: "Implementação, como o documento descreve",
-  inApp: "No app",
-  depends: "Depende de",
-  usedBy: "Usado por",
-  children: "Adapters e perfis",
-  implementsContract: "Implementa",
-  contents: "Nesta página",
-  all: "Todos os rascunhos",
-  glossary: "Glossário",
-  moved: "Este rascunho ganhou um número novo. Você está lendo no endereço atual; o link antigo continua funcionando.",
-  draftNote: "Um rascunho em revisão. Não é padrão final, nem promessa de que todo cliente o suporta.",
-  supportNote: "Documentação de apoio. Pode incluir propostas datadas e evidências históricas.",
-  source: "Ver o código-fonte no GitHub",
-  download: "Baixar o Markdown",
-  prev: "Anterior",
-  next: "Próximo",
-  back: "Voltar ao catálogo",
-  updated: "Atualizado",
-  unassigned: "Planejado · número a definir",
-  video: "Videoaula",
-  chapters: "Capítulos",
-  repo: "repositório",
-  englishDocs: "Os documentos técnicos estão em inglês; o resumo e a navegação estão em português.",
-};
-
-export const reader: Localized<ReaderCopy> = { en, "pt-br": ptBr };
+export type ReaderCopy = typeof reader;

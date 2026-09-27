@@ -4,7 +4,6 @@ import { Act } from "@/components/story/Act";
 import { Statement } from "@/components/story/Statement";
 import { StoryRail } from "@/components/story/StoryRail";
 import { home } from "@/content/home";
-import { href, type Locale } from "@/lib/i18n";
 import { Hero } from "./Hero";
 import { InviteScene } from "./InviteScene";
 import { DhtScene } from "./DhtScene";
@@ -24,10 +23,10 @@ import "@/app/home.css";
  * opening under the ghosts, and the payoff.
  */
 /** `version`: the release the download panel offers (lib/latestRelease.ts). */
-export function HomePage({ locale, version }: { locale: Locale; version: string }) {
-  const t = home[locale];
+export function HomePage({ version }: { version: string }) {
+  const t = home;
   return (
-    <Shell locale={locale}>
+    <Shell>
       <StoryRail
         label={t.rail}
         marks={[
@@ -79,16 +78,16 @@ export function HomePage({ locale, version }: { locale: Locale; version: string 
         layers={t.open.layers}
         cta={t.open.cta}
         catalog={t.open.catalog}
-        devHref={href(locale, "/developers")}
-        catalogHref={href(locale, "/developers/catalog")}
+        devHref={"/developers"}
+        catalogHref={"/developers/catalog"}
       />
       {/* Phones: the chapter's buttons after the picture instead of in the sheet over it. */}
       <div className="wrap open-after">
         <div className="open-actions">
-          <Link className="btn btn--primary" href={href(locale, "/developers")}>
+          <Link className="btn btn--primary" href={"/developers"}>
             {t.open.cta} →
           </Link>
-          <Link className="btn" href={href(locale, "/developers/catalog")}>
+          <Link className="btn" href={"/developers/catalog"}>
             {t.open.catalog}
           </Link>
         </div>

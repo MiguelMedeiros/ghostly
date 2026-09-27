@@ -1,4 +1,3 @@
-import type { Localized } from "@/lib/i18n";
 import type { Level } from "@/lib/status";
 
 /**
@@ -41,7 +40,7 @@ type Timeline = {
   lanes: Lane[];
 };
 
-const en: Timeline = {
+export const timeline: Timeline = {
   mapTitle: "The map",
   mapLead: "Every piece of Ghostly, by area. Start from today, then move along the stages to see what comes next.",
   timelineTitle: "Stage by stage",
@@ -139,104 +138,3 @@ const en: Timeline = {
     },
   ],
 };
-
-const ptBr: Timeline = {
-  mapTitle: "O mapa",
-  mapLead: "Todas as peças do Ghostly, por área. Comece por hoje e avance pelas etapas para ver o que vem depois.",
-  timelineTitle: "Etapa por etapa",
-  timelineLead: "Da esquerda para a direita é a ordem em que as coisas acontecem. Sem datas: uma coluna é uma etapa, não um trimestre.",
-  detailsTitle: "Por que nesta ordem? Dependências e o que significa \"pronto\"",
-  grid: {
-    presets: "Etapas",
-    selectHint: "Toque em qualquer bloco para ver o que ele permite fazer e onde está especificado.",
-    enables: "O que permite",
-    specs: "Especificado em",
-    noSpec: "Ainda sem WISP",
-    docs: "Referência",
-    included: "{n} de {t} peças",
-    close: "Fechar",
-    stages: {
-      title: "Etapas",
-      play: "Ver a evolução",
-      pause: "Pausar",
-      names: { available: "Hoje", planned: "Planejado", research: "Pesquisa" },
-    },
-  },
-  phases: {
-    now: { title: "Hoje", sub: "O que o app faz agora" },
-    planned: { title: "Próximos passos", sub: "Na ordem do que depende de quê" },
-    later: { title: "Horizonte", sub: "Visão de longo prazo e perguntas em aberto" },
-  },
-  here: "Estamos aqui",
-  empty: "Nenhum",
-  lanes: [
-    {
-      id: "talk",
-      color: "#22d3ee",
-      title: "Conversa e conexão",
-      items: {
-        now: ["Um único convite ghostly1: código, QR, link", "Início na DHT e upgrade sozinho em todo chat", "Chats: arquivos de qualquer tamanho, pagamentos, apps locais", "Chamadas em todo chat, ao vivo, inclusive no Linux", "Iroh e HyperDHT no desktop; Iroh nos navegadores por relays", "Progresso do pareamento à vista", "Mensagens de voz, texto formatado, menções, prévias de links"],
-        planned: ["Digitando e presença", "Apps para celular", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
-        later: [{ text: "Tor, libp2p, componentes Pear", level: "research" }],
-      },
-    },
-    {
-      id: "pay",
-      color: "#fbbf24",
-      title: "Pagamentos",
-      items: {
-        now: ["Cashu e Lightning, também da sua própria fonte", "Lightning addresses, pagar com qualquer carteira", "Ark, Spark, Fedimint, USDT, on-chain (experimentais)", "Carteiras de Mainnet e de Testnet lado a lado"],
-        planned: ["Mainnet para Spark, Breez, BDK e Fedimint", "Saída unilateral no Ark", "Liquid e outros trilhos"],
-      },
-    },
-    {
-      id: "keep",
-      color: "#4ade80",
-      title: "Perfis e backup",
-      items: {
-        now: ["Perfis locais", "Backups selados em arquivo ou S3", "Mensagens guardadas para um contato ausente"],
-        planned: ["Backups agendados e retenção", "Mais lugares de armazenamento"],
-      },
-    },
-    {
-      id: "identity",
-      color: "#f472b6",
-      title: "Identidade (opcional)",
-      items: {
-        now: ["Provas: Nostr · Pubky · domínio · OpenPGP · SSH · endereço Bitcoin · DID", "Camada social do Nostr", "Um did:dht por perfil", "Perfis públicos nos cartões de identidade"],
-        planned: ["Contas Bluesky / AT Protocol, quando o documento de cliente OAuth do site estiver no ar", "Contas OpenID, quando os clientes do Ghostly forem registrados", "Carteiras de hardware como signers, passkeys"],
-        later: ["Keet, quando tiver uma API de assinatura suportada", { text: "Perfis e conteúdos do Pubky", level: "research" }],
-      },
-    },
-    {
-      id: "groups",
-      color: "#fb923c",
-      title: "Grupos",
-      items: {
-        now: ["Grupos privados (8) e comunidades (256)", "Foto do grupo, pagamentos entre membros"],
-        planned: ["Arquivos e chamadas em grupos", "Mais de um admin"],
-        later: ["Canais e tópicos", { text: "Criptografia de grupo além das chaves por época (MLS)", level: "research" }],
-      },
-    },
-    {
-      id: "sdk",
-      color: "#a78bfa",
-      title: "SDKs e plugins",
-      items: {
-        now: ["Contratos abertos (rascunhos WISP)", "@ghostly/sdk e plugins", "A CLI headless e o fluxo de eventos"],
-        planned: ["Manifestos de adapters, o SDK e a CLI no npm", "Autenticidade de pacotes e atualizações"],
-        later: [{ text: "Um host de plugins com permissões", level: "research" }],
-      },
-    },
-    {
-      id: "eco",
-      color: "#94a3b8",
-      title: "Apps e auto-hospedagem",
-      items: {
-        later: ["Miniapps e jogos P2P", "Catálogos e indexadores independentes", "Runtime auto-hospedado sempre ligado (até num Raspberry Pi)", "Ghostly OS"],
-      },
-    },
-  ],
-};
-
-export const timeline: Localized<Timeline> = { en, "pt-br": ptBr };

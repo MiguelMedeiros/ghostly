@@ -1,30 +1,29 @@
 import Link from "next/link";
 import { Ghost, GhostMark } from "@/components/ghost/Ghost";
 import { Brand } from "./Brand";
-import { href, type Locale } from "@/lib/i18n";
 import { RELEASES_URL } from "@/lib/release";
 import { shell, APP_URL, REPO_URL } from "@/content/shell";
 import { Particles } from "./Particles";
 
-export function SiteFooter({ locale = "en" }: { locale?: Locale }) {
-  const t = shell[locale].footer;
+export function SiteFooter() {
+  const t = shell.footer;
   const cols = [
     {
       title: t.product,
       links: [
         { label: t.links.open, href: APP_URL },
-        { label: t.links.download, href: href(locale, "/#download") },
+        { label: t.links.download, href: "/#download" },
         { label: t.links.privacy, href: "/privacy" },
       ],
     },
     {
       title: t.developers,
       links: [
-        { label: t.links.overview, href: href(locale, "/developers") },
-        { label: t.links.catalog, href: href(locale, "/developers/catalog") },
+        { label: t.links.overview, href: "/developers" },
+        { label: t.links.catalog, href: "/developers/catalog" },
         { label: t.links.protocol, href: "/docs" },
         { label: t.links.cli, href: "/cli" },
-        { label: t.links.roadmap, href: href(locale, "/roadmap") },
+        { label: t.links.roadmap, href: "/roadmap" },
       ],
     },
     {
@@ -32,8 +31,8 @@ export function SiteFooter({ locale = "en" }: { locale?: Locale }) {
       links: [
         { label: t.links.github, href: REPO_URL },
         { label: t.links.releases, href: RELEASES_URL },
-        { label: t.links.security, href: href(locale, "/developers/wisps/security") },
-        { label: t.links.contributing, href: href(locale, "/developers/wisps/contributing") },
+        { label: t.links.security, href: "/developers/wisps/security" },
+        { label: t.links.contributing, href: "/developers/wisps/contributing" },
       ],
     },
   ];
@@ -43,7 +42,7 @@ export function SiteFooter({ locale = "en" }: { locale?: Locale }) {
       <div className="wrap">
         <div className="footer-top">
           <div>
-            <Link href={href(locale, "/")} className="brand">
+            <Link href={"/"} className="brand">
               <Brand />
             </Link>
             <p className="muted" style={{ marginTop: 14, maxWidth: 340, fontSize: 14, lineHeight: 1.6 }}>

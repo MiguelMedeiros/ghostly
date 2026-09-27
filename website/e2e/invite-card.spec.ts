@@ -76,10 +76,8 @@ async function holdOut(page: Page) {
 
 const CASES = [
   { name: "desktop film", path: "/", viewport: { width: 1440, height: 900 } },
-  { name: "desktop film, Portuguese", path: "/pt-br", viewport: { width: 1440, height: 900 } },
   { name: "reduced motion", path: "/", viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" as const },
   { name: "phone", path: "/", viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
-  { name: "phone, Portuguese", path: "/pt-br", viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
 ];
 
 for (const { name, path, viewport, reducedMotion, isMobile, hasTouch } of CASES) {

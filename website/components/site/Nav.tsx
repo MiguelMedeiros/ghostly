@@ -4,35 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "./Brand";
-import { href, isTranslated, LOCALE_META, LOCALES, splitLocale, type Locale } from "@/lib/i18n";
 import { shell, APP_URL } from "@/content/shell";
 
-export function LangSwitch({ locale }: { locale: Locale }) {
+export function Nav() {
+  const t = shell.nav;
   const pathname = usePathname() ?? "/";
-  const { path } = splitLocale(pathname);
-  const t = shell[locale].nav;
-  return (
-    <nav className="lang-switch" aria-label={t.language}>
-      {LOCALES.map((l) => (
-        <a
-          key={l}
-          href={isTranslated(path) ? href(l, path) : href(l, "/")}
-          hrefLang={LOCALE_META[l].html}
-          lang={LOCALE_META[l].html}
-          aria-current={l === locale ? "true" : undefined}
-          title={LOCALE_META[l].label}
-        >
-          {LOCALE_META[l].short}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
-export function Nav({ locale }: { locale: Locale }) {
-  const t = shell[locale].nav;
-  const pathname = usePathname() ?? "/";
-  const { path } = splitLocale(pathname);
   const [scrolled, setScrolled] = useState(false);
   const menu = useRef<HTMLDetailsElement>(null);
 
@@ -58,28 +34,27 @@ export function Nav({ locale }: { locale: Locale }) {
   };
 
   const links = [
-    { href: href(locale, "/#story"), label: t.story, match: null },
-    { href: href(locale, "/developers"), label: t.developers, match: /^\/developers$/ },
-    { href: href(locale, "/developers/catalog"), label: t.wisps, match: /^\/developers\/(catalog|wisps)/ },
-    { href: href(locale, "/roadmap"), label: t.roadmap, match: /^\/roadmap/ },
+    { href: "/#story", label: t.story, match: null },
+    { href: "/developers", label: t.developers, match: /^\/developers$/ },
+    { href: "/developers/catalog", label: t.wisps, match: /^\/developers\/(catalog|wisps)/ },
+    { href: "/roadmap", label: t.roadmap, match: /^\/roadmap/ },
     { href: "/cli", label: t.cli, match: /^\/cli/ },
   ];
 
   return (
     <header className="nav" data-scrolled={scrolled}>
       <div className="wrap nav-inner">
-        <Link href={href(locale, "/")} className="brand" aria-label="Ghostly home">
+        <Link href={"/"} className="brand" aria-label="Ghostly home">
           <Brand />
         </Link>
         <nav className="nav-links" aria-label="Main">
           {links.map((l) => (
-            <Link key={l.href} href={l.href} aria-current={l.match?.test(path) ? "page" : undefined}>
+            <Link key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
               {l.label}
             </Link>
           ))}
         </nav>
         <div className="nav-end">
-          <LangSwitch locale={locale} />
           <a className="btn btn--primary nav-cta" href={APP_URL}>
             {t.open}
           </a>
@@ -96,7 +71,6 @@ export function Nav({ locale }: { locale: Locale }) {
                 </Link>
               ))}
               <a href={APP_URL}>{t.open} ↗</a>
-              <LangSwitch locale={locale} />
             </div>
           </details>
         </div>

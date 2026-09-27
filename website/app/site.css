@@ -439,23 +439,6 @@ body {
   font-size: 14px;
   border-radius: 11px;
 }
-.lang-switch {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 2px;
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
-  font-size: 12px;
-}
-.lang-switch a {
-  padding: 5px 8px;
-  border-radius: 8px;
-  color: var(--dim);
-}
-.lang-switch a[aria-current="true"] {
-  color: var(--text);
-  background: var(--surface-3);
-}
 .nav-menu {
   display: none;
   position: relative;
@@ -504,7 +487,6 @@ body {
 }
 @media (max-width: 900px) {
   .nav-links,
-  .nav-end .lang-switch,
   .nav-end .nav-cta {
     display: none;
   }
@@ -513,11 +495,6 @@ body {
   }
   .nav-end {
     margin-left: auto;
-  }
-  .nav-sheet .lang-switch {
-    display: inline-flex;
-    align-self: flex-start;
-    margin-top: 8px;
   }
 }
 

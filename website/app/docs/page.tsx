@@ -36,7 +36,7 @@ export const metadata: Metadata = {
 export default function DocsPage() {
   return (
     <>
-      <Nav locale="en" />
+      <Nav />
       <main id="content" className="pt-16">
         <aside className="mx-auto mt-8 max-w-5xl border-l-2 border-cyan bg-cyan/5 px-6 py-4 text-sm text-gray-300">
           This guide describes the record and signaling profile of compatibility

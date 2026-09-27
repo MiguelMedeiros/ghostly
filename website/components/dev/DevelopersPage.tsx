@@ -4,7 +4,6 @@ import { Icon } from "@/components/site/icons";
 import { LevelBadge } from "@/components/site/Level";
 import { Reveal } from "@/components/home/Reveal";
 import { developers } from "@/content/developers";
-import { href, type Locale } from "@/lib/i18n";
 import { wisps, wispCount } from "@/lib/wisps";
 import { REPO_URL, shell } from "@/content/shell";
 import { BlockGrid } from "./BlockGrid";
@@ -12,18 +11,18 @@ import { Negotiation } from "./Negotiation";
 import { ProtocolSteps, type WispLink } from "./ProtocolSteps";
 import "@/app/developers.css";
 
-export function DevelopersPage({ locale }: { locale: Locale }) {
-  const t = developers[locale];
+export function DevelopersPage() {
+  const t = developers;
   const wispRefs = wisps.map((w) => ({ slug: w.slug, number: w.number, name: w.name }));
   // The explainer links each step to the rendered WISPs it cites.
   const stepWisps: Record<string, WispLink> = Object.fromEntries(
     [...new Set(t.hero.steps.list.flatMap((s) => s.wisps))].flatMap((n) => {
       const w = wisps.find((x) => x.number === n);
-      return w ? [[n, { number: w.number, name: w.name, href: href(locale, `/developers/wisps/${w.slug}`) }]] : [];
+      return w ? [[n, { number: w.number, name: w.name, href: `/developers/wisps/${w.slug}` }]] : [];
     }),
   );
   return (
-    <Shell locale={locale}>
+    <Shell>
       <section className="dvx-hero">
         <div className="wrap">
           <div className="dvx-head">
@@ -32,10 +31,10 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
             <div className="dvx-sub">
               <p className="lead">{t.hero.lead}</p>
               <div className="dvx-actions">
-                <Link className="btn btn--primary" href={href(locale, "/developers/wisps/01-ghost-core")}>
+                <Link className="btn btn--primary" href={"/developers/wisps/01-ghost-core"}>
                   {t.hero.ctaCore} →
                 </Link>
-                <Link className="btn dv-btn-sm" href={href(locale, "/developers/catalog")}>
+                <Link className="btn dv-btn-sm" href={"/developers/catalog"}>
                   {t.hero.ctaCatalog.replace("{n}", String(wispCount))}
                 </Link>
                 <a className="dvx-gh" href={REPO_URL}>
@@ -55,7 +54,7 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
             <h2 className="h-section">{t.compose.title}</h2>
             <p className="lead">{t.compose.lead}</p>
           </Reveal>
-          <BlockGrid mode="compose" t={t.compose} locale={locale} wisps={wispRefs} />
+          <BlockGrid mode="compose" t={t.compose} wisps={wispRefs} />
         </div>
       </section>
 
@@ -131,11 +130,11 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
                     {r.cells.map((c, i) => (
                       <td key={i}>
                         {c === "available" ? (
-                          <span className="avail-yes" role="img" aria-label={shell[locale].levels.available}>
+                          <span className="avail-yes" role="img" aria-label={shell.levels.available}>
                             ✓
                           </span>
                         ) : c ? (
-                          <LevelBadge level={c} locale={locale} small />
+                          <LevelBadge level={c} small />
                         ) : (
                           <span className="dim" aria-label="not supported">
                             {t.availability.none}
@@ -162,7 +161,7 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
             <Reveal as="article" key={k} className="card devnext-card">
               <h3 className="h-card">{t.next[k].title}</h3>
               <p className="muted">{t.next[k].body}</p>
-              <Link className="link-arrow" href={k === "docs" ? "/docs" : href(locale, k === "catalog" ? "/developers/catalog" : "/roadmap")}>
+              <Link className="link-arrow" href={k === "docs" ? "/docs" : k === "catalog" ? "/developers/catalog" : "/roadmap"}>
                 {t.next[k].cta} →
               </Link>
             </Reveal>

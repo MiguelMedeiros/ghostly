@@ -1,29 +1,25 @@
-import type { Locale } from "@/lib/i18n";
-import { LOCALE_META } from "@/lib/i18n";
 import { shell } from "@/content/shell";
 import { Nav } from "./Nav";
 import { SiteFooter } from "./Footer";
 import { GhostPet } from "./GhostPet";
 import { GhostSwarm } from "./GhostSwarm";
 import { IdleLoops } from "./IdleLoops";
-import { HtmlLang } from "./HtmlLang";
 import { JoinLanding } from "./JoinLanding";
 
-export function Shell({ locale = "en", children }: { locale?: Locale; children: React.ReactNode }) {
-  const t = shell[locale];
+export function Shell({ children }: { children: React.ReactNode }) {
+  const t = shell;
   return (
-    <div lang={locale === "en" ? undefined : LOCALE_META[locale].html}>
-      {locale !== "en" && <HtmlLang lang={LOCALE_META[locale].html} />}
+    <div>
       <a className="skip-link" href="#content">
         {t.skip}
       </a>
-      <Nav locale={locale} />
+      <Nav />
       <main id="content">{children}</main>
-      <SiteFooter locale={locale} />
+      <SiteFooter />
       <GhostPet label={t.pet} />
       <GhostSwarm />
       <IdleLoops />
-      <JoinLanding locale={locale} />
+      <JoinLanding />
     </div>
   );
 }
