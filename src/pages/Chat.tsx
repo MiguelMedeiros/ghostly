@@ -426,7 +426,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
     <CueChat.Provider value={sessionId}>
     <div className="chat-pane flex-1 h-full">
-    <div className="chat-column flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
+    {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
+    <div data-file-drop className="chat-column relative flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
       {/* Chat Header */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">

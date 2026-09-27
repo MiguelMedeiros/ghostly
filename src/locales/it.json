@@ -538,6 +538,12 @@
     "sendPhoto": "Invia foto",
     "closeCamera": "Chiudi fotocamera",
     "cameraFailed": "Impossibile avviare la fotocamera.",
+    "sendFiles": "Invia file",
+    "caption": "Aggiungi una didascalia",
+    "send": "Invia",
+    "sendCount": "Invia {{count}}",
+    "removeFile": "Rimuovi {{name}}",
+    "dropFiles": "Rilascia per inviare",
     "category": {
       "recent": "Recenti",
       "people": "Faccine e persone",

@@ -538,6 +538,12 @@
     "sendPhoto": "إرسال الصورة",
     "closeCamera": "إغلاق الكاميرا",
     "cameraFailed": "تعذّر تشغيل الكاميرا.",
+    "sendFiles": "إرسال ملفات",
+    "caption": "أضف تعليقًا",
+    "send": "إرسال",
+    "sendCount": "إرسال {{count}}",
+    "removeFile": "إزالة {{name}}",
+    "dropFiles": "أفلت للإرسال",
     "category": {
       "recent": "الأخيرة",
       "people": "الوجوه والأشخاص",
