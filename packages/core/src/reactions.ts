@@ -133,7 +133,7 @@ export function parseReactedFrame(frame: Record<string, unknown>): number | null
 }
 
 /**
- * A DHT envelope's reactions (its twelfth element): `[[id, emoji, n], …]`. What does not hold is skipped, never the
+ * A DHT envelope's reactions (its thirteenth element): `[[id, emoji, n], …]`. What does not hold is skipped, never the
  * envelope; at most `REACTION_LIMITS.dht` are read.
  */
 export function readDhtReactions(raw: unknown): WireReaction[] {

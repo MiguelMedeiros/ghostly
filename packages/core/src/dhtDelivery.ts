@@ -46,12 +46,13 @@ type Message = [id: string, timestamp: number, text: string];
  * (WISP 403, revision 0.3): `1`, the author can use it; `2`, the author knows the reader can too, and reads
  * there first. A ninth element then goes as `null` when there is no revision to name. The eleventh, with a text only,
  * is the id of the message it replies to (WISP 403 § Replies): the id alone, which the reader looks up in its history.
- * The twelfth, the author's reactions the reader has not confirmed yet, `[[id, emoji, n], …]`, oldest first and as many
- * as fit; the thirteenth, the highest number of the reader's reactions the author took (WISP 403 § Reactions). The
- * eleventh then goes as `null` when there is no reply.
+ * The twelfth is kept for an edit (WISP 403 § Edits). The thirteenth, the author's reactions the reader has not confirmed
+ * yet, `[[id, emoji, n], …]`, oldest first and as many as fit; the fourteenth, the highest number of the reader's
+ * reactions the author took (WISP 403 § Reactions). The eleventh and twelfth then go as `null` when there is no reply
+ * and no edit.
  */
 type DhtReaction = [id: string, emoji: string, n: number];
-type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string | null, reactions?: DhtReaction[], reactionsTaken?: number | null];
+type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string | null, edit?: null, reactions?: DhtReaction[], reactionsTaken?: number | null];
 /** An envelope's plaintext past this is not read (`receive`): what rides along must stay under it. */
 const MAX_ENVELOPE_PLAINTEXT = 900;
 /**
@@ -367,7 +368,7 @@ export class DhtDelivery {
     // Whether it has a revision to name or not, the ninth element holds the place of the tenth: this side uses the pinned mailbox.
     body.push(rev !== undefined && Number.isSafeInteger(rev) && rev >= 0 ? rev : null, this.state.peerPinned ? 2 : 1);
     const taken = this.state.reactionsTaken;
-    if (reactions.length || taken) body.push(message && reply ? reply : null, reactions.map(r => [r.id, r.e, r.n] as DhtReaction), taken ?? null);
+    if (reactions.length || taken) body.push(message && reply ? reply : null, null, reactions.map(r => [r.id, r.e, r.n] as DhtReaction), taken ?? null);
     else if (message && reply) body.push(reply);
     return body;
   }
@@ -451,7 +452,7 @@ export class DhtDelivery {
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return "none"; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return "none";
     const [body, signature] = envelope as [Body, string];
-    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, reactions, reactionsTaken] = body;
+    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, , reactions, reactionsTaken] = body;
     const now = Date.now();
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || issued > now + 30_000 || expires <= now || expires - issued > CONTROL_TTL || issued >= expires ||

@@ -67,7 +67,7 @@ The id costs about 30 bytes of the 1,000-byte packet. A text near the 256 bytes,
 
 ## Reactions
 
-Reactions ([400](400-chat.md#reactions), revision 0.5) ride on the envelopes while the live session does not carry them. The signed body's **twelfth** element is the author's reactions the reader has not confirmed, oldest first, `[[id, emoji, n], …]` (at most 8, as many as the packet and the reader's 900 bytes leave room for); the **thirteenth** is the highest `n` of the reader's reactions the author took, or `null`. The eleventh is then `null` when there is no reply. A reader checks each reaction on its own, as on the session, and skips what does not hold, never the envelope; it takes the ones that hold, and says the highest number it took in every envelope it publishes after. The author drops every reaction up to the number the reader said, and the next envelope carries the rest.
+Reactions ([400](400-chat.md#reactions), revision 0.5) ride on the envelopes while the live session does not carry them. The signed body's **thirteenth** element is the author's reactions the reader has not confirmed, oldest first, `[[id, emoji, n], …]` (at most 8, as many as the packet and the reader's 900 bytes leave room for); the **fourteenth** is the highest `n` of the reader's reactions the author took, or `null`. The eleventh (a reply) and the twelfth (kept for an edit of a text) are then `null` when the envelope carries neither. A reader checks each reaction on its own, as on the session, and skips what does not hold, never the envelope; it takes the ones that hold, and says the highest number it took in every envelope it publishes after. The author drops every reaction up to the number the reader said, and the next envelope carries the rest.
 
 Reactions add no envelope of their own when one goes anyway: they ride on texts, receipts and the envelopes that keep the mode current. A reaction made while nothing else goes publishes one envelope, once the publication spacing allows; a text that leaves no room carries none, and the next envelope does. Readers from before ignore both elements (they accept up to 16).
 
@@ -117,7 +117,7 @@ DHT only avoids stream discovery/dialing. Native clients read the Mainline DHT d
 
 ## Revision log
 
-- 0.5 (2026-09-27): reactions ride as the twelfth element (the author's, not yet confirmed, as many as fit) with the thirteenth saying which of the reader's were taken.
+- 0.5 (2026-09-27): reactions ride as the thirteenth element (the author's, not yet confirmed, as many as fit) with the fourteenth saying which of the reader's were taken; the twelfth is kept for edits.
 - 0.4 (2026-09-27): a text's reply rides as the eleventh element, its id only, left out when the packet has no room for it.
 - 0.3 (2026-09-26): another key on the invite mailbox after the pin is ignored, not a stop; pinned mailboxes, told by the envelope's tenth element, so a copy of the invite cannot overwrite the contact's texts.
 - 0.2 (2026-09-25): the floor and first contact of every chat; states instead of invite modes; queueing, expiry per state, poll pace, DHT only as a per-chat choice.

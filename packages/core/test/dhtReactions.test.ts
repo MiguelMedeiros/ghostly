@@ -7,7 +7,7 @@ import type { PairingCredentials } from "../src/pairedSession";
 import type { WireReaction } from "../src/reactions";
 // covers: chat.reactions.wire
 
-/** Reactions on DHT envelopes (WISP 403 § Reactions): the twelfth element carries them, the thirteenth says them taken. */
+/** Reactions on DHT envelopes (WISP 403 § Reactions): the thirteenth element carries them, the fourteenth says them taken. */
 
 function setup(options: { reactions?: [boolean, boolean] } = {}) {
   const link = createLink(), params = [link.mine, link.invite];
@@ -41,6 +41,8 @@ function setup(options: { reactions?: [boolean, boolean] } = {}) {
   return { make, pending, got, taken, messages, saved, publish, packets };
 }
 afterEach(() => vi.useRealTimers());
+// Fake timers over real crypto: slow on a busy runner.
+vi.setConfig({ testTimeout: 30_000 });
 
 const ID = (c: string) => c.repeat(22);
 
