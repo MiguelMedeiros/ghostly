@@ -1,5 +1,6 @@
 import { fromBase64Url, toBase64Url } from "./bytes";
 import { formatFileSize, sanitizeFileName, sanitizeMime, type FileInfo } from "./files";
+import { pairedReplyAuthor, readReply, wireReply } from "./replies";
 import { parseVoiceMeta } from "./voice";
 
 /**
@@ -13,7 +14,7 @@ import { parseVoiceMeta } from "./voice";
  *
  * Frames (authenticated JSON on the paired session):
  *
- *   sender → receiver  pf-offer {id,name,mime,size,ts,voice?,paused?}  pf-data {id,offset,data}
+ *   sender → receiver  pf-offer {id,name,mime,size,ts,voice?,r?,paused?}  pf-data {id,offset,data}
  *                      pf-sum {id,size,digest}  pf-abort {id}
  *   receiver → sender  pf-accept {id,offset}  pf-wait {id,why}  pf-got {id,offset}  pf-done {id}
  *                      pf-refuse {id,why,room?}
@@ -334,7 +335,7 @@ export class ChatFiles {
 
   private offerFrame(record: FileTransferRecord, paused: boolean): Record<string, unknown> {
     const { file } = record;
-    return { t: "pf-offer", id: file.id, name: file.name, mime: file.mime, size: file.size, ts: file.timestamp, ...(file.voice && { voice: file.voice }), ...(paused && { paused: true }) };
+    return { t: "pf-offer", id: file.id, name: file.name, mime: file.mime, size: file.size, ts: file.timestamp, ...(file.voice && { voice: file.voice }), ...(file.reply && { r: wireReply(file.reply) }), ...(paused && { paused: true }) };
   }
 
   private announce(entry: Entry): void {
@@ -486,6 +487,8 @@ export class ChatFiles {
     const file: FileInfo = { id, name: sanitizeFileName(frame.name), mime: sanitizeMime(frame.mime), size: frame.size, timestamp: frame.ts };
     const voice = parseVoiceMeta(frame.voice, file.mime);
     if (voice) file.voice = voice;
+    const reply = readReply(frame.r, pairedReplyAuthor);
+    if (reply) file.reply = reply;
     const paused = frame.paused === true;
     const existing = this.entries.get(key("in", id));
     if (existing) {

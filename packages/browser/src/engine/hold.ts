@@ -24,7 +24,7 @@ export interface HoldHost {
   reply?(linkId: string, messageId: string): Promise<WireReply | undefined>;
   receiveText(linkId: string, message: { id: string; text: string; timestamp: number; reply?: WireReply }, held?: HeldFacts): Promise<void>;
   /** Returns why it was not kept (room, a reused id), or null when it was. */
-  receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta }, bytes: Uint8Array, digest: string, held?: HeldFacts): Promise<string | null>;
+  receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta; reply?: WireReply }, bytes: Uint8Array, digest: string, held?: HeldFacts): Promise<string | null>;
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
   changed(): void;
   fetch?: typeof fetch;
@@ -230,7 +230,9 @@ export class HoldEngine {
       } else if (entry.kind === "file") {
         const file = await this.host.file(entry.ref!);
         if (!file) return fail("The file is gone");
-        body = file.bytes; meta = { name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }) };
+        // A file's reply rides in the same meta as a text's (older apps ignore it).
+        const reply = await this.host.reply?.(linkId, entry.messageId);
+        body = file.bytes; meta = { name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(reply && { r: reply }) };
       } else {
         const request = this.host.paymentRequest(entry.ref!);
         if (!request) return fail("The payment request is gone");
@@ -420,9 +422,10 @@ export class HoldEngine {
           await this.host.receiveText(linkId, { id: header.id, text: utf8Decode(body), timestamp: header.ts, ...(reply && { reply }) }, held);
         }
         else if (header.kind === "file") {
-          const meta = header.meta as { name: string; size: number; mime: string; voice?: unknown };
+          const meta = header.meta as { name: string; size: number; mime: string; voice?: unknown; r?: unknown };
           const voice = parseVoiceMeta(meta.voice, meta.mime);
-          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts, ...(voice && { voice }) }, body, hex(fromBase64Url(header.digest)), held);
+          const reply = readReply(meta.r, pairedReplyAuthor);
+          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts, ...(voice && { voice }), ...(reply && { reply }) }, body, hex(fromBase64Url(header.digest)), held);
           if (refused) throw new HoldRefusedError("limits", refused);
         } else if (header.kind === "pay-req") {
           let parsed: unknown;

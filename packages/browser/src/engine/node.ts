@@ -611,6 +611,7 @@ export class GhostlyNode implements EngineImplementation {
         metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
       this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
       await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file,
+        ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }),
         details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: wire.size, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }), completedAt: Date.now() } });
       return null;
     },
@@ -1716,7 +1717,19 @@ export class GhostlyNode implements EngineImplementation {
     return `${linkId}-out-${wireId}`;
   }
 
-  sendFile({ linkId, file, timestamp }: { linkId: string; file: MessageFile; timestamp: number }): void {
+  /**
+   * Sends a file, or sends it again (the same `timestamp`). `replyTo` quotes a message of the chat (WISP 401 § Replies),
+   * as a text reply does; sent again, the file keeps the reply its message has.
+   */
+  async sendFile({ linkId, file, timestamp, replyTo }: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string }): Promise<void> {
+    let reply: MessageReply | undefined;
+    if (replyTo !== undefined) {
+      const found = await this.replyFor(linkId, replyTo);
+      if (typeof found === "string") throw new Error(found);
+      reply = found;
+    } else reply = (await db.getMessages(linkId)).find(m => m.id === `me_${timestamp}`)?.replyTo;
+    const answers = reply && { replyTo: reply };
+    const wire = reply && pairedWireReply(reply);
     const live = this.links.get(linkId);
     const fail = (error: string) => {
       const transfer = { state: "failed" as const, transferred: 0, size: file.size, error };
@@ -1734,7 +1747,7 @@ export class GhostlyNode implements EngineImplementation {
       // The contact is away: the file waits in this device's storage, sealed for them.
       live.files.wireIds.add(wireId);
       this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
-      void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "hold", delivery: "sending", file })
+      void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "hold", delivery: "sending", file, ...answers })
         .then(() => this.hold.hold(linkId, { kind: "file", id: wireId, messageId: `me_${timestamp}`, ref: file.id, bytes: file.size, timestamp })).catch(() => {});
       return;
     }
@@ -1743,7 +1756,7 @@ export class GhostlyNode implements EngineImplementation {
       if (this.chatStopped(live)) return fail(this.chatStopped(live)!);
       live.files.wireIds.add(wireId);
       void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "datalink", file,
-        delivery: "waiting", deliveryError: "Sent when you are live." });
+        delivery: "waiting", deliveryError: "Sent when you are live.", ...answers });
       return;
     }
     if (!GhostlyNode.takesFiles(live.link)) return fail("Connect to an updated peer to send files");
@@ -1756,15 +1769,16 @@ export class GhostlyNode implements EngineImplementation {
       timestamp,
       via: "datalink",
       file,
+      ...answers,
     });
-    this.transferFile(live, file, wireId, timestamp, fail);
+    this.transferFile(live, file, wireId, timestamp, fail, wire);
   }
 
   /**
    * The file of a stored message goes over the open session: offered with files/3 when both sides agree it,
    * else whole with files/2, which takes up to 100 MB.
    */
-  private transferFile(live: LiveLink, file: MessageFile, wireId: string, timestamp: number, fail: (error: string) => void): void {
+  private transferFile(live: LiveLink, file: MessageFile, wireId: string, timestamp: number, fail: (error: string) => void, reply?: WireReply): void {
     const { link } = live;
     if (!link) return fail("You are offline");
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
@@ -1773,7 +1787,7 @@ export class GhostlyNode implements EngineImplementation {
       await this.noteDetails(live.stored.id, `me_${timestamp}`, details => ({ ...withSend(details, { at, ...pathSnapshot(live, "datalink"), result: "sent" }), sentAt: at, wire: fileWire(large ? "files/3" : "files/2", file.size) }));
       if (large) {
         // A transfer that ended for good (cancelled, declined) keeps saying why, rather than a bare failure with Retry.
-        await this.fileDesk.offer(live.stored.id, file, wireId, timestamp).catch((error) => { if (!this.fileDesk.reshow(live.stored.id, file.id)) throw error; });
+        await this.fileDesk.offer(live.stored.id, file, wireId, timestamp, reply).catch((error) => { if (!this.fileDesk.reshow(live.stored.id, file.id)) throw error; });
         return;
       }
       if (file.size > LIMITS.maxFileBytes) {
@@ -1785,7 +1799,7 @@ export class GhostlyNode implements EngineImplementation {
       // Read a step at a time, wherever the bytes are: never the whole file at once.
       const source = streamStored(stored);
       await link.sendFile(
-        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }) },
+        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(reply && { reply }) },
         source,
       );
     })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
@@ -1831,7 +1845,7 @@ export class GhostlyNode implements EngineImplementation {
         this.transferFile(live, file, wireId, message.timestamp, error => {
           this.transfers.set(file.id, { state: "failed", transferred: 0, size: file.size, error });
           this.emitState();
-        });
+        }, GhostlyNode.wireReply(message));
       } else {
         // The desk's replay has sent every pending request of this chat on the open session.
         if (live.link.supportsPayments) {
@@ -1845,7 +1859,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private receiveFile(
     linkId: string,
-    wire: { id: string; name: string; size: number; mime: string; timestamp: number; voice?: MessageFile["voice"] },
+    wire: { id: string; name: string; size: number; mime: string; timestamp: number; voice?: MessageFile["voice"]; reply?: WireReply },
   ): FileSink | string {
     const files = this.links.get(linkId)?.files;
     if (!files) return "refused";
@@ -1854,7 +1868,8 @@ export class GhostlyNode implements EngineImplementation {
     if (files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
 
     // The local id is ours, never the peer's: whatever it announces cannot replace a stored file.
-    const file: MessageFile = { ...wire, id: `${linkId}-in-${toBase64Url(randomBytes(12))}` };
+    const { reply: _reply, ...announced } = wire;
+    const file: MessageFile = { ...announced, id: `${linkId}-in-${toBase64Url(randomBytes(12))}` };
     files.wireIds.add(wire.id);
     files.receivedBytes += wire.size;
     files.incoming.set(wire.id, { localId: file.id, size: wire.size });
@@ -1874,6 +1889,7 @@ export class GhostlyNode implements EngineImplementation {
       timestamp: wire.timestamp,
       via: "datalink",
       file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }) },
+      ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }),
       details: { wire: fileWire("files/2", wire.size) },
     });
     void messageStored.catch(() => {});

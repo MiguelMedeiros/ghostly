@@ -320,6 +320,18 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(voice.duration).toBeGreaterThan(1400);
     expect(voice.duration).toBeLessThan(1800);
     await listen.stop();
+    // Bob answers it with a voice note that quotes it (WISP 401 § Replies on a file): Alice's copy finds the original.
+    const messageId = (message.message as { id: string }).id;
+    error(await as(bob, "file", "send", "alice", recording, "--voice", "--reply", "peer_nothing"), "not_found", 3);
+    ok(await as(bob, "file", "send", "alice", recording, "--voice", "--reply", messageId));
+    type Row = { file?: { voice?: boolean }; replyTo?: { found: boolean; from: string | null }; from?: string; sender?: string };
+    let answer: Row | undefined;
+    await expect.poll(async () => {
+      const rows = ok(await as(alice, "chat", "history", "bob", "--limit", "10")).messages as Row[];
+      answer = rows.find((m) => m.file?.voice && m.replyTo);
+      return answer?.replyTo?.found;
+    }, { timeout: 60_000 }).toBe(true);
+    expect(answer!.replyTo!.from).toBe("me");
     // Sound this side cannot read: sent flat with a warning on stderr when the length is given, refused when not.
     const noise = join(alice, "noise.wav");
     writeFileSync(noise, randomBytes(4000));

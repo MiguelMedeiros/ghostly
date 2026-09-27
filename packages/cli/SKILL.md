@@ -114,6 +114,7 @@ ghostly group history Support
 ghostly file send alice ./report.pdf               # a file (paths are this machine's)
 ghostly file send alice ./note.ogg --voice         # a voice note: length and waveform read from the file
 ghostly file send alice ./note.m4a --voice 4200    # or its length given (AAC needs ffmpeg for the waveform)
+ghostly file send alice ./answer.ogg --voice --reply <message id>  # a voice note that quotes a message
 ghostly file save <file id> --dir ./inbox --wait   # a received file once it is all here (message.received carries message.file.id)
 ghostly file wait <file id> --timeout 120          # exit 0 when done, 1 with the error when it failed, 4 on timeout
 ghostly file accept <file id>                      # a file over 25 MiB waits for this (file.offered event)

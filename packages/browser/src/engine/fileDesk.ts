@@ -11,11 +11,13 @@ import {
   type IncomingTarget,
   type OfferDecision,
   type OutgoingSource,
+  type WireReply,
 } from "@ghostly/core";
 import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { fileStore, type StoredFile } from "../shared/idb";
 import { FileAppender, readStored } from "../shared/storedFiles";
 import type { FileTransferView, MessageFile, StoredMessage } from "../shared/types";
+import { receivedPairedReply } from "../shared/replies";
 import { fileWire } from "./messageDetails";
 
 /** What the desk needs from the peer: the chat's link and bookkeeping, its messages, and the views. */
@@ -129,7 +131,7 @@ export class FileDesk {
    * Offers a file whose record and bytes are stored under its local id (`outgoingFileId`). Offered before (Retry, a
    * restart): an unfinished transfer is taken over and offered again, a failed one sent again; never a second one.
    */
-  async offer(linkId: string, file: MessageFile, wireId: string, timestamp: number): Promise<void> {
+  async offer(linkId: string, file: MessageFile, wireId: string, timestamp: number, reply?: WireReply): Promise<void> {
     const chat = this.chat(linkId);
     const stored = await fileStore.get(file.id);
     if (!stored) throw new Error("The file is gone");
@@ -144,7 +146,7 @@ export class FileDesk {
       this.deps.changed();
       return;
     }
-    chat.files.offer({ id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }) }, stored.digest);
+    chat.files.offer({ id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(reply && { reply }) }, stored.digest);
   }
 
   /**
@@ -310,6 +312,7 @@ export class FileDesk {
         await fileStore.put({ id, linkId, direction: "in", wireId: record.id, createdAt: Date.now(), bytes: (await fileBytes()).kind,
           metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice }, wire3: record });
         await this.deps.storeMessage({ linkId, id: `peer_${record.id}`, text: fileMessageText(message), sender: "peer", timestamp: file.timestamp, via: "datalink", file: message,
+          ...(file.reply && { replyTo: receivedPairedReply(file.reply) }),
           details: { wire: fileWire("files/3", file.size) } });
       }).catch(() => {});
     }

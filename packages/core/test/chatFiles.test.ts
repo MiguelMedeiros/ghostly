@@ -215,6 +215,16 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(dataBeforeGot).toBe(Math.ceil(100_000 / FILE_LIMITS.chunkBytes));
   });
 
+  it("an offer carries the message the file answers (r), kept with the record", async () => {
+    const w = wire({ keepBytes: true });
+    w.attach();
+    const reply = { i: "AbCdEfGhIjKlMnOpQrStUv", s: "listen to this", f: "sender" };
+    send(w, { ...file("reply-01", 1000), reply });
+    await until(() => state(w.b, "in", "reply-01") === "done");
+    expect(w.a.sent.find((f) => f.t === "pf-offer")).toMatchObject({ r: reply });
+    expect(w.b.records.get("in:reply-01")!.file.reply).toEqual(reply);
+  });
+
   it("an empty file goes too", async () => {
     const w = wire({ keepBytes: true });
     w.attach();

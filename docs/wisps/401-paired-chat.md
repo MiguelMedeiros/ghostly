@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.8 |
+| Revision | 0.9 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
@@ -69,7 +69,7 @@ A `paired-message` MAY carry `r`, the message it answers ([400](400-chat.md#repl
 { "t": "paired-message", "id", "ts", "m", "pv"?, "r"?: { "i", "s", "f" } }
 ```
 
-The reader looks for `i` among this chat's own messages only; what it finds there gives the line and the author, and the wire's `s` and `f` are shown only when it finds nothing, marked as unchecked. A reply is a few hundred bytes at most and always goes: when the frame would pass 56 KiB, `pv` is left out, never `r`. Over the DHT only `i` travels ([403](403-dht-text.md#replies)); a held text carries `r` in its header ([4xx](4xx-store-and-forward.md#bundle)). A text sent again after a lost session goes with the same `r`. Older apps ignore the field.
+The reader looks for `i` among this chat's own messages only; what it finds there gives the line and the author, and the wire's `s` and `f` are shown only when it finds nothing, marked as unchecked. A reply is a few hundred bytes at most and always goes: when the frame would pass 56 KiB, `pv` is left out, never `r`. Over the DHT only `i` travels ([403](403-dht-text.md#replies)); a held text carries `r` in its header ([4xx](4xx-store-and-forward.md#bundle)). A text sent again after a lost session goes with the same `r`. A file can answer a message too (revision 0.9): the same `r` rides on its announcement (`pf-offer` and `pf-start`, [501](501-paired-files.md)) or in a held file's `meta` ([4xx](4xx-store-and-forward.md#bundle)), and is read the same way. Older apps ignore the field.
 
 ### Liveness and reconnection
 
@@ -120,6 +120,7 @@ First contact runs on the DHT and on a stream in parallel, and native transports
 
 ## Revision log
 
+- 0.9 (2026-09-27): a file (a voice message included) can be a reply: `r` on its announcement, as on a text.
 - 0.8 (2026-09-27): reactions, `react/1` with `paired-reaction` and `paired-reacted`, confirmed by number, capped per window.
 - 0.7 (2026-09-27): replies (`r` on `paired-message`): the original's id, a cleaned line and its author, checked by the reader against this chat.
 - 0.6 (2026-09-27): the typing indicator, `typing/1` and `paired-typing` on the live session only, 1:1 chats.

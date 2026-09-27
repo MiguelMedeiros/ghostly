@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 501; editorial family allocation |
 | Status | Draft |
-| Revision | 0.3.2 |
+| Revision | 0.4 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
@@ -28,7 +28,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 
 | Frame | From | Meaning |
 |---|---|---|
-| `pf-offer {id, name, mime, size, ts, voice?, paused?}` | sender | This file, whole. Repeated on every session until the transfer ends; `paused` while the sender paused it |
+| `pf-offer {id, name, mime, size, ts, voice?, r?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
 | `pf-accept {id, offset}` | receiver | Send from `offset` (0, or where the stored part ends) |
 | `pf-wait {id, why}` | receiver | Not now: `consent` (its person has not decided), `paused`, `busy` (other files arrive first) |
 | `pf-data {id, offset, data}` | sender | base64url bytes at `offset`, at most 16 KiB |
@@ -54,7 +54,7 @@ Implemented in [`chatFiles.ts`](../../packages/core/src/chatFiles.ts) (protocol)
 
 ## files/2 framing
 
-Both peers negotiate `files/2`. `pf-start` announces ID, sanitized metadata and exact byte length. `pf-chunk` carries offset plus base64url data; stop-and-wait credits allow one 16 KiB chunk in flight per sender. `pf-end` binds final offset and SHA-256 digest. `pf-ack` identifies phase and offset; `pf-cancel` identifies the sender/receiver side.
+Both peers negotiate `files/2`. `pf-start` announces ID, sanitized metadata and exact byte length (and `r` when the file answers a message, [401](401-paired-chat.md#replies)). `pf-chunk` carries offset plus base64url data; stop-and-wait credits allow one 16 KiB chunk in flight per sender. `pf-end` binds final offset and SHA-256 digest. `pf-ack` identifies phase and offset; `pf-cancel` identifies the sender/receiver side.
 
 The receiver MUST validate offsets, exact size and digest, then finish durable `sink.close` before the final acknowledgement. A duplicate already stored file can acknowledge its stored digest without storing/executing a second copy. Reject mismatched digests, replayed IDs with different content and unsupported capability frames. Names are display suggestions, not paths; MIME is untrusted.
 
@@ -66,6 +66,7 @@ For `files/2`: the common contract's 100 MiB file bound, three concurrent incomi
 
 ## Revision log
 
+- 0.4 (2026-09-27): `r` on `pf-offer` and `pf-start`: a file that answers a message. A reply that does not check out is dropped; the file is taken all the same. Older apps ignore it.
 - 0.3.1 (2026-09-26): an offer that expired unanswered is refused when offered again, never taken without consent.
 - 0.3 (2026-09-25): `files/3`: offer and consent, advertised room, 1 MiB window, resume from the stored offset after a drop, a switch or a restart, SHA-256 checked on what was stored, pause and cancel from either side. `files/2` kept for older apps.
 - 0.2 (2026-09-25): renamed Chat Files; place in the one chat; behaviour on a drop to the DHT.

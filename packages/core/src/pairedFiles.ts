@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, toBase64Url } from "./bytes";
 import { LIMITS, type FrameChannel } from "./frames";
 import { sanitizeFileName, sanitizeMime, type FileInfo, type FileSink, type FileTransferEvents } from "./files";
+import { pairedReplyAuthor, readReply, wireReply } from "./replies";
 import { parseVoiceMeta } from "./voice";
 
 const CHUNK = 16 * 1024;
@@ -57,7 +58,8 @@ export class PairedFiles {
     if (this.outgoing.has(file.id) || this.outgoing.size >= LIMITS.maxIncomingFilesPerPeer) throw new Error("File transfer already active");
     this.outgoing.add(file.id);
     try {
-      await this.exchange(file.id, 0, "start", { t: "pf-start", ...file, name: sanitizeFileName(file.name), mime: sanitizeMime(file.mime), voice: parseVoiceMeta(file.voice, sanitizeMime(file.mime)) });
+      const { reply, ...announced } = file;
+      await this.exchange(file.id, 0, "start", { t: "pf-start", ...announced, name: sanitizeFileName(file.name), mime: sanitizeMime(file.mime), voice: parseVoiceMeta(file.voice, sanitizeMime(file.mime)), ...(reply && { r: wireReply(reply) }) });
       const hash = sha256.create();
       let offset = 0;
       for await (const part of source) {
@@ -119,6 +121,8 @@ export class PairedFiles {
         // A description that does not check out only costs the player: the file itself is fine.
         const voice = parseVoiceMeta(frame.voice, file.mime);
         if (voice) file.voice = voice;
+        const reply = readReply(frame.r, pairedReplyAuthor);
+        if (reply) file.reply = reply;
         const stored = await this.events.onStored?.(file);
         if (this.closed) return;
         const sink = stored ? null : this.events.onIncoming(file);
