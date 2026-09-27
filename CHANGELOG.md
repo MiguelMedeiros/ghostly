@@ -25,7 +25,7 @@ Ghostly 1.0. One kind of chat: it finds your contact on the DHT and goes peer to
 
 **Groups**
 
-- Private groups of up to 8 and communities of up to 256, joined by a link. Text, @mentions, replies, reactions, a group picture and payments between members. No files or calls in groups yet.
+- Private groups of up to 8 and communities of up to 256, joined by a link. Text, @mentions, replies, edits, reactions, a group picture and payments between members. No files or calls in groups yet.
 
 **Wallets**
 
