@@ -47,6 +47,7 @@ type IndexEntry = (typeof index)[number] & {
   level?: string | null;
   note?: string;
   feature?: { label: string; href: string };
+  video?: { src: string; poster?: string };
 };
 
 function groupFor(id: string): GroupId {
@@ -83,6 +84,7 @@ const all: Wisp[] = numbering.map((entry) => {
     level: (ref?.level ?? null) as Level | null,
     note: ref?.note,
     feature: ref?.feature,
+    video: ref?.video,
   };
 });
 

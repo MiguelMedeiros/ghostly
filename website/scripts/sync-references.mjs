@@ -8,12 +8,15 @@ import {
 import { fileURLToPath } from "node:url";
 import { resolve, basename } from "node:path";
 import { roadmapCandidates } from "./roadmap-candidates.mjs";
+import { roadmapTracks } from "./roadmap-tracks.mjs";
 import { siteFields } from "./wisp-header.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "docs/wisps");
 const destination = resolve(root, "website/public/reference");
 const numbering = JSON.parse(readFileSync(resolve(source, "numbering.json"), "utf8"));
-const candidates = roadmapCandidates(readFileSync(resolve(source, "ADAPTER-ROADMAP.md"), "utf8"));
+const roadmap = readFileSync(resolve(source, "ADAPTER-ROADMAP.md"), "utf8");
+const candidates = roadmapCandidates(roadmap);
+writeFileSync(resolve(root, "website/lib/roadmap-tracks.json"), JSON.stringify(roadmapTracks(roadmap), null, 2) + "\n");
 writeFileSync(resolve(root, "website/lib/roadmap-candidates.json"), JSON.stringify(candidates, null, 2) + "\n");
 console.log(`Catalogue coverage: ${candidates.length} roadmap inventory entries, each with a unique navigable ID.`);
 writeFileSync(resolve(root, "website/lib/wisp-numbering.json"), JSON.stringify(numbering, null, 2) + "\n");
@@ -134,6 +137,18 @@ if (new Set(entries.map((e) => e.slug)).size !== entries.length)
 writeFileSync(
   resolve(root, "website/lib/reference-index.json"),
   JSON.stringify(entries, null, 2) + "\n",
+);
+// What the map's blocks (lib/composition.ts) light up by: small, because the map runs in the browser.
+writeFileSync(
+  resolve(root, "website/lib/levels.json"),
+  JSON.stringify(
+    {
+      wisps: Object.fromEntries(entries.filter((e) => "level" in e).map((e) => [e.slug, e.level])),
+      rows: Object.fromEntries(candidates.map((c) => [c.id, c.level])),
+    },
+    null,
+    2,
+  ) + "\n",
 );
 console.log(
   `Synced ${entries.length} reference documents and their route index.`,

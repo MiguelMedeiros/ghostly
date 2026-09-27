@@ -28,6 +28,8 @@ const generated = new Set([
   "website/lib/reference-index.json",
   "website/lib/wisp-numbering.json",
   "website/lib/roadmap-candidates.json",
+  "website/lib/roadmap-tracks.json",
+  "website/lib/levels.json",
   "website/lib/code-snippets.json",
   "docs/wisps/NUMBERING.md",
 ]);

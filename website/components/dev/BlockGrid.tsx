@@ -23,14 +23,12 @@ export type GridLabels = {
   stages?: { title: string; play: string; pause: string; names: Record<Level, string> };
 };
 
-/** Reader titles for reference documents, and for drafts the numbered catalogue does not list yet. */
+/** Reader titles for reference documents that are not WISPs. */
 const REF_NAMES: Record<string, string> = {
   "usdt-integration": "USDT integration",
   "public-profiles": "Public profiles",
   "adapter-roadmap": "Adapter roadmap",
   sdk: "Ghostly SDK",
-  "4xx-store-and-forward": "Store-and-forward for an away contact",
-  "9xx-group-mesh": "Group mesh distribution profile",
 };
 
 const PRESET_COUNTS = Object.fromEntries(PRESETS.map((p) => [p.id, BLOCKS.filter(p.blocks).length])) as Record<PresetId, number>;

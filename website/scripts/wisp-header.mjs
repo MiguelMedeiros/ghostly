@@ -42,5 +42,14 @@ export function siteFields(body, file) {
     if (!parts || !parts[2].startsWith(`${SITE}/`)) fail(`"Feature" is one link to a page of ${SITE}, as [label](${SITE}/#anchor)`);
     feature = { label: parts[1], href: parts[2].slice(SITE.length) };
   }
-  return { benefit, level: LEVELS[availability], ...(note ? { note } : {}), ...(feature ? { feature } : {}) };
+  // A lesson video served by the site; its poster is the same path, as .jpg.
+  const watch = field("Video");
+  let video;
+  if (watch !== undefined) {
+    const parts = watch.match(/^\[[^\]]+\]\((.+\.(?:mp4|webm))\)$/);
+    if (!parts || !parts[1].startsWith(`${SITE}/`)) fail(`"Video" is one link to a video file on ${SITE}, as [Watch](${SITE}/videos/name.mp4)`);
+    const src = parts[1].slice(SITE.length);
+    video = { src, poster: src.replace(/\.\w+$/, ".jpg") };
+  }
+  return { benefit, level: LEVELS[availability], ...(note ? { note } : {}), ...(feature ? { feature } : {}), ...(video ? { video } : {}) };
 }

@@ -78,24 +78,14 @@ Narração (PT):
 
 ## Wiring a finished video
 
-Put the file and poster somewhere the site can serve (for example
-`website/public/videos/wisp-800.mp4` and `.jpg`), then add to the WISP's entry
-in `website/lib/wisp-editorial.ts`:
+Put the file and its poster, with the same name, where the site serves them
+(for example `website/public/videos/wisp-800.mp4` and `wisp-800.jpg`), then add
+one row to the header table of the WISP itself, in `docs/wisps`:
 
-```ts
-video: {
-  src: "/videos/wisp-800.mp4",
-  poster: "/videos/wisp-800.jpg",
-  chapters: [
-    { at: 0, title: "Opening" },
-    { at: 12, title: "Problem" },
-    { at: 50, title: "The piece" },
-    { at: 110, title: "In the app" },
-    { at: 180, title: "How it works" },
-    { at: 250, title: "Next step" },
-  ],
-},
+```md
+| Video | [Watch](https://ghostly.tools/videos/wisp-800.mp4) |
 ```
 
-The reader then shows the player and chapters under "In short". Without that
-field the page shows no player at all.
+`npm run sync:references` reads it and the reader shows the video above the
+document. Chapters are not read from the header yet.
+

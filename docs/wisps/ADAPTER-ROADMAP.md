@@ -8,21 +8,138 @@ Ghostly is intended to become a coordination and interoperability layer with a s
 
 The public story is **architecture → contracts → capabilities → adapters → verifiable releases**. A small coordination core lets independently built components agree on what they can do together. The reference app demonstrates those agreements in a familiar experience. More adapters should expand user choice, platform reach or resilience while reusing an existing contract; an adapter that adds none of those needs a stronger justification.
 
-This public view summarizes the broad inventory without turning every candidate into a promise:
-
-| Public status | Outcome / proposed commitment | Verifiable completion and dependency |
-|---|---|---|
-| Available on `dev` | One chat ([400](400-chat.md)) with authenticated participation: first contact on the DHT and a live link at once, DHT text as its floor, self-upgrade to a live link, one `ghostly1` invite, calls and shared apps in every chat while it is live, files of any size with resume, voice messages, a per-chat transport switch and the pairing progress | Evidence per row below (merged pull requests, `e2e/features.json`, tests). `dev` is what the v1.0.0 release ships; it is not publicly deployed until that release. Media and shared apps have client limits (no screen sharing on Linux Desktop, which calls with its own media; the web app cannot share apps). |
-| Available on `dev` | The site and public protocol/capability catalog, with the app as reference implementation | Home, developers, catalog and this roadmap on `dev`, statuses read from this document; published at ghostly.tools with the v1.0.0 release. |
-| Available on `dev` | Mainnet and Testnet wallets side by side, a confirmation before real money moves (#298) and test coins on request (#291). A reusable payment agreement carried by several rails: Cashu and Lightning (the mints or the person's own NWC, LND, Core Lightning, WebLN or Breez source, several Lightning cards per network), Arkade, Bark, Spark, Fedimint, on-chain bitcoin and USDT, plus paying from another wallet and Lightning addresses | Mainnet limits per rail are in the rows below: Fedimint, BDK and Breez are test networks only; Bark runs on Second's Bitcoin server with no exit button yet; Spark is Testnet only (New shows its Mainnet as "Not yet"); Arkade has no unilateral exit yet. The settlement tests run on disposable networks; none moves real money. |
-| Available on `dev` | Optional identity without a global public account: proofs made once per profile and shared per contact (Nostr, Pubky, a domain, OpenPGP, SSH, a Bitcoin address, a DID), the Nostr social layer, and a did:dht per profile | No-proof sessions still work. OpenID accounts are blocked on Ghostly's OAuth client registrations; Bluesky ([#248](https://github.com/MiguelMedeiros/ghostly/pull/248)) is built and blocked on its OAuth client-metadata file being live on ghostly.tools. |
-| Available on `dev` | Private groups of up to eight and communities of up to 256, with a picture and payments between members; profiles, sealed backups and messages held for an away contact | Admission, epochs and roles tested in multi-browser e2e and a 256-member load test. Files and calls in groups, more than one admin and channels are planned. |
-| Long-term planned direction; scope not committed | Portable data, independent apps/catalogs and a self-hosted GhostlyOS runtime | Each is a staged deliverable with restoration, sandbox, provenance and operations gates below. Backup foundations begin with payments, not only at the end. |
-| Planned and research | Remaining named rails, proofs, hardware, transports and research suggestions | Promote individually only after source/API feasibility and a concrete user outcome are established. No implied delivery date. |
-
 Before publishing a commitment, record an owner, bounded deliverable, dependencies, acceptance evidence, supported runtime, risks and the next decision. No fixed dates, final version numbers, staffing assumptions, investment return or market traction are invented here. For partners/investors, present shipped evidence and unresolved technical dependencies alongside the opportunity: reusable agreements, independent integrations and a reference experience that makes interoperability tangible.
 
 Measure progress by independently compatible implementations, supported platform/profile combinations, successful recovery drills, independently authored adapters/apps and measured experience quality. Do not use a count of logos or Draft documents as a substitute. Resource/cost estimates and target performance budgets remain to be established before delivery commitments.
+
+### Tracks
+
+The order of the work, by what each track depends on. The website's roadmap page (its tracks and its stage-by-stage timeline) is generated from this section by `npm run sync:references` in `website/` ([roadmap-tracks.mjs](../../website/scripts/roadmap-tracks.mjs)); the site holds no copy of these lines. Each track is a `####` heading with its number and title, one paragraph on why, a list whose items each start with one status in bold (**Available**, **Planned** or **Research**, as in [Evidence and readiness](#evidence-and-readiness)), a `Gate:` line, and a `Builds on:` line naming the numbers of the tracks it needs, when there are any. The lines are plain text, written for people who use the app. A track with nothing available yet sits on the horizon.
+
+#### 01 Talk in more ways
+
+Every new chat is the same kind: it comes from one ghostly1 invite, starts on the DHT when no direct path exists and goes live by itself. Next is what a chat shows about the other person, and more clients.
+
+- **Available**: One ghostly1 invite code, a QR and a ghostly.tools link
+- **Available**: Chats with pinned keys, files of any size, payments and local apps
+- **Available**: A chat with no direct path starts on the DHT and goes live by itself; short texts over the DHT when the live link drops
+- **Available**: Calls and screen sharing in every chat, while it is live; Linux desktops call with their own media
+- **Available**: Pairing progress you can watch while two apps find each other
+- **Available**: Voice messages, rich text, mentions, link previews and cards for invites, payments and identities
+- **Available**: A headless CLI for bots that joins the same chats
+- **Planned**: Typing and presence, each a capability of its own that you can keep private
+- **Planned**: Native apps for iOS and Android (route to be decided)
+
+Gate: Every client tested against every other one, on each transport it offers.
+
+#### 02 More ways to pay
+
+One payment agreement, many wallets. Each method keeps its own rules and its own risks.
+
+- **Available**: Mainnet and Testnet wallets side by side, a confirmation before real money moves
+- **Available**: Cashu and Lightning, through the mint or your own sources (NWC, LND, Core Lightning, WebLN), several Lightning cards per network
+- **Available**: Lightning addresses, and paying a request from any wallet
+- **Available**: Ark (Arkade and Bark), Spark, Fedimint, USDT and on-chain bitcoin, experimental; BDK on test networks only
+- **Planned**: Mainnet for Spark, Breez, BDK and Fedimint, once reviewed with real money in mind
+- **Planned**: Unilateral exit for Ark
+- **Planned**: Liquid and other rails
+
+Gate: Disposable-network settlement, fee limits, unknown-result reconciliation, and recovery or exit tested before any mainnet claim.
+
+Builds on: 01
+
+#### 03 Reach each other in more places
+
+New transports widen where two people can meet. Each one is an adapter both sides must support, never a silent bridge.
+
+- **Available**: WebRTC (not on Linux desktops); Iroh and HyperDHT between desktop apps
+- **Available**: Iroh in the browser through n0's relays; HyperDHT there only through a relay you set
+- **Planned**: Local network discovery, generic QUIC and WebSocket relay profiles
+- **Research**: Tor, libp2p, Pear / Holepunch components
+
+Gate: Each adapter tested on its own platforms, with its relays and privacy trade-offs stated.
+
+Builds on: 01
+
+#### 04 Keep things, bring them back
+
+Profiles, backups and held messages exist. Next is making recovery routine.
+
+- **Available**: Local profiles, sealed backups to a file or S3, messages held for an away contact
+- **Planned**: Scheduled backups and retention
+- **Planned**: More storage places (WebDAV, Blossom and others), for backups and held messages
+
+Gate: Restore drills across devices and versions, without overwriting anything.
+
+Builds on: 01
+
+#### 05 Bring an identity, only if you want
+
+Nobody needs a public identity to talk. Proofs are optional, several can coexist, and you choose what each contact sees.
+
+- **Available**: Proofs made once, shared per chat: Nostr, Pubky (approved in Pubky Ring or Passport), a domain, an OpenPGP or SSH key, a Bitcoin address, a DID
+- **Available**: Nostr social layer: profile, follows and notes; posting off by default
+- **Available**: A did:dht for every profile, listing only the identities you switch on
+- **Available**: Public profiles on identity cards, and a contact shown as one of their identities
+- **Planned**: Bluesky / AT Protocol accounts: built, blocked until the website's OAuth client document is live on ghostly.tools
+- **Planned**: OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch): built, blocked until Ghostly's OAuth clients are registered
+- **Planned**: Hardware wallets as signers, and passkeys
+- **Planned**: Keet, blocked until it offers a supported signing API
+- **Research**: Pubky profiles and content
+
+Gate: Sessions without any proof still work. Proving a key never implies importing a graph or permission to publish.
+
+Builds on: 01
+
+#### 06 From a conversation to a community
+
+Groups need membership, roles and distribution designed together, off the DHT.
+
+- **Available**: Private groups of up to eight and communities of up to 256: text, a picture and payments between members
+- **Planned**: Files and calls in groups, each a capability of its own
+- **Planned**: More than one admin, member key updates
+- **Planned**: Channels, topics and gated access
+- **Research**: Group encryption beyond the epoch-key scheme (MLS)
+
+Gate: Membership authority, removal, partitions, abuse limits and recovery tested.
+
+Builds on: 01, 05
+
+#### 07 SDKs, adapters and plugins
+
+Let others build pieces without forking the app. A plugin is packaging; the contract stays a WISP.
+
+- **Available**: Contracts as WISP drafts, @ghostly/sdk in the repository (an adapter registers as a plugin), and a headless CLI with an event stream for bots
+- **Planned**: Adapter manifests, and the SDK and the CLI published on npm
+- **Planned**: Package authenticity and updates
+- **Research**: A permissioned plugin host
+
+Gate: Malicious-plugin tests, provenance and an update policy.
+
+Builds on: 01
+
+#### 08 Apps and catalogs
+
+Mini-apps, peer-to-peer games, commerce, interfaces for specific contracts, all found through independent catalogs.
+
+- **Planned**: Mini-apps and games
+- **Planned**: Independent catalogs, several indexers, perhaps an indexer contract
+- **Planned**: Reputation and optional paid apps
+
+Gate: No single catalog becomes mandatory.
+
+Builds on: 07, 02
+
+#### 09 A Ghostly you can host
+
+An always-on runtime (even a Raspberry Pi at home) so services and presence don't depend on an open tab.
+
+- **Planned**: Self-hosted 24h runtime
+- **Planned**: Ghostly OS
+
+Gate: Measured hardware needs, secure administration, backup, reboot and upgrade tests.
+
+Builds on: 04, 07
 
 ## Reading this roadmap
 

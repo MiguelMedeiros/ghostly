@@ -32,6 +32,20 @@ A revision log records substantive changes. Incompatible changes to Final behavi
 
 Headers: number/assignment state, title, status, revision, editors, date, dependencies and implementation state. Body: purpose, existing behavior with source evidence, candidate requirements or profile, compatibility, security/privacy, open decisions, conformance and references. A wire proposal additionally specifies sizes, canonical bytes, failure behavior, state transitions and downgrade rules. Unknown fields, unsupported versions and mandatory extensions need separate handling.
 
+### Header fields the site reads
+
+WISP content is written in this directory only. The website's catalogue, reader and maps are generated from the documents (`npm run sync:references` in `website/`) and hold no text of their own about a WISP, so a change is written once, here. Besides the fields above, the header table of every WISP carries these rows, in plain text (no Markdown, no links, except where a link is the value):
+
+| Row | Required | Value |
+|---|---|---|
+| Summary | Yes | One line on what the WISP gives a person, shown on the catalogue. |
+| Availability | Yes | `Available` (the app on `dev` does it), `Planned` or `Research` (not built), or `Not applicable` for a process document. Independent of Status: every WISP is a Draft. |
+| Notes | No | The short caveat shown with the availability: what is experimental, which clients, which networks. Leave the row out when there is none. |
+| Feature | No | One link to the part of the site that shows it, as `[label](https://ghostly.tools/#anchor)`. |
+| Video | No | One link to its lesson video on the site, as `[Watch](https://ghostly.tools/videos/name.mp4)`. |
+
+The family a WISP is listed under comes from its number's range, so there is no row for it. The Implementation row stays the technical statement (packages, versions, evidence); Summary and Notes are its plain-language counterpart and must not contradict it. The sync refuses a document without Summary and Availability.
+
 Use MUST/SHOULD/MAY only for clearly scoped requirements. Never hide a design choice in a code example. Before Proposed, replace semantic sketches with fixed encodings and test vectors. Reference application behavior is evidence, not automatically the best protocol requirement.
 
 ## Review checklist and open decisions

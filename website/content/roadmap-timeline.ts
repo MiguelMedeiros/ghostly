@@ -1,10 +1,10 @@
 import type { Level } from "@/lib/status";
 
 /**
- * The roadmap as a timeline: columns in the order things happen, rows by area.
- * No dates: a column is a stage, not a quarter. "Today" is where Ghostly
- * stands (the 1.0.0 release on `dev`); every column after it is future work,
- * checked against the code (see content/roadmap.ts).
+ * The roadmap as a timeline: columns in the order things happen, one row per
+ * track. No dates: a column is a stage, not a quarter. The labels and each
+ * track's anchor, colour and short name are here; what a track holds comes
+ * from docs/wisps/ADAPTER-ROADMAP.md (lib/roadmap-tracks.json).
  */
 export const PHASES = ["now", "planned", "later"] as const;
 export type Phase = (typeof PHASES)[number];
@@ -15,8 +15,6 @@ export const PHASE_LEVEL: Record<Phase, Level> = {
   later: "planned",
 };
 
-type Item = string | { text: string; level: Level };
-type Lane = { id: string; color: string; title: string; items: Partial<Record<Phase, Item[]>> };
 type Timeline = {
   mapTitle: string;
   mapLead: string;
@@ -37,7 +35,6 @@ type Timeline = {
   phases: Record<Phase, { title: string; sub: string }>;
   here: string;
   empty: string;
-  lanes: Lane[];
 };
 
 export const timeline: Timeline = {
@@ -69,72 +66,17 @@ export const timeline: Timeline = {
   },
   here: "We are here",
   empty: "None",
-  lanes: [
-    {
-      id: "talk",
-      color: "#22d3ee",
-      title: "Chat & connection",
-      items: {
-        now: ["One ghostly1 invite: code, QR, link", "DHT start and self-upgrade in every chat", "Chats: files of any size, payments, local apps", "Calls in every chat, while live, Linux included", "Iroh and HyperDHT on desktop; Iroh in browsers through relays", "Pairing progress you can watch", "Voice messages, rich text, mentions, link previews"],
-        planned: ["Typing and presence", "Native iOS and Android apps", "Local network discovery, QUIC and WebSocket relay profiles"],
-        later: [{ text: "Tor, libp2p, Pear components", level: "research" }],
-      },
-    },
-    {
-      id: "pay",
-      color: "#fbbf24",
-      title: "Payments",
-      items: {
-        now: ["Cashu and Lightning, from your own source too", "Lightning addresses, paying from any wallet", "Ark, Spark, Fedimint, USDT, on-chain (experimental)", "Mainnet and Testnet wallets side by side"],
-        planned: ["Mainnet for Spark, Breez, BDK and Fedimint", "Unilateral exit for Ark", "Liquid and other rails"],
-      },
-    },
-    {
-      id: "keep",
-      color: "#4ade80",
-      title: "Profiles & backup",
-      items: {
-        now: ["Local profiles", "Sealed backups to a file or S3", "Messages held for an away contact"],
-        planned: ["Scheduled backups and retention", "More storage places"],
-      },
-    },
-    {
-      id: "identity",
-      color: "#f472b6",
-      title: "Identity (optional)",
-      items: {
-        now: ["Proofs: Nostr · Pubky · domain · OpenPGP · SSH · Bitcoin address · DID", "Nostr social layer", "A did:dht per profile", "Public profiles on identity cards"],
-        planned: ["Bluesky / AT Protocol accounts, once the site's OAuth client document is live", "OpenID accounts, once Ghostly's clients are registered", "Hardware wallets as signers, passkeys"],
-        later: ["Keet, once it has a supported signing API", { text: "Pubky profiles and content", level: "research" }],
-      },
-    },
-    {
-      id: "groups",
-      color: "#fb923c",
-      title: "Groups",
-      items: {
-        now: ["Private groups (8) and communities (256)", "A group picture, payments between members"],
-        planned: ["Files and calls in groups", "More than one admin"],
-        later: ["Channels and topics", { text: "Group encryption beyond epoch keys (MLS)", level: "research" }],
-      },
-    },
-    {
-      id: "sdk",
-      color: "#a78bfa",
-      title: "SDKs & plugins",
-      items: {
-        now: ["Open contracts (WISP drafts)", "@ghostly/sdk and plugins", "The headless CLI and its event stream"],
-        planned: ["Adapter manifests, the SDK and the CLI on npm", "Package authenticity and updates"],
-        later: [{ text: "A permissioned plugin host", level: "research" }],
-      },
-    },
-    {
-      id: "eco",
-      color: "#94a3b8",
-      title: "Apps & self-hosting",
-      items: {
-        later: ["Mini-apps and P2P games", "Independent catalogs and indexers", "Always-on self-hosted runtime (even a Raspberry Pi)", "Ghostly OS"],
-      },
-    },
-  ],
+};
+
+/** How a track is shown, by its number in the roadmap document: its anchor, its colour and its row's short name. */
+export const TRACKS: Record<string, { id: string; color: string; lane: string }> = {
+  "01": { id: "talk", color: "#22d3ee", lane: "Chat" },
+  "02": { id: "pay", color: "#fbbf24", lane: "Payments" },
+  "03": { id: "reach", color: "#60a5fa", lane: "Connection" },
+  "04": { id: "keep", color: "#4ade80", lane: "Profiles & backup" },
+  "05": { id: "identity", color: "#f472b6", lane: "Identity (optional)" },
+  "06": { id: "groups", color: "#fb923c", lane: "Groups" },
+  "07": { id: "sdk", color: "#a78bfa", lane: "SDKs & plugins" },
+  "08": { id: "apps", color: "#94a3b8", lane: "Apps & catalogs" },
+  "09": { id: "os", color: "#2dd4bf", lane: "Self-hosting" },
 };
