@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 601; editorial family allocation |
 | Status | Draft |
-| Revision | 0.5 |
-| Updated | 2026-09-26 |
+| Revision | 0.6 |
+| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
 | Implementation | Compatibility chats (`_call`) and the chat session of every new chat (`calls/1`); capture varies by platform. Desktop on Linux runs WebRTC in Rust and media in GStreamer (#331), with no screen sharing yet. |
@@ -42,11 +42,17 @@ WebKitGTK, the WebView of Ghostly Desktop on Linux, is built without WebRTC by U
 
 Permissions are the same choices: capture starts only when the person places or answers a call, or turns the camera on, and stops on hang-up.
 
+## Headless Ghostly
+
+The headless CLI ([11xx](11xx-headless.md#calls)) calls and answers in the chat session too, voice only, with its media in libdatachannel and Opus in WebAssembly, and hands the audio to a program. Nothing on the wire changes. Its offers have an audio section alone; it answers a contact's video section and drops what comes on it. Its signals carry up to eight candidates, every IPv4 host first (a server often has several interfaces), which a receiver already accepts.
+
 ## Scope and evidence
 
 This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of the chat session ([401](401-paired-chat.md)), in browsers and in the Linux Desktop's native media (`src-tauri/src/native_call`, `src/desktop/nativeCalls.ts`). It does not add group calls, an SFU or an end-to-end encrypted forwarding-service claim. See [React call hooks](../../packages/react), [paired calls](../../packages/core/src/pairedCalls.ts). Exercise accept/reject/hangup, stale signals, simultaneous calls, denied permissions and camera/screen transitions on supported platforms, and in the chat session the live-only rule and a contact without `calls/1`.
 
 ## Revision log
+
+- 0.6 (2026-09-27): the headless CLI calls, voice only (11xx § Calls): audio-only offers, video sections answered and dropped, up to eight candidates in a signal. Tested with the web app both ways (e2e/web/headless-call.spec.ts).
 
 - 0.5 (2026-09-26): Desktop on Linux calls: WebRTC in Rust (webrtc-rs), media in GStreamer, no wire change; a host candidate may end at `typ host`. Tested between two Linux Desktops (e2e/desktop/calls.spec.ts) and against Chromium both ways (e2e/desktop/calls-interop.spec.ts).
 

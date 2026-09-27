@@ -125,6 +125,22 @@ ghostly service share <service id> alice           # alice may open it; nobody e
 
 Making a proof of your own needs its tool (ssh-keygen, gpg) and a person who holds the key: leave that to the owner.
 
+## Voice calls
+
+```bash
+ghostly call auto on --from alice                  # answer alice's calls by themselves (needs the daemon)
+ghostly call answer alice                          # or answer one that rings (a call.incoming event)
+ghostly call start alice                           # call alice
+ghostly call list                                  # calls on now, each with its audio socket
+ghostly call flush                                 # drop the audio queued and not played yet (barge-in)
+ghostly call hangup
+```
+
+A call's audio is raw PCM on its own Unix socket (`audio.socket` in the result and in `call.connected`): s16le, mono,
+48 kHz by default (`--rate 16000` and others), 20 ms frames from the call; write any amount to it, at any pace, and
+the call plays it at real time. The program reads EOF when the call ends. Voice only. See the package's
+`examples/call-echo.mjs`.
+
 ## Pay and get paid
 
 ```bash
@@ -155,5 +171,5 @@ that exact payment.
 ## Anything else the app does
 
 Every call of the app's engine is reachable: `ghostly engine --list`, then `ghostly engine <method> '<json params>'`.
-Not on the CLI yet: Bark and Fedimint wallets, OpenID Connect proofs and calls (app only).
+Not on the CLI yet: Bark and Fedimint wallets, OpenID Connect proofs, and video in calls (voice only).
 See the [README](https://github.com/MiguelMedeiros/ghostly/blob/dev/packages/cli/README.md) and WISP 11xx.

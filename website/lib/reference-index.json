@@ -289,7 +289,7 @@
     "title": "WISP 11xx: Headless Runtime and Local Control API",
     "status": "Draft",
     "updated": "2026-09-27",
-    "implementation": "Experimental: packages/cli (@ghostly/cli, command ghostly), phases 1 to 4 on dev; the npm package is not published",
+    "implementation": "Experimental: packages/cli (@ghostly/cli, command ghostly), phases 1 to 5 on dev; the npm package is not published",
     "documentKind": "Contract (local API; nothing here goes on the wire between peers)",
     "dependencies": [
       "04-profiles.md",
@@ -303,7 +303,7 @@
     "notices": [],
     "benefit": "Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares.",
     "level": "available",
-    "note": "Experimental, the same engine as the apps on Node: ghostly1 invites, chats, groups, wallets, files, identity proofs and shared apps. Not on npm yet; no Bark or Fedimint wallets, and the DHT only through relays. Number not yet assigned."
+    "note": "Experimental, the same engine as the apps on Node: ghostly1 invites, chats, groups, wallets, files, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, no video in calls, and the DHT only through relays. Number not yet assigned."
   },
   {
     "file": "200-payments.md",
@@ -958,7 +958,7 @@
     "slug": "601-webrtc-media",
     "title": "WISP 601: WebRTC Media",
     "status": "Draft",
-    "updated": "2026-09-26",
+    "updated": "2026-09-27",
     "implementation": "Compatibility chats (call) and the chat session of every new chat (calls/1); capture varies by platform. Desktop on Linux runs WebRTC in Rust and media in GStreamer (#331), with no screen sharing yet.",
     "documentKind": "Profile",
     "dependencies": [

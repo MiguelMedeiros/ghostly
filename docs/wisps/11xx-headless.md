@@ -4,15 +4,15 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.6.1 |
+| Revision | 0.7 |
 | Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
-| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 to 4 on `dev`; the npm package is not published |
+| Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is not published |
 | Summary | Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares. |
 | Availability | Available |
-| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats, groups, wallets, files, identity proofs and shared apps. Not on npm yet; no Bark or Fedimint wallets, and the DHT only through relays. Number not yet assigned. |
+| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats, groups, wallets, files, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, no video in calls, and the DHT only through relays. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -85,7 +85,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 - `seq` grows by one per event in a profile, across restarts. `listen --since <seq>` replays what the journal still holds (the last 10,000 events) before following.
 - `id` is stable for the fact it reports: the same message received is the same id whenever the daemon derives it again, so a bot that restarts dedupes by `id`.
-- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `typing.started` and `typing.stopped` (the contact is writing, or stopped, [401](401-paired-chat.md#typing)); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.offer`; `events.gap` (a replay asked for more than the journal keeps). `file.offered`, `file.stage`, `file.done`, `file.failed` (transfers, by file id). `identity.received`, `identity.status`, `identity.approval`, `identity.progress`.
+- Types: `daemon.started`; `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (stage changes of the pairing progress), `chat.connection` (live or not, and over what); `typing.started` and `typing.stopped` (the contact is writing, or stopped, [401](401-paired-chat.md#typing)); `chat.joined` (the contact's app announced itself with its join notice: shown by the apps as a line, so not a `message.received`) and `chat.announced` (this side's); `message.received`, `message.sent`, `message.delivery` (sending, queued, waiting, held, sent, delivered, failed), `message.deleted`; `group.created`, `group.status`, `group.members` (joined, left), `group.message` (with `mentioned` when it names this profile), `group.sent`, `group.event`, `group.deleted`, `group.removed`; `payment.created` and `payment.updated` (a payment or request, in or out, and its state); `call.incoming`, `call.outgoing`, `call.connected`, `call.ended` ([Calls](#calls)); `events.gap` (a replay asked for more than the journal keeps). `file.offered`, `file.stage`, `file.done`, `file.failed` (transfers, by file id). `identity.received`, `identity.status`, `identity.approval`, `identity.progress`.
 - Which messages were reported is kept in the profile's own store (a database of the CLI's beside the engine's): a restart reports only what is new, a message that arrived while no process derived events (a crash) is reported at the next start, and a profile's first start reports none of the history it already had.
 - As the app's chat screen does, the side that joined says `👋 <name> joined` once the chat first goes live and the other side answers once; each is said once per chat, across restarts.
 - Hooks: `listen --exec "<command>"` runs the command once per event, in order, with the event on its stdin; `listen --webhook <url>` POSTs each event to a local bridge (loopback only); `listen --cursor <file>` records the last event handled (the acknowledgement), and a restarted listener resumes after it. With no daemon running, `listen` becomes the daemon, socket included, so a hook can answer with `ghostly send`.
@@ -133,9 +133,40 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Identities | Add proofs that need no browser (SSH, OpenPGP, Bitcoin address with the tool; domain and DID by a published record; Nostr over NIP-46 and other in-app signers with their fields); list; share and withdraw per contact; a contact's identities, checks and re-checks; public profiles (`settings set publicProfiles`) | Phase 3b |
 | Identities | Proofs that need a browser or an approval app | Phase 3b for in-app signers that wait on a link or a code (reported as `identity.approval` events and printed); OpenID Connect (a browser popup) is app only |
 | Services | Share a loopback web app with a contact; list what a contact shares; open one as a local port | Phase 3b: loopback only, redirects handed back rather than followed (as the Desktop's Rust fetch), granted per contact |
-| Calls | Voice, video, screen sharing | Not applicable (no media devices); `call.offer` events only |
+| Calls | Voice: place, answer, decline, hang up, auto-answer; the audio to and from a program | Phase 5 ([#350](https://github.com/MiguelMedeiros/ghostly/pull/350)), see [Calls](#calls) |
+| Calls | Video, screen sharing | Not applicable: a video call is answered as a voice call |
 | Settings | Pkarr relays, Iroh relays, HyperDHT relay, ICE servers, public profiles, sharing the profile's name | Phase 1 through `settings set` and `profile set` |
 | Settings | DHT-direct (Mainline reached over UDP, as the Desktop) | Planned: needs a BEP 44 client on Node and a check against the real DHT; relays carry the DHT floor meanwhile, as in the web app |
+
+## Calls
+
+A bot or an agent joins a voice call with the apps: the CLI takes part in [601](601-webrtc-media.md#paired-profile) calls/1 as any app does, and hands the call's audio to an outside program. Nothing about speech is in Ghostly: recognizing it, answering and speaking are the program's.
+
+**Media.** A WebRTC connection of the CLI's own per call, as in the apps: libdatachannel (node-datachannel, the module the CLI's chats use) for ICE, DTLS-SRTP and RTP, and libopus built to WebAssembly (`opusscript`) for Opus. Nothing changes on the wire: the same compact signals on the chat session, the SDP rebuilt around them (`buildSdpFromSignal`). Choices of a side that runs no browser:
+
+- **Voice only.** Its offer has an audio section alone (the contact's app answers it, and its video lane stays closed). A contact's offer has a video section too: it is answered, and whatever comes on it is dropped. A video call rings as `video: true` and is answered as a voice call.
+- **Candidates.** A signal on the chat session may carry eight; a headless host often has several interfaces (Docker, VPNs, Tailscale) of which the first is not the one the contact reaches. So a CLI signal carries every IPv4 host candidate first, then the server reflexive one, then IPv6 hosts, without their related addresses.
+- **Availability.** The CLI offers `calls/1` only when node-datachannel and Opus load (not with `GHOSTLY_WEBRTC=0`); otherwise its contacts' call buttons say why.
+
+**Audio contract.** One Unix socket per call, 0600, in the profile's folder (`calls/<call>.sock`, or under `/tmp` by a hash when the path is too long for a socket). It exists from the moment the call is placed or answered.
+
+| | |
+|---|---|
+| Format | Raw PCM, no framing: signed 16-bit little-endian, mono, at the call's rate: 48000 by default, or 24000, 16000, 12000, 8000 (`--rate`). Opus runs at that rate itself: nothing is resampled |
+| From the call | The contact's audio, in 20 ms frames, as soon as each is decoded. A late packet waits up to 40 ms; a lost one is 20 ms of silence |
+| To the call | Any amount at any time. The CLI queues it (at most five minutes), sends a 20 ms frame per tick at real time, and silence when the queue is empty. A partial frame waits 60 ms for the rest, then plays padded |
+| Barge-in | `call.flush` drops everything queued at once and says how much (`flushedMs`) |
+| Programs | One at a time: a new connection replaces the old one, which reads EOF |
+| End | The program reads EOF and the socket is removed; `call.ended` says why |
+| Latency added | At most one 20 ms frame going out; coming in, none beyond decoding (and the wait for a late packet) |
+
+**Commands and methods.** `call start <chat>`, `call answer [<chat|call>]`, `call hangup [<chat|call>]` (declines a call that rings), `call list`, `call flush`, `call auto on|off [--from <chat>]…` (kept in the profile's `calls.json`), and `call pipe` (the audio on stdin and stdout); on the socket, `call.start|answer|hangup|list|get|flush|auto`. Calls need the daemon: a one-shot command still reports a call that rings, and refuses to place or answer one.
+
+**Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`, `call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, `call.ended` `{call, chat, direction, reason, duration?}`. `reason` is `hangup` (this side hung up, or declined), `remote-hangup` (the contact hung up a connected call), `missed` (an incoming call stopped ringing unanswered), `rejected` (the contact declined), `unanswered` (this side's call rang 60 s), `failed` (the media did not connect within 30 s, or dropped) or `stopped` (the daemon stopped, and hung its calls up first).
+
+**Rules**, the apps' (`useWebRTC`): one call per chat; an offer rings only while that chat has none; an answer counts only after this side's offer; a hang-up ends whatever is on; a signal no newer than the last one handled is ignored; after a hang-up the signal is cleared 5 s later. The contact's app closes its connection as it hangs up, often before its hang-up signal arrives over the chat session: a call whose media closed waits 3 s for that signal, and without one a connection the contact closed still counts as its hang-up.
+
+**Evidence.** Unit tests (the queue, RTP, the socket, Opus at 48 and 16 kHz), two call managers over libdatachannel on loopback, two daemons calling each other (`test/twoPeers.test.ts`, with the `call-echo` example), and the web app calling a bot and the bot calling back with a tone each way (`e2e/web/headless-call.spec.ts`, Chromium). A probe also connected Playwright's WebKit (WPE, Linux) to the CLI, with audio both ways. The macOS app (WKWebView) calling the CLI is not tested yet.
 
 ## Wallet SDKs on Node (phase 2)
 
@@ -171,3 +202,4 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 2. Wallets and payments on the test networks of the shared regtest stack, with `--confirm-real` on Mainnet.
 3. Files, identities, services, advanced groups, pictures, backups (DHT-direct left planned).
 4. Packaging: an npm package whose dependencies are exactly what the bundle imports (a test keeps them so), checked by installing the packed tarball outside the repository and running two bots and four wallets from it; the bot skill; examples (echo bot, payment bot). A single-file binary and DHT-direct remain open.
+5. Voice calls with the apps, the audio handed to a program over a Unix socket per call ([Calls](#calls)); the `call-echo` example.
