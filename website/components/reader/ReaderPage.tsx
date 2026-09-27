@@ -11,6 +11,7 @@ import type { Reference } from "@/lib/references";
 import { GROUPS, wispByFile, wisps, type Wisp } from "@/lib/wisps";
 import { REPO_URL } from "@/content/shell";
 import { ReferenceMarkdown } from "./Markdown";
+import { WispNav, type WispNavGroup } from "./WispNav";
 import "@/app/reader.css";
 
 /** h2/h3 headings with the same ids the renderer gives them. */
@@ -61,6 +62,13 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
     w && name !== reference.title
       ? [...new Set([w.number, ...(former ? [former.oldId] : [])].map((n) => new GithubSlugger().slug(`WISP ${n} \u2014 ${name}`)))]
       : [];
+  const groups: WispNavGroup[] = GROUPS.map((g) => ({
+    id: g.id,
+    title: g.title,
+    items: wisps
+      .filter((x) => x.group === g.id)
+      .map((x) => ({ id: x.id, slug: x.slug, number: x.number, name: x.name, child: Boolean(x.parent), assigned: x.assigned })),
+  })).filter((g) => g.items.length > 0);
   const sourceUrl = `${REPO_URL}/blob/dev/${reference.sourcePath}`;
 
   return (
@@ -79,30 +87,11 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
             <Link className="reader-glossary" href={`${"/developers/catalog"}#glossary`}>
               {t.glossary} →
             </Link>
-            <details className="reader-all" open>
-              <summary>{t.all}</summary>
-              <nav aria-label={t.all}>
-                {GROUPS.map((g) => {
-                  const items = wisps.filter((x) => x.group === g.id);
-                  if (!items.length) return null;
-                  return (
-                    <div key={g.id} className="reader-all-group">
-                      <p>{g.title}</p>
-                      <ul>
-                        {items.map((x) => (
-                          <li key={x.id} data-child={Boolean(x.parent)}>
-                            <Link href={`/developers/wisps/${x.slug}`} aria-current={x.slug === w?.slug ? "page" : undefined}>
-                              <span className="mono">{x.number}</span>
-                              {x.name}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  );
-                })}
-              </nav>
-            </details>
+            {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
+            <noscript>
+              <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
+            </noscript>
+            <WispNav groups={groups} current={w?.slug} t={{ all: t.all, expandAll: t.expandAll, collapseAll: t.collapseAll }} />
           </aside>
 
           <article className="reader-main">

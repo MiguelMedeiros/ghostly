@@ -12,6 +12,8 @@ export const reader = {
   implementsContract: "Implements",
   contents: "On this page",
   all: "All drafts",
+  expandAll: "Expand all",
+  collapseAll: "Collapse all",
   glossary: "Glossary",
   moved: "This draft has a new number. You're reading it at its current address; the old link keeps working.",
   draftNote: "A review draft, not a final standard, and not a promise that every client supports it.",
