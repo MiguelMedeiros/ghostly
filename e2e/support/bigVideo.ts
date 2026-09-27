@@ -8,7 +8,11 @@ import { fileURLToPath } from "node:url";
  * the durations) rewritten to match. The index stays at the front, the samples spread over the whole file: a seek
  * near the end reads near its end. Every copy starts with a key frame, so each is a place to seek to.
  */
-export const BIG_VIDEO_SOURCE = fileURLToPath(new URL("./video-fixtures/ghosts-h264.mp4", import.meta.url));
+export const BIG_VIDEO_SOURCES = {
+  h264: fileURLToPath(new URL("./video-fixtures/ghosts-h264.mp4", import.meta.url)),
+  /** VP9: what a WebKitGTK without an H.264 decoder (no gstreamer1.0-libav) still plays. */
+  vp9: fileURLToPath(new URL("./video-fixtures/ghosts.mp4", import.meta.url)),
+};
 
 interface Box { type: string; start: number; size: number; header: number }
 
@@ -43,8 +47,8 @@ const u32 = (...values: number[]) => {
 export interface BigVideo { path: string; size: number; duration: number; repeats: number }
 
 /** Writes the video to `path`: `repeats` copies of the fixture (2 s each), `size` bytes in all. */
-export function makeBigVideo(path: string, { size = 100 * 1024 * 1024, repeats = 50 } = {}): BigVideo {
-  const src = readFileSync(BIG_VIDEO_SOURCE);
+export function makeBigVideo(path: string, { size = 100 * 1024 * 1024, repeats = 50, codec = "h264" as keyof typeof BIG_VIDEO_SOURCES } = {}): BigVideo {
+  const src = readFileSync(BIG_VIDEO_SOURCES[codec]);
   const top = children(src, 0, src.length);
   const ftyp = top.find((b) => b.type === "ftyp")!;
   const moov = top.find((b) => b.type === "moov")!;
