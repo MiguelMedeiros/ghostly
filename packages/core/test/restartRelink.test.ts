@@ -5,7 +5,7 @@ import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import type { PkarrTransport } from "../src/transport";
 import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, invitationWhere, killRtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeRtc, closeWorld, fakePeerConnection, invitationWhere, killRtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
 import { setLinkTraceSink } from "../src/linkTrace";
 
@@ -77,11 +77,16 @@ async function until(check: () => boolean, limit: number): Promise<number> {
 }
 
 /**
- * The app ends: gracefully (it says goodbye and has `DEPART_FLUSH_MS` before it exits, as the Desktop's exit hook and
- * the CLI's stop give it), or not at all (a crash, a kill). Either way no close of its connections reaches anyone.
+ * The app ends:
+ * - `graceful`: it says goodbye and has `DEPART_FLUSH_MS` before it exits (a page closing, the CLI's stop, the Desktop
+ *   when its exit can wait);
+ * - `closed`: it only closes its connections on the way out (the Desktop quit on macOS, which nothing can hold);
+ * - `crash`: nothing at all.
  */
-async function quit(world: { native: NativeWorld }, app: App, how: "graceful" | "crash"): Promise<void> {
+type How = "graceful" | "closed" | "crash";
+async function quit(world: { native: NativeWorld }, app: App, how: How): Promise<void> {
   if (how === "graceful") { app.link.depart(); await run(DEPART_FLUSH_MS); }
+  if (how === "closed") { world.native.close(app.name); closeRtc(app.name); await run(DEPART_FLUSH_MS); }
   world.native.kill(app.name);
   killRtc(app.name);
   app.stopped = app.link.stop(false);
@@ -90,13 +95,13 @@ async function quit(world: { native: NativeWorld }, app: App, how: "graceful" | 
 const DEPART_FLUSH_MS = 300;
 const RESTART_AFTER_MS = 3_000;
 
-interface Result { kind: Kind; restarted: "lower" | "higher"; how: "graceful" | "crash"; downSeenMs: number; liveAgainMs: number; requestsPerMin: number; dialFailures: number }
+interface Result { kind: Kind; restarted: "lower" | "higher"; how: How; downSeenMs: number; liveAgainMs: number; requestsPerMin: number; dialFailures: number }
 function report(result: Result): void {
   const file = process.env.RESTART_REPORT;
   if (file) appendFileSync(file, JSON.stringify(result) + "\n");
 }
 
-async function restart(kind: Kind, restarted: "lower" | "higher", how: "graceful" | "crash"): Promise<Result> {
+async function restart(kind: Kind, restarted: "lower" | "higher", how: How): Promise<Result> {
   const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
   // The inviter has the lower link key here: it is the one that dials.
   const made = invitationWhere("inviter");
@@ -149,11 +154,11 @@ afterEach(async () => {
 
 describe.each(["iroh", "webrtc"] as const)("a paired chat over %s after one app restarts", kind => {
   describe.each(["lower", "higher"] as const)("the app with the %s key restarts", restarted => {
-    it.each(["graceful", "crash"] as const)("%s: live again within the target, on a small discovery budget", async how => {
+    it.each(["graceful", "closed", "crash"] as const)("%s: live again within the target, on a small discovery budget", async how => {
       const result = await restart(kind, restarted, how);
       // Before (dev at 57bd8d2e): Iroh 61 s (lower) and 28 s (higher), noticed after 30 s; WebRTC 16-18 s.
-      expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(how === "graceful" ? 5_000 : 15_000);
-      if (how === "graceful") expect(result.downSeenMs, "the goodbye ends the session at once").toBeLessThanOrEqual(1_000);
+      expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(how === "crash" ? 15_000 : 5_000);
+      if (how !== "crash") expect(result.downSeenMs, "a goodbye or a close ends the session at once").toBeLessThanOrEqual(1_000);
       // The relays allow 30 requests a minute per client, reads and publishes together, for every chat.
       expect(result.requestsPerMin).toBeLessThanOrEqual(10);
       // Nothing dials an app that is not there: a departing app does not redial, the staying one waits for the other back.
