@@ -283,7 +283,8 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
   const run = (action: () => Promise<unknown>) => {
     setRetryError("");
     setBusy(true);
-    void action().catch((error: Error) => { setBusy(false); setRetryError(String(error.message ?? error)); });
+    // The ring turns until the transfer moves, or the request comes back without moving it.
+    void action().catch((error: Error) => setRetryError(String(error.message ?? error))).finally(() => setBusy(false));
   };
 
   return (

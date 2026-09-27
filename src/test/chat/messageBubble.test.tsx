@@ -329,13 +329,13 @@ describe("MessageBubble: delivery", () => {
     expect(engine.callsTo("retryMessage")).toEqual([]);
   });
 
-  it("a file of mine has the clock while its bytes travel, and the red mark (which sends it again) when they did not go", async () => {
+  it("a file of mine keeps its own mark while its bytes travel, and has the red mark (which sends it again) when they did not go", async () => {
     vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
     const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
     const file = { id: "link-1-out-f", name: "report.pdf", size: 10, mime: "application/pdf" };
     const { user, engine } = bubble({ sender: "me", text: "report.pdf", file, delivery: "delivered" });
     act(() => engine.update({ transfers: { [file.id]: { state: "transferring", direction: "out", transferred: 2, size: 10 } } }));
-    expect(mark()).toHaveAttribute("data-delivery", "sending");
+    expect(mark()).toHaveAttribute("data-delivery", "delivered");
     act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 2, size: 10, error: "Connection lost", retry: true } } }));
     await user.click(screen.getByRole("button", { name: "Not sent. Send again" }));
     expect(retryFile).toHaveBeenCalledWith(file.id);

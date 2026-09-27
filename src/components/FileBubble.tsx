@@ -80,7 +80,8 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
-    void action().catch((error: Error) => { setBusy(false); setActionError(String(error.message ?? error)); });
+    // The ring turns until the transfer moves, or the request comes back without moving it.
+    void action().catch((error: Error) => setActionError(String(error.message ?? error))).finally(() => setBusy(false));
   };
 
   return (

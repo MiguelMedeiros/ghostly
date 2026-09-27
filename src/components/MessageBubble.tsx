@@ -16,7 +16,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState } from "../lib/fileDownload";
 import { canRetryFile } from "../lib/fileStatus";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { useServicesPlatform, useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import type { QuoteView } from "../lib/replies";
 import { ReplyQuote } from "./chat/ReplyQuote";
@@ -477,13 +477,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
-  const platform = useServicesPlatform();
-  const transfer = isMe && message.file ? platform?.getTransfer(message.file.id) ?? null : null;
-  // A file of mine goes by its bytes, WhatsApp's way: a clock while they travel, the red mark when they did not go.
+  const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
+  // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
+  // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
   const fileFailed = !!message.file && canRetryFile(message.file, transfer, platform);
-  const shown = fileFailed ? "failed" as const
-    : transfer?.state === "transferring" && !["waiting", "held", "queued"].includes(message.delivery ?? "") ? "sending" as const
-    : message.delivery;
+  const shown = fileFailed ? "failed" as const : message.delivery;
   /** A message that was not sent, sent again: its red mark, or its ⋮. */
   const retry = () => {
     if (fileFailed) { void platform!.retryFile!(message.file!.id).catch(() => {}); return; }

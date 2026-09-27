@@ -29,6 +29,7 @@ async function deliveryNote(p: Peer, text: string): Promise<string> {
   await row.hover();
   await row.getByTestId("message-options").click();
   await p.page.getByTestId("message-details").click();
+  await expect(p.page.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes");
   const section = p.page.locator('[data-testid="message-details-section"][data-section="delivery"]');
   await expect(section).toBeVisible();
   const note = (await section.textContent()) ?? "";
