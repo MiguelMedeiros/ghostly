@@ -53,10 +53,11 @@ export function clearPeek(profile: string): void {
  * waiting before and have something now.
  */
 export function mergePeek(profile: string, result: Pick<PeekResult, "chats">, now = Date.now()): PeekChat[] {
-  const store = readStore();
+  const store = readStore(), was = JSON.stringify(store);
   const known = new Set(listProfiles().map((p) => p.id));
   for (const id of Object.keys(store)) if (!known.has(id)) delete store[id];
-  const entry = store[profile] ?? { at: now, chats: {} };
+  const entry = store[profile] ?? { at: 0, chats: {} };
+  const seenBefore = JSON.stringify(entry.chats);
   const fresh: PeekChat[] = [];
   for (const chat of result.chats) {
     const before = entry.chats[chat.linkId];
@@ -68,9 +69,10 @@ export function mergePeek(profile: string, result: Pick<PeekResult, "chats">, no
       entry.chats[chat.linkId] = next;
     } else delete entry.chats[chat.linkId];
   }
-  entry.at = now;
+  // Written (and the switcher told) only when something changed: most looks find nothing new.
+  if (JSON.stringify(entry.chats) !== seenBefore) entry.at = now;
   store[profile] = entry;
-  writeStore(store);
+  if (JSON.stringify(store) !== was) writeStore(store);
   return fresh;
 }
 
