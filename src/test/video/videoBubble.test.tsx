@@ -244,6 +244,27 @@ describe("a video not here yet", () => {
   });
 });
 
+describe("a video that did not go", () => {
+  it("offers the round Send again, says Not sent, and keeps the reason behind its ⓘ", async () => {
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
+    const file = video({ id: "chat1-out-failed" });
+    show(file, { state: "failed", direction: "out", transferred: 0, size: file.size, error: "The connection dropped", retry: true }, "me");
+    expect(screen.getByTestId("video-status")).toHaveTextContent("Not sent");
+    expect(screen.queryByText("The connection dropped")).toBeNull();
+    fireEvent.click(screen.getByTestId("video-why"));
+    expect(screen.getByTestId("video-why-text")).toHaveTextContent("The connection dropped");
+    fireEvent.click(screen.getByTestId("video-retry"));
+    expect(retryFile).toHaveBeenCalledWith("chat1-out-failed");
+  });
+
+  it("a stuck one offers Ask again", async () => {
+    const file = video();
+    show(file, { state: "transferring", direction: "in", transferred: 14 * MB, size: file.size, stalled: true });
+    fireEvent.click(screen.getByTestId("video-request"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("request"));
+  });
+});
+
 describe("the video's box", () => {
   it("is as wide as a picture, a tall one capped in height", () => {
     expect(videoBox(1920, 1080)).toEqual({ width: 300, height: 169 });

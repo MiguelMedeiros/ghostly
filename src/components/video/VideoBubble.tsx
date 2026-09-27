@@ -1,18 +1,19 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { formatFileSize, formatVideoDuration, safeBlobType, sanitizeFileName } from "@ghostly/core";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
-import { fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
 import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/videoPlayer";
 import { localPoster, posterUrl } from "../../lib/videoPoster";
+import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "missing" | "not-yet";
 
-const linkButton = "text-xs underline px-2 py-1 bg-transparent border-none text-inherit cursor-pointer";
+const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
 /**
  * A video in the chat. Before it plays: a poster (the sender's, or one made here once the file is in), its
@@ -33,6 +34,10 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   /** On screen: true, off it: false, not known yet (no answer from the observer so far): null. */
   const [visible, setVisible] = useState<boolean | null>(() => (typeof IntersectionObserver === "undefined" ? true : null));
   const [actionError, setActionError] = useState("");
+  /** A resend or a request asked for, until the transfer answers by moving on. */
+  const [busy, setBusy] = useState(false);
+  const [why, setWhy] = useState(false);
+  const whyId = useId();
 
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -124,6 +129,8 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
     srcRef.current = null;
   }, [file.id]);
 
+  useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
+
   const act = (action: FileAction) => {
     setActionError("");
     void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
@@ -154,9 +161,17 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   const noRoom = offered && typeof transfer.room === "number" && transfer.room < file.size;
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
   const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
-  const canRetry = transfer?.state === "failed" && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+  const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer) : null;
-  const status = moving || transfer?.state === "failed" ? fileStatus(file, transfer, peerName, false) : null;
+  const failed = transfer?.state === "failed";
+  const status = moving || failed ? fileStatus(file, transfer, peerName, false) : null;
+  // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
+  const reason = actionError || (failed ? transfer.error : undefined);
+  const again = (action: () => Promise<unknown>) => {
+    setActionError("");
+    setBusy(true);
+    void action().catch((error: Error) => setActionError(String(error.message ?? error))).finally(() => setBusy(false));
+  };
   const percent = moving ? Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100) : 0;
   // A video sent from here can be watched while it goes, once it has been copied.
   const canPlay = playable && (ready || (sender === "me" && transfer?.stage !== "preparing" && transfer?.state !== "failed"));
@@ -260,20 +275,31 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
           {noRoom ? `Not enough space: ${formatFileSize(transfer.room)} free` : `${peerName} wants to send it · ${formatFileSize(transfer.room)} free`}
         </p>
       )}
-      {status && !offered && (
-        <p className={`text-[11px] m-0 mt-1 px-1 ${transfer?.state === "failed" ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="video-status">{status}</p>
+      {(status || canRetry || stuck) && !offered && (
+        <div className="flex items-center gap-2 mt-1 px-1">
+          {canRetry ? (
+            <RoundRetry danger busy={busy} testId="video-retry" label="Send again" hint="Not sent. Send it again."
+              onClick={() => again(() => platform!.retryFile!(file.id))} />
+          ) : stuck ? (
+            <RoundRetry busy={busy} testId={`video-${stuck.action}`} label={stuck.label} hint={stuck.hint}
+              onClick={() => again(() => platform!.fileAction!(file.id, stuck.action))} />
+          ) : null}
+          {status && (
+            <p className={`flex items-center gap-1 min-w-0 text-[11px] m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
+              <span className="min-w-0 truncate" data-testid="video-status">{status}</span>
+              {reason && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger />}
+            </p>
+          )}
+        </div>
       )}
       {controls && !offered && (
-        <div className="flex gap-1">
+        <div className="flex gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={linkButton} data-testid="video-pause-transfer" onClick={() => act("pause")}>Pause</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="video-resume-transfer" onClick={() => act("resume")}>Resume</button>}
-          {stuck && <button type="button" className={linkButton} data-testid={`video-${stuck.action}`} title={stuck.hint} onClick={() => act(stuck.action)}>{stuck.label}</button>}
           <button type="button" className={linkButton} data-testid="video-cancel" onClick={() => act("cancel")}>Cancel</button>
         </div>
       )}
-      {canRetry && (
-        <button type="button" className={linkButton} onClick={() => { setActionError(""); void platform!.retryFile!(file.id).catch((error: Error) => setActionError(String(error.message ?? error))); }}>Retry sending</button>
-      )}
+      {reason && why && <WhyText id={whyId} testId="video-why-text">{reason}</WhyText>}
       {problemText && (
         <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
           {problemText}{" "}
@@ -282,7 +308,7 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
           )}
         </p>
       )}
-      {actionError && <p className="text-xs text-danger-ink px-1 m-0" role="alert">{actionError}</p>}
+      {actionError && !status && <p className="text-xs text-danger-ink px-1 m-0" role="alert">{actionError}</p>}
     </div>
   );
 }
