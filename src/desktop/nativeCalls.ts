@@ -232,9 +232,10 @@ export class NativePeerConnection extends EventTarget {
   }
 
   /**
-   * Runs a description call, holding the ICE states heard meanwhile until the caller has seen it resolve. A
-   * browser cannot connect before `setRemoteDescription` resolves; Rust on the same machine connects within a
-   * millisecond, and "connected" arrived before the call hook, back from its await, set "connecting" over it.
+   * Runs a description call, holding the ICE states heard meanwhile until the caller has seen it resolve. Rust
+   * on the same machine connects within a millisecond, and "connected" arrived before the call hook, back from
+   * its await, set "connecting" over it. The hook no longer does that (two WKWebViews on one Mac connected as
+   * fast); the hold keeps the order a browser usually shows.
    */
   private async hold<T>(work: () => Promise<T>): Promise<T> {
     this.describing++;
