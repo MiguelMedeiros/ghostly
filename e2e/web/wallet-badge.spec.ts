@@ -2,7 +2,8 @@ import { chat, connect, expect, getTestCoins, link, openChat, test, useTestnet }
 import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
 
-// Sats that come in while the wallet is closed show as a count on the wallet icon, until it is opened.
+// Sats that come in while the wallet is closed show as a dot on the wallet icon, until it is opened. How many is in
+// the button's name and tooltip, never on the bar.
 test.describe("wallet badge", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
 
@@ -28,16 +29,20 @@ test.describe("wallet badge", { tag: "@network" }, () => {
     await alice.page.getByTestId("payment-composer").getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
     await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state")).toHaveText(/Received/);
 
-    // Test sats: an outlined count on the icon, and the button says to screen readers that they are test sats.
+    // Test sats: a hollow dot on the icon, no number; the button's name and tooltip say how many, and that they are test sats.
     const badge = bob.page.getByTestId("wallet-new");
-    await expect(badge).toHaveText("+21");
-    await expect(badge).toHaveClass(/wallet-new-test/);
-    await expect(bob.page.getByTestId("wallet-chip")).toHaveAttribute("aria-label", /21 new test sats/);
-    // It sits on the icon, inside the wallet button, not in the gap beside it.
+    await expect(badge).toHaveClass(/nav-dot-test/);
+    await expect(badge).toHaveText("");
+    await expect(bob.page.getByTestId("wallet-chip")).not.toContainText(/\d/);
+    await expect(bob.page.getByTestId("wallet-chip")).toHaveAttribute("aria-label", "Wallets, 21 new test sats");
+    await expect(bob.page.getByTestId("wallet-chip")).toHaveAttribute("title", "Wallets, 21 new test sats");
+    // A small dot on the icon's top-right corner, inside the wallet button.
     const icon = (await bob.page.getByTestId("wallet-chip").locator("svg").boundingBox())!;
     const box = (await badge.boundingBox())!, button = (await bob.page.getByTestId("wallet-chip").boundingBox())!;
-    expect(box.x).toBeGreaterThan(icon.x);
-    expect(box.x).toBeLessThan(icon.x + icon.width + 4);
+    expect(box.width).toBeLessThanOrEqual(10);
+    expect(box.x).toBeGreaterThan(icon.x + icon.width / 2);
+    expect(box.x).toBeLessThan(icon.x + icon.width);
+    expect(box.y).toBeLessThan(icon.y + icon.height / 2);
     expect(box.x + box.width).toBeLessThanOrEqual(button.x + button.width);
     await bob.page.getByTestId("account-bar").screenshot({ path: testInfo.outputPath("wallet-badge.png") });
 

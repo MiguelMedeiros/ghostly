@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { resetGifSearch } from "../lib/gifSearch";
+import { resetUnseenSats } from "../hooks/useUnseenSats";
 import { fakeEngine, installFakeEngine } from "./fakeEngine";
 
 // The web app's session sync (started by the sidebar) keeps localStorage and the peer in step on every state push:
@@ -33,6 +34,8 @@ beforeEach(() => {
   sessionStorage.clear();
   // GIF answers and the rate-limit wait are kept for the app session: each test starts a session of its own.
   resetGifSearch();
+  // What the wallet icon marks as new is kept for the app session, like the GIF answers.
+  resetUnseenSats();
   delete document.documentElement.dataset.reduceMotion;
   document.documentElement.removeAttribute("lang");
   document.documentElement.removeAttribute("dir");

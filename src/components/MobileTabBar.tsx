@@ -8,6 +8,8 @@ import { ProfileBadge } from "./ProfileBadge";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
 import { SWITCHER_SHORTCUT, useLongPress, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { unseenSatsLabel, useUnseenSats } from "../hooks/useUnseenSats";
+import { UnseenSatsDot } from "./UnseenSatsDot";
 
 const icon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -73,6 +75,7 @@ export function MobileTabBar() {
   const glances = useProfileGlances();
   const longPress = useLongPress(switcher.show);
   const myAvatar = useMyAvatar();
+  const unseen = useUnseenSats();
 
   return (
     <>
@@ -82,7 +85,8 @@ export function MobileTabBar() {
           const dot = tab.path === "/identities" && identityAttention;
           const account = tab.path === "/settings" && canSwitch;
           const others = account && glances.othersUnread > 0;
-          const label = dot ? `${t(tab.label)}, ${t("identities.attention")}` : account ? `${t(tab.label)}, ${glances.current.name}${others ? `, ${t("profileSwitcher.othersUnread")}` : ""}` : undefined;
+          const wallet = tab.path === "/wallet";
+          const label = wallet && (unseen.real || unseen.test) ? unseenSatsLabel(t(tab.label), unseen) : dot ? `${t(tab.label)}, ${t("identities.attention")}` : account ? `${t(tab.label)}, ${glances.current.name}${others ? `, ${t("profileSwitcher.othersUnread")}` : ""}` : undefined;
           return (
             <button
               key={tab.path}
@@ -98,6 +102,7 @@ export function MobileTabBar() {
               <span className="relative flex">
                 {tab.icon}
                 {dot && <span data-testid="identities-attention" aria-hidden="true" className="nav-dot nav-dot-tab" />}
+                {wallet && <UnseenSatsDot unseen={unseen} tab />}
                 {/* Whose Settings these are: the active profile's picture, ringed when another one left something unread. */}
                 {account && (
                   <span data-testid="mobile-tab-profile" aria-hidden="true" className="absolute bottom-0 -right-2.5 rounded-full" style={{ boxShadow: `0 0 0 2px var(--theme-panel-header)${others ? ", 0 0 0 3.5px var(--theme-accent)" : ""}` }}>

@@ -737,21 +737,18 @@ body {
 /* A label that would be cut at this width hides with the others; the icon, its tooltip and its name stay. It keeps
    its line, so the icons stay level. */
 .account-actions[data-compact] .account-label { visibility: hidden; }
-/* Something to look at behind an icon (Identities): a dot on its corner, ringed in the bar's color like the wallet's count. */
-.nav-dot { position: absolute; top: -2px; right: -3px; width: 9px; height: 9px; border-radius: 999px; background: var(--theme-accent);
-  box-shadow: 0 0 0 2px var(--theme-sidebar-bg); animation: wallet-new-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
-.nav-dot-tab { box-shadow: 0 0 0 2px var(--theme-panel-header); }
+/* Something to look at behind an icon (Identities, sats that came in): a dot on its corner, ringed in the bar's color. */
+.nav-dot { --dot-ring: var(--theme-sidebar-bg); position: absolute; top: -2px; right: -3px; width: 9px; height: 9px; border-radius: 999px;
+  background: var(--theme-accent); box-shadow: 0 0 0 2px var(--dot-ring); animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+.nav-dot-tab { --dot-ring: var(--theme-panel-header); }
+/* Test sats only: the same dot, hollow. */
+.nav-dot-test { background: var(--dot-ring); box-shadow: inset 0 0 0 1.5px var(--theme-accent), 0 0 0 2px var(--dot-ring); }
 .nav-dot-inline { display: inline-block; width: 8px; height: 8px; border-radius: 999px; background: var(--theme-accent); flex-shrink: 0; }
-/* Sats that came in while the wallet was closed: a count on the wallet icon, ringed in the bar's color. */
-.wallet-new { position: absolute; top: -7px; left: 14px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 999px; display: grid; place-items: center;
-  font-size: 10px; font-weight: 700; line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums;
-  background: var(--theme-accent); color: #111b21; box-shadow: 0 0 0 2px var(--theme-sidebar-bg); animation: wallet-new-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
-.wallet-new-test { background: var(--theme-sidebar-bg); color: var(--theme-accent); box-shadow: inset 0 0 0 1.5px var(--theme-accent), 0 0 0 2px var(--theme-sidebar-bg); }
-@keyframes wallet-new-in { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .wallet-new, .nav-dot { animation: none; } }
+@keyframes nav-dot-in { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .nav-dot { animation: none; } }
 /* Another profile left something unread: a ring around the picture, in the accent. */
 .profile-others-ring { position: absolute; inset: -3px; border-radius: 999px; box-shadow: 0 0 0 2px var(--theme-accent); pointer-events: none;
-  animation: wallet-new-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+  animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
 .profile-switcher-popover { animation: profile-switcher-in 140ms ease-out both; transform-origin: bottom left; }
 .profile-switcher-sheet { animation: profile-switcher-sheet-in 180ms ease-out both; max-height: 80vh; overflow-y: auto; }
 @keyframes profile-switcher-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
