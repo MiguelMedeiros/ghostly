@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { liftGlobals, parseArgs } from "../src/args";
-import { positionals, COMMANDS } from "../src/commands";
+import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
 
 /** Base64url values start with "-" one time in 64 (the #208 lesson): fixed ones, never random. */
 const HYPHEN_KEY = "-Abc_def-123";
+/** The draft id that failed PR #357's CI, and an id that starts with two dashes (one in 4096). */
+const HYPHEN_DRAFT = "-wtTajMuVtb91WDQOVyEcg";
+const DOUBLE_DASH_ID = "--tTajMuVtb91WDQOVyEc";
 
 describe("the argument parser", () => {
   it("takes an option's value as is, even when it starts with a dash", () => {
@@ -14,9 +17,42 @@ describe("the argument parser", () => {
     expect(parseArgs([`--label=${HYPHEN_KEY}`], { label: { type: "string", description: "" } }).options.label).toBe(HYPHEN_KEY);
   });
 
-  it("refuses a positional that starts with a dash, unless it comes after --", () => {
+  it("refuses a text positional that starts with a dash, unless it comes after --", () => {
     expect(() => parseArgs(["chat", "-oops"], {})).toThrow(/Unknown option -oops/);
     expect(parseArgs(["--profile", "bot", "--", "chat", "-a dash"], {})).toEqual({ positionals: ["chat", "-a dash"], options: { profile: "bot" } });
+    const send = TEXT_COMMANDS.send;
+    expect(() => parseArgs(["alice", "-oops"], send.options, idSlot(send))).toThrow(/Unknown option -oops/);
+    expect(() => parseArgs(["alice", "--stdn"], send.options, idSlot(send))).toThrow(/Unknown option --stdn/);
+    expect(() => parseArgs(["abc", "-oops"], COMMANDS["chat rename"].options ?? {}, idSlot(COMMANDS["chat rename"]))).toThrow(/Unknown option -oops/);
+    expect(() => parseArgs(["-oops"], COMMANDS["group create"].options!, idSlot(COMMANDS["group create"]))).toThrow(/Unknown option -oops/);
+  });
+
+  it("takes a draft that starts with a dash (identity complete, the #357 failure)", () => {
+    const complete = COMMANDS["identity complete"];
+    const parsed = parseArgs([HYPHEN_DRAFT, "--stdin"], complete.options!, idSlot(complete));
+    expect(parsed).toEqual({ positionals: [HYPHEN_DRAFT], options: { stdin: true } });
+    expect(complete.params!(parsed, positionals(complete, parsed.positionals))).toEqual({ draft: HYPHEN_DRAFT, evidenceFile: undefined, stdin: true });
+    expect(parseArgs(["--stdin", DOUBLE_DASH_ID], complete.options!, idSlot(complete))).toEqual({ positionals: [DOUBLE_DASH_ID], options: { stdin: true } });
+    // The command's own options are still options there, and a mistyped one after the draft is still refused.
+    expect(parseArgs(["-p", "bot", "--no-stdin", HYPHEN_DRAFT], complete.options!, idSlot(complete))).toEqual({ positionals: [HYPHEN_DRAFT], options: { profile: "bot", stdin: false } });
+    expect(() => parseArgs([HYPHEN_DRAFT, "--stdn"], complete.options!, idSlot(complete))).toThrow(/Unknown option --stdn/);
+  });
+
+  it("takes an id that starts with a dash in every positional that names something", () => {
+    const named = new Set<string>();
+    for (const [name, command] of [...Object.entries(COMMANDS), ...Object.entries(TEXT_COMMANDS)]) {
+      const takesId = idSlot(command);
+      const slots = command.args ?? [];
+      const argv = slots.map((slot, i) => (takesId(i) ? `${i % 2 ? DOUBLE_DASH_ID : HYPHEN_KEY}${i}` : "word"));
+      expect(parseArgs(argv, command.options ?? {}, takesId).positionals, name).toEqual(argv);
+      slots.forEach((slot, i) => { if (takesId(i)) named.add(slot); });
+    }
+    // Every kind of generated id a command takes: drafts, proofs, payments, messages, files, groups, calls, …
+    expect([...named].sort()).toEqual(["call...", "card", "chat", "draft", "file", "group", "id", "member", "message", "payment", "service"]);
+    expect(parseArgs([HYPHEN_KEY, "--limit", "5"], COMMANDS["chat history"].options!, idSlot(COMMANDS["chat history"]))).toEqual({ positionals: [HYPHEN_KEY], options: { limit: 5 } });
+    expect(parseArgs([HYPHEN_KEY, "hi", "--force"], TEXT_COMMANDS.send.options, idSlot(TEXT_COMMANDS.send))).toEqual({ positionals: [HYPHEN_KEY, "hi"], options: { force: true } });
+    // An id in a trailing optional one (`call answer [<chat|call>]`).
+    expect(parseArgs([HYPHEN_KEY, "--rate", "16000"], COMMANDS["call answer"].options!, idSlot(COMMANDS["call answer"]))).toEqual({ positionals: [HYPHEN_KEY], options: { rate: 16000 } });
   });
 
   it("lets --voice stand alone, taking the next word only when it is a number", () => {

@@ -23,17 +23,25 @@ export const GLOBAL_OPTIONS: Record<string, OptionSpec> = {
  * before positionals that start with a dash.
  *
  * The value of an option is taken as is even when it starts with `-` (base64url keys and seeds do one time in 64:
- * the ghostly-cli lesson of #208). A positional that starts with `-` is refused instead of sent: a mistyped flag
- * must not reach a contact as text. Put `--` before a message that starts with a dash.
+ * the ghostly-cli lesson of #208). So is a positional that `idSlot` says takes an id, a key or a draft: there a word
+ * that starts with `-` and is no option of the command is the value (`--` starts one id in 4096). Any other
+ * positional that starts with `-` is refused instead of sent: a mistyped flag must not reach a contact as text. Put
+ * `--` before a message that starts with a dash.
  */
-export function parseArgs(argv: readonly string[], spec: Record<string, OptionSpec>): Parsed {
+export function parseArgs(argv: readonly string[], spec: Record<string, OptionSpec>, idSlot: (index: number) => boolean = () => false): Parsed {
   const all = { ...GLOBAL_OPTIONS, ...spec };
   const byShort = new Map(Object.entries(all).filter(([, s]) => s.short).map(([name, s]) => [s.short!, name]));
+  const isOption = (arg: string) => {
+    if (!arg.startsWith("--")) return arg.length === 2 && byShort.has(arg.slice(1));
+    const name = arg.slice(2).split("=")[0];
+    return Object.hasOwn(all, name) || (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean");
+  };
   const positionals: string[] = [];
   const options: Parsed["options"] = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--") { positionals.push(...argv.slice(i + 1)); break; }
+    if (arg.startsWith("-") && idSlot(positionals.length) && !isOption(arg)) { positionals.push(arg); continue; }
     if (arg.startsWith("--") || (arg.startsWith("-") && arg.length === 2 && arg !== "-")) {
       let name: string, inline: string | undefined;
       if (arg.startsWith("--")) {
