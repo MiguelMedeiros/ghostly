@@ -1,6 +1,6 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
+import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
 
 // covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.screen-share, calls.upgrade
@@ -71,6 +71,55 @@ describe("placing a call", () => {
     expect(call.fastPoll()).toBe(false);
   });
 
+  it("ICE connecting before the answer's description comes back stays connected, with its video lane open", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    // Two apps on one Mac, in WebKit: ICE is up before the promise returns, and the lane's direction is not settled yet.
+    const apply = pc.setRemoteDescription.bind(pc);
+    vi.spyOn(pc, "setRemoteDescription").mockImplementation(async (description) => {
+      pc.setIceState("connected");
+      await apply(description);
+    });
+
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.result.current.canSendVideo).toBe(true);
+    expect(call.result.current.canShareScreen).toBe(true);
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
+  });
+
+  it("a hang-up while the answer's description is being applied leaves the call ended", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    const applied = deferred<void>();
+    vi.spyOn(pc, "setRemoteDescription").mockReturnValue(applied.promise);
+    call.receive(remote.answer(Date.now() + 1));
+
+    act(() => call.result.current.hangUp());
+    applied.resolve();
+    await settle();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.onError).not.toHaveBeenCalled();
+  });
+
+  it("a description refused after the hang-up closed the connection is not reported as an error", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    const applied = deferred<void>();
+    vi.spyOn(pc, "setRemoteDescription").mockReturnValue(applied.promise);
+    call.receive(remote.answer(Date.now() + 1));
+
+    act(() => call.result.current.hangUp());
+    applied.reject(new DOMException("The RTCPeerConnection is closed", "InvalidStateError"));
+    await settle();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.onError).not.toHaveBeenCalled();
+  });
+
   it("hanging up closes the connection, stops the tracks, publishes a hang-up and clears it 5 s later", async () => {
     const call = renderCall();
     const { stream, pc } = await offered(call);
@@ -125,6 +174,23 @@ describe("answering a call", () => {
     expect(pc.getTransceivers().find((t) => t.receiver.track.kind === "video")?.direction).toBe("sendrecv");
     expect(call.publishedKinds()).toEqual(["a"]);
     expect(call.result.current.callState).toBe("connecting");
+  });
+
+  it("ICE connecting while our answer is still gathering stays connected once the answer goes out", async () => {
+    FakePeerConnection.holdGathering = true;
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    act(() => { void call.result.current.acceptCall(false); });
+    devices.userMedia[0].grant();
+    await settle();
+    const pc = FakePeerConnection.instances[0];
+
+    act(() => pc.setIceState("connected"));
+    act(() => pc.finishGathering());
+    await settle();
+
+    expect(call.publishedKinds()).toEqual(["a"]);
+    expect(call.result.current.callState).toBe("connected");
   });
 
   it("declining publishes a hang-up and never asks for the microphone", () => {

@@ -462,7 +462,8 @@ export function useWebRTC({
         const signalStr = JSON.stringify(signal);
         publishCallSignal(signalStr);
         refreshVideoLane();
-        updateCallState("connecting");
+        // Read again (the check above narrowed it to "incoming"): ICE may have connected while our answer gathered.
+        if ((callStateRef.current as CallState) === "answering") updateCallState("connecting");
         pendingOfferRef.current = null;
       } catch (error) {
         if (cancelled()) return;
@@ -488,16 +489,22 @@ export function useWebRTC({
     async (signal: CallSignal) => {
       const pc = pcRef.current;
       if (!pc) return;
+      const attempt = attemptRef.current;
+      const cancelled = () => attemptRef.current !== attempt;
 
       try {
         applyRemotePicture(signal);
 
         const answerSdp = buildSdpFromSignal(signal);
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+        if (cancelled()) return;
         refreshVideoLane();
 
-        updateCallState("connecting");
+        // ICE may have connected before the description's promise came back (two apps on one machine, in
+        // WebKit): "connected" is not taken back.
+        if (callStateRef.current === "offering") updateCallState("connecting");
       } catch (error) {
+        if (cancelled()) return;
         onErrorRef.current?.(error);
         cleanupConnection();
         updateCallState("idle");
