@@ -538,6 +538,12 @@
     "sendPhoto": "发送照片",
     "closeCamera": "关闭相机",
     "cameraFailed": "无法启动相机。",
+    "sendFiles": "发送文件",
+    "caption": "添加说明",
+    "send": "发送",
+    "sendCount": "发送 {{count}} 个",
+    "removeFile": "移除 {{name}}",
+    "dropFiles": "拖放到此处发送",
     "category": {
       "recent": "最近使用",
       "people": "笑脸和人物",

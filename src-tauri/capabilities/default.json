@@ -47,6 +47,8 @@
     "allow-open-web-link",
     "allow-share-text",
     "allow-read-clipboard-text",
+    "allow-read-clipboard-files",
+    "allow-read-pasted-bytes",
     "allow-oidc-loopback-start",
     "allow-oidc-loopback-wait",
     "allow-oidc-loopback-cancel",

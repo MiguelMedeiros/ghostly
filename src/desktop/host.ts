@@ -196,6 +196,13 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).
     readClipboardText: () => invoke<string>("read_clipboard_text"),
+    // A paste the webview showed the page nothing of (no files, no text): Rust looks for copied files or a picture.
+    // Their bytes stay in Rust, read by token; the page never names a path.
+    readClipboardFiles: async () => (await invoke<{ token: string; name: string | null; size: number; mime: string | null }[]>("read_clipboard_files"))
+      .map(({ token, ...item }) => ({ ...item, read: async (offset: number, length: number) => {
+        const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
+        return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+      } })),
     // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
     requestLocalAccess: async () => true,
     async openService(peerPubKeyZ32, serviceId) {

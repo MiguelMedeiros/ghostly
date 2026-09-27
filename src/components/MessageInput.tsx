@@ -1,11 +1,13 @@
 import { getSessionDraft, setSessionDraft } from "../lib/storage";
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ClipboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
 import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
 import type { LinkPreview, VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { useIsLocked } from "../contexts/LockScreenContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
 import { SecretGuardDialog } from "./SecretGuardDialog";
@@ -19,6 +21,8 @@ import type { GroupMention } from "@ghostly/core";
 import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
+import { AttachmentSheet } from "./composer/AttachmentSheet";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import "./composer/composer.css";
 
 interface MessageInputProps {
@@ -113,6 +117,7 @@ export function MessageInput({
 }: MessageInputProps) {
   const { t } = useI18n();
   const phone = useIsMobile();
+  const locked = useIsLocked();
   const [showPayment, setShowPayment] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   /** The picker closed because an identity was shared: the keys go back to the message, not to the +. */
@@ -129,7 +134,11 @@ export function MessageInput({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
   const [toast, setToast] = useState<string | null>(null);
-  const [secret, setSecret] = useState<SecretFinding | null>(null);
+  /** `caption`: the guard asks about a pasted file's caption, not the draft. */
+  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string } | null>(null);
+  /** Files pasted or dropped here, waiting on the sheet for Send. */
+  const [attached, setAttached] = useState<File[] | null>(null);
+  const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const caretRef = useRef<number | null>(null);
@@ -177,7 +186,7 @@ export function MessageInput({
     const bytes = new TextEncoder().encode(text.trim()).length;
     if (maxBytes && bytes > maxBytes) { showToast(`This text is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}; shorten it or use a live connection. Your draft is kept.`); return; }
     const found = confirmed ? null : findSecret(text);
-    if (found) { setSecret(found); return; }
+    if (found) { setSecret({ finding: found }); return; }
     const named = picker.compose(text);
     const err = await (named.length ? onSend(text, named) : linkPreview.preview ? onSend(text, undefined, { preview: linkPreview.preview }) : onSend(text));
     if (err) {
@@ -265,15 +274,130 @@ export function MessageInput({
     setShowIdentities(false);
   };
 
-  const sendFiles = async (files: FileList | null, input: HTMLInputElement) => {
-    const chosen = [...(files ?? [])];
-    input.value = "";
-    if (!onSendFile || disabled || fileUnavailable) return;
+  /** One after the other, as + → Document sends them; the first that cannot go stops the rest. False then. */
+  const sendChosen = async (chosen: File[]): Promise<boolean> => {
+    if (!onSendFile || disabled || fileUnavailable) return false;
     for (const file of chosen) {
       const err = await onSendFile(file);
-      if (err) { showToast(err); return; }
+      if (err) { showToast(err); return false; }
     }
+    return true;
   };
+
+  const sendFiles = (files: FileList | null, input: HTMLInputElement) => {
+    const chosen = [...(files ?? [])];
+    input.value = "";
+    void sendChosen(chosen);
+  };
+
+  /** Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. */
+  const offerFiles = (files: File[]): boolean => {
+    if (!onSendFile || disabled || !files.length) return false;
+    if (fileUnavailable) { showToast(fileUnavailable); return true; }
+    closeAll();
+    setAttached((was) => [...(was ?? []), ...files]);
+    return true;
+  };
+  const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
+
+  /**
+   * A paste's files to the sheet. True when the paste was taken; false leaves it to the field: no files, or a rich
+   * copy, is text as it always was. A paste that showed nothing at all asks the platform (a webview may keep copied
+   * files or a picture from the page).
+   */
+  const takePaste = (data: DataTransfer | null): boolean => {
+    if (locked) return false;
+    const files = pastedFiles(data);
+    if (files) return offerFiles(files);
+    if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
+    const reading = platformPastedFiles();
+    if (!reading) return false;
+    reading.then((found) => { if (found.length) offerRef.current(found); }, (error: unknown) => showToast(error instanceof Error ? error.message : String(error)));
+    return true;
+  };
+  const takeRef = useRef(takePaste); takeRef.current = takePaste;
+
+  const handlePaste = (e: ClipboardEvent) => {
+    if (takePaste(e.clipboardData)) e.preventDefault();
+  };
+
+  /** A caption goes as a message of its own after the files, through the same checks as the draft. */
+  const sendCaption = async (caption: string, confirmed = false) => {
+    if (!caption) return;
+    const bytes = new TextEncoder().encode(caption).length;
+    if (maxBytes && bytes > maxBytes) { showToast(`This caption is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}.`); return; }
+    const found = confirmed ? null : findSecret(caption);
+    if (found) { setSecret({ finding: found, caption }); return; }
+    const err = await onSend(caption);
+    if (err) showToast(err);
+  };
+
+  const sendAttached = async (caption: string) => {
+    const files = attached ?? [];
+    setAttached(null);
+    if (await sendChosen(files)) await sendCaption(caption);
+  };
+
+  // Behind the lock screen nothing is pasted or dropped in (the composer stays mounted under it).
+  const canAttach = !!onSendFile && !disabled && !locked;
+  // A paste where no field has the focus (the chat's messages clicked last) still brings its files here.
+  useEffect(() => {
+    if (!canAttach) return;
+    const paste = (e: globalThis.ClipboardEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (e.defaultPrevented || target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
+      if (takeRef.current(e.clipboardData)) e.preventDefault();
+    };
+    document.addEventListener("paste", paste);
+    return () => document.removeEventListener("paste", paste);
+  }, [canAttach]);
+
+  // Files dragged over the chat (its column, where the page marks one): a veil says they can be dropped.
+  useEffect(() => {
+    const zone = composerRef.current?.closest<HTMLElement>("[data-file-drop]") ?? composerRef.current;
+    if (!canAttach || !zone) return;
+    let depth = 0;
+    const enter = (e: DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      depth += 1;
+      setDragging(zone);
+    };
+    const over = (e: DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    };
+    const done = () => { depth = 0; setDragging(null); };
+    const leave = (e: DragEvent) => {
+      depth = Math.max(0, depth - 1);
+      // Out of the column (where the browser says where to): gone, even if an enter went uncounted.
+      const to = e.relatedTarget;
+      if (!depth || (to instanceof Node && !zone.contains(to))) done();
+    };
+    const drop = (e: DragEvent) => {
+      done();
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      offerRef.current(droppedFiles(e.dataTransfer));
+    };
+    zone.addEventListener("dragenter", enter);
+    zone.addEventListener("dragover", over);
+    zone.addEventListener("dragleave", leave);
+    zone.addEventListener("drop", drop);
+    // A drag that ends anywhere else (dropped outside, Escape) takes the veil with it.
+    window.addEventListener("drop", done);
+    window.addEventListener("dragend", done);
+    return () => {
+      zone.removeEventListener("dragenter", enter);
+      zone.removeEventListener("dragover", over);
+      zone.removeEventListener("dragleave", leave);
+      zone.removeEventListener("drop", drop);
+      window.removeEventListener("drop", done);
+      window.removeEventListener("dragend", done);
+      setDragging(null);
+    };
+  }, [canAttach]);
 
   const actions: ComposerAction[] = [];
   // A chat that chooses its own ways of paying always reaches them, to turn one on again: the reason is a hint then.
@@ -361,6 +485,7 @@ export function MessageInput({
               value={text}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               onSelect={picker.onCaret}
               {...picker.inputProps}
               onFocus={() => { setShowMenu(false); setShowIdentities(false); if (phone) setShowPanel(false); }}
@@ -455,9 +580,27 @@ export function MessageInput({
         />
       )}
       {secret && (
-        <SecretGuardDialog finding={secret} recipient={recipient ?? payments?.contact ?? identities?.contact}
-          onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void handleSubmit(true); }} />
+        <SecretGuardDialog finding={secret.finding} recipient={recipient ?? payments?.contact ?? identities?.contact}
+          onCancel={() => setSecret(null)} onConfirm={() => {
+            setSecret(null);
+            if (secret.caption !== undefined) void sendCaption(secret.caption, true);
+            else void handleSubmit(true);
+          }} />
       )}
+      {attached && !locked && (
+        <AttachmentSheet files={attached}
+          onAdd={(more) => setAttached((was) => [...(was ?? []), ...more])}
+          onRemove={(index) => setAttached((was) => was && was.length > 1 ? was.filter((_, i) => i !== index) : null)}
+          onCancel={() => setAttached(null)}
+          onSend={(caption) => void sendAttached(caption)} />
+      )}
+      {dragging && createPortal(
+        <div data-testid="file-drop-overlay" aria-hidden="true"
+          className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center bg-chat-bg/80 border-2 border-dashed border-accent rounded-lg m-2 animate-fade-in">
+          <p className="flex items-center gap-2 text-sm font-medium text-text-primary bg-panel-header rounded-full px-4 py-2 shadow-lg">
+            <DocumentGlyph />{t("composer.dropFiles")}
+          </p>
+        </div>, dragging)}
       {showCamera && onSendFile && (
         <CameraCapture onClose={() => setShowCamera(false)} onSend={(file) => {
           setShowCamera(false);

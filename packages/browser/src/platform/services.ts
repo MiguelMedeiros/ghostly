@@ -224,6 +224,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     const read = getBrowserHost().readClipboardText;
     return read ? read() : null;
   },
+  readClipboardFiles() {
+    const read = getBrowserHost().readClipboardFiles;
+    return read ? read() : null;
+  },
   callMedia: () => getBrowserHost().callMedia ?? null,
   get features() {
     return getBrowserHost().features;

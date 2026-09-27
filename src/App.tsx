@@ -13,6 +13,7 @@ import { useSettings } from "./contexts/SettingsContext";
 import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
 import { useEngineNick } from "./hooks/useAvatars";
+import { guardFileDrops } from "./lib/pastedFiles";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -142,6 +143,8 @@ export function App() {
   const { pathname } = useLocation();
   useViewportHeight();
   useThemeColor();
+  // A file dropped outside a chat never opens in place of the app; a chat takes its own drops.
+  useEffect(() => guardFileDrops(), []);
   useWakeOnReturn();
   const chats = useLoadedChats();
 

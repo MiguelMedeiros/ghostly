@@ -66,6 +66,12 @@ export interface BrowserHost {
    */
   readClipboardText?(): Promise<string>;
   /**
+   * Files copied in a file manager, or a picture, read by the platform itself for a paste whose event
+   * carried neither files nor text (a webview that hides them from the page). Left out where the page
+   * sees them in the paste event (a browser, WebKit on macOS).
+   */
+  readClipboardFiles?(): Promise<ClipboardFile[]>;
+  /**
    * Where calls get their media, when not from the page's own WebRTC. Ghostly Desktop on Linux: WebKitGTK has
    * no WebRTC there, and GStreamer runs the calls. Left out where the page has it.
    */
@@ -116,4 +122,15 @@ export function setBrowserHost(host: BrowserHost): void {
 export function getBrowserHost(): BrowserHost {
   if (!current) throw new Error("No browser host configured");
   return current;
+}
+
+/**
+ * One thing a paste brought, held by the platform: a file (its name) or a picture (no name: the page
+ * names it). `read` hands its bytes a step at a time.
+ */
+export interface ClipboardFile {
+  name: string | null;
+  size: number;
+  mime: string | null;
+  read(offset: number, length: number): Promise<Uint8Array>;
 }

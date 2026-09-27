@@ -179,3 +179,8 @@ export function useLockScreen(): LockScreenContextValue {
   }
   return context;
 }
+
+/** Whether the lock screen is up; false where there is none (a part rendered on its own). */
+export function useIsLocked(): boolean {
+  return useContext(LockScreenContext)?.isLocked ?? false;
+}

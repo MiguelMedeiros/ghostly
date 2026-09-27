@@ -424,6 +424,11 @@ export interface ServicesPlatform {
    * `readClipboardText` in `clipboard.ts`, which picks the way and checks the click.
    */
   readClipboardText(): Promise<string> | null;
+  /**
+   * Files or a picture on the clipboard read by the platform itself (the desktop app), for a paste whose
+   * event carried neither. Null where the paste event is the way. Use `nativePastedFiles` in `pastedFiles.ts`.
+   */
+  readClipboardFiles(): Promise<import("@ghostly/browser/host").ClipboardFile[]> | null;
   /** Where calls get their media, when not from the page's own WebRTC (Ghostly Desktop on Linux). Null: the page's. */
   callMedia?(): import("@ghostly/core").CallMedia | null;
   /** Largest file that can be sent, in bytes. */

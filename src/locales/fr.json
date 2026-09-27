@@ -538,6 +538,12 @@
     "sendPhoto": "Envoyer la photo",
     "closeCamera": "Fermer l'appareil photo",
     "cameraFailed": "Impossible de démarrer l'appareil photo.",
+    "sendFiles": "Envoyer des fichiers",
+    "caption": "Ajouter une légende",
+    "send": "Envoyer",
+    "sendCount": "Envoyer {{count}}",
+    "removeFile": "Retirer {{name}}",
+    "dropFiles": "Déposez pour envoyer",
     "category": {
       "recent": "Récents",
       "people": "Smileys et personnes",

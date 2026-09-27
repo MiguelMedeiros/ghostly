@@ -549,10 +549,22 @@
           "markdownDescription": "Enables the publish_signed_packet command without any pre-configured scope."
         },
         {
+          "description": "Enables the read_clipboard_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-clipboard-files",
+          "markdownDescription": "Enables the read_clipboard_files command without any pre-configured scope."
+        },
+        {
           "description": "Enables the read_clipboard_text command without any pre-configured scope.",
           "type": "string",
           "const": "allow-read-clipboard-text",
           "markdownDescription": "Enables the read_clipboard_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_pasted_bytes command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-pasted-bytes",
+          "markdownDescription": "Enables the read_pasted_bytes command without any pre-configured scope."
         },
         {
           "description": "Enables the resolve_messages command without any pre-configured scope.",
@@ -963,10 +975,22 @@
           "markdownDescription": "Denies the publish_signed_packet command without any pre-configured scope."
         },
         {
+          "description": "Denies the read_clipboard_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-clipboard-files",
+          "markdownDescription": "Denies the read_clipboard_files command without any pre-configured scope."
+        },
+        {
           "description": "Denies the read_clipboard_text command without any pre-configured scope.",
           "type": "string",
           "const": "deny-read-clipboard-text",
           "markdownDescription": "Denies the read_clipboard_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_pasted_bytes command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-pasted-bytes",
+          "markdownDescription": "Denies the read_pasted_bytes command without any pre-configured scope."
         },
         {
           "description": "Denies the resolve_messages command without any pre-configured scope.",

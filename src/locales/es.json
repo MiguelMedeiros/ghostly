@@ -538,6 +538,12 @@
     "sendPhoto": "Enviar foto",
     "closeCamera": "Cerrar cámara",
     "cameraFailed": "No se pudo iniciar la cámara.",
+    "sendFiles": "Enviar archivos",
+    "caption": "Añadir un pie",
+    "send": "Enviar",
+    "sendCount": "Enviar {{count}}",
+    "removeFile": "Quitar {{name}}",
+    "dropFiles": "Suelta para enviar",
     "category": {
       "recent": "Recientes",
       "people": "Caras y personas",

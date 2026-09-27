@@ -538,6 +538,12 @@
     "sendPhoto": "Send photo",
     "closeCamera": "Close camera",
     "cameraFailed": "The camera could not start.",
+    "sendFiles": "Send files",
+    "caption": "Add a caption",
+    "send": "Send",
+    "sendCount": "Send {{count}}",
+    "removeFile": "Remove {{name}}",
+    "dropFiles": "Drop to send",
     "category": {
       "recent": "Recent",
       "people": "Smileys & people",
