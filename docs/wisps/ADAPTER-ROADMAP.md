@@ -39,7 +39,7 @@ Gate: Every client tested against every other one, on each transport it offers.
 One payment agreement, many wallets. Each method keeps its own rules and its own risks.
 
 - **Available**: Mainnet and Testnet wallets side by side, a confirmation before real money moves
-- **Available**: Cashu and Lightning, through the mint or your own sources (NWC, LND, Core Lightning, WebLN), several Lightning cards per network
+- **Available**: Cashu and Lightning, through the mint or your own sources (NWC, LND, Core Lightning, WebLN, Breez, Fedimint), several Lightning cards per network
 - **Available**: Lightning addresses, and paying a request from any wallet
 - **Available**: Ark (Arkade and Bark), Spark, Fedimint, USDT and on-chain bitcoin, experimental; BDK on test networks only
 - **Available**: Spark, Breez and Fedimint on Mainnet (Spark and Breez with your own Breez API key; Fedimint not yet tried with real funds)
