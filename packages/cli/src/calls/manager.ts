@@ -43,6 +43,8 @@ export interface AudioInfo { socket: string; rate: CallRate; channels: 1; format
 export const RING_MS = 60_000;
 /** An answered or accepted call has this long to connect its media, then ends as `failed`. */
 export const CONNECT_MS = 30_000;
+/** How long a call whose media closed or failed waits for the contact's hang-up signal to say why. */
+export const MEDIA_GRACE_MS = 3_000;
 /** After a hang-up, the signal is cleared this much later (the apps' own delay). */
 export const CLEAR_MS = 5_000;
 
@@ -246,9 +248,11 @@ export class CallManager {
       onFrame: (frame) => call.socket?.write(frame),
       onState: (state) => {
         if (call.ended) return;
-        if (state === "connected") this.connected(call);
-        // Failed media ends the call as it does in the apps: nothing to say, the contact's side fails the same way.
-        else void this.end(call, "failed", false);
+        if (state === "connected") { this.connected(call); return; }
+        // The contact's app closes its connection as it hangs up, and that is often here before its hang-up signal
+        // (which crosses the chat session): the signal gets a moment to say so. Without one, a connection the
+        // contact closed was still a hang-up; one that failed ends the call as it does in the apps, with nothing to say.
+        this.arm(call, MEDIA_GRACE_MS, state === "closed" ? "remote-hangup" : "failed", false);
       },
     });
   }

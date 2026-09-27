@@ -6,7 +6,7 @@ import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
-import { dominantHz, tone } from "./support/tone";
+import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing
 
 /**
@@ -19,6 +19,7 @@ let relay: { url: string; server: Server };
 let dht: { bootstrap: string; destroy(): Promise<void> };
 const running: Running[] = [];
 const alice = home("alice"), bob = home("bob");
+const sockets: Record<string, string> = {};
 let env: NodeJS.ProcessEnv;
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 
@@ -51,7 +52,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     for (const dir of [alice, bob]) {
       const daemon = new Running(["--home", dir, "daemon"], env);
       running.push(daemon);
-      await daemon.waitFor((l) => l.daemon === "ready");
+      sockets[dir] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
     }
     error(await as(alice, "daemon"), "busy", 1);
     const invite = ok(await as(alice, "invite", "create", "--label", "bob"));
@@ -169,6 +170,38 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(alice, "call", "auto", "off"));
     await listenA.stop();
     await listenB.stop();
+  });
+
+  it("the call-echo example answers, greets with its WAV, and echoes the caller a second later", async () => {
+    const wav = join(alice, "greeting.wav");
+    writeFileSync(wav, wavFile(tone(300, 24000, 800), 24000));
+    const example = spawn(process.execPath, [join(import.meta.dirname, "../examples/call-echo.mjs"), wav], { env: { ...process.env, GHOSTLY_SOCKET: sockets[alice] }, stdio: ["ignore", "pipe", "pipe"] });
+    let said = "";
+    example.stdout.on("data", (d) => (said += d));
+    example.stderr.on("data", (d) => (said += d));
+    try {
+      await new Promise((r) => setTimeout(r, 1000));
+      const placed = ok(await as(bob, "call", "start", "alice")) as { call: string; audio: { socket: string } };
+      const heard: Buffer[] = [];
+      const program = connect(placed.audio.socket);
+      program.on("data", (d: Buffer) => heard.push(d));
+      await expect.poll(() => said, { timeout: 30_000 }).toContain("connected");
+      // The greeting first (the WAV's 300 Hz, resampled to the call's 48 kHz).
+      await expect.poll(() => Buffer.concat(heard).length, { timeout: 20_000 }).toBeGreaterThan(1920 * 30);
+      const start = Buffer.concat(heard).length;
+      program.write(tone(520, 48000, 1500));
+      await expect.poll(() => Buffer.concat(heard).length, { timeout: 20_000 }).toBeGreaterThan(start + 1920 * 150);
+      const all = Buffer.concat(heard);
+      const greetingPart = all.subarray(1920 * 5, 1920 * 30);
+      expect(dominantHz(greetingPart, 48000)).toBeCloseTo(300, -1);
+      // The echo comes back about a second after the tone went: look where it must be by then.
+      expect(dominantHz(all.subarray(start + 1920 * 100, start + 1920 * 140), 48000)).toBeCloseTo(520, -1);
+      ok(await as(bob, "call", "hangup"));
+      await expect.poll(() => said, { timeout: 20_000 }).toContain("ended: remote-hangup");
+      program.destroy();
+    } finally {
+      example.kill();
+    }
   });
 
   it("send files: a small one taken at once, a large one only once accepted, saved byte for byte", async () => {
