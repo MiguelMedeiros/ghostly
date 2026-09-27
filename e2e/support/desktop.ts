@@ -1,6 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -192,6 +192,13 @@ export function desktopHome(name: string): { dir: string; remove: () => void } {
   const dir = mkdtempSync(join(tmpdir(), `ghostly-desktop-${name}-`));
   // The app may still be writing its store for a moment after it closed.
   return { dir, remove: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }) };
+}
+
+/** Attaches each app log (`ghostly.log`) under a Desktop home to the running test: what a failure looked like from Rust. */
+export function attachDesktopLogs(name: string, home: string): void {
+  const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);
+  for (const file of find(home)) void base.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
 }
 
 const homeEnv = (dir: string): Record<string, string> => {

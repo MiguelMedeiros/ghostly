@@ -45,6 +45,8 @@ export interface Person {
    * WebRTC, and whether it can call at all (a Linux Desktop has no WebRTC and calls natively, in GStreamer).
    */
   callButton(): Promise<{ disabled: boolean; title: string | null; rtc: boolean; calls: boolean }>;
+  /** The call window's text, or null when there is no call window. */
+  callWindow(): Promise<string | null>;
 }
 
 /** `callButton` as a page script, for Desktop (WebDriver runs a string). */
@@ -116,6 +118,10 @@ export function webPerson(actor: Actor): Person {
         await actor.page.goto(url);
         await expect(chatPane(actor)).toBeVisible({ timeout: 60_000 });
       };
+    },
+    callWindow: async () => {
+      const window = page().getByTestId("call-window");
+      return (await window.count()) ? window.first().innerText() : null;
     },
     callButton: () => page().evaluate(() => {
       const button = document.querySelector<HTMLButtonElement>('[data-testid="call-audio"]');
@@ -228,6 +234,7 @@ export async function desktopPerson(name: string, options: {
       };
     },
     callButton: () => run(CALL_BUTTON),
+    callWindow: () => run<string | null>(`return document.querySelector('[data-testid="call-window"]')?.innerText ?? null;`),
     stop: () => session.stop(),
   };
   return person;

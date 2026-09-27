@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { expect, type TestInfo } from "@playwright/test";
-import { desktopHome } from "../support/desktop";
+import { attachDesktopLogs, desktopHome } from "../support/desktop";
 import type { LocalRelay } from "../support/relay";
 import type { Combination } from "./dimensions";
 import { desktopPerson, type Person } from "./people";
@@ -43,7 +43,7 @@ export async function desktopNetwork(relay: LocalRelay): Promise<{ env: Record<s
 export async function openDesktopPerson(w: Pick<DesktopWorld, "cleanup">, name: string, env: Record<string, string>): Promise<Person> {
   const home = desktopHome(name);
   const person = await desktopPerson(name, { home: home.dir, env });
-  w.cleanup.push(async () => { await person.stop(); home.remove(); });
+  w.cleanup.push(async () => { await person.stop(); attachDesktopLogs(name, home.dir); home.remove(); });
   return person;
 }
 
@@ -190,7 +190,13 @@ async function calls({ a, b }: DesktopWorld): Promise<void> {
   if (await reason(a, b) || await reason(b, a)) return;
   await a.press("Audio call");
   await b.press("Accept audio call");
+  // Connected on both sides (the call window's clock) before it ends: a call hung up while connecting logs no end.
+  // No word boundary: WebKit's innerText runs the title into the clock ("Audio call00:59").
+  for (const p of [a, b]) {
+    await expect.poll(async () => /\d{1,2}:\d{2}/.test((await p.callWindow()) ?? ""), { timeout: 60_000, message: `${p.name}'s call connects` }).toBe(true);
+  }
   await b.press("End call");
+  for (const p of [a, b]) await expect.poll(() => p.callWindow(), { timeout: 60_000, message: `${p.name}'s call window closes` }).toBeNull();
   await expect.poll(async () => (await a.snapshot()).includes("Audio call ended"), { timeout: 60_000 }).toBe(true);
 }
 

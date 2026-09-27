@@ -1,7 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { desktopHome } from "../support/desktop";
+import { attachDesktopLogs, desktopHome } from "../support/desktop";
 import { LocalRelay } from "../support/relay";
 import { desktopNetwork } from "../matrix/desktop";
 import { desktopPerson, type DesktopPerson } from "../matrix/people";
@@ -41,20 +39,13 @@ const picture = (p: DesktopPerson) => p.app.execute<{ width: number; time: numbe
 
 const callWindows = (p: DesktopPerson) => p.app.execute<number>(`return document.querySelectorAll('[data-testid="call-window"]').length;`);
 
-/** The call window's clock: the call is connected. */
+/** The call window's clock: the call is connected. No word boundary: WebKit's innerText runs the title into it. */
 const connected = (p: DesktopPerson) => p.app.execute<boolean>(`
-  return /\\b\\d{1,2}:\\d{2}\\b/.test(document.querySelector('[data-testid="call-window"]')?.innerText ?? "");`);
+  return /\\d{1,2}:\\d{2}/.test(document.querySelector('[data-testid="call-window"]')?.innerText ?? "");`);
 
 const button = (p: DesktopPerson, selector: string) => p.app.execute<{ disabled: boolean; title: string | null } | null>(`
   const button = document.querySelector(arguments[0]);
   return button ? { disabled: button.disabled, title: button.getAttribute("title") } : null;`, selector);
-
-/** Each app's own log (`ghostly.log`): what the native call said when something went wrong. */
-function attachLogs(name: string, home: string): void {
-  const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
-    .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);
-  for (const file of find(home)) void test.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
-}
 
 test("two Linux Desktops call each other: decline, then sound and pictures both ways, mute, camera off, hang up", {
   tag: ["@feature:calls.linux-native", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.decline"],
@@ -73,7 +64,7 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
         const window = await person.app.execute<string>(`return document.querySelector('[data-testid="call-window"]')?.innerText ?? "(no call window)";`).catch(() => "");
         test.info().annotations.push({ type: `${name} at the end`, description: `${JSON.stringify(seen)} ${window}` });
         await person.stop();
-        attachLogs(name, home.dir);
+        attachDesktopLogs(name, home.dir);
         home.remove();
       });
       return person;
