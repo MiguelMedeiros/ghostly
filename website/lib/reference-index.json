@@ -1073,7 +1073,7 @@
     "title": "WISP 900: Group Session Negotiation",
     "status": "Draft",
     "updated": "2026-09-24",
-    "implementation": "Two profiles: group-mesh/1 (private, up to eight) and group-community/1 (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members",
+    "implementation": "Two profiles: group-mesh/1 (private, up to 32) and group-community/1 (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members",
     "dependencies": [
       "02-peer-keys.md",
       "03-capabilities.md",
@@ -1084,7 +1084,7 @@
     "notices": [],
     "benefit": "How a group agrees on who is in it, locks out whoever left, and moves messages between members, never through the DHT.",
     "level": "available",
-    "note": "Two profiles implemented: group-mesh/1 (private, up to eight members, one admin) and group-community/1 (a link anyone can open, up to 256). Text, a picture and payments between members; web, desktop and extension."
+    "note": "Two profiles implemented: group-mesh/1 (private, up to 32 members, one admin; a member who was away is caught up by whoever is there) and group-community/1 (a link anyone can open, up to 256). Text, a picture and payments between members; web, desktop and extension."
   },
   {
     "file": "901-gossipsub.md",
@@ -1153,9 +1153,9 @@
     ],
     "summary": "Payments between two members are part of it (§ Payments): the money travels on their edge, the group sees a note. Files, media, calls and local services are not part of this profile and are refused in groups.",
     "notices": [],
-    "benefit": "Up to eight people, each pair on its own authenticated link, with a fresh group key whenever someone joins or leaves.",
+    "benefit": "Up to 32 people, each pair on its own authenticated link, with a fresh group key whenever someone joins or leaves.",
     "level": "available",
-    "note": "Text, a picture set by the admin, and payments between two members over their own link; files and calls are refused in groups. A member who was away catches up from each author's recent messages. Number not yet assigned."
+    "note": "Text, a picture set by the admin, and payments between two members over their own link; files and calls are refused in groups. A member who was away catches up from any member who has what it missed, not only from each author. Number not yet assigned."
   },
   {
     "file": "ADAPTER-ROADMAP.md",

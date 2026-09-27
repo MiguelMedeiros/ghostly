@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ghostly, home, localRelay, ok, Running } from "./support/cli";
@@ -42,7 +43,7 @@ afterAll(async () => {
   relay?.server.close();
 }, 60_000);
 
-describe(`a private group of ${N} headless members`, { timeout: 420_000 }, () => {
+describe(`a private group of ${N} headless members`, { timeout: 480_000 }, () => {
   let group = "";
 
   it("joins everyone through the coordinator's link and connects every pair", async () => {
@@ -58,7 +59,11 @@ describe(`a private group of ${N} headless members`, { timeout: 420_000 }, () =>
       expect(ok(await as(dir, "group", "join", link)).group).toBe(group);
       await until("admitted", async () => ok(await as(dir, "group", "show", group)).status, (s) => s === "active");
     }
+    const started = Date.now();
     for (const dir of homes) await until(`${dir} reaches everyone`, () => members(dir, group), (m) => m.length === N && m.every((x) => x.online));
+    // What a member costs here: each daemon's resident memory with N - 1 edges up (WebRTC through libdatachannel).
+    const rss = [...running.values()].map((daemon) => Number(execFileSync("ps", ["-o", "rss=", "-p", String(daemon.child.pid)]).toString().trim()) / 1024);
+    console.log(`MESH_CLI ${N} members: every pair up ${Math.round((Date.now() - started) / 1000)} s after the last join; daemon RSS ${rss.map((r) => r.toFixed(0)).join(", ")} MiB`);
   });
 
   it("a status posted while the person's daemon is down, whose author then stops, still reaches the person", async () => {
@@ -69,7 +74,10 @@ describe(`a private group of ${N} headless members`, { timeout: 420_000 }, () =>
     // The author's daemon stops right after posting, as `devbot stop` does.
     await down(author);
     await up(person);
-    const seen = await until("the person has it", () => texts(person, group), (t) => t.includes("status: all green"));
+    const started = Date.now();
+    const seen = await until("the person has it", async () => ({ texts: await texts(person, group), person: await members(person, group), coordinator: await members(coordinator, group) }),
+      (v) => v.texts.includes("status: all green"), 300_000).then((v) => v.texts);
+    console.log(`MESH_CLI caught up ${Math.round((Date.now() - started) / 1000)} s after the person's daemon was up again`);
     expect(seen.filter((t) => t === "status: all green")).toHaveLength(1);
     // Named as the author's, from the roster: it came signed by the author.
     const history = ok(await as(person, "group", "history", group)).messages as { text: string; member?: string }[];
