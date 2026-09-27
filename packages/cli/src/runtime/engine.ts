@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { fromBase64Url } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
+import { loadCallStack } from "../calls/media";
 import { nodeLocalFetch } from "../services";
 import { installFileFetch } from "./fileFetch";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
@@ -13,6 +14,8 @@ export interface Runtime {
   readonly paths: ProfilePaths;
   /** WebRTC runs here (node-datachannel loaded). */
   readonly webrtc: boolean;
+  /** Why voice calls cannot run here, or null when they can (node-datachannel's media and Opus loaded). */
+  readonly callsUnavailable: string | null;
   readonly server: EngineServer;
   readonly store: PersistentIndexedDb;
   /** Says goodbye to peers, then folds the store. */
@@ -86,6 +89,9 @@ function irohWasmBytes(): Buffer {
 export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
   const store = await openPersistentIndexedDb(paths.db);
   const webrtc = await installWebRtc();
+  // Voice calls (WISP 11xx § Calls): offered to contacts (calls/1) only where their media can run.
+  const stack = webrtc ? await loadCallStack() : "Calls need WebRTC, which is off on this headless Ghostly";
+  const callsUnavailable = typeof stack === "string" ? stack : null;
   installFileFetch();
   await installEventSource();
   await preloadWalletModules();
@@ -108,6 +114,8 @@ export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
     // Local web apps may be shared with a contact, reached on loopback only (src/services.ts).
     servicesSupport: true,
     localFetch: nodeLocalFetch,
+    callsSupport: callsUnavailable === null,
+    ...(callsUnavailable ? { callsUnavailable } : {}),
   });
   try {
     await server.ready;
@@ -117,7 +125,7 @@ export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
   }
   let closing: Promise<void> | null = null;
   return {
-    paths, server, store, webrtc,
+    paths, server, store, webrtc, callsUnavailable,
     close: () => (closing ??= (async () => {
       await server.node.shutdown().catch(() => {});
       await store.close();

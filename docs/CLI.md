@@ -94,7 +94,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 Main types: `message.received`, `message.delivery`, `chat.pairing`, `chat.connection`, `chat.joined`,
 `typing.started` and `typing.stopped`,
 `group.message` (with `mentioned`), `group.members`, `file.offered`, `file.done`, `payment.created`,
-`payment.updated`, `identity.received`, `call.offer`. The full list is in the
+`payment.updated`, `identity.received`, `call.incoming`, `call.connected`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
 
 ## What it does
@@ -109,6 +109,7 @@ Main types: `message.received`, `message.delivery`, `chat.pairing`, `chat.connec
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
 | Identities | `identity providers\|list\|add\|complete`, `identity share\|withdraw <chat> <id>`, `identity contact <chat>` |
 | Shared services | `service add <name> http://127.0.0.1:<port>`, `service share <service> <chat>`, `service peer\|open\|close` |
+| Voice calls | `call start <chat>`, `call answer`, `call auto on [--from <chat>]`, `call hangup\|list\|flush`, `call pipe`: the audio as raw PCM on a Unix socket per call, for a program of yours |
 
 Safety rules the CLI enforces:
 
@@ -135,6 +136,33 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
 - A payment bot on Testnet ("request 21", "tip 5", "balance", and a thank-you when a request is paid):
   [examples/payment-bot.mjs](../packages/cli/examples/payment-bot.mjs). Before it:
   `ghostly wallet create cashu && ghostly wallet faucet cashu && ghostly daemon --detach`.
+- A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
+  greeting (speaking over it stops it), then echoes the caller a second later.
+
+## Voice calls
+
+A bot or an agent can join a voice call with the apps. The CLI runs the call (WebRTC with Opus, as the apps) and
+hands its audio to your program; speech-to-text, a model or text-to-speech are your program's, not Ghostly's.
+
+```bash
+ghostly daemon --detach
+ghostly call auto on --from alice        # or: ghostly call answer alice, on each call.incoming event
+ghostly listen --type call.              # call.connected carries {"audio":{"socket":…,"rate":48000,…}}
+```
+
+The audio contract, one Unix socket per call:
+
+- **Format.** Raw PCM, no framing: s16le, mono, at the call's rate (48000 by default; 24000, 16000, 12000 or 8000
+  with `--rate`).
+- **From the call.** The contact's voice in 20 ms frames, as they are decoded.
+- **To the call.** Write any amount, at any pace: the CLI plays it at real time, and silence when there is nothing.
+- **Barge-in.** `ghostly call flush` drops what is queued, at once.
+- **End.** The program reads EOF when the call ends; `call.ended` says why (`hangup`, `remote-hangup`, `missed`,
+  `rejected`, `unanswered`, `failed`, `stopped`).
+- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg.
+
+Voice only: a video call is answered as a voice call. The details are in the
+[package README](../packages/cli/README.md#calls).
 
 ## Not there yet
 
@@ -144,7 +172,7 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
 - **A single binary.** The CLI needs Node; there is no standalone executable yet.
 - **An npm release.** Install from source until the package is published.
 - Also open: link previews made by the sender, and holding messages for an away contact. OpenID Connect proofs
-  need a browser: make them in the app. Calls are app-only (a bot gets `call.offer` events only).
+  need a browser: make them in the app. Calls are voice only (no video).
 
 ## The older `ghostly-cli`
 

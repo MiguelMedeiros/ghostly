@@ -13,6 +13,7 @@ import { GROUP_ADMIN_METHODS } from "./groupAdmin";
 import { IDENTITY_METHODS } from "./identities";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
+import { CALL_METHODS } from "./calls/api";
 import { WALLET_METHODS } from "./wallets";
 import { chatDetailsJson, chatJson, groupJson, messageJson } from "./views";
 
@@ -116,12 +117,13 @@ const METHODS: Record<string, Method> = {
   ...IDENTITY_METHODS,
   ...SERVICE_METHODS,
   ...BACKUP_METHODS,
+  ...CALL_METHODS,
 
   async status(ctx) {
     const s = state(ctx);
     return {
       version: ctx.version, profile: ctx.runtime.paths.name, mode: ctx.mode, pid: process.pid,
-      online: s.settings.online, name: s.settings.nick || null, webrtc: ctx.runtime.webrtc,
+      online: s.settings.online, name: s.settings.nick || null, webrtc: ctx.runtime.webrtc, calls: ctx.runtime.callsUnavailable === null,
       chats: s.links.length, live: s.links.filter((l) => l.textDelivery === "stream").length, groups: s.groups.length,
       discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
       events: { lastSeq: ctx.hub.lastSeq },

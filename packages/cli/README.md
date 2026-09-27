@@ -73,7 +73,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 
 | Command | What it does |
 |---|---|
-| `status` | The profile, its chats, whether WebRTC runs, the last event seq |
+| `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
 | `profile create <name> [--use] [--name <shown>]`, `profile list`, `profile use <name>` | Profiles |
 | `profile show`, `profile set [--name <name>] [--share-profile \| --no-share-profile]` | The name contacts see |
 | `daemon [--detach]`, `daemon status`, `daemon stop` | Keep the profile online |
@@ -120,6 +120,10 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
 | `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
 | `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
+| `call start <chat> [--rate 48000]`, `call answer [<chat\|call>] [--rate n]` | Voice calls (daemon): the result names the call's audio socket ([Calls](#calls)) |
+| `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
+| `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
+| `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg) |
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 
@@ -189,8 +193,8 @@ refused without it.
   `file.stage`, `file.done`, `file.failed`, `identity.received` and `identity.status` (what a contact
   showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted`, `group.removed`, `payment.created` and
   `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
-  settled|failed, network, method), `call.offer` (a call came; headless
-  Ghostly has no media), `events.gap` (the journal no longer holds what `--since` asked for).
+  settled|failed, network, method), `call.incoming`, `call.outgoing`, `call.connected` and `call.ended` (voice
+  calls: see [Calls](#calls)), `events.gap` (the journal no longer holds what `--since` asked for).
 - A message that answers another carries `replyTo`: `{id, snippet, from, member?, found}`. `id` is the original's
   message id in this chat when it is here (`found: true`, and `snippet` and `from` come from that copy), else the id
   the reply named; `from` is `me`, `peer` or null (only the id came, over the DHT). Answer one with
@@ -222,9 +226,63 @@ delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|reques
 receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `payment.list|check|reclaim`,
 `file.send|list|action|save`, `group.invite|remove|admin|rotate|link|picture`, `profile.picture|backup`,
 `identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `service.list|add|remove|enable|share|peer|open|close`,
+`call.start|answer|hangup|list|get|flush|auto`,
 `events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
 `{"method":"<engine call>","params":{…},"confirmReal":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.
+
+## Calls
+
+A bot or an agent can take part in a voice call with the apps (calls/1, WISP 601): the CLI runs the call's media and
+hands its audio to a program of yours, over a Unix socket per call. Speech-to-text, a model or text-to-speech are the
+program's business, not Ghostly's. Audio only: a video call is answered as a voice call (the contact's camera is not
+shown, and nothing is sent on its video lane). Calls need the daemon.
+
+```sh
+ghostly daemon --detach
+ghostly call auto on --from alice          # or answer each one: ghostly call answer alice
+ghostly listen --type call.                # call.incoming … call.connected {"audio":{"socket":…}}
+node examples/call-echo.mjs greeting.wav   # a program that answers, greets, then echoes after 1 s
+```
+
+**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `/tmp/ghostly-calls-<hash>/<call>.sock` (in a
+folder of yours alone, 0700) when that path is too long; `call start`, `call answer`, `call list` and the
+`call.connected` event name it. It carries raw PCM,
+with no framing:
+
+- s16le, mono, at the call's rate: 48000 by default, or 24000, 16000, 12000, 8000 with `--rate`. Opus runs at that
+  rate itself, so nothing is resampled.
+- From the call: the contact's audio in 20 ms frames (1920 bytes at 48 kHz, 640 at 16 kHz), as they are decoded.
+- To the call: any amount, at any time. Writing faster than real time is fine: the CLI queues it (up to 5 minutes),
+  sends a 20 ms frame per tick at real time, and silence when the queue is empty. A partial frame waits 60 ms for the
+  rest of it, then plays padded.
+- Barge-in: `ghostly call flush` (or `call.flush` on the socket API) drops everything queued, at once. Stop writing
+  before you flush.
+- The socket exists from `call start`/`call answer`, so the program may connect before the media is up. One program
+  at a time: a new connection replaces the old one. When the call ends, the program reads EOF and the socket is
+  removed.
+- Added latency inside the CLI: at most one 20 ms frame going out; coming in, a frame as soon as its packet is
+  decoded (up to 40 ms more when a packet is late; a lost one becomes 20 ms of silence).
+
+**Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`,
+`call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, and `call.ended`
+`{call, chat, direction, reason, duration?}` with `reason`:
+
+| `reason` | |
+|---|---|
+| `hangup` | This side hung up, or declined a call that rang |
+| `remote-hangup` | The contact hung up a connected call |
+| `missed` | An incoming call stopped ringing unanswered (the contact gave up, or its offer went stale after 120 s) |
+| `rejected` | The contact declined this side's call |
+| `unanswered` | This side's call rang 60 s with no answer |
+| `failed` | The media did not connect within 30 s, or dropped |
+| `stopped` | The daemon stopped (its calls are hung up first) |
+
+**Rules**, as in the apps: one call per chat, several chats may each have one; a call needs the chat live (the call
+buttons of the contact's app say why when not); an offer that is older than 120 s does not ring. `call auto` is
+kept in the profile's `calls.json`. The media is libdatachannel (node-datachannel, as for chats) and libopus built to
+WebAssembly (`opusscript`); `status` says `calls: false` and `call list` says why where they cannot run.
+`GHOSTLY_CALL_BIND=127.0.0.1` binds the call's media to one address (the tests use loopback).
 
 ## Transports
 
@@ -238,12 +296,14 @@ turns WebRTC off.
 
 - **DHT-direct**: the DHT floor goes through the Pkarr relays, as in the web app; reading the Mainline DHT directly,
   as the Desktop does, needs a BEP 44 client on Node.
-- **Bark and Fedimint** wallets (see above), **OpenID Connect** proofs (a browser window) and calls (no media).
+- **Bark and Fedimint** wallets (see above), **OpenID Connect** proofs (a browser window), and video in calls
+  (calls are voice only).
 - **A single binary**: the CLI needs Node.
 - Link previews made by the sender, and holding messages for an away contact.
 
 ## Tests
 
 `npm test -w @ghostly/cli` builds the CLI and runs the unit tests and a two-bot end-to-end test on loopback (a Pkarr
-relay in the test process and a HyperDHT testnet). `e2e/web/headless-chat.spec.ts` puts a bot and the web app in one
-chat.
+relay in the test process and a HyperDHT testnet), a voice call between them included.
+`e2e/web/headless-chat.spec.ts` puts a bot and the web app in one chat; `e2e/web/headless-call.spec.ts` has them
+call each other, with a tone each way.

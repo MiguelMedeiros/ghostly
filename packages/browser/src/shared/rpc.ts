@@ -227,7 +227,7 @@ export interface EngineApi {
   setServiceEnabled(params: { serviceId: string; enabled: boolean }): void;
   setServiceShared(params: { serviceId: string; peerPubKeyZ32: string; shared: boolean }): void;
   updateSettings(params: { settings: SettingsPatch }): void;
-  setCallSignal(params: { linkId: string; signal: string | null }): void;
+  setCallSignal(params: { linkId: string; signal: string | null }): Promise<void>;
   /**
    * This side is typing in a paired chat (true), or stopped: cleared the text, sent it, left the chat (false). Said
    * on the live session only, throttled there; nothing is said while Settings `sendTyping` is off.

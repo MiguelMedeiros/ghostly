@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { announceJoins } from "./announce";
 import { callApi, type ApiContext } from "./api";
+import { CallManager } from "./calls/manager";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { acquireLock, type ProfilePaths } from "./profiles";
@@ -31,6 +32,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     throw error;
   }
   const hub = new EventHub(paths.events);
+  let calls!: CallManager;
   try {
     await hub.open();
     const node = runtime.server.node;
@@ -40,17 +42,23 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     for (const group of now.groups) histories.set(`group:${group.id}`, await node.groupMessages({ groupId: group.id }));
     hub.baseline(now, histories);
     announceJoins(hub, node);
+    // Calls (WISP 11xx § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
+    calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
+    const manager = calls;
+    hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
     runtime.server.attach(hub.sink);
   } catch (error) {
     await runtime.close().catch(() => {});
     release();
     throw error;
   }
-  const ctx: ApiContext = { runtime, hub, mode, version };
+  const ctx: ApiContext = { runtime, hub, mode, version, calls };
   let closing: Promise<void> | null = null;
   return {
     ctx,
     close: () => (closing ??= (async () => {
+      // Every call is hung up while the engine can still tell the contact.
+      await calls.stopAll().catch(() => {});
       runtime.server.detach(hub.sink);
       await runtime.close().catch(() => {});
       release();
