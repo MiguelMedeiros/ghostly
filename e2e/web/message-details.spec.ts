@@ -123,7 +123,7 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   await close(alice.page);
 });
 
-test("message details on a phone: a long press opens a sheet from the bottom", { tag: ["@feature:chat.paired.message-details", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+test("message details on a phone: a long press opens the quick bar, and Details under it a sheet from the bottom", { tag: ["@feature:chat.paired.message-details", "@feature:app.mobile-layout", "@feature:chat.reactions"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("details-phone-alice"), peer("details-phone-bob", { mobile: true })]);
   await pair(alice, bob);
   await say(alice, "press and hold me");
@@ -135,6 +135,9 @@ test("message details on a phone: a long press opens a sheet from the bottom", {
   await row.dispatchEvent("pointerdown", at);
   await bob.page.waitForTimeout(700);
   await row.dispatchEvent("pointerup", at);
+  // The reactions' quick bar (WISP 400 § Reactions), with the details one tap under it.
+  await expect(bob.page.getByTestId("reaction-bar").getByTestId("reaction-quick")).toHaveCount(6);
+  await bob.page.getByTestId("reaction-bar-details").click();
   await expect(panel(bob.page)).toHaveAttribute("data-loaded", "yes");
   await expect(panel(bob.page)).toHaveAttribute("data-side", "bottom");
   await expect(field(bob.page, "Received over")).toHaveText("WebRTC, direct");

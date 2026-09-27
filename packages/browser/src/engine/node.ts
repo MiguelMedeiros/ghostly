@@ -280,6 +280,8 @@ export interface NodeOptions {
    * (WISP 102). It loads when a chat first starts an endpoint, not with the app.
    */
   irohWeb?: boolean;
+  /** Reactions on 1:1 chats (`react/1`, WISP 401 § Reactions). Default on; off only stands in for an older app in tests. */
+  reactions?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -3183,7 +3185,7 @@ export class GhostlyNode implements EngineImplementation {
       largeFilesSupport: true,
       // 1:1 chats only: group edges (startEdge) never offer it.
       typingSupport: true,
-      reactionsSupport: true,
+      reactionsSupport: this.options.reactions !== false,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });

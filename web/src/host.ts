@@ -30,6 +30,15 @@ function testIroh(): boolean {
 }
 
 /**
+ * Tests only: `localStorage["ghostly-test-reactions"] = "off"` makes this page's peer an app from before reactions
+ * (WISP 401 § Reactions): it never says `react/1`, so the compatibility spec can check what an older contact sees.
+ * Read once.
+ */
+function testReactions(): Pick<NodeOptions, "reactions"> {
+  try { return localStorage.getItem("ghostly-test-reactions") === "off" ? { reactions: false } : {}; } catch { return {}; }
+}
+
+/**
  * Ghostly on the web: the peer runs in this page and lives as long as the tab.
  * Two things a web page cannot do stay with the extension and the desktop app:
  * reaching web apps on the user's machine (no way to be granted access, only
@@ -40,7 +49,7 @@ export const webHost = createInPageHost({
   notice: "Beta. Keys and wallet data live in this browser. Pocket money only.",
   features: { shareLocalServices: false, openServices: false, profiles: true },
   // Iroh through a relay (WISP 102): where WebRTC cannot connect, before the chat drops to the DHT.
-  node: { ...testPace(), irohWeb: testIroh() },
+  node: { ...testPace(), ...testReactions(), irohWeb: testIroh() },
 
   /**
    * The deployed build says what it is in `/version.json`, on this origin and
