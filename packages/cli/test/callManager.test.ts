@@ -138,7 +138,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(level(bob.heard().subarray(mark + 640 * 10, mark + 640 * 25))).toBeLessThan(0.01);
 
     // Where the call runs, for a person reading `call list` when one does not connect.
-    expect(a.calls.list()).toMatchObject([{ state: "connected", stats: { programConnected: true, ice: { state: expect.stringMatching(/^(connected|completed)$/), pair: expect.stringMatching(/:\d+ host <-> .+:\d+ host$/) } } }]);
+    expect(a.calls.list()).toMatchObject([{ state: "connected", stats: { programConnected: true, ice: { state: expect.stringMatching(/^(connected|completed)$/), pair: expect.stringMatching(/:\d+ host <-> .+:\d+ (host|prflx)$/) } } }]);
     await b.calls.hangup("chat-ba");
     await Promise.all([alice.ended, bob.ended]);
     const endedA = await until(() => a.events.find((e) => e.type === "call.ended"));
