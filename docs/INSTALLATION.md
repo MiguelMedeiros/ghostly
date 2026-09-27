@@ -36,7 +36,7 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 | Linux x64, Debian/Ubuntu | [Ghostly_0.4.0_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.deb) |
 
 - **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings, Updates** allows it, and nothing installs without your OK.
-- **Linux has no calls and no WebRTC** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT.
+- **Linux has no WebRTC in its WebView** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT, and calls run in the app itself, with GStreamer: the `.deb` and `.rpm` depend on its base and good plugins, and the AppImage carries them. If a plugin is missing, the call buttons name the package to install. Screen sharing is not available on Linux yet.
 - **Checksums.** Each release has `SHA256SUMS.txt` and its signature `SHA256SUMS.txt.asc`. Check a download with `shasum -a 256 -c SHA256SUMS.txt --ignore-missing`.
 
 ## CLI
@@ -72,7 +72,7 @@ Requirements (what the release workflow uses):
 
 - Node.js 22 and npm
 - Rust, stable toolchain
-- The [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS. On Debian/Ubuntu: `libwebkit2gtk-4.1-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev`
+- The [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS. On Debian/Ubuntu: `libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev`
 
 ```bash
 git clone https://github.com/MiguelMedeiros/ghostly.git

@@ -293,6 +293,12 @@ export interface NodeOptions {
    * Default: everywhere but the web app, which can do neither (a tab has no way to reach localhost).
    */
   servicesSupport?: boolean;
+  /**
+   * Whether paired chats offer `calls/1`. Default: where the page has WebRTC. Ghostly Desktop on Linux says
+   * itself: its calls run in GStreamer, and when that is missing, `callsUnavailable` says what to install.
+   */
+  callsSupport?: boolean;
+  callsUnavailable?: string;
 }
 
 export interface NodeEvents {
@@ -2963,8 +2969,10 @@ export class GhostlyNode implements EngineImplementation {
       barkPaymentsSupport: true,
       params: stored,
       rtcAvailable: typeof RTCPeerConnection !== "undefined",
-      // Call media is a WebRTC connection of its own, whatever carries the chat: no WebRTC, no calls (Linux WebKitGTK).
-      callsSupport: typeof RTCPeerConnection !== "undefined",
+      // Call media is a WebRTC connection of its own, whatever carries the chat: the page's, or the host's own
+      // (Ghostly Desktop on Linux, where WebKitGTK has none, brings GStreamer's).
+      callsSupport: this.options.callsSupport ?? typeof RTCPeerConnection !== "undefined",
+      callsMissing: this.options.callsUnavailable,
       largeFilesSupport: true,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {

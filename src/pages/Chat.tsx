@@ -145,11 +145,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     [addSystemMessage],
   );
 
+  const platform = useServicesPlatform();
   const webrtc = useWebRTC({
     incomingCallSignal,
     publishCallSignal: setCallSignal,
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
+    media: platform?.callMedia?.(),
   });
 
   const callState = webrtc.callState;
@@ -175,7 +177,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     return signalHasVideo(parseCallSignal(incomingCallSignal));
   })();
 
-  const platform = useServicesPlatform();
   const paired = session?.profile === "paired-chat/1";
   // A chat made with a v0.4 code (WISP 402): kept working both ways, never created by this app.
   const compat = !!session && !paired;

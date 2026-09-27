@@ -761,7 +761,7 @@
     "slug": "601-webrtc-media",
     "title": "WISP 601: WebRTC Media",
     "status": "Draft",
-    "updated": "2026-09-25",
+    "updated": "2026-09-26",
     "implementation": "Compatibility chats (call) and the chat session of every new chat (calls/1); capture varies by platform.",
     "documentKind": "Profile",
     "dependencies": [

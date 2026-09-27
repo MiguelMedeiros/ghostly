@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { expect, type TestInfo } from "@playwright/test";
-import { desktopHome } from "../support/desktop";
+import { attachDesktopLogs, desktopHome } from "../support/desktop";
 import type { LocalRelay } from "../support/relay";
 import type { Combination } from "./dimensions";
 import { desktopPerson, type Person } from "./people";
@@ -43,7 +43,7 @@ export async function desktopNetwork(relay: LocalRelay): Promise<{ env: Record<s
 export async function openDesktopPerson(w: Pick<DesktopWorld, "cleanup">, name: string, env: Record<string, string>): Promise<Person> {
   const home = desktopHome(name);
   const person = await desktopPerson(name, { home: home.dir, env });
-  w.cleanup.push(async () => { await person.stop(); home.remove(); });
+  w.cleanup.push(async () => { await person.stop(); attachDesktopLogs(name, home.dir); home.remove(); });
   return person;
 }
 
@@ -167,18 +167,19 @@ async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
 }
 
 /**
- * Calls in the chat (`calls/1`). Call media is a WebRTC connection of its own, whatever carries the chat, so a
- * client without WebRTC (Desktop on Linux: WebKitGTK) cannot call: its buttons say so, and a live contact's say
- * the contact cannot take calls. Where both sides can, a call is placed, answered and ended.
+ * Calls in the chat (`calls/1`). Call media is a WebRTC connection of its own, whatever carries the chat: the
+ * page's, or on a Linux Desktop (WebKitGTK has none) the app's own, in GStreamer, with a test picture and tone
+ * here. A client that cannot call says so on its buttons, and a live contact's say the contact cannot take
+ * calls. Where both sides can and the pair is live, a call is placed, answered and ended.
  */
 async function calls({ a, b }: DesktopWorld): Promise<void> {
   for (const p of [a, b]) await p.go(p.chatHash!);
-  const rtc = new Map<Person, boolean>();
-  for (const p of [a, b]) rtc.set(p, (await p.callButton()).rtc);
+  const calling = new Map<Person, boolean>();
+  for (const p of [a, b]) calling.set(p, (await p.callButton()).calls);
   const reason = async (p: Person, other: Person): Promise<string | null> => {
-    if (!rtc.get(p)) return "Calls are not available in this app";
+    if (!calling.get(p)) return "Calls are not available in this app";
     if (!/Connected ·/.test(await p.connection())) return "Calls need a live connection";
-    return rtc.get(other) ? null : "Your contact's app cannot take calls";
+    return calling.get(other) ? null : "Your contact's app cannot take calls";
   };
   for (const [p, other] of [[a, b], [b, a]] as const) {
     await expect.poll(async () => {
@@ -189,7 +190,13 @@ async function calls({ a, b }: DesktopWorld): Promise<void> {
   if (await reason(a, b) || await reason(b, a)) return;
   await a.press("Audio call");
   await b.press("Accept audio call");
+  // Connected on both sides (the call window's clock) before it ends: a call hung up while connecting logs no end.
+  // No word boundary: WebKit's innerText runs the title into the clock ("Audio call00:59").
+  for (const p of [a, b]) {
+    await expect.poll(async () => /\d{1,2}:\d{2}/.test((await p.callWindow()) ?? ""), { timeout: 60_000, message: `${p.name}'s call connects` }).toBe(true);
+  }
   await b.press("End call");
+  for (const p of [a, b]) await expect.poll(() => p.callWindow(), { timeout: 60_000, message: `${p.name}'s call window closes` }).toBeNull();
   await expect.poll(async () => (await a.snapshot()).includes("Audio call ended"), { timeout: 60_000 }).toBe(true);
 }
 

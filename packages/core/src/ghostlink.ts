@@ -283,6 +283,8 @@ export interface GhostLinkOptions {
   holdSupport?: boolean;
   /** Offer `calls/1` on paired sessions: this app can place and take calls (WebRTC media and capture). */
   callsSupport?: boolean;
+  /** Why this app cannot call, when `callsSupport` is off and the platform can say more (what to install). */
+  callsMissing?: string;
   /** Offer `services/1` on paired sessions: this app can serve granted local web apps and open the contact's. */
   servicesSupport?: boolean;
   /** Offer `files/3` on paired sessions: files of any size, offered, resumed and checked (`chatFiles.ts`). */
@@ -1700,7 +1702,7 @@ export class GhostLink {
   /** Why a call cannot be placed in this paired chat right now, or null when it can. */
   get callsUnavailable(): string | null {
     if (!this.options.params.profile || this.supportsCalls) return null;
-    if (!this.options.callsSupport) return "Calls are not available in this app";
+    if (!this.options.callsSupport) return this.options.callsMissing ?? "Calls are not available in this app";
     if (!this.isDataLinkOpen) return "Calls need a live connection";
     return this.sessionCapabilities.peerAnnounced ? "Your contact's app cannot take calls" : "Your contact needs an updated Ghostly for calls";
   }

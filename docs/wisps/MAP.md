@@ -43,7 +43,7 @@ History: the 2026-09-20 [proof increment](PROOF-INCREMENT.md) (external-signer N
 |---|---|---|
 | [400 Chat](400-chat.md) | [401 chat session](401-paired-chat.md) (layer 1), [403 DHT text](403-dht-text.md) (layer 0, the floor), [4xx store-and-forward](4xx-store-and-forward.md); [402 compatibility](402-legacy-chat.md) for v0.4 | One chat on two layers in every new chat (#209, #229); 0.4 chats use the compatibility profile |
 | [500 Files](500-files.md) | [501 files/2 and files/3](501-paired-files.md), [502 compatibility](502-legacy-files.md) | Layer 1 or a hold; never DHT records; `files/3` of any size with resume (#233) |
-| [600 Media](600-media.md) | [601 WebRTC media](601-webrtc-media.md) | Calls in every chat while live (`calls/1`, #207) and in compatibility chats; screen sharing inside a call; not on Linux Desktop |
+| [600 Media](600-media.md) | [601 WebRTC media](601-webrtc-media.md) | Calls in every chat while live (`calls/1`, #207) and in compatibility chats; screen sharing inside a call; Linux Desktop with native media (no screen sharing yet) |
 | [700 Local Services](700-local-services.md) | [701 HTTP](701-http-services.md) | Hosting with selected contact access, in every chat (desktop and extension) |
 | [800 Invite/Join](800-invite-join.md) | [801 implemented invitations](801-invitation-profiles.md) | One bech32m `ghostly1…` invite for every new chat (#210); global consumable admission proposed |
 | [900 Groups](900-group-sessions.md) | [9xx Group Mesh](9xx-group-mesh.md), [9xx Group Community](9xx-group-community.md), [901 GossipSub](901-gossipsub.md) | Mesh profile (eight members) and community profile (a link, 256 members, hubs) implemented, with text, a picture and payments between members; GossipSub proposed |

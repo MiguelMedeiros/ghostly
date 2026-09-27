@@ -22,6 +22,7 @@ import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
 import { desktopAtproto } from "./atproto";
+import { nativeCallOptions, type NativeCallSupport } from "./nativeCalls";
 import { engine } from "@ghostly/browser/platform/engine";
 import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
@@ -168,7 +169,9 @@ function serveServiceWindows(server: EngineServer): void {
   });
 }
 
-export function createDesktopHost(version: string) {
+/** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
+export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
+  const { node: callOptions, callMedia } = nativeCallOptions(calls);
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
@@ -178,7 +181,8 @@ export function createDesktopHost(version: string) {
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
-    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke },
+    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke, ...callOptions },
+    callMedia,
     onServer: serveServiceWindows,
     oidc: desktopOidc,
     atproto: desktopAtproto,

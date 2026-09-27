@@ -1,12 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
 import { vi } from "vitest";
+import type { CallMedia } from "@ghostly/core";
 import { useWebRTC } from "../src/useWebRTC";
 
 /**
  * Renders `useWebRTC` as a chat does: `receive` is the other side's `_call` record changing, and
- * `published` is every value the hook put in ours, in order (`null` clears it).
+ * `published` is every value the hook put in ours, in order (`null` clears it). `media`: where the call's media
+ * comes from, when not the page's own WebRTC.
  */
-export function renderCall() {
+export function renderCall(media?: CallMedia) {
   const published: (string | null)[] = [];
   const publishCallSignal = vi.fn((signal: string | null) => { published.push(signal); });
   const setFastPoll = vi.fn();
@@ -15,7 +17,7 @@ export function renderCall() {
 
   const hook = renderHook(
     ({ signal }: { signal: string | null }) =>
-      useWebRTC({ incomingCallSignal: signal, publishCallSignal, setFastPoll, addCallEventMessage, onError }),
+      useWebRTC({ incomingCallSignal: signal, publishCallSignal, setFastPoll, addCallEventMessage, onError, media }),
     { initialProps: { signal: null as string | null } },
   );
 

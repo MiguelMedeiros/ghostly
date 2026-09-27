@@ -8,6 +8,7 @@ import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
+import { nativeCallSupport } from "./desktop/nativeCalls";
 import { setStorageProfile } from "./lib/storage";
 import { activeProfileId, namespaceOf, setProfileBase } from "./lib/profiles";
 import { loadSettings } from "./lib/settings";
@@ -36,7 +37,7 @@ async function boot() {
     root.render(<p lang="en" style={{ padding: 24, font: "15px system-ui" }}>Ghostly is already running with this profile.</p>),
   );
 
-  const host = createDesktopHost(await getVersion().catch(() => "0.0.0"));
+  const host = createDesktopHost(await getVersion().catch(() => "0.0.0"), await nativeCallSupport());
   setBrowserHost(host);
   startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());

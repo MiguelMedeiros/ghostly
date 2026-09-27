@@ -106,8 +106,10 @@ export const PLAN: readonly Step[] = [
     title: "a call in the chat: A rings, B answers, A hangs up; where a side cannot call, its button says why",
     // Before the transport step, whose preferences would decide whether the pair is live when it rings.
     applies: always,
-    // A Linux Desktop (WebKitGTK) has no WebRTC, so no call media: its buttons say so, and so do its contact's.
-    features: (c) => (withDesktop(c) ? ["calls.paired.live-only"] : ["calls.paired", "calls.paired.negotiate", "calls.audio"]),
+    // A Linux Desktop (WebKitGTK) has no WebRTC and calls natively (GStreamer). Two of them go live and call; with
+    // a browser they never go live in this harness, so the buttons say why instead.
+    features: (c) => (c.client === "desktop-desktop" ? ["calls.paired", "calls.linux-native", "calls.paired.negotiate", "calls.audio"]
+      : withDesktop(c) ? ["calls.paired.live-only"] : ["calls.paired", "calls.paired.negotiate", "calls.audio"]),
     requires: none,
   },
   {

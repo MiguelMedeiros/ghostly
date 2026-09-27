@@ -821,11 +821,11 @@
     "family": "6",
     "kind": "Media profile",
     "status": "Available",
-    "note": "one to one, not on Linux Desktop",
+    "note": "one to one",
     "level": "available",
     "range": "6xx",
     "section": "Communication, groups and storage",
-    "body": "**Composition and provider/runtime options**\n\n600 media over WebRTC in every chat while it is live (calls/1 on paired sessions, #207) and in compatibility chats; native and mobile variants to validate\n\n**Dependencies and criteria for readiness**\n\n**Available: one to one, not on Linux Desktop**: audio and video calls with screen sharing on web, extension and macOS Desktop (`calls.*`, `calls.paired*`; two Desktop apps on a Mac, #230); Linux Desktop has no WebRTC. Screen sharing is tested in compatibility chats only. Group calls, SFU and recording are separate decisions, including who can decrypt. Permissions, device lifecycle, media encryption and capability negotiation; test each profile/runtime.",
+    "body": "**Composition and provider/runtime options**\n\n600 media over WebRTC in every chat while it is live (calls/1 on paired sessions, #207) and in compatibility chats; native and mobile variants to validate\n\n**Dependencies and criteria for readiness**\n\n**Available: one to one**: audio and video calls with screen sharing on web, extension and macOS Desktop (`calls.*`, `calls.paired*`; two Desktop apps on a Mac, #230); on Linux Desktop, whose WebView has no WebRTC, with WebRTC in Rust and media in GStreamer, and no screen sharing yet (`calls.linux-native`: two Linux apps, and against Chromium). Screen sharing is tested in compatibility chats only. Group calls, SFU and recording are separate decisions, including who can decrypt. Permissions, device lifecycle, media encryption and capability negotiation; test each profile/runtime.",
     "sourceAnchor": "communication-groups-and-storage"
   },
   {

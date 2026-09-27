@@ -1,6 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -194,6 +194,13 @@ export function desktopHome(name: string): { dir: string; remove: () => void } {
   return { dir, remove: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }) };
 }
 
+/** Attaches each app log (`ghostly.log`) under a Desktop home to the running test: what a failure looked like from Rust. */
+export function attachDesktopLogs(name: string, home: string): void {
+  const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);
+  for (const file of find(home)) void base.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
+}
+
 const homeEnv = (dir: string): Record<string, string> => {
   const env = { HOME: dir, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), XDG_CACHE_HOME: join(dir, "cache") };
   for (const path of Object.values(env)) mkdirSync(path, { recursive: true });
@@ -211,9 +218,11 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
     ["--port", String(port), "--native-port", String(nativePort)],
     {
       stdio: ["ignore", "pipe", "pipe"],
-      // A test must never open the person's own chats: its own profile, its own storage.
+      // A test must never open the person's own chats: its own profile, its own storage. Nor the machine's camera
+      // and microphone: a test picture and a test tone for calls on Linux (debug builds), as Chromium's fake devices.
       env: {
         ...process.env,
+        GHOSTLY_FAKE_MEDIA: "1",
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
         ...options.env,

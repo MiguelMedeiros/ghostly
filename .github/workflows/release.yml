@@ -91,9 +91,14 @@ jobs:
       - name: Install dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
+          # GStreamer's headers (calls on Linux, src-tauri/src/native_call) need libunwind-dev, which the
+          # runner image's libunwind-14-dev (LLVM's) blocks.
+          sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev \

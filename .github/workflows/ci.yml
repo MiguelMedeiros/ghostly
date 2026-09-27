@@ -202,9 +202,14 @@ jobs:
       - name: Install system dependencies
         run: |
           {
+            # GStreamer's headers (calls on Linux, src-tauri/src/native_call) need libunwind-dev, which the
+            # runner image's libunwind-14-dev (LLVM's) blocks.
+            sudo apt-get remove -y libunwind-14-dev || true
             sudo apt-get update
             sudo apt-get install -y \
               libwebkit2gtk-4.1-dev \
+              libgstreamer1.0-dev \
+              libgstreamer-plugins-base1.0-dev \
               librsvg2-dev \
               patchelf \
               libssl-dev \
@@ -240,7 +245,7 @@ jobs:
           while kill -0 "$pid" 2>/dev/null; do sleep 1; done
           tail -n 5 "$RUNNER_TEMP/apt.log"
           # The exit status of a process that is not this shell's child is gone: check the result instead.
-          dpkg -s libwebkit2gtk-4.1-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev > /dev/null
+          dpkg -s libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev > /dev/null
 
       # tauri-build wants every bundled resource to exist. `tauri build` fills this one
       # (scripts/prepare-native-runtime.mjs); plain cargo only needs the folder.

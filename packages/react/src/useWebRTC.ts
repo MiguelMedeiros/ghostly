@@ -9,6 +9,7 @@ import {
   type CallState,
   type CallSignal,
   type CallEventType,
+  type CallMedia,
 } from "@ghostly/core";
 
 /** What a peer can put on the video lane of a call. */
@@ -21,7 +22,16 @@ interface UseWebRTCParams {
   addCallEventMessage?: (type: CallEventType, hasVideo: boolean, duration?: number) => void;
   /** Called when a call could not be placed or answered, e.g. the microphone was denied. */
   onError?: (error: unknown) => void;
+  /** Where the media comes from, when not the browser's own WebRTC (Ghostly Desktop on Linux). */
+  media?: CallMedia | null;
 }
+
+/** The browser's own WebRTC and capture. */
+const browserMedia: CallMedia = {
+  createPeerConnection: (config) => new RTCPeerConnection(config),
+  getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+  getDisplayMedia: (options) => navigator.mediaDevices.getDisplayMedia(options),
+};
 
 /** How long a failed screen share stays explained in the call window. */
 export const SCREEN_SHARE_ERROR_MS = 8000;
@@ -65,9 +75,12 @@ export function useWebRTC({
   setFastPoll,
   addCallEventMessage,
   onError,
+  media,
 }: UseWebRTCParams) {
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const mediaRef = useRef<CallMedia>(media ?? browserMedia);
+  mediaRef.current = media ?? browserMedia;
 
   const [callState, setCallState] = useState<CallState>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -173,7 +186,7 @@ export function useWebRTC({
   }, []);
 
   const createPeerConnection = useCallback(() => {
-    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const pc = mediaRef.current.createPeerConnection(RTC_CONFIG);
 
     pc.ontrack = (event) => {
       setRemoteStream((prev) => {
@@ -252,9 +265,11 @@ export function useWebRTC({
 
       let track: MediaStreamTrack | null = null;
       if (next === "camera") {
-        track = (await navigator.mediaDevices.getUserMedia({ video: true })).getVideoTracks()[0];
+        track = (await mediaRef.current.getUserMedia({ video: true })).getVideoTracks()[0];
       } else if (next === "screen") {
-        track = (await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
+        const { getDisplayMedia } = mediaRef.current;
+        if (!getDisplayMedia) throw Object.assign(new Error("Screen sharing is not available here"), { name: "NotSupportedError" });
+        track = (await getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
       }
       // The call ended while the prompt or the picker was open: what it gave is let go, and nobody is told.
       if (attemptRef.current !== attempt) {
@@ -331,7 +346,7 @@ export function useWebRTC({
         addCallEventMessage?.("call_started", withVideo);
 
         // A screen is shared from inside a call (`toggleScreenShare`), never as the way one starts.
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
+        const stream = await mediaRef.current.getUserMedia({ audio: true, video: withVideo });
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         localStreamRef.current = stream;
         setLocalStream(stream);
@@ -403,7 +418,7 @@ export function useWebRTC({
         callHadVideoRef.current = withVideo || signalHasVideo(offer);
         callConnectedEventFiredRef.current = false;
 
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const stream = await mediaRef.current.getUserMedia({
           audio: true,
           video: withVideo,
         });
@@ -641,7 +656,7 @@ export function useWebRTC({
 
   const connected = callState === "connected";
   // Phones have no screen to capture (no getDisplayMedia): there the share button does not show at all.
-  const screenCapture = typeof navigator.mediaDevices?.getDisplayMedia === "function";
+  const screenCapture = media ? typeof media.getDisplayMedia === "function" : typeof navigator.mediaDevices?.getDisplayMedia === "function";
 
   return {
     callState,
@@ -660,10 +675,13 @@ export function useWebRTC({
     /** The screen can be shared right now: a connected call with a video lane, voice or video, and a screen to capture. */
     canShareScreen: connected && videoLaneOpen && screenCapture,
     /**
-     * Why a connected call cannot carry a screen, where screens can be captured: the peer's offer had no video
-     * section, or its answer refused ours. Null when it can, and where there is no screen to capture.
+     * Why a connected call cannot carry a screen: the peer's offer had no video section, or its answer refused
+     * ours; or this app cannot capture one and says why (`CallMedia.screenUnavailable`). Null when it can, and
+     * where there is no screen to capture and nothing to say (phones).
      */
-    screenShareUnavailable: connected && screenCapture && !videoLaneOpen ? "Your contact's app cannot show a screen in this call" : null,
+    screenShareUnavailable: !connected ? null
+      : screenCapture ? (videoLaneOpen ? null : "Your contact's app cannot show a screen in this call")
+      : media?.screenUnavailable ?? null,
     /** Why sharing the screen just failed, for a few seconds. */
     screenShareError,
     callStartedAt,
