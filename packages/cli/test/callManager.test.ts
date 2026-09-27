@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { AudioSocket, audioSocketPath } from "../src/calls/audioSocket";
 import { CallManager, type CallEngine } from "../src/calls/manager";
+import { loadCallStack, type CallStack } from "../src/calls/media";
 import { dominantHz, level, tone } from "./support/tone";
 // covers: headless.calls
 
@@ -24,7 +25,7 @@ afterAll(() => {
 
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string> } = {}): { a: Side; b: Side } {
   const make = (chat: string): Side => {
     const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` } } as unknown as Side;
     return side;
@@ -38,10 +39,40 @@ function pairOfManagers(): { a: Side; b: Side } {
       if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, signal), 5);
     },
   });
-  a.calls = new CallManager({ engine: engine(a, () => b), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp() });
+  a.calls = new CallManager({ engine: engine(a, () => b), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a });
   b.calls = new CallManager({ engine: engine(b, () => a), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp() });
   return { a, b };
 }
+
+/**
+ * The real media stack, but the first `refuse` answers applied on it are refused as libdatachannel 0.24.5 refuses one
+ * in its race (see CallManager's `redial`): the connection closes, and adding the answer throws.
+ */
+function refusingStack(refuse: number): () => Promise<CallStack | string> {
+  return async () => {
+    const real = await loadCallStack();
+    if (typeof real === "string") return real;
+    const Real = real.ndc.PeerConnection;
+    function PeerConnection(...args: ConstructorParameters<typeof Real>) {
+      const pc = new Real(...args);
+      const apply = pc.setRemoteDescription.bind(pc);
+      // The native method is read-only on its prototype: the connection gets its own.
+      Object.defineProperty(pc, "setRemoteDescription", {
+        value: (sdp: string, type: Parameters<typeof apply>[1]) => {
+          if (type !== "answer" || refuse <= 0) return apply(sdp, type);
+          refuse--;
+          pc.close();
+          throw new Error("libdatachannel error while adding remote description: Got a remote candidate without ICE transport");
+        },
+      });
+      return pc;
+    }
+    return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+  };
+}
+
+const signalsOf = (side: Side, t: string) => side.signals.filter((s) => s && JSON.parse(s).t === t);
+const diagnose = (a: Side, b: Side) => (e: Error) => { throw new Error(`${e.message}\nA: ${JSON.stringify(a.events)}\nB: ${JSON.stringify(b.events)}\nsignals A ${a.signals.length} B ${b.signals.length}`); };
 
 async function until<T>(check: () => T | undefined | false, ms = 15_000): Promise<T> {
   const end = Date.now() + ms;
@@ -175,10 +206,67 @@ describe("two call managers", { timeout: 60_000 }, () => {
     const { a, b } = pairOfManagers();
     b.calls.setAuto({ on: true });
     await a.calls.start("chat-ab", {});
-    await until(() => a.events.find((e) => e.type === "call.connected")).catch((e) => { throw new Error(`${e.message}\nA: ${JSON.stringify(a.events)}\nB: ${JSON.stringify(b.events)}\nsignals A ${a.signals.length} B ${b.signals.length}`); });
+    await until(() => a.events.find((e) => e.type === "call.connected")).catch(diagnose(a, b));
     await b.calls.stopAll();
     expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "stopped" });
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
     await expect(b.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "unavailable" });
+  });
+
+  it("an answer refused as its connection closes: both sides start over once, on new connections and the same sockets", async () => {
+    const { a, b } = pairOfManagers({ a: refusingStack(1) });
+    b.calls.setAuto({ on: true, rate: 16000 });
+    const placed = await a.calls.start("chat-ab", { rate: 48000 }) as { call: string; audio: { socket: string } };
+    const alice = await program(placed.audio.socket);
+    const [, connectedB] = await Promise.all([
+      until(() => a.events.find((e) => e.type === "call.connected")),
+      until(() => b.events.find((e) => e.type === "call.connected")),
+    ]).catch(diagnose(a, b));
+    expect(signalsOf(a, "o")).toHaveLength(2);
+    expect(signalsOf(b, "a")).toHaveLength(2);
+    expect(signalsOf(a, "h")).toHaveLength(0);
+    expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected"]);
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.connected"]);
+    expect(a.calls.list()).toMatchObject([{ call: placed.call, state: "connected", audio: { socket: placed.audio.socket } }]);
+
+    // The program that connected before the answer speaks over the new connection.
+    const bob = await program((connectedB.audio as { socket: string }).socket);
+    alice.socket.write(tone(440, 48000, 1500));
+    await until(() => bob.heard().length >= 640 * 60, 20_000);
+    expect(dominantHz(bob.heard().subarray(640 * 20, 640 * 60), 16000)).toBeCloseTo(440, -1);
+
+    await a.calls.hangup(undefined);
+    await Promise.all([alice.ended, bob.ended]);
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+  });
+
+  it("a second refused answer ends the call as failed, and the contact is told", async () => {
+    const { a, b } = pairOfManagers({ a: refusingStack(2) });
+    b.calls.setAuto({ on: true });
+    await a.calls.start("chat-ab", {});
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    expect(signalsOf(a, "o")).toHaveLength(2);
+    expect(signalsOf(b, "a")).toHaveLength(2);
+    expect(a.events.find((e) => e.type === "call.connected")).toBeUndefined();
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("a contact that does not answer the second offer, as the apps do, hangs up: the call failed", async () => {
+    const { a, b } = pairOfManagers({ a: refusingStack(1) });
+    b.calls.setAuto({ on: true });
+    // The apps answer an offer only while idle (useWebRTC): their connection fails with the caller's, and they hang up.
+    const onSignal = b.calls.onSignal.bind(b.calls);
+    b.calls.onSignal = (chat, json) => {
+      if (JSON.parse(json).t === "o" && signalsOf(b, "a").length) void b.calls.hangup(undefined);
+      else onSignal(chat, json);
+    };
+    await a.calls.start("chat-ab", {});
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    expect(signalsOf(a, "o")).toHaveLength(2);
+    expect(a.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
   });
 });

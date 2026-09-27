@@ -5,7 +5,7 @@ import { parseCallSignal, signalHasVideo, CALL_SIGNAL_MAX_AGE_MS, type CallSigna
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath } from "./audioSocket";
-import { CallMedia, loadCallStack, type CallStack } from "./media";
+import { CallMedia, loadCallStack, type CallStack, type MediaOptions } from "./media";
 import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
 
 /**
@@ -58,6 +58,12 @@ interface Call {
   offer: CallSignal | null;
   /** This side's offer's timestamp: only a later answer counts. */
   offerTs: number;
+  /** This side's offer waits for its answer. */
+  offering: boolean;
+  /** Whether this side offered again on a new connection, after its first answer was refused (`redial`). */
+  redialed: boolean;
+  /** Counts the connections made for the call: one that comes back after a newer one was asked for is closed. */
+  attempt: number;
   media: CallMedia | null;
   socket: AudioSocket | null;
   /** What the program wrote and the call has not sent yet: kept from the moment the socket opens. */
@@ -101,15 +107,20 @@ export class CallManager {
     if (signal.t === "o" && !call) {
       this.lastSignal.set(chat, signal.ts);
       this.incoming(chat, signal);
-    } else if (signal.t === "a" && call?.direction === "out" && call.state === "ringing" && signal.ts > call.offerTs) {
+    } else if (signal.t === "a" && call?.direction === "out" && call.offering && signal.ts > call.offerTs) {
       this.lastSignal.set(chat, signal.ts);
       this.accepted(call, signal);
+    } else if (signal.t === "o" && call?.direction === "in" && call.state === "connecting" && call.media && signal.ts > (call.offer?.ts ?? 0)) {
+      // The contact's side offered again on a new connection (see `redial`): the answered call starts over on one.
+      this.lastSignal.set(chat, signal.ts);
+      void this.reanswer(call, signal);
     } else if (signal.t === "v") {
       this.lastSignal.set(chat, signal.ts);
     } else if (signal.t === "h") {
       this.lastSignal.set(chat, signal.ts);
       if (call) {
-        const reason: EndReason = call.state === "ringing" ? (call.direction === "in" ? "missed" : "rejected") : "remote-hangup";
+        // A hang-up while a second offer waits (`redial`) is the contact's app ending a connection that failed.
+        const reason: EndReason = call.state === "ringing" ? (call.direction === "in" ? "missed" : "rejected") : call.offering ? "failed" : "remote-hangup";
         void this.end(call, reason, false);
       }
     }
@@ -129,15 +140,62 @@ export class CallManager {
   }
 
   private accepted(call: Call, answer: CallSignal): void {
+    call.offering = false;
+    call.state = "connecting";
     try {
       call.media!.applyAnswer(answer);
     } catch (error) {
-      process.stderr.write(`ghostly: call ${call.id}: the answer was refused (${error instanceof Error ? error.message : String(error)})\n`);
+      const why = error instanceof Error ? error.message : String(error);
+      if (!call.redialed) {
+        process.stderr.write(`ghostly: call ${call.id}: the answer was refused (${why}): offering again on a new connection\n`);
+        void this.redial(call);
+        return;
+      }
+      process.stderr.write(`ghostly: call ${call.id}: the answer was refused (${why})\n`);
       void this.end(call, "failed", true);
       return;
     }
-    call.state = "connecting";
     this.arm(call, CONNECT_MS, "failed", true);
+  }
+
+  /**
+   * A second offer, once, on a new connection. libdatachannel (0.24.5) can refuse a good answer: when the contact's
+   * checks and its DTLS hello came before the answer (they do, the answer crosses the chat session), ICE connects
+   * and the handshake ends inside setRemoteDescription, before the answer's fingerprint is recorded; the fingerprint
+   * check fails, the connection closes its transports, and adding the answer's candidates throws "Got a remote
+   * candidate without ICE transport". That connection is done for, and the contact's side saw the handshake fail
+   * too, so both start over: the contact's side answers the newer offer (`reanswer`). Fixed upstream in libdatachannel
+   * 0235225a, which no release has yet.
+   */
+  private async redial(call: Call): Promise<void> {
+    call.redialed = true;
+    this.arm(call, CONNECT_MS, "failed", true);
+    try {
+      const stack = await this.stack();
+      if (!(await this.connect(call, (media) => CallMedia.offer(stack, media)))) return;
+      call.offerTs = this.now;
+      call.offering = true;
+      await this.send(call.chat, { t: "o", ts: call.offerTs, ...call.media!.local, v: 0 });
+    } catch (error) {
+      process.stderr.write(`ghostly: call ${call.id}: offering again failed (${error instanceof Error ? error.message : String(error)})\n`);
+      void this.end(call, "failed", true);
+    }
+  }
+
+  /** The contact's second offer (its `redial`): answered on a new connection, on the call's socket. */
+  private async reanswer(call: Call, offer: CallSignal): Promise<void> {
+    process.stderr.write(`ghostly: call ${call.id}: the contact offered again: answering on a new connection\n`);
+    call.offer = offer;
+    call.video = signalHasVideo(offer);
+    this.arm(call, CONNECT_MS, "failed", true);
+    try {
+      const stack = await this.stack();
+      if (!(await this.connect(call, (media) => CallMedia.answer(stack, offer, media)))) return;
+      await this.send(call.chat, { t: "a", ts: this.now, ...call.media!.local, v: 0 });
+    } catch (error) {
+      process.stderr.write(`ghostly: call ${call.id}: answering again failed (${error instanceof Error ? error.message : String(error)})\n`);
+      void this.end(call, "failed", true);
+    }
   }
 
   // ---------- commands ----------
@@ -152,6 +210,7 @@ export class CallManager {
       await this.attach(call, (media) => CallMedia.offer(stack, media));
       if (call.ended) throw new CliError("unavailable", "The call ended before it was placed");
       call.offerTs = this.now;
+      call.offering = true;
       await this.send(link.id, { t: "o", ts: call.offerTs, ...call.media!.local, v: 0 });
     } catch (error) {
       await this.end(call, "failed", false, false);
@@ -234,26 +293,37 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
+      offering: false, redialed: false, attempt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
     };
     this.calls.set(call.id, call);
     return call;
   }
 
   /** The call's socket (open from now on: a program may connect before the media is up) and its media. */
-  private async attach(call: Call, create: (options: Parameters<typeof CallMedia.offer>[1]) => Promise<CallMedia>): Promise<void> {
+  private async attach(call: Call, create: (options: MediaOptions) => Promise<CallMedia>): Promise<void> {
     const queue = (call.queue = new PlaybackQueue(call.rate));
     call.socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id), call.rate, {
       onAudio: (chunk) => queue.push(chunk),
     });
-    call.media = await create({
+    await this.connect(call, create);
+  }
+
+  /**
+   * A connection for the call, in place of the one it had (closed first); the socket and its queue stay. False when
+   * the call ended, or asked for a newer connection, while this one was made: then it is closed.
+   */
+  private async connect(call: Call, create: (options: MediaOptions) => Promise<CallMedia>): Promise<boolean> {
+    const attempt = ++call.attempt;
+    call.media?.close();
+    call.media = null;
+    const media = await create({
       rate: call.rate,
-      queue,
+      queue: call.queue ?? undefined,
       log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
       iceServers: this.host.engine.getState().settings?.iceServers ?? [],
       onFrame: (frame) => call.socket?.write(frame),
       onState: (state) => {
-        if (call.ended) return;
+        if (call.ended || attempt !== call.attempt) return;
         if (state === "connected") { this.connected(call); return; }
         // The contact's app closes its connection as it hangs up, and that is often here before its hang-up signal
         // (which crosses the chat session): the signal gets a moment to say so. Without one, a connection the
@@ -261,6 +331,12 @@ export class CallManager {
         this.arm(call, MEDIA_GRACE_MS, state === "closed" ? "remote-hangup" : "failed", false);
       },
     });
+    if (call.ended || attempt !== call.attempt) {
+      media.close();
+      return false;
+    }
+    call.media = media;
+    return true;
   }
 
   private connected(call: Call): void {
