@@ -27,6 +27,7 @@ export type GridLabels = {
 /** Reader titles for reference documents, and for drafts the numbered catalogue does not list yet. */
 const REF_NAMES: Record<string, string> = {
   "usdt-integration": "USDT integration",
+  "public-profiles": "Public profiles",
   "adapter-roadmap": "Adapter roadmap",
   sdk: "Ghostly SDK",
   "4xx-store-and-forward": "Store-and-forward for an away contact",

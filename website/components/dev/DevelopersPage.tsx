@@ -66,7 +66,7 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
             <h2 className="h-section">{t.negotiate.title}</h2>
             <p className="lead">{t.negotiate.lead}</p>
           </Reveal>
-          <Negotiation t={t.negotiate} />
+          <Negotiation t={t.negotiate} relayedLabel={t.hero.steps.stage.relayedShort} />
         </div>
       </section>
 

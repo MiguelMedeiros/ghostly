@@ -22,11 +22,15 @@ import "@/app/negotiation.css";
 const TRANSPORTS = ["iroh/1", "hyperdht/1", "webrtc/1"] as const;
 type Transport = (typeof TRANSPORTS)[number];
 
-/** Symmetric rank sum; the fixed order breaks ties deterministically. */
-function rankTransports(local: readonly string[], remote: readonly string[]): Transport[] {
+/** Symmetric rank sum; a relayed transport ranks after every direct one, and
+ * the fixed order breaks ties deterministically. */
+function rankTransports(local: readonly string[], remote: readonly string[], relayed: readonly string[]): Transport[] {
+  const penalty = (t: Transport) => (relayed.includes(t) ? 1 : 0);
   return TRANSPORTS.filter((t) => local.includes(t) && remote.includes(t)).sort(
     (a, b) =>
-      local.indexOf(a) + remote.indexOf(a) - (local.indexOf(b) + remote.indexOf(b)) || TRANSPORTS.indexOf(a) - TRANSPORTS.indexOf(b),
+      penalty(a) - penalty(b) ||
+      local.indexOf(a) + remote.indexOf(a) - (local.indexOf(b) + remote.indexOf(b)) ||
+      TRANSPORTS.indexOf(a) - TRANSPORTS.indexOf(b),
   );
 }
 /** What a peer offers: its preferred adapter first, then the rest it has, only with fallback on. */
@@ -36,7 +40,10 @@ function transportOrder(available: readonly Transport[], preferred: Transport, f
 }
 
 const DESKTOP: readonly Transport[] = TRANSPORTS;
-const BROWSER: readonly Transport[] = ["webrtc/1"];
+/** The web app and extension: WebRTC, and Iroh through a relay (a page cannot send UDP).
+ * HyperDHT only through a relay the person sets; none by default. */
+const BROWSER: readonly Transport[] = ["webrtc/1", "iroh/1"];
+const BROWSER_RELAYED: Transport[] = ["iroh/1"];
 const CHAT = "chat/1";
 const FILES = "files/2";
 const CASHU = "payments-cashu/1";
@@ -47,6 +54,8 @@ type Tag = "fallbackOff" | "arkadeOff" | "paymentsOff";
 type Peer = {
   platform: Platform;
   transports: Transport[];
+  /** Transports this peer reaches only through a relay. */
+  relayed?: Transport[];
   caps: string[];
   tag?: Tag;
 };
@@ -77,6 +86,7 @@ const SCENARIOS: Scenario[] = [
     casper: {
       platform: "browser",
       transports: transportOrder(BROWSER, "webrtc/1", true),
+      relayed: BROWSER_RELAYED,
       caps: [CHAT, FILES, CASHU],
       tag: "arkadeOff",
     },
@@ -85,13 +95,14 @@ const SCENARIOS: Scenario[] = [
     id: "none",
     boo: {
       platform: "desktop",
-      transports: transportOrder(DESKTOP, "iroh/1", false),
+      transports: transportOrder(DESKTOP, "hyperdht/1", false),
       caps: [CHAT, FILES],
       tag: "fallbackOff",
     },
     casper: {
       platform: "browser",
       transports: transportOrder(BROWSER, "webrtc/1", true),
+      relayed: BROWSER_RELAYED,
       caps: [CHAT, FILES],
     },
   },
@@ -100,22 +111,28 @@ const SCENARIOS: Scenario[] = [
     boo: {
       platform: "browser",
       transports: transportOrder(BROWSER, "webrtc/1", true),
+      relayed: BROWSER_RELAYED,
       caps: [CHAT, FILES, CASHU],
     },
     casper: {
       platform: "browser",
       transports: transportOrder(BROWSER, "webrtc/1", true),
+      relayed: BROWSER_RELAYED,
       caps: [CHAT, FILES],
       tag: "paymentsOff",
     },
   },
 ];
 
+/** Either side being relay only makes the whole path relayed (pairedTransports.ts relayedTransports). */
+const relayedIn = (s: Scenario): Transport[] => [...new Set([...(s.boo.relayed ?? []), ...(s.casper.relayed ?? [])])];
+
 function outcome(s: Scenario) {
-  const order = rankTransports(s.boo.transports, s.casper.transports);
+  const relayed = relayedIn(s);
+  const order = rankTransports(s.boo.transports, s.casper.transports, relayed);
   const caps = s.boo.caps.filter((c) => s.casper.caps.includes(c));
   const off = [...new Set([...s.boo.caps, ...s.casper.caps])].filter((c) => !caps.includes(c));
-  return { order, caps, off, connected: order.length > 0 };
+  return { order, relayed, caps, off, connected: order.length > 0 };
 }
 
 // ── Timing (website/MOTION.md, "Loops and demos") ────────────────────────────
@@ -145,6 +162,7 @@ function PeerTile({
   shared,
   agreed,
   t,
+  relayedLabel,
 }: {
   who: "boo" | "casper";
   peer: Peer;
@@ -153,6 +171,7 @@ function PeerTile({
   shared: ReadonlySet<string>;
   agreed: ReadonlySet<string>;
   t: Copy;
+  relayedLabel: string;
 }) {
   const mood: GhostMood = phase === 0 ? "calm" : connected ? "happy" : "lonely";
   const transportState = (tr: Transport): ChipState => (phase < 1 ? "idle" : shared.has(tr) ? "shared" : "off");
@@ -175,6 +194,7 @@ function PeerTile({
           {peer.transports.map((tr, i) => (
             <li key={tr} data-state={transportState(tr)} style={{ "--i": i } as CSSProperties}>
               <span className="mono">{tr}</span>
+              {peer.relayed?.includes(tr) && <span className="ng-relayed">{relayedLabel}</span>}
             </li>
           ))}
         </ol>
@@ -193,7 +213,7 @@ function PeerTile({
   );
 }
 
-function ResultCard({ s, phase, t }: { s: Scenario; phase: number; t: Copy }) {
+function ResultCard({ s, phase, t, relayedLabel }: { s: Scenario; phase: number; t: Copy; relayedLabel: string }) {
   const out = outcome(s);
   const verdict = phase < 1 ? "wait" : out.connected ? "ok" : "no";
   return (
@@ -215,6 +235,7 @@ function ResultCard({ s, phase, t }: { s: Scenario; phase: number; t: Copy }) {
               return (
                 <li key={tr} data-first={i === 0} style={{ "--i": i } as CSSProperties}>
                   <span className="mono">{tr}</span>
+                  {out.relayed.includes(tr) && <span className="ng-relayed">{relayedLabel}</span>}
                   <span className="ng-sum" title={t.sum} aria-label={`${a} + ${b} = ${a + b}`}>
                     <b data-who="boo">{a}</b>+<b data-who="casper">{b}</b>=<b data-total="">{a + b}</b>
                   </span>
@@ -265,7 +286,8 @@ function summary(s: Scenario, t: Copy): string {
   return parts.join(" ");
 }
 
-export function Negotiation({ t }: { t: Copy }) {
+/** `relayedLabel`: the short "relayed" word from the explainer's stage labels. */
+export function Negotiation({ t, relayedLabel }: { t: Copy; relayedLabel: string }) {
   const calm = useCalm();
   const [play, setPlay] = useState(STILL);
   const [hover, setHover] = useState(false);
@@ -411,9 +433,9 @@ export function Negotiation({ t }: { t: Copy }) {
             </span>
           </p>
           <div className="ng-stage" data-verdict={phase < 1 ? "wait" : out.connected ? "ok" : "no"}>
-            <PeerTile who="boo" peer={s.boo} phase={phase} connected={out.connected} shared={shared} agreed={agreed} t={t} />
-            <ResultCard s={s} phase={phase} t={t} />
-            <PeerTile who="casper" peer={s.casper} phase={phase} connected={out.connected} shared={shared} agreed={agreed} t={t} />
+            <PeerTile who="boo" peer={s.boo} phase={phase} connected={out.connected} shared={shared} agreed={agreed} t={t} relayedLabel={relayedLabel} />
+            <ResultCard s={s} phase={phase} t={t} relayedLabel={relayedLabel} />
+            <PeerTile who="casper" peer={s.casper} phase={phase} connected={out.connected} shared={shared} agreed={agreed} t={t} relayedLabel={relayedLabel} />
           </div>
           <p className="ng-caption">{t.captions[s.id]}</p>
         </div>

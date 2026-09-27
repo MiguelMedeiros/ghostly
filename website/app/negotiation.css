@@ -645,3 +645,12 @@
     display: none;
   }
 }
+/* A transport this pair reaches only through a relay: it waits behind every direct one. */
+.ng-relayed {
+  font-size: 12px;
+  color: var(--dim);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
