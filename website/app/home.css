@@ -32,7 +32,7 @@
   gap: 22px;
   width: auto;
   max-width: 640px;
-  margin-inline: max(24px, calc((100vw - var(--wrap)) / 2 + 24px)) auto;
+  margin-inline: var(--inset) auto;
   padding-inline: 0;
 }
 .hero-title {

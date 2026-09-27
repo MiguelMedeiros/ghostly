@@ -39,6 +39,16 @@ After `npm run build`, restart a running dev server: reader routes are static
 | `e2e/` | The browser checks (`npm run test:e2e` against a build). CI runs them in four shards of about equal time: `e2e/shard.mjs` splits the tests by `e2e/durations.json`. After adding a spec or making one slower, record the times again (the command is at the top of `shard.mjs`); a stale file only unbalances the shards, it never skips a test. |
 | `scripts/capture/` | The app screenshots (`public/screenshots/current/`): `npm run capture` re-shoots all of them from a fresh build of `dev`, with funded test wallets from the shared e2e environment; see its README. |
 
+## One content width
+
+`--wrap` in `app/site.css` is the site's one content width (gutters included, `--gutter` each side;
+`--inset` is where the column's content starts from a window edge). The nav's row, every section,
+the story's copy and stage, the pages and the footer sit in that centred column; backgrounds (the
+act's room and field, glows, section fills, the washes) stay full-bleed. The story's stage svgs are
+the column, full height, so on a wide window the ghosts and pictures are framed beside their copy
+(`story/framing.ts` measures the stage box, not the window). `e2e/content-width.spec.ts` checks it at
+2560×1440.
+
 ## The story spine
 
 Two acts, one continuous take each. Every chapter reads its coordinates from

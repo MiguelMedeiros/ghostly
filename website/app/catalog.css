@@ -266,9 +266,14 @@
 .inventory-list a:hover {
   color: var(--cyan);
 }
+/* A short status stays on one line; a long one ("Available: Desktop; browsers only with a relay URL") wraps in its
+   cell instead of running out of the column. */
 .inventory-list .mono {
   font-size: 11px;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: end;
+  text-wrap: balance;
+  max-width: 62%;
 }
 
 /* The map at a glance */
