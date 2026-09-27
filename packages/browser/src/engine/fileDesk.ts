@@ -146,7 +146,7 @@ export class FileDesk {
       this.deps.changed();
       return;
     }
-    chat.files.offer({ id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(reply && { reply }) }, stored.digest);
+    chat.files.offer({ id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(reply && { reply }) }, stored.digest);
   }
 
   /**
@@ -307,10 +307,10 @@ export class FileDesk {
       chat.local.set(record.id, id);
       this.deps.wireIds(linkId)?.add(record.id);
       const { file } = record;
-      const message: MessageFile = { id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }) };
+      const message: MessageFile = { id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }) };
       chat.saving = chat.saving.then(async () => {
         await fileStore.put({ id, linkId, direction: "in", wireId: record.id, createdAt: Date.now(), bytes: (await fileBytes()).kind,
-          metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice }, wire3: record });
+          metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice, video: file.video }, wire3: record });
         await this.deps.storeMessage({ linkId, id: `peer_${record.id}`, text: fileMessageText(message), sender: "peer", timestamp: file.timestamp, via: "datalink", file: message,
           ...(file.reply && { replyTo: receivedPairedReply(file.reply) }),
           details: { wire: fileWire("files/3", file.size) } });

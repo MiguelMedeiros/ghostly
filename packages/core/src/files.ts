@@ -9,6 +9,7 @@ import {
   type ResetFrame,
 } from "./frames";
 import type { WireReply } from "./replies";
+import { PLAYABLE_VIDEO, type VideoMeta } from "./video";
 import { PLAYABLE_AUDIO, type VoiceMeta } from "./voice";
 
 /**
@@ -26,6 +27,8 @@ export interface FileInfo {
   timestamp: number;
   /** A voice message: its length and the shape of its sound (files/2 and held items only). */
   voice?: VoiceMeta;
+  /** A video: its length, size and a small first frame (optional; old apps ignore it). */
+  video?: VideoMeta;
   /** The message this file answers (`r`, WISP 401 § Replies): files/2, files/3 and held items; older apps ignore it. */
   reply?: WireReply;
 }
@@ -83,12 +86,12 @@ export const PREVIEWABLE_IMAGE = /^image\/(png|jpe?g|gif|webp)$/;
 /**
  * The type received bytes are served with. The peer picks the announced type,
  * and a blob: URL typed text/html or image/svg+xml would run in the app's
- * origin, so anything but a previewable image or playable audio is opaque bytes.
- * Audio keeps its type because WebKit will not play what is typed as bytes.
+ * origin, so anything but a previewable image or playable audio or video is opaque bytes.
+ * Audio and video keep their type because WebKit will not play what is typed as bytes.
  */
 export function safeBlobType(mime: string): string {
   const clean = sanitizeMime(mime);
-  return PREVIEWABLE_IMAGE.test(clean) || PLAYABLE_AUDIO.test(clean) ? clean : "application/octet-stream";
+  return PREVIEWABLE_IMAGE.test(clean) || PLAYABLE_AUDIO.test(clean) || PLAYABLE_VIDEO.test(clean) ? clean : "application/octet-stream";
 }
 
 interface Incoming {

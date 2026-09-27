@@ -6,6 +6,7 @@ import {
   safeBlobType,
   sanitizeFileName,
   sanitizeMime,
+  parseVideoMeta,
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
@@ -288,12 +289,14 @@ export const servicesPlatform: ServicesPlatform | null = {
       size: source.size,
       mime: sanitizeMime(source.type),
       ...(options?.voice && { voice: parseVoiceMeta(options.voice, sanitizeMime(source.type)) }),
+      // A description that does not check out is left off: the video still goes, without a poster.
+      ...(!options?.voice && options?.video && { video: parseVideoMeta(options.video, sanitizeMime(source.type)) }),
     };
     if (options?.voice && !file.voice) throw new Error("That recording cannot be sent as a voice message");
     // The page and the peer share this database and the file storage; the bytes never go through a message.
     // A small file is kept whole; a larger one is copied into file storage a step at a time.
     const timestamp = Date.now();
-    const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice };
+    const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video };
     const transfer = { state: "transferring" as const, transferred: 0, size: file.size };
     if (source.size <= SMALL_FILE_BYTES) {
       // Its digest from the bytes in hand (a recording in memory): sending never has to read the stored copy back whole.
