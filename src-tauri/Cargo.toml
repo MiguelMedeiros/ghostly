@@ -54,6 +54,11 @@ rtc = "0.21"
 async-trait = "0.1"
 bytes = "1"
 
+# The window follows WebView2 in and out of full screen (src/fullscreen.rs): the versions Tauri's wry uses.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3"

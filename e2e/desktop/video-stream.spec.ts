@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { makeBigVideo } from "../support/bigVideo";
 import { desktopHome, expect, openDesktop, test } from "../support/desktop";
-import { freePort, openDriven, playFromStore, removeFromApp, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
+import { freePort, fullscreenInPage, openDriven, playFromStore, removeFromApp, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
 
 /**
  * A video too large for the page (#381: over 64 MiB) plays and seeks in the Desktop WebView from the stored file,
@@ -18,7 +18,11 @@ import { freePort, openDriven, playFromStore, removeFromApp, servePieces, served
 const MAX_BODY = 4 * 1024 * 1024;
 const PLACE = { space: "e2e-stream", id: "chat-in-video-1" };
 const DIR = fileURLToPath(new URL("../../test-results/desktop-video", import.meta.url));
-/** Windows (or `GHOSTLY_E2E_DRIVEN=1`, e.g. on a Mac): the app's own test driver (see `openDriven`). */
+/**
+ * Windows: the app's own test driver (see `openDriven`). `GHOSTLY_E2E_DRIVEN=1` forces it elsewhere, for debugging
+ * the harness only: on a Mac the bare binary's window is hidden, so WebKit decodes nothing and refuses full screen;
+ * Macs have e2e/desktop-macos/video-stream.spec.ts.
+ */
 const DRIVEN = process.platform === "win32" || process.env.GHOSTLY_E2E_DRIVEN === "1";
 
 test("a 100 MB video plays and seeks from the stored file, a range at a time", { tag: ["@feature:files.video.stream"] }, async () => {
@@ -63,5 +67,28 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
     await new Promise((done) => (server ? server.close(done) : done(null)));
     home.remove();
     rmSync(DIR, { recursive: true, force: true });
+  }
+});
+
+// A video's Full screen button fills the screen: WebKitGTK does it itself; WebView2 fills only the webview until the
+// window follows it (src-tauri/src/fullscreen.rs). The macOS WKWebView: e2e/desktop-macos/video-stream.spec.ts.
+test("a video goes full screen, the window with it, and comes back", { tag: ["@feature:files.video.play"] }, async () => {
+  const home = desktopHome("fullscreen");
+  const { app, stop } = DRIVEN ? await openDriven() : await openDesktop({ home: home.dir });
+  try {
+    await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+    const report = await fullscreenInPage(app, { click: !DRIVEN });
+    test.info().annotations.push({ type: "fullscreen", description: JSON.stringify(report) });
+    expect(report.enabled).toBe(true);
+    expect(report.error).toBeUndefined();
+    expect(report.entered).toBe(true);
+    expect(report.exited).toBe(true);
+    if (process.platform === "win32") {
+      expect(report.windowFullscreen).toBe(true);
+      expect(report.windowAfter).toBe(false);
+    }
+  } finally {
+    await stop();
+    home.remove();
   }
 });

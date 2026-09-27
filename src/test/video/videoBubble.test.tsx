@@ -222,7 +222,7 @@ describe("a video in the chat", () => {
     const big = video({ size: 700 * MB }), small = video();
     getFile.mockImplementation(async (id: string) => (id === big.id ? null : new Blob(["mp4"], { type: "video/mp4" })));
     const release = vi.fn();
-    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/token-3", release });
+    vi.spyOn(servicesPlatform!, "streamFile").mockImplementation(async (id: string) => (id === big.id ? { url: "ghostly-file://localhost/token-3", release } : null));
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
     renderApp(<><VideoBubble file={big} sender="peer" /><VideoBubble file={small} sender="peer" /></>);
     const [a, b] = screen.getAllByTestId("video-play");
@@ -233,6 +233,28 @@ describe("a video in the chat", () => {
     await flush();
     expect(release).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("video-player").getAttribute("src")).toMatch(/^blob:/);
+  });
+
+  it("on Desktop even a small one streams, and a stream the player refuses plays again from its bytes, once", async () => {
+    const release = vi.fn();
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/token-4", release });
+    show(video({ size: 20 * MB }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const streamed = screen.getByTestId("video-player") as HTMLVideoElement;
+    expect(streamed.getAttribute("src")).toBe("ghostly-file://localhost/token-4");
+    expect(getFile).not.toHaveBeenCalled();
+    streamed.currentTime = 5;
+    fireEvent.error(streamed);
+    await flush();
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+    const fromBytes = screen.getByTestId("video-player") as HTMLVideoElement;
+    expect(fromBytes.getAttribute("src")).toMatch(/^blob:/);
+    expect(fromBytes.currentTime).toBe(5);
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+    fireEvent.error(fromBytes);
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MP4).");
   });
 
   it("too large to hand out, and nothing streams it here: Download to watch", async () => {
