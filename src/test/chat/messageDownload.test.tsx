@@ -83,6 +83,13 @@ describe("Download in a message's menu", () => {
     expect(screen.getByTestId("message-download")).toBeEnabled();
   });
 
+  it("waits while a large file sent from here is still being copied into storage", async () => {
+    const { user } = show(voice({ sender: "me", file: { ...voice().file!, id: "chat1-out-big" } }), { state: "transferring", stage: "preparing", transferred: 1, size: 4 });
+    await menu(user);
+    expect(screen.getByTestId("message-download")).toBeDisabled();
+    expect(screen.getByTestId("message-download")).toHaveTextContent("Still being prepared");
+  });
+
   it("downloads a voice message on the web under a readable name, and closes the menu", async () => {
     const { user } = show(voice());
     await menu(user);

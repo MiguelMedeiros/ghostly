@@ -2,14 +2,16 @@ import { safeBlobType, sanitizeFileName, voiceDownloadName } from "@ghostly/core
 import type { FileTransferState, ServicesPlatform } from "./platform";
 import type { ChatFile } from "./types";
 
-/** Whether a file message's bytes can be saved now: `arriving` and `failed` say why not. */
-export type DownloadState = "ready" | "arriving" | "failed";
+/** Whether a file message's bytes can be saved now: the others say why not. */
+export type DownloadState = "ready" | "preparing" | "arriving" | "failed";
 
 /**
- * A file sent from here is kept whole from the start. One received can be saved once its transfer is done, or
- * when nothing is known about a transfer (history, after a restart).
+ * A file sent from here is kept whole once it is prepared (a large one is copied into storage first). One
+ * received can be saved once its transfer is done, or when nothing is known about a transfer (history, after a
+ * restart).
  */
 export function downloadState(transfer: FileTransferState | null, sender: "me" | "peer"): DownloadState {
+  if (transfer?.state === "transferring" && transfer.stage === "preparing") return "preparing";
   if (sender === "me" || transfer === null || transfer.state === "done") return "ready";
   return transfer.state === "failed" ? "failed" : "arriving";
 }

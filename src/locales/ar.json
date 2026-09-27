@@ -63,6 +63,7 @@
       "details": "التفاصيل",
       "download": "تنزيل",
       "downloadArriving": "لم يُستلم بعد",
+      "downloadPreparing": "لا يزال قيد التحضير",
       "downloadFailed": "لم يصل",
       "downloadMissing": "غير موجود على هذا الجهاز",
       "detailsTitle": "تفاصيل الرسالة",

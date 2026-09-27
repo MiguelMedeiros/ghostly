@@ -327,9 +327,21 @@ export const servicesPlatform: ServicesPlatform | null = {
   },
   async saveFile(fileId, name) {
     const stored = await fileStore.get(fileId);
-    const bytes = stored?.bytes && await fileBytesOf(stored.bytes);
-    if (!stored?.metadata || !bytes?.save) return null;
-    return bytes.save(fileId, name ?? stored.metadata.name);
+    const saveAs = name ?? stored?.metadata?.name;
+    if (!stored || !saveAs) return null;
+    const bytes = stored.bytes && await fileBytesOf(stored.bytes);
+    if (bytes?.save) return bytes.save(fileId, saveAs);
+    // A small file (a voice message, most pictures) is kept as a Blob. Where files can be saved through the
+    // system's dialog (Desktop), it goes the same way: a copy staged next to the real files, saved, then removed.
+    const native = stored.blob && await fileBytesOf("native");
+    if (!stored.blob || !native?.save) return null;
+    const copy = `save-${crypto.randomUUID()}`;
+    try {
+      await native.stage(copy, stored.blob);
+      return await native.save(copy, saveAs);
+    } finally {
+      await native.remove(copy).catch(() => {});
+    }
   },
 
   wallet: walletPlatform(),

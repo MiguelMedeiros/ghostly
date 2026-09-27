@@ -63,6 +63,7 @@
       "details": "详情",
       "download": "下载",
       "downloadArriving": "尚未收到",
+      "downloadPreparing": "仍在准备中",
       "downloadFailed": "未送达",
       "downloadMissing": "不在此设备上",
       "detailsTitle": "消息详情",

@@ -234,6 +234,7 @@ function DownloadItem({ file, name, sender, onDone }: { file: ChatFile; name: st
   const [busy, setBusy] = useState(false);
   const state = downloadState(platform?.getTransfer(file.id) ?? null, sender);
   const reason = missing ? t("chat.message.downloadMissing")
+    : state === "preparing" ? t("chat.message.downloadPreparing")
     : state === "arriving" ? t("chat.message.downloadArriving")
     : state === "failed" ? t("chat.message.downloadFailed")
     : undefined;

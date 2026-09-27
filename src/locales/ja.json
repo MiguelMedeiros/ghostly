@@ -63,6 +63,7 @@
       "details": "詳細",
       "download": "ダウンロード",
       "downloadArriving": "まだ受信していません",
+      "downloadPreparing": "準備中です",
       "downloadFailed": "届きませんでした",
       "downloadMissing": "この端末にありません",
       "detailsTitle": "メッセージの詳細",

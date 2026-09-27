@@ -63,6 +63,7 @@
       "details": "Details",
       "download": "Download",
       "downloadArriving": "Not received yet",
+      "downloadPreparing": "Still being prepared",
       "downloadFailed": "Did not arrive",
       "downloadMissing": "Not on this device",
       "detailsTitle": "Message details",
