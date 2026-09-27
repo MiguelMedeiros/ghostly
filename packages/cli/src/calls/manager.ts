@@ -249,6 +249,7 @@ export class CallManager {
     call.media = await create({
       rate: call.rate,
       queue,
+      log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
       onFrame: (frame) => call.socket?.write(frame),
       onState: (state) => {
         if (call.ended) return;
@@ -274,6 +275,7 @@ export class CallManager {
     call.ended = true;
     this.disarm(call);
     this.calls.delete(call.id);
+    if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
     call.media?.close();
     await call.socket?.close();
     if (tell) {
@@ -338,7 +340,7 @@ export class CallManager {
       call: call.id, chat: call.chat, direction: call.direction, state: call.state, video: call.video,
       startedAt: call.startedAt, connectedAt: call.connectedAt,
       audio: this.audioInfo(call),
-      ...(call.socket ? { stats: { framesIn: audio?.received ?? 0, framesOut: audio?.sent ?? 0, queuedMs: call.queue?.queuedMs ?? 0, programConnected: call.socket.connected } } : {}),
+      ...(call.socket ? { stats: { framesIn: audio?.received ?? 0, framesOut: audio?.sent ?? 0, queuedMs: call.queue?.queuedMs ?? 0, programConnected: call.socket.connected, ice: call.media?.ice ?? null } } : {}),
     };
   }
 

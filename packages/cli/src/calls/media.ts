@@ -75,6 +75,18 @@ export interface MediaOptions {
   onState(state: MediaState): void;
   /** The call's queue of the program's audio. */
   queue?: PlaybackQueue;
+  /** A line about the connection (candidates, ICE states, the pair it runs on), for the daemon's log. */
+  log?(line: string): void;
+}
+
+/** The call's connection as `call list` reports it: the ICE state and, once connected, the pair it runs on. */
+export interface IceView { state: string; pair: string | null }
+
+/** A candidate as `call list` and the log show it: address, port and type. */
+function describePair(pair: ReturnType<PeerConnection["getSelectedCandidatePair"]>): string | null {
+  if (!pair) return null;
+  const one = (c: { address: string; port: number; type: string }) => `${c.address}:${c.port} ${c.type}`;
+  return `${one(pair.local)} <-> ${one(pair.remote)}`;
 }
 
 /** How long a description waits for its candidates: a server reflexive one and a little after it, or this long. */
@@ -89,6 +101,9 @@ const SETTLE_MS = 400;
 export class CallMedia {
   readonly audio: CallAudio;
   private closed = false;
+  private iceState = "new";
+  private pair: string | null = null;
+  private log: (line: string) => void = () => {};
 
   private constructor(private readonly pc: PeerConnection, private readonly track: Track, private readonly videoTrack: Track | null, readonly local: Partial<CallSignal>, audio: CallAudio) {
     this.audio = audio;
@@ -143,6 +158,18 @@ export class CallMedia {
         encoder: stack.opus(options.rate), decoder: stack.opus(options.rate), onFrame: options.onFrame, queue: options.queue,
       });
       const media = new CallMedia(pc, track, videoTrack, local, audio);
+      const log = (media.log = options.log ?? (() => {}));
+      // What each side offered to meet on: when a call does not connect, the log says between which addresses.
+      log(`candidates here: ${(local.c ?? []).join(" | ") || "none"}`);
+      if (offer) log(`contact's candidates: ${(offer.c ?? []).join(" | ") || "none"}`);
+      pc.onIceStateChange((state) => {
+        if (media.closed) return;
+        media.iceState = state;
+        if (state === "connected" || state === "completed") {
+          try { media.pair = describePair(pc.getSelectedCandidatePair()); } catch { media.pair = null; }
+          log(`ice ${state}${media.pair ? ` over ${media.pair}` : ""}`);
+        } else log(`ice ${state}`);
+      });
       track.onOpen(() => audio.start());
       if (track.isOpen()) audio.start();
       pc.onStateChange((state) => {
@@ -159,7 +186,12 @@ export class CallMedia {
 
   /** The contact's answer to this side's offer. */
   applyAnswer(answer: CallSignal): void {
+    this.log(`contact's candidates: ${(answer.c ?? []).join(" | ") || "none"}`);
     this.pc.setRemoteDescription(buildSdpFromSignal(answer), "answer");
+  }
+
+  get ice(): IceView {
+    return { state: this.iceState, pair: this.pair };
   }
 
   close(): void {
