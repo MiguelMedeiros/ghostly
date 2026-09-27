@@ -22,7 +22,7 @@ import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
 import { desktopAtproto } from "./atproto";
-import { nativeCallMedia, type NativeCallSupport } from "./nativeCalls";
+import { nativeCallOptions, type NativeCallSupport } from "./nativeCalls";
 import { engine } from "@ghostly/browser/platform/engine";
 import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
@@ -169,13 +169,9 @@ function serveServiceWindows(server: EngineServer): void {
   });
 }
 
-/**
- * `calls`: what Rust said about calls (`nativeCallSupport`). On Linux the WebView has no WebRTC and GStreamer
- * runs them; when its plugins are missing, the call buttons say what to install, and contacts are told this
- * app cannot take calls (no `calls/1`). Elsewhere, or when Rust could not say, the WebView's WebRTC it is.
- */
+/** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
 export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
-  const native = calls?.native ? { callsSupport: !calls.missing, ...(calls.missing ? { callsUnavailable: calls.missing } : {}) } : {};
+  const { node: callOptions, callMedia } = nativeCallOptions(calls);
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
@@ -185,8 +181,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
-    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke, ...native },
-    callMedia: calls?.native && !calls.missing ? nativeCallMedia() : undefined,
+    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke, ...callOptions },
+    callMedia,
     onServer: serveServiceWindows,
     oidc: desktopOidc,
     atproto: desktopAtproto,

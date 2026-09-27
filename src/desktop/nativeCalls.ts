@@ -3,8 +3,8 @@ import type { CallMedia } from "@ghostly/core";
 
 /**
  * Calls on Ghostly Desktop for Linux. WebKitGTK is built without WebRTC by Ubuntu, Debian and Fedora alike, so
- * the page has no RTCPeerConnection and no camera; GStreamer's `webrtcbin` does the call in Rust instead
- * (src-tauri/src/native_call). This file gives the call hook (`useWebRTC`) what it expects: a peer connection
+ * the page has no RTCPeerConnection and no camera; Rust does the call instead (src-tauri/src/native_call):
+ * webrtc-rs for WebRTC, GStreamer for the camera, the microphone and the codecs. This file gives the call hook (`useWebRTC`) what it expects: a peer connection
  * and capture with the browser's shape, backed by those commands. What the hook shows is real: the pictures
  * arrive as JPEG frames, drawn on canvases whose `captureStream()` tracks go in the call window's <video>s.
  * The sound stays in Rust, from the microphone to the speakers; the page's audio track is a silent stand-in
@@ -155,7 +155,9 @@ interface Lane {
 
 /**
  * Enough of RTCPeerConnection for `useWebRTC`: two lanes, audio and video, always open both ways; the offer
- * and the answer come back with their candidates already gathered, as `waitForIceGathering` wants them.
+ * and the answer come back with their candidates already gathered, as `waitForIceGathering` wants them. What
+ * happens is told through the `on…` handlers only, the ones the hook sets: no events are dispatched as well
+ * (some EventTargets call `on…` for a dispatched event too, and the hook would hear it twice).
  */
 export class NativePeerConnection extends EventTarget {
   readonly id = crypto.randomUUID();
@@ -270,9 +272,7 @@ export class NativePeerConnection extends EventTarget {
       track: this.remote.track, streams: [this.remoteStream], receiver: this.video.receiver, transceiver: this.video,
     }) as unknown as RTCTrackEvent;
     queueMicrotask(() => {
-      if (this.closed) return;
-      this.ontrack?.(event);
-      this.dispatchEvent(event);
+      if (!this.closed) this.ontrack?.(event);
     });
   }
 
@@ -309,15 +309,11 @@ export class NativePeerConnection extends EventTarget {
     const next = connectionStateOf(ice);
     if (next.ice !== this.iceConnectionState) {
       this.iceConnectionState = next.ice;
-      const event = new Event("iceconnectionstatechange");
-      this.oniceconnectionstatechange?.(event);
-      this.dispatchEvent(event);
+      this.oniceconnectionstatechange?.(new Event("iceconnectionstatechange"));
     }
     if (next.connection !== this.connectionState) {
       this.connectionState = next.connection;
-      const event = new Event("connectionstatechange");
-      this.onconnectionstatechange?.(event);
-      this.dispatchEvent(event);
+      this.onconnectionstatechange?.(new Event("connectionstatechange"));
     }
   }
 
@@ -349,4 +345,19 @@ export function nativeCallMedia(): CallMedia {
     },
     screenUnavailable: SCREEN_UNAVAILABLE,
   };
+}
+
+/**
+ * What the engine and the call hook get from what Rust said. On Linux (`native`) the WebView has no WebRTC and
+ * GStreamer runs calls: `calls/1` is offered and the media is this file's; when plugins are missing, calls/1 is
+ * not offered (a contact is told this app cannot take calls) and the call buttons say what to install.
+ * Elsewhere, or when Rust could not say, it is the WebView's own WebRTC: nothing to change.
+ */
+export function nativeCallOptions(calls: NativeCallSupport | null): {
+  node: { callsSupport?: boolean; callsUnavailable?: string };
+  callMedia?: CallMedia;
+} {
+  if (!calls?.native) return { node: {} };
+  if (calls.missing) return { node: { callsSupport: false, callsUnavailable: calls.missing } };
+  return { node: { callsSupport: true }, callMedia: nativeCallMedia() };
 }

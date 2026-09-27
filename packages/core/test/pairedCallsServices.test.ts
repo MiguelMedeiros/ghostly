@@ -159,6 +159,17 @@ describe("calls on a paired session (calls/1)", () => {
     expect(b.calls).toEqual([]);
   });
 
+  it("a side that cannot call says why in its own words (the Linux Desktop without its GStreamer plugins)", async () => {
+    const missing = "Calls need GStreamer plugins: install gstreamer1.0-plugins-good";
+    const { a, b } = pair({ b: { callsSupport: false, callsMissing: missing } });
+    expect(b.link.callsUnavailable).toBe(missing);
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.sessionOffers.peer).toEqual(["services/1"]));
+    // Live or not, the reason is this app's; its contact is told it cannot take calls.
+    expect(b.link.callsUnavailable).toBe(missing);
+    expect(a.link.callsUnavailable).toBe("Your contact's app cannot take calls");
+  });
+
   it("an older contact that never says what it offers has no calls and no shared apps", async () => {
     const older = (data: string) => data.includes('"t":"paired-capabilities"');
     const { a, b } = pair({ drop: { b: older } });
