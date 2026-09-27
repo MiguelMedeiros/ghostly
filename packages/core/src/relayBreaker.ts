@@ -14,6 +14,11 @@ export const BREAKER_THRESHOLD = 3;
 export const BREAKER_BASE_MS = 60_000;
 /** The longest a relay is left alone. */
 export const BREAKER_MAX_MS = 5 * 60_000;
+/**
+ * While every relay is left alone for failing, one of them is asked this often anyway: with nothing else to try, a
+ * long wait only delays noticing that they answer again (a link stayed down minutes after the relays came back).
+ */
+export const BREAKER_ALL_DOWN_PROBE_MS = 15_000;
 
 /** Why a request to a relay failed: its rate limit (`throttled`), or anything else (`error`). */
 export type RelayFailure = "throttled" | "error";
@@ -41,6 +46,8 @@ export interface RelayBreakerOptions {
   threshold?: number;
   baseMs?: number;
   maxMs?: number;
+  /** `BREAKER_ALL_DOWN_PROBE_MS`. */
+  allDownProbeMs?: number;
   now?: () => number;
   /** Told each time a relay trips: which, why, and for how long. */
   onTrip?: (relay: string, reason: string, forMs: number) => void;
@@ -65,12 +72,16 @@ export class RelayBreaker {
   private readonly threshold: number;
   private readonly baseMs: number;
   private readonly maxMs: number;
+  private readonly allDownProbeMs: number;
   private readonly now: () => number;
+  /** When a relay was last asked because every relay was left alone. */
+  private lastAllDownProbe = -Infinity;
 
   constructor(private readonly options: RelayBreakerOptions = {}) {
     this.threshold = options.threshold ?? BREAKER_THRESHOLD;
     this.baseMs = options.baseMs ?? BREAKER_BASE_MS;
     this.maxMs = options.maxMs ?? BREAKER_MAX_MS;
+    this.allDownProbeMs = options.allDownProbeMs ?? BREAKER_ALL_DOWN_PROBE_MS;
     this.now = options.now ?? Date.now;
   }
 
@@ -101,6 +112,30 @@ export class RelayBreaker {
     if (circuit && circuit.openUntil !== 0 && circuit.openUntil <= this.now()) circuit.probing = true;
   }
 
+  /**
+   * When every relay of `relays` is left alone for failing (none for its rate limit, none with its probe due or out),
+   * the one whose wait ends first may be asked now, once every `BREAKER_ALL_DOWN_PROBE_MS`. Returns it, or null. The
+   * caller marks the request with `beginAllDown` when it really goes (a request its budget holds back is no probe).
+   */
+  allDownProbe(relays: string[]): string | null {
+    const now = this.now();
+    if (!relays.length || now - this.lastAllDownProbe < this.allDownProbeMs) return null;
+    let pick: string | null = null, soonest = Infinity;
+    for (const relay of relays) {
+      const circuit = this.circuits.get(relay);
+      if (!circuit || circuit.openUntil <= now || circuit.probing || circuit.kind !== "error") return null;
+      if (circuit.openUntil < soonest) { soonest = circuit.openUntil; pick = relay; }
+    }
+    return pick;
+  }
+
+  /** The probe `allDownProbe` named is going now: its answer closes the breaker, a failure trips it again. */
+  beginAllDown(relay: string): void {
+    const circuit = this.circuits.get(relay);
+    if (circuit) circuit.probing = true;
+    this.lastAllDownProbe = this.now();
+  }
+
   /** The relay answered: whatever was wrong is over. */
   success(relay: string): void {
     const circuit = this.circuits.get(relay);
@@ -120,6 +155,8 @@ export class RelayBreaker {
   }
 
   private trip(relay: string, circuit: Circuit): void {
+    // What just failed was an answer of sorts: the next early probe (`allDownProbe`) is a full interval away.
+    this.lastAllDownProbe = Math.max(this.lastAllDownProbe, this.now());
     const forMs = Math.min(this.baseMs * 2 ** circuit.trips, this.maxMs);
     circuit.openUntil = this.now() + forMs;
     circuit.trips++;

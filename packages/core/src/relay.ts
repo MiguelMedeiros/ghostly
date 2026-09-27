@@ -1,7 +1,7 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
-import { DiscoveryBudgetError, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
+import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /**
  * Public Pkarr relays. They are generic Pkarr infrastructure (an HTTP bridge to
@@ -97,7 +97,7 @@ export class RelayTransport implements PkarrTransport {
   private readonly breaker: RelayBreaker;
   /** The relay the last read was answered by. */
   private lastRelay: string | null = null;
-  private readonly listeners = new Set<() => void>();
+  private readonly listeners = new Set<(change?: DiscoveryChange) => void>();
 
   constructor(options: RelayTransportOptions = {}) {
     this.relays = [];
@@ -112,12 +112,12 @@ export class RelayTransport implements PkarrTransport {
       onTrip: (relay, reason, forMs) => {
         log(`${new URL(relay).host} tripped (${reason}); left alone for ${Math.round(forMs / 1000)} s`);
         options.breaker?.onTrip?.(relay, reason, forMs);
-        this.changed();
+        this.changed("tripped");
       },
       onRecover: (relay) => {
         log(`${new URL(relay).host} answered again`);
         options.breaker?.onRecover?.(relay);
-        this.changed();
+        this.changed("recovered");
       },
     });
   }
@@ -132,19 +132,21 @@ export class RelayTransport implements PkarrTransport {
   }
 
   /** Called when a relay trips or recovers. */
-  subscribe(listener: () => void): () => void {
+  subscribe(listener: (change?: DiscoveryChange) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private changed(): void {
-    for (const listener of this.listeners) try { listener(); } catch { /* a listener that fails must not fail a request */ }
+  private changed(change: DiscoveryChange): void {
+    for (const listener of this.listeners) try { listener(change); } catch { /* a listener that fails must not fail a request */ }
   }
 
   /** What the relay did, for its breaker. */
-  private answered(relay: string, failure?: { kind: RelayFailure; reason: string }): void {
-    if (failure) this.breaker.failure(relay, failure.kind, failure.reason);
-    else this.breaker.success(relay);
+  private answered(relay: string, failure?: { kind: RelayFailure; reason: string }, method?: "GET" | "PUT"): void {
+    if (failure) { this.breaker.failure(relay, failure.kind, failure.reason); return; }
+    // It answered this kind of request: an earlier failure of it no longer keeps the next one back.
+    if (method) this.networkCooldown.delete(`${method} ${relay}`);
+    this.breaker.success(relay);
   }
 
   setRelays(relays: string[]): void {
@@ -194,6 +196,8 @@ export class RelayTransport implements PkarrTransport {
     const noWriteWaits = () => {
       for (const relay of this.relays) if (this.writeWaiting.get(relay) !== waitingBefore.get(relay)) this.writeWaiting.delete(relay);
     };
+    // Every relay left alone for failing: one of them is asked anyway, now and then (`allDownProbe`).
+    const probe = this.breaker.allDownProbe(this.relays);
     const puts = this.relays.map(async (relay) => {
       const slot = `${relay} ${pubKeyZ32}`;
       const previous = this.lastPut.get(slot);
@@ -201,7 +205,7 @@ export class RelayTransport implements PkarrTransport {
 
       // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
       // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
-      let response = await this.put(relay, pubKeyZ32, payload, previous, options.background);
+      let response = await this.put(relay, pubKeyZ32, payload, previous, options.background, relay === probe);
       // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
       if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, options.background);
       // The relay's own rate limit: this packet did not go in, and goes once the relay says so.
@@ -245,21 +249,23 @@ export class RelayTransport implements PkarrTransport {
 
     const start = this.cursor++;
     let reachable = false;
+    // Every relay left alone for failing: one of them is asked anyway, now and then (`allDownProbe`).
+    const probe = this.breaker.allDownProbe(this.relays);
     // The soonest a relay passed over for its budget takes a request again, and whether one was down instead.
     let budgetWait = Infinity, down = false;
     for (let i = 0; i < this.relays.length; i++) {
       const relay = this.relays[(start + i) % this.relays.length];
-      if (this.networkCoolingDown(relay, "GET")) { down = true; continue; }
+      if (relay !== probe && this.networkCoolingDown(relay, "GET")) { down = true; continue; }
       const limited = this.rateLimitedFor(relay);
       if (limited > 0) { budgetWait = Math.min(budgetWait, limited); continue; }
       // Its breaker is open: a relay throttling us is a wait, one failing is down. The others take its turn.
-      const blocked = this.breaker.blockedFor(relay);
+      const blocked = relay === probe ? 0 : this.breaker.blockedFor(relay);
       if (blocked > 0) {
         if (this.breaker.blockedKind(relay) === "throttled") budgetWait = Math.min(budgetWait, blocked); else down = true;
         continue;
       }
       if (!this.take(relay, options.background, false)) { budgetWait = Math.min(budgetWait, this.freeInMs(relay, options.background, false)); continue; }
-      this.breaker.begin(relay);
+      if (relay === probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
       let status = 0;
       try {
         let payload: Uint8Array | undefined;
@@ -279,7 +285,7 @@ export class RelayTransport implements PkarrTransport {
           const known = this.newest.get(pubKeyZ32);
           if (!known || packet.timestampMicros > known.timestampMicros) this.newest.set(pubKeyZ32, packet);
         }
-        this.answered(relay);
+        this.answered(relay, undefined, "GET");
         this.lastRelay = relay;
         reachable = true;
         break;
@@ -304,17 +310,17 @@ export class RelayTransport implements PkarrTransport {
     return this.newest.get(pubKeyZ32) ?? null;
   }
 
-  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint, background = false): Promise<Response> {
-    if (this.networkCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
+  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint, background = false, probe = false): Promise<Response> {
+    if (!probe && this.networkCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
     const limited = this.rateLimitedFor(relay);
     if (limited > 0) throw new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
-    const blocked = this.breaker.blockedFor(relay);
+    const blocked = probe ? 0 : this.breaker.blockedFor(relay);
     if (blocked > 0) {
       if (this.breaker.blockedKind(relay) === "throttled") throw new DiscoveryBudgetError(blocked, "Discovery relay is throttling this address; retry shortly");
       throw new Error(`${relay} is left alone after failing; retry shortly`);
     }
     if (!this.take(relay, background, true)) throw new DiscoveryBudgetError(this.freeInMs(relay, background, true));
-    this.breaker.begin(relay);
+    if (probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
     let response: Response;
     try { response = await this.request(`${relay}/${pubKeyZ32}`, {
       method: "PUT",
@@ -328,7 +334,7 @@ export class RelayTransport implements PkarrTransport {
     // 409, 412 and 428 are the relay working as it should; its rate limit and its own errors count against it.
     if (response.status === 429) this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
     else if (response.status >= 500) this.answered(relay, { kind: "error", reason: `HTTP ${response.status}` });
-    else this.answered(relay);
+    else this.answered(relay, undefined, "PUT");
     return response;
   }
 

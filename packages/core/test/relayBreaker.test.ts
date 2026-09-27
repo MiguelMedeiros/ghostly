@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BREAKER_BASE_MS, BREAKER_MAX_MS, BREAKER_THRESHOLD, DEFAULT_RELAYS, PREVIOUS_DEFAULT_RELAYS, RelayBreaker, RelayTransport, createIdentity, createRelayPayload, currentRelays } from "../src";
+import { BREAKER_ALL_DOWN_PROBE_MS, BREAKER_BASE_MS, BREAKER_MAX_MS, BREAKER_THRESHOLD, DEFAULT_RELAYS, PREVIOUS_DEFAULT_RELAYS, RelayBreaker, RelayTransport, createIdentity, createRelayPayload, currentRelays } from "../src";
 // covers: core.relay-breaker
 
 describe("relay breaker", () => {
@@ -17,6 +17,36 @@ describe("relay breaker", () => {
     breaker.failure("a", "error", "no answer");
     expect(breaker.blockedFor("a")).toBe(BREAKER_BASE_MS);
     expect(trips).toEqual([`a no answer ${BREAKER_BASE_MS}`]);
+  });
+
+  it("with every relay left alone for failing, one is asked anyway every 15 s; not while one is fine or throttled", () => {
+    const { breaker, advance } = clocked();
+    const trip = (relay: string, kind: "error" | "throttled" = "error") => { for (let i = 0; i < BREAKER_THRESHOLD; i++) breaker.failure(relay, kind, "HTTP 500"); };
+    trip("a");
+    expect(breaker.allDownProbe(["a", "b"])).toBeNull();
+    trip("b");
+    advance(1_000);
+    // Not the moment they failed…
+    expect(breaker.allDownProbe(["a", "b"])).toBeNull();
+    advance(BREAKER_ALL_DOWN_PROBE_MS - 1_000);
+    // …but both out for a minute: "a" (tripped first, its wait ends first) is asked 15 s on, not a minute on.
+    expect(breaker.allDownProbe(["a", "b"])).toBe("a");
+    breaker.beginAllDown("a");
+    expect(breaker.allDownProbe(["a", "b"])).toBeNull();
+    breaker.failure("a", "error", "HTTP 500");
+    advance(BREAKER_ALL_DOWN_PROBE_MS - 1);
+    expect(breaker.allDownProbe(["a", "b"])).toBeNull();
+    advance(1);
+    // "a" failed its probe and waits two minutes now; "b" is next.
+    expect(breaker.allDownProbe(["a", "b"])).toBe("b");
+    breaker.beginAllDown("b");
+    breaker.success("b");
+    expect(breaker.blockedFor("b")).toBe(0);
+    advance(BREAKER_ALL_DOWN_PROBE_MS);
+    expect(breaker.allDownProbe(["a", "b"])).toBeNull();
+    // A relay throttling us is a wait for its rate limit, not an outage: no probe ahead of it.
+    trip("b", "throttled");
+    expect(breaker.allDownProbe(["a", "b"])).toBeNull();
   });
 
   it("an answer between failures starts the count again", () => {
@@ -137,16 +167,20 @@ describe("relay transport with a breaker", () => {
         vi.advanceTimersByTime(21_000);
       }
       expect(recovered).toHaveBeenCalledTimes(1);
+      // Its only relay out for 15 s: asked anyway (it fails, and trips again), then left alone for the next 15 s.
+      calls.length = 0;
+      await expect(relay.resolve(id.pubKeyZ32)).rejects.toThrow();
+      expect(calls).toEqual(["GET flaky.test"]);
       calls.length = 0;
       await expect(relay.resolve(id.pubKeyZ32)).rejects.toThrow();
       expect(calls).toEqual([]);
-      vi.advanceTimersByTime(60_000);
+      vi.advanceTimersByTime(15_000);
       up = true;
       expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(1000n);
       expect(calls).toEqual(["GET flaky.test"]);
       expect(relay.discovery()).toEqual({ path: { via: "relay", relay: "https://flaky.test" }, relays: [{ relay: "https://flaky.test", state: "ok" }] });
       expect(log.at(-1)).toBe("flaky.test answered again");
-      expect(recovered).toHaveBeenCalledTimes(2);
+      expect(recovered.mock.calls.map(([change]) => change)).toEqual(["tripped", "tripped", "recovered"]);
     } finally {
       vi.useRealTimers();
     }
@@ -192,6 +226,31 @@ describe("relay transport with a breaker", () => {
     const { relay } = transport({ "a.test": () => new Response("", { status: 404 }) });
     for (let i = 0; i < 5; i++) expect(await relay.resolve(id.pubKeyZ32)).toBeNull();
     expect(relay.discovery().relays).toEqual([{ relay: "https://a.test", state: "ok" }]);
+  });
+  it("every relay answering 500: one probe every 15 s, and the links hear when one answers again", async () => {
+    vi.useFakeTimers();
+    try {
+      let up = false;
+      const changes: string[] = [];
+      const answer = () => up ? new Response(packet(2000n) as BodyInit) : new Response("down", { status: 500 });
+      const { relay, calls } = transport({ "a.test": answer, "b.test": answer });
+      relay.subscribe((change) => changes.push(change ?? ""));
+      for (let i = 0; i < 8; i++) { await relay.resolve(id.pubKeyZ32).catch(() => {}); vi.advanceTimersByTime(21_000); }
+      expect(relay.discovery().relays.map((r) => r.state)).toEqual(["failing", "failing"]);
+      // Two minutes of polls every 2 s while both are out: one request every 15 s, not one per poll, and not none for minutes.
+      calls.length = 0;
+      for (let i = 0; i < 60; i++) { await relay.resolve(id.pubKeyZ32).catch(() => {}); vi.advanceTimersByTime(2_000); }
+      expect(calls.length).toBeGreaterThanOrEqual(7);
+      expect(calls.length).toBeLessThanOrEqual(9);
+      up = true;
+      changes.length = 0;
+      let seen = null;
+      for (let i = 0; i < 8 && !seen; i++) { seen = await relay.resolve(id.pubKeyZ32).catch(() => null); if (!seen || seen.timestampMicros !== 2000n) seen = null; vi.advanceTimersByTime(2_000); }
+      expect(seen).not.toBeNull();
+      expect(changes).toContain("recovered");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

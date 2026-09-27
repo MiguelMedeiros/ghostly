@@ -171,6 +171,7 @@ export class LinkSession {
     return this.publishing !== null || this.firstPublishTimer !== null || Date.now() - this.lastPublishedAt < withinMs;
   }
   private discoveryErrors: Partial<Record<"publish" | "read", string>> = {};
+  private unsubscribe: (() => void) | null = null;
   private presence: PeerPresence = { online: false, lastPacketAt: 0, services: null };
 
   constructor(options: LinkSessionOptions) {
@@ -203,7 +204,16 @@ export class LinkSession {
       else this.firstPublishTimer = setTimeout(() => { this.firstPublishTimer = null; this.ensureAdvertised(); }, FIRST_PUBLISH_MAX_MS);
     }
     this.scheduleHeartbeat();
+    // A relay that answers again after failing: look and publish now, not at this link's pace (which may be minutes).
+    this.unsubscribe = this.transport.subscribe?.(change => { if (change === "recovered") this.discoveryRecovered(); }) ?? null;
     void this.poll();
+  }
+
+  private discoveryRecovered(): void {
+    if (!this.running) return;
+    traceLink(this.identity.pubKeyZ32, "discovery-recovered", { publishWaiting: !!this.publishRetryTimer });
+    if (this.publishRetryTimer || this.discoveryErrors.publish) void this.publish().catch(() => {});
+    this.pollNow();
   }
 
   /** This side's packet goes out now, unless one already did. */
@@ -217,6 +227,8 @@ export class LinkSession {
     if (!this.running) return;
     this.running = false;
     this.silent = !announce;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     if (this.pollTimer) clearTimeout(this.pollTimer);
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
