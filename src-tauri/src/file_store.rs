@@ -15,6 +15,7 @@ use tauri::ipc::{InvokeBody, Request, Response};
 pub const MAX_STEP: u64 = 16 * 1024 * 1024;
 
 /// Where the files are: set once the app knows its data folder.
+#[derive(Clone)]
 pub struct FileStore {
     base: PathBuf,
 }
@@ -41,6 +42,11 @@ impl FileStore {
         Ok(self.folder(space)?.join(check_id(id)?))
     }
 
+    /// Where a stored file is, for serving it in ranges (`file_stream.rs`): checked like every other access.
+    pub fn path_of(&self, space: &str, id: &str) -> Result<PathBuf, String> {
+        self.path(space, id)
+    }
+
     /// Writes `bytes` at `offset`, which must be the file's length: files grow in order only.
     pub fn append(&self, space: &str, id: &str, offset: u64, bytes: &[u8]) -> Result<(), String> {
         if bytes.len() as u64 > MAX_STEP {
@@ -63,9 +69,10 @@ impl FileStore {
         file.write_all(bytes).map_err(|e| e.to_string())
     }
 
-    /// What was written so far survives a crash.
+    /// What was written so far survives a crash. Opened for writing: Windows refuses to flush a read-only handle
+    /// (`FlushFileBuffers`, "Access is denied").
     pub fn flush(&self, space: &str, id: &str) -> Result<(), String> {
-        match File::open(self.path(space, id)?) {
+        match OpenOptions::new().write(true).open(self.path(space, id)?) {
             Ok(file) => file.sync_all().map_err(|e| e.to_string()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.to_string()),
@@ -332,7 +339,15 @@ pub fn file_bytes_remove_where<R: tauri::Runtime>(
     space: String,
     prefix: String,
 ) -> Result<(), String> {
-    store(&app)?.remove_where(&space, &prefix)
+    use tauri::Manager;
+    store(&app)?.remove_where(&space, &prefix)?;
+    // A profile's files all gone: so are the tokens that played them.
+    if prefix.is_empty() {
+        if let Some(grants) = app.try_state::<crate::file_stream::StreamGrants>() {
+            grants.close_space(&space);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

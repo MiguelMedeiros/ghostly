@@ -10,6 +10,7 @@ mod diagnostics;
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
 mod e2e_driver;
 mod file_store;
+mod file_stream;
 mod hyperdht;
 mod link_preview;
 mod lnd;
@@ -114,6 +115,8 @@ macro_rules! commands {
             file_store::file_bytes_remove_where,
             file_store::file_bytes_room,
             file_store::file_bytes_save,
+            file_stream::file_bytes_stream_open,
+            file_stream::file_bytes_stream_close,
             native_call::native_call_support,
             native_call::native_camera_open,
             native_call::native_camera_close,
@@ -183,6 +186,31 @@ fn main() {
             }
             Ok(())
         })
+        // Stored files played in place (a video over the size a page can hold), by a token the page got.
+        .manage(file_stream::StreamGrants::default())
+        .register_asynchronous_uri_scheme_protocol(
+            file_stream::SCHEME,
+            |ctx, request, responder| {
+                let app = ctx.app_handle().clone();
+                let label = ctx.webview_label().to_string();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let response = match (
+                        app.try_state::<file_store::FileStore>(),
+                        app.try_state::<file_stream::StreamGrants>(),
+                    ) {
+                        (Some(store), Some(grants)) => {
+                            file_stream::respond(&store, &grants, &label, &request)
+                        }
+                        _ => tauri::http::Response::builder()
+                            .status(tauri::http::StatusCode::NOT_FOUND)
+                            .body(Vec::new())
+                            .unwrap(),
+                    };
+                    file_stream::trace(&request, &response);
+                    responder.respond(response);
+                });
+            },
+        )
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -354,13 +382,15 @@ mod tests {
         arguments["answer"] = serde_json::json!("x");
         arguments["muted"] = serde_json::json!(false);
         arguments["camera"] = serde_json::json!(null);
+        arguments["mime"] = serde_json::json!("video/mp4");
+        arguments["token"] = serde_json::json!("x");
         arguments
     }
 
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 72, "{declared:?}");
+        assert_eq!(declared.len(), 74, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

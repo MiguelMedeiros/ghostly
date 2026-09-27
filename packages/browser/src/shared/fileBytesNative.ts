@@ -1,9 +1,9 @@
-import { FILE_BYTES_STEP, checkFileId, fileSpace, type FileBytes } from "./fileBytes";
+import { FILE_BYTES_STEP, checkFileId, fileSpace, type FileBytes, type FileStream } from "./fileBytes";
 
 /** Tauri's `invoke`, with the raw-body form the file commands take. */
 export type NativeInvoke = (command: string, args?: Record<string, unknown> | Uint8Array, options?: { headers: Record<string, string> }) => Promise<unknown>;
 
-/** Received files up to this size can be shown in the app (an image, a voice message); larger ones are saved. */
+/** Received files up to this size can be shown in the app as a Blob (an image, a voice message); a larger video streams (`stream`). */
 export const NATIVE_BLOB_MAX = 64 * 1024 * 1024;
 
 /**
@@ -63,6 +63,25 @@ export class NativeFileBytes implements FileBytes {
     const parts: Uint8Array[] = [];
     for (let offset = 0; offset < size; offset += FILE_BYTES_STEP) parts.push(await this.read(id, offset, FILE_BYTES_STEP));
     return new Blob(parts as BlobPart[], { type });
+  }
+
+  /**
+   * A URL Rust serves the file from in ranges (`src-tauri/src/file_stream.rs`): the `ghostly-file` scheme, or HTTP on
+   * 127.0.0.1 on Linux, whose WebKitGTK plays no custom scheme. The WebView reads it as a video seeks.
+   */
+  async stream(id: string, type: string): Promise<FileStream | null> {
+    const opened = await this.invoke("file_bytes_stream_open", this.args(id, { mime: type })).catch(() => null) as { url?: unknown; token?: unknown } | null;
+    if (typeof opened?.url !== "string" || typeof opened.token !== "string") return null;
+    const { url, token } = opened as { url: string; token: string };
+    let released = false;
+    return {
+      url,
+      release: () => {
+        if (released) return;
+        released = true;
+        void this.invoke("file_bytes_stream_close", { token }).catch(() => {});
+      },
+    };
   }
 
   async dropSpace(space: string): Promise<void> {

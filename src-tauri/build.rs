@@ -64,6 +64,8 @@ const COMMANDS: &[&str] = &[
     "file_bytes_remove_where",
     "file_bytes_room",
     "file_bytes_save",
+    "file_bytes_stream_open",
+    "file_bytes_stream_close",
     "native_call_support",
     "native_camera_open",
     "native_camera_close",
