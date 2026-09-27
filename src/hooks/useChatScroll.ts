@@ -45,6 +45,8 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   const seen = useRef(new Set<string>());
   const opened = useRef(false);
   const firstNew = useRef<string | null>(null);
+  /** On the way down after ↓ or End: counts as at the bottom until it gets there, or until a hand scrolls it. */
+  const following = useRef(false);
   const hasRows = useRef(false);
   hasRows.current = rows.length > 0;
 
@@ -89,6 +91,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     const el = list.current;
     if (!el) return;
     atBottom.current = true;
+    following.current = true;
     anchor.current = null;
     clear();
     const top = el.scrollHeight;
@@ -112,6 +115,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   // Another chat: it opens at its bottom, with nothing counted.
   useLayoutEffect(() => {
     opened.current = false;
+    following.current = false;
     seen.current = new Set();
     atBottom.current = true;
     anchor.current = null;
@@ -154,16 +158,23 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     if (!el) return;
     const onScroll = () => {
       const d = distance(el);
-      atBottom.current = d <= NEAR_BOTTOM_PX;
+      if (d <= NEAR_BOTTOM_PX) following.current = false;
+      atBottom.current = following.current || d <= NEAR_BOTTOM_PX;
       setFar(d > FAR_FROM_BOTTOM_PX);
       if (atBottom.current) { anchor.current = null; clear(); } else capture(el);
     };
+    const takeOver = () => { following.current = false; };
     el.addEventListener("scroll", onScroll, { passive: true });
+    for (const type of ["wheel", "touchstart", "pointerdown"]) el.addEventListener(type, takeOver, { passive: true });
     // A picture or a video loading, a bubble growing, the list itself getting shorter (a bar under it, the keyboard).
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => settle()) : undefined;
     observer?.observe(el);
     if (columnEl) observer?.observe(columnEl);
-    return () => { el.removeEventListener("scroll", onScroll); observer?.disconnect(); };
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      for (const type of ["wheel", "touchstart", "pointerdown"]) el.removeEventListener(type, takeOver);
+      observer?.disconnect();
+    };
   }, [listEl, columnEl, capture, settle, clear]);
 
   useEffect(() => {

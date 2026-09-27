@@ -389,7 +389,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
-  const scrollRows = useMemo(() => messages.map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
+  // A notice (joined, a call) is not a message to count.
+  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
   const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible });
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.

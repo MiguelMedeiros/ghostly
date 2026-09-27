@@ -219,6 +219,38 @@ describe("the chat timeline's scrolling", () => {
     expect(pill()).toBeNull();
   });
 
+  it("on the way down after ↓, a new message or a picture loading does not leave the view halfway", async () => {
+    const rows = theirs(0, 30);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    // A smooth scroll still under way: it has only got halfway when the rest happens.
+    const halfway = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
+      this.scrollTop = ((options as ScrollToOptions).top ?? 0) / 2;
+    });
+    await user.click(pill()!);
+    halfway.mockRestore();
+    expect(list().scrollTop).toBeLessThan(1200);
+    rerender(<Timeline rows={[...rows, ...theirs(30, 1)]} />);
+    expect(list().scrollTop).toBe(1250);
+    expect(pill()).toBeNull();
+  });
+
+  it("scrolling by hand on the way down stops it there", async () => {
+    const rows = theirs(0, 30);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    const halfway = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
+      this.scrollTop = ((options as ScrollToOptions).top ?? 0) / 2;
+    });
+    await user.click(pill()!);
+    halfway.mockRestore();
+    fireEvent.wheel(list());
+    scrollTo(400);
+    rerender(<Timeline rows={[...rows, ...theirs(30, 1)]} />);
+    expect(list().scrollTop).toBe(400);
+    expect(pill()).toHaveAttribute("data-count", "1");
+  });
+
   it("End or Ctrl/Cmd+↓ jumps to the bottom, but not from a text field", () => {
     renderApp(<Timeline rows={theirs(0, 30)} />);
     scrollTo(0);
