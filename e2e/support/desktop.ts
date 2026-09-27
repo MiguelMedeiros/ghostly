@@ -211,9 +211,11 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
     ["--port", String(port), "--native-port", String(nativePort)],
     {
       stdio: ["ignore", "pipe", "pipe"],
-      // A test must never open the person's own chats: its own profile, its own storage.
+      // A test must never open the person's own chats: its own profile, its own storage. Nor the machine's camera
+      // and microphone: a test picture and a test tone for calls on Linux (debug builds), as Chromium's fake devices.
       env: {
         ...process.env,
+        GHOSTLY_FAKE_MEDIA: "1",
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
         ...options.env,

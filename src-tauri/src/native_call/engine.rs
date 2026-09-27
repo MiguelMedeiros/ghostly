@@ -256,6 +256,7 @@ pub struct Stats {
     pub audio_received: u64,
     pub video_received: u64,
     pub ice: String,
+    pub muted: bool,
 }
 
 /// What the call's handler and its tasks share.
@@ -283,6 +284,7 @@ impl Shared {
             self.told_connected.store(true, Ordering::Relaxed);
         }
         *current = state.to_string();
+        crate::diagnostics::log(&format!("native call: {state}"));
         (self.events)(serde_json::json!({ "ice": state }).to_string().into_bytes());
     }
 
@@ -517,6 +519,14 @@ pub fn describe(sdp: &str, gathered: &[String], ssrcs: (u32, u32)) -> String {
                 }
             })
             .collect();
+        // A wildcard address (a socket bound to `[::]` on a machine with no IPv6) cannot be dialled.
+        if parts
+            .get(4)
+            .and_then(|a| a.parse::<std::net::IpAddr>().ok())
+            .is_some_and(|a| a.is_unspecified())
+        {
+            return;
+        }
         let line = format!("a=candidate:{}", parts.join(" "));
         if !candidates.contains(&line) {
             candidates.push(line);
@@ -550,6 +560,13 @@ pub fn describe(sdp: &str, gathered: &[String], ssrcs: (u32, u32)) -> String {
     for line in gathered {
         candidate(line);
     }
+    // The signal carries the first host candidate only (`extractParamsFromSdp`): IPv4 first, as browsers put it.
+    candidates.sort_by_key(|line| {
+        let parts: Vec<&str> = line.split(' ').collect();
+        let host = parts.get(7) == Some(&"host");
+        let ipv6 = parts.get(4).is_some_and(|a| a.contains(':'));
+        (!host, ipv6)
+    });
     out.extend(candidates);
     out.join("\r\n") + "\r\n"
 }
@@ -583,7 +600,6 @@ fn codec(kind: RtpCodecKind, payload_type: u8) -> RTCRtpCodecParameters {
             }
         },
         payload_type,
-        ..Default::default()
     }
 }
 
@@ -821,7 +837,15 @@ impl Call {
             .local_description()
             .await
             .ok_or("No local description")?;
-        Ok(describe(&local.sdp, &gathered, self.ssrcs))
+        let described = describe(&local.sdp, &gathered, self.ssrcs);
+        // Which kinds of candidates went out (not their addresses): why a call never connected, afterwards.
+        let kinds: Vec<&str> = described
+            .lines()
+            .filter(|l| l.starts_with("a=candidate:") && l.split(' ').nth(1) == Some("1"))
+            .filter_map(|l| l.split(' ').nth(7))
+            .collect();
+        crate::diagnostics::log(&format!("native call: {} with {kinds:?}", local.sdp_type));
+        Ok(described)
     }
 
     /// Our offer, gathered: what the page reads its signal from.
@@ -874,6 +898,7 @@ impl Call {
             audio_received: c.audio_received.load(Ordering::Relaxed),
             video_received: c.video_received.load(Ordering::Relaxed),
             ice: self.shared.ice.lock().unwrap().clone(),
+            muted: self.mic.property::<bool>("mute"),
         }
     }
 
@@ -904,10 +929,12 @@ mod tests {
     }
 
     #[test]
-    fn the_description_carries_ssrcs_and_every_candidate_once_in_lower_case() {
+    fn the_description_carries_ssrcs_and_every_dialable_candidate_once_ipv4_hosts_first() {
         let sdp = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=candidate:9 1 UDP 1 1.2.3.4 5 typ host\r\n\
                    a=end-of-candidates\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=ssrc:7 cname:x\r\n";
         let gathered = [
+            "candidate:7 1 udp 2130706431 :: 42934 typ host".to_string(),
+            "candidate:8 1 udp 2130706431 fd00::2 42935 typ host".to_string(),
             "candidate:1 1 UDP 2015363327 172.17.0.2 38415 typ host".to_string(),
             "candidate:9 1 udp 1 1.2.3.4 5 typ host".to_string(),
         ];
@@ -923,7 +950,8 @@ mod tests {
         assert!(!out.contains("end-of-candidates"), "{out}");
         assert!(
             out.ends_with(
-                "a=candidate:9 1 udp 1 1.2.3.4 5 typ host\r\na=candidate:1 1 udp 2015363327 172.17.0.2 38415 typ host\r\n"
+                "a=candidate:9 1 udp 1 1.2.3.4 5 typ host\r\na=candidate:1 1 udp 2015363327 172.17.0.2 38415 typ host\r\n\
+                 a=candidate:8 1 udp 2130706431 fd00::2 42935 typ host\r\n"
             ),
             "{out}"
         );

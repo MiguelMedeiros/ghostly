@@ -169,6 +169,24 @@ describe("call signals", () => {
     expect(buildSdpFromSignal(parseCallSignal(signalFrom(CHROME_OFFER, "o"), NOW)!)).toContain("\r\na=rtpmap:96 VP8/90000\r\n");
   });
 
+  it("keeps a host candidate whose line ends at `typ host` (webrtc-rs, the Linux Desktop's calls)", () => {
+    const linux = [
+      "v=0", "o=- 1 2 IN IP4 0.0.0.0", "s=-", "t=0 0", "a=group:BUNDLE 0 1",
+      "m=audio 9 UDP/TLS/RTP/SAVPF 111", "c=IN IP4 0.0.0.0", "a=ice-ufrag:YMMdExaxQBHqpEPs",
+      "a=ice-pwd:fpzBkrMsIRuhHekXupyTDFopKaWShAFt", `a=fingerprint:sha-256 ${FINGERPRINT}`, "a=setup:actpass", "a=mid:0",
+      "a=rtpmap:111 opus/48000/2", "a=ssrc:1 cname:ghostly", "m=video 9 UDP/TLS/RTP/SAVPF 96", "a=mid:1",
+      "a=rtpmap:96 VP8/90000", "a=ssrc:2 cname:ghostly",
+      "a=candidate:2519499965 1 udp 2130706431 192.168.215.2 58888 typ host",
+      "a=candidate:2052316515 1 udp 1694498815 203.0.113.9 51670 typ srflx raddr 192.168.215.2 rport 58888",
+    ].join("\r\n") + "\r\n";
+    const signal = parseCallSignal(signalFrom(linux, "o"), NOW)!;
+    expect(signal.c).toEqual([
+      "2519499965 1 udp 2130706431 192.168.215.2 58888 typ host",
+      "2052316515 1 udp 1694498815 203.0.113.9 51670 typ srflx raddr 192.168.215.2 rport 58888",
+    ]);
+    expect(signal.ss).toEqual([1, 2]);
+  });
+
   it("carries an Opus payload type other than 111 (Firefox offers it as 109)", () => {
     const firefox = FIREFOX_ANSWER.replace("m=audio 9 UDP/TLS/RTP/SAVPF 111", "m=audio 9 UDP/TLS/RTP/SAVPF 109").replace("a=mid:0", "a=mid:0\r\na=rtpmap:109 opus/48000/2");
     const signal = parseCallSignal(signalFrom(firefox, "a"), NOW)!;
@@ -181,7 +199,11 @@ describe("call signals", () => {
     expect(signal).not.toBeNull();
     expect(signal.s).toBe("active");
     expect(signal.m).toEqual(["a"]);
-    expect(signal.c).toEqual(["1 1 udp 1686052863 198.51.100.4 50001 typ srflx raddr 0.0.0.0 rport 0"]);
+    // Firefox ends a host line at `typ host` too: its (mDNS) host candidate goes with the reflexive one.
+    expect(signal.c).toEqual([
+      "0 1 udp 2122252543 9a1c2f47-5d2e-4e0a-8f7b-1c2d3e4f5a6b.local 50001 typ host",
+      "1 1 udp 1686052863 198.51.100.4 50001 typ srflx raddr 0.0.0.0 rport 0",
+    ]);
     expect(buildSdpFromSignal(signal)).toContain("a=candidate:1 1 udp 1686052863 198.51.100.4 50001 typ srflx");
   });
 

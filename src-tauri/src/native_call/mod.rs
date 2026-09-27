@@ -63,7 +63,16 @@ fn calls() -> &'static Mutex<Calls> {
 #[cfg(not(target_os = "linux"))]
 const ELSEWHERE: &str = "Calls here go through the WebView";
 
-/// Blocking work (GStreamer's promises, ICE gathering) off the IPC thread.
+/// A failure, in the app's log as well: the page only shows that the call ended.
+#[cfg(target_os = "linux")]
+fn logged<T>(what: &str, result: Result<T, String>) -> Result<T, String> {
+    if let Err(error) = &result {
+        crate::diagnostics::log(&format!("native call: {what} failed: {error}"));
+    }
+    result
+}
+
+/// Blocking work (opening or stopping a camera) off the IPC thread.
 #[cfg(target_os = "linux")]
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -84,9 +93,8 @@ fn sink(channel: Channel<InvokeResponseBody>) -> impl Fn(Vec<u8>) + Send + Sync 
 pub async fn native_camera_open(frames: Channel<InvokeResponseBody>) -> Result<u32, String> {
     #[cfg(target_os = "linux")]
     {
-        let camera =
-            blocking(move || engine::Camera::open(engine::fake_media(), Arc::new(sink(frames))))
-                .await?;
+        let open = move || engine::Camera::open(engine::fake_media(), Arc::new(sink(frames)));
+        let camera = logged("the camera", blocking(open).await)?;
         let mut calls = calls().lock().unwrap();
         calls.next_camera += 1;
         let id = calls.next_camera;
@@ -217,10 +225,11 @@ fn call(id: &str) -> Result<Arc<engine::Call>, String> {
 pub async fn native_call_offer(id: String, camera: Option<u32>) -> Result<String, String> {
     #[cfg(target_os = "linux")]
     {
-        media(&id, (engine::OPUS_PT, engine::VP8_PT), camera)
-            .await?
-            .offer()
-            .await
+        let call = logged(
+            "starting",
+            media(&id, (engine::OPUS_PT, engine::VP8_PT), camera).await,
+        )?;
+        logged("the offer", call.offer().await)
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -238,10 +247,11 @@ pub async fn native_call_answer(
 ) -> Result<String, String> {
     #[cfg(target_os = "linux")]
     {
-        media(&id, engine::offered_payload_types(&offer), camera)
-            .await?
-            .answer(&offer)
-            .await
+        let call = logged(
+            "starting",
+            media(&id, engine::offered_payload_types(&offer), camera).await,
+        )?;
+        logged("the answer", call.answer(&offer).await)
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -255,7 +265,7 @@ pub async fn native_call_answer(
 pub async fn native_call_accept(id: String, answer: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        call(&id)?.accept(&answer).await
+        logged("the peer's answer", call(&id)?.accept(&answer).await)
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -302,11 +312,26 @@ pub fn native_call_camera(id: String, camera: Option<u32>) -> Result<(), String>
     }
 }
 
-/// What went each way so far: frames and audio buffers sent and received, and the ICE state.
+/// What went each way so far: frames and audio buffers sent and received, the ICE state, and whether the
+/// microphone is muted. Without an id, the call in progress (there is one at a time), or null.
 #[tauri::command]
-pub fn native_call_stats(id: String) -> Result<serde_json::Value, String> {
+pub fn native_call_stats(id: Option<String>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "linux")]
-    return serde_json::to_value(call(&id)?.stats()).map_err(|e| e.to_string());
+    {
+        let call = match id {
+            Some(id) => Some(call(&id)?),
+            None => calls()
+                .lock()
+                .unwrap()
+                .calls
+                .values()
+                .find_map(|l| l.call.clone()),
+        };
+        return match call {
+            Some(call) => serde_json::to_value(call.stats()).map_err(|e| e.to_string()),
+            None => Ok(serde_json::Value::Null),
+        };
+    }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = id;

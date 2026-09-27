@@ -167,18 +167,19 @@ async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
 }
 
 /**
- * Calls in the chat (`calls/1`). Call media is a WebRTC connection of its own, whatever carries the chat, so a
- * client without WebRTC (Desktop on Linux: WebKitGTK) cannot call: its buttons say so, and a live contact's say
- * the contact cannot take calls. Where both sides can, a call is placed, answered and ended.
+ * Calls in the chat (`calls/1`). Call media is a WebRTC connection of its own, whatever carries the chat: the
+ * page's, or on a Linux Desktop (WebKitGTK has none) the app's own, in GStreamer, with a test picture and tone
+ * here. A client that cannot call says so on its buttons, and a live contact's say the contact cannot take
+ * calls. Where both sides can and the pair is live, a call is placed, answered and ended.
  */
 async function calls({ a, b }: DesktopWorld): Promise<void> {
   for (const p of [a, b]) await p.go(p.chatHash!);
-  const rtc = new Map<Person, boolean>();
-  for (const p of [a, b]) rtc.set(p, (await p.callButton()).rtc);
+  const calling = new Map<Person, boolean>();
+  for (const p of [a, b]) calling.set(p, (await p.callButton()).calls);
   const reason = async (p: Person, other: Person): Promise<string | null> => {
-    if (!rtc.get(p)) return "Calls are not available in this app";
+    if (!calling.get(p)) return "Calls are not available in this app";
     if (!/Connected ·/.test(await p.connection())) return "Calls need a live connection";
-    return rtc.get(other) ? null : "Your contact's app cannot take calls";
+    return calling.get(other) ? null : "Your contact's app cannot take calls";
   };
   for (const [p, other] of [[a, b], [b, a]] as const) {
     await expect.poll(async () => {
