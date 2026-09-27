@@ -17,6 +17,8 @@
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
   --color-danger: #ea4335;
+  /* Test money's colour, the same in every theme (Real money takes the accent). */
+  --color-test-money: #e0a800;
   --color-text-primary: var(--theme-text-primary);
   --color-text-secondary: var(--theme-text-secondary);
   --color-text-muted: var(--theme-text-muted);
@@ -827,6 +829,10 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 
 /* Which money: "Test money" or "Real money", wherever money moves. Words first; the colour only echoes them. */
 .network-tag{display:inline-block;padding:0 6px;border:1px solid currentColor;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;line-height:1.7;text-transform:uppercase;vertical-align:middle;white-space:nowrap}
-.network-tag[data-network="testnet"]{color:#e0a800}
+.network-tag[data-network="testnet"]{color:var(--color-test-money)}
 .network-tag[data-network="mainnet"]{color:var(--color-accent)}
+/* In a bubble, half of it is the bubble's own ink: the accent and the yellow alone fall under 3:1 on sent bubbles
+   (the accent on classic's green, the yellow on every light one). The mix keeps the hue and reads at 4:1 or more. */
+.money-ink-mainnet,[data-message-bubble] .network-tag[data-network="mainnet"]{color:color-mix(in oklab,var(--color-accent) 50%,var(--color-text-primary))}
+[data-message-bubble] .network-tag[data-network="testnet"]{color:color-mix(in oklab,var(--color-test-money) 50%,var(--color-text-primary))}
 .payment-back-network{margin-left:8px;font-size:9px}
