@@ -182,6 +182,24 @@ describe("dropping files on the chat", () => {
     await waitFor(() => expect(onSendFile.mock.calls.map(([file]) => file.name)).toEqual(["ghost story.pdf"]));
   });
 
+  it("the veil goes when the drag leaves the column or ends somewhere else", () => {
+    composer();
+    const column = screen.getByTestId("column");
+    const data = () => ({ dataTransfer: transfer({ files: [png()] }) });
+    fireEvent.dragEnter(column, data());
+    fireEvent.dragEnter(screen.getByTestId("messages"), data());
+    // Out to the page beside the chat (this DOM's DragEvent drops `relatedTarget` from its init: set it as a browser does).
+    const out = createEvent.dragLeave(screen.getByTestId("messages"), data());
+    Object.defineProperty(out, "relatedTarget", { value: document.body });
+    fireEvent(screen.getByTestId("messages"), out);
+    expect(screen.queryByTestId("file-drop-overlay")).toBeNull();
+    fireEvent.dragEnter(column, data());
+    expect(screen.getByTestId("file-drop-overlay")).toBeInTheDocument();
+    fireEvent(window, new Event("dragend"));
+    expect(screen.queryByTestId("file-drop-overlay")).toBeNull();
+    expect(sheet()).toBeNull();
+  });
+
   it("text dragged about is not a drop of files", () => {
     composer();
     fireEvent.dragEnter(screen.getByTestId("column"), { dataTransfer: transfer({ text: "words" }) });

@@ -351,27 +351,33 @@ export function MessageInput({
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     };
+    const done = () => { depth = 0; setDragging(null); };
     const leave = (e: DragEvent) => {
-      if (!dragHasFiles(e.dataTransfer)) return;
       depth = Math.max(0, depth - 1);
-      if (!depth) setDragging(null);
+      // Out of the column (where the browser says where to): gone, even if an enter went uncounted.
+      const to = e.relatedTarget;
+      if (!depth || (to instanceof Node && !zone.contains(to))) done();
     };
     const drop = (e: DragEvent) => {
+      done();
       if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
-      depth = 0;
-      setDragging(null);
       offerRef.current(droppedFiles(e.dataTransfer));
     };
     zone.addEventListener("dragenter", enter);
     zone.addEventListener("dragover", over);
     zone.addEventListener("dragleave", leave);
     zone.addEventListener("drop", drop);
+    // A drag that ends anywhere else (dropped outside, Escape) takes the veil with it.
+    window.addEventListener("drop", done);
+    window.addEventListener("dragend", done);
     return () => {
       zone.removeEventListener("dragenter", enter);
       zone.removeEventListener("dragover", over);
       zone.removeEventListener("dragleave", leave);
       zone.removeEventListener("drop", drop);
+      window.removeEventListener("drop", done);
+      window.removeEventListener("dragend", done);
       setDragging(null);
     };
   }, [canAttach]);
