@@ -70,7 +70,7 @@ export function voiceRate(): VoiceRate {
   }
 }
 
-/** 1× → 1.5× → 2× → 1×, for every voice message at once. */
+/** 1× → 1.5× → 2× → 1×, for every voice message at once, and remembered on this device for the next one. */
 export function nextVoiceRate(): VoiceRate {
   const rate = VOICE_RATES[(VOICE_RATES.indexOf(voiceRate()) + 1) % VOICE_RATES.length]!;
   try { localStorage.setItem(RATE_KEY, String(rate)); } catch { /* the speed just is not remembered */ }
@@ -81,6 +81,24 @@ export function nextVoiceRate(): VoiceRate {
 export function onVoiceRate(listener: (rate: VoiceRate) => void): () => void {
   rateListeners.add(listener);
   return () => rateListeners.delete(listener);
+}
+
+/**
+ * Plays `audio` at `rate` with the voice at its own pitch, not a chipmunk's. The default rate is set too:
+ * loading another source (the decoded WAV fallback) puts `playbackRate` back to it. WebKit before
+ * `preservesPitch` knew only the prefixed name; an engine with neither just plays faster.
+ */
+export function applyVoiceRate(audio: HTMLMediaElement, rate: number): void {
+  const media = audio as HTMLMediaElement & { preservesPitch?: boolean; webkitPreservesPitch?: boolean };
+  media.preservesPitch = true;
+  media.webkitPreservesPitch = true;
+  media.defaultPlaybackRate = rate;
+  media.playbackRate = rate;
+}
+
+/** The speed as the pill shows it, in `locale`'s decimals ("1.5×" in English, "1,5×" in Portuguese) and the digits the clock uses. */
+export function formatVoiceRate(rate: number, locale: string): string {
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 2, numberingSystem: "latn" }).format(rate)}×`;
 }
 
 /** Played marks are this profile's own: newest last, the oldest forgotten past this many. */
