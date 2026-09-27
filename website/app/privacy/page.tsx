@@ -31,7 +31,7 @@ export const metadata: Metadata = {
   },
 };
 
-const LAST_UPDATED = "September 19, 2026";
+const LAST_UPDATED = "September 27, 2026";
 
 function Section({
   title,
@@ -82,15 +82,18 @@ export default function PrivacyPage() {
 
           <Section title="What stays on your device">
             <p>
-              Your identity is a keypair generated locally and never
-              transmitted. Your contacts, your settings, your wallet state and
-              your message history live in your browser&apos;s local storage, on
-              your machine only. None of it is synced anywhere.
+              Your keys are generated on your device and never leave it. Your
+              contacts, settings, wallets and message history live in the
+              app&apos;s own storage on your machine: the browser&apos;s, the
+              extension&apos;s or the desktop app&apos;s. None of it is synced
+              anywhere.
             </p>
             <p>
-              Uninstalling the extension, or clearing the site data, erases all
-              of it. There is no copy elsewhere to restore from, and we cannot
-              recover it for you.
+              A backup happens only when you make one: a file sealed with your
+              passphrase, which you keep, or the same sealed file in an
+              S3-compatible bucket of your own. Uninstalling the app, or
+              clearing the site data, erases everything else. We hold no copy
+              and cannot recover it for you.
             </p>
           </Section>
 
@@ -104,28 +107,31 @@ export default function PrivacyPage() {
                 <strong className="text-gray-200">
                   Discovery records on the Mainline DHT.
                 </strong>{" "}
-                To be reachable, your client publishes a signed record to a
-                public distributed hash table, keyed by your public key. Anyone
-                who knows your public key can look it up. That is how contacts
-                reach you.
+                To be reachable, your app publishes small signed records to a
+                public distributed hash table, under keys that belong to each
+                chat. What matters inside them is sealed: only the other side of
+                that chat can read it. That is how contacts reach you.
               </li>
               <li>
                 <strong className="text-gray-200">
-                  Encrypted message payloads.
+                  Short texts over the DHT.
                 </strong>{" "}
-                Messages sent while a contact is offline are published to the
-                DHT encrypted, and expire from it in roughly five hours. They
-                are readable only by the holder of the recipient key. We never
-                receive them, and neither does any operator: the DHT is a public
-                network of independent nodes, not a service we run.
+                When no direct connection is up, short texts travel through the
+                DHT, sealed, and expire after about five minutes. They are
+                readable only by the other side of the chat. We never receive
+                them, and neither does any operator: the DHT is a public network
+                of independent nodes, not a service we run. If you both turn it
+                on for a chat, a message for a contact who is away can also wait
+                up to seven days, sealed, in the sender&apos;s own S3 bucket.
               </li>
               <li>
-                <strong className="text-gray-200">
-                  Direct WebRTC connections.
-                </strong>{" "}
-                Chats, calls, screen sharing and file transfers run directly
-                between the two browsers, end-to-end encrypted with 256-bit NaCl
-                secretbox. Content never passes through an intermediary.
+                <strong className="text-gray-200">Direct connections.</strong>{" "}
+                Chats, calls, screen sharing, files and payment messages run
+                directly between the two devices over WebRTC, Iroh or HyperDHT,
+                each encrypted end to end by its transport (DTLS, QUIC with TLS,
+                or Noise). When no direct path exists, a relay can carry the
+                encrypted traffic without being able to read it (see Iroh
+                relays below).
               </li>
             </ul>
           </Section>
@@ -134,8 +140,8 @@ export default function PrivacyPage() {
             <p>
               We want to be exact about this, because &quot;peer-to-peer&quot;
               is often used to imply that nobody sees anything. Establishing a
-              direct connection inherently exposes your IP address to a few
-              parties:
+              connection, and a few features you use, expose your IP address to
+              some parties:
             </p>
             <ul className="list-disc pl-6 space-y-3">
               <li>
@@ -146,8 +152,8 @@ export default function PrivacyPage() {
                   stun.l.google.com
                 </code>{" "}
                 and its numbered siblings). They observe your IP address. They
-                see no message content. You can replace them with your own
-                STUN/TURN server in Settings.
+                see no message content. You can add your own TURN server in
+                Settings.
               </li>
               <li>
                 <strong className="text-gray-200">Pkarr relays.</strong> A
@@ -158,16 +164,51 @@ export default function PrivacyPage() {
                 <code className="text-cyan-400 text-sm">pkarr.pubky.org</code>.
                 Ghostly Desktop reads the DHT directly and publishes to those
                 relays too, so contacts in a browser can read its records.
-                The relays observe your IP address and the public keys you
-                publish or look up.
-                Record contents are signed and readable, as DHT records are by
-                design.
+                The relays observe your IP address and the keys you publish or
+                look up. Records are signed; what matters in them is sealed.
               </li>
               <li>
-                <strong className="text-gray-200">GIPHY.</strong> If you search
-                for or send a GIF, your browser loads that image from
-                GIPHY&apos;s servers, which observe your IP address and the
-                image requested. This happens only when you use the GIF feature.
+                <strong className="text-gray-200">Iroh relays.</strong> In the
+                browser and the extension, Iroh connects through n0&apos;s
+                public relays (
+                <code className="text-cyan-400 text-sm">relay.n0.iroh.link</code>) when WebRTC cannot
+                connect. A relay sees your IP address, when you connect and how
+                much you send, never the content. You can set your own relays in
+                Settings.
+              </li>
+              <li>
+                <strong className="text-gray-200">Link previews.</strong> When
+                you send a link, your app reads that page to make its preview,
+                so the site sees your IP address. Your contact&apos;s app never
+                contacts it: the preview travels inside the message. You can
+                turn link previews off in Settings, Security.
+              </li>
+              <li>
+                <strong className="text-gray-200">
+                  Identities and public profiles.
+                </strong>{" "}
+                Checking an identity someone shared, or showing its public
+                profile, asks the service behind it: Nostr relays, Pubky&apos;s
+                indexer, Bluesky&apos;s public API, or a DNS-over-HTTPS resolver
+                (Quad9 by default) for a domain. They see your IP address and
+                which identity is looked up. Public profiles can be turned off
+                in Settings, Security.
+              </li>
+              <li>
+                <strong className="text-gray-200">GIFs and maps.</strong> GIF
+                search and GIFs come from the Internet Archive (
+                <code className="text-cyan-400 text-sm">gifcities.archive.org</code>,{" "}
+                <code className="text-cyan-400 text-sm">web.archive.org</code>), which sees the IP address of
+                whoever loads them, sender and receiver. A location card loads
+                its map from OpenStreetMap only when you tap it.
+              </li>
+              <li>
+                <strong className="text-gray-200">Wallets.</strong> A wallet
+                talks to the services it runs on: a Cashu mint, an Ark server, a
+                Lightning node or wallet you connect, an Ethereum RPC, a block
+                explorer. They see your IP address and the operations they
+                serve, and some of them (a mint, a federation) hold funds. A new
+                profile has no wallet until you create one.
               </li>
               <li>
                 <strong className="text-gray-200">
@@ -179,8 +220,7 @@ export default function PrivacyPage() {
               </li>
             </ul>
             <p>
-              None of these parties receive your message content, your keys or
-              your contact list.
+              None of these parties receive your messages or your keys.
             </p>
           </Section>
 
@@ -195,8 +235,8 @@ export default function PrivacyPage() {
               Ghostly lets a contact open a web app you are running on your own
               machine. To deliver that app into a tab, the extension attaches
               the debugger to that specific tab, intercepts its requests, and
-              answers them with content relayed from the peer over the WebRTC
-              data channel. It is the only mechanism a Chrome extension has for
+              answers them with content relayed from the peer over the chat&apos;s
+              live connection. It is the only mechanism a Chrome extension has for
               serving a response body to a navigation request.
             </p>
             <p>

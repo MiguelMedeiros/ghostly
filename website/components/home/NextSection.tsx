@@ -45,6 +45,16 @@ const SHOTS: Record<string, Shot> = {
     crop: { x: 0.385, y: 0.33, w: 0.61 },
     mobile: "/screenshots/current/file-mobile.webp",
   },
+  messages: {
+    src: "/screenshots/current/messages.webp",
+    alt: "Casper's messages in Boo's chat: bold text, a link with its preview, an invite card with Join, and a bitcoin request as a Test money card",
+    from: "dev",
+    width: 2560,
+    height: 1640,
+    // The cards under Casper's messages: the preview, the invite and the request.
+    crop: { x: 0.345, y: 0.2, w: 0.655 },
+    mobile: "/screenshots/current/messages-mobile.webp",
+  },
   calls: {
     src: "/screenshots/current/call.webp",
     alt: "An audio call with Casper in progress: the timer, the name and the mute, camera, screen and hang-up controls",
@@ -216,7 +226,7 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img className="nx-shot" src={shot.src} alt={shot.alt} loading="lazy" decoding="async" width={shot.width} height={shot.height} />
                       </div>
-                    ) : (
+                    ) : item.id === "cli" && (
                       <pre className="nx-term" aria-label="Example CLI session" tabIndex={0}>
                         <code>{CLI}</code>
                       </pre>
