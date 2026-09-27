@@ -229,7 +229,8 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 
 ## Revision log
 
-- 0.8 (2026-09-27): groups for bots: messages name their author from the roster, `group send` answers with the message id, the entry link is printed only with `--show-secret` (#372); `file send --reply` (#359); calls log their ICE candidates and state, and `call list` shows the pair (#362); ids that start with a dash are read as ids (#367).
+- 0.8 (2026-09-27): groups for bots: messages name their author from the roster, `group send` answers with the message id, the entry link is printed only with `--show-secret` (#372); `file send --reply` (#359); calls log their ICE candidates and state, and `call list` shows the pair (#362); ids that start with a dash are read as ids (#367); calls use the profile's ICE servers, a TURN relay included (#375).
+- 0.7.3 (2026-09-27): `typing --kind recording|thinking --status <text>`, and `typing.started` carries them (#361).
 - 0.7.2 (2026-09-27): edits: `ghostly edit`, `message.edited`, `edits` and `editedAt` in history (#351).
 - 0.7.1 (2026-09-27): reactions: `react`, `group react`, `message.reaction` and `group.reaction` events (#354).
 - 0.7 (2026-09-27): phase 5, voice calls with the audio on a Unix socket per call (#350); for bots: file events name their message, `file wait`, `typing --for`, help per command, `chat disconnect --hold`, `daemon restart` (#358).

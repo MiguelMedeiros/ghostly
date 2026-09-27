@@ -71,7 +71,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-27. Pull req
 | [AT Protocol · 3xx planned](3xx-atproto.md) | AT Protocol identity (Bluesky) | Draft | Provider `atproto` (#248), e2e against a local PDS; a real server needs its client-metadata file live on ghostly.tools |
 | [DID · 3xx planned](3xx-did.md) | Decentralized identifiers (did:key, did:jwk, did:dht, did:web) | Draft | Experimental provider `did` (#249), under Advanced in the picker |
 | [400](400-chat.md) | Chat Messaging | Draft | One chat on two layers in every new chat: DHT first contact and floor, live link, self-upgrade, DHT only per chat (#209, #229); replies (#347), reactions (#354), edits (#351), lists, quotes, headings and links in the text (#370) |
-| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared apps (`services/1`) while live; typing (`typing/1`, #344), reactions (`react/1`, #354), edits (`edit/1`, #351), replies on texts and files (#347, #359) |
+| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared apps (`services/1`) while live; typing, recording or a bot's status (`typing/1`, #344, #361), reactions (`react/1`, #354), edits (`edit/1`, #351), replies on texts and files (#347, #359) |
 | [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 apps and the Rust compatibility CLI; existing chats and v0.4 codes only; "Continue in a new chat" |
 | [403](403-dht-text.md) | DHT Text (formerly Bounded DHT Text) | Draft | First contact and floor of every chat, fallback after a drop, DHT only per chat; pinned mailboxes (#302); a reply's id, an edit and reactions ride in the envelope (#347, #351, #354) |
 | [Store-and-forward · 4xx planned](4xx-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1` (#108), opt-in: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests; held replies (#347, #359) |
@@ -79,7 +79,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-27. Pull req
 | [501](501-paired-files.md) | Chat Files (formerly Paired Files) | Draft | `files/2` (100 MiB) and `files/3` (any size) on every chat's live link; Send again and Ask again for a stuck transfer, backpressure on native links (#348, #352); a file can answer a message (#359); a video's length, size and poster on its offer (#371) |
 | [502](502-legacy-files.md) | Compatibility File Frames | Draft; retained for compatibility | Compatibility chats only; both peers online |
 | [600](600-media.md) | Voice and Video | Draft | 1:1 calls in every chat while live; screen sharing from inside a call (#253); Linux Desktop with native media, no screen sharing yet |
-| [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); Desktop on Linux with WebRTC in Rust and GStreamer media (#331) |
+| [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); Desktop on Linux with WebRTC in Rust and GStreamer media (#331); signals carry up to eight candidates and calls use the profile's TURN relay (#375) |
 | [700](700-local-services.md) | Local Services | Draft | HTTP proxy in every chat, hosted from Desktop and the extension; Shared apps from the composer's + (#268) |
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | `ph` frames in the chat session (`services/1`, #207); the web app can neither host nor open one |
 | [800](800-invite-join.md) | Invite and Join | Draft | Bearer `ghostly1` invite that pins the inviter's participation key (#210); a copy cannot stop a paired chat (#302); admission protocol proposed |
@@ -169,7 +169,7 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 
 ## Revision record
 
-2026-09-27 (evening): the chat family after typing, replies, reactions, edits, file replies, videos in the chat and message text (400 0.2.9, 401 0.10, 403 0.6, 4xx 0.3.1, 501 0.4.2, group mesh 0.7, group community 0.8), the headless runtime at 0.8 with voice calls, Fedimint, Spark and Breez on Mainnet (#341). Group mesh, group community and 11xx gained a revision log. Numbers, file names, wire identifiers and Draft status unchanged.
+2026-09-27 (evening): the chat family after typing, replies, reactions, edits, file replies, videos in the chat and message text (400 0.2.9, 401 0.11, 403 0.6, 4xx 0.3.1, 501 0.4.2, 601 0.7, group mesh 0.7, group community 0.8), the headless runtime at 0.8 with voice calls, Fedimint, Spark and Breez on Mainnet (#341). Group mesh, group community and 11xx gained a revision log. Numbers, file names, wire identifiers and Draft status unchanged.
 
 2026-09-27: the headless runtime (11xx) through its fourth phase, calls on Desktop on Linux (601), the count of entries (53). Numbers, file names, wire identifiers and Draft status unchanged.
 

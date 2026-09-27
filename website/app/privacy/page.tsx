@@ -153,7 +153,7 @@ export default function PrivacyPage() {
                 </code>{" "}
                 and its numbered siblings). They observe your IP address. They
                 see no message content. You can add your own TURN server in
-                Settings.
+                Settings; chats and calls then use it.
               </li>
               <li>
                 <strong className="text-gray-200">Pkarr relays.</strong> A
@@ -217,7 +217,8 @@ export default function PrivacyPage() {
                 A direct connection means the peer on the other end sees your IP
                 address. Only ever connect with people you are willing to reveal
                 that to. While you write in a one-to-one chat, your app tells
-                that contact you are typing, over the live connection only. You
+                that contact you are typing or recording, over the live
+                connection only. You
                 can turn this off in Settings, Security.
               </li>
             </ul>

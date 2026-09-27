@@ -11,7 +11,7 @@ Ghostly 1.0. One kind of chat: it finds your contact on the DHT and goes peer to
 **Chat**
 
 - One invite: a `ghostly1…` code, a link or a QR. A chat with no direct path starts on the DHT and goes live over WebRTC, Iroh or HyperDHT by itself; if the live link drops, short texts go over the DHT. Choose a transport, or DHT only, per chat.
-- Reply to a message, edit a text you sent, react with an emoji, and see when your contact is typing (you can turn that off).
+- Reply to a message, edit a text you sent, react with an emoji, and see when your contact is typing or recording (you can turn that off).
 - Delivery marks beside the time: a clock, one tick, two ticks, or a red mark you press to send again.
 - Rich text with lists, quotes, headings and links. Cards for invites, payment codes, Nostr keys and identities. Link previews made by the sender. A check before a seed or a private key goes out as text.
 - Voice messages: hold to record, or lock, pause and discard. Play at 1.5× or 2×. Download, also as MP3.
@@ -21,7 +21,7 @@ Ghostly 1.0. One kind of chat: it finds your contact on the DHT and goes peer to
 
 **Calls**
 
-- Voice and video calls in every chat while it is live, the Linux desktop app included. Share your screen from inside a call (not on Linux yet).
+- Voice and video calls in every chat while it is live, the Linux desktop app included. Share your screen from inside a call (not on Linux yet). Calls use your own TURN relay when you set one.
 
 **Groups**
 
@@ -47,7 +47,7 @@ Ghostly 1.0. One kind of chat: it finds your contact on the DHT and goes peer to
 
 - **WISPs.** 53 Draft contracts in [docs/wisps](docs/wisps/README.md); the website's catalogue and roadmap are generated from them. New since 0.4: one chat (400 to 403), the `ghostly1` invite (801), `files/3` (501), groups (900, group mesh, group community), store-and-forward (4xx), identity proofs (300 and its providers), the headless runtime (11xx).
 - **Session capabilities.** `calls/1`, `services/1`, `files/3`, `typing/1`, `react/1` and `edit/1`, announced after the handshake. A capability is on only while both sides list it; older apps ignore what they do not know.
-- **Headless CLI.** `ghostly` ([docs/CLI.md](docs/CLI.md), `packages/cli`) runs the app's engine on Node for bots: a daemon, a socket API, JSON events and hooks. Chats, groups, files and voice notes, wallets, identity proofs, shared web apps, and voice calls with the audio on a Unix socket. Built from source; not on npm yet.
+- **Headless CLI.** `ghostly` ([docs/CLI.md](docs/CLI.md), `packages/cli`) runs the app's engine on Node for bots: a daemon, a socket API, JSON events and hooks. Chats, groups, files and voice notes, wallets, identity proofs, shared web apps, and voice calls with the audio on a Unix socket; a bot can say what it is doing (`typing --kind thinking --status …`). Built from source; not on npm yet.
 - **SDK.** `@ghostly/sdk`: an adapter registers as a plugin ([docs/SDK.md](docs/SDK.md)).
 - **The Rust `ghostly-cli`** is now the compatibility client for bots on v0.4 chats. New bots use `ghostly`.
 - **Tests.** A feature map (`e2e/features.json`, [docs/TESTING.md](docs/TESTING.md)), Desktop e2e on Linux and macOS, and a two-peer CLI suite.

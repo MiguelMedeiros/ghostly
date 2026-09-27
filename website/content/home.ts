@@ -131,7 +131,7 @@ export const home = {
         id: "chat",
         icon: "chat",
         title: "Say it your way.",
-        body: "Private one-to-one conversations. Reply to a message, edit what you sent, react with an emoji, see when they are typing. No phone number, no public profile.",
+        body: "Private one-to-one conversations. Reply to a message, edit what you sent, react with an emoji, see when they are typing or recording. No phone number, no public profile.",
         extra: "Voice messages you can lock, pause and play at 2x. Delivery marks beside the time, local history, and messages held for a contact who is away.",
       },
       {
