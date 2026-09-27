@@ -244,7 +244,7 @@ export const developers = {
       },
       {
         title: "Run a bot",
-        body: "The headless ghostly CLI joins the same chats as the apps: groups, files, payments, typing, replies, reactions and voice calls. Every event is a JSON line.",
+        body: "The headless ghostly CLI joins the same chats as the apps: groups, files, payments, typing, replies, edits, reactions and voice calls. Every event is a JSON line.",
         links: [
           { label: "CLI guide", href: "/cli" },
           { label: "WISP 11xx · Headless", href: "/developers/wisps/11xx-headless" },
@@ -264,7 +264,7 @@ export const developers = {
       { name: "Text chat, ghostly1 invites", cells: [A, A, A, A] },
       { name: "Pinned keys, durable outbox", cells: [A, A, A, A] },
       { name: "Rich text, link previews, cards, secret check", cells: [A, A, A, null] },
-      { name: "Replies, emoji reactions, typing indicator", cells: [A, A, A, A] },
+      { name: "Replies, edits, emoji reactions, typing indicator", cells: [A, A, A, A] },
       { name: "Files of any size, resumed or sent again", cells: [A, A, A, A] },
       { name: "Paste or drop pictures and files", cells: [A, A, A, null] },
       { name: "Voice messages", cells: [A, A, A, A] },

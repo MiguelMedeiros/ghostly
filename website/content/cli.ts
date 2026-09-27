@@ -98,7 +98,7 @@ export const cli = {
     title: "What it covers",
     items: {
       chats: "Invites and one chat, over the app's transports",
-      chatting: "Typing, replies and emoji reactions",
+      chatting: "Typing, replies, edits and emoji reactions",
       groups: "Groups, with mentions and admin tools",
       files: "Files and voice notes, with their waveform",
       pay: "Wallets and payments (Mainnet only with --confirm-real)",

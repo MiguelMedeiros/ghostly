@@ -6,7 +6,7 @@
 
 <p align="center">An end-to-end encrypted, peer-to-peer messenger with a wallet and verifiable identities built in. No Ghostly server, no account.</p>
 
-**Download:** the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) (macOS, Windows, Linux, browser extension, CLI), or open [app.ghostly.tools](https://app.ghostly.tools). Step by step: [Installation](docs/INSTALLATION.md).
+**Download:** the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) (macOS, Windows, Linux, browser extension), or open [app.ghostly.tools](https://app.ghostly.tools). Step by step: [Installation](docs/INSTALLATION.md).
 
 - [Chat](docs/CHAT.md): one invite, live over WebRTC, Iroh or HyperDHT, with the DHT as the fallback.
 - [Wallets](docs/WALLETS.md): Cashu, Lightning, Ark, Fedimint, on-chain and more, on Mainnet and Testnet.

@@ -1,5 +1,57 @@
 # Changelog
 
+## Unreleased
+
+<!-- Draft of the 1.0.0 notes. scripts/bump-version.mjs turns this heading into "## 1.0.0" on release. -->
+
+Ghostly 1.0. One kind of chat: it finds your contact on the DHT and goes peer to peer by itself. A wallet for every rail, on Mainnet and Testnet side by side. Identities you prove to one contact at a time, groups, and a headless CLI for bots. Chats with 0.4 contacts keep working as compatibility chats.
+
+### For users
+
+**Chat**
+
+- One invite: a `ghostly1…` code, a link or a QR. A chat with no direct path starts on the DHT and goes live over WebRTC, Iroh or HyperDHT by itself; if the live link drops, short texts go over the DHT. Choose a transport, or DHT only, per chat.
+- Reply to a message, edit a text you sent, react with an emoji, and see when your contact is typing (you can turn that off).
+- Delivery marks beside the time: a clock, one tick, two ticks, or a red mark you press to send again.
+- Rich text with lists, quotes, headings and links. Cards for invites, payment codes, Nostr keys and identities. Link previews made by the sender. A check before a seed or a private key goes out as text.
+- Voice messages: hold to record, or lock, pause and discard. Play at 1.5× or 2×. Download, also as MP3.
+- Files of any size, resumed where they stopped and checked on arrival. Paste a screenshot or drop files into the chat. A stuck transfer can be sent again or asked for again.
+- Messages held for a contact who is away, in your own S3 bucket (experimental; both of you turn it on).
+- Pin or mute a chat, a message's details, sounds by category.
+
+**Calls**
+
+- Voice and video calls in every chat while it is live, the Linux desktop app included. Share your screen from inside a call (not on Linux yet).
+
+**Groups**
+
+- Private groups of up to 8 and communities of up to 256, joined by a link. Text, @mentions, replies, reactions, a group picture and payments between members. No files or calls in groups yet.
+
+**Wallets**
+
+- Mainnet and Testnet wallets side by side, one tab per network. Real money asks before it moves; test coins only when you ask.
+- Cashu, Lightning, Ark (Arkade and Bark), Spark, Fedimint, USDT and on-chain bitcoin. Several Lightning cards, each on a source you choose: the mint, NWC, LND, Core Lightning, WebLN, Breez or a Fedimint federation. Pay Lightning addresses, and pay a request from any wallet by its QR code.
+- New rails are experimental and say so on their card. The BDK on-chain wallet runs on test networks only. Fedimint on Mainnet has not been tried with real funds yet.
+
+**Identities**
+
+- Prove a Nostr, Pubky or Bluesky account, a domain, an OpenPGP or SSH key, a Bitcoin address or a DID, once per profile. Share it with one contact at a time; their app checks it and shows its public profile.
+- Every profile has a did:dht of its own.
+
+**Everywhere**
+
+- Local profiles on the web app, the desktop app and the extension. Backups to a file or to S3, restored as a new profile.
+- Shorter settings, with details behind ⓘ.
+
+### For developers
+
+- **WISPs.** 53 Draft contracts in [docs/wisps](docs/wisps/README.md); the website's catalogue and roadmap are generated from them. New since 0.4: one chat (400 to 403), the `ghostly1` invite (801), `files/3` (501), groups (900, group mesh, group community), store-and-forward (4xx), identity proofs (300 and its providers), the headless runtime (11xx).
+- **Session capabilities.** `calls/1`, `services/1`, `files/3`, `typing/1`, `react/1` and `edit/1`, announced after the handshake. A capability is on only while both sides list it; older apps ignore what they do not know.
+- **Headless CLI.** `ghostly` ([docs/CLI.md](docs/CLI.md), `packages/cli`) runs the app's engine on Node for bots: a daemon, a socket API, JSON events and hooks. Chats, groups, files and voice notes, wallets, identity proofs, shared web apps, and voice calls with the audio on a Unix socket. Built from source; not on npm yet.
+- **SDK.** `@ghostly/sdk`: an adapter registers as a plugin ([docs/SDK.md](docs/SDK.md)).
+- **The Rust `ghostly-cli`** is now the compatibility client for bots on v0.4 chats. New bots use `ghostly`.
+- **Tests.** A feature map (`e2e/features.json`, [docs/TESTING.md](docs/TESTING.md)), Desktop e2e on Linux and macOS, and a two-peer CLI suite.
+
 ## 0.4.0
 
 From here on Ghostly tells you when there is a new version, and installs it where it can — so this is the last one you have to go and fetch yourself. Calls gained video and screen sharing without calling again, and any single message can now be deleted from this device. Nothing changes on the wire: older clients keep working, they just cannot turn their camera on mid-call until they update.

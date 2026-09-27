@@ -6,7 +6,7 @@ What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.m
 
 - One chat type and one invite: a `ghostly1…` code, link or QR code.
 - Live peer to peer over WebRTC, Iroh or HyperDHT, with the DHT as the fallback. The chat header's connection icon shows how you are connected, and you can pick a transport or "DHT only" per chat.
-- Replies, emoji reactions, a typing indicator (1:1, can be turned off) and WhatsApp-style delivery marks.
+- Replies, edits of your own texts, emoji reactions, a typing indicator (1:1, can be turned off) and WhatsApp-style delivery marks.
 - Rich text with lists, quotes, headings and links, @mentions in groups, link previews made by the sender, location cards, and cards for invites, Nostr keys, identities and payment codes.
 - Voice messages you can lock, pause, discard and play at 1.5× or 2×, and download as MP3. GIFs, emoji, message details, per-chat mute.
 - Files of any size, resumable and checked by digest, pasted or dropped into the chat. Large files ask the receiver first; a stuck one can be sent again.
@@ -41,7 +41,7 @@ More: [Calls and shared services](CHAT.md#calls-and-shared-services).
 
 ## Bots and scripts
 
-- `ghostly` runs the app's own engine without a screen, for bots: `ghostly1` invites, groups, files, wallets, typing, replies, reactions, voice calls with the audio on a socket, and a JSON event stream ([packages/cli](../packages/cli/README.md)).
+- `ghostly` runs the app's own engine without a screen, for bots: `ghostly1` invites, groups, files, wallets, typing, replies, edits, reactions, voice calls with the audio on a socket, and a JSON event stream ([packages/cli](../packages/cli/README.md)).
 - `ghostly-cli` stays the compatibility client for bots built on v0.4 chats.
 
 More: [CLI](CLI.md), [AI agents and bots](AI-AGENTS.md), [SDK](SDK.md).
