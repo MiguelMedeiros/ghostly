@@ -265,6 +265,32 @@ describe("a voice message in the chat", () => {
     chat(message);
     expect(screen.getByTestId("voice-play")).toBeDisabled();
     expect(screen.getByTestId("voice-status")).toHaveTextContent("50% of");
+    // A ring around the play button fills as it moves.
+    expect(screen.getByTestId("voice-progress").querySelectorAll("circle")[1]).toHaveAttribute("stroke-dashoffset", expect.stringMatching(/^5\d\./));
+  });
+
+  it("not sent, its play button becomes a red ↻ that sends it again, with the reason behind the ⓘ", async () => {
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
+    const mine = voice({ id: "me_1", sender: "me" });
+    mine.file!.id = "link-1-out-voice-failed";
+    fakeEngine.update({ links: [linkView({ id: "link-1" })], transfers: {
+      [mine.file!.id]: { state: "failed", direction: "out", transferred: 0, size: 1234, error: "Connection lost", retry: true },
+    } });
+    chat(mine);
+    expect(screen.queryByTestId("voice-play")).toBeNull();
+    expect(screen.getByTestId("voice-status")).toHaveTextContent("· Not sent");
+    expect(screen.queryByText("Connection lost")).toBeNull();
+    fireEvent.click(screen.getByTestId("voice-why"));
+    expect(screen.getByTestId("voice-why-text")).toHaveTextContent("Connection lost");
+    const button = screen.getByRole("button", { name: "Send again" });
+    expect(button).toHaveAttribute("data-testid", "voice-retry");
+    expect(button).toHaveAttribute("data-tone", "danger");
+    fireEvent.click(button);
+    expect(retryFile).toHaveBeenCalledWith(mine.file!.id);
+    expect(button).toHaveAttribute("aria-busy", "true");
+    act(() => fakeEngine.update({ transfers: { [mine.file!.id]: { state: "transferring", direction: "out", transferred: 300, size: 1234 } } }));
+    expect(screen.queryByTestId("voice-retry")).toBeNull();
+    expect(screen.getByTestId("voice-progress")).toBeInTheDocument();
   });
 
   it("a failed note offers Retry only when it can go again: not one the contact cancelled", () => {
@@ -278,9 +304,9 @@ describe("a voice message in the chat", () => {
     } });
     chat(retryable, cancelled);
     const [first, second] = bubbles();
-    expect(within(first).getByText("Retry sending")).toBeInTheDocument();
-    expect(within(second).queryByText("Retry sending")).toBeNull();
-    expect(within(second).getByTestId("voice-status")).toHaveTextContent("Failed: Cancelled by your contact");
+    expect(within(first).getByTestId("voice-retry")).toBeInTheDocument();
+    expect(within(second).queryByTestId("voice-retry")).toBeNull();
+    expect(within(second).getByTestId("voice-status")).toHaveTextContent("· Cancelled");
   });
 
   it("stuck on its way, it says so instead of a bare 0%, and offers Send again (sent) or Ask again (received)", async () => {
@@ -296,6 +322,7 @@ describe("a voice message in the chat", () => {
     const [sent, received] = bubbles();
     expect(within(sent).getByTestId("voice-status")).toHaveTextContent("Not moving · 0% of 1.2 KB");
     expect(within(received).getByTestId("voice-status")).toHaveTextContent("Waiting for connection · 50% done");
+    expect(within(sent).getByTestId("voice-resend")).toHaveAttribute("data-tone", "neutral");
     fireEvent.click(within(sent).getByTestId("voice-resend"));
     fireEvent.click(within(received).getByTestId("voice-request"));
     await vi.waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([

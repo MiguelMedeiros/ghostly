@@ -27,7 +27,7 @@ export interface Person {
   say(text: string): Promise<void>;
   /** Whether the open conversation shows this text. */
   shows(text: string): Promise<boolean>;
-  /** Whether one of this person's texts still shows "Sent · waiting for receipt". */
+  /** Whether one of this person's texts still has one tick: sent, waiting for its receipt. */
   awaitingReceipt(): Promise<boolean>;
   /** The page's visible text, for the report when something fails. */
   snapshot(): Promise<string>;
@@ -93,7 +93,7 @@ export function webPerson(actor: Actor): Person {
       await box.press("Enter");
     },
     shows: async (text) => (await chatPane(actor).getByText(text, { exact: true }).count()) > 0,
-    awaitingReceipt: async () => (await chatPane(actor).getByText(either("Sent · waiting for receipt")).count()) > 0,
+    awaitingReceipt: async () => (await chatPane(actor).locator('[data-testid="message-delivery"][data-delivery="sent"]').count()) > 0,
     snapshot: () => page().evaluate(() => document.body.innerText),
     connection: async () => (await page().getByTestId("connection-options").getAttribute("aria-label")) ?? "",
     preferTransport: async (preferred, fallback) => {
@@ -201,7 +201,7 @@ export async function desktopPerson(name: string, options: {
     shows: (text) => run<boolean>(`
       const pane = document.querySelector(".chat-wallpaper");
       return !!pane && [...pane.querySelectorAll("*")].some((e) => e.childElementCount === 0 && e.textContent === arguments[0]);`, text),
-    awaitingReceipt: () => run<boolean>(`return (document.querySelector(".chat-wallpaper")?.innerText ?? "").includes("Sent · waiting for receipt");`),
+    awaitingReceipt: () => run<boolean>(`return !!document.querySelector('.chat-wallpaper [data-testid="message-delivery"][data-delivery="sent"]');`),
     snapshot: () => run<string>(`return document.body.innerText;`),
     connection: async () => (await app().attribute('[data-testid="connection-options"]', "aria-label")) ?? "",
     preferTransport: async (preferred, fallback) => {

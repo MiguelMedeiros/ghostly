@@ -73,7 +73,9 @@
       "keysHint": "Les clés ne sont jamais affichées ici.",
       "options": "Options du message",
       "copyHint": "Cliquer pour copier",
-      "reply": "Répondre"
+      "reply": "Répondre",
+      "cancelSending": "Annuler l'envoi",
+      "retry": "Renvoyer"
     },
     "options": "Options",
     "menu": {
@@ -118,6 +120,23 @@
       "notice": "Quelqu’un a réagi à votre message",
       "note": "{{name}} a réagi {{emoji}} à « {{snippet}} »",
       "noteMine": "Vous avez réagi {{emoji}} à « {{snippet}} »"
+    },
+    "delivery": {
+      "sending": "Envoi en cours",
+      "waiting": "En attente que votre contact soit en ligne",
+      "sent": "Envoyé",
+      "delivered": "Distribué",
+      "failed": "Non envoyé",
+      "retry": "Non envoyé. Renvoyer",
+      "hint": {
+        "sending": "En route.",
+        "queued": "Pas encore d'accusé. Renvoyé automatiquement.",
+        "waiting": "Part tout seul quand votre contact est en ligne.",
+        "held": "Gardé pour votre contact jusqu'à ce qu'il soit en ligne.",
+        "sent": "Envoyé. Pas encore d'accusé.",
+        "delivered": "L'app de votre contact l'a reçu.",
+        "failed": "Non envoyé. Touchez pour renvoyer."
+      }
     }
   },
   "group": {

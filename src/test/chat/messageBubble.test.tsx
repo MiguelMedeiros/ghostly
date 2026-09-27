@@ -2,6 +2,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
+import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -208,59 +209,149 @@ describe("MessageBubble: system lines", () => {
 });
 
 describe("MessageBubble: delivery", () => {
+  const mark = () => screen.getByTestId("message-delivery");
+
   it.each([
-    ["sending", "Sending…"],
-    ["sent", "Sent · waiting for receipt"],
-    ["held", "Held · waiting for your contact"],
-    ["delivered", "Received by peer"],
-    ["queued", "Not confirmed yet · sends again by itself"],
-    ["waiting", "Sends when live"],
-    ["failed", "Delivery unconfirmed"],
-  ] as const)("says a %s message is %s", (delivery, text) => {
-    bubble({ sender: "me", delivery });
-    expect(screen.getByRole("status")).toHaveTextContent(text);
+    ["sending", "Sending", "On its way."],
+    ["queued", "Sending", "No receipt yet. Sends again by itself."],
+    ["waiting", "Waiting for your contact to be online", "Sends by itself when your contact is online."],
+    ["held", "Waiting for your contact to be online", "Kept for your contact until they are online."],
+    ["sent", "Sent", "Sent. No receipt yet."],
+    ["delivered", "Delivered", "Your contact's app received it."],
+  ] as const)("marks a %s message beside the time as %s, and hovered says %s", async (delivery, label, hint) => {
+    const { user, container } = bubble({ sender: "me", delivery });
+    expect(mark()).toHaveAttribute("data-delivery", delivery);
+    expect(mark()).toHaveAccessibleName(label);
+    // In the time row, not a line of its own.
+    expect(mark().closest(".msg-meta")).not.toBeNull();
+    expect(container).not.toHaveTextContent(label);
+    await user.hover(mark());
+    expect(screen.getByRole("tooltip")).toHaveTextContent(hint);
+    expect(mark()).toHaveAccessibleDescription(hint);
+    await user.unhover(mark());
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
-  it("says nothing about delivery on the contact's messages, or mine without a delivery state", () => {
-    const { rerender } = bubble({ delivery: "failed" });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    rerender(<MessageBubble message={message({ sender: "me" })} />);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  it("puts no text line under the bubble and none of the engine's words, whatever the state", () => {
+    for (const [delivery, deliveryError] of [["waiting", "Sent when you are live."], ["failed", "The contact's app is closed"], ["queued", "Connection closed before receipt."]] as const) {
+      const { container, unmount } = bubble({ sender: "me", delivery, deliveryError });
+      expect(container).not.toHaveTextContent(deliveryError);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
-  it("offers a failed message again, with why it failed", async () => {
+  it("says nothing about delivery on the contact's messages", () => {
+    bubble({ delivery: "failed" });
+    expect(screen.queryByTestId("message-delivery")).not.toBeInTheDocument();
+  });
+
+  it("a tap shows the line on a phone, and a finger held on the mark does not open the details", async () => {
+    vi.useFakeTimers();
+    try {
+      bubble({ sender: "me", delivery: "waiting" });
+      fireEvent.pointerDown(mark(), { pointerType: "touch", button: 0 });
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(screen.getByRole("tooltip")).toHaveTextContent("Sends by itself when your contact is online.");
+      expect(document.querySelector("[data-details-open]")).toBeNull();
+      fireEvent.pointerUp(mark(), { pointerType: "touch" });
+      act(() => { vi.advanceTimersByTime(3000); });
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      // The click that ends a long press is not a tap; a quick tap after it is.
+      fireEvent.click(mark());
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      fireEvent.pointerDown(mark(), { pointerType: "touch", button: 0 });
+      fireEvent.pointerUp(mark(), { pointerType: "touch" });
+      fireEvent.click(mark());
+      expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a message that was not sent has a red mark that sends it again", async () => {
     const { user, engine } = bubble({ sender: "me", delivery: "failed", deliveryError: "The contact's app is closed" });
     act(() => engine.update({ links: [linkView()] }));
     engine.on("retryMessage", () => undefined);
-    expect(screen.getByRole("status")).toHaveTextContent("The contact's app is closed");
-    await user.click(screen.getByRole("button", { name: "Retry message" }));
+    const red = screen.getByRole("button", { name: "Not sent. Send again" });
+    expect(red).toHaveAttribute("data-delivery", "failed");
+    expect(red.className).toContain("text-danger-ink");
+    await user.hover(red);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Not sent. Tap to send again.");
+    await user.click(red);
     expect(engine.callsTo("retryMessage")).toEqual([{ linkId: "link-1", messageId: "m1" }]);
   });
 
-  it("asks nothing of the person while a message is being sent again by itself", () => {
-    bubble({ sender: "me", delivery: "queued", deliveryError: "Connection closed before receipt." });
-    expect(screen.getByRole("status")).not.toHaveTextContent("Delivery unconfirmed");
-    expect(screen.queryByRole("button", { name: "Retry message" })).not.toBeInTheDocument();
+  it("⋮ → Send again sends a message that was not sent; a sent one has no such row", async () => {
+    const { user, engine, rerender } = bubble({ sender: "me", delivery: "failed" });
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("retryMessage", () => undefined);
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-retry"));
+    expect(engine.callsTo("retryMessage")).toEqual([{ linkId: "link-1", messageId: "m1" }]);
+    rerender(<MessageBubble message={message({ sender: "me", delivery: "sent" })} peerPubKey="peer" />);
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-retry")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("message-cancel-sending")).not.toBeInTheDocument();
   });
 
-  it("offers a cancel for what waits for a live connection, with why it waits", async () => {
+  it("asks nothing of the person while a message is being sent again by itself", async () => {
+    const { user } = bubble({ sender: "me", delivery: "queued", deliveryError: "Connection closed before receipt." });
+    expect(screen.queryByRole("button", { name: "Not sent. Send again" })).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-retry")).not.toBeInTheDocument();
+  });
+
+  it("⋮ → Cancel sending drops what waits for your contact, in the place of Delete and with no confirmation", async () => {
     const { user, engine } = bubble({ sender: "me", delivery: "waiting", deliveryError: "Longer than the 256 bytes the DHT carries: it is sent when you are live." });
     act(() => engine.update({ links: [linkView()] }));
     engine.on("deleteMessage", () => undefined);
-    expect(screen.getByTestId("waiting-reason")).toHaveTextContent("256 bytes");
-    expect(screen.queryByRole("button", { name: "Retry message" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-retry")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel sending" }));
     expect(engine.callsTo("deleteMessage")).toEqual([{ linkId: "link-1", messageId: "m1" }]);
+    expect(screen.queryByTestId("message-delete-menu")).not.toBeInTheDocument();
+  });
+
+  it("Cancel sending uses the chat's own delete where the chat gives one", async () => {
+    const onDelete = vi.fn();
+    const { user } = bubble({ sender: "me", delivery: "waiting" }, { onDelete });
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-delete")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("message-cancel-sending"));
+    expect(onDelete).toHaveBeenCalledOnce();
   });
 
   it("does not retry into a chat that is not there", async () => {
     const { user, engine } = bubble({ sender: "me", delivery: "failed" });
-    await user.click(screen.getByRole("button", { name: "Retry message" }));
+    await user.click(screen.getByRole("button", { name: "Not sent. Send again" }));
     expect(engine.callsTo("retryMessage")).toEqual([]);
   });
 
+  it("a file of mine keeps its own mark while its bytes travel, and has the red mark (which sends it again) when they did not go", async () => {
+    vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
+    const file = { id: "link-1-out-f", name: "report.pdf", size: 10, mime: "application/pdf" };
+    const { user, engine } = bubble({ sender: "me", text: "report.pdf", file, delivery: "delivered" });
+    act(() => engine.update({ transfers: { [file.id]: { state: "transferring", direction: "out", transferred: 2, size: 10 } } }));
+    expect(mark()).toHaveAttribute("data-delivery", "delivered");
+    act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 2, size: 10, error: "Connection lost", retry: true } } }));
+    await user.click(screen.getByRole("button", { name: "Not sent. Send again" }));
+    expect(retryFile).toHaveBeenCalledWith(file.id);
+    // Declined: the message arrived, its file did not; the ticks stay and nothing is offered again.
+    act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 0, size: 10, error: "Declined by your contact" } } }));
+    expect(mark()).toHaveAttribute("data-delivery", "delivered");
+  });
+
+  it("marks a picture of mine on the dark chip over it, the same way", () => {
+    bubble({ sender: "me", text: PNG, delivery: "waiting" });
+    expect(mark().closest("[data-picture-time]")).not.toBeNull();
+    expect(mark()).toHaveAccessibleName("Waiting for your contact to be online");
+  });
+
   // The check mark: a second tick once the contact has it.
-  const ticks = (container: HTMLElement) => container.querySelectorAll('svg[viewBox="0 0 16 11"] path').length;
+  const ticks = (container: HTMLElement) => container.querySelectorAll('[data-testid="message-delivery"] svg[viewBox="0 0 16 11"] path').length;
 
   it.each([
     ["delivered", { delivery: "delivered" }, 0, 2],

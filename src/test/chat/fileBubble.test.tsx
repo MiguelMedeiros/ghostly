@@ -38,7 +38,10 @@ describe("what a file's status line says", () => {
     ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by Ana · 62% of 4.2 GB"],
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
     ["copying before the offer", t({ stage: "preparing" }), "Preparing… 62% of 4.2 GB"],
-    ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Failed: Declined by your contact"],
+    ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Declined"],
+    ["cancelled", { state: "failed", transferred: 0, size: f.size, error: "Cancelled by the sender" } as FileTransferState, "Cancelled"],
+    ["broken off, arriving here", { state: "failed", direction: "in", transferred: 0, size: f.size, error: "Connection lost" } as FileTransferState, "Did not arrive"],
+    ["broken off, sent from here", { state: "failed", direction: "out", transferred: 0, size: f.size, error: "Connection lost" } as FileTransferState, "Not sent"],
     ["stuck", t({ stalled: true, rate: 12 * 1024 ** 2 }), "Not moving · 62% of 4.2 GB"],
     ["stuck, no connection: the connection is the reason", t({ stalled: true, stage: "waiting" }), "Waiting for connection · 62% done"],
   ])("%s", (_, transfer, text) => {
@@ -89,6 +92,9 @@ describe("FileBubble: files/3", () => {
     expect(screen.getByTestId("file-status")).toHaveTextContent("Not moving · 23% of 4.2 GB");
     expect(screen.queryByTestId("file-request")).toBeNull();
     expect(screen.getByTestId("file-resend")).toHaveAttribute("title", "Offers it again. It goes on from what your contact already has.");
+    // A quiet ↻ in the icon's place, not a link under the bubble.
+    expect(screen.getByTestId("file-resend")).toHaveAttribute("data-tone", "neutral");
+    expect(screen.getByTestId("file-resend")).toHaveAccessibleName("Send again");
     fireEvent.click(screen.getByTestId("file-resend"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-out-stuck", action: "resend" }));
     // Moving again: the button goes.
@@ -110,14 +116,41 @@ describe("FileBubble: files/3", () => {
     expect(screen.queryByTestId("file-resend")).toBeNull();
   });
 
-  it("a declined or cancelled file cannot be sent again; a failed one can", () => {
-    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
+  it("a declined or cancelled file cannot be sent again; a failed one can, from a round button where its icon was", async () => {
+    let answer!: () => void;
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockImplementation(() => new Promise<void>((resolve) => { answer = resolve; }));
     const declined = show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "Declined by your contact" }, { id: "chat1-out-1" });
-    expect(screen.queryByText("Retry sending")).toBeNull();
+    expect(screen.queryByTestId("file-retry")).toBeNull();
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^Declined$/);
     declined.unmount();
     show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "The file arrived damaged", retry: true }, { id: "chat1-out-2" });
-    fireEvent.click(screen.getByText("Retry sending"));
+    // Two words in the bubble; the engine's own behind the ⓘ.
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^Not sent$/);
+    expect(screen.queryByText("The file arrived damaged")).toBeNull();
+    fireEvent.click(screen.getByTestId("file-why"));
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent("The file arrived damaged");
+    const button = screen.getByTestId("file-retry");
+    expect(button).toHaveAccessibleName("Send again");
+    expect(button).toHaveAttribute("data-tone", "danger");
+    fireEvent.click(button);
     expect(retryFile).toHaveBeenCalledWith("chat1-out-2");
+    // The ring turns until the transfer moves.
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector("[data-busy]")).not.toBeNull();
+    await act(async () => { answer(); });
+    act(() => fakeEngine.update({ transfers: { "chat1-out-2": { state: "transferring", direction: "out", transferred: 2, size: 10 } } }));
+    expect(screen.queryByTestId("file-retry")).toBeNull();
+    expect(screen.getByTestId("file-progress")).toBeInTheDocument();
+  });
+
+  it("a resend that fails says why behind the ⓘ, and the button can be pressed again", async () => {
+    vi.spyOn(servicesPlatform!, "retryFile").mockRejectedValue(new Error("No connection to your contact"));
+    show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "Connection lost", retry: true }, { id: "chat1-out-3" });
+    fireEvent.click(screen.getByTestId("file-retry"));
+    await waitFor(() => expect(screen.getByTestId("file-retry")).not.toHaveAttribute("aria-busy"));
+    fireEvent.click(screen.getByTestId("file-why"));
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent("No connection to your contact");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("a file kept but too large to show here is saved through the system (Desktop)", async () => {

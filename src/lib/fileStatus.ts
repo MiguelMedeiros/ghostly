@@ -1,5 +1,5 @@
 import { formatFileSize } from "./format";
-import type { FileAction, FileTransferState } from "./platform";
+import type { FileAction, FileTransferState, ServicesPlatform } from "./platform";
 import type { ChatFile } from "./types";
 
 /** "3 min left", "2 h 5 min left", "less than a minute left". */
@@ -14,11 +14,30 @@ export function timeLeft(seconds: number): string {
 
 const percent = (transfer: FileTransferState) => Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100);
 
+/**
+ * Whether a file sent from here that did not go can be sent again: not one the contact declined or the sender
+ * cancelled (files/3 says so with `retry`), and only where the platform sends files.
+ */
+export function canRetryFile(file: ChatFile, transfer: FileTransferState | null, platform: ServicesPlatform | null): boolean {
+  return transfer?.state === "failed" && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+}
+
+/**
+ * A transfer that ended without the file, in two words: declined, cancelled, or not sent / did not arrive. The
+ * error's own words are the reason behind the bubble's ⓘ, never the status itself.
+ */
+export function failedStatus(file: ChatFile, transfer: FileTransferState): string {
+  const error = transfer.error ?? "";
+  if (/declin/i.test(error)) return "Declined";
+  if (/cancel/i.test(error)) return "Cancelled";
+  return transfer.direction === "out" || (!transfer.direction && file.id.includes("-out-")) ? "Not sent" : "Did not arrive";
+}
+
 /** The line under the file's name: how far it got, and what it waits for. */
 export function fileStatus(file: ChatFile, transfer: FileTransferState | null, peerName: string, missing: boolean): string {
   const size = formatFileSize(file.size);
   if (!transfer || transfer.state === "done") return missing ? "No longer available" : size;
-  if (transfer.state === "failed") return `Failed: ${transfer.error ?? "transfer interrupted"}`;
+  if (transfer.state === "failed") return failedStatus(file, transfer);
   const done = `${percent(transfer)}%`;
   const incoming = transfer.direction === "in";
   switch (transfer.stage) {

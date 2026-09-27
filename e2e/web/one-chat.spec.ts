@@ -43,7 +43,7 @@ test("with WebRTC blocked a first pairing opens On DHT, chats there, and goes li
     await expect(chip(alice)).toHaveAttribute("data-pairing", "on-dht");
     await say(bob, "hello over the DHT");
     await expect(chat(alice).getByText("hello over the DHT")).toBeVisible({ timeout: 60_000 });
-    await expect(chat(bob).locator(".group").filter({ hasText: "hello over the DHT" }).getByText("Received by peer")).toBeVisible({ timeout: 60_000 });
+    await expect(chat(bob).locator(".group").filter({ hasText: "hello over the DHT" }).locator('[data-delivery="delivered"]')).toBeVisible({ timeout: 60_000 });
 
     // WebRTC works again: nobody does anything, and the chat goes live.
     for (const p of [alice, bob]) await rtcBlocked(p, false);

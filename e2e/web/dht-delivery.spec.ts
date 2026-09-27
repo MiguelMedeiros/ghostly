@@ -1,6 +1,6 @@
 import { copyInvite } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
-import { test, expect, chat, chooseDhtOnly, say, setDhtOnly, type Peer } from "../support/fixtures";
+import { test, expect, chat, chooseDhtOnly, delivered, say, setDhtOnly, type Peer } from "../support/fixtures";
 import { LocalRelay } from "../support/relay";
 import { DhtDelivery, createIdentity, createRelayPayload, decodeInviteCode } from "@ghostly/core";
 import { composerRow } from "../support/composer";
@@ -25,7 +25,7 @@ async function join(peer:Peer,invite:string) {
 }
 const mode = (peer:Peer,dht:boolean) => setDhtOnly(peer.page, dht);
 async function noStreams(peers:Peer[]) { for(const p of peers) expect(await p.page.evaluate(()=>Number(localStorage.getItem("qa-stream-dials")??0))).toBe(0); }
-const received=(p:Peer)=>chat(p).getByText("Received by peer",{exact:true});
+const received=(p:Peer)=>delivered(chat(p));
 
 test("DHT-only starts from an invite without streams, preserves drafts and receipts across reload",{ tag: ["@feature:chat.dht.send", "@feature:invite.dht", "@feature:chat.waiting"] },async({peer,relay})=>{
   const a=await peer("dht-first"),b=await peer("dht-second");
@@ -40,8 +40,9 @@ test("DHT-only starts from an invite without streams, preserves drafts and recei
   await expect(b.page.getByTestId("dht-byte-count")).toHaveText("260 / 256 B");
   await b.page.getByRole("button",{name:"Send message",exact:true}).click();
   const waiting=chat(b).locator(".group").filter({hasText:large});
-  await expect(waiting.getByText("Sends when live",{exact:true})).toBeVisible();await expect(b.page.getByPlaceholder("Message…")).toHaveValue("");
-  await waiting.getByTestId("cancel-waiting").click();await expect(waiting).toHaveCount(0);
+  await expect(delivered(waiting,"waiting")).toHaveAccessibleName("Waiting for your contact to be online");await expect(b.page.getByPlaceholder("Message…")).toHaveValue("");
+  // Cancel sending is in the message's ⋮, not a link in the bubble.
+  await waiting.hover();await waiting.getByTestId("message-options").click();await b.page.getByTestId("message-cancel-sending").click();await expect(waiting).toHaveCount(0);
   await b.page.getByPlaceholder("Message…").fill("Reply over DHT");await b.page.getByRole("button",{name:"Send message",exact:true}).click();
   await expect(chat(a).getByText("Reply over DHT",{exact:true})).toBeVisible();await expect(received(b)).toHaveCount(1);
   await a.page.reload();await b.page.reload();
@@ -58,7 +59,7 @@ test("DHT published while contact is away survives sender restart and is receive
   const a=await peer("dht-away-sender"),b=await peer("dht-away-reader");await watchStreams(a);await watchStreams(b);
   await join(b,await createDht(a));for(const p of[a,b])await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
   const returnTo=b.page.url();await b.page.goto("about:blank");
-  await say(a,"Waiting in the DHT mailbox");await expect(chat(a).getByText("Sent · waiting for receipt",{exact:true})).toBeVisible();
+  await say(a,"Waiting in the DHT mailbox");await expect(delivered(chat(a),"sent").last()).toBeVisible();
   await expect(received(a)).toHaveCount(0);await a.page.reload();
   await expect(chat(a).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);
   await b.page.goto(returnTo);await expect(chat(b).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);await expect(received(a)).toHaveCount(1);
@@ -76,7 +77,7 @@ test("DHT and live delivery share history; offline text fallback is independent 
   await fallback.click();await expect(fallback).not.toBeChecked();await a.page.keyboard.press("Escape");
   const returnTo=b.page.url();await b.page.goto("about:blank");
   await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/On DHT · retrying live/);
-  await say(a,"Offline delivery after stream");await expect(chat(a).getByText("Sent · waiting for receipt",{exact:true})).toBeVisible();
+  await say(a,"Offline delivery after stream");await expect(delivered(chat(a),"sent").last()).toBeVisible();
   await b.page.goto(returnTo);await expect(chat(b).getByText("Offline delivery after stream",{exact:true})).toHaveCount(1);
   await mode(a,true);await mode(b,true);await say(b,"Back to DHT");await expect(chat(a).getByText("Back to DHT",{exact:true})).toBeVisible();
   for(const p of[a,b]) for(const text of["Before migration","After migration","Offline delivery after stream","Back to DHT"])await expect(chat(p).getByText(text,{exact:true})).toHaveCount(1);

@@ -131,7 +131,8 @@ describe("the voice bubble's layout", () => {
     expect(within(meta).getByTestId("voice-unplayed")).toBeInTheDocument();
     expect(within(meta).getByTestId("voice-time")).toHaveTextContent("0:04");
     // No badge beside the waveform: the row holds the play button and the waveform's column only.
-    const row = within(bubble).getByTestId("voice-play").parentElement!;
+    // The play button sits in the slot its progress ring (or a ↻) shares.
+    const row = within(bubble).getByTestId("voice-play").parentElement!.parentElement!;
     expect(row.children).toHaveLength(2);
 
     await clickPlay();

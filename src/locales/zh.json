@@ -73,7 +73,9 @@
       "keysHint": "此处绝不显示密钥。",
       "options": "消息选项",
       "copyHint": "点击复制",
-      "reply": "回复"
+      "reply": "回复",
+      "cancelSending": "取消发送",
+      "retry": "重新发送"
     },
     "options": "选项",
     "menu": {
@@ -118,6 +120,23 @@
       "notice": "有人回应了你的消息",
       "note": "{{name}} 对“{{snippet}}”回应了 {{emoji}}",
       "noteMine": "你对“{{snippet}}”回应了 {{emoji}}"
+    },
+    "delivery": {
+      "sending": "正在发送",
+      "waiting": "等待联系人上线",
+      "sent": "已发送",
+      "delivered": "已送达",
+      "failed": "未发送",
+      "retry": "未发送。重新发送",
+      "hint": {
+        "sending": "正在路上。",
+        "queued": "尚未收到回执。会自动重发。",
+        "waiting": "联系人上线后自动发送。",
+        "held": "为联系人保存，直到对方上线。",
+        "sent": "已发送。尚未收到回执。",
+        "delivered": "联系人的应用已收到。",
+        "failed": "未发送。点按即可重新发送。"
+      }
     }
   },
   "group": {

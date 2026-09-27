@@ -188,7 +188,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
   const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? "Calls need a live connection" : deliveryPeer.callsUnavailable) : null;
-  // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits ("Sends when live") or is held.
+  // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
   const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? deliveryPeer.pairing.error ?? "This chat stopped: your contact's key changed." : undefined;

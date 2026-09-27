@@ -73,7 +73,9 @@
       "keysHint": "Chaves nunca aparecem aqui.",
       "options": "Opções da mensagem",
       "copyHint": "Clique para copiar",
-      "reply": "Responder"
+      "reply": "Responder",
+      "cancelSending": "Cancelar envio",
+      "retry": "Enviar de novo"
     },
     "options": "Opções",
     "menu": {
@@ -118,6 +120,23 @@
       "notice": "Alguém reagiu à sua mensagem",
       "note": "{{name}} reagiu com {{emoji}} a \"{{snippet}}\"",
       "noteMine": "Você reagiu com {{emoji}} a \"{{snippet}}\""
+    },
+    "delivery": {
+      "sending": "Enviando",
+      "waiting": "Aguardando seu contato ficar online",
+      "sent": "Enviada",
+      "delivered": "Entregue",
+      "failed": "Não enviada",
+      "retry": "Não enviada. Enviar de novo",
+      "hint": {
+        "sending": "A caminho.",
+        "queued": "Sem confirmação ainda. Envia de novo sozinha.",
+        "waiting": "Envia sozinha quando seu contato estiver online.",
+        "held": "Guardada para seu contato até ele ficar online.",
+        "sent": "Enviada. Sem confirmação ainda.",
+        "delivered": "O app do seu contato recebeu.",
+        "failed": "Não enviada. Toque para enviar de novo."
+      }
     }
   },
   "group": {
