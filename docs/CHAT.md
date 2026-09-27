@@ -81,7 +81,7 @@ Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #2
 In order, each row when it applies (`src/components/MessageBubble.tsx`):
 
 1. **Reply** (#347)
-2. **Edit**, for a text you sent, in a 1:1 chat (#351)
+2. **Edit**, for a text you sent (#351; groups #378)
 3. **React** (#354)
 4. **Send again**, for a message that was not sent (#360)
 5. **Download**, for a voice message, a picture or a file, once its bytes are on this device (#346). Desktop opens the save dialog; web and extension download it.

@@ -567,7 +567,7 @@
     "slug": "303-keet",
     "title": "WISP 3xx: Keet",
     "status": "Draft",
-    "updated": "2026-09-20",
+    "updated": "2026-09-27",
     "implementation": "Blocked on existing-identity signer API; see follow-up",
     "dependencies": [
       "300-peer-proofs.md"
@@ -577,8 +577,8 @@
       "Planned integration. No current integration is enabled or promised. The historical document identifier 303 remains in the URL for link compatibility; it is not a committed WISP number."
     ],
     "benefit": "Investigate an optional relationship with a Keet identity.",
-    "level": "research",
-    "note": "Blocked on a signer API for existing accounts; number not yet assigned."
+    "level": "planned",
+    "note": "Blocked until Keet offers a supported signing API for existing accounts; the 2026-09-20 compatible import stays off. Number not yet assigned."
   },
   {
     "file": "3xx-atproto.md",
@@ -770,7 +770,7 @@
     "notices": [],
     "benefit": "One chat for everyone: the DHT to meet, a live link when one connects, the DHT again when none does.",
     "level": "available",
-    "note": "Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited in a 1:1 chat, reactions put one emoji per person on a message, and lists, quotes, headings and links show as such.",
+    "note": "Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited, in a chat or a group, reactions put one emoji per person on a message, and lists, quotes, headings and links show as such.",
     "feature": {
       "label": "Chat",
       "href": "/#next"
