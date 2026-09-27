@@ -285,7 +285,7 @@ describe("typing on a paired session (typing/1)", () => {
       params: invitation.mine, rtcAvailable: false, typingSupport: true,
       transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "memory", relays: [] }) },
       localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-    } as GhostLinkOptions);
+    } as unknown as GhostLinkOptions);
     link.setTyping(true);
     expect(link.supportsTyping).toBe(false);
   });
