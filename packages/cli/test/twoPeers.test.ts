@@ -23,6 +23,17 @@ const sockets: Record<string, string> = {};
 let env: NodeJS.ProcessEnv;
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 
+/**
+ * `listen` on `dir`'s daemon from its last event as of now: an event that comes while the process still starts is
+ * replayed, not missed (a fixed pause before acting was too short on a busy CI runner).
+ */
+async function listenTo(dir: string, ...args: string[]): Promise<Running> {
+  const since = (ok(await as(dir, "status")).events as { lastSeq: number }).lastSeq;
+  const listener = new Running(["--home", dir, "listen", "--since", String(since), ...args], env);
+  running.push(listener);
+  return listener;
+}
+
 /** Waits until `dir`'s roster of `group` names a member `name` (names come over the edges, a moment after joining). */
 async function waitForMember(dir: string, group: string, name: string): Promise<void> {
   const until = Date.now() + 120_000;
@@ -104,9 +115,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("carry messages both ways, with events a bot can act on", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "message.received"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "message.received");
     const sent = ok(await as(alice, "send", "bob", "hello", "bob", "--wait", "delivered"));
     expect(sent).toMatchObject({ chat: chatA, delivery: "delivered" });
     const event = await listen.waitFor((l) => l.type === "message.received");
@@ -124,9 +133,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("show the contact this side is typing, and its stream says when it started and stopped", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "typing.started", "--type", "typing.stopped"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped");
     expect(ok(await as(alice, "typing", "bob"))).toMatchObject({ chat: chatA, typing: true, live: true, sendTyping: true });
     expect(await listen.waitFor((l) => l.type === "typing.started")).toMatchObject({ chat: chatB });
     ok(await as(alice, "typing", "bob", "--stop"));
@@ -141,9 +148,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("keep typing on with --for until the time is up, or a message ends it", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "typing."], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "typing.");
     const count = (type: string) => listen.lines.filter((l) => l.type === type).length;
     // A single start fades after 6 s; --for 10 keeps it on past that.
     expect(ok(await as(alice, "typing", "bob", "--for", "10"))).toMatchObject({ typing: true, until: expect.any(Number) });
@@ -161,9 +166,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("show the contact a bot is thinking, with its status, and then recording", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "typing.started", "--type", "typing.stopped"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped");
     expect(ok(await as(alice, "typing", "bob", "--kind", "thinking", "--status", "Transcribing your audio…")))
       .toMatchObject({ chat: chatA, typing: true, kind: "thinking", status: "Transcribing your audio…", live: true });
     expect(await listen.waitFor((l) => l.type === "typing.started" && l.kind === "thinking"))
@@ -205,10 +208,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("call by voice: auto-answer, audio both ways over the socket and `call pipe`, hang-up events", async () => {
-    const listenA = new Running(["--home", alice, "listen", "--type", "call."], env);
-    const listenB = new Running(["--home", bob, "listen", "--type", "call."], env);
-    running.push(listenA, listenB);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listenA = await listenTo(alice, "--type", "call.");
+    const listenB = await listenTo(bob, "--type", "call.");
     expect(ok(await as(alice, "status"))).toMatchObject({ calls: true });
     expect(ok(await as(alice, "call", "auto", "on", "--from", "bob", "--rate", "16000"))).toEqual({ autoAnswer: { on: true, from: [chatA], rate: 16000 } });
     const placed = ok(await as(bob, "call", "start", "alice")) as { call: string; audio: { socket: string } };
@@ -281,9 +282,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("react to a message: the contact's stream says it, its history shows it, a new one replaces it, --remove takes it back", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "message.reaction"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "message.reaction");
     const theirs = (ok(await as(alice, "chat", "history", "bob")).messages as { id: string; text: string }[]).find((m) => m.text === "done typing")!;
     expect(ok(await as(alice, "react", "bob", theirs.id, "👍"))).toMatchObject({ chat: chatA, messageId: theirs.id, emoji: "👍", removed: false });
     const event = await listen.waitFor((l) => l.type === "message.reaction");
@@ -302,9 +301,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("update a status in place: send it, edit it three times, the contact sees the last text and each edit once", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "message.edited"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "message.edited");
     const id = ok(await as(alice, "send", "bob", "Working: 0 of 3", "--wait", "delivered")).messageId as string;
     expect(ok(await as(alice, "edit", "bob", id, "Working: 1 of 3", "--wait", "confirmed"))).toMatchObject({ chat: chatA, messageId: id, confirmed: true });
     expect(ok(await as(alice, "edit", "bob", id, "--text", "Working: 2 of 3", "--wait", "confirmed"))).toMatchObject({ edits: 2, confirmed: true });
@@ -325,9 +322,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
 
   it("send files: a small one taken at once, a large one only once accepted, saved byte for byte", async () => {
     const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
-    const listen = new Running(["--home", bob, "listen", "--type", "file.", "--type", "message.received"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "file.", "--type", "message.received");
     const small = join(alice, "note.txt");
     writeFileSync(small, randomBytes(200_000));
     const sent = ok(await as(alice, "file", "send", "bob", small));
@@ -361,9 +356,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("send a voice note from a file: its length and waveform measured here, the contact sees the bars", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "message.received"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "message.received");
     const recording = join(import.meta.dirname, "../../../e2e/support/voice-fixtures/chromium.webm");
     const sent = await as(alice, "file", "send", "bob", recording, "--voice");
     expect(ok(sent)).toMatchObject({ file: { mime: "audio/webm", voice: true } });
@@ -418,9 +411,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(proof.provider).toBe("ssh");
     expect((ok(await as(alice, "identity", "list")).proofs as { id: string }[]).map((p) => p.id)).toContain(proof.id);
 
-    const listen = new Running(["--home", bob, "listen", "--type", "identity."], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 500));
+    const listen = await listenTo(bob, "--type", "identity.");
     ok(await as(alice, "identity", "share", "bob", proof.id));
     await listen.waitFor((e) => e.type === "identity.received" || e.type === "identity.status", 60_000);
     const until = Date.now() + 60_000;
@@ -467,9 +458,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       const event = JSON.parse(input);
       execFileSync(process.execPath, [${JSON.stringify(join(import.meta.dirname, "../dist/ghostly.mjs"))}, "--home", ${JSON.stringify(bob)}, "send", event.chat, "--", "echo: " + event.message.text]);
     `);
-    const bot = new Running(["--home", bob, "listen", "--type", "message.received", "--exec", `"${process.execPath}" "${script}"`, "--cursor", join(bob, "cursor")], env);
-    running.push(bot);
-    await new Promise((r) => setTimeout(r, 1000));
+    const bot = await listenTo(bob, "--type", "message.received", "--exec", `"${process.execPath}" "${script}"`, "--cursor", join(bob, "cursor"));
     ok(await as(alice, "send", "bob", "ping", "--wait", "delivered"));
     const until = Date.now() + 60_000;
     let texts: string[] = [];
@@ -501,9 +490,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(JSON.stringify(ok(await as(alice, "group", "list")))).not.toContain(created.link as string);
     // Bob's roster names Alice before the message comes, so the stream can name her (the message has her key only).
     await waitForMember(bob, "Bot crew", "Alice bot");
-    const listen = new Running(["--home", bob, "listen", "--type", "group."], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "group.");
     const sent = ok(await as(alice, "group", "send", "Bot crew", "hey @Bob", "--mention", "Bob"));
     expect(sent).toMatchObject({ group: created.group, messageId: expect.any(String), sent: true });
     const event = await listen.waitFor((l) => l.type === "group.message", 60_000);
@@ -553,12 +540,13 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(bob, "group", "accept", "Mesh crew"));
     await waitForMember(alice, "Mesh crew", "Bob");
     await waitForMember(bob, "Mesh crew", "Alice bot");
-    const listen = new Running(["--home", bob, "listen", "--type", "group.message"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "group.message");
     const sent = ok(await as(alice, "group", "send", "Mesh crew", "status: building"));
     expect(sent.messageId).toEqual(expect.any(String));
-    const event = await listen.waitFor((l) => (l.message as { text?: string } | undefined)?.text === "status: building", 90_000);
+    const event = await listen.waitFor((l) => (l.message as { text?: string } | undefined)?.text === "status: building", 90_000).catch(async (error: Error) => {
+      // Which half failed: the message never reached Bob, or it did and the stream did not say so.
+      throw new Error(`${error.message}\nBob's history: ${JSON.stringify(ok(await as(bob, "group", "history", "Mesh crew"))).slice(0, 2000)}`);
+    });
     const aliceKey = (ok(await as(alice, "group", "show", "Mesh crew")).me as string);
     expect(event.message).toMatchObject({ id: sent.messageId, member: aliceKey, nick: "Alice bot" });
     const history = ok(await as(bob, "group", "history", "Mesh crew")).messages as { id: string; nick: string | null; member?: string }[];
@@ -577,9 +565,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("update a group status in place: group send, group edit three times, the other member sees the last text and each edit once", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "group.message.edited"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "group.message.edited");
     // --wait sent: back once Bob's edge took it (a group has no receipts).
     const sent = ok(await as(alice, "group", "send", "Mesh crew", "Deploy: 0 of 3", "--wait", "sent"));
     expect(sent.edges).toBeGreaterThanOrEqual(1);
@@ -609,9 +595,11 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   it("send as a one-shot while the other side's daemon runs, and stop cleanly", async () => {
     const daemonA = running[0];
     ok(await as(alice, "daemon", "stop"));
-    expect(daemonA.child.exitCode).toBe(0);
+    expect(await daemonA.exited()).toBe(0);
     expect(ok(await as(alice, "daemon", "status"))).toMatchObject({ running: false });
-    expect(ok(await as(alice, "send", "bob", "from a one-shot", "--wait", "delivered", "--timeout", "90"))).toMatchObject({ delivery: "delivered" });
+    // A fresh process on one relay, with the two groups above running again: its 30 requests a minute are spent in
+    // seconds, so the message often waits for the next minute (about 65 s on CI, measured). Hence well past 60 s.
+    expect(ok(await as(alice, "send", "bob", "from a one-shot", "--wait", "delivered", "--timeout", "150"))).toMatchObject({ delivery: "delivered" });
     const history = ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { text: string }[];
     expect(history.map((m) => m.text)).toEqual(["from a one-shot"]);
   });

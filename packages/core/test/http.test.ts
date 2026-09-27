@@ -229,6 +229,12 @@ describe("http over the data link", () => {
     };
   }
 
+  /** Byte for byte, at memory speed: toEqual walks a Uint8Array one element at a time (a second per MB, more on CI). */
+  function expectBytes(actual: Uint8Array, expected: Uint8Array) {
+    expect(actual.length).toBe(expected.length);
+    expect(actual.findIndex((byte, i) => byte !== expected[i]), "the first byte that differs").toBe(-1);
+  }
+
   async function* bodyOf(...parts: Uint8Array[]) {
     for (const p of parts) yield p;
   }
@@ -259,15 +265,13 @@ describe("http over the data link", () => {
     const upload = new Uint8Array(200_000).map((_, i) => i % 251);
     const download = new Uint8Array(1_000_000).map((_, i) => i % 241);
     const { client } = setup(async (request) => {
-      expect(request.body).toEqual(upload);
+      expectBytes(request.body!, upload);
       return { status: 201, headers: [], body: bodyOf(download.subarray(0, 300_000), download.subarray(300_000)) };
     });
     const response = await client.request("atlas", { method: "POST", path: "/upload", body: upload });
     expect(response.status).toBe(201);
-    expect(await response.bytes()).toEqual(download);
-    // 1.2 MB through the in-memory link: a second locally, but past the default 5 s on a CI runner whose cores are busy
-    // with the other test files (it failed at 5.2 s beside the files/3 suite).
-  }, 20_000);
+    expectBytes(await response.bytes(), download);
+  });
 
   it("answers for unknown services, bad paths and bad methods without touching the network", async () => {
     let calls = 0;

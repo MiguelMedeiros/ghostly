@@ -65,6 +65,14 @@ export class Running {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
+  /** Its exit code once it is gone: another process can see it end a moment before this one hears of it. */
+  exited(ms = 10_000): Promise<number | null> {
+    if (this.child.exitCode !== null) return Promise.resolve(this.child.exitCode);
+    return new Promise((done, fail) => {
+      const timer = setTimeout(() => fail(new Error(`still running after ${ms} ms`)), ms);
+      this.child.once("exit", (code) => { clearTimeout(timer); done(code); });
+    });
+  }
   stop(): Promise<number | null> {
     if (this.child.exitCode !== null) return Promise.resolve(this.child.exitCode);
     return new Promise((done) => { this.child.once("exit", (code) => done(code)); this.child.kill("SIGTERM"); setTimeout(() => this.child.kill("SIGKILL"), 20_000).unref(); });
