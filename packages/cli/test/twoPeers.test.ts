@@ -136,17 +136,19 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const afterStop = Date.now() - started;
     await bothWays("after a stop");
 
-    // Killed: nothing said. Alice still holds the dead session; Bob's app, back, dials it and takes over.
+    // Killed: nothing said. Alice still holds the dead session; Bob's app, back, offers at once. Here over WebRTC, whose
+    // Node build never says a connection went `disconnected`, Alice reads that offer at a live chat's pace, or her
+    // liveness gives up first: under a minute and a half, where a native knock takes over in about a second.
     const killed = running.pop()!;
     await new Promise((r) => { killed.child.once("exit", r); killed.child.kill("SIGKILL"); });
     started = Date.now();
     await restartBob();
-    await live(bob, "alice", 15);
+    await live(bob, "alice", 90);
     const afterKill = Date.now() - started;
     await bothWays("after a kill");
     console.log(`[restart] live again after a stop in ${afterStop} ms, after a kill in ${afterKill} ms`);
     expect(afterStop).toBeLessThan(10_000);
-    expect(afterKill).toBeLessThan(15_000);
+    expect(afterKill).toBeLessThan(90_000);
   });
 
   it("move a chat to native HyperDHT when asked", async () => {
