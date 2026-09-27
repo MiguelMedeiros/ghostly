@@ -20,7 +20,8 @@ function short(name: string) {
     .replace(/^HTTP Local Service Profile$/i, "HTTP services")
     .replace(/^Group Session$/i, "Group sessions")
     .replace(/^S3-Compatible Storage$/i, "S3 storage")
-    .replace(/^Local File Storage$/i, "Local file");
+    .replace(/^Local File Storage$/i, "Local file")
+    .replace(/^Headless Runtime and Local Control API$/i, "Headless runtime");
 }
 
 /**
