@@ -45,12 +45,12 @@ describe("a voice message in the chat", () => {
     expect(servicesPlatform!.getFile).not.toHaveBeenCalled();
   });
 
-  it("is a voice message only with its description: a plain audio file stays a file", () => {
+  it("is a voice message only with its description: a plain audio file gets the audio file player", () => {
     const plain = voice();
     delete plain.file!.voice;
     chat(plain);
     expect(screen.queryByTestId("voice-bubble")).not.toBeInTheDocument();
-    expect(screen.getByTestId("file-bubble")).toBeInTheDocument();
+    expect(screen.getByTestId("audio-bubble")).toBeInTheDocument();
   });
 
   it("plays and pauses", async () => {
