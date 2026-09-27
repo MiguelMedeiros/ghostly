@@ -1,5 +1,6 @@
 import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { checkVersionFeed } from "@ghostly/browser/updateFeed";
+import { applyUpdate, prepareUpdate } from "./pwa/serviceWorker";
 import { RELEASES_URL } from "../../src/lib/settings";
 import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
 import { atprotoPopupWindow } from "@ghostly/browser/proofs/atproto/popup";
@@ -55,18 +56,23 @@ export const webHost = createInPageHost({
    * The deployed build says what it is in `/version.json`, on this origin and
    * nowhere else: nothing third-party learns that this tab is running Ghostly.
    * Applying it is a reload, which ends the peer and every call it holds, so
-   * it only ever happens because the user pressed the button.
+   * it only ever happens because the user pressed the button. The app's files
+   * come from the service worker's cache, so the reload first lets the new
+   * worker (fetched as soon as the deploy is found) take over.
    */
   updates: {
     downloadUrl: RELEASES_URL,
-    check: () =>
-      checkVersionFeed({
+    check: async () => {
+      const found = await checkVersionFeed({
         url: new URL("version.json", document.baseURI).toString(),
         currentVersion: __APP_VERSION__,
         currentBuild: __APP_BUILD__,
         apply: "reload",
-      }),
-    install: async () => window.location.reload(),
+      });
+      if (found) prepareUpdate();
+      return found;
+    },
+    install: () => applyUpdate(),
   },
   requestLocalAccess: async () => false,
   // A popup on this origin; the provider returns to /oidc-callback.html.

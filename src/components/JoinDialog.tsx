@@ -15,7 +15,8 @@ import type { SessionKeys } from "../lib/storage";
  * An invite this profile already has a chat for makes no second chat (WISP 801 Q9): one it made itself
  * is refused here, with the way to that chat (`onOpenChat`); one it already joined by opens that chat.
  */
-export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose }: { onJoin(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onClose(): void }) {
+/** `autoScan`: the camera starts at once (the installed app's "Scan invite" shortcut). */
+export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose, autoScan = false }: { onJoin(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onClose(): void; autoScan?: boolean }) {
   const { t } = useI18n();
   const closed = useRef(false);
   const busyRef = useRef(false);
@@ -123,6 +124,9 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose }: { onJoi
       setError(t("join.cameraUnavailable")); setManual(true);
     }
   };
+  // Once, on opening, after the dialog is up; `scan` itself stops anything a closed dialog started.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (autoScan) void scan(); }, []);
   const readImage = async (file?: File) => {
     if (!file || busyRef.current || joined.current || closed.current) return;
     stop(); setError("");

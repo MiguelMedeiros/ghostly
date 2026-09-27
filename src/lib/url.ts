@@ -21,8 +21,28 @@ function keysOf(params: LinkParams): SessionKeys {
   };
 }
 
-/** The invite a route carries, if it carries one: `/ghostly1…` (the hash of a shared link) or `/chat/<code>`. */
+/** A `web+ghostly:` link, as the browser hands it over (escaped) or as it was written. */
+const PROTOCOL_LINK = /^\/?web(?:\+|%2B)ghostly(?::|%3A)(?:\/\/|%2F%2F)?/i;
+
+/**
+ * What a `web+ghostly:…` link names, when the address is one. The installed web app registers the scheme
+ * (manifest `protocol_handlers`, `/#%s`), so the browser opens `#web%2Bghostly%3Aghostly1…` with the whole link
+ * escaped in the fragment. Null when the address is not such a link.
+ */
+export function protocolLinkCode(pathname: string): string | null {
+  if (!PROTOCOL_LINK.test(pathname)) return null;
+  const rest = pathname.replace(PROTOCOL_LINK, "");
+  try { return decodeURIComponent(rest); } catch { return rest; }
+}
+
+/**
+ * The invite a route carries, if it carries one: `/ghostly1…` (the hash of a shared link), `/chat/<code>`, or a
+ * `web+ghostly:` link. Whatever a `web+ghostly:` link holds is read as an invite, so what is not one is refused
+ * and leaves the address like a bad invite does.
+ */
 export function inviteRouteCode(pathname: string): string | null {
+  const protocol = protocolLinkCode(pathname);
+  if (protocol !== null) return protocol || "web+ghostly:";
   return pathname.match(/^\/?(ghostly1[^/]*)$/i)?.[1] ?? pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
 }
 

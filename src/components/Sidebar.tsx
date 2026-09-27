@@ -15,6 +15,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
 import { AppBrand } from "./AppBrand";
+import { OfflineBanner } from "./OfflineBanner";
 import { UpdateBanner } from "./UpdateBanner";
 import {
   listSessions,
@@ -127,6 +128,20 @@ export function Sidebar() {
     if (activeSessionId) markSessionAsRead(activeSessionId);
   }, [activeSessionId, sessions]);
 
+  // The installed app's shortcuts (manifest.json): `#/new` starts a chat, `#/scan` opens Join with the camera on.
+  // Each address is acted on once (StrictMode runs effects twice), and leaves the history at once.
+  const [scanOnOpen, setScanOnOpen] = useState(false);
+  const shortcutDone = useRef<string | null>(null);
+  useEffect(() => { if (!showNewChat) setScanOnOpen(false); }, [showNewChat]);
+  useEffect(() => {
+    const shortcut = location.pathname === "/new" || location.pathname === "/scan" ? location.pathname : null;
+    if (!shortcut || shortcutDone.current === location.key) return;
+    shortcutDone.current = location.key;
+    if (shortcut === "/scan") { setScanOnOpen(true); setShowNewChat(true); nav.home(); return; }
+    void createPairedChat().then(id => nav.conversation(chatPath(id)), () => nav.home());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
+  }, [location.pathname, location.key]);
+
   const handleDelete = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -177,8 +192,9 @@ export function Sidebar() {
         </div>
       </div>
       <UpdateBanner />
+      <OfflineBanner />
       {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
-      {showNewChat && <JoinDialog onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); nav.conversation(chatPath(ensureSession(keys))); refreshSessions();}}
+      {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); nav.conversation(chatPath(ensureSession(keys))); refreshSessions();}}
         onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
         onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
 

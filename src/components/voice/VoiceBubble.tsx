@@ -19,6 +19,7 @@ import {
   voiceRate,
 } from "../../lib/voicePlayback";
 import { decodeToWav } from "../../lib/voiceDecode";
+import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { Waveform } from "./Waveform";
 import "./voice.css";
@@ -75,6 +76,8 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
   const startingRef = useRef(false);
   /** Whether the recording is already playing from a WAV decoded from it (the fallback, tried once). */
   const decodedRef = useRef(false);
+  /** What the system's media controls call: set on every render, below, once every function it names exists. */
+  const mediaRef = useRef<MediaSessionPlayer | null>(null);
 
   const objectUrl = (blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -143,7 +146,10 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
         return null;
       }
       applyVoiceRate(audio, voiceRate());
-      audio.addEventListener("timeupdate", () => setPosition(audio.currentTime));
+      audio.addEventListener("timeupdate", () => {
+        setPosition(audio.currentTime);
+        mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
+      });
       audio.addEventListener("ended", () => {
         stopFrames();
         releasePlayback(file.id);
@@ -151,9 +157,10 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
         setPosition(0);
         showProgress(0);
         audio.currentTime = 0;
+        releaseMediaSession(file.id);
         playNextVoice(rootRef.current);
       });
-      audio.addEventListener("pause", () => { stopFrames(); setState((s) => (s === "playing" ? "paused" : s)); });
+      audio.addEventListener("pause", () => { stopFrames(); setState((s) => (s === "playing" ? "paused" : s)); mediaSessionState(file.id, "paused"); });
       audio.addEventListener("error", () => {
         report("media element", audio.error);
         if (startingRef.current) return;
@@ -167,7 +174,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
       return audio;
     })().finally(() => { loadingRef.current = null; });
     return loadingRef.current;
-  }, [platform, file.id, file.mime, showProgress, report, giveUp, cannotPlayHere, switchToDecoded]);
+  }, [platform, file.id, file.mime, seconds, showProgress, report, giveUp, cannotPlayHere, switchToDecoded]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -220,8 +227,18 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     }
     setState("playing");
     followAudio();
+    // The lock screen and media keys drive the one playing now (through `mediaRef`, always this render's functions).
+    claimMediaSession(file.id, {
+      title: "Voice message",
+      artist: sender === "me" ? "You" : peerName,
+      play: () => mediaRef.current?.play(),
+      pause: () => mediaRef.current?.pause(),
+      seekTo: (at) => mediaRef.current?.seekTo(at),
+      next: () => mediaRef.current?.next?.(),
+    });
+    mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
     if (sender === "peer" && !played) { markVoicePlayed(file.id); setPlayed(true); }
-  }, [ready, file.id, load, seconds, showProgress, start, followAudio, sender, played]);
+  }, [ready, file.id, load, seconds, showProgress, start, followAudio, sender, played, peerName]);
 
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause }), [file.id, play, pause]);
   useEffect(() => onVoiceRate((next) => {
@@ -231,6 +248,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
   useEffect(() => () => {
     stopFrames();
     releasePlayback(file.id);
+    releaseMediaSession(file.id);
     audioRef.current?.pause();
     audioRef.current?.removeAttribute("src");
     for (const url of urlsRef.current) URL.revokeObjectURL(url);
@@ -243,6 +261,8 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     setPosition(clamped);
     if (audioRef.current) audioRef.current.currentTime = clamped;
   }, [seconds, showProgress]);
+
+  mediaRef.current = { title: "", play: () => void play(), pause, seekTo, next: () => void playNextVoice(rootRef.current) };
 
   const scrubbing = useRef(false);
   const fractionAt = (event: PointerEvent<HTMLDivElement>) => {

@@ -9,6 +9,7 @@ import { Profile } from "./pages/Profile";
 import { Identities } from "./pages/Identities";
 import { Wallet } from "./pages/Wallet";
 import { GroupChat } from "./pages/GroupChat";
+import { SharePicker } from "./pages/SharePicker";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { I18nProvider } from "./contexts/I18nContext";
@@ -19,7 +20,7 @@ import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, readInvite } from "./lib/url";
+import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -53,7 +54,7 @@ function ChatLinkIntake() {
         try { sessionId = ensureSession(reading.keys); } catch { sessionId = null; }
         if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
       }
-    } else if (!rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
+    } else if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
     if (!sessionId) {
       // Whatever it was, it leaves the address bar and the history: it may hold a key.
       setInvalid(reading.ok ? "join.invalid" : INVITE_REFUSAL_MESSAGE[reading.reason]);
@@ -139,7 +140,7 @@ function GroupLinkIntake() {
  * this device does not have. Everything else opened directly gets home put under it (`useAnchorHome`).
  */
 function isIntake(pathname: string): boolean {
-  if (pathname.startsWith("/join/") || /^\/?ghostly1/i.test(pathname)) return true;
+  if (pathname.startsWith("/join/") || /^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null) return true;
   const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
   return !!rest && (rest.includes("/") || !loadSession(decodeURIComponent(rest)));
 }
@@ -201,6 +202,10 @@ export function Root() {
                       <Route path="/profile" element={<Profile />} />
                       <Route path="/identities" element={<Identities />} />
                       <Route path="/share" element={<Navigate to="/services" replace />} />
+                      {/* The installed web app: what another app shared, and the icon's shortcuts (manifest.json). */}
+                      <Route path="/shared" element={<SharePicker />} />
+                      <Route path="/new" element={<Home />} />
+                      <Route path="/scan" element={<Home />} />
                     </Route>
                   </Routes>
                 </UpdateProvider>

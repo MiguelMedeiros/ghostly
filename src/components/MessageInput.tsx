@@ -23,6 +23,7 @@ import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
+import { onShareChange, peekShareFor, shareText, takeShareFor } from "../lib/incomingShare";
 import "./composer/composer.css";
 
 interface MessageInputProps {
@@ -388,6 +389,23 @@ export function MessageInput({
 
   // Behind the lock screen nothing is pasted or dropped in (the composer stays mounted under it).
   const canAttach = !!onSendFile && !disabled && !locked;
+  // Something shared into the app from another one, sent to this chat from the "Share to…" picker: its text into
+  // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked).
+  useEffect(() => {
+    if (!draftId) return;
+    const take = () => {
+      const waiting = peekShareFor(draftId);
+      if (!waiting || (waiting.files.length && !canAttach && !fileUnavailable)) return;
+      const share = takeShareFor(draftId)!;
+      const shared = shareText(share);
+      if (shared) setText((was) => (was.trim() ? `${was}\n${shared}` : shared));
+      if (share.files.length) offerRef.current(share.files);
+      else textareaRef.current?.focus();
+    };
+    take();
+    return onShareChange(take);
+  }, [draftId, canAttach, fileUnavailable]);
+
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here.
   useEffect(() => {
     if (!canAttach) return;
