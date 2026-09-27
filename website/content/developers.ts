@@ -263,7 +263,8 @@ export const developers = {
     rows: [
       { name: "Text chat, ghostly1 invites", cells: [A, A, A, A] },
       { name: "Pinned keys, durable outbox", cells: [A, A, A, A] },
-      { name: "Rich text, link previews, cards, secret check", cells: [A, A, A, null] },
+      { name: "Rich text, link previews, cards", cells: [A, A, A, null] },
+      { name: "A check before a seed or a key is sent as text", cells: [A, A, A, A] },
       { name: "Replies, edits, emoji reactions, typing indicator", cells: [A, A, A, A] },
       { name: "Files of any size, resumed or sent again", cells: [A, A, A, A] },
       { name: "Paste or drop pictures and files, videos played in the chat", cells: [A, A, A, null] },

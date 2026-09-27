@@ -9,9 +9,9 @@ status: script
 
 # WISP 800: Invite and Join (example lesson)
 
-A representative script. Availability checked against the code on 2026-09-23:
-invite links are in the public release (v0.4.0); paired invitations with a
-scannable QR code are in development for 0.5.0.
+A representative script. Availability checked against the code on 2026-09-27:
+the ghostly1 invite, shared as a link, a QR code or a text code, ships in
+1.0.0.
 
 ## 1. Opening (0:00-0:12)
 
@@ -43,7 +43,7 @@ Recording: two web clients side by side (development build, paired chats), then 
 
 - Boo: New → invite card with QR and "Copy invite".
 - Casper: Join → paste (or scan) → connected; both see "joined the chat".
-- Say on screen: "QR scanning: development build (0.5.0)".
+- Say on screen: "One invite: link, QR or code (1.0.0)".
 
 Narration (EN): "In the app it's one button. Boo creates an invitation, here as a QR code and a link. Casper joins, and both apps confirm the connection. In the public release you share a link; scanning a QR code with the camera arrives in the next release."
 
