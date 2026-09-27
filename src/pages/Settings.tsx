@@ -17,6 +17,7 @@ import { openProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Button, Switch } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
+import { setSendTyping, useSendTyping } from "../hooks/useTyping";
 import { Select } from "../components/ui/Select";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
@@ -51,6 +52,7 @@ export function Settings() {
   const myAvatar = useMyAvatar();
   const canSwitch = !!useServicesPlatform()?.features.profiles;
   const loadPublicProfiles = useLoadPublicProfiles();
+  const sendTyping = useSendTyping();
 
   const [lockEnabled, setLockEnabled] = useState(settings.lockScreen.enabled);
   const [newPassword, setNewPassword] = useState("");
@@ -324,6 +326,9 @@ export function Settings() {
       <Section title={t("settings.security")}>
         <Row label={t("settings.linkPreviews")} hint={t("settings.linkPreviewsHint")} info={t("settings.linkPreviewsInfo")} testId="settings-link-previews-row">
           <Switch testId="settings-link-previews" label={t("settings.linkPreviews")} checked={settings.linkPreviews} onChange={(on) => updateLinkPreviews(on)} />
+        </Row>
+        <Row label={t("settings.sendTyping")} hint={t("settings.sendTypingHint")} testId="settings-send-typing-row">
+          <Switch testId="settings-send-typing" label={t("settings.sendTyping")} checked={sendTyping} onChange={(on) => void setSendTyping(on).catch(() => {})} />
         </Row>
         <Row label={t("settings.publicProfiles")} hint={t("settings.publicProfilesHint")} info={t("settings.publicProfilesInfo")} testId="settings-public-profiles-row">
           <Switch testId="settings-public-profiles" label={t("settings.publicProfiles")} checked={loadPublicProfiles} onChange={(on) => void setLoadPublicProfiles(on).catch(() => {})} />

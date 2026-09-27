@@ -55,6 +55,8 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useChatLink } from "../hooks/useChatLink";
+import { useTypingSender } from "../hooks/useTyping";
+import { ChatSubtitle } from "../components/TypingIndicator";
 import { TransportLine } from "../components/TransportTimeline";
 import { mergeTimeline } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
@@ -273,6 +275,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
   // The chat's link as the engine shows it: its transport lines in the timeline.
   const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
+  // What tells the contact when this side writes (WISP 401 § Typing): 1:1 paired chats only.
+  const onTyping = useTypingSender(paired ? chatLink?.id : undefined, visible);
   const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : [], paired ? chatLink?.identityTimeline ?? [] : []),
     [messages, paired, chatLink?.transportLog, chatLink?.identityTimeline]);
   // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.
@@ -485,10 +489,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
             )}
-            {/* The contact's key. Everything about the connection, pairing included, is the icon beside the calls. */}
-            <p className="m-0 truncate text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap" data-testid="chat-subtitle">
-              {truncatedPeerKey}
-            </p>
+            {/* The contact's key, or "typing…" while they write (presence, not connection). Everything about the
+                connection, pairing included, is the icon beside the calls. */}
+            <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={truncatedPeerKey} />
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -645,6 +648,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       {/* Input */}
       <MessageInput draftId={sessionId}
         key={sessionId}
+        // Said to the contact on the live session only; stops when the text goes, the chat is left or the page is hidden.
+        onTyping={paired ? onTyping : undefined}
         // A paired chat has no mentions; a link preview made in the composer goes with the text.
         onSend={(text, _mentions, extra) => sendMessage(text, extra)}
         // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.

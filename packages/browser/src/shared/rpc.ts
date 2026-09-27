@@ -227,6 +227,11 @@ export interface EngineApi {
   setServiceShared(params: { serviceId: string; peerPubKeyZ32: string; shared: boolean }): void;
   updateSettings(params: { settings: SettingsPatch }): void;
   setCallSignal(params: { linkId: string; signal: string | null }): void;
+  /**
+   * This side is typing in a paired chat (true), or stopped: cleared the text, sent it, left the chat (false). Said
+   * on the live session only, throttled there; nothing is said while Settings `sendTyping` is off.
+   */
+  setTyping(params: { linkId: string; typing: boolean }): void;
   setFastPoll(params: { linkId: string; fast: boolean }): void;
 
   // Private groups (WISP 900, `group-mesh/1`). Group messages arrive as `messages` events under `group:<id>`.

@@ -694,6 +694,15 @@ body {
 }
 .animate-pop { animation: pop 0.35s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
 
+/* The typing indicator's dots (components/TypingIndicator.tsx): a soft wave, still and fully shown when motion is reduced. */
+.typing-dots { display: inline-flex; align-items: center; gap: 2px; }
+.typing-dots > span { width: 4px; height: 4px; border-radius: 999px; background: currentColor; animation: typing-dot 1.2s ease-in-out infinite; }
+.typing-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots > span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-dot { 0%, 60%, 100% { opacity: 1; transform: none; } 30% { opacity: 0.35; transform: translateY(-2px); } }
+:root[data-reduce-motion="true"] .typing-dots > span { animation: none; }
+@media (prefers-reduced-motion: reduce) { .typing-dots > span { animation: none; } }
+
 /* The user's choice in Settings, or the system's. */
 :root[data-reduce-motion="true"] *,
 :root[data-reduce-motion="true"] *::before,

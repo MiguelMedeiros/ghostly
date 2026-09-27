@@ -6,6 +6,8 @@ import { GroupAvatar } from "./GroupAvatar";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
+import { TypingText } from "./TypingIndicator";
+import { usePeerTyping } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
@@ -191,6 +193,7 @@ export function ChatRow(p: ChatRowProps) {
   const muted = useChatMute(p.chatId) !== undefined;
   const size = AVATAR[p.density];
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
+  const typing = usePeerTyping(p.peerPubKey);
   useChosenProfile(p.peerPubKey);
   return (
     <div data-testid="chat-row" data-muted={muted || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
@@ -231,7 +234,10 @@ export function ChatRow(p: ChatRowProps) {
             ? <span data-testid="chat-row-key" className="block text-[11px] leading-4 text-text-muted/60 font-mono whitespace-nowrap">{p.keyLabel}</span>
             : <span className="sr-only"> · {p.keyLabel}</span>}
         </>}
-        preview={p.note
+        // The contact writing now takes the last message's place, in the accent, until it stops or the message comes.
+        preview={typing
+          ? <TypingText testId="chat-row-typing" />
+          : p.note
           ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
