@@ -63,6 +63,8 @@ export interface PkarrTransport {
    * answered again after failing: links then look and publish at once rather than at their pace. Returns the unsubscribe.
    */
   subscribe?(listener: (change?: DiscoveryChange) => void): () => void;
+  /** The device changed networks (back online): what was learnt about failing relays is forgotten, and links look again. */
+  networkChanged?(): void;
   /**
    * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.

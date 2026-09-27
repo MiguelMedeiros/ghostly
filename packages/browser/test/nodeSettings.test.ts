@@ -285,6 +285,15 @@ describe("one chat's choices", () => {
 });
 
 describe("links", () => {
+  it("back online, discovery forgets the relays that failed on the old network; a plain wake does not", () => {
+    const networkChanged = vi.fn();
+    const { node } = engine({ transport: { ...fixture, networkChanged } });
+    node.wake();
+    expect(networkChanged).not.toHaveBeenCalled();
+    node.wake({ network: true });
+    expect(networkChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("renames with a trimmed, bounded label, and an empty one clears it", async () => {
     const { node } = engine();
     const chat = await addChat(node, stubLink());

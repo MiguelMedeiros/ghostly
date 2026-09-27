@@ -131,6 +131,14 @@ export class RelayTransport implements PkarrTransport {
     return { path: this.lastRelay ? { via: "relay", relay: this.lastRelay } : null, relays };
   }
 
+  /** Back online on some network: relays that failed (or rate limited this address) on the old one are asked again. */
+  networkChanged(): void {
+    this.breaker.reset();
+    this.networkCooldown.clear();
+    this.coolingDown.clear();
+    this.changed("recovered");
+  }
+
   /** Called when a relay trips or recovers. */
   subscribe(listener: (change?: DiscoveryChange) => void): () => void {
     this.listeners.add(listener);
@@ -317,7 +325,7 @@ export class RelayTransport implements PkarrTransport {
     const blocked = probe ? 0 : this.breaker.blockedFor(relay);
     if (blocked > 0) {
       if (this.breaker.blockedKind(relay) === "throttled") throw new DiscoveryBudgetError(blocked, "Discovery relay is throttling this address; retry shortly");
-      throw new Error(`${relay} is left alone after failing; retry shortly`);
+      throw new Error(`${relay} is left alone after failing; asked again in ${Math.max(1, Math.ceil(this.breaker.askedAgainIn(relay, this.relays) / 1000))} s`);
     }
     if (!this.take(relay, background, true)) throw new DiscoveryBudgetError(this.freeInMs(relay, background, true));
     if (probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);

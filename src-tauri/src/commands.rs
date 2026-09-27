@@ -130,6 +130,12 @@ pub fn set_pkarr_relays(state: State<'_, AppState>, relays: Vec<String>, read_re
         .configure(crate::pkarr_network::relay_urls(&relays), read_relays);
 }
 
+/// The network changed (the WebView went back online, another Wi-Fi, a VPN): every relay is asked again.
+#[tauri::command]
+pub fn pkarr_network_changed(state: State<'_, AppState>) {
+    state.pkarr.network_changed();
+}
+
 /// Where Pkarr reads go and how each relay is doing, for the connection panel.
 #[tauri::command]
 pub fn pkarr_status(state: State<'_, AppState>) -> crate::pkarr_network::DiscoveryStatus {

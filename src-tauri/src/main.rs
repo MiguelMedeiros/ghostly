@@ -81,6 +81,7 @@ macro_rules! commands {
             commands::resolve_records,
             commands::set_pkarr_relays,
             commands::pkarr_status,
+            commands::pkarr_network_changed,
             commands::diagnostic_log,
             commands::local_fetch,
             commands::bitcoind_rpc,

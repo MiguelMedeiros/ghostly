@@ -86,7 +86,9 @@ Every client keeps one per relay (`packages/core/src/relayBreaker.ts`, and the s
 
 - Three failures in a row (no answer, a server error, or the relay's 429) trip it.
 - The relay is then left alone for 1 minute, doubling on each trip up to 5 minutes. One probe goes out after the wait; an answer closes the breaker.
-- While every relay is left alone for failing (none only for its rate limit), one of them, the one whose wait ends first, is asked anyway every 15 seconds: with nothing else to try, the long wait only delayed noticing that the relays answer again. A group's edge stayed down for minutes after the relays stopped answering HTTP 500 (2026-09-27). The Desktop reads the DHT meanwhile.
+- While every relay is left alone for failing (none only for its rate limit), one of them, the one whose wait ends first, is asked anyway every 15 seconds: with nothing else to try, the long wait only delayed noticing that the relays answer again. A group's edge stayed down for minutes after the relays stopped answering HTTP 500 (2026-09-27). The Desktop does the same in Rust: its DHT covers reads, but with UDP blocked (a VPN) there was no way at all to publish for minutes after a restart, and a private group showed "0 of 7 reachable".
+- Back online (the app's `online` event: another network, a VPN up or down), every breaker is forgotten and every relay is asked again at once (`wake({ network: true })`, `networkChanged` on the transport, `pkarr_network_changed` on the Desktop).
+- A link whose connection details could not go out says why and when it tries again: "Retrying in N s", the soonest a relay is asked.
 - A relay that answers again tells the links: each looks at once and publishes what it could not, instead of waiting for its own pace. A relay that answers a kind of request (a read, a write) is no longer kept out of the next one of that kind by an earlier network failure.
 - 404, 409, 412 and 428 are normal answers and never count.
 - Reads rotate among healthy relays. On a Desktop with relay reads on, reads go to the DHT while every relay is tripped.

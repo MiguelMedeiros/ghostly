@@ -1431,8 +1431,12 @@ export class GhostlyNode implements EngineImplementation {
     return this.profilePeek.peek(profile, dbName);
   }
 
-  /** The window or tab is back in front: every chat looks now, and dropped ones reconnect at once. */
-  wake(): void {
+  /**
+   * The window or tab is back in front: every chat looks now, and dropped ones reconnect at once. Back online
+   * (`network`): relays left alone for failing on the old network are asked again at once.
+   */
+  wake(params: { network?: boolean } = {}): void {
+    if (params.network) this.transport.networkChanged?.();
     for (const live of this.links.values()) live.link?.wake();
     this.hold.wake();
     // A wallet source that could not be reached at start-up (no network yet, a server asleep) tries again.

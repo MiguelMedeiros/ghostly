@@ -53,10 +53,12 @@ function useWakeOnReturn() {
       last = Date.now();
       void engine.call("wake").catch(() => {});
     };
+    // Back online (another network, a VPN up or down): discovery forgets the relays that failed on the old one.
+    const online = () => { last = Date.now(); void engine.call("wake", { network: true }).catch(() => {}); };
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("focus", wake);
-    window.addEventListener("online", wake);
-    return () => { document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake); window.removeEventListener("online", wake); };
+    window.addEventListener("online", online);
+    return () => { document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake); window.removeEventListener("online", online); };
   }, []);
 }
 

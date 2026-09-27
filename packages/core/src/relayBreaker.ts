@@ -165,6 +165,19 @@ export class RelayBreaker {
     this.options.onTrip?.(relay, circuit.reason ?? "", forMs);
   }
 
+  /** How long until a relay left alone is asked again: its wait, or the next probe while every relay of `relays` is left alone. */
+  askedAgainIn(relay: string, relays: string[]): number {
+    const wait = this.blockedFor(relay);
+    if (!relays.every((r) => this.blockedFor(r) > 0)) return wait;
+    return Math.min(wait, Math.max(0, this.lastAllDownProbe + this.allDownProbeMs - this.now()));
+  }
+
+  /** A new network: every relay starts fresh. */
+  reset(): void {
+    this.circuits.clear();
+    this.lastAllDownProbe = -Infinity;
+  }
+
   /** Each relay's health, in the order given. */
   health(relays: string[]): RelayHealth[] {
     return relays.map((relay) => {
