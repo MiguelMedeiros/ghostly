@@ -56,6 +56,13 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     await node(ctx).makeGroupAdmin({ groupId: group.id, key: findMember(group, str(params, "member", true)).key });
     return view(ctx, group.id, params);
   },
+  async "group.hub"(ctx, params) {
+    const group = groupOf(ctx, params);
+    const role = str(params, "role") ?? "auto";
+    if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
+    await node(ctx).setGroupHub({ groupId: group.id, key: findMember(group, str(params, "member", true)).key, role: role === "auto" ? null : role as "pin" | "exclude" });
+    return view(ctx, group.id, params);
+  },
   async "group.rotate"(ctx, params) {
     const group = groupOf(ctx, params);
     await node(ctx).rotateGroup({ groupId: group.id });

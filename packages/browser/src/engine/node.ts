@@ -301,6 +301,11 @@ export interface NodeOptions {
   automaticWallets?: boolean;
   /** Where this engine runs, for the wallet providers that only work on some platforms. Default: web. */
   platform?: ProviderPlatform;
+  /**
+   * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 9xx · Group
+   * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
+   */
+  staysOnline?: boolean;
   /** The Lightning and on-chain providers on offer. Default: the registry (tests pass their own). */
   providers?: ProviderRegistry;
   /** Desktop: the Tauri commands the providers that need them call (see `ProviderHost.invoke`). */
@@ -807,6 +812,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     myNick: () => this.sharedNick,
+    staysOnline: () => this.options.staysOnline ?? this.options.platform === "desktop",
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
     edges: groupId => this.groupEdges(groupId),
     entries: groupId => {
@@ -2605,6 +2611,8 @@ export class GhostlyNode implements EngineImplementation {
   leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
   removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
+  /** The admin of a private group pins a member as a hub, excludes one, or leaves it to the member's app (`role` null). */
+  setGroupHub({ groupId, key, role }: { groupId: string; key: string; role: "pin" | "exclude" | null }): Promise<void> { return this.groups.setHub(groupId, key, role); }
   rotateGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.rotate(groupId); }
   setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { this.groupEdits.forget(groupId); return this.groups.forget(groupId); }

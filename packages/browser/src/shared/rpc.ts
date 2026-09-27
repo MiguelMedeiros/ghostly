@@ -291,6 +291,7 @@ export interface EngineApi {
   leaveGroup(params: { groupId: string }): void;
   removeGroupMember(params: { groupId: string; key: string }): void;
   makeGroupAdmin(params: { groupId: string; key: string }): void;
+  setGroupHub(params: { groupId: string; key: string; role: "pin" | "exclude" | null }): void;
   /** A fresh epoch secret without a membership change. */
   rotateGroup(params: { groupId: string }): void;
   /** The admin sets the group's picture (a data URL as `avatarFromFile` makes it), or removes it with null. */
