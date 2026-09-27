@@ -47,12 +47,12 @@ const SHOTS: Record<string, Shot> = {
   },
   messages: {
     src: "/screenshots/current/messages.webp",
-    alt: "Casper's messages in Boo's chat: bold text, a link with its preview, an invite card with Join, and a bitcoin request as a Test money card",
+    alt: "Casper's messages in Boo's chat: a link with the preview his app made, and a bitcoin request shown as a Test money card",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The cards under Casper's messages: the preview, the invite and the request.
-    crop: { x: 0.345, y: 0.2, w: 0.655 },
+    // The link preview's picture and, under it, the payment card with its amount.
+    crop: { x: 0.345, y: 0.1, w: 0.655 },
     mobile: "/screenshots/current/messages-mobile.webp",
   },
   calls: {

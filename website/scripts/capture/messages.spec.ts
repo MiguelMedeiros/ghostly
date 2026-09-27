@@ -35,6 +35,15 @@ async function story(browser: Browser, baseURL: string, mobile: boolean) {
   });
 
   const casperChat = await pair(casper, boo);
+
+  // An invite for another chat, sent inside a sentence: a card with Join on Boo's side. It comes first, so the long
+  // link scrolls up and the cards below it fill the shot.
+  await casper.page.getByTitle("New Chat").first().click();
+  const invite = await copyInvite(casper.page);
+  await go(casper, casperChat);
+  await send(casper, boo, `a chat for friday, with Wendy and Mara: ${invite}`, "a chat for friday");
+  await expect(chat(boo).getByTestId("entity-invite").last()).toBeVisible();
+  await send(boo, casper, "_so_ spooky. where are we going?", "where are we going?");
   await send(casper, boo, "found it! *the old house by the lake* 👻", "the old house by the lake");
 
   // The link: Casper's app reads the page and redraws its picture before he sends.
@@ -43,15 +52,6 @@ async function story(browser: Browser, baseURL: string, mobile: boolean) {
   await expect(casper.page.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
   await box.press("Enter");
   await expect(chat(boo).getByTestId("link-preview-card").last()).toBeVisible({ timeout: 60_000 });
-
-  await send(boo, casper, "_so_ spooky. who else is coming friday?", "who else is coming friday?");
-
-  // An invite for another chat, sent inside a sentence: a card with Join on Boo's side.
-  await casper.page.getByTitle("New Chat").first().click();
-  const invite = await copyInvite(casper.page);
-  await go(casper, casperChat);
-  await send(casper, boo, `Wendy and Mara. a chat for all of us: ${invite}`, "a chat for all of us");
-  await expect(chat(boo).getByTestId("entity-invite").last()).toBeVisible();
 
   // A payment request as plain bitcoin: text, on a test network.
   await send(casper, boo, `and the flashlight was mine 🔦 bitcoin:${TB1Q}?amount=0.00021&message=Flashlight`, "the flashlight was mine");
