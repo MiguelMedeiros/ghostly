@@ -800,7 +800,7 @@
     "level": "available",
     "range": "4xx",
     "section": "Communication, groups and storage",
-    "body": "**Composition and provider/runtime options**\n\nCurrent 400 chat; transient presence/typing should be separately advertised with TTL and privacy preferences\n\n**Dependencies and criteria for readiness**\n\n**Available: text; no typing or presence yet**: one chat ([400](400-chat.md)) over a live link or DHT text, with delivery and read ticks, a durable outbox and retries (`chat.paired.*`, `chat.one-chat`). The header shows the state of the connection, not whether the person is online; typing and presence are not built. Authenticated session, per-sender sequence/limits, reconnect semantics and no durable typing log by default. “Online” is a hint, not proof a person is available.",
+    "body": "**Composition and provider/runtime options**\n\nCurrent 400 chat; transient presence/typing should be separately advertised with TTL and privacy preferences\n\n**Dependencies and criteria for readiness**\n\n**Available: text; no typing or presence yet**: one chat ([400](400-chat.md)) over a live link or DHT text, with delivery and read ticks, a durable outbox and retries (`chat.paired.*`, `chat.one-chat`). Rich text, @mentions in groups, link previews made by the sender, and cards for invites, Nostr keys, identities and payment codes (#279 to #284, bounded in #301); a secret guard asks before a seed, a key or ecash goes out as text (#283). The header shows the state of the connection, not whether the person is online; typing and presence are not built. Authenticated session, per-sender sequence/limits, reconnect semantics and no durable typing log by default. “Online” is a hint, not proof a person is available.",
     "sourceAnchor": "communication-groups-and-storage"
   },
   {
@@ -1085,6 +1085,19 @@
     "sourceAnchor": "plugins-apps-catalogs-and-ghostlyos"
   },
   {
+    "id": "candidate-headless-client-for-bots",
+    "title": "Headless client for bots",
+    "family": "runtime",
+    "kind": "Runtime / product composition",
+    "status": "Available",
+    "note": "experimental, npm package not published",
+    "level": "available",
+    "range": "Unassigned",
+    "section": "Plugins, apps, catalogs and GhostlyOS",
+    "body": "**Proposed deliverable**\n\nThe app's engine on Node behind a per-profile daemon, a local socket API, a JSON event stream and hooks, driven by the `ghostly` CLI ([draft 11xx](11xx-headless.md), `packages/cli`)\n\n**Dependencies / trust boundary**\n\n**Available: experimental, npm package not published**: phases 1 to 4 (#323 to #327): profiles, `ghostly1` invites, one chat live over WebRTC, HyperDHT or Iroh's relay, community groups and their admin tools, events and hooks, wallets and payments with `--confirm-real` on Mainnet, files and voice notes, identity proofs, shared web apps, backups; `e2e/web/headless-chat.spec.ts` puts it in a chat with the web app. Bark and Fedimint wallets stay app only (their SDKs need a browser), the DHT goes through relays (no DHT-direct on Node yet), and sender link previews, held messages and a single binary are open. The Rust `ghostly-cli` stays the compatibility client ([cli/README.md](../../cli/README.md)). The socket is the profile: owner-only, never on TCP.",
+    "sourceAnchor": "plugins-apps-catalogs-and-ghostlyos"
+  },
+  {
     "id": "candidate-future-clients",
     "title": "Future clients",
     "family": "runtime",
@@ -1093,7 +1106,7 @@
     "level": "planned",
     "range": "Unassigned",
     "section": "Plugins, apps, catalogs and GhostlyOS",
-    "body": "**Proposed deliverable**\n\nReact Native, improved PWA behavior, CLI/daemon tooling and plugin hosts\n\n**Dependencies / trust boundary**\n\n**Planned** for React Native, the PWA and plugin hosts: there is no mobile app beyond the web app's phone layout. The CLI/daemon part has begun: the headless `ghostly` CLI ([draft 11xx](11xx-headless.md), `packages/cli`) runs the app's engine for bots, phases 1 to 3 on `dev` (chats, invites, community groups and their admin tools, events, hooks, wallets and payments with test coins, files and voice notes, identity proofs, shared web apps, backups; `e2e/web/headless-chat.spec.ts` puts it in a chat with the web app) and an npm package (phase 4) not yet published; Bark and Fedimint wallets stay app-only on Node for now. The Rust `ghostly-cli` stays the compatibility client ([CLI.md](../CLI.md)). Each advertises what it actually supports. Native SDK availability is not proof of a Ghostly mobile integration, background delivery, battery performance or App Store acceptance.",
+    "body": "**Proposed deliverable**\n\nReact Native, improved PWA behavior and plugin hosts\n\n**Dependencies / trust boundary**\n\n**Planned**: there is no mobile app beyond the web app's phone layout, and no plugin host. Each client advertises what it actually supports. Native SDK availability is not proof of a Ghostly mobile integration, background delivery, battery performance or App Store acceptance. The headless CLI is the row above.",
     "sourceAnchor": "plugins-apps-catalogs-and-ghostlyos"
   }
 ]

@@ -179,8 +179,8 @@
     "slug": "101-webrtc",
     "title": "WISP 101: WebRTC",
     "status": "Draft",
-    "updated": "2026-09-25",
-    "implementation": "Existing adapter in every client; WISP binding proposed",
+    "updated": "2026-09-27",
+    "implementation": "Existing adapter in the web app, the extension and Desktop on macOS and Windows (Linux WebKitGTK has no WebRTC); WISP binding proposed",
     "dependencies": [
       "100-transports.md"
     ],
@@ -619,7 +619,7 @@
     "slug": "401-paired-chat",
     "title": "WISP 401: Chat Session",
     "status": "Draft",
-    "updated": "2026-09-25",
+    "updated": "2026-09-27",
     "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (calls/1, screen sharing inside a call), shared apps (services/1) and files/3 on the live session.",
     "documentKind": "Profile",
     "dependencies": [
@@ -762,7 +762,7 @@
     "title": "WISP 601: WebRTC Media",
     "status": "Draft",
     "updated": "2026-09-26",
-    "implementation": "Compatibility chats (call) and the chat session of every new chat (calls/1); capture varies by platform.",
+    "implementation": "Compatibility chats (call) and the chat session of every new chat (calls/1); capture varies by platform. Desktop on Linux runs WebRTC in Rust and media in GStreamer (#331), with no screen sharing yet.",
     "documentKind": "Profile",
     "dependencies": [
       "600-media.md"

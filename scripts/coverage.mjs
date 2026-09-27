@@ -75,7 +75,7 @@ if (results.length) {
     if (a >= 0 && b >= 0) {
       const table = [START, "", `Unit tests only, measured on ${date} with \`npm run coverage\` (gated suites skipped).`, "",
         "| Package | Lines | Statements | Functions | Branches |", "|---|---:|---:|---:|---:|",
-        ...results.map((r) => `| ${r.name} (\`${r.dir}\`)${r.failed ? " — some tests failed" : ""} | ${pct(r.lines)} | ${pct(r.statements)} | ${pct(r.functions)} | ${pct(r.branches)} |`),
+        ...results.map((r) => `| ${r.name} (\`${r.dir}\`)${r.failed ? " (some tests failed)" : ""} | ${pct(r.lines)} | ${pct(r.statements)} | ${pct(r.functions)} | ${pct(r.branches)} |`),
         ...(results.some((r) => r.lines === null) ? ["", "n/a: the package only re-exports code that lives (and is counted) elsewhere."] : []), "", END].join("\n");
       writeFileSync(join(ROOT, DOC), doc.slice(0, a) + table + doc.slice(b + END.length));
       console.log(`wrote ${DOC}`);

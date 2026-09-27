@@ -3,7 +3,7 @@ import type { Level } from "@/lib/status";
 
 /**
  * The public roadmap: tracks in dependency order, never dates. It starts after
- * 0.5.0: "Now" is a short baseline of what the app already does, and "Next" is
+ * 1.0: "Now" is a short baseline of what the app already does, and "Next" is
  * only work that is not built. Checked against the code on `dev`.
  */
 type Track = {
@@ -21,7 +21,7 @@ const en = {
   meta: {
     title: "Roadmap",
     description:
-      "Where Ghostly goes after 0.5.0, in order and with dependencies: richer chats, more ways to pay, optional identities, groups, storage, SDKs and plugins, independent apps and a self-hosted runtime. No invented dates.",
+      "Where Ghostly goes after 1.0, in order and with dependencies: richer chats, more ways to pay, optional identities, groups, storage, SDKs and plugins, independent apps and a self-hosted runtime. No invented dates.",
   },
   eyebrow: "Public roadmap",
   title: "The ghost keeps learning.",
@@ -45,13 +45,14 @@ const en = {
         { text: "One ghostly1 invite code, a QR and a ghostly.tools link", level: "available" },
         { text: "Chats with pinned keys, files of any size, payments and local apps", level: "available" },
         { text: "A chat with no direct path starts on the DHT and goes live by itself; short texts over the DHT when the live link drops", level: "available" },
-        { text: "Calls and screen sharing in every chat, while it is live", level: "available" },
+        { text: "Calls and screen sharing in every chat, while it is live; Linux desktops call with their own media", level: "available" },
         { text: "Pairing progress you can watch while two apps find each other", level: "available" },
-        { text: "Voice messages", level: "available" },
+        { text: "Voice messages, rich text, mentions, link previews and cards for invites, payments and identities", level: "available" },
+        { text: "A headless CLI for bots that joins the same chats", level: "available" },
       ],
       next: [
         { text: "Typing and presence, each a capability of its own that you can keep private", level: "planned" },
-        { text: "Mobile apps, and a CLI that joins the same chats", level: "planned" },
+        { text: "Mobile apps", level: "planned" },
       ],
       gate: "Every client tested against every other one, on each transport it offers.",
       after: [],
@@ -62,12 +63,13 @@ const en = {
       title: "More ways to pay",
       why: "One payment agreement, many wallets. Each method keeps its own rules and its own risks.",
       now: [
-        { text: "Cashu and Lightning, through the mint or your own source (NWC, LND, Core Lightning, WebLN)", level: "available" },
+        { text: "Mainnet and Testnet wallets side by side, a confirmation before real money moves", level: "available" },
+        { text: "Cashu and Lightning, through the mint or your own sources (NWC, LND, Core Lightning, WebLN), several Lightning cards per network", level: "available" },
         { text: "Lightning addresses, and paying a request from any wallet", level: "available" },
-        { text: "Ark, Spark, Fedimint, USDT and on-chain bitcoin, experimental; several on test networks only", level: "available" },
+        { text: "Ark (Arkade and Bark), Spark, Fedimint, USDT and on-chain bitcoin, experimental; several on test networks only", level: "available" },
       ],
       next: [
-        { text: "Mainnet for Bark, Breez, BDK and Fedimint, once reviewed with real money in mind", level: "planned" },
+        { text: "Mainnet for Spark, Breez, BDK and Fedimint, once reviewed with real money in mind", level: "planned" },
         { text: "Unilateral exit for Ark", level: "planned" },
         { text: "Liquid and other rails", level: "planned" },
       ],
@@ -114,6 +116,7 @@ const en = {
         { text: "Proofs made once, shared per chat: Nostr, Pubky (approved in Pubky Ring or Passport), a domain, an OpenPGP or SSH key, a Bitcoin address, a DID", level: "available" },
         { text: "Nostr social layer: profile, follows and notes; posting off by default", level: "available" },
         { text: "A did:dht for every profile, listing only the identities you switch on", level: "available" },
+        { text: "Public profiles on identity cards, and a contact shown as one of their identities", level: "available" },
       ],
       next: [
         { text: "Bluesky / AT Protocol accounts: built, blocked until the website's OAuth client document is live on ghostly.tools", level: "planned" },
@@ -148,10 +151,10 @@ const en = {
       title: "SDKs, adapters and plugins",
       why: "Let others build pieces without forking the app. A plugin is packaging; the contract stays a WISP.",
       now: [
-        { text: "Contracts as WISP drafts, a compatibility CLI for scripts and bots, and @ghostly/sdk in the repository: an adapter registers as a plugin", level: "available" },
+        { text: "Contracts as WISP drafts, @ghostly/sdk in the repository (an adapter registers as a plugin), and a headless CLI with an event stream for bots", level: "available" },
       ],
       next: [
-        { text: "Adapter manifests, and the SDK published on npm", level: "planned" },
+        { text: "Adapter manifests, and the SDK and the CLI published on npm", level: "planned" },
         { text: "Package authenticity and updates", level: "planned" },
         { text: "A permissioned plugin host", level: "research" },
       ],
@@ -202,7 +205,7 @@ const ptBr: RoadmapCopy = {
   meta: {
     title: "Roadmap",
     description:
-      "Para onde o Ghostly vai depois da 0.5.0, em ordem e com dependências: chats mais ricos, mais formas de pagar, identidades opcionais, grupos, armazenamento, SDKs e plugins, apps independentes e um runtime auto-hospedado. Sem datas inventadas.",
+      "Para onde o Ghostly vai depois da 1.0, em ordem e com dependências: chats mais ricos, mais formas de pagar, identidades opcionais, grupos, armazenamento, SDKs e plugins, apps independentes e um runtime auto-hospedado. Sem datas inventadas.",
   },
   eyebrow: "Roadmap público",
   title: "O fantasma continua aprendendo.",
@@ -226,13 +229,14 @@ const ptBr: RoadmapCopy = {
         { text: "Um único código de convite ghostly1, um QR e um link em ghostly.tools", level: "available" },
         { text: "Chats com chaves fixadas, arquivos de qualquer tamanho, pagamentos e apps locais", level: "available" },
         { text: "Um chat sem caminho direto começa na DHT e passa sozinho ao link direto; textos curtos pela DHT quando o link direto cai", level: "available" },
-        { text: "Chamadas e compartilhamento de tela em todo chat, enquanto ele está ao vivo", level: "available" },
+        { text: "Chamadas e compartilhamento de tela em todo chat, enquanto ele está ao vivo; o desktop Linux chama com mídia própria", level: "available" },
         { text: "Ver o progresso do pareamento enquanto os dois apps se encontram", level: "available" },
-        { text: "Mensagens de voz", level: "available" },
+        { text: "Mensagens de voz, texto formatado, menções, prévias de links e cartões para convites, pagamentos e identidades", level: "available" },
+        { text: "Uma CLI headless para bots que entra nos mesmos chats", level: "available" },
       ],
       next: [
         { text: "Digitando e presença, cada um uma capacidade própria que você pode manter privada", level: "planned" },
-        { text: "Apps para celular, e uma CLI que entra nos mesmos chats", level: "planned" },
+        { text: "Apps para celular", level: "planned" },
       ],
       gate: "Cada cliente testado contra cada outro, em cada transporte que oferece.",
       after: [],
@@ -243,12 +247,13 @@ const ptBr: RoadmapCopy = {
       title: "Mais formas de pagar",
       why: "Um acordo de pagamento, muitas carteiras. Cada método mantém as próprias regras e os próprios riscos.",
       now: [
-        { text: "Cashu e Lightning, pelo mint ou pela sua própria fonte (NWC, LND, Core Lightning, WebLN)", level: "available" },
+        { text: "Carteiras de Mainnet e de Testnet lado a lado, com uma confirmação antes de mover dinheiro de verdade", level: "available" },
+        { text: "Cashu e Lightning, pelo mint ou pelas suas próprias fontes (NWC, LND, Core Lightning, WebLN), vários cartões Lightning por rede", level: "available" },
         { text: "Lightning addresses, e pagar um pedido com qualquer carteira", level: "available" },
-        { text: "Ark, Spark, Fedimint, USDT e bitcoin on-chain, experimentais; vários só em redes de teste", level: "available" },
+        { text: "Ark (Arkade e Bark), Spark, Fedimint, USDT e bitcoin on-chain, experimentais; vários só em redes de teste", level: "available" },
       ],
       next: [
-        { text: "Mainnet para Bark, Breez, BDK e Fedimint, depois de revisados pensando em dinheiro de verdade", level: "planned" },
+        { text: "Mainnet para Spark, Breez, BDK e Fedimint, depois de revisados pensando em dinheiro de verdade", level: "planned" },
         { text: "Saída unilateral no Ark", level: "planned" },
         { text: "Liquid e outros trilhos", level: "planned" },
       ],
@@ -295,6 +300,7 @@ const ptBr: RoadmapCopy = {
         { text: "Provas feitas uma vez, compartilhadas por chat: Nostr, Pubky (aprovada no Pubky Ring ou no Passport), um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin, um DID", level: "available" },
         { text: "Camada social do Nostr: perfil, quem segue e notas; publicar desligado por padrão", level: "available" },
         { text: "Um did:dht para cada perfil, que lista só as identidades que você ligar", level: "available" },
+        { text: "Perfis públicos nos cartões de identidade, e um contato mostrado como uma das identidades dele", level: "available" },
       ],
       next: [
         { text: "Contas Bluesky / AT Protocol: prontas, bloqueadas até o documento de cliente OAuth do site estar no ar em ghostly.tools", level: "planned" },
@@ -329,10 +335,10 @@ const ptBr: RoadmapCopy = {
       title: "SDKs, adapters e plugins",
       why: "Deixar outras pessoas construírem peças sem fazer fork do app. Plugin é embalagem; o contrato continua sendo um WISP.",
       now: [
-        { text: "Contratos como rascunhos WISP, uma CLI de compatibilidade para scripts e bots, e o @ghostly/sdk no repositório: um adapter se registra como plugin", level: "available" },
+        { text: "Contratos como rascunhos WISP, o @ghostly/sdk no repositório (um adapter se registra como plugin), e uma CLI headless com fluxo de eventos para bots", level: "available" },
       ],
       next: [
-        { text: "Manifestos de adapters, e o SDK publicado no npm", level: "planned" },
+        { text: "Manifestos de adapters, e o SDK e a CLI publicados no npm", level: "planned" },
         { text: "Autenticidade de pacotes e atualizações", level: "planned" },
         { text: "Um host de plugins com permissões", level: "research" },
       ],

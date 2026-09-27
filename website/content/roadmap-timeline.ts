@@ -4,7 +4,7 @@ import type { Level } from "@/lib/status";
 /**
  * The roadmap as a timeline: columns in the order things happen, rows by area.
  * No dates: a column is a stage, not a quarter. "Today" is where Ghostly
- * stands (the 0.5.0 release on `dev`); every column after it is future work,
+ * stands (the 1.0.0 release on `dev`); every column after it is future work,
  * checked against the code (see content/roadmap.ts).
  */
 export const PHASES = ["now", "planned", "later"] as const;
@@ -76,8 +76,8 @@ const en: Timeline = {
       color: "#22d3ee",
       title: "Chat & connection",
       items: {
-        now: ["One ghostly1 invite: code, QR, link", "DHT start and self-upgrade in every chat", "Chats: files of any size, payments, local apps", "Calls in every chat, while live", "Iroh and HyperDHT on desktop; Iroh in browsers through relays", "Pairing progress you can watch", "Voice messages"],
-        planned: ["Typing and presence", "Local network discovery, QUIC and WebSocket relay profiles"],
+        now: ["One ghostly1 invite: code, QR, link", "DHT start and self-upgrade in every chat", "Chats: files of any size, payments, local apps", "Calls in every chat, while live, Linux included", "Iroh and HyperDHT on desktop; Iroh in browsers through relays", "Pairing progress you can watch", "Voice messages, rich text, mentions, link previews"],
+        planned: ["Typing and presence", "Mobile apps", "Local network discovery, QUIC and WebSocket relay profiles"],
         later: [{ text: "Tor, libp2p, Pear components", level: "research" }],
       },
     },
@@ -86,8 +86,8 @@ const en: Timeline = {
       color: "#fbbf24",
       title: "Payments",
       items: {
-        now: ["Cashu and Lightning, from your own source too", "Lightning addresses, paying from any wallet", "Ark, Spark, Fedimint, USDT, on-chain (experimental)", "Testnet mode for every wallet"],
-        planned: ["Mainnet for Bark, Breez, BDK and Fedimint", "Unilateral exit for Ark", "Liquid and other rails"],
+        now: ["Cashu and Lightning, from your own source too", "Lightning addresses, paying from any wallet", "Ark, Spark, Fedimint, USDT, on-chain (experimental)", "Mainnet and Testnet wallets side by side"],
+        planned: ["Mainnet for Spark, Breez, BDK and Fedimint", "Unilateral exit for Ark", "Liquid and other rails"],
       },
     },
     {
@@ -104,7 +104,7 @@ const en: Timeline = {
       color: "#f472b6",
       title: "Identity (optional)",
       items: {
-        now: ["Proofs: Nostr · Pubky · domain · OpenPGP · SSH · Bitcoin address · DID", "Nostr social layer", "A did:dht per profile"],
+        now: ["Proofs: Nostr · Pubky · domain · OpenPGP · SSH · Bitcoin address · DID", "Nostr social layer", "A did:dht per profile", "Public profiles on identity cards"],
         planned: ["Bluesky / AT Protocol accounts, once the site's OAuth client document is live", "OpenID accounts, once Ghostly's clients are registered", "Hardware wallets as signers, passkeys"],
         later: ["Keet, once it has a supported signing API", { text: "Pubky profiles and content", level: "research" }],
       },
@@ -124,8 +124,8 @@ const en: Timeline = {
       color: "#a78bfa",
       title: "SDKs & plugins",
       items: {
-        now: ["Open contracts (WISP drafts)", "@ghostly/sdk and plugins"],
-        planned: ["Adapter manifests, the SDK on npm", "Package authenticity and updates"],
+        now: ["Open contracts (WISP drafts)", "@ghostly/sdk and plugins", "The headless CLI and its event stream"],
+        planned: ["Adapter manifests, the SDK and the CLI on npm", "Package authenticity and updates"],
         later: [{ text: "A permissioned plugin host", level: "research" }],
       },
     },
@@ -175,8 +175,8 @@ const ptBr: Timeline = {
       color: "#22d3ee",
       title: "Conversa e conexão",
       items: {
-        now: ["Um único convite ghostly1: código, QR, link", "Início na DHT e upgrade sozinho em todo chat", "Chats: arquivos de qualquer tamanho, pagamentos, apps locais", "Chamadas em todo chat, ao vivo", "Iroh e HyperDHT no desktop; Iroh nos navegadores por relays", "Progresso do pareamento à vista", "Mensagens de voz"],
-        planned: ["Digitando e presença", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
+        now: ["Um único convite ghostly1: código, QR, link", "Início na DHT e upgrade sozinho em todo chat", "Chats: arquivos de qualquer tamanho, pagamentos, apps locais", "Chamadas em todo chat, ao vivo, inclusive no Linux", "Iroh e HyperDHT no desktop; Iroh nos navegadores por relays", "Progresso do pareamento à vista", "Mensagens de voz, texto formatado, menções, prévias de links"],
+        planned: ["Digitando e presença", "Apps para celular", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
         later: [{ text: "Tor, libp2p, componentes Pear", level: "research" }],
       },
     },
@@ -185,8 +185,8 @@ const ptBr: Timeline = {
       color: "#fbbf24",
       title: "Pagamentos",
       items: {
-        now: ["Cashu e Lightning, também da sua própria fonte", "Lightning addresses, pagar com qualquer carteira", "Ark, Spark, Fedimint, USDT, on-chain (experimentais)", "Modo Testnet para todas as carteiras"],
-        planned: ["Mainnet para Bark, Breez, BDK e Fedimint", "Saída unilateral no Ark", "Liquid e outros trilhos"],
+        now: ["Cashu e Lightning, também da sua própria fonte", "Lightning addresses, pagar com qualquer carteira", "Ark, Spark, Fedimint, USDT, on-chain (experimentais)", "Carteiras de Mainnet e de Testnet lado a lado"],
+        planned: ["Mainnet para Spark, Breez, BDK e Fedimint", "Saída unilateral no Ark", "Liquid e outros trilhos"],
       },
     },
     {
@@ -203,7 +203,7 @@ const ptBr: Timeline = {
       color: "#f472b6",
       title: "Identidade (opcional)",
       items: {
-        now: ["Provas: Nostr · Pubky · domínio · OpenPGP · SSH · endereço Bitcoin · DID", "Camada social do Nostr", "Um did:dht por perfil"],
+        now: ["Provas: Nostr · Pubky · domínio · OpenPGP · SSH · endereço Bitcoin · DID", "Camada social do Nostr", "Um did:dht por perfil", "Perfis públicos nos cartões de identidade"],
         planned: ["Contas Bluesky / AT Protocol, quando o documento de cliente OAuth do site estiver no ar", "Contas OpenID, quando os clientes do Ghostly forem registrados", "Carteiras de hardware como signers, passkeys"],
         later: ["Keet, quando tiver uma API de assinatura suportada", { text: "Perfis e conteúdos do Pubky", level: "research" }],
       },
@@ -223,8 +223,8 @@ const ptBr: Timeline = {
       color: "#a78bfa",
       title: "SDKs e plugins",
       items: {
-        now: ["Contratos abertos (rascunhos WISP)", "@ghostly/sdk e plugins"],
-        planned: ["Manifestos de adapters, o SDK no npm", "Autenticidade de pacotes e atualizações"],
+        now: ["Contratos abertos (rascunhos WISP)", "@ghostly/sdk e plugins", "A CLI headless e o fluxo de eventos"],
+        planned: ["Manifestos de adapters, o SDK e a CLI no npm", "Autenticidade de pacotes e atualizações"],
         later: [{ text: "Um host de plugins com permissões", level: "research" }],
       },
     },

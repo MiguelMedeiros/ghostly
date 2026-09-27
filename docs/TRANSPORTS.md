@@ -69,7 +69,8 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 |---|---|---|
 | Web app, extension | Through the Pkarr relays: a page cannot send UDP | Every relay. The publish returns on the first relay that took the packet ([#293](https://github.com/MiguelMedeiros/ghostly/pull/293)) |
 | Desktop | The Mainline DHT directly ([#289](https://github.com/MiguelMedeiros/ghostly/pull/289)). Relay reads only with Settings, Advanced, Network, "Also use Pkarr relays" | The DHT and every relay |
-| CLI | The DHT directly. Relay reads only with `--read-relays` | The DHT and pkarr's default relays |
+| Headless CLI (`ghostly`) | Through the Pkarr relays, as the web app: no DHT-direct on Node yet ([11xx](wisps/11xx-headless.md)) | Every relay |
+| Rust CLI (`ghostly-cli`) | The DHT directly. Relay reads only with `--read-relays` | The DHT and pkarr's default relays |
 
 - Native apps still write to the relays because a browser contact can only read relays, and a relay keeps serving the copy it holds. Measured on 2026-09-25: after a newer packet went to the DHT alone, `pkarr.pubky.org` still served the older one 30 s later, even with a record TTL of 1 s.
 - A Desktop read of an unknown key waits for the lookup's first answer (about 0.7 s), not the whole lookup (about 3.4 s).

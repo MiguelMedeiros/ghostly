@@ -36,7 +36,7 @@ A positive case exchanges data in both directions. A negative case records the e
 
 Before Proposed, every semantic sketch needs exact canonical bytes, message/state limits, replay/clock rules and expected failure outputs. Unresolved cryptographic construction, public ingress or adapter API feasibility blocks the relevant profile. Before Final, publish independent results and security review appropriate to the change; do not infer forward secrecy, anonymity or scale from a library name.
 
-For documentation-only edits, verify all 52 catalogue entries/headers, uniqueness, dependencies, relative links and consistent implementation claims. Runtime changes require their relevant automated and observed app checks, recorded separately with limitations.
+For documentation-only edits, verify every catalogue entry and header, uniqueness, dependencies, relative links and consistent implementation claims. Runtime changes require their relevant automated and observed app checks, recorded separately with limitations.
 
 ## Optional Nostr proof increment (2026-09-20, history)
 
