@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pkarr-network-changed"
+description = "Enables the pkarr_network_changed command without any pre-configured scope."
+commands.allow = ["pkarr_network_changed"]
+
+[[permission]]
+identifier = "deny-pkarr-network-changed"
+description = "Denies the pkarr_network_changed command without any pre-configured scope."
+commands.deny = ["pkarr_network_changed"]

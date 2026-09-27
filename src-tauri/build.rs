@@ -31,6 +31,7 @@ const COMMANDS: &[&str] = &[
     "resolve_records",
     "set_pkarr_relays",
     "pkarr_status",
+    "pkarr_network_changed",
     "diagnostic_log",
     "local_fetch",
     "bitcoind_rpc",
