@@ -594,7 +594,7 @@
     "src/hooks/useCountUp.ts": ["payments.chat.cards","wallet.cashu.*","wallet.history","app.reduce-motion"],
     "src/hooks/useFloatingBox.ts": ["calls.*"],
     "src/hooks/useWebRTC.ts": ["calls.*"],
-    "{src/hooks/useCallDevices.ts,src/hooks/useMediaDevices.ts,src/lib/mediaDevices.ts}": ["calls.*","settings.media","files.voice.record"],
+    "{src/hooks/useCallDevices.ts,src/hooks/useMediaDevices.ts,src/hooks/useChosenSpeaker.ts,src/lib/mediaDevices.ts}": ["calls.*","settings.media","files.voice.record"],
     "src/components/MediaSettings.tsx": ["settings.media"],
     "src/hooks/usePkarr.ts": ["invite.create"],
     "src/hooks/useProfileSwitcher.ts": ["profiles.*","backup.*","storage.s3","groups.*","delivery.hold.*","proofs.page","chats.list.delete","chat.paired.nickname-sync","invite.dht"],

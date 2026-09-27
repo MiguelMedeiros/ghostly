@@ -106,6 +106,40 @@ test("a call switches the microphone and the speaker without dropping", { tag: [
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
+test("a microphone and speaker chosen in Settings during a call switch the call live", { tag: ["@feature:calls.devices"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await linkLegacy(alice, bob);
+  await connect(alice, bob);
+
+  await alice.page.getByTitle("Audio call").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+
+  // The call comes along into Settings in its small window.
+  await alice.page.getByTestId("call-minimize").click();
+  await alice.page.getByTitle("Settings").click();
+  const second = await deviceId(alice, "audioinput", "Fake Audio Input 2");
+  await choose(alice.page.getByTestId("settings-microphone"), second);
+  const speaker = alice.page.getByTestId("settings-speaker");
+  const speakers = await optionsOf(speaker);
+  const sink = await speakers.nth(2).getAttribute("data-value");
+  await close(speaker);
+  await choose(speaker, sink!);
+  await expect.poll(() => alice.page.locator("audio").first().evaluate((a: HTMLAudioElement & { sinkId: string }) => a.sinkId)).toBe(sink);
+
+  // Back in the chat, the call's menu reads the new microphone off the track it sends.
+  await alice.page.getByTestId("call-minimize").click();
+  await alice.page.getByTestId("call-devices").click();
+  const menu = alice.page.getByTestId("call-devices-menu");
+  await expect(menu.getByTestId("call-device-audioinput").and(alice.page.locator(`[data-device-id="${second}"]`))).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByTestId("call-device-audiooutput").and(alice.page.locator(`[data-device-id="${sink}"]`))).toHaveAttribute("aria-checked", "true");
+  await alice.page.keyboard.press("Escape");
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+  await alice.page.getByTestId("call-hang-up").click();
+  await expect(bob.page.getByTestId("call-hang-up")).toHaveCount(0);
+});
+
 /** The page stops (or, with null, starts again) listing this device, and hears that the devices changed. */
 const unplug = (peer: Peer, deviceId: string | null) =>
   peer.page.evaluate((deviceId) => {
