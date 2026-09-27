@@ -102,6 +102,8 @@ export interface MessageJson {
    * (`found`), else the id the reply named. `from`: null when nothing says (only the id came, over the DHT).
    */
   replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean };
+  /** Reactions to it, one per person (WISP 400 § Reactions): `by` is `me`, `peer` or a member's key. */
+  reactions?: { by: string; emoji: string; at: number }[];
 }
 
 export function messageJson(message: StoredMessage): MessageJson {
@@ -124,6 +126,7 @@ export function messageJson(message: StoredMessage): MessageJson {
     ...(message.event ? { event: message.event } : {}),
     ...(message.replyTo ? { replyTo: { id: message.replyTo.messageId ?? message.replyTo.id, snippet: message.replyTo.snippet, from: message.replyTo.from ?? null,
       ...(message.replyTo.member ? { member: message.replyTo.member } : {}), found: !!message.replyTo.messageId } } : {}),
+    ...(reactionsJson(message).length ? { reactions: reactionsJson(message) } : {}),
   };
 }
 
@@ -133,6 +136,11 @@ export function fileJson(file: MessageFile): NonNullable<MessageJson["file"]> {
     id: file.id, name: file.name, size: file.size, mime: file.mime,
     ...(file.voice ? { voice: { duration: file.voice.duration, ...(file.voice.peaks?.length ? { peaks: [...file.voice.peaks] } : {}) } } : {}),
   };
+}
+
+/** A message's reactions shown now (taken-back ones left out), oldest first. */
+export function reactionsJson(message: StoredMessage): { by: string; emoji: string; at: number }[] {
+  return Object.entries(message.reactions ?? {}).filter(([, r]) => r.e).sort(([, a], [, b]) => a.at - b.at).map(([by, r]) => ({ by, emoji: r.e, at: r.at }));
 }
 
 export function groupJson(group: GroupView) {

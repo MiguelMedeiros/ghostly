@@ -8,7 +8,7 @@ import { HeadlessBot } from "../support/headless";
  */
 test.describe.configure({ timeout: 4 * 60_000 });
 
-test("a person on the web chats with a headless bot, both ways", { tag: ["@feature:headless.web-interop", "@feature:headless.chat", "@feature:headless.events"] }, async ({ peer, relay }) => {
+test("a person on the web chats with a headless bot, both ways", { tag: ["@feature:headless.web-interop", "@feature:headless.chat", "@feature:headless.events", "@feature:headless.reactions", "@feature:chat.reactions.wire"] }, async ({ peer, relay }) => {
   const url = await relay.listen();
   const bot = new HeadlessBot();
   try {
@@ -33,6 +33,18 @@ test("a person on the web chats with a headless bot, both ways", { tag: ["@featu
     expect(await bot.event((e) => e.type === "chat.joined")).toMatchObject({ chat: invite.chat });
     // The app shows each notice as a line: the person's own, and the bot's answer.
     await expect(chat(person).getByText(/joined the chat/)).toHaveCount(2);
+
+    // Reactions both ways (WISP 400 § Reactions): the bot's shows under the person's message, the person's reaches the bot's stream.
+    await bot.run("react", invite.chat as string, (received.message as { id: string }).id, "👍");
+    const hiBot = chat(person).locator("[data-message-row]").filter({ hasText: "hi bot" }).last();
+    await expect(hiBot.locator('[data-testid="reaction-chip"][data-emoji="👍"]')).toHaveAccessibleName(/👍: /);
+    const fromBot = chat(person).locator("[data-message-row]").filter({ hasText: "hello from the bot" }).last();
+    await fromBot.hover();
+    await fromBot.getByTestId("message-react-action").click();
+    await person.page.locator('[data-testid="reaction-quick"][data-emoji="🙏"]').click();
+    // Its own reaction is in its stream too (by "me"); the person's comes as the contact's.
+    expect(await bot.event((e) => e.type === "message.reaction" && e.by === "me")).toMatchObject({ chat: invite.chat, emoji: "👍", mine: false });
+    expect(await bot.event((e) => e.type === "message.reaction" && e.by === "peer")).toMatchObject({ chat: invite.chat, emoji: "🙏", mine: true });
 
     // The person invites; the bot joins.
     await person.page.goto("/#/");
