@@ -38,6 +38,14 @@ export function isVideoMime(mime: string): boolean {
   return mime.split(";")[0]!.trim().toLowerCase().startsWith("video/");
 }
 
+/**
+ * Whether a file is shown as a video (a poster, a player): a type a player may be handed. Other video types
+ * (Matroska, AVI) are files, saved to be played elsewhere.
+ */
+export function isPlayableVideoType(mime: string): boolean {
+  return PLAYABLE_VIDEO.test(mime.split(";")[0]!.trim().toLowerCase());
+}
+
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const JPEG_START = [0xff, 0xd8, 0xff];
 

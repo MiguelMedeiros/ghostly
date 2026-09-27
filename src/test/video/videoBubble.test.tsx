@@ -58,9 +58,18 @@ describe("a video in the chat", () => {
     expect(screen.queryByTestId("file-bubble")).toBeNull();
     view.unmount();
     // From an app that sends no description: still a video, with its size where the length would be.
-    renderApp(<MessageBubble message={message(video({ video: undefined }))} peerPubKey="peer" />);
+    const other = renderApp(<MessageBubble message={message(video({ video: undefined }))} peerPubKey="peer" />);
     expect(screen.getByTestId("video-bubble")).toBeInTheDocument();
     expect(screen.getByTestId("video-duration")).toHaveTextContent("35.0 MB");
+    other.unmount();
+  });
+
+  it("a video type no player here is handed (Matroska) stays a file, to save", () => {
+    const message: ChatMessage = { id: "peer_mkv", text: "📎 film.mkv", sender: "peer", timestamp: 1_700_000_000_000, file: video({ name: "film.mkv", mime: "video/x-matroska", video: undefined }) };
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<MessageBubble message={message} peerPubKey="peer" />);
+    expect(screen.getByTestId("file-bubble")).toBeInTheDocument();
+    expect(screen.queryByTestId("video-bubble")).toBeNull();
   });
 
   it("shows the sender's poster, its length and a big play button before it plays", () => {

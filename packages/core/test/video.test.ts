@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toBase64Url } from "../src/bytes";
 import { safeBlobType } from "../src/files";
-import { VIDEO_LIMITS, formatVideoDuration, isVideoMime, parseVideoMeta } from "../src/video";
+import { VIDEO_LIMITS, formatVideoDuration, isPlayableVideoType, isVideoMime, parseVideoMeta } from "../src/video";
 import { fileMessageText } from "../src/voice";
 // covers: files.video.meta
 
@@ -50,6 +50,10 @@ describe("video metadata", () => {
     expect(isVideoMime("video/mp4")).toBe(true);
     expect(isVideoMime("VIDEO/webm; codecs=vp9")).toBe(true);
     expect(isVideoMime("audio/mp4")).toBe(false);
+    // Shown as a video only when a player may be handed it; Matroska is a file.
+    expect(isPlayableVideoType("video/mp4")).toBe(true);
+    expect(isPlayableVideoType("video/QuickTime")).toBe(true);
+    expect(isPlayableVideoType("video/x-matroska")).toBe(false);
   });
 
   it("reads its length as a player does, and says it in the chat list", () => {
