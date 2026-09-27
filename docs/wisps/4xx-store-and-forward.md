@@ -10,6 +10,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [03](03-capabilities.md), [1000](1000-storage.md), [1002](1002-s3-storage.md), [200](200-payments.md) |
 | Implementation | Experimental: `hold/1` in web, extension and desktop clients; exercised against a local S3-compatible server |
+| Summary | Text, a picture or a payment request sent while a contact is away waits, sealed, in your own S3 bucket and reaches them when they are back. |
+| Availability | Available |
+| Notes | Experimental, in chats with the switch on at both ends; web, desktop and extension. Picked up until seven days after you were last online. Ecash is never held. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 

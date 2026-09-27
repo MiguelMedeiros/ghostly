@@ -9,6 +9,10 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
 | Implementation | 1:1 transfer in every chat: `files/3` (any size) and `files/2` on the chat session ([501](501-paired-files.md)), held files while not live ([4xx](4xx-store-and-forward.md)), [502](502-legacy-files.md) frames in compatibility chats |
+| Summary | Send a file straight to a contact, checked and acknowledged on arrival. |
+| Availability | Available |
+| Notes | Any size, with both people online; above 25 MB the receiver accepts first, and a transfer resumes where it stopped. Chats with 0.4 contacts: up to 100 MiB. |
+| Feature | [Send files](https://ghostly.tools/#next) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

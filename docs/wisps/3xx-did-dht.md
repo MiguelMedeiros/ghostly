@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [04](04-profiles.md), [05](05-backups.md), [300](300-peer-proofs.md) |
 | Implementation | Experimental, web, desktop and extension: `packages/core/src/didDht.ts`, `packages/browser/src/engine/did.ts`, `src/components/identities/PublicDid.tsx`, Desktop `publish_signed_packet` |
+| Summary | Every profile gets a public identifier of its own, a did:dht that any resolver reads from the DHT, with no Ghostly server. |
+| Availability | Available |
+| Notes | Experimental. Its own key, never a chat's; it lists an identity only when you switch it on. Web, desktop and extension. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

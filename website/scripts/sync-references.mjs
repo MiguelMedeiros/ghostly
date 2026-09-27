@@ -8,6 +8,7 @@ import {
 import { fileURLToPath } from "node:url";
 import { resolve, basename } from "node:path";
 import { roadmapCandidates } from "./roadmap-candidates.mjs";
+import { siteFields } from "./wisp-header.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "docs/wisps");
 const destination = resolve(root, "website/public/reference");
@@ -82,7 +83,7 @@ const plain = (text) =>
     .trim();
 // What a WISP says about itself in its header table and first section, so the
 // catalogue follows the documents instead of a copy of them.
-function describe(body) {
+function describe(body, file) {
   const field = (...names) => {
     for (const name of names) {
       const row = body.match(new RegExp(`^\\|\\s*${name}\\s*\\|\\s*(.+?)\\s*\\|\\s*$`, "m"));
@@ -108,6 +109,8 @@ function describe(body) {
     dependencies,
     summary: paragraph ? plain(paragraph).slice(0, 420) : undefined,
     notices,
+    // The catalogue's own line, availability and caveat: written in the header, nowhere on the site.
+    ...siteFields(body, file),
   };
 }
 const entries = paths.map((sourcePath) => {
@@ -120,7 +123,7 @@ const entries = paths.map((sourcePath) => {
     aliases: numbering.filter((entry) => entry.file === file && entry.oldFile !== file).map((entry) => entry.oldFile.replace(/\.md$/, "").toLowerCase()),
     slug: file.replace(/\.md$/, "").toLowerCase(),
     title: body.match(/^#\s+(.+)$/m)?.[1] ?? file,
-    ...(numbering.some((entry) => entry.file === file) ? describe(body) : { dependencies: [], notices: [] }),
+    ...(numbering.some((entry) => entry.file === file) ? describe(body, file) : { dependencies: [], notices: [] }),
   };
 });
 for (const entry of numbering.filter((entry) => entry.oldFile !== entry.file)) {

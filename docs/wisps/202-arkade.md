@@ -9,6 +9,10 @@
 | Updated | 2026-09-26 |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Capabilities 03](03-capabilities.md), authenticated live data transport |
 | Implementation | Experimental browser adapter, Arkade SDK 0.4.74; regtest evidence below. New makes a Mainnet wallet on `arkade.computer` or a Testnet one on Mutinynet, in one click. |
+| Summary | Review and approve an exact Ark payment through a pinned operator. |
+| Availability | Available |
+| Notes | Experimental. New makes a Mainnet wallet or a Testnet one in one click; payment flows were exercised only on a local regtest network. There is no unilateral exit yet. |
+| Feature | [Wallets](https://ghostly.tools/#wallets) |
 
 ## Scope and provider choice
 

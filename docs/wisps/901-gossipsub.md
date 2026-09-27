@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md), [900](900-group-sessions.md) |
 | Implementation | Proposed; no adapter found |
+| Summary | Evaluate GossipSub as a distribution layer for groups larger than the mesh. |
+| Availability | Planned |
+| Notes | A later profile, after the mesh is measured; no adapter. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

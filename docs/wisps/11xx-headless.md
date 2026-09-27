@@ -10,6 +10,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
 | Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 to 4 on `dev`; the npm package is not published |
+| Summary | Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares. |
+| Availability | Available |
+| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats, groups, wallets, files, identity proofs and shared apps. Not on npm yet; no Bark or Fedimint wallets, and the DHT only through relays. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 

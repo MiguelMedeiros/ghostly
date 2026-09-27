@@ -10,6 +10,8 @@
 | Disposition | Retained for compatibility: existing chats and v0.4 codes only; no new chat is created with it |
 | Dependencies | [400](400-chat.md) |
 | Implementation | Legacy 1:1 clients (v0.4 and earlier, the Rust CLI) and the read/write path kept in current apps; the compatibility header and **Continue in a new chat** in current apps |
+| Summary | Chats with Ghostly 0.4 contacts keep working, calls included. A new chat never uses it. |
+| Availability | Available |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

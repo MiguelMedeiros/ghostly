@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md) |
 | Implementation | Experimental: native adapter of the chat session (desktop); browsers through a HyperDHT relay (web app, extension; off until a relay is set); public key in the layer-0 capability record |
+| Summary | Use an authenticated Noise stream found through HyperDHT. |
+| Availability | Available |
+| Notes | Experimental. Between desktop apps, tried from the first contact. The web app and extension reach it only through a relay you set: none runs by default. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

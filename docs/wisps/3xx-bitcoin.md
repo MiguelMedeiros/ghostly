@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Experimental provider `bitcoin` (`packages/browser/src/proofs/providers/bitcoin.ts`); verifier in `@ghostly/core` |
+| Summary | Prove you hold the key behind a Bitcoin address with one BIP-322 signature from your wallet. |
+| Availability | Available |
+| Notes | Experimental. Checked on the device with no blockchain lookup; proves no balance, past payment or willingness to pay. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

@@ -9,6 +9,10 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [00](00-process.md) |
 | Implementation | Rendezvous and DHT text in every client; the DHT as rendezvous and floor of every chat; native clients (Desktop, CLI) read the Mainline DHT directly; a circuit breaker per Pkarr relay in every client |
+| Summary | Find a peer through small signed records on the Mainline DHT, without turning discovery into storage. |
+| Availability | Available |
+| Notes | The rendezvous exists since the first release; the modular boundary is a proposal. |
+| Feature | [The meeting on the DHT](https://ghostly.tools/#dht) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

@@ -9,6 +9,8 @@
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
 | Implementation | Every chat session: `files/3` (any size, consent, resume) and `files/2` for older apps; WebRTC and supported native adapters |
+| Summary | How files travel in every chat: negotiated, chunk by chunk, with integrity checks. |
+| Availability | Available |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

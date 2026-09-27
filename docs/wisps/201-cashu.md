@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md) |
 | Implementation | Cashu wallet per network (Mainnet and Testnet); shared reviewed-payment coordinator |
+| Summary | Send and receive ecash tokens in the conversation; a mint you choose holds the funds. |
+| Availability | Available |
+| Feature | [Wallets](https://ghostly.tools/#wallets) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

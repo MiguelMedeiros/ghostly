@@ -9,6 +9,9 @@
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
 | Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts) and, for the group's link (`group-entry/1`), [`groupEntry.ts`](../../packages/core/src/groupEntry.ts); engine, UI and four-browser e2e in [`packages/browser`](../../packages/browser/src/engine/groups.ts) and [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts); web, extension and desktop share it |
+| Summary | Up to eight people, each pair on its own authenticated link, with a fresh group key whenever someone joins or leaves. |
+| Availability | Available |
+| Notes | Text, a picture set by the admin, and payments between two members over their own link; files and calls are refused in groups. A member who was away catches up from each author's recent messages. Number not yet assigned. |
 
 > This Draft documents the first distribution profile of [900](900-group-sessions.md) as implemented, not full contract conformance or an independent implementation certification. Numbers and wire formats are not registered standards.
 

@@ -9,6 +9,9 @@
 | Document kind | Profile |
 | Dependencies | [700](700-local-services.md) |
 | Implementation | Desktop/extension hosting in every chat: data-link frames in compatibility chats, the same frames inside `ph` frames in the chat session (`services/1`); web viewer where supported. |
+| Summary | HTTP requests and responses carried over the chat's data link. |
+| Availability | Available |
+| Notes | Plain request/response. No WebSockets or streaming. |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

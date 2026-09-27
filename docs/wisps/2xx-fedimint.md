@@ -10,6 +10,10 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Lightning 203](203-lightning.md), [Profile Backups 05](05-backups.md), authenticated live data transport |
 | Implementation | Experimental browser adapter on the Fedimint web SDK (`@fedimint/core` canary, pinned). Mainnet and Testnet, each joined by invite code; regtest evidence below (Mainnet not yet exercised with real funds). |
+| Summary | Ecash from a federation of guardians you choose: in a chat, and Lightning through the federation's gateway. |
+| Availability | Available |
+| Notes | Experimental, on Mainnet and Testnet; not yet tried with real funds. You see a federation's name, guardians and network before joining. Number not yet assigned. |
+| Feature | [Wallets](https://ghostly.tools/#wallets) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 

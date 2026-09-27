@@ -9,6 +9,10 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
 | Implementation | Payment frames with wallets per network (Mainnet and Testnet side by side); experimental rails: Cashu, Lightning cards, Ark (Arkade, Bark), Spark, Fedimint, USDT, on-chain Bitcoin |
+| Summary | Agree on a payment method and carry the request; the wallet adapter moves the value. |
+| Availability | Available |
+| Notes | Methods are negotiated in every chat, and in groups between two members. Any wallet can pay a request from its QR code or link; it is settled only when the payee's own wallet sees the money. |
+| Feature | [Send sats](https://ghostly.tools/#next) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

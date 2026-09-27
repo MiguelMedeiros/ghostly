@@ -9,6 +9,10 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md), [203](203-lightning.md) |
 | Implementation | Paying a Lightning address or LNURL through a Lightning card; no wire format |
+| Summary | Pay a Lightning address (name@domain) or an LNURL from the wallet or straight from a chat, through your Lightning source. |
+| Availability | Available |
+| Notes | Paying only: receiving on an address needs a server you run. The domain is named before anything is fetched, and the service must allow cross-origin reads. |
+| Feature | [Wallets](https://ghostly.tools/#wallets) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

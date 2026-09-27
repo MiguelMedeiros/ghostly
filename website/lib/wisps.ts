@@ -1,14 +1,13 @@
 import numbering from "./wisp-numbering.json";
 import index from "./reference-index.json";
-import { editorial, GROUPS, type GroupId } from "./wisp-editorial";
+import { GROUPS, type GroupId } from "./wisp-groups";
 import type { Level } from "./status";
 
 /**
  * The WISP catalogue, derived from `docs/wisps/numbering.json` (which drafts
  * exist and their numbers) and the documents themselves (status, dependencies,
- * implementation line), synced by `npm run sync:references`. Editorial copy
- * adds a plain-language benefit and a verified availability; a draft that has
- * none yet still appears, described by its own header.
+ * implementation line, summary, availability, notes), synced by
+ * `npm run sync:references`. No text about a WISP is written on the site.
  */
 export type Wisp = {
   id: string;
@@ -44,6 +43,10 @@ type IndexEntry = (typeof index)[number] & {
   implementation?: string;
   summary?: string;
   documentKind?: string;
+  benefit?: string;
+  level?: string | null;
+  note?: string;
+  feature?: { label: string; href: string };
 };
 
 function groupFor(id: string): GroupId {
@@ -59,7 +62,6 @@ const all: Wisp[] = numbering.map((entry) => {
   const slug = entry.file.replace(/\.md$/, "").toLowerCase();
   const fullTitle = ref?.title ?? entry.file;
   const name = fullTitle.replace(/^WISP\s+[^\s:]+(?::|\s+[\u2014-])\s+/, "");
-  const extra = editorial[slug];
   return {
     id: entry.id,
     number: entry.displayNumber,
@@ -70,18 +72,17 @@ const all: Wisp[] = numbering.map((entry) => {
     aliases: ref?.aliases ?? [],
     name,
     fullTitle,
-    group: extra?.group ?? groupFor(entry.id),
+    group: groupFor(entry.id),
     status: ref?.status ?? "Draft",
     updated: ref?.updated,
     implementation: ref?.implementation,
     summary: ref?.summary,
     notices: ref?.notices ?? [],
     dependencies: ref?.dependencies ?? [],
-    benefit: extra?.benefit,
-    level: extra ? extra.level : null,
-    note: extra?.note,
-    feature: extra?.feature,
-    video: extra?.video,
+    benefit: ref?.benefit,
+    level: (ref?.level ?? null) as Level | null,
+    note: ref?.note,
+    feature: ref?.feature,
   };
 });
 
@@ -117,3 +118,4 @@ export function wispByFile(file: string): Wisp | undefined {
 export const wispPath = (w: Pick<Wisp, "slug">) => `/developers/wisps/${w.slug}`;
 
 export { GROUPS };
+export type { GroupId };

@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md) |
 | Implementation | Identity proofs with a provider contract: Nostr, Pubky, domain, OpenPGP, Bitcoin address, SSH, DID, AT Protocol (Bluesky); OpenID Connect built but not offered (no client ID). See [2026-09-23](#implementation-2026-09-23-identity-proofs) |
+| Summary | Optionally prove to one contact that you control an outside identity. Never required. |
+| Availability | Available |
+| Notes | Rebuilt on 2026-09-23: a proof is made once in Profile → Identities, shared per chat only when you choose, withdrawable and revocable through a DHT record. Web, desktop, extension and the headless CLI. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

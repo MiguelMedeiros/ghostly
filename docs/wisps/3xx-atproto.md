@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Experimental provider `atproto`: `packages/core/src/atprotoRepo.ts`, `atprotoIdentity.ts`, `packages/browser/src/proofs/atproto/`, `proofs/providers/atproto.ts`. Real servers need the client metadata served at ghostly.tools (it ships with the website) |
+| Summary | Show a contact that you control a Bluesky (AT Protocol) account, checked from its signed repository without logging in. |
+| Availability | Planned |
+| Notes | Approved once on your own server, asking only for Ghostly's records; the record is public. Built, and offered once the website's OAuth client document is live. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee.
 

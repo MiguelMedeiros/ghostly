@@ -9,6 +9,10 @@
 | Document kind | Profile |
 | Dependencies | [800](800-invite-join.md), [400](400-chat.md), [403](403-dht-text.md) |
 | Implementation | Every current app creates only `ghostly1…` codes and links, and reads by the rules below (`pair1/`, `pair2d/` and v0.4 codes still accepted as input) |
+| Summary | The invitation formats clients actually produce: links, QR codes and connection strings. |
+| Availability | Available |
+| Notes | One ghostly1… code, checked for typos, shared as text, a QR code or a ghostly.tools link that opens the app. Older codes are still read. |
+| Feature | [The invitation](https://ghostly.tools/#invite) |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

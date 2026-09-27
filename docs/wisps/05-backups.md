@@ -9,6 +9,10 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [200](200-payments.md), [1000](1000-storage.md) |
 | Implementation | Experimental: web, desktop and browser extension clients |
+| Summary | Bring a whole profile back from one passphrase-sealed bundle. |
+| Availability | Available |
+| Notes | Web, desktop and extension. A restore always creates a new profile; nothing is overwritten. |
+| Feature | [Your space](https://ghostly.tools/#space) |
 
 > This is a review draft. Candidate numbers and formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 

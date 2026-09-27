@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Provider `openpgp` in the identity-proof registry; see [Implementation](#implementation) |
+| Summary | Sign the statement once with your own gpg (a YubiKey works unchanged), and the contact verifies it locally. |
+| Availability | Available |
+| Notes | Holding a key proves nothing about the name or email in its user ID, and the app says so. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

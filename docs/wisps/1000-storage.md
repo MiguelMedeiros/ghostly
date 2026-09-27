@@ -9,6 +9,10 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [05](05-backups.md) |
 | Implementation | Experimental: local file ([1001](1001-local-storage.md)) and S3-compatible ([1002](1002-s3-storage.md)) adapters |
+| Summary | Where sealed bundles are kept, separate from what goes into a backup. |
+| Availability | Available |
+| Notes | Holds backups and, since store-and-forward, items sealed for an away contact. |
+| Feature | [Your space](https://ghostly.tools/#space) |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 

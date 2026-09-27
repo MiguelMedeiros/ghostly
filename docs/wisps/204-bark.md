@@ -9,6 +9,10 @@
 | Updated | 2026-09-26 |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Capabilities 03](03-capabilities.md), authenticated live data transport |
 | Implementation | Experimental browser adapter, Second's Bark SDK `@secondts/bark` 0.25.0 (bark 0.7.1, WebAssembly). New makes a Mainnet wallet on Second's Bitcoin server and a Testnet one on their signet server, each in one click. Regtest evidence below; no Ghostly test has moved real money. |
+| Summary | A second Ark provider (Second's Bark) beside Arkade, so Ark isn't tied to one implementation. |
+| Availability | Available |
+| Notes | Experimental. Mainnet on Second's Bitcoin server, Testnet on their signet server; no unilateral exit yet. Not interchangeable with Arkade: its own payment method and capability. |
+| Feature | [Wallets](https://ghostly.tools/#wallets) |
 
 ## Scope and provider choice
 
