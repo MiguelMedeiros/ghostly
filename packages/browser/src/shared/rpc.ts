@@ -140,6 +140,12 @@ export interface EngineApi {
   /** `replyTo`: the id of a message of this chat the text answers (WISP 400 § Replies). */
   sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): { error: string | null; refused?: boolean; messageId?: string };
   retryMessage(params: { linkId: string; messageId: string }): void;
+  /**
+   * Reacts to a message (WISP 400 § Reactions): `linkId` a chat's link or `group:<id>`, `messageId` the message's id
+   * here or the id both sides know it by, `emoji` one emoji, or "" to take this side's reaction back. One reaction per
+   * person per message: a new one replaces the old.
+   */
+  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
@@ -297,8 +303,11 @@ export type AttentionCue =
 /** Ephemeral UI feedback, never part of history or the initial snapshot. No private content. */
 export interface AttentionEvent {
   id: string;
-  /** "cue": an event that had no sound before the categories; `cue` names it. */
-  type: "message" | "sent" | "coin" | "confirmed" | "cue";
+  /**
+   * "cue": an event that had no sound before the categories; `cue` names it. "reaction": someone reacted to a message
+   * of mine: a quiet notice at most, no sound, no unread count.
+   */
+  type: "message" | "sent" | "coin" | "confirmed" | "cue" | "reaction";
   at: number;
   /** The chat the event belongs to (its link id, `group:<id>` for a group), so a page can mute one chat. */
   linkId?: string;

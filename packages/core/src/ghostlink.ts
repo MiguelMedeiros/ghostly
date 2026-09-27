@@ -239,6 +239,8 @@ export interface GhostLinkEvents {
   onReaction?(reaction: WireReaction): boolean | Promise<boolean>;
   /** The contact confirmed this side's reaction numbered `n`. */
   onReactionReceipt?(n: number): void | Promise<void>;
+  /** The contact's DHT envelope said it took this side's reactions up to number `n`. */
+  onReactionsTaken?(n: number): void | Promise<void>;
   /** Both sides offer `react/1` on the open session (true), or no longer (false). */
   onReactionsSupport?(supported: boolean): void;
   onStatus?(status: LinkStatus): void;
@@ -322,6 +324,8 @@ export interface GhostLinkOptions {
     peerCapsRev?(rev: number): void;
     /** Whether the contact's capability record accepts DHT text; absent or unknown: it does. */
     peerAcceptsText?(): boolean;
+    /** This side's reactions the contact has not confirmed, oldest first: they ride on the envelopes. */
+    reactions?(): readonly WireReaction[];
   };
   rtcAvailable?: boolean;
   /** `automatic`: the chat follows the app's rule (no transport chosen for it); `preferred` is then the rule's. Absent: automatic unless `preferred` is given. */
@@ -479,6 +483,12 @@ export class GhostLink {
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs,
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText,
+      // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
+      ...(options.reactionsSupport && {
+        reactions: options.dht.reactions,
+        reaction: async reaction => { await options.events?.onReaction?.(reaction); },
+        reactionsTaken: async n => { await options.events?.onReactionsTaken?.(n); },
+      }),
       // A first contact verified on the DHT pins the contact: the pairing is on the DHT until a stream is up.
       pin: async key => {
         await options.pairing!.pinPeer(key, true);
@@ -1721,6 +1731,11 @@ export class GhostLink {
    * Says a reaction of this side (WISP 401 § Reactions) on the live session, once both sides offer `react/1`. An
    * error when it could not go now: the caller keeps it, and it goes again later (or on the DHT).
    */
+  /**
+   * This side has reactions the contact has not confirmed (`reactions` in the DHT options): off the live session they
+   * ride on the DHT envelopes, and one goes now (WISP 403 § Reactions).
+   */
+  reactionsPending(): void { if (this.options.params.profile) void this.dht?.announceReactions(); }
   sendReaction(reaction: WireReaction): string | null {
     if (!this.options.params.profile) return "Reactions need a current chat";
     if (!this.channel || !this.isDataLinkOpen) return "Reactions go when you are live";

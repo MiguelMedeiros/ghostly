@@ -9,6 +9,7 @@ import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
+import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 
 export type DeliveryMode = "stream" | "dht";
 export const DHT_TEXT_BYTES = 256;
@@ -45,8 +46,14 @@ type Message = [id: string, timestamp: number, text: string];
  * (WISP 403, revision 0.3): `1`, the author can use it; `2`, the author knows the reader can too, and reads
  * there first. A ninth element then goes as `null` when there is no revision to name. The eleventh, with a text only,
  * is the id of the message it replies to (WISP 403 § Replies): the id alone, which the reader looks up in its history.
+ * The twelfth, the author's reactions the reader has not confirmed yet, `[[id, emoji, n], …]`, oldest first and as many
+ * as fit; the thirteenth, the highest number of the reader's reactions the author took (WISP 403 § Reactions). The
+ * eleventh then goes as `null` when there is no reply.
  */
-type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string];
+type DhtReaction = [id: string, emoji: string, n: number];
+type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string | null, reactions?: DhtReaction[], reactionsTaken?: number | null];
+/** An envelope's plaintext past this is not read (`receive`): what rides along must stay under it. */
+const MAX_ENVELOPE_PLAINTEXT = 900;
 /**
  * Before the contact said it can use the pinned mailbox, the invite's mailbox is read. When that held a packet but
  * nothing from the contact (expired, or someone else's), the pinned one is looked in too, no more often than this:
@@ -72,6 +79,8 @@ export interface DhtDeliveryState {
    */
   receipt?: { id: string; expires: number; attempts: number; next?: number; settled?: boolean };
   confirmed?: string;
+  /** The highest number of the contact's reactions taken from its envelopes: said back in every envelope. */
+  reactionsTaken?: number;
 }
 export interface DhtDeliveryView {
   mode: DeliveryMode;
@@ -144,6 +153,8 @@ export class DhtDelivery {
   private readonly participation;
   /** The capability-record revision the last envelope published here named. */
   private namedRev?: number;
+  /** A reaction of this side waits to ride on an envelope, or the contact's reactions wait to be said taken. */
+  private reactionsDue = false;
   constructor(private readonly options: {
     params: LinkParams; mode: DeliveryMode; state?: DhtDeliveryState;
     credentials: PairingCredentials; transport: PkarrTransport;
@@ -158,6 +169,12 @@ export class DhtDelivery {
     peerCapsRev?(rev: number): void;
     /** Whether the contact's capability record accepts DHT text (`dht-text/1`); absent or unknown: it does. */
     peerAcceptsText?(): boolean;
+    /** This side's reactions the contact has not confirmed, oldest first: they ride on the envelopes (WISP 403 § Reactions). */
+    reactions?(): readonly WireReaction[];
+    /** A reaction of the contact's, from an envelope, already checked. */
+    reaction?(reaction: WireReaction): Promise<void>;
+    /** The contact took this side's reactions up to number `n`. */
+    reactionsTaken?(n: number): Promise<void>;
     pollMs?: number;
   }) {
     // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
@@ -327,6 +344,16 @@ export class DhtDelivery {
       try { await this.publish(true); } catch { /* The next envelope names it. */ }
     });
   }
+  /**
+   * This side has reactions the contact has not confirmed (`reactions`): the next envelope carries them, and goes
+   * as soon as the publication spacing allows.
+   */
+  async announceReactions(): Promise<void> {
+    if (!this.options.reactions?.().length) return;
+    this.reactionsDue = true;
+    await this.serialize(async () => { try { await this.publish(); } catch { /* the next envelope carries them */ } });
+    if (this.reactionsDue) this.schedule();
+  }
   /** A stream receipt for the same stable ID also cancels DHT retransmission. */
   async acknowledge(id: string): Promise<void> {
     await this.serialize(async () => {
@@ -334,13 +361,31 @@ export class DhtDelivery {
       this.changed();
     });
   }
-  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string): Body {
+  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, reactions: readonly WireReaction[] = []): Body {
     const rev = this.options.capsRev?.();
     const body: Body = [1, sequence, issued, expires, this.participation.pubKeyZ32, this.mode, message, receipt];
     // Whether it has a revision to name or not, the ninth element holds the place of the tenth: this side uses the pinned mailbox.
     body.push(rev !== undefined && Number.isSafeInteger(rev) && rev >= 0 ? rev : null, this.state.peerPinned ? 2 : 1);
-    if (message && reply) body.push(reply);
+    const taken = this.state.reactionsTaken;
+    if (reactions.length || taken) body.push(message && reply ? reply : null, reactions.map(r => [r.id, r.e, r.n] as DhtReaction), taken ?? null);
+    else if (message && reply) body.push(reply);
     return body;
+  }
+  /**
+   * The envelope with as many of this side's pending reactions as fit, oldest first: the packet's budget and what a
+   * reader reads (`MAX_ENVELOPE_PLAINTEXT`) both bound it. The contact confirms up to the newest it carried.
+   */
+  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string): { body: Body; records: GhostRecord[]; reactions: number } {
+    const pending = (this.options.reactions?.() ?? []).slice(0, REACTION_LIMITS.dht);
+    for (let count = pending.length; count > 0; count--) {
+      const body = this.body(sequence, issued, expires, message, receipt, reply, pending.slice(0, count));
+      try {
+        const records = this.records(body);
+        if (utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT) return { body, records, reactions: count };
+      } catch { /* one fewer */ }
+    }
+    const body = this.body(sequence, issued, expires, message, receipt, reply);
+    return { body, records: this.records(body), reactions: 0 };
   }
   private async publish(force = false): Promise<void> {
     const now = Date.now();
@@ -350,10 +395,13 @@ export class DhtDelivery {
     // A receipt forces an envelope of its own only while the contact still asks for it, and with a text's backoff: the
     // envelope stays in the mailbox until the next one, and every publication spends a request on each relay.
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
-    if (!force && (!pending || pending.next > now) && !receiptDue && this.controlDue > now) return;
+    if (!force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && this.controlDue > now) return;
     const expires = pending?.expires ?? now + CONTROL_TTL;
-    const body = this.body(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply);
-    const records = this.records(body);
+    const { body, records, reactions } = this.fitted(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply);
+    const reactionsWereDue = this.reactionsDue;
+    // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
+    // to say those were taken (the engine announces the rest then).
+    this.reactionsDue = !reactions && !!this.options.reactions?.().length;
     // In the pinned mailbox once the contact said it reads there; until then where an older app looks.
     const identity = (this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
     // Persist sequence and attempt count first. A crash cannot reuse them or
@@ -366,6 +414,7 @@ export class DhtDelivery {
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
     try { await this.options.transport.publish(identity, records); }
     catch (error) {
+      this.reactionsDue ||= reactionsWereDue;
       if (isDiscoveryBudgetError(error)) await this.heldBack(error, now, before, pending, receipt);
       throw error;
     }
@@ -398,11 +447,11 @@ export class DhtDelivery {
     if (hints.length && !sender) return "none";
     let plaintext: string | null;
     try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { return "none"; }
-    if (!plaintext || utf8Encode(plaintext).length > 900) return "none";
+    if (!plaintext || utf8Encode(plaintext).length > MAX_ENVELOPE_PLAINTEXT) return "none";
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return "none"; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return "none";
     const [body, signature] = envelope as [Body, string];
-    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo] = body;
+    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, reactions, reactionsTaken] = body;
     const now = Date.now();
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || issued > now + 30_000 || expires <= now || expires - issued > CONTROL_TTL || issued >= expires ||
@@ -444,12 +493,20 @@ export class DhtDelivery {
       // Asked for again (the text sent anew after a lost session): its receipt goes at once again.
       else if (nextReceipt.settled) { const { settled: _settled, next: _next, ...asked } = nextReceipt; nextReceipt = asked; }
     } else if (nextReceipt && !nextReceipt.settled) nextReceipt = { ...nextReceipt, settled: true };
+    // The contact's reactions, each checked on its own (what does not hold is skipped, never the envelope), and the
+    // highest number taken, which every envelope of this side says back; one carrying only what was taken asks again.
+    const theirs = this.options.reaction ? readDhtReactions(reactions) : [];
+    for (const reaction of theirs) await this.options.reaction?.(reaction);
+    const newest = theirs.reduce((max, r) => Math.max(max, r.n), 0);
+    if (theirs.length) this.reactionsDue = true;
     const confirmed = receipt && this.state.pending?.message[0] === receipt ? receipt : this.state.confirmed;
     if (mode !== this.state.peerMode) traceLink(this.from, "dht-peer-mode", { peerMode: mode });
     if (peerPinned !== this.state.peerPinned) traceLink(this.from, "dht-peer-pinned", { peerPinned });
     await this.persist({ ...this.state, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }),
-      pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending });
+      pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending,
+      ...(newest > (this.state.reactionsTaken ?? 0) && { reactionsTaken: newest }) });
     if (confirmed) await this.options.receipt(confirmed);
+    if (validReactionNumber(reactionsTaken)) await this.options.reactionsTaken?.(reactionsTaken);
     if (Number.isSafeInteger(capsRev) && (capsRev as number) >= 0) this.options.peerCapsRev?.(capsRev as number);
     this.changed();
     return "new";
@@ -519,7 +576,9 @@ export class DhtDelivery {
     if (this.timer) clearTimeout(this.timer);
     // A publication the budget held back goes when the budget frees a request, if that comes before the next read.
     const held = this.budgetUntil - Date.now();
-    this.timer = setTimeout(() => void this.tick(), held > 0 ? Math.min(this.pollMs, held) : this.pollMs);
+    // Reactions to carry, or to say taken, go once the publication spacing allows, not at the next read.
+    const due = this.reactionsDue ? Math.max(0, this.lastPublish + 4_000 - Date.now()) : Infinity;
+    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due));
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";
