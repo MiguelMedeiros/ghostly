@@ -23,7 +23,7 @@ What `dev` runs on each client today. The sections after this one are dated hist
 | Identity proofs | Yes | Yes | Yes | [300](300-peer-proofs.md) |
 | Groups (mesh, community) | Yes | Yes | Yes | [900](900-group-sessions.md) |
 | Headless CLI (`ghostly`) | The app's engine on Node, for bots: `ghostly1` invites, one chat, groups, wallets (not Bark or Fedimint), files, identity proofs, shared apps; DHT through relays only | | | [11xx](11xx-headless.md), #323 to #327 |
-| Rust `ghostly-cli` | Compatibility client only: older DHT records, no `ghostly1` codes, no chat sessions | | | [CLI](../CLI.md) |
+| Rust `ghostly-cli` | Compatibility client only: older DHT records, no `ghostly1` codes, no chat sessions | | | [cli/README.md](../../cli/README.md) |
 
 
 ## Observed baseline

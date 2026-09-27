@@ -33,7 +33,7 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`src-tauri`](../src-tauri) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications |
 | [`web`](../web) | The web app: the peer in a tab. See [WEB.md](WEB.md) |
 | [`extension`](../extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
-| [`cli`](../cli) | `ghostly-cli`, the older Rust compatibility client for v0.4 chats. See [CLI.md](CLI.md) |
+| [`cli`](../cli) | `ghostly-cli`, the older Rust compatibility client for v0.4 chats. See [cli/README.md](../cli/README.md) |
 | [`native-transports`](../native-transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node), the HyperDHT relay for browsers, and the Iroh wasm crate |
 | [`website`](../website) | ghostly.tools |
 | [`e2e`](../e2e) | End-to-end tests. See [TESTING.md](TESTING.md) |

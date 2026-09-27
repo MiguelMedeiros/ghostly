@@ -103,7 +103,7 @@ It never starts, stops, resets or seeds a stack, here or on one, and never falls
 |---|---|---|
 | Changed paths | [`scripts/ci-changes.mjs`](../scripts/ci-changes.mjs): which path-gated jobs below this pull request needs | pull requests (pushes run everything) |
 | Frontend lint and types | `npm run lint`, `npm run typecheck`, `npm run test:map` | always |
-| Frontend tests (packages, app) | `npm run test:packages` and `npm run test:app`, one runner each (together they are `npm test`) | always |
+| Frontend tests (packages, app) | `npm run test:packages` (core, browser, sdk, extension and the headless CLI, whose tests build it and pair two bots) and `npm run test:app`, one runner each (together they are `npm test`) | always |
 | Frontend builds | `npm run build`, `check:desktop-bundle`, `build:extension`, `build:web`, `test:sdk-example` | always |
 | Tauri Backend, CLI | `cargo fmt --check`, `clippy -D warnings`, `build`, `test` for `src-tauri` (+ `native-transports`) and `cli` | a draft skips them unless it changed `src-tauri/`, `cli/`, `native-transports/`, `Cargo.*` or `ci.yml`; leaving draft runs them |
 | Website, Website browser checks (1/4 to 4/4) | the site's deck check, lint and types; its Playwright checks in 4 shards balanced by time (`website/e2e/shard.mjs`, `website/e2e/durations.json`) | only when something the site reads changed (`WEBSITE_INPUTS` in `ci-changes.mjs`) |
