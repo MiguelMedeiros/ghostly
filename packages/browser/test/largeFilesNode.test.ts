@@ -295,3 +295,28 @@ it("Retry never says 'already active': a failed read goes again, an unfinished t
   expect(t.node().getState().transfers[refused.id]).toMatchObject({ state: "failed", error: "Cancelled by your contact", direction: "out" });
   expect(t.node().getState().transfers[refused.id].retry).toBeFalsy();
 }, 120_000);
+
+it("a file sent while the chat is not live waits, and goes whole once it is, after a restart too (WebKit's Blob stream failing)", async () => {
+  const t = await setup();
+  // As WebKit did with IndexedDB Blobs: slices read, a stream does not. It must not matter.
+  const stream = vi.spyOn(Blob.prototype, "stream").mockImplementation(() => { throw notFound(); });
+  try {
+    t.contact.disconnect();
+    await vi.waitFor(() => expect(t.files.live).toBe(false));
+    const waiting = await put(t, "queued-001", 76_232, 21);
+    await vi.waitFor(async () => expect((await db.getMessages(t.id)).find((m) => m.file?.id === waiting.id)?.delivery).toBe("waiting"));
+    void t.contact.connect(5_000).catch(() => {});
+    await vi.waitFor(() => expect(t.node().getState().transfers[waiting.id]).toMatchObject({ state: "done", transferred: 76_232 }), { timeout: 30_000 });
+    expect(t.records.get("in:queued-001")?.state).toBe("done");
+
+    // Queued, then the app restarts before the chat is live again.
+    t.contact.disconnect();
+    await vi.waitFor(() => expect(t.files.live).toBe(false));
+    const later = await put(t, "queued-002", 20_986, 22);
+    await vi.waitFor(async () => expect((await db.getMessages(t.id)).find((m) => m.file?.id === later.id)?.delivery).toBe("waiting"));
+    await t.restartApp();
+    await vi.waitFor(() => expect(t.node().getState().transfers[later.id]).toMatchObject({ state: "done", transferred: 20_986 }), { timeout: 30_000 });
+    expect(t.records.get("in:queued-002")?.state).toBe("done");
+    expect((await db.getMessages(t.id)).filter((m) => m.file?.id === later.id)).toHaveLength(1);
+  } finally { stream.mockRestore(); }
+}, 120_000);

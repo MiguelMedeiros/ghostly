@@ -1964,6 +1964,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.link?.isDataLinkOpen) return;
     const waiting = (await db.getMessages(linkId)).filter(m => m.sender === "me" && m.delivery === "waiting" && (m.file || m.paymentId))
       .sort((a, b) => a.timestamp - b.timestamp);
+    // A session that just opened has not heard the contact's capabilities yet (files/3 comes in them): asked a little.
+    if (waiting.some((m) => m.file) && !GhostlyNode.takesFiles(live.link)) await GhostlyNode.largeFilesAgreed(live.link);
     for (const message of waiting) {
       if (message.file) {
         if (!GhostlyNode.takesFiles(live.link)) { await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive files."); continue; }
