@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.10 |
+| Revision | 0.11 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
@@ -95,6 +95,8 @@ A contact can see that the other side is writing (revision 0.6). Both sides list
 
 The writer sends `start` when a keystroke leaves text in the composer, again at most every 3 seconds while the typing goes on, and `stop` once, after a `start`, when the text is cleared, the message is sent, the chat is left, the app goes to the background, or nothing was typed for 5 seconds. The reader shows the contact typing from a `start` until a `stop`, a message from that contact, the end of the session, or 6 seconds with no new `start`, so a dropped link never leaves it showing. A reader MUST ignore a frame whose `s` is anything else, and SHOULD drop typing frames past a small rate (Ghostly: 8 in 10 seconds). The frame counts only on the authenticated session with the pinned contact ([400](400-chat.md) requirement 8): a connection that has not authenticated as that key never reaches it.
 
+A `start` may say what the contact is doing (revision 0.11): `{"t":"paired-typing","s":"start","kind":"recording"}` while a voice note is being recorded, `"kind":"thinking"` while a bot works on an answer, and, for bots, a short `status` line shown in place of the kind's words, such as `{"t":"paired-typing","s":"start","kind":"thinking","status":"Transcribing your audio…"}`. Both fields are optional and belong to `start` only; a `stop` carries neither. With no `kind`, or a kind the reader does not know, the reader shows typing, so an older app that reads only `s` keeps showing "typing…" and the capability stays `typing/1`. A `status` is plain text: the reader makes it one line (line breaks and runs of spaces become one space), removes invisible and direction-changing characters as it does for names ([#301](https://github.com/MiguelMedeiros/ghostly/pull/301)), keeps at most 40 characters, and drops it (showing the kind instead) when it holds a link (a `scheme://`, `www.`, or a scheme such as `nostr:` or `javascript:`) or a tag; it never goes through the message renderer, so it can carry no link, mention or formatting. A writer sends a `start` with a new kind or status at once rather than at the next refresh, and keeps under the reader's rate (Ghostly sends at most 6 frames in 10 seconds, leaving room for the `stop`). Ghostly's apps say `recording` from the moment the microphone opens (held or locked hands-free) until the voice note is sent or thrown away, told again every second since there are no keystrokes; `thinking` and `status` come from bots ([11xx](11xx-headless.md#typing)). The `sendTyping` choice below covers every kind.
+
 Each local profile ([04](04-profiles.md)) decides whether contacts are told (on by default; Settings, "Send typing indicator"). Off, it sends no `start`, ends any standing one with a `stop`, and still shows its contacts' typing: the choice is about what this side says, not what it hears.
 
 Groups ([900](900-group-sessions.md)) do not carry it yet. A mesh group would send one frame per member edge for every refresh, and a community's typing would tell every member, most of them strangers, when each person is present; both need their own decision on cost and privacy.
@@ -138,6 +140,7 @@ First contact runs on the DHT and on a stream in parallel, and native transports
 
 ## Revision log
 
+- 0.11 (2026-09-27): what a typing `start` says: `kind` (typing, recording, thinking) and a bot's `status` line (40 characters, plain text); older apps show typing.
 - 0.10 (2026-09-27): edits, `edit/1` with `paired-edit` and `paired-edited` on the live session: the whole new text numbered per message, only the contact's own messages, a receive limit, an edit before its message waits a minute.
 - 0.9 (2026-09-27): a file (a voice message included) can be a reply: `r` on its announcement, as on a text.
 - 0.8 (2026-09-27): reactions, `react/1` with `paired-reaction` and `paired-reacted`, confirmed by number, capped per window.
