@@ -38,8 +38,6 @@ import { LocalRelay } from "../support/relay";
 // 49700-49799: this test's ports.
 const PORTS = { relay: 49701, dht: 49702, atlas: 49703, a: 49710, b: 49711 };
 
-const clock = /\b\d{1,2}:\d{2}\b/;
-
 /** Synthetic camera and microphone, and a list of the page's peer connections (for their stats). Idempotent. */
 const FAKE_MEDIA = `
   if (window.__e2eMedia) return;
@@ -135,6 +133,13 @@ const REMOTE_PICTURE = `
   const video = [...document.querySelectorAll("video")].find((v) => !v.muted);
   return video ? video.videoWidth + "x" + video.videoHeight : "none";`;
 
+/**
+ * The state the call window shows. Media can flow while it still says "Connecting..." (the caller's hook once
+ * took "connected" back when ICE came up before its `setRemoteDescription` returned), and the share button is
+ * only there in a connected call.
+ */
+const callState = (p: DesktopPerson) => p.app.attribute('[data-testid="call-status"]', "data-state");
+
 /** Whether the call shows the other side's picture at all (a voice call hides the element). */
 const REMOTE_SHOWN = `
   const video = document.querySelector('[data-testid="remote-video"]');
@@ -222,6 +227,7 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       await expect.poll(() => pageText(bob), { timeout: 60_000 }).toContain("Incoming video call");
       await bob.app.click('[title="Accept video call"]');
       for (const p of [alice, bob]) await expect.poll(() => p.app.text('[title="End call"]'), { timeout: 60_000, message: `${p.name} is on the call` }).not.toBeNull();
+      for (const p of [alice, bob]) await expect.poll(() => callState(p), { timeout: 60_000, message: `${p.name}'s call window says connected` }).toBe("connected");
 
       for (const p of [alice, bob]) {
         const received = () => p.app.executeAsync<Received>(RECEIVED);
@@ -232,7 +238,8 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
         await expect.poll(() => p.app.execute<string>(REMOTE_PICTURE), { timeout: 30_000, message: `${p.name} shows the other side's picture` }).toMatch(/^[1-9]\d*x[1-9]\d*$/);
         testInfo.annotations.push({ type: `${p.name} received`, description: JSON.stringify(await received()) });
       }
-      expect(await pageText(alice)).toMatch(clock);
+      // The call's own timer, not a time in the chat.
+      for (const p of [alice, bob]) expect((await p.app.text('[data-testid="call-status"]'))?.trim(), `${p.name}'s call timer`).toMatch(/^\d{2}:\d{2}$/);
       testInfo.annotations.push({ type: "WKWebView getDisplayMedia", description: String(await alice.app.execute(`return window.__e2eNativeDisplayMedia;`)) });
 
       // The screen takes the camera's place, and stopping turns the camera back on.
@@ -262,6 +269,7 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       await alice.app.click('[data-testid="call-audio"]');
       await expect.poll(() => pageText(bob), { timeout: 60_000 }).toContain("Incoming audio call");
       await bob.app.click('[title="Accept audio call"]');
+      for (const p of [alice, bob]) await expect.poll(() => callState(p), { timeout: 60_000, message: `${p.name}'s voice call window says connected` }).toBe("connected");
       // Connected, over the video section a voice call negotiates empty: the button is on.
       await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 60_000, message: "A can share in a voice call" }).toEqual({ disabled: false, title: "Share screen" });
       expect(await bob.app.execute<boolean>(REMOTE_SHOWN), "a voice call shows no picture").toBe(false);

@@ -45,7 +45,7 @@ describe("the argument parser", () => {
       const slots = command.args ?? [];
       const argv = slots.map((slot, i) => (takesId(i) ? `${i % 2 ? DOUBLE_DASH_ID : HYPHEN_KEY}${i}` : "word"));
       expect(parseArgs(argv, command.options ?? {}, takesId).positionals, name).toEqual(argv);
-      slots.forEach((slot, i) => { if (takesId(i)) named.add(slot); });
+      slots.forEach((slot, i) => { if (takesId(i)) named.add(slot.replace(/\?$/, "")); });
     }
     // Every kind of generated id a command takes: drafts, proofs, payments, messages, files, groups, calls, …
     expect([...named].sort()).toEqual(["call...", "card", "chat", "draft", "file", "group", "id", "member", "message", "payment", "service"]);
@@ -65,6 +65,18 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["--voice=soon"], options!)).toThrow(/takes a number/);
   });
 
+  it("takes ids that start with a single dash where the command says ids come, never as text", () => {
+    const draft = "-guUzRbBsj7cpq-yPjgCUQ";
+    const ids = () => true;
+    expect(parseArgs(["identity", draft, "--stdin"], { stdin: { type: "boolean", description: "" } }, ids)).toEqual({ positionals: ["identity", draft], options: { stdin: true } });
+    expect(parseArgs([draft, "hello"], {}, (i) => i === 0).positionals).toEqual([draft, "hello"]);
+    expect(() => parseArgs(["group", "-oops"], {}, (i) => i === 0)).toThrow(/Unknown option -oops/);
+    expect(() => parseArgs(["-x"], {}, ids)).toThrow(/Unknown option -x/);
+    // Two dashes too (one id in 4096), except where text comes.
+    expect(parseArgs(["--nope"], {}, (i) => i === 0).positionals).toEqual(["--nope"]);
+    expect(() => parseArgs(["group", "--nope"], {}, (i) => i === 0)).toThrow(/Unknown option --nope/);
+  });
+
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
     const spec = { force: { type: "boolean" as const, description: "" }, mention: { type: "list" as const, description: "" } };
     expect(parseArgs(["-p", "bot", "g", "--mention", "a", "--no-force", "--mention", "b", "--pretty"], spec).options).toEqual({ profile: "bot", mention: ["a", "b"], force: false, pretty: true });
@@ -81,12 +93,27 @@ describe("the argument parser", () => {
     expect(liftGlobals(["--home", "/h", "send", "c", "--", "-dash"])).toEqual(["send", "c", "--home", "/h", "--", "-dash"]);
   });
 
+  it("takes a file by its id alone, or after its chat, for every file command", () => {
+    const params = (name: string, values: string[]) => COMMANDS[name].params!({ positionals: values, options: {} }, positionals(COMMANDS[name], values));
+    for (const action of ["accept", "decline", "pause", "resume", "cancel", "resend", "request"]) {
+      expect(params(`file ${action}`, ["c1-in-x"])).toEqual({ file: "c1-in-x", action });
+      expect(params(`file ${action}`, ["alice", "c1-in-x"])).toEqual({ chat: "alice", file: "c1-in-x", action });
+      expect(COMMANDS[`file ${action}`].usage).toBe(`file ${action} [<chat>] <file>`);
+    }
+    expect(params("file save", ["c1-in-x"])).toMatchObject({ file: "c1-in-x", force: false });
+    expect(params("file save", ["alice", "c1-in-x"])).toMatchObject({ chat: "alice", file: "c1-in-x" });
+    expect(params("file wait", ["c1-in-x"])).toEqual({ file: "c1-in-x" });
+    expect(COMMANDS["file wait"].params!({ positionals: [], options: { timeout: 5 } }, { chat: "alice", file: "f" })).toEqual({ chat: "alice", file: "f", timeout: 5 });
+  });
+
   it("names positionals, joins a trailing one, and says what is missing", () => {
     expect(positionals(COMMANDS["chat rename"], ["abc", "My", "bot"])).toEqual({ chat: "abc", name: "My bot" });
     expect(positionals(COMMANDS["chat rename"], ["abc"])).toEqual({ chat: "abc", name: undefined });
     expect(COMMANDS["file resend"].params!({ positionals: [], options: {} }, positionals(COMMANDS["file resend"], ["c1-out-x"]))).toEqual({ file: "c1-out-x", action: "resend" });
     expect(COMMANDS["file request"].params!({ positionals: [], options: {} }, positionals(COMMANDS["file request"], ["c1-in-y"]))).toEqual({ file: "c1-in-y", action: "request" });
     expect(() => positionals(COMMANDS["message delete"], ["abc"])).toThrow(/Missing <message>/);
+    expect(() => positionals(COMMANDS["file accept"], [])).toThrow(/Missing <file>/);
+    expect(() => positionals(COMMANDS["file accept"], ["a", "b", "c"])).toThrow(/Too many/);
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
   });
 });

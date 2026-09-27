@@ -82,11 +82,16 @@ export const COMMANDS: Record<string, Command> = {
   },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "typing": {
-    method: "chat.typing", usage: "typing <chat> [--stop]", summary: "Show the contact you are writing (live chats; again every few seconds, send or --stop ends it)", args: ["chat"],
-    options: { stop: { type: "boolean", description: "Say you stopped" } }, params: ({ options }, { chat }) => ({ chat, stop: options.stop === true }),
+    method: "chat.typing", usage: "typing <chat> [--for s] [--stop]", summary: "Show the contact you are writing (live chats; it fades after 6 s unless said again, or kept with --for; a send or --stop ends it)", args: ["chat"],
+    options: { stop: { type: "boolean", description: "Say you stopped" }, for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" } },
+    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, for: options.for }),
   },
-  "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now", args: ["chat"], params: (_, { chat }) => ({ chat }) },
-  "chat disconnect": { method: "chat.disconnect", usage: "chat disconnect <chat>", summary: "Close a chat's live session", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now (ends a --hold)", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "chat disconnect": {
+    method: "chat.disconnect", usage: "chat disconnect <chat> [--hold <minutes>]", summary: "Close a chat's live session (the contact may redial; --hold keeps it on the DHT that long, 0 ends it)", args: ["chat"],
+    options: { hold: { type: "number", description: "Stay off the direct link this many minutes (up to 10080): DHT only, taken back after" } },
+    params: ({ options }, { chat }) => ({ chat, hold: options.hold }),
+  },
   "chat verify": {
     method: "chat.verify", usage: "chat verify <chat> --code <code>", summary: "Mark a contact verified after comparing codes", args: ["chat"],
     options: { code: { type: "string", description: "The code the contact reads out" } }, params: ({ options }, { chat }) => ({ chat, code: options.code }),
@@ -194,17 +199,29 @@ export const COMMANDS: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, voice: options.voice, peaks: typeof options.peaks === "string" ? options.peaks.split(",") : undefined }),
   },
   "file list": { method: "file.list", usage: "file list <chat>", summary: "A chat's files and their transfers", args: ["chat"], params: (_, { chat }) => ({ chat }) },
-  "file accept": { method: "file.action", usage: "file accept <chat> <file>", summary: "Take a file the contact offers", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
-  "file decline": { method: "file.action", usage: "file decline <chat> <file>", summary: "Refuse a file the contact offers", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "decline" }) },
-  "file pause": { method: "file.action", usage: "file pause <chat> <file>", summary: "Pause a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "pause" }) },
-  "file resume": { method: "file.action", usage: "file resume <chat> <file>", summary: "Resume a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resume" }) },
-  "file cancel": { method: "file.action", usage: "file cancel <chat> <file>", summary: "Cancel a transfer", args: ["chat", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "cancel" }) },
-  "file resend": { method: "file.action", usage: "file resend <file>", summary: "Send again a file that stopped moving or failed: it goes on from what the contact holds", args: ["file"], params: (_, a) => ({ file: a.file, action: "resend" }) },
-  "file request": { method: "file.action", usage: "file request <file>", summary: "Ask again for a file that stopped arriving: it goes on from what is here", args: ["file"], params: (_, a) => ({ file: a.file, action: "request" }) },
+  "file accept": { method: "file.action", usage: "file accept [<chat>] <file>", summary: "Take a file the contact offers", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
+  "file decline": { method: "file.action", usage: "file decline [<chat>] <file>", summary: "Refuse a file the contact offers", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "decline" }) },
+  "file pause": { method: "file.action", usage: "file pause [<chat>] <file>", summary: "Pause a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "pause" }) },
+  "file resume": { method: "file.action", usage: "file resume [<chat>] <file>", summary: "Resume a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resume" }) },
+  "file cancel": { method: "file.action", usage: "file cancel [<chat>] <file>", summary: "Cancel a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "cancel" }) },
+  "file resend": { method: "file.action", usage: "file resend [<chat>] <file>", summary: "Send again a file that stopped moving or failed: it goes on from what the contact holds", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resend" }) },
+  "file request": { method: "file.action", usage: "file request [<chat>] <file>", summary: "Ask again for a file that stopped arriving: it goes on from what is here", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "request" }) },
+  "file wait": {
+    method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",
+    args: ["chat?", "file"], options: { timeout: { type: "number", description: "Seconds (default 300)" } },
+    params: ({ options }, a) => ({ chat: a.chat, file: a.file, timeout: options.timeout }),
+  },
   "file save": {
-    method: "file.save", usage: "file save <file> [--dir d | --path p] [--force]", summary: "Write a received file to disk (never over a file without --force)",
-    args: ["file"], options: { dir: { type: "string", description: "Into this folder, under its own name" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" } },
-    params: ({ options }, a) => ({ file: a.file, dir: here(options.dir ?? "."), path: options.path === undefined ? undefined : here(options.path), force: options.force === true }),
+    method: "file.save", usage: "file save [<chat>] <file> [--dir d | --path p] [--force] [--wait [--timeout s]]", summary: "Write a received file to disk (never over a file without --force; --wait: once it is all here)",
+    args: ["chat?", "file"],
+    options: {
+      dir: { type: "string", description: "Into this folder, under its own name" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" },
+      wait: { type: "boolean", description: "Wait for the transfer to finish first" }, timeout: { type: "number", description: "Seconds --wait waits (default 300)" },
+    },
+    params: ({ options }, a) => ({
+      chat: a.chat, file: a.file, dir: here(options.dir ?? "."), path: options.path === undefined ? undefined : here(options.path), force: options.force === true,
+      wait: options.wait === true ? true : undefined, timeout: options.timeout,
+    }),
   },
 
   "group invite": { method: "group.invite", usage: "group invite <group> <chat>", summary: "Invite a contact into a group you administer", args: ["group", "chat"], params: (_, a) => ({ group: a.group, chat: a.chat }) },
@@ -304,19 +321,32 @@ function cursor(value: unknown): string | number | undefined {
  */
 const ID_ARGS = new Set(["chat", "message", "group", "member", "payment", "file", "draft", "id", "card", "service", "call"]);
 
-/** Which of a command's positionals take an id, by index (a trailing `...` one covers the rest). */
+/**
+ * Which of a command's positionals take an id, by index (a trailing `...` one covers the rest). An optional `name?`
+ * shifts the others, so it counts only where it and what may come in its place are all ids.
+ */
 export function idSlot(command: { args?: string[] }): (index: number) => boolean {
-  const names = command.args ?? [];
+  const names = (command.args ?? []).map((name) => name.replace(/\?$/, ""));
+  const shift = (command.args ?? []).filter((name) => name.endsWith("?")).length;
   const rest = names.findIndex((name) => name.endsWith("..."));
-  return (index) => {
+  const at = (index: number) => {
     const name = rest !== -1 && index >= rest ? names[rest].slice(0, -3) : names[index];
     return name !== undefined && ID_ARGS.has(name);
   };
+  return (index) => at(index) && (shift === 0 || index + shift >= names.length || at(index + shift));
 }
 
-/** The positionals of a command, by name; missing required ones are a usage error. */
+/**
+ * The positionals of a command, by name; missing required ones are a usage error. A leading `name?` is optional: it
+ * is given only when every required one is there too (`file accept [<chat>] <file>`).
+ */
 export function positionals(command: { usage: string; args?: string[] }, values: readonly string[]): Record<string, string | undefined> {
-  const names = command.args ?? [];
+  let names = command.args ?? [];
+  const optional = names.filter((name) => name.endsWith("?"));
+  if (optional.length) {
+    const skip = Math.max(0, optional.length - Math.max(0, values.length - (names.length - optional.length)));
+    names = [...optional.slice(skip).map((name) => name.slice(0, -1)), ...names.filter((name) => !name.endsWith("?"))];
+  }
   const out: Record<string, string | undefined> = {};
   for (let i = 0; i < names.length; i++) {
     const name = names[i];

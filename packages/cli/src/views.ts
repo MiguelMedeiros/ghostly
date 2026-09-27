@@ -1,4 +1,4 @@
-import type { GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { GroupView, LinkView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 
 /**
  * The JSON shapes the CLI and the daemon answer with. They are the contract bots code against (WISP 11xx), kept
@@ -93,7 +93,8 @@ export interface MessageJson {
   member?: string;
   mentions?: { key: string; offset: number; length: number }[];
   mentioned?: boolean;
-  file?: { id: string; name: string; size: number; mime: string; voice?: boolean };
+  /** A file or voice message: its id is what `file wait`, `file save` and the `file.*` events name. */
+  file?: { id: string; name: string; size: number; mime: string; voice?: { duration: number; peaks?: number[] } };
   paymentId?: string;
   event?: unknown;
   /**
@@ -118,11 +119,19 @@ export function messageJson(message: StoredMessage): MessageJson {
     ...(message.member ? { member: message.member } : {}),
     ...(message.mentions?.length ? { mentions: message.mentions.map((m) => ({ key: m.k, offset: m.o, length: m.l })) } : {}),
     ...(message.mentioned ? { mentioned: true } : {}),
-    ...(message.file ? { file: { id: message.file.id, name: message.file.name, size: message.file.size, mime: message.file.mime, ...(message.file.voice ? { voice: true } : {}) } } : {}),
+    ...(message.file ? { file: fileJson(message.file) } : {}),
     ...(message.paymentId ? { paymentId: message.paymentId } : {}),
     ...(message.event ? { event: message.event } : {}),
     ...(message.replyTo ? { replyTo: { id: message.replyTo.messageId ?? message.replyTo.id, snippet: message.replyTo.snippet, from: message.replyTo.from ?? null,
       ...(message.replyTo.member ? { member: message.replyTo.member } : {}), found: !!message.replyTo.messageId } } : {}),
+  };
+}
+
+/** A message's file; a voice note's length (ms) and loudness bars ride along (older releases said only `voice: true`). */
+export function fileJson(file: MessageFile): NonNullable<MessageJson["file"]> {
+  return {
+    id: file.id, name: file.name, size: file.size, mime: file.mime,
+    ...(file.voice ? { voice: { duration: file.voice.duration, ...(file.voice.peaks?.length ? { peaks: [...file.voice.peaks] } : {}) } } : {}),
   };
 }
 

@@ -218,7 +218,7 @@ export function CallOverlay({
 
       {/* Status */}
       <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
-        <p className="text-text-muted text-sm">
+        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
             <span className="text-accent">Audio call</span>
           )}
