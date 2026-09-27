@@ -1,0 +1,258 @@
+import { act, fireEvent, screen } from "@testing-library/react";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { JumpToLatest } from "../../components/chat/JumpToLatest";
+import { useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
+import { renderApp } from "../render";
+
+// covers: chat.scroll
+
+/**
+ * happy-dom has no layout, so the list gets one here: a 300 px tall view over rows 50 px tall each (or what `heights`
+ * says), stacked in order. Setting `scrollTop` clamps and fires `scroll`, as a browser does.
+ */
+const VIEW = 300;
+const ROW = 50;
+const heights = new Map<string, number>();
+const positions = new WeakMap<Element, number>();
+const isList = (el: Element) => el instanceof HTMLElement && el.dataset.testid === "list";
+const rowsIn = (el: Element) => [...el.querySelectorAll<HTMLElement>("[data-message-id]")];
+const heightOf = (row: HTMLElement) => heights.get(row.dataset.messageId!) ?? ROW;
+const contentHeight = (el: Element) => rowsIn(el).reduce((sum, row) => sum + heightOf(row), 0);
+const maxTop = (el: Element) => Math.max(0, contentHeight(el) - VIEW);
+
+function inherited(name: string): PropertyDescriptor {
+  for (let proto: object | null = Element.prototype; proto; proto = Object.getPrototypeOf(proto)) {
+    const d = Object.getOwnPropertyDescriptor(proto, name);
+    if (d) return d;
+  }
+  throw new Error(name);
+}
+
+let observed: ResizeObserverCallback[] = [];
+/** A picture or a video changed a row's height: what the ResizeObserver would say. */
+const resized = () => act(() => { for (const callback of observed) callback([], {} as ResizeObserver); });
+
+beforeAll(() => {
+  const top = inherited("scrollTop");
+  const rect = Element.prototype.getBoundingClientRect;
+  Object.defineProperties(HTMLElement.prototype, {
+    scrollHeight: { configurable: true, get(this: HTMLElement) { return isList(this) ? Math.max(VIEW, contentHeight(this)) : 0; } },
+    clientHeight: { configurable: true, get(this: HTMLElement) { return isList(this) ? VIEW : 0; } },
+    scrollTop: {
+      configurable: true,
+      get(this: HTMLElement) { return isList(this) ? positions.get(this) ?? 0 : top.get!.call(this); },
+      set(this: HTMLElement, value: number) {
+        if (!isList(this)) { top.set!.call(this, value); return; }
+        const next = Math.min(maxTop(this), Math.max(0, value));
+        if (next === (positions.get(this) ?? 0)) return;
+        positions.set(this, next);
+        this.dispatchEvent(new Event("scroll"));
+      },
+    },
+    scrollTo: { configurable: true, value(this: HTMLElement, options: ScrollToOptions) { this.scrollTop = options.top ?? 0; } },
+    getBoundingClientRect: {
+      configurable: true,
+      value(this: HTMLElement) {
+        if (isList(this)) return new DOMRect(0, 0, 400, VIEW);
+        const list = this.closest<HTMLElement>("[data-testid='list']");
+        if (!list || !this.dataset.messageId) return rect.call(this);
+        let y = -list.scrollTop;
+        for (const row of rowsIn(list)) {
+          if (row === this) return new DOMRect(0, y, 400, heightOf(row));
+          y += heightOf(row);
+        }
+        return rect.call(this);
+      },
+    },
+  });
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: ResizeObserverCallback) { observed.push(callback); }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+});
+
+afterAll(() => {
+  for (const name of ["scrollHeight", "clientHeight", "scrollTop", "scrollTo", "getBoundingClientRect"]) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+  vi.unstubAllGlobals();
+});
+
+beforeEach(() => { heights.clear(); observed = []; });
+
+function Timeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
+  const jump = useChatScroll({ rows, chat });
+  return (
+    <div>
+      <div ref={jump.listRef} data-testid="list">
+        <div ref={jump.columnRef}>{rows.map(row => <div key={row.id} data-message-id={row.id}>{row.id}</div>)}</div>
+      </div>
+      <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
+      <textarea data-testid="composer" />
+    </div>
+  );
+}
+
+const theirs = (from: number, n: number): ScrollRow[] => Array.from({ length: n }, (_, i) => ({ id: `peer_${from + i}`, mine: false }));
+const list = () => screen.getByTestId("list");
+const pill = () => screen.queryByTestId("jump-latest");
+/** The user scrolls the list to `top`. */
+const scrollTo = (top: number) => act(() => { list().scrollTop = top; });
+const topOf = (id: string) => list().querySelector<HTMLElement>(`[data-message-id="${id}"]`)!.getBoundingClientRect().top;
+
+describe("the chat timeline's scrolling", () => {
+  it("opens at the bottom, and at the bottom a new message keeps it there", () => {
+    const rows = theirs(0, 10);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    expect(list().scrollTop).toBe(200);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 1)]} />);
+    expect(list().scrollTop).toBe(250);
+    expect(pill()).toBeNull();
+  });
+
+  it("scrolled up, a new message leaves the view where it was and the pill counts it", () => {
+    const rows = theirs(0, 10);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    scrollTo(60);
+    const before = topOf("peer_2");
+    rerender(<Timeline rows={[...rows, ...theirs(10, 3)]} />);
+    expect(list().scrollTop).toBe(60);
+    expect(topOf("peer_2")).toBe(before);
+    expect(pill()).toHaveAttribute("data-count", "3");
+    expect(pill()).toHaveAccessibleName("3 new messages, scroll to bottom");
+    expect(screen.getByTestId("jump-latest-label")).toHaveTextContent("3 new");
+  });
+
+  it("one new message is said in the singular", () => {
+    const rows = theirs(0, 10);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 1)]} />);
+    expect(pill()).toHaveAccessibleName("1 new message, scroll to bottom");
+  });
+
+  it("the pill goes down to the new messages and clears", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 3)]} />);
+    await user.click(pill()!);
+    expect(list().scrollTop).toBe(350);
+    expect(pill()).toBeNull();
+  });
+
+  it("with more new than a screen, the pill stops at the first new one", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 20)]} />);
+    expect(pill()).toHaveAttribute("data-count", "20");
+    await user.click(pill()!);
+    // peer_10 starts at 500, a little below the top of the view.
+    expect(list().scrollTop).toBe(492);
+    expect(topOf("peer_10")).toBe(8);
+    // Nothing counted any more; still far from the bottom, so the plain ↓ stays.
+    expect(pill()).toHaveAttribute("data-count", "0");
+    expect(pill()).toHaveAccessibleName("Scroll to bottom");
+  });
+
+  it("reaching the bottom by hand clears the count", () => {
+    const rows = theirs(0, 10);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 2)]} />);
+    expect(pill()).toHaveAttribute("data-count", "2");
+    scrollTo(10_000);
+    expect(pill()).toBeNull();
+  });
+
+  it("what I send goes to the bottom, wherever I was", () => {
+    const rows = theirs(0, 10);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 1)]} />);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 1), { id: "me_1", mine: true }]} />);
+    expect(list().scrollTop).toBe(300);
+    expect(pill()).toBeNull();
+  });
+
+  it("a reaction or an edit (the same ids) is not new and moves nothing", () => {
+    const rows = theirs(0, 10);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    scrollTo(40);
+    rerender(<Timeline rows={rows.map(row => ({ ...row }))} />);
+    expect(list().scrollTop).toBe(40);
+    expect(pill()).toBeNull();
+  });
+
+  it("a picture loading above keeps the message in view where it was; one below moves nothing", () => {
+    const rows = theirs(0, 20);
+    renderApp(<Timeline rows={rows} />);
+    scrollTo(120);
+    // peer_2 is the first row still in view, 20 px above its top edge.
+    expect(topOf("peer_2")).toBe(-20);
+    heights.set("peer_0", 250);
+    resized();
+    expect(topOf("peer_2")).toBe(-20);
+    expect(list().scrollTop).toBe(320);
+    heights.set("peer_15", 400);
+    resized();
+    expect(list().scrollTop).toBe(320);
+    expect(topOf("peer_2")).toBe(-20);
+  });
+
+  it("at the bottom, a picture that loads keeps the view at the bottom", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    heights.set("peer_9", 300);
+    resized();
+    expect(list().scrollTop).toBe(450);
+  });
+
+  it("far from the bottom with nothing new, a plain ↓ shows; near it, nothing", async () => {
+    const { user } = renderApp(<Timeline rows={theirs(0, 30)} />);
+    expect(pill()).toBeNull();
+    scrollTo(100);
+    expect(pill()).toHaveAttribute("data-count", "0");
+    expect(pill()).toHaveAccessibleName("Scroll to bottom");
+    await user.click(pill()!);
+    expect(list().scrollTop).toBe(1200);
+    expect(pill()).toBeNull();
+  });
+
+  it("End or Ctrl/Cmd+↓ jumps to the bottom, but not from a text field", () => {
+    renderApp(<Timeline rows={theirs(0, 30)} />);
+    scrollTo(0);
+    fireEvent.keyDown(screen.getByTestId("composer"), { key: "End" });
+    expect(list().scrollTop).toBe(0);
+    fireEvent.keyDown(document.body, { key: "End" });
+    expect(list().scrollTop).toBe(1200);
+    scrollTo(0);
+    fireEvent.keyDown(document.body, { key: "ArrowDown", metaKey: true });
+    expect(list().scrollTop).toBe(1200);
+    scrollTo(0);
+    fireEvent.keyDown(document.body, { key: "ArrowDown", ctrlKey: true });
+    expect(list().scrollTop).toBe(1200);
+  });
+
+  it("the pill is a button reached with Tab", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 3)]} />);
+    await user.tab();
+    expect(pill()).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(list().scrollTop).toBe(350);
+  });
+
+  it("another chat opens at its bottom with nothing counted", () => {
+    const rows = theirs(0, 10);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 3)]} />);
+    expect(pill()).toHaveAttribute("data-count", "3");
+    rerender(<Timeline chat="chat-2" rows={theirs(100, 12)} />);
+    expect(list().scrollTop).toBe(300);
+    expect(pill()).toBeNull();
+  });
+});
