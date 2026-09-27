@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { loadFixtures, playInPage } from "../support/voice-media.mjs";
+import { loadFixtures, playInPage, rateInPage } from "../support/voice-media.mjs";
 
 /**
  * The web app (and the extension, the same Chromium) plays what every Ghostly records: its own WebM/Opus and
@@ -17,4 +17,15 @@ test("voice recordings from every Ghostly play in the web app, under its CSP", {
   const results = await page.evaluate(playInPage, loadFixtures());
   test.info().annotations.push({ type: "codecs", description: JSON.stringify(results) });
   for (const [name, result] of Object.entries(results)) expect(result, name).toMatchObject({ played: true });
+});
+
+test("voice recordings from every Ghostly play twice as fast with the pitch kept, under the web CSP", { tag: ["@feature:files.voice.play"] }, async ({ page, baseURL }) => {
+  await page.route("**/voice-codecs", (route) =>
+    route.fulfill({ contentType: "text/html", headers: { "content-security-policy": policy }, body: "<!doctype html><title>codecs</title>" }));
+  await page.goto(new URL("/voice-codecs", baseURL).href);
+  const results = await page.evaluate(rateInPage, loadFixtures());
+  test.info().annotations.push({ type: "rates", description: JSON.stringify(results) });
+  // At 1× the same timing reads under 1, so over 1.4 is really faster, not a clock's jitter.
+  for (const [name, result] of Object.entries(results)) expect(result, name).toMatchObject({ rate: 2, preservesPitch: true, speed: expect.any(Number) });
+  for (const [name, result] of Object.entries(results)) expect(result.speed, name).toBeGreaterThan(1.4);
 });

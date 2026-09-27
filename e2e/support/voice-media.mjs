@@ -89,12 +89,12 @@ export async function playInPage(fixtures) {
 }
 
 /**
- * In the page: plays each fixture muted at `rate` with the pitch kept, as the voice bubble's speed pill does,
+ * In the page: plays each fixture muted at `rate` (2× by default) with the pitch kept, as the voice bubble's speed pill does,
  * and reports what the engine made of it: `{ [name]: { rate, preservesPitch, speed, error? } }`. `rate` and
- * `preservesPitch` are read back from the element (an engine without them leaves 1 and undefined); `speed` is
+ * `preservesPitch` are read back from the element (an engine without them reports 1 and undefined); `speed` is
  * how many seconds of the recording played per second of wall clock, so 2 means it really plays twice as fast.
  */
-export async function rateInPage(fixtures, rate) {
+export async function rateInPage(fixtures, rate = 2) {
   const out = {};
   for (const { name, mime, base64 } of fixtures) {
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -120,7 +120,9 @@ export async function rateInPage(fixtures, rate) {
       audio.addEventListener("ended", () => finish(first && performance.now() - first.at >= 150 ? timed() : { error: "ended before it could be timed" }));
       audio.play().catch((error) => finish({ error: `play() ${error?.name}: ${error?.message}` }));
     });
-    out[name] = { rate: audio.playbackRate, preservesPitch: audio.preservesPitch ?? audio.webkitPreservesPitch, ...result };
+    // Read from the engine's own property: on an engine without one, the value set above is only a plain field.
+    const pitch = "preservesPitch" in HTMLMediaElement.prototype ? audio.preservesPitch : "webkitPreservesPitch" in HTMLMediaElement.prototype ? audio.webkitPreservesPitch : undefined;
+    out[name] = { rate: audio.playbackRate, preservesPitch: pitch, ...result };
     audio.pause();
     audio.removeAttribute("src");
     URL.revokeObjectURL(url);
