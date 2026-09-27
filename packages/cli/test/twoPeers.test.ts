@@ -128,6 +128,42 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listen.stop();
   });
 
+  it("keep typing on with --for until the time is up, or a message ends it", async () => {
+    const listen = new Running(["--home", bob, "listen", "--type", "typing."], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    const count = (type: string) => listen.lines.filter((l) => l.type === type).length;
+    // A single start fades after 6 s; --for 10 keeps it on past that.
+    expect(ok(await as(alice, "typing", "bob", "--for", "10"))).toMatchObject({ typing: true, until: expect.any(Number) });
+    await expect.poll(() => count("typing.started"), { timeout: 15_000 }).toBe(1);
+    await new Promise((r) => setTimeout(r, 8000));
+    expect(count("typing.stopped")).toBe(0);
+    await expect.poll(() => count("typing.stopped"), { timeout: 15_000 }).toBe(1);
+    ok(await as(alice, "typing", "bob", "--for", "60"));
+    await expect.poll(() => count("typing.started"), { timeout: 15_000 }).toBe(2);
+    ok(await as(alice, "send", "bob", "typed", "--wait", "delivered"));
+    await expect.poll(() => count("typing.stopped"), { timeout: 5_000 }).toBe(2);
+    await new Promise((r) => setTimeout(r, 7000));
+    expect(count("typing.started")).toBe(2);
+    await listen.stop();
+  });
+
+  it("hold a chat off its direct link: the contact does not redial, text still goes over the DHT, chat connect ends it", async () => {
+    const held = ok(await as(alice, "chat", "disconnect", "bob", "--hold", "1"));
+    expect(held.heldUntil).toBeGreaterThan(Date.now());
+    await expect.poll(async () => ok(await as(bob, "chat", "show", "alice")).live, { timeout: 30_000 }).toBe(false);
+    // Long enough for Bob's daemon to have dialed again if it would.
+    await new Promise((r) => setTimeout(r, 10_000));
+    expect(ok(await as(bob, "chat", "show", "alice"))).toMatchObject({ live: false });
+    expect(ok(await as(alice, "chat", "show", "bob"))).toMatchObject({ live: false, heldUntil: held.heldUntil, deliveryMode: "dht" });
+    expect(ok(await as(alice, "send", "bob", "over the dht", "--wait", "sent", "--timeout", "60"))).toMatchObject({ delivery: expect.stringMatching(/^(sent|delivered)$/) });
+    ok(await as(alice, "chat", "connect", "bob"));
+    expect(ok(await as(alice, "chat", "show", "bob"))).toMatchObject({ heldUntil: null });
+    for (const [dir, chat] of [[alice, chatA], [bob, chatB]]) ok(await as(dir, "chat", "wait", chat, "--until", "live", "--timeout", "90"));
+    const history = ok(await as(bob, "chat", "history", "alice", "--limit", "5")).messages as { text: string }[];
+    expect(history.map((m) => m.text)).toContain("over the dht");
+  });
+
   it("call by voice: auto-answer, audio both ways over the socket and `call pipe`, hang-up events", async () => {
     const listenA = new Running(["--home", alice, "listen", "--type", "call."], env);
     const listenB = new Running(["--home", bob, "listen", "--type", "call."], env);
@@ -215,7 +251,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const fileMessage = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: unknown }).file);
     const incoming = (fileMessage.message as { file: { id: string; name: string; size: number } }).file;
     expect(incoming).toMatchObject({ name: "note.txt", size: 200_000 });
-    await listen.waitFor((e) => e.type === "file.done" && e.file === incoming.id);
+    // The file's events name its message and chat; file wait answers once it is all here.
+    expect(await listen.waitFor((e) => e.type === "file.done" && e.file === incoming.id)).toMatchObject({ chat: chatB, messageId: (fileMessage.message as { id: string }).id });
+    expect(ok(await as(bob, "file", "wait", incoming.id, "--timeout", "30"))).toMatchObject({ chat: chatB, file: incoming.id, state: "done", size: 200_000 });
     const saved = ok(await as(bob, "file", "save", incoming.id, "--dir", bob));
     expect(sha(saved.path as string)).toBe(sha(small));
     error(await as(bob, "file", "save", incoming.id, "--dir", bob), "confirm", 5);
@@ -230,9 +268,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     writeFileSync(large, randomBytes(26 * 1024 * 1024));
     ok(await as(alice, "file", "send", "bob", large));
     const offer = await listen.waitFor((e) => e.type === "file.offered", 90_000);
-    ok(await as(bob, "file", "accept", "alice", offer.file as string));
-    await listen.waitFor((e) => e.type === "file.done" && e.file === offer.file, 120_000);
-    const savedLarge = ok(await as(bob, "file", "save", offer.file as string, "--path", join(bob, "big-copy.bin")));
+    // By the file's id alone (the two-argument form above still works), then saved as soon as it is all here.
+    expect(offer).toMatchObject({ chat: chatB, messageId: expect.stringMatching(/^peer_/) });
+    ok(await as(bob, "file", "accept", offer.file as string));
+    const savedLarge = ok(await as(bob, "file", "save", offer.file as string, "--path", join(bob, "big-copy.bin"), "--wait", "--timeout", "120"));
     expect(savedLarge.size).toBe(26 * 1024 * 1024);
     expect(sha(join(bob, "big-copy.bin"))).toBe(sha(large));
     await listen.stop();
@@ -246,8 +285,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const sent = await as(alice, "file", "send", "bob", recording, "--voice");
     expect(ok(sent)).toMatchObject({ file: { mime: "audio/webm", voice: true } });
     expect(sent.stderr).not.toMatch(/Sent without a waveform/);
-    const message = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: { voice?: boolean } }).file?.voice);
+    const message = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: { voice?: unknown } }).file?.voice);
     const id = (message.message as { file: { id: string } }).file.id;
+    // The event says it all: the length and the bars, beside the file's id.
+    const onEvent = (message.message as { file: { voice: { duration: number; peaks: number[] } } }).file.voice;
+    expect(onEvent.duration).toBeGreaterThan(1400);
+    expect(onEvent.peaks).toHaveLength(64);
     const listed = (ok(await as(bob, "file", "list", "alice")).files as { file: { id: string; voice?: { duration: number; peaks: number[] } } }[]).find((f) => f.file.id === id);
     const voice = listed!.file.voice!;
     expect(voice.peaks).toHaveLength(64);
