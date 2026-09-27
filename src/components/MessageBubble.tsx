@@ -7,7 +7,8 @@ import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
 import { VideoBubble } from "./video/VideoBubble";
-import { isPlayableVideoType } from "@ghostly/core";
+import { isPlayableAudioType, isPlayableVideoType } from "@ghostly/core";
+import { AudioBubble } from "./audio/AudioBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
 import { PaymentBubble } from "./PaymentBubble";
@@ -692,6 +693,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         ) : message.file && isPlayableVideoType(message.file.mime) ? (
           <div className="clearfix">
             <VideoBubble file={message.file} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} />
+            {timestampEl}
+          </div>
+        ) : message.file && isPlayableAudioType(message.file.mime) ? (
+          <div className="clearfix">
+            <AudioBubble file={message.file} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} />
             {timestampEl}
           </div>
         ) : message.file ? (

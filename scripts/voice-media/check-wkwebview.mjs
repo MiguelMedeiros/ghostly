@@ -108,3 +108,42 @@ if (failed) {
   console.error(`\nAn H.264 video does not play, or gives no poster, in WKWebView${policy ? " under Desktop's CSP" : ""}.`);
   process.exit(1);
 }
+
+// Audio sent as a file (e2e/support/audio-fixtures/): an MP3 plays from a blob in the chat's <audio>. FLAC is
+// reported, not required: on a GitHub macOS runner it loaded (canPlayType "maybe", its length read) but its time did
+// not move within 700 ms, while it plays on a Mac.
+const audioDir = new URL("../../e2e/support/audio-fixtures/", import.meta.url);
+const audioFixtures = { "ghost-tune.mp3": "audio/mpeg", "ghost-tune.flac": "audio/flac" };
+const sounds = inWebView(async (fixtures) => {
+  const out = {};
+  for (const [name, { type, base64 }] of Object.entries(fixtures)) {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const audio = document.createElement("audio");
+    audio.muted = true;
+    document.body.append(audio);
+    const result = { canPlay: audio.canPlayType(type) };
+    try {
+      audio.src = URL.createObjectURL(new Blob([bytes], { type }));
+      await audio.play();
+      const start = audio.currentTime;
+      // Up to 3 s for the clock to move: a loaded runner starts late.
+      for (let waited = 0; waited < 3000 && !(audio.currentTime > start + 0.2); waited += 100) await new Promise((resolve) => setTimeout(resolve, 100));
+      result.played = audio.currentTime > start + 0.2;
+      result.at = audio.currentTime;
+      result.duration = audio.duration;
+    } catch (error) {
+      result.error = String(error);
+    }
+    out[name] = result;
+  }
+  return out;
+}, [Object.fromEntries(Object.entries(audioFixtures).map(([name, type]) => [name, { type, base64: readFileSync(new URL(name, audioDir)).toString("base64") }]))], { csp: policy });
+for (const [name, result] of Object.entries(sounds)) {
+  const required = name.endsWith(".mp3");
+  if (!result.played && required) failed++;
+  console.log(`${result.played ? "✓" : required ? "✗" : "·"} ${name.padEnd(28)} canPlayType=${JSON.stringify(result.canPlay)} duration=${result.duration ?? "?"} at=${result.at ?? "?"}${result.error ? `  ${result.error}` : ""}`);
+}
+if (failed) {
+  console.error(`\nAn MP3 file does not play in WKWebView${policy ? " under Desktop's CSP" : ""}.`);
+  process.exit(1);
+}

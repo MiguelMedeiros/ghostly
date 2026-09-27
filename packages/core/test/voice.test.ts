@@ -5,6 +5,7 @@ import {
   baseMime,
   downsamplePeaks,
   formatVoiceDuration,
+  isPlayableAudioType,
   parseVoiceMeta,
   recordingMime,
   voiceDownloadName,
@@ -157,6 +158,13 @@ describe("served types", () => {
   it("serves recorded audio with its type, and nothing that could run", () => {
     for (const type of ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/aac", "audio/wav"]) expect(safeBlobType(type)).toBe(type);
     for (const type of ["audio/svg+xml", "audio/html", "text/html", "video/x-matroska"]) expect(safeBlobType(type)).toBe("application/octet-stream");
+    // Audio sent as a file: FLAC, Opus and the other names browsers give WAV and MP3 play too.
+    for (const type of ["audio/flac", "audio/x-flac", "audio/opus", "audio/x-wav", "audio/wave", "audio/mp3"]) expect(safeBlobType(type)).toBe(type);
+  });
+
+  it("knows which audio files get a player", () => {
+    for (const type of ["audio/mpeg", "audio/x-m4a", "audio/ogg", "audio/flac", "AUDIO/WAV", "audio/webm;codecs=opus"]) expect(isPlayableAudioType(type)).toBe(true);
+    for (const type of ["audio/midi", "audio/aiff", "audio/x-ms-wma", "video/mp4", "application/ogg"]) expect(isPlayableAudioType(type)).toBe(false);
   });
 });
 
