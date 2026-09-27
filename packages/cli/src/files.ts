@@ -1,12 +1,13 @@
 import { openAsBlob } from "node:fs";
 import { open, rm, stat } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
-import { LIMITS, parseVoiceMeta, randomBytes, sanitizeFileName, sanitizeMime, toBase64Url } from "@ghostly/core";
+import { LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, sanitizeFileName, sanitizeMime, toBase64Url } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import type { MessageFile } from "@ghostly/browser/shared/types";
 import { bool, chatOf, list, node, num, oneOf, state, str, type Method } from "./apiKit";
 import { CliError } from "./errors";
+import { measureVoice } from "./voicePeaks";
 
 /**
  * Files and voice notes in a chat (WISP 11xx, phase 3), as the app's composer sends them (packages/browser
@@ -34,6 +35,8 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
   }));
 }
 
+const VOICE_ONLY = "A voice note is audio (webm, ogg, mp4, mpeg, aac, m4a or wav) of at most 15 minutes, with peaks from 0 to 255";
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -47,11 +50,23 @@ export const FILE_METHODS: Record<string, Method> = {
     if (!link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
     const mime = mimeOf(path, str(params, "mime"));
-    let voice;
+    let voice, warning: string | undefined;
     if (params.voice !== undefined) {
-      const peaks = list(params, "peaks").map(Number);
-      voice = parseVoiceMeta({ duration: num(params, "voice", 0, { min: 1 }), peaks: peaks.length ? peaks : new Array(64).fill(0) }, mime);
-      if (!voice) throw new CliError("bad_request", "A voice note is audio (webm, ogg, mp4, mpeg, aac, m4a or wav) of at most 15 minutes, with peaks from 0 to 255");
+      if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", VOICE_ONLY);
+      // Without a length or a waveform, both are measured from the sound, as the apps measure their recordings.
+      let duration = params.voice === true ? undefined : num(params, "voice", 0, { min: 1 });
+      let peaks = list(params, "peaks").map(Number);
+      if (duration === undefined || !peaks.length) {
+        const measured = await measureVoice(path);
+        if ("voice" in measured) {
+          duration ??= measured.voice.duration;
+          if (!peaks.length) peaks = measured.voice.peaks;
+        } else if (duration === undefined) {
+          throw new CliError("bad_request", `Could not measure the voice note (${measured.problem}): give its length as --voice <ms>`);
+        } else warning = `Sent without a waveform: could not read the sound (${measured.problem})`;
+      }
+      voice = parseVoiceMeta({ duration, peaks: peaks.length ? peaks : new Array(VOICE_LIMITS.bars).fill(0) }, mime);
+      if (!voice) throw new CliError("bad_request", VOICE_ONLY);
     }
     const wireId = toBase64Url(randomBytes(12));
     const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: info.size, mime, ...(voice ? { voice } : {}) };
@@ -64,7 +79,7 @@ export const FILE_METHODS: Record<string, Method> = {
       transfer: { state: "transferring", transferred: 0, size: file.size },
     });
     await node(ctx).sendFile({ linkId: link.id, file, timestamp });
-    return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}) } };
+    return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}) }, ...(warning ? { warning } : {}) };
   },
 
   async "file.list"(ctx, params) {

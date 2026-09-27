@@ -48,6 +48,41 @@ export function parseVoiceMeta(value: unknown, mime?: string): VoiceMeta | undef
   return { duration, peaks: [...peaks] };
 }
 
+/**
+ * How the level is metered while recording (src/lib/voiceRecorder.ts): every `intervalMs`, the RMS of the last
+ * `window` samples an AnalyserNode holds (at a 48 kHz context, about 21 ms of sound).
+ */
+export const VOICE_METER = { intervalMs: 50, window: 1024, windowRate: 48_000 } as const;
+
+/** One reading of the meter, 0-1: the RMS of the samples, lifted because speech sits low on a linear scale. */
+export function voiceLevel(samples: ArrayLike<number>): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i]! * samples[i]!;
+  return Math.min(1, Math.sqrt(sum / samples.length) * 4);
+}
+
+/**
+ * The readings the recorder would have taken of this sound (mono, -1 to 1), for a recording made elsewhere: one
+ * every `intervalMs` of it, each over the window that ends there, as long in time as the analyser's.
+ */
+export function voiceLevelsOf(mono: Float32Array, sampleRate: number): number[] {
+  if (!(sampleRate > 0) || mono.length === 0) return [];
+  const window = Math.max(1, Math.round((VOICE_METER.window * sampleRate) / VOICE_METER.windowRate));
+  const levels: number[] = [];
+  for (let step = 1; ; step++) {
+    const end = Math.round((step * VOICE_METER.intervalMs * sampleRate) / 1000);
+    if (end > mono.length) break;
+    levels.push(voiceLevel(mono.subarray(Math.max(0, end - window), end)));
+  }
+  return levels;
+}
+
+/** The waveform sent with a recording made elsewhere, drawn as the recorder draws its own. */
+export function voicePeaksOf(mono: Float32Array, sampleRate: number, bars: number = VOICE_LIMITS.bars): number[] {
+  return downsamplePeaks(voiceLevelsOf(mono, sampleRate), bars);
+}
+
 /** Below this a recording is silence, and is drawn flat rather than stretched to fill the bars. */
 const QUIET = 0.02;
 

@@ -1,7 +1,11 @@
 import { CliError } from "./errors";
 
 export type OptionType = "string" | "number" | "boolean" | "list";
-export interface OptionSpec { type: OptionType; short?: string; description: string }
+export interface OptionSpec {
+  type: OptionType; short?: string; description: string;
+  /** A number option that may stand alone (then `true`): it takes the next word only when that is a number. */
+  optionalValue?: boolean;
+}
 export interface Parsed { positionals: string[]; options: Record<string, string | number | boolean | string[] | undefined> }
 
 /**
@@ -50,6 +54,10 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         continue;
       }
       let value = inline;
+      if (value === undefined && option.optionalValue && !(i + 1 < argv.length && argv[i + 1] !== "" && Number.isFinite(Number(argv[i + 1])))) {
+        options[name] = true;
+        continue;
+      }
       if (value === undefined) {
         if (i + 1 >= argv.length) throw new CliError("usage", `--${name} needs a value`);
         value = argv[++i];

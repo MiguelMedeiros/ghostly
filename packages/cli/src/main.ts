@@ -428,14 +428,20 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
-  print(await withSession(g, async (s) => {
+  const result = await withSession(g, async (s) => {
     const result = await s.call(command.method, params) as Record<string, unknown>;
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.
     if (command.method === "invite.join" && s.mode === "one-shot") {
       await s.call("chat.wait", { chat: result.chat, until: "paired", timeout: 60 }).catch(() => {});
     }
     return result;
-  }));
+  });
+  // Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer.
+  if (typeof result?.warning === "string") {
+    process.stderr.write(`ghostly: ${result.warning}\n`);
+    delete result.warning;
+  }
+  print(result);
 }
 
 // ---------- entry ----------

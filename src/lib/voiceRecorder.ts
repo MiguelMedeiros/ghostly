@@ -1,4 +1,4 @@
-import { VOICE_LIMITS, downsamplePeaks, recordingMime, voiceFileName, type VoiceMeta } from "@ghostly/core";
+import { VOICE_LIMITS, VOICE_METER, downsamplePeaks, recordingMime, voiceFileName, voiceLevel, type VoiceMeta } from "@ghostly/core";
 
 /**
  * One voice recording: the microphone, a MediaRecorder in a type every Ghostly can play,
@@ -26,8 +26,6 @@ export interface Recording {
   voice: VoiceMeta;
 }
 
-/** How often the level is read: often enough for a live waveform, few enough to keep 15 minutes small. */
-const LEVEL_MS = 50;
 /** Shorter than this is a slip of the finger, not a message. */
 export const MIN_RECORDING_MS = 400;
 
@@ -180,7 +178,7 @@ export class VoiceRecorder {
       if (Context) {
         this.context = new Context();
         analyser = this.context.createAnalyser();
-        analyser.fftSize = 1024;
+        analyser.fftSize = VOICE_METER.window;
         this.context.createMediaStreamSource(stream).connect(analyser);
         samples = new Float32Array(analyser.fftSize);
       }
@@ -197,14 +195,11 @@ export class VoiceRecorder {
       let level = 0;
       if (analyser && samples) {
         analyser.getFloatTimeDomainData(samples);
-        let sum = 0;
-        for (const sample of samples) sum += sample * sample;
-        // Speech sits low on a linear RMS scale: lift it so a normal voice fills the bars.
-        level = Math.min(1, Math.sqrt(sum / samples.length) * 4);
+        level = voiceLevel(samples);
       }
       this.levels.push(level);
       this.onLevel?.(level);
-    }, LEVEL_MS);
+    }, VOICE_METER.intervalMs);
   }
 
   private release(): void {
