@@ -109,7 +109,13 @@ const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 
 /** Entry sessions the admin runs at once; a joiner who does not finish in time is not answered again for a while. */
 const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
+/** A joiner refused (its app cannot follow the group) is not answered again for this long. */
 const REFUSED_FOR_MS = 10 * 60_000;
+/**
+ * A joiner whose entry session timed out (the relays failing, its app closed a moment) is answered again after this,
+ * doubling with each timeout in a row up to `REFUSED_FOR_MS`: a slow network is no refusal.
+ */
+const ENTRY_RETRY_MS = 30_000;
 /** The welcome is on its way when the admin sends it; the session stays up a little for it to arrive. */
 const ENTRY_LINGER_MS = 20_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
@@ -174,6 +180,8 @@ export class Groups {
   private readonly pendingEntries = new Map<string, Map<string, number>>();
   /** Admin side: member keys whose entry did not finish, not answered again until then. */
   private readonly refused = new Map<string, number>();
+  /** Admin side: entry sessions of a member key that timed out in a row, and when the last did. */
+  private readonly entryTimeouts = new Map<string, { count: number; at: number }>();
   private readonly lastPoll = new Map<string, number>();
   /** Admin side: until when a group's link is looked at the warm pace. */
   private readonly warmUntil = new Map<string, number>();
@@ -532,7 +540,9 @@ export class Groups {
         const pending = this.pendingEntries.get(group.id);
         for (const [key, since] of pending ?? []) if (now - since > ENTRY_TIMEOUT_MS) {
           pending!.delete(key);
-          this.refused.set(key, now + REFUSED_FOR_MS);
+          const timeouts = (this.entryTimeouts.get(key)?.count ?? 0) + 1;
+          this.entryTimeouts.set(key, { count: timeouts, at: now });
+          this.refused.set(key, now + Math.min(ENTRY_RETRY_MS * 2 ** (timeouts - 1), REFUSED_FOR_MS));
           const linkId = this.host.entries(group.id).get(key);
           if (linkId) await this.host.closeEdge(linkId);
         }
@@ -542,6 +552,7 @@ export class Groups {
         if (!busy && now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
+      for (const [key, { at }] of this.entryTimeouts) if (now - at > 60 * 60_000) this.entryTimeouts.delete(key);
       this.meshTick(now);
       await this.communities.tick(now);
     } finally { this.ticking = false; }
@@ -677,6 +688,7 @@ export class Groups {
         for (const piece of welcome) this.host.sendOnLink(linkId, piece);
         if (entryPeer) traceJoin(g, "welcome.sent");
         if (entryPeer) {
+          this.entryTimeouts.delete(entryPeer);
           this.pendingEntries.get(g)?.delete(entryPeer);
           this.host.entryDone?.(linkId);
           setTimeout(() => { if (this.host.entries(g).get(entryPeer) === linkId) void this.host.closeEdge(linkId); }, ENTRY_LINGER_MS);
