@@ -34,7 +34,7 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
   }));
 }
 
-const ACTIONS = ["accept", "decline", "pause", "resume", "cancel"] as const;
+const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
@@ -72,12 +72,25 @@ export const FILE_METHODS: Record<string, Method> = {
     return { chat: link.id, files: filesOf(await node(ctx).getMessages(link.id), state(ctx).transfers) };
   },
 
-  /** files/3: answer an offer, or pause, resume or cancel a transfer, either way. */
+  /**
+   * files/3: answer an offer, or pause, resume or cancel a transfer, either way; `resend` a file sent from here that
+   * stopped moving (or failed), `request` again one that stopped arriving. Without a chat, the file's id names it.
+   */
   async "file.action"(ctx, params) {
-    const link = chatOf(ctx, params);
     const fileId = str(params, "file", true);
+    const link = params.chat === undefined
+      ? state(ctx).links.find((l) => fileId.startsWith(`${l.id}-in-`) || fileId.startsWith(`${l.id}-out-`))
+      : chatOf(ctx, params);
+    if (!link) throw new CliError("not_found", `No file ${fileId}`);
     const action = oneOf(params, "action", ACTIONS, "accept");
     if (!fileId.startsWith(`${link.id}-`)) throw new CliError("not_found", `No file ${fileId} in this chat`);
+    if (action === "resend" || action === "request") {
+      const outgoing = fileId.startsWith(`${link.id}-out-`);
+      if (outgoing !== (action === "resend")) throw new CliError("bad_request", outgoing ? "A file sent from here is sent again: file resend" : "A received file is asked for again: file request");
+      const transfer = state(ctx).transfers[fileId];
+      if (!transfer || transfer.state === "done") throw new CliError("refused", outgoing ? "Nothing to send again: it arrived whole" : "Nothing to ask for: the file is all here");
+      if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+    }
     await node(ctx).fileAction({ linkId: link.id, fileId, action });
     return { chat: link.id, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
