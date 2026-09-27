@@ -106,6 +106,11 @@ const RECONCILE_MS = 30_000;
 const HERE_AFTER_MS = 60_000;
 /** A `group-here` about the same member makes its edge look fast at most this often. */
 const EXPECT_AGAIN_MS = 30_000;
+/**
+ * Hints acted on per group and minute, whoever they name: fast looks spend the relays' budget every chat of the app
+ * shares, so a member saying everyone is back every 30 s cannot keep all of my edges polling fast.
+ */
+const HERE_PER_MINUTE = 4;
 
 /**
  * How much slower a mesh member looks at its edges' Pkarr records than a chat would, for a group of `members`: one
@@ -167,6 +172,8 @@ export class Groups {
   /** Per mesh group: member key → since when its edge to me is down, and when someone last told me it is here. */
   private readonly downSince = new Map<string, Map<string, number>>();
   private readonly hereHeard = new Map<string, Map<string, number>>();
+  /** Per mesh group, when the last `group-here` hints were acted on (at most `HERE_PER_MINUTE` a minute). */
+  private readonly hereActed = new Map<string, number[]>();
   private gossipTurn = 0;
   /** The clock of the last tick (the engine's, or a simulation's); the wall clock before the first. */
   private tickNow = 0;
@@ -400,6 +407,7 @@ export class Groups {
     this.lastGossip.delete(groupId);
     this.downSince.delete(groupId);
     this.hereHeard.delete(groupId);
+    this.hereActed.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     this.host.emit();
@@ -805,7 +813,11 @@ export class Groups {
     if (now - (heard.get(key) ?? -Infinity) < EXPECT_AGAIN_MS) return;
     heard.set(key, now);
     const edge = this.host.edges(groupId).get(key);
-    if (edge && !this.host.linkReady(edge)) this.host.expectPeer?.(edge);
+    if (!edge || this.host.linkReady(edge)) return;
+    const acted = (this.hereActed.get(groupId) ?? []).filter(at => now - at < 60_000);
+    if (acted.length >= HERE_PER_MINUTE) return;
+    this.hereActed.set(groupId, [...acted, now]);
+    this.host.expectPeer?.(edge);
   }
 
   /** Members whose edges to me are down. */

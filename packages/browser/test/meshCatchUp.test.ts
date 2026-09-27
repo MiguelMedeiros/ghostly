@@ -80,4 +80,21 @@ describe("a private group catches up a member from whoever is there", { timeout:
     expect(new Set(here.map(f => f.from)).size).toBeLessThanOrEqual(2);
     expect(took).toBeLessThan(2 * 60_000);
   });
+
+  it("a member cannot keep another's edges looking fast: at most four hints a minute are acted on", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "erin", "frank", "gina", "hal"], true);
+    const [alice, bob, ...rest] = peers;
+    const away = rest.slice(1);
+    for (const p of away) p.online = false;
+    await world.run(5_000);
+    const keyOf = (p: Peer) => world.view(p, id)!.myKey!;
+    const fast = () => [...bob.links.values()].filter(e => e.kind === "edge" && away.some(p => keyOf(p) === e.peer) && e.fastUntil > world.now).length;
+    expect(fast()).toBe(0);
+    // Alice says all five are back, twice over.
+    for (let round = 0; round < 2; round++) for (const p of away) await bob.groups.handleEdgeFrame(id, keyOf(alice), { t: "group-here", g: id, k: keyOf(p) });
+    expect(fast()).toBe(4);
+    await world.run(61_000);
+    for (const p of away) await bob.groups.handleEdgeFrame(id, keyOf(alice), { t: "group-here", g: id, k: keyOf(p) });
+    expect(fast()).toBeLessThanOrEqual(4);
+  });
 });
