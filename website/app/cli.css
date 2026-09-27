@@ -1,0 +1,190 @@
+/* /cli: page rules are prefixed cl-. */
+.cl-hero {
+  padding-block: calc(var(--nav-h) + 64px) 56px;
+  background: radial-gradient(ellipse at 80% 20%, rgba(34, 211, 238, 0.06), transparent 60%);
+}
+.cl-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 48px;
+  align-items: center;
+}
+.cl-hero-copy {
+  display: grid;
+  gap: 20px;
+  justify-items: start;
+}
+.cl-title {
+  font-size: clamp(44px, 7vw, 88px);
+}
+.cl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* The terminal window: the home's "05" row look. */
+.cl-win {
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: #03070c;
+  overflow: hidden;
+  box-shadow:
+    0 60px 120px -40px #000,
+    0 0 90px -30px rgba(34, 211, 238, 0.22);
+}
+.cl-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding-inline: 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.cl-bar i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.cl-term,
+.cl-code,
+.cl-line pre {
+  margin: 0;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #cbd5e1;
+  white-space: pre;
+  overflow-x: auto;
+}
+.cl-term {
+  padding: 22px 24px;
+}
+
+.cl-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding-block: 40px;
+  border-top: 1px solid var(--line);
+}
+
+.cl-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: #03070c;
+  padding: 8px 8px 8px 20px;
+}
+.cl-line pre {
+  flex: 1;
+  min-width: 0;
+  padding-block: 8px;
+  /* One long command: wrapped, so all of it is read without scrolling. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: visible;
+}
+.btn.cl-copy {
+  min-height: 40px;
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+.cl-cmds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.cl-cmd {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+}
+.cl-cmd code {
+  color: var(--cyan);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.cl-cmd p {
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+
+.cl-code {
+  padding: 20px 24px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: #03070c;
+}
+.cl-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+}
+
+.cl-scope {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px 28px;
+}
+.cl-scope li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
+}
+.cl-scope .level {
+  flex: none;
+}
+
+.cl-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+}
+.cl-legacy {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 18px 20px;
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
+}
+.cl-legacy h3 {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+@media (max-width: 1080px) {
+  .cl-hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+}
+@media (max-width: 640px) {
+  .cl-hero {
+    padding-block: calc(var(--nav-h) + 40px) 40px;
+  }
+  .cl-term,
+  .cl-code {
+    font-size: 12px;
+    padding: 16px;
+  }
+  .cl-line {
+    padding-left: 14px;
+  }
+  .cl-scope {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

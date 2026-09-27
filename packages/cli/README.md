@@ -3,7 +3,7 @@
 `ghostly` runs **the Ghostly app's own engine** without a screen: the same chats, groups and protocol as the web app,
 the extension and the Desktop, on Node. A bot keeps a profile online with `ghostly daemon`, reads what happens with
 `ghostly listen` (JSON lines), and acts with the other commands (JSON answers). The contract behind it, and why it
-is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md).
+is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md). A guided tour: [docs/CLI.md](../../docs/CLI.md).
 
 > Status: phases 1 to 4 (profiles, pictures and backups, invites, one chat, groups with their admin tools, the
 > event stream and hooks, wallets and payments, files and voice notes, identity proofs, shared web apps; an npm
@@ -217,6 +217,14 @@ relay only, as in the web app), and the DHT floor through the Pkarr relays in th
 networks: `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` replaces HyperDHT's bootstrap nodes, `settings set relays
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
 turns WebRTC off.
+
+## Not yet
+
+- **DHT-direct**: the DHT floor goes through the Pkarr relays, as in the web app; reading the Mainline DHT directly,
+  as the Desktop does, needs a BEP 44 client on Node.
+- **Bark and Fedimint** wallets (see above), **OpenID Connect** proofs (a browser window) and calls (no media).
+- **A single binary**: the CLI needs Node.
+- Link previews made by the sender, and holding messages for an away contact.
 
 ## Tests
 

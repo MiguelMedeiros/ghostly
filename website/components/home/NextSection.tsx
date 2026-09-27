@@ -111,12 +111,13 @@ function cropVars(shot: Shot): React.CSSProperties {
   } as React.CSSProperties;
 }
 
-// Commands from docs/CLI.md; the watch line has the shape of the CLI's WatchEvent.
-const CLI = `$ ghostly-cli identity new > ~/.ghostly-identity.json
-$ ghostly-cli invite new --seed "$SEED"
-$ ghostly-cli send --seed "$SEED" --peer "$PEER" --key "$KEY" "Boo! 👻"
-$ ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY"
-{"from":"…","text":"deploy?","timestamp":1790000000,"nick":"Casper"}`;
+// Commands from docs/CLI.md; output shapes from packages/cli/README.md.
+const CLI = `$ ghostly daemon --detach
+$ ghostly invite create --label casper
+{"invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…"}
+$ ghostly send casper "Boo! 👻"
+$ ghostly listen --type message.received
+{"type":"message.received","message":{"text":"deploy?"}}`;
 
 function Bar() {
   return (
