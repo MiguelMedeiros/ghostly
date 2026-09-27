@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
+/** The CLI stays off the public Mainline DHT in tests (it would bootstrap to the public routers): relays only, as the web app. */
+const headlessEnv = (): NodeJS.ProcessEnv => ({ GHOSTLY_DHT: "0", ...process.env });
+
 /**
  * The headless Ghostly (`packages/cli`, WISP 11xx) in a test: built once per worker, one profile per bot in a folder of
  * its own, pointed at the test's Pkarr relay. Its commands answer JSON; `listen` streams events.
@@ -26,7 +29,7 @@ export class HeadlessBot {
   /** Runs one command to its end; rejects with the CLI's JSON error. */
   run(...args: string[]): Promise<Record<string, unknown>> {
     return new Promise((done, fail) => {
-      const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: headlessEnv(), stdio: ["ignore", "pipe", "pipe"] });
       let out = "", err = "";
       child.stdout.on("data", (d) => (out += d));
       child.stderr.on("data", (d) => (err += d));
@@ -53,7 +56,7 @@ export class HeadlessBot {
   }
 
   private spawn(...args: string[]): ChildProcess {
-    const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: headlessEnv(), stdio: ["ignore", "pipe", "inherit"] });
     this.running.push(child);
     return child;
   }
