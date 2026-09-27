@@ -42,11 +42,22 @@ export interface FileBytes {
   room(): Promise<number | null>;
   /** Saves a copy where the person chooses, where the platform has a dialog for it. False when they cancelled. */
   save?(id: string, name: string): Promise<boolean>;
+  /**
+   * A URL a `<video>` or `<audio>` plays the stored file from, served in ranges by the platform (Desktop, for a file
+   * too large for `blob`), or null when there is no such file. The URL works until `release`.
+   */
+  stream?(id: string, type: string): Promise<FileStream | null>;
   /** Removes another profile's folder (a deleted profile). IndexedDB pieces go with the profile's database. */
   dropSpace?(space: string): Promise<void>;
 }
 
 export type FileBytesKind = "opfs" | "native" | "idb";
+
+/** A stored file being served to a media element: its URL, and how to stop serving it. */
+export interface FileStream {
+  url: string;
+  release(): void;
+}
 
 /** Files sent from memory-sized sources stay whole in IndexedDB; anything larger goes through a `FileBytes`. */
 export const SMALL_FILE_BYTES = 16 * 1024 * 1024;

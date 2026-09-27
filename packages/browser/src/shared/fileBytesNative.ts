@@ -1,18 +1,21 @@
-import { FILE_BYTES_STEP, checkFileId, fileSpace, type FileBytes } from "./fileBytes";
+import { FILE_BYTES_STEP, checkFileId, fileSpace, type FileBytes, type FileStream } from "./fileBytes";
 
 /** Tauri's `invoke`, with the raw-body form the file commands take. */
 export type NativeInvoke = (command: string, args?: Record<string, unknown> | Uint8Array, options?: { headers: Record<string, string> }) => Promise<unknown>;
 
-/** Received files up to this size can be shown in the app (an image, a voice message); larger ones are saved. */
+/** Received files up to this size can be shown in the app as a Blob (an image, a voice message); a larger video streams (`stream`). */
 export const NATIVE_BLOB_MAX = 64 * 1024 * 1024;
 
 /**
  * Files as real files in the app's data folder (`files/<space>/<id>`), written and read by the Rust
  * commands in `src-tauri/src/file_store.rs`. Bytes cross as raw IPC bodies, a step at a time.
+ *
+ * `streamUrl` makes the URL of a token of the `ghostly-file` scheme (`src-tauri/src/file_stream.rs`), which serves a
+ * stored file in ranges; without it nothing streams.
  */
 export class NativeFileBytes implements FileBytes {
   readonly kind = "native" as const;
-  constructor(private readonly invoke: NativeInvoke) {}
+  constructor(private readonly invoke: NativeInvoke, private readonly streamUrl?: (token: string) => string) {}
 
   private args(id: string, extra: Record<string, unknown> = {}) {
     return { space: fileSpace(), id: checkFileId(id), ...extra };
@@ -63,6 +66,22 @@ export class NativeFileBytes implements FileBytes {
     const parts: Uint8Array[] = [];
     for (let offset = 0; offset < size; offset += FILE_BYTES_STEP) parts.push(await this.read(id, offset, FILE_BYTES_STEP));
     return new Blob(parts as BlobPart[], { type });
+  }
+
+  /** A token for the file on the `ghostly-file` scheme: the WebView reads it in ranges, as a video seeks. */
+  async stream(id: string, type: string): Promise<FileStream | null> {
+    if (!this.streamUrl) return null;
+    const token = await this.invoke("file_bytes_stream_open", this.args(id, { mime: type })).catch(() => null);
+    if (typeof token !== "string") return null;
+    let released = false;
+    return {
+      url: this.streamUrl(token),
+      release: () => {
+        if (released) return;
+        released = true;
+        void this.invoke("file_bytes_stream_close", { token }).catch(() => {});
+      },
+    };
   }
 
   async dropSpace(space: string): Promise<void> {

@@ -173,6 +173,28 @@ describe("files on Desktop (Rust commands)", () => {
     expect(invoke.mock.calls.filter(([command]) => command === "file_bytes_read")).toHaveLength(0);
   });
 
+  // covers: files.video.stream
+  it("a large file streams from a token on the ghostly-file scheme, closed once, and never read into memory", async () => {
+    const { invoke } = fakeRust();
+    invoke.mockImplementation(async (command: string, args?: unknown) => {
+      if (command === "file_bytes_stream_open") return (args as { id: string }).id === "c-in-big" ? "tok_1" : Promise.reject("No such file");
+      return null;
+    });
+    const bytes = new NativeFileBytes(invoke as unknown as NativeInvoke, (token) => `ghostly-file://localhost/${token}`);
+    const stream = await bytes.stream("c-in-big", "video/mp4");
+    expect(stream!.url).toBe("ghostly-file://localhost/tok_1");
+    expect(invoke).toHaveBeenCalledWith("file_bytes_stream_open", expect.objectContaining({ id: "c-in-big", mime: "video/mp4" }));
+    stream!.release();
+    stream!.release();
+    expect(invoke.mock.calls.filter(([command]) => command === "file_bytes_stream_close")).toEqual([["file_bytes_stream_close", { token: "tok_1" }]]);
+    expect(invoke.mock.calls.filter(([command]) => command === "file_bytes_read")).toHaveLength(0);
+    // Gone, or a path for an id: nothing.
+    expect(await bytes.stream("c-in-gone", "video/mp4")).toBeNull();
+    await expect(bytes.stream("../x", "video/mp4")).rejects.toThrow("Invalid file id");
+    // Without a way to make the URL (not Desktop), nothing streams.
+    expect(await fakeRust().bytes.stream("c-in-big", "video/mp4")).toBeNull();
+  });
+
   it("a failed copy leaves nothing behind", async () => {
     const { files, bytes } = fakeRust();
     const broken = { size: 3 * STEP, slice: (from: number) => from >= STEP ? { arrayBuffer: () => Promise.reject(new Error("unreadable")) } : new Blob([pattern(0, STEP) as BlobPart]) } as unknown as Blob;

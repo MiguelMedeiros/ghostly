@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VideoBubble } from "../../components/video/VideoBubble";
@@ -191,8 +191,53 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-download")).toBeInTheDocument();
   });
 
-  it("too large to hand out here (Desktop above its limit): Download to watch", async () => {
+  // covers: files.video.stream
+  it("too large to hand out as bytes (Desktop over 64 MiB): it plays from the platform's stream, and lets go of it", async () => {
     getFile.mockResolvedValue(null);
+    const release = vi.fn();
+    const streamFile = vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/token-1", release });
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const file = video({ size: 700 * MB });
+    show(file);
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(streamFile).toHaveBeenCalledWith(file.id);
+    const player = screen.getByTestId("video-player") as HTMLVideoElement;
+    expect(player.getAttribute("src")).toBe("ghostly-file://localhost/token-1");
+    expect(play).toHaveBeenCalled();
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+    fireEvent.ended(player);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(revoke).not.toHaveBeenCalledWith("ghostly-file://localhost/token-1");
+    // Again: a new stream, and leaving the chat lets go of it too.
+    streamFile.mockResolvedValue({ url: "ghostly-file://localhost/token-2", release });
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(screen.getByTestId("video-player").getAttribute("src")).toBe("ghostly-file://localhost/token-2");
+    cleanup();
+    expect(release).toHaveBeenCalledTimes(2);
+  });
+
+  it("a streamed one stops being served when another video starts", async () => {
+    const big = video({ size: 700 * MB }), small = video();
+    getFile.mockImplementation(async (id: string) => (id === big.id ? null : new Blob(["mp4"], { type: "video/mp4" })));
+    const release = vi.fn();
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/token-3", release });
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<><VideoBubble file={big} sender="peer" /><VideoBubble file={small} sender="peer" /></>);
+    const [a, b] = screen.getAllByTestId("video-play");
+    fireEvent.click(a!);
+    await flush();
+    fireEvent.play(screen.getByTestId("video-player"));
+    fireEvent.click(b!);
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("video-player").getAttribute("src")).toMatch(/^blob:/);
+  });
+
+  it("too large to hand out, and nothing streams it here: Download to watch", async () => {
+    getFile.mockResolvedValue(null);
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue(null);
     vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
     show(video());
     fireEvent.click(screen.getByTestId("video-play"));

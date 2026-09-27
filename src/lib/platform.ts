@@ -448,6 +448,11 @@ export interface ServicesPlatform {
   /** The file to show or save, backed by storage. Null when it is gone, or too large to hand out here (see `saveFile`). */
   getFile(fileId: string): Promise<Blob | null>;
   /**
+   * A URL a `<video>` plays a stored file from without the page holding it (Desktop: served in ranges by Rust), for
+   * a file `getFile` cannot hand out. Null where the platform cannot, or the file is gone. Call `release` when done.
+   */
+  streamFile?(fileId: string): Promise<{ url: string; release(): void } | null>;
+  /**
    * Saves a copy through the system's save dialog, where the platform keeps files as real files (the desktop
    * app): true when saved, false when the person cancelled, null where the platform has no such dialog.
    * `name` is the name to suggest; the file's own name when left out.

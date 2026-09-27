@@ -42,6 +42,8 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const srcRef = useRef<string | null>(null);
+  /** Lets go of the source: revokes a blob URL, or stops the platform serving a streamed file. */
+  const releaseRef = useRef<(() => void) | null>(null);
   const resumeAt = useRef(0);
   /** A play started by a tap: the element gets the keyboard once it is there. */
   const focusOnStart = useRef(false);
@@ -75,7 +77,8 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
     if (video) resumeAt.current = video.ended ? 0 : video.currentTime;
     video?.pause();
     releasePlayback(file.id);
-    if (srcRef.current) URL.revokeObjectURL(srcRef.current);
+    releaseRef.current?.();
+    releaseRef.current = null;
     srcRef.current = null;
     setSrc(null);
     setPhase("poster");
@@ -88,18 +91,26 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
     setPhase("loading");
     claimPlayback(file.id);
     const blob = await platform.getFile(file.id).catch(() => null);
-    if (!blob) {
-      releasePlayback(file.id);
-      setPhase("poster");
-      // Desktop hands out large files only through the system (saved, not played); a file still being sent
-      // from here may not be readable yet.
-      setProblem(!ready ? "not-yet" : platform.saveFile ? "too-large" : "missing");
-      return;
+    if (blob) {
+      const type = safeBlobType(file.mime);
+      const url = URL.createObjectURL(blob.type === type ? blob : blob.slice(0, blob.size, type));
+      srcRef.current = url;
+      releaseRef.current = () => URL.revokeObjectURL(url);
+    } else {
+      // Too large to hand to the page (Desktop, over 64 MiB): the platform serves it in ranges, as a video seeks.
+      const stream = ready ? await platform.streamFile?.(file.id).catch(() => null) : null;
+      if (!stream) {
+        releasePlayback(file.id);
+        setPhase("poster");
+        // Where nothing streams, Desktop hands out large files only through the system (saved, not played); a file
+        // still being sent from here may not be readable yet.
+        setProblem(!ready ? "not-yet" : platform.saveFile ? "too-large" : "missing");
+        return;
+      }
+      srcRef.current = stream.url;
+      releaseRef.current = () => stream.release();
     }
-    const type = safeBlobType(file.mime);
-    const url = URL.createObjectURL(blob.type === type ? blob : blob.slice(0, blob.size, type));
-    srcRef.current = url;
-    setSrc(url);
+    setSrc(srcRef.current);
     setPhase("playing");
   }, [platform, phase, file.id, file.mime, ready]);
 
@@ -120,12 +131,13 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   // Another video or voice message starts: this one stops and lets go of its bytes, so only one is ever held.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
 
-  // Scrolled away: it stops, and its bytes go (a desktop video is held in memory).
+  // Scrolled away: it stops, and its bytes go (a desktop video up to 64 MiB is held in memory; a larger one stops being served).
   useEffect(() => { if (visible === false && phase === "playing") unload(); }, [visible, phase, unload]);
 
   useEffect(() => () => {
     releasePlayback(file.id);
-    if (srcRef.current) URL.revokeObjectURL(srcRef.current);
+    releaseRef.current?.();
+    releaseRef.current = null;
     srcRef.current = null;
   }, [file.id]);
 
