@@ -65,11 +65,6 @@ export class NativeWorld {
     return entry.endpoint;
   }
 
-  /** The app named `name` closes its endpoints: each far end hears its connection close a moment later. */
-  close(name: string): void {
-    for (const entry of this.entries.values()) if (entry.name === name && !entry.closed) void entry.endpoint.close();
-  }
-
   /** The app named `name` ends with nothing said: no close reaches anyone, the far ends time out. */
   kill(name: string): void {
     for (const entry of this.entries.values()) {

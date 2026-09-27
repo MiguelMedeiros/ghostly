@@ -25,7 +25,7 @@ function stubLink() {
     releaseEndpoint: vi.fn(async (transport: string) => { available.splice(available.indexOf(transport), 1); }),
     isDataLinkOpen: false, allowsPayment: vi.fn(() => true), paymentEnabled: vi.fn(() => true),
     setNick: vi.fn(), setAvatar: vi.fn(), refreshServices: vi.fn(async () => {}),
-    stop: vi.fn(async () => {}), wake: vi.fn(), session: { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() },
+    stop: vi.fn(async () => {}), wake: vi.fn(), depart: vi.fn(), session: { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() },
   };
 }
 async function addChat(node: GhostlyNode, link: ReturnType<typeof stubLink>) {

@@ -148,10 +148,6 @@ export function fakePeerConnection(owner?: string): RTCPeerConnection {
   peerConnections.add(pc);
   return pc as unknown as RTCPeerConnection;
 }
-/** The app `owner` closes its connections (a page unloading): the contact's side sees each data channel close. */
-export function closeRtc(owner: string): void {
-  for (const pc of [...peerConnections]) if (pc.owner === owner && !pc.closed) { peerConnections.delete(pc); pc.close(); }
-}
 /**
  * The app `owner` ends with nothing said: its connections go dead. The contact's side sees its connection
  * `disconnected` once ICE consent checks stop being answered, `disconnectedAfterMs` later.

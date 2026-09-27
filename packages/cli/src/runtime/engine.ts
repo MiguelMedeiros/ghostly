@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { fromBase64Url } from "@ghostly/core";
+import { fromBase64Url, setLinkTraceSink } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { nodeLocalFetch } from "../services";
@@ -99,6 +99,10 @@ function irohWasmBytes(): Buffer {
  * The caller holds the profile's lock.
  */
 export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
+  // `GHOSTLY_LINK_TRACE=<file>`: each step of each chat's way to live, one JSON line (packages/core/src/linkTrace.ts),
+  // as the Desktop writes to its log. For measuring, not needed to run.
+  const trace = process.env.GHOSTLY_LINK_TRACE;
+  if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n"));
   const store = await openPersistentIndexedDb(paths.db);
   const webrtc = await installWebRtc();
   // Voice calls (WISP 11xx § Calls): offered to contacts (calls/1) only where their media can run.

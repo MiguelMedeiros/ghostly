@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
-// covers: groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit
+// covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -50,7 +50,7 @@ beforeAll(async () => {
   relay = await localRelay();
   dht = await hyperdhtTestnet();
   // Calls bind their media to loopback: on some machines (a VPN on a Mac) UDP to the machine's own LAN address is dropped.
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1" };
+  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1", ...(process.env.GHOSTLY_LINK_TRACE ? { GHOSTLY_LINK_TRACE: process.env.GHOSTLY_LINK_TRACE } : {}) };
 }, 30_000);
 
 afterAll(async () => {
@@ -102,6 +102,53 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(events.filter((e) => e.type === "message.received")).toEqual([]);
   });
 
+  it("a daemon that restarts is live with its contact again in seconds, stopped or killed (WISP 100, Back after a restart)", async () => {
+    const live = async (dir: string, chat: string, seconds: number) =>
+      ok(await as(dir, "chat", "wait", chat, "--until", "live", "--timeout", String(seconds)));
+    // Early on, while the relays' request budget is whole (WebRTC signals through them), and over WebRTC: over HyperDHT
+    // on this loopback testnet a restarted daemon's own dial does not reach its contact, while a bare HyperDHT node
+    // restarted the same way does (followed up apart).
+    ok(await as(alice, "chat", "transport", "bob", "webrtc"));
+    for (const [dir, chat] of [[alice, "bob"], [bob, "alice"]]) {
+      const until = Date.now() + 60_000;
+      while (Date.now() < until && ok(await as(dir, "chat", "show", chat)).transport !== "webrtc/1") await new Promise((r) => setTimeout(r, 300));
+      expect(ok(await as(dir, "chat", "show", chat))).toMatchObject({ live: true, transport: "webrtc/1" });
+    }
+    const restartBob = async () => {
+      const daemon = new Running(["--home", bob, "daemon"], env);
+      running.push(daemon);
+      sockets[bob] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
+    };
+    const bothWays = async (tag: string) => {
+      expect(ok(await as(alice, "send", "bob", `↻ alice ${tag}`, "--wait", "delivered", "--timeout", "30"))).toMatchObject({ delivery: "delivered" });
+      expect(ok(await as(bob, "send", "alice", `↻ bob ${tag}`, "--wait", "delivered", "--timeout", "30"))).toMatchObject({ delivery: "delivered" });
+    };
+
+    // Stopped: it says goodbye, and Alice's side is off live at once.
+    ok(await as(bob, "daemon", "stop"));
+    const offLive = Date.now() + 3_000;
+    while (Date.now() < offLive && ok(await as(alice, "chat", "show", "bob")).live) await new Promise((r) => setTimeout(r, 100));
+    expect(ok(await as(alice, "chat", "show", "bob")).live, "the goodbye ends the session at once").toBe(false);
+    let started = Date.now();
+    await restartBob();
+    await live(bob, "alice", 10);
+    await live(alice, "bob", 10);
+    const afterStop = Date.now() - started;
+    await bothWays("after a stop");
+
+    // Killed: nothing said. Alice still holds the dead session; Bob's app, back, dials it and takes over.
+    const killed = running.pop()!;
+    await new Promise((r) => { killed.child.once("exit", r); killed.child.kill("SIGKILL"); });
+    started = Date.now();
+    await restartBob();
+    await live(bob, "alice", 15);
+    const afterKill = Date.now() - started;
+    await bothWays("after a kill");
+    console.log(`[restart] live again after a stop in ${afterStop} ms, after a kill in ${afterKill} ms`);
+    expect(afterStop).toBeLessThan(10_000);
+    expect(afterKill).toBeLessThan(15_000);
+  });
+
   it("move a chat to native HyperDHT when asked", async () => {
     ok(await as(alice, "chat", "transport", "bob", "hyperdht"));
     const until = Date.now() + 90_000;
@@ -128,7 +175,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     error(await as(alice, "send", "bob", "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"), "confirm", 5);
     await listen.waitFor((l) => (l.message as { text?: string } | undefined)?.text === "-dash first");
     const history = ok(await as(bob, "chat", "history", "alice")).messages as { text: string }[];
-    expect(history.map((m) => m.text).filter((t) => !t.startsWith("👋"))).toEqual(["hello bob", "from stdin", "-dash first"]);
+    // Notices, and the restart step's messages (↻), aside.
+    expect(history.map((m) => m.text).filter((t) => !t.startsWith("👋") && !t.startsWith("↻"))).toEqual(["hello bob", "from stdin", "-dash first"]);
     await listen.stop();
   });
 

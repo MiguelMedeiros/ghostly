@@ -5,7 +5,7 @@ import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import type { PkarrTransport } from "../src/transport";
 import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
-import { DESKTOP_NETWORK, MemoryPkarr, closeRtc, closeWorld, fakePeerConnection, invitationWhere, killRtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, invitationWhere, killRtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
 import { setLinkTraceSink } from "../src/linkTrace";
 
@@ -86,10 +86,11 @@ async function until(check: () => boolean, limit: number): Promise<number> {
 type How = "graceful" | "closed" | "crash";
 async function quit(world: { native: NativeWorld }, app: App, how: How): Promise<void> {
   if (how === "graceful") { app.link.depart(); await run(DEPART_FLUSH_MS); }
-  if (how === "closed") { world.native.close(app.name); closeRtc(app.name); await run(DEPART_FLUSH_MS); }
+  // Its connections close (each contact hears it), and nothing else of it runs.
+  if (how === "closed") { app.stopped = app.link.stop(false); await run(DEPART_FLUSH_MS); }
   world.native.kill(app.name);
   killRtc(app.name);
-  app.stopped = app.link.stop(false);
+  app.stopped ??= app.link.stop(false);
 }
 
 const DEPART_FLUSH_MS = 300;

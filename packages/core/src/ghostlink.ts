@@ -66,6 +66,12 @@ export const DHT_PIN_GRACE_MS = 10_000;
 export const RESUME_WAIT_MS = 10_000;
 /** Two dials crossing: how long the lower key's side waits for its own to connect before it takes the contact's. */
 export const CROSSED_WAIT_MS = 3_000;
+/**
+ * A session this side dialled this recently is one a crossing dial of the contact's may meet (both connected): the
+ * lower key keeps its own. Older, the session is one the contact has since lost (its app restarted), and its dial
+ * takes over.
+ */
+export const CROSSED_FRESH_MS = 10_000;
 export const DEMOTE_AFTER_FAILURES = 3;
 export const DEMOTE_MS = 60 * 60_000;
 const AUTO_CONNECT_MAX_RETRY_MS = 3 * 60_000;
@@ -498,6 +504,8 @@ export class GhostLink {
   private lastDataLinkState: DataLinkState = "idle";
   /** When an inviter first saw the joiner on the network (0: not yet). */
   private peerSeenAt = 0;
+  /** When the channel carrying the chat now was attached. */
+  private channelSince = 0;
   /**
    * The contact said goodbye on the live session (`paired-bye`): its app is going away, likely to restart. Its packet
    * then was `packet`; it is dialled again once a newer one shows it back, or after `until`.
@@ -611,6 +619,8 @@ export class GhostLink {
         onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(signal); },
         onRtcSignal: signal => {
           traceLink(this.myPubKeyZ32, "rtc-signal-in", { held: this.streamBlocked });
+          // Going away: an answer now would pair the contact with a connection about to die, and it would wait on it.
+          if (this.leaving) return;
           // Seen once only: kept, and answered as soon as nothing blocks the stream any more.
           if (this.streamBlocked) { this.heldSignal = signal; return; }
           this.handleRtcSignal(signal);
@@ -664,7 +674,13 @@ export class GhostLink {
           void this.attachCandidate(channel, undefined, plan).catch(() => {});
         } else if (this.activeBinding) channel.close(); else this.attach(channel);
       },
-      onClose: () => { if (!this.activeBinding) this.detach(); },
+      onClose: () => {
+        if (this.activeBinding) return;
+        // A live WebRTC session the contact closed: dialled again at once, and watched for it to come back.
+        const wasLive = !!this.channel && this.paired?.state.status === "ready";
+        this.detach();
+        if (wasLive) this.peerLost("closed");
+      },
       onState: (state) => {
         traceLink(this.myPubKeyZ32, "datalink", { state });
         this.trackDataLink(state);
@@ -1233,6 +1249,7 @@ export class GhostLink {
     if (this.stopped || this.deliveryMode === "dht" || !this.options.params.profile) { void endpoint.close(); return; }
     this.endpoints.set(endpoint.transport, endpoint);
     endpoint.onConnection = ({ channel, binding }) => {
+      traceLink(this.myPubKeyZ32, "dialed-in", { transport: binding.transport, held: !!this.channel, dialing: this.dialing });
       if (this.streamBlocked) { channel.close(); return; }
       this.dialedIn.add(channel);
       const plan = this.switcher.pending;
@@ -2090,6 +2107,13 @@ export class GhostLink {
    */
   private attachReplacement(channel: FrameChannel, binding: NativeBinding): void {
     if (this.candidate || !this.options.pairing?.credentials.peerKey || !this.options.params.profile) { channel.close(); return; }
+    // Two dials crossed and both connected: the lower key's carries the chat. Here, the lower key's side, holding the
+    // one it just dialled, refuses the contact's; the contact takes this one over as a replacement.
+    const held = this.channel;
+    if (held && this.activeBinding && !this.dialedIn.has(held) && Date.now() - this.channelSince < CROSSED_FRESH_MS
+      && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32) {
+      traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true }); channel.close(); return;
+    }
     traceLink(this.myPubKeyZ32, "replacing", { transport: binding.transport, held: this.paired?.state.transport });
     this.attach(channel, binding, { resolve: () => {}, reject: () => {} });
   }
@@ -2120,7 +2144,7 @@ export class GhostLink {
         }
       };
       if (!migration) {
-        this.activeBinding = binding; this.channel = channel;
+        this.activeBinding = binding; this.channel = channel; this.channelSince = Date.now();
         this.session.setDataLinkOpen(true);
       }
       const paired = new PairedSession(channel, {
@@ -2159,7 +2183,7 @@ export class GhostLink {
         },
         onReady: () => {
           let carried: PairedFiles | null = null;
-          let switched: { from?: PairedTransport; to: PairedTransport } | null = null;
+          let switched: { from?: PairedTransport; to: PairedTransport } | null = null, replaced = false;
           if (migration) {
             if (this.candidate?.channel !== channel) { paired.stop(); channel.close(); return; }
             const oldChannel = this.channel, oldPaired = this.paired, oldBinding = this.activeBinding;
@@ -2170,13 +2194,13 @@ export class GhostLink {
             const files = this.pairedFiles; this.pairedFiles = null;
             if (files && migration.plan && paired.supports("files/2")) { files.rebind(channel); carried = files; } else files?.closeAll();
             this.pairedHttp?.close(); this.pairedHttp = null;
-            this.channel = channel; this.paired = paired; this.activeBinding = binding;
+            this.channel = channel; this.paired = paired; this.activeBinding = binding; this.channelSince = Date.now();
             oldPaired?.stop();
             // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then.
             if (oldChannel) this.retire(oldChannel, () => { if (!oldBinding && this.activeBinding) this.dataLink.close(); });
             this.session.setDataLinkOpen(true);
             if (migration.plan) switched = { from, to: paired.state.transport! };
-            else traceLink(this.myPubKeyZ32, "replaced", { from, to: paired.state.transport });
+            else { replaced = true; traceLink(this.myPubKeyZ32, "replaced", { from, to: paired.state.transport }); }
           }
           if (this.channel !== channel) return;
           this.securityRejected = false;
@@ -2221,6 +2245,9 @@ export class GhostLink {
           this.options.events?.onPresence?.(this.presence);
           if (switched) this.options.events?.onTransportSwitched?.(switched.from, switched.to);
           if (switched) this.emitFilesSession(true);
+          // A new session in place of a dead one, live all along as the owner saw it: what the old one may have lost
+          // (the outbox's unconfirmed text, a file offer) goes again now, as after any reconnect.
+          if (replaced) { this.options.events?.onDataLinkState?.("open"); this.emitFilesSession(true); }
         },
         onApplication: async data => {
           if (this.channel !== channel) return;
