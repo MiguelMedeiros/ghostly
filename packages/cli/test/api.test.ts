@@ -103,6 +103,37 @@ describe("chats", () => {
     await expect(callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent" })).rejects.toMatchObject({ code: "engine", message: "Peer is gone" });
   });
 
+  it("send's wait sees a delivery that never came as message.delivery, and one that came as the time ran out", async () => {
+    vi.useFakeTimers();
+    try {
+      const stored = [msg("me_1", 5, { sender: "me", delivery: "sending" })];
+      const { ctx, emit } = fake(stored);
+      // First seen by the event hub already delivered: it says message.sent, not message.delivery.
+      const first = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "delivered", timeout: 90 });
+      await vi.advanceTimersByTimeAsync(10);
+      stored[0] = { ...stored[0], delivery: "delivered" };
+      emit({ seq: 1, id: "x", type: "message.sent", at: 1, chat: "chat-one", message: { id: "me_1" } });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await first).toMatchObject({ delivery: "delivered" });
+
+      // Delivered with no event this side saw: the last look when the time is up says so, not a timeout.
+      stored[0] = { ...stored[0], delivery: "sending" };
+      const second = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "delivered", timeout: 90 });
+      await vi.advanceTimersByTimeAsync(89_000);
+      stored[0] = { ...stored[0], delivery: "delivered" };
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await second).toMatchObject({ delivery: "delivered" });
+
+      stored[0] = { ...stored[0], delivery: "sending" };
+      const third = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "delivered", timeout: 90 });
+      const failed = expect(third).rejects.toMatchObject({ code: "timeout", details: { delivery: "sending" } });
+      await vi.advanceTimersByTimeAsync(90_000);
+      await failed;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("history pages oldest first, before and after a message or a time", async () => {
     const { ctx } = fake([msg("c", 3), msg("a", 1), msg("b", 2), msg("d", 4)]);
     expect(await callApi(ctx, "chat.history", { chat: "chat-one", limit: 2 })).toMatchObject({ messages: [{ id: "c" }, { id: "d" }], more: true });

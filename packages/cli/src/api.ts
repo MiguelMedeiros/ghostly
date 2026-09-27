@@ -21,7 +21,6 @@ import { chatDetailsJson, chatJson, groupJson, groupMessageJson, messageJson, ty
 
 const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
 
-/** Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). */
 /** Waits until the contact confirmed the latest edit of one of my messages (it is no longer pending). */
 async function waitForEdit(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<StoredMessage> {
   const until = Date.now() + ms;
@@ -48,6 +47,7 @@ async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: st
   }
 }
 
+/** Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). */
 async function waitForMessage(ctx: ApiContext, chat: string, messageId: string, target: "sent" | "delivered", ms: number): Promise<StoredMessage> {
   const want = DELIVERY_RANK[target];
   const look = (message: StoredMessage | undefined) => {
@@ -56,8 +56,6 @@ async function waitForMessage(ctx: ApiContext, chat: string, messageId: string, 
     if (delivery === "failed") throw new CliError("engine", message.deliveryError ?? "The message could not be sent", { messageId, delivery });
     return (DELIVERY_RANK[delivery] ?? 0) >= want ? message : undefined;
   };
-  const current = look((await node(ctx).getMessages(chat)).find((m) => m.id === messageId));
-  if (current) return current;
   return new Promise<StoredMessage>((resolve, reject) => {
     let settled = false;
     const finish = (error: unknown, message?: StoredMessage) => {
@@ -65,18 +63,21 @@ async function waitForMessage(ctx: ApiContext, chat: string, messageId: string, 
       settled = true; clearTimeout(timer); off();
       if (error) reject(error); else resolve(message!);
     };
-    const timer = setTimeout(() => {
-      void node(ctx).getMessages(chat).then((messages) => {
-        const message = messages.find((m) => m.id === messageId);
-        finish(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the message is ${message?.delivery ?? "not sent yet"} and still goes by itself while this profile is online`, { messageId, delivery: message?.delivery ?? null }));
-      }, finish);
-    }, ms);
+    const check = (last = false) => void node(ctx).getMessages(chat).then((messages) => {
+      const message = messages.find((m) => m.id === messageId);
+      try {
+        const done = look(message);
+        if (done) finish(null, done);
+        else if (last) finish(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the message is ${message?.delivery ?? "not sent yet"} and still goes by itself while this profile is online`, { messageId, delivery: message?.delivery ?? null }));
+      } catch (error) { finish(error); }
+    }, finish);
+    const timer = setTimeout(() => check(true), ms);
+    // Any event naming the message: a message first seen already delivered comes as `message.sent`, never as
+    // `message.delivery`. Listening before the first read leaves no gap for a change to slip through.
     const off = ctx.hub.onEvent((event: GhostlyEvent) => {
-      if (event.type !== "message.delivery" || event.chat !== chat || event.messageId !== messageId) return;
-      void node(ctx).getMessages(chat).then((messages) => {
-        try { const done = look(messages.find((m) => m.id === messageId)); if (done) finish(null, done); } catch (error) { finish(error); }
-      }, finish);
+      if (event.chat === chat && (event.messageId === messageId || (event.message as { id?: string } | undefined)?.id === messageId)) check();
     });
+    check();
   });
 }
 

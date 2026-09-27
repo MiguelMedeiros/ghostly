@@ -16,6 +16,12 @@ function pattern(offset: number, length: number): Uint8Array {
 }
 const STEP = FILE_BYTES_STEP;
 
+/** Byte for byte, at memory speed: toEqual walks a Uint8Array one element at a time (a second per MB, more on CI). */
+function expectBytes(actual: Uint8Array, expected: Uint8Array) {
+  expect(actual.length).toBe(expected.length);
+  expect(actual.findIndex((byte, i) => byte !== expected[i]), "the first byte that differs").toBe(-1);
+}
+
 afterEach(() => resetFileBytes());
 
 describe("files in IndexedDB pieces (no file system)", () => {
@@ -36,7 +42,7 @@ describe("files in IndexedDB pieces (no file system)", () => {
     expect(await bytes.size(id)).toBe(size);
     expect(await bytes.digest(id)).toBe(digestText(hash.digest()));
     for (const [offset, length] of [[0, 10], [STEP - 5, 10], [2 * STEP - 1, STEP + 2], [size - 3, 100]]) {
-      expect(await bytes.read(id, offset, length)).toEqual(pattern(offset, Math.min(length, size - offset)));
+      expectBytes(await bytes.read(id, offset, length), pattern(offset, Math.min(length, size - offset)));
     }
     const blob = (await bytes.blob(id, "image/png"))!;
     expect(blob.size).toBe(size);

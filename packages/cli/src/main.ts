@@ -318,14 +318,22 @@ async function daemonCommand(argv: string[]): Promise<void> {
   print(await startDetached(g, Number(parsed.options.timeout) || 60));
 }
 
-/** Asks the daemon to stop and waits until its process let go of the profile; its pid. */
+/**
+ * Asks the daemon to stop and waits until its process is gone, not only until it let go of the profile (it releases
+ * the lock a moment before it exits); its pid.
+ */
 async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Promise<number> {
   const { pid } = await client.call("daemon.stop") as { pid: number };
   client.close();
   const until = Date.now() + seconds * 1000;
-  while (lockOwner(g.paths) === pid && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
-  if (lockOwner(g.paths) === pid) throw new CliError("timeout", `The daemon (process ${pid}) has not stopped yet`);
+  const running = () => lockOwner(g.paths) === pid || processAlive(pid);
+  while (running() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+  if (running()) throw new CliError("timeout", `The daemon (process ${pid}) has not stopped yet`);
   return pid;
+}
+
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
 
 /** A daemon in the background, running this command's code, once its socket answers. */
