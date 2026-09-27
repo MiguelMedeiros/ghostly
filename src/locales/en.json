@@ -341,7 +341,12 @@
     "clear": "Clear",
     "clearAllDataInfo": "Wallets are not deleted: spend or back up your sats first if you want them gone too.",
     "advanced": "Advanced",
-    "advancedHint": "Network, relays and domain lookups"
+    "advancedHint": "Network, relays and domain lookups",
+    "profilePeek": "Check other profiles",
+    "profilePeekHint": "Show when a message waits for another profile",
+    "profilePeekInfo": "Now and then this app reads what your other unlocked profiles' contacts publish for them, over the same relays or DHT those profiles use. It only reads: it never opens a message, and locked profiles are skipped.",
+    "profilePeekNotify": "Notify for other profiles",
+    "profilePeekNotifyHint": "A system notice when one gets a message"
   },
   "updates": {
     "available": "Ghostly {{version}} is available",
@@ -484,7 +489,10 @@
     "open": "Open profile",
     "othersUnread": "unread messages in another profile",
     "switching": "Opening {{name}}…",
-    "holdHint": "Or hold Settings in the tab bar"
+    "holdHint": "Or hold Settings in the tab bar",
+    "new": "new messages",
+    "newShort": "New",
+    "othersNew": "new messages in another profile"
   },
   "pairing": {
     "you": "You",
@@ -718,5 +726,8 @@
     "shareNoChats": "No chats yet. Start one, then share again.",
     "shareOneFile": "1 file",
     "shareFiles": "{{count}} files"
+  },
+  "profilePeek": {
+    "notice": "New message in {{name}}"
   }
 }

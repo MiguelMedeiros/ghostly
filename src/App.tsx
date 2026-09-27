@@ -13,6 +13,7 @@ import { useSettings } from "./contexts/SettingsContext";
 import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
 import { useEngineNick } from "./hooks/useAvatars";
+import { useProfilePeek } from "./hooks/useProfilePeek";
 import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { useAppBadge } from "./lib/appBadge";
@@ -151,6 +152,7 @@ export function App() {
   useEffect(() => guardFileDrops(), []);
   useWakeOnReturn();
   useAppBadge();
+  useProfilePeek();
   const chats = useLoadedChats();
 
   const inChat = pathname.startsWith("/chat");

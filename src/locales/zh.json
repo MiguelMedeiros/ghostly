@@ -341,7 +341,12 @@
     "clear": "清除",
     "clearAllDataInfo": "钱包不会被删除:如果也想移除,请先花掉或备份你的 sats。",
     "advanced": "高级",
-    "advancedHint": "网络、中继和域名查询"
+    "advancedHint": "网络、中继和域名查询",
+    "profilePeek": "检查其他资料",
+    "profilePeekHint": "有消息等待其他资料时显示",
+    "profilePeekInfo": "此应用会不时通过其他未锁定资料所用的相同中继或 DHT，读取其联系人为它们发布的内容。它只读取：从不打开消息，并跳过已锁定的资料。",
+    "profilePeekNotify": "其他资料的通知",
+    "profilePeekNotifyHint": "有消息时显示系统通知"
   },
   "updates": {
     "available": "Ghostly {{version}} 已发布",
@@ -484,7 +489,10 @@
     "open": "打开个人资料",
     "othersUnread": "其他资料中有未读消息",
     "switching": "正在打开 {{name}}…",
-    "holdHint": "也可以在标签栏长按“设置”"
+    "holdHint": "也可以在标签栏长按“设置”",
+    "new": "新消息",
+    "newShort": "新",
+    "othersNew": "其他资料中有新消息"
   },
   "pairing": {
     "you": "你",
@@ -718,5 +726,8 @@
     "shareNoChats": "还没有聊天。先开始一个，再重新分享。",
     "shareOneFile": "1 个文件",
     "shareFiles": "{{count}} 个文件"
+  },
+  "profilePeek": {
+    "notice": "{{name}} 有新消息"
   }
 }

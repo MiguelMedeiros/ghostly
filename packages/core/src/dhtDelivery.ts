@@ -7,7 +7,7 @@ import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, 
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
-import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
+import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 import { validEditNumber } from "./pairedEdits";
@@ -448,31 +448,42 @@ export class DhtDelivery {
     await this.persist({ ...this.state, pending: pending ?? this.state.pending, receipt: receipt ?? this.state.receipt });
   }
   /**
-   * One packet from one of the contact's two mailboxes: `invite` (derived from the invite, which anyone holding a copy
-   * can write to) or `pinned`. `none`: nothing from the contact in it; `old`: the contact's, already read; `new`: taken.
+   * One packet from one of the contact's mailboxes, opened and checked the way `receive` takes it: the right address,
+   * one sealed record, a well-formed body within its times, signed by the key it names. Null: not an envelope of the
+   * contact's (the pin rules are the caller's).
    */
-  private async receive(packet: SignedPacket, box: "invite" | "pinned"): Promise<"none" | "old" | "new"> {
+  private open(packet: SignedPacket, box: "invite" | "pinned") {
     const address = box === "pinned" ? this.pinned()?.peerAddress : this.peerAddress;
-    if (!address || packet.pubKeyZ32 !== address || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return "none";
-    const records = packet.records.filter(r => r.label === "_dm"); if (records.length !== 1) return "none";
-    const hints = packet.records.filter(r => r.label === "_dmk"); if (hints.length > 1) return "none";
+    if (!address || packet.pubKeyZ32 !== address || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return null;
+    const records = packet.records.filter(r => r.label === "_dm"); if (records.length !== 1) return null;
+    const hints = packet.records.filter(r => r.label === "_dmk"); if (hints.length > 1) return null;
     const sender = hints.length ? tryDecrypt(hints[0].value, this.key) : null;
-    if (hints.length && !sender) return "none";
+    if (hints.length && !sender) return null;
     let plaintext: string | null;
-    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { return "none"; }
-    if (!plaintext || utf8Encode(plaintext).length > MAX_ENVELOPE_PLAINTEXT) return "none";
-    let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return "none"; }
-    if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return "none";
+    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { return null; }
+    if (!plaintext || utf8Encode(plaintext).length > MAX_ENVELOPE_PLAINTEXT) return null;
+    let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return null; }
+    if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return null;
     const [body, signature] = envelope as [Body, string];
     const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken] = body;
     const now = Date.now();
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || issued > now + 30_000 || expires <= now || expires - issued > CONTROL_TTL || issued >= expires ||
-      (mode !== "stream" && mode !== "dht") || typeof author !== "string" || typeof signature !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return "none";
-    if (sender && sender !== author) return "none";
+      (mode !== "stream" && mode !== "dht") || typeof author !== "string" || typeof signature !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return null;
+    if (sender && sender !== author) return null;
     try {
-      if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.to, this.from, sender ? this.participation.pubKeyZ32 : "invite", body])), publicKeyFromZ32(author))) return "none";
-    } catch { return "none"; }
+      if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.to, this.from, sender ? this.participation.pubKeyZ32 : "invite", body])), publicKeyFromZ32(author))) return null;
+    } catch { return null; }
+    return { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken };
+  }
+  /**
+   * One packet from one of the contact's two mailboxes: `invite` (derived from the invite, which anyone holding a copy
+   * can write to) or `pinned`. `none`: nothing from the contact in it; `old`: the contact's, already read; `new`: taken.
+   */
+  private async receive(packet: SignedPacket, box: "invite" | "pinned"): Promise<"none" | "old" | "new"> {
+    const opened = this.open(packet, box);
+    if (!opened) return "none";
+    const { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken } = opened;
     // Before the pin, the key the invite named: another invite holder's envelope is refused, and not remembered,
     // since whoever holds a copy can write to this mailbox and the inviter's next envelope replaces it.
     if (!this.options.credentials.peerKey && this.options.credentials.expectedPeerKey && this.options.credentials.expectedPeerKey !== author) return "none";
@@ -550,6 +561,29 @@ export class DhtDelivery {
       if (got !== "none" && !(box === "invite" && !before && this.state.peerPinned)) return;
     }
   }
+  /**
+   * A look at this chat from another profile of the device while this one is not running (WISP 04 § Checking other
+   * profiles): the mailbox the chat reads first, opened and checked as `receive` does, with nothing saved, pinned or
+   * published. It tells only whether the contact's envelope carries a text this side has not taken yet, and that text's
+   * id; the words are dropped unread. `reads`: requests spent. Null `text`: nothing new, or nothing of the contact's.
+   */
+  async peek(options?: PkarrRequestOptions): Promise<{ reads: number; text: string | null }> {
+    const expected = this.options.credentials.peerKey ?? this.options.credentials.expectedPeerKey;
+    if (!expected) return { reads: 0, text: null };
+    const pinned = this.pinned(), before = this.state.peerPinned;
+    const boxes: ("invite" | "pinned")[] = !pinned || !before ? ["invite"] : before === "seen" ? ["pinned"] : ["pinned", "invite"];
+    let reads = 0;
+    for (const box of boxes) {
+      const packet = await this.options.transport.resolve(box === "pinned" ? pinned!.peerAddress : this.peerAddress, options);
+      reads++;
+      const opened = packet && this.open(packet, box);
+      if (!opened || opened.author !== expected) continue;
+      const { sequence, message } = opened;
+      const fresh = Array.isArray(message) && typeof message[0] === "string" && ID.test(message[0]) && sequence > this.state.peerSequence && this.state.receipt?.id !== message[0];
+      return { reads, text: fresh ? message[0] : null };
+    }
+    return { reads, text: null };
+  }
   private async tick(): Promise<void> {
     if (!this.running) return;
     // A read asked for during one in flight happens right after it: its answer may predate the reason.
@@ -597,3 +631,14 @@ export class DhtDelivery {
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";
+
+/**
+ * `DhtDelivery.peek` for a chat of a profile that is not running: built from what that profile stored, with every
+ * callback a no-op that refuses to save, so the look can change nothing.
+ */
+export function peekDhtMailbox(options: { params: LinkParams; credentials: PairingCredentials; state?: DhtDeliveryState; transport: PkarrTransport; background?: boolean }): Promise<{ reads: number; text: string | null }> {
+  const refuse = async () => { throw new Error("A peek saves nothing"); };
+  const delivery = new DhtDelivery({ params: options.params, mode: "stream", state: options.state, credentials: { ...options.credentials }, transport: options.transport,
+    save: refuse, pin: refuse, message: refuse, receipt: refuse, changed: () => {} });
+  return delivery.peek(options.background ? { background: true } : undefined);
+}

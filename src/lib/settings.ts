@@ -54,6 +54,11 @@ export interface AppSettings {
    * and sends them with it. Only the sender's app ever contacts the site; off, links go as plain text.
    */
   linkPreviews: boolean;
+  /**
+   * Checking this device's other unlocked profiles for new messages (WISP 04 § Checking other profiles): `enabled`
+   * absent follows the platform (on for Desktop, off for the web and the extension); `notify` shows a system notice.
+   */
+  profilePeek?: { enabled?: boolean; notify?: boolean };
   /** WISP 1000: this profile's random storage space, chosen on first backup. */
   backupSpace?: string;
   /** WISP 1002: where backups go, if S3-compatible storage is set up. Never copied into a backup. */

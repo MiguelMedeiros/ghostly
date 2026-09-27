@@ -2,6 +2,7 @@ import { databaseExists } from "@ghostly/browser/backup/database";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { activeProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
 import { unreadUnder } from "./storage";
+import { peekFresh } from "./profilePeek";
 import { verifyPassword } from "./settings";
 
 /** What deleting a profile would take away, read from its own storage without starting it. */
@@ -45,6 +46,8 @@ function drop(name: string): Promise<void> {
 }
 
 const databaseOf = (id: string) => (namespaceOf(id) ? `ghostly_${namespaceOf(id)}` : "ghostly");
+/** A profile's peer database (WISP 04). */
+export const profileDatabase = databaseOf;
 
 /** The Ark wallets a profile's database names, current and retired. */
 async function arkWalletIds(dbName: string): Promise<string[]> {
@@ -70,14 +73,14 @@ export function profileLock(id: string): string | null {
 }
 
 /**
- * What the switcher shows of a profile that is not running: its picture and how many messages were left
- * unread in its chats. Nothing new reaches a profile while it is not running (its peer is off), so this is
- * what was there when it was left. A locked profile shows neither: only its name and that it is locked.
+ * What the switcher shows of a profile that is not running: its picture, how many messages were left unread in its
+ * chats, and in how many chats something new waits for it (`fresh`), as the running profile saw while checking the
+ * others (WISP 04 § Checking other profiles). A locked profile shows none of it: only its name and that it is locked.
  */
-export interface ProfileGlance { locked: boolean; unread: number; avatar?: string }
+export interface ProfileGlance { locked: boolean; unread: number; fresh: number; avatar?: string }
 export async function profileGlance(id: string): Promise<ProfileGlance> {
-  if (profileLock(id)) return { locked: true, unread: 0 };
-  return { locked: false, unread: unreadUnder(prefixOf(id)), avatar: await storedAvatar(databaseOf(id)) };
+  if (profileLock(id)) return { locked: true, unread: 0, fresh: 0 };
+  return { locked: false, unread: unreadUnder(prefixOf(id)), fresh: peekFresh(id), avatar: await storedAvatar(databaseOf(id)) };
 }
 /** The picture a profile's peer keeps in its settings (WISP 04), if it is the small JPEG the peer accepts. */
 async function storedAvatar(dbName: string): Promise<string | undefined> {
@@ -103,11 +106,16 @@ export async function assertUnlocked(id: string, password?: string): Promise<voi
   if (hash && !(password && (await verifyPassword(password, hash)))) throw new Error("Wrong lock password for that profile");
 }
 
+/** Another window runs that profile: it is online itself. */
+export const runningElsewhere = (id: string) => lockHeld(namespaceOf(id));
+
 /** Another tab running this profile holds its peer lock (see the entry points). */
-async function runningElsewhere(ns: string): Promise<boolean> {
+async function lockHeld(ns: string): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.locks?.query) return false;
   const { held = [] } = await navigator.locks.query();
-  return held.some((lock) => lock.name === `ghostly-peer-${ns}`);
+  // The default profile's lock is `ghostly-peer` on the web and in the extension, `ghostly-peer-` on Desktop.
+  const names = ns ? [`ghostly-peer-${ns}`] : ["ghostly-peer", "ghostly-peer-"];
+  return held.some((lock) => !!lock.name && names.includes(lock.name));
 }
 
 /**
@@ -120,7 +128,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   if (id === activeProfileId()) throw new Error("Switch to another profile first");
   await assertUnlocked(id, password);
   const ns = namespaceOf(id), dbName = `ghostly_${ns}`;
-  if (await runningElsewhere(ns)) throw new Error("This profile is open in another window. Close it, then try again.");
+  if (await lockHeld(ns)) throw new Error("This profile is open in another window. Close it, then try again.");
   const others = new Set((await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => arkWalletIds(databaseOf(p.id))))).flat());
   const arkIds = (await arkWalletIds(dbName)).filter((walletId) => !others.has(walletId));
   if (await databaseExists(dbName)) await drop(dbName);

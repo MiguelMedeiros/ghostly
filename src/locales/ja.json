@@ -341,7 +341,12 @@
     "clear": "消去",
     "clearAllDataInfo": "ウォレットは削除されません。それも消したい場合は、先にsatsを使うかバックアップしてください。",
     "advanced": "詳細設定",
-    "advancedHint": "ネットワーク、リレー、ドメインの照会"
+    "advancedHint": "ネットワーク、リレー、ドメインの照会",
+    "profilePeek": "他のプロフィールを確認",
+    "profilePeekHint": "別のプロフィール宛てのメッセージを知らせます",
+    "profilePeekInfo": "このアプリは時々、ロックされていない他のプロフィールの連絡先がそのプロフィール宛てに公開したものを、そのプロフィールと同じリレーまたは DHT で読みます。読むだけで、メッセージを開くことはなく、ロックされたプロフィールは対象外です。",
+    "profilePeekNotify": "他のプロフィールを通知",
+    "profilePeekNotifyHint": "メッセージが届いたらシステム通知"
   },
   "updates": {
     "available": "Ghostly {{version}} が公開されました",
@@ -484,7 +489,10 @@
     "open": "プロフィールを開く",
     "othersUnread": "別のプロフィールに未読メッセージがあります",
     "switching": "{{name}} を開いています…",
-    "holdHint": "タブバーの設定を長押しでも切り替えられます"
+    "holdHint": "タブバーの設定を長押しでも切り替えられます",
+    "new": "新着メッセージ",
+    "newShort": "新着",
+    "othersNew": "別のプロフィールに新着メッセージがあります"
   },
   "pairing": {
     "you": "あなた",
@@ -718,5 +726,8 @@
     "shareNoChats": "まだチャットがありません。始めてから、もう一度共有してください。",
     "shareOneFile": "1 個のファイル",
     "shareFiles": "{{count}} 個のファイル"
+  },
+  "profilePeek": {
+    "notice": "{{name}} に新着メッセージ"
   }
 }

@@ -13,7 +13,7 @@ const LockIcon = () => (
 
 /**
  * The switcher itself: the active profile on top in its colors, which opens the Profile page; the others
- * below with their picture and what they left unread, one tap each; then Add a profile and Manage profiles.
+ * below with their picture, what they left unread and whether something new waits for them, one tap each; then Add a profile and Manage profiles.
  * A popover over the account bar on a wide screen, a sheet from the bottom on a phone. Arrow keys, Home/End,
  * Enter; Escape closes.
  */
@@ -91,8 +91,9 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
       {others.length > 0 && <div role="none" className="my-1 border-t border-border" />}
       {others.map((other) => {
         const { entry, glance } = other;
-        const unread = glance?.unread ?? 0;
-        const status = glance?.locked ? t("profileSwitcher.locked") : unread ? t("profileSwitcher.unread", { count: unread }) : "";
+        const unread = glance?.unread ?? 0, fresh = glance?.fresh ?? 0;
+        const status = glance?.locked ? t("profileSwitcher.locked")
+          : [fresh ? t("profileSwitcher.new") : "", unread ? t("profileSwitcher.unread", { count: unread }) : ""].filter(Boolean).join(", ");
         return (
           <button key={entry.id || "default"} type="button" role="menuitemradio" aria-checked="false" data-testid="profile-switcher-item"
             aria-label={`${t("profileSwitcher.switchTo", { name: entry.name })}${status ? `, ${status}` : ""}`}
@@ -103,7 +104,11 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
             <span className="flex-1 min-w-0 truncate text-sm text-text-primary">{entry.name}</span>
             {glance?.locked
               ? <span className="shrink-0 text-text-muted" title={t("profileSwitcher.locked")} data-testid="profile-switcher-locked"><LockIcon /></span>
-              : unread > 0 && <span data-testid="profile-switcher-unread" aria-hidden="true" className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-accent text-[11px] font-bold leading-5 text-center text-on-accent tabular-nums">{unread > 99 ? "99+" : unread}</span>}
+              : <>
+                {/* Seen waiting for it since it last ran (WISP 04 § Checking other profiles): it arrives when it runs. */}
+                {fresh > 0 && <span data-testid="profile-switcher-new" aria-hidden="true" className="shrink-0 h-5 px-1.5 rounded-full border border-accent text-[11px] font-semibold leading-[18px] text-accent">{t("profileSwitcher.newShort")}</span>}
+                {unread > 0 && <span data-testid="profile-switcher-unread" aria-hidden="true" className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-accent text-[11px] font-bold leading-5 text-center text-on-accent tabular-nums">{unread > 99 ? "99+" : unread}</span>}
+              </>}
           </button>
         );
       })}
