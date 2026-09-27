@@ -110,6 +110,8 @@ export const CONNECT_MS = 600;
 export const rtc = { blocked: false };
 
 class FakePeerConnection extends EventTarget {
+  /** The app this connection belongs to, for `killRtc`. */
+  owner?: string;
   localDescription: RTCSessionDescriptionInit | null = null;
   remoteDescription: RTCSessionDescriptionInit | null = null;
   iceGatheringState: RTCIceGatheringState = "complete";
@@ -136,6 +138,34 @@ class FakePeerConnection extends EventTarget {
     }, CONNECT_MS);
   }
   close() { this.closed = true; this.connectionState = "closed"; this.channel?.close(); }
+}
+
+const peerConnections = new Set<FakePeerConnection>();
+/** A stand-in WebRTC connection owned by the app `owner` (see `killRtc`). */
+export function fakePeerConnection(owner?: string): RTCPeerConnection {
+  const pc = new FakePeerConnection();
+  pc.owner = owner;
+  peerConnections.add(pc);
+  return pc as unknown as RTCPeerConnection;
+}
+/**
+ * The app `owner` ends with nothing said: its connections go dead. The contact's side sees its connection
+ * `disconnected` once ICE consent checks stop being answered, `disconnectedAfterMs` later.
+ */
+export function killRtc(owner: string, disconnectedAfterMs = 5_000): void {
+  for (const pc of [...peerConnections]) {
+    if (pc.owner !== owner || pc.closed) continue;
+    peerConnections.delete(pc);
+    pc.closed = true; pc.connectionState = "closed";
+    const channel = pc.channel, far = channel?.peer;
+    if (channel) { channel.peer = null; channel.readyState = "closed"; }
+    const farPc = [...peerConnections].find(other => other.channel === far);
+    if (farPc) setTimeout(() => {
+      if (farPc.closed) return;
+      farPc.connectionState = "disconnected";
+      farPc.dispatchEvent(new Event("connectionstatechange"));
+    }, disconnectedAfterMs);
+  }
 }
 
 export interface Side { params: LinkParams; seedB64: string; role: "inviter" | "joiner"; createdAt: number; /** An app from before pairing progress: no tracker, the lower key dials. */ old?: boolean }
@@ -191,7 +221,7 @@ export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean
     pollIntervals: options.pollIntervals ?? DHT_POLL_INTERVALS,
     autoConnect: true,
     ...options.link,
-    createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+    createPeerConnection: () => fakePeerConnection(),
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
     events: {
       onPairingProgress: p => progress.push(p),
@@ -237,6 +267,7 @@ export async function closeWorld(): Promise<void> {
   for (let i = 0; !stopped && i < 200; i++) { await vi.advanceTimersByTimeAsync(100); await yieldToLoop(); }
   await stopping;
   byFingerprint.clear();
+  peerConnections.clear();
   rtc.blocked = false;
   vi.useRealTimers();
 }

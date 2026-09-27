@@ -37,6 +37,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     start = vi.fn();
     stop = vi.fn(async () => {});
     wake = vi.fn();
+    depart = vi.fn();
     connect = vi.fn(async () => {});
     disconnect = vi.fn();
     sendFile = vi.fn(async (_wire: unknown, source: AsyncIterable<Uint8Array>) => { for await (const chunk of source) this.sent.push(chunk); });
@@ -195,6 +196,32 @@ describe("a chat as the contact drives it", () => {
     await pairing.verifyPeer!(first);
     expect(await saved(chat.id)).toMatchObject({ pairedPeerKey: first, requireSignedSignals: true, peerTrust: { verifiedKey: first } });
     expect(node.getState().links[0]).toMatchObject({ peerVerified: true, peerParticipationKey: first });
+  });
+});
+
+describe("an app restarting (WISP 100, Back after a restart)", () => {
+  it("a chat live when the app last ran resumes on that transport; one that ended off live, DHT only or unpaired does not", async () => {
+    const paired = { pairedPeerKey: createIdentity().pubKeyZ32 };
+    const live = row({ ...paired, transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
+    const switched = row({ ...paired, transportHistory: [{ at: 1, kind: "live", transport: "webrtc/1" }, { at: 2, kind: "switched", from: "webrtc/1", transport: "hyperdht/1" }] });
+    const dropped = row({ ...paired, transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }, { at: 2, kind: "down", from: "iroh/1" }] });
+    const dhtOnly = row({ ...paired, deliveryMode: "dht", transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
+    const unpaired = row({ transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
+    const { linkOf } = await started(live, switched, dropped, dhtOnly, unpaired);
+    expect([live, switched, dropped, dhtOnly, unpaired].map(chat => linkOf(chat.id).options.resume))
+      .toEqual(["iroh/1", "hyperdht/1", undefined, undefined, undefined]);
+  });
+
+  it("shutting down says goodbye on every link before anything else it waits for", async () => {
+    const chat = row({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const { node, linkOf } = await started(chat);
+    const link = linkOf(chat.id) as unknown as { depart: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
+    const stopping = node.shutdown();
+    // Said synchronously, as the page may be gone by the next tick.
+    expect(link.depart).toHaveBeenCalledOnce();
+    expect(link.stop).not.toHaveBeenCalled();
+    await stopping;
+    expect(link.stop).toHaveBeenCalled();
   });
 });
 

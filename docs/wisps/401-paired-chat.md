@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.11 |
+| Revision | 0.12 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
@@ -75,6 +75,8 @@ The reader looks for `i` among this chat's own messages only; what it finds ther
 
 A connection can die without either side being told (a laptop asleep, an app suspended in the background, a network change). While a session is ready, each side sends `{"t":"paired-ping"}` every 15 seconds and answers each one with `{"t":"paired-pong"}`. Any frame from the peer counts as a sign of life. Three pings in a row with nothing back close the session and its connection, and the dialling side tries again. This counts from the open for a peer whose `pair-offer` lists `ping/1` in `extensions`, so a contact that freezes before the first ping (a laptop closed right after connecting) is noticed too; for a peer that does not say so, it counts once that peer has answered a ping, and a peer that never answers one (an older app) is never cut off for it. Missed pings are counted, not timed, so a throttled background tab is not mistaken for a dead peer.
 
+An app going away (it quits, its page closes) first sends `{"t":"paired-bye"}` on every ready session. The contact closes the session at once instead of waiting for its liveness, and watches for the app to come back ([100](100-transports.md#back-after-a-restart-revision-06)). The frame carries no id, so older apps drop it. Only on a ready session: before it, the contact's handshake would fail on it anyway.
+
 The side that dials waits 20 seconds after a failed attempt, doubling up to 3 minutes. A link that worked and then dropped is dialled again as soon as the contact is seen. Opening a chat, or bringing the window back, looks for the contact at once and starts the wait over; the side that does not dial republishes its presence so the other one sees it fresh. A chat whose contact was never seen (an invite just sent) keeps polling at the active pace for ten minutes even in the background. The side that does not dial, when it sees the other side just appear (a packet of its that is new and under 30 seconds old), polls at the signaling pace for 30 seconds: the offer follows that side's presence by a moment, and left to the background pace it waited up to 30 seconds on the relays. A contact that has been online a while is not waited on this way (nothing is coming now), so an app opening with many contacts does not spend the relays' budget on it.
 
 ## Capabilities on this session
@@ -140,6 +142,7 @@ First contact runs on the DHT and on a stream in parallel, and native transports
 
 ## Revision log
 
+- 0.12 (2026-09-27): `paired-bye`, the goodbye an app sends on its way out.
 - 0.11 (2026-09-27): what a typing `start` says: `kind` (typing, recording, thinking) and a bot's `status` line (40 characters, plain text); older apps show typing.
 - 0.10 (2026-09-27): edits, `edit/1` with `paired-edit` and `paired-edited` on the live session: the whole new text numbered per message, only the contact's own messages, a receive limit, an edit before its message waits a minute.
 - 0.9 (2026-09-27): a file (a voice message included) can be a reply: `r` on its announcement, as on a text.

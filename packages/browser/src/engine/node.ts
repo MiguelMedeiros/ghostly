@@ -1075,9 +1075,19 @@ export class GhostlyNode implements EngineImplementation {
     void this.usdtWallets[network].ensureReady();
   }
 
+  /**
+   * Says goodbye on every live session (`paired-bye`): the contacts end theirs now and watch for this app to come back,
+   * instead of noticing a minute later. Synchronous: an app closing may have no time for anything after it.
+   */
+  depart(): void {
+    for (const live of this.links.values()) live.link?.depart();
+  }
+
   /** Tells every peer we are leaving. Best effort: the browser may already be closing. */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
+    this.depart();
     if (this.relayRetry) clearTimeout(this.relayRetry);
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
@@ -3404,6 +3414,8 @@ export class GhostlyNode implements EngineImplementation {
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback,
         automatic: stored.preferredTransport === undefined },
+      // Live when this app last ran: the contact may still hold that session, and is reached again at once (WISP 100).
+      resume: stored.pairedPeerKey && stored.deliveryMode !== "dht" ? this.transportLogOf(live)?.liveAtLastRun : undefined,
       pairing: credentials ? {
         credentials,
         verifyPeer: async key => {

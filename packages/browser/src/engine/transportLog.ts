@@ -195,6 +195,19 @@ export class TransportLog {
   }
 
   /**
+   * The transport the chat was live on when this app last ran: the history ends on a live stretch nobody saw end (the
+   * app quit, or crashed, with the session up; nothing is recorded while it shuts down). None when it ends off live.
+   */
+  get liveAtLastRun(): PairedTransport | undefined {
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      const e = this.history[i];
+      if (e.kind === "live" || e.kind === "switched") return e.transport;
+      if (e.kind === "down" || e.kind === "dht-only") return undefined;
+    }
+    return undefined;
+  }
+
+  /**
    * The choice `by` last made, as the rows tell it: the transport of its latest choice (a `chose` row, or the switch
    * that choice became), `automatic` when that was going back to the app's rule or there is none.
    */
