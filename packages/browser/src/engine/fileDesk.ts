@@ -125,14 +125,25 @@ export class FileDesk {
     return { live: !!files?.live, peerRoom: files?.peerRoom ?? null };
   }
 
-  /** Offers a file whose record and bytes are stored under its local id (`outgoingFileId`). */
+  /**
+   * Offers a file whose record and bytes are stored under its local id (`outgoingFileId`). Offered before (Retry, a
+   * restart): an unfinished transfer is taken over and offered again, a failed one sent again; never a second one.
+   */
   async offer(linkId: string, file: MessageFile, wireId: string, timestamp: number): Promise<void> {
     const chat = this.chat(linkId);
     const stored = await fileStore.get(file.id);
     if (!stored) throw new Error("The file is gone");
     const existing = chat.files.get("out", wireId);
-    if (existing && !transferEnded(existing)) return;
-    if (existing?.state === "failed") { chat.files.retry(wireId); return; }
+    if (existing) {
+      if (existing.state === "done") return;
+      if (existing.state === "declined" || existing.state === "cancelled") throw new Error(existing.error ?? "It was cancelled");
+      // Not running (a restart, a link that went) or failed: sent again, from what the contact holds.
+      chat.files.resend(wireId);
+      const current = chat.files.get("out", wireId);
+      if (current) this.show(linkId, chat, current, chat.files.transferred("out", wireId));
+      this.deps.changed();
+      return;
+    }
     chat.files.offer({ id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }) }, stored.digest);
   }
 
@@ -167,6 +178,19 @@ export class FileDesk {
       }
     }
     return chat.files.live;
+  }
+
+  /** Shows a files/3 transfer's own view again; false when this local file has none. */
+  reshow(linkId: string, fileId: string): boolean {
+    const chat = this.chats.get(linkId);
+    if (!chat) return false;
+    const out = fileId.startsWith(`${linkId}-out-`);
+    const wireId = out ? fileId.slice(`${linkId}-out-`.length) : [...chat.local].find(([, local]) => local === fileId)?.[0];
+    const record = wireId && chat.files.get(out ? "out" : "in", wireId);
+    if (!wireId || !record) return false;
+    this.show(linkId, chat, record, chat.files.transferred(record.direction, wireId));
+    this.deps.changed();
+    return true;
   }
 
   /** Whether this local file is a files/3 transfer, and not finished. */
@@ -317,7 +341,8 @@ export class FileDesk {
     } else this.speeds.delete(id);
     if (view.stage === "asking" && record.direction === "in") { view.room = this.deps.transfers.get(id)?.room; void this.room(id); }
     this.deps.transfers.set(id, view);
-    if (!transferEnded(record)) this.underway.add(id);
+    // Ended, then going again (sent again, taken again): its next end is reported too.
+    if (!transferEnded(record)) { this.underway.add(id); this.ended.delete(id); }
     else if (!this.ended.has(id)) { this.ended.add(id); this.deps.settled?.(linkId, id, record, this.underway.delete(id)); }
   }
 

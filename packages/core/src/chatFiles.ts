@@ -101,6 +101,11 @@ export interface FileTransferRecord {
   /** In: the person accepted it (not taken on its own). */
   consented?: boolean;
   /**
+   * In, `cancelled`: the sender stopped it (`pf-abort`), not this person. Offered again (the sender could not read its
+   * file and sends it again), it is taken again from the start.
+   */
+  abortedBySender?: boolean;
+  /**
    * In: taken, by the person or within the app's limits. An offer that expired unanswered never was, so offered again
    * it is refused, never taken without asking.
    */
@@ -489,15 +494,16 @@ export class ChatFiles {
       switch (record.state) {
         case "done": this.send({ t: "pf-done", id }); return;
         case "declined": this.send({ t: "pf-refuse", id, why: "declined" }); return;
-        case "cancelled": this.send({ t: "pf-refuse", id, why: "cancelled" }); return;
+        case "cancelled":
+          // Cancelled here stays cancelled; stopped by the sender (it could not read its file), it is taken again.
+          if (!record.abortedBySender || (!record.agreed && !record.consented)) { this.send({ t: "pf-refuse", id, why: "cancelled" }); return; }
+          await this.retake(existing);
+          break;
         case "failed":
           // Expired here before anyone answered: nothing was agreed, and offered again it would skip the question.
           if (!record.agreed && !record.consented) { this.send({ t: "pf-refuse", id, why: "expired" }); return; }
           // Sent again after it failed here (damaged, not stored): taken again from the start, as it was agreed.
-          await existing.in?.target?.then((t) => t.discard()).catch(() => {});
-          existing.in = { written: 0, stored: 0, acked: 0, checkpointed: 0, writing: Promise.resolve() };
-          Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, since: this.now() });
-          this.changed(existing);
+          await this.retake(existing);
           break;
         case "asking": this.send({ t: "pf-wait", id, why: "consent" }); return;
       }
@@ -524,6 +530,14 @@ export class ChatFiles {
     this.changed(entry);
     if (decision === "ask") this.send({ t: "pf-wait", id, why: "consent" });
     else if (!paused) this.startIncoming(entry);
+  }
+
+  /** An agreed file that ended here, offered again: taken again from the start. */
+  private async retake(entry: Entry): Promise<void> {
+    await entry.in?.target?.then((t) => t.discard()).catch(() => {});
+    entry.in = { written: 0, stored: 0, acked: 0, checkpointed: 0, writing: Promise.resolve() };
+    Object.assign(entry.record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, abortedBySender: undefined, since: this.now() });
+    this.changed(entry);
   }
 
   private onData(entry: Entry, frame: Record<string, unknown>): void {
@@ -655,6 +669,7 @@ export class ChatFiles {
     if (frame.t === "pf-abort") {
       if (incoming && !transferEnded(incoming.record)) {
         await incoming.in?.target?.then((t) => t.discard()).catch(() => {});
+        incoming.record.abortedBySender = true;
         this.end(incoming, "cancelled", "Cancelled by the sender");
         this.startNext();
       }

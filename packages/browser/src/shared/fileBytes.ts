@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { databaseName } from "./idb";
-import { digestText } from "./fileBytesCommon";
+import { digestText, FILE_BYTES_STEP } from "./fileBytesCommon";
 
 /**
  * Where the bytes of a file live when they may be more than memory holds: a file sent or received in a chat.
@@ -69,16 +69,18 @@ export function fileSpace(): string {
   return space;
 }
 
-/** SHA-256 of a Blob, read as a stream: memory stays at one read. */
+/**
+ * SHA-256 of a Blob, read a step at a time: memory stays at one step. Read with `slice().arrayBuffer()`, not
+ * `stream()`: in WebKit a Blob kept in IndexedDB that reads fine in slices failed as a stream ("The object can not be
+ * found here"), which failed a voice note after all its bytes had arrived.
+ */
 export async function blobDigest(blob: Blob, onProgress?: (done: number) => void): Promise<string> {
   const hash = sha256.create();
-  let done = 0;
-  const reader = blob.stream().getReader();
-  for (;;) {
-    const { done: end, value } = await reader.read();
-    if (end) break;
-    hash.update(value);
-    done += value.length;
+  for (let done = 0; done < blob.size;) {
+    const part = new Uint8Array(await blob.slice(done, Math.min(blob.size, done + FILE_BYTES_STEP)).arrayBuffer());
+    if (!part.length) throw new Error("The file is shorter than it says");
+    hash.update(part);
+    done += part.length;
     onProgress?.(done);
   }
   return digestText(hash.digest());

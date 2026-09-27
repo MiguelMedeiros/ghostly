@@ -497,6 +497,29 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.b.sent.filter((f) => f.t === "pf-accept").length).toBeGreaterThan(accepts);
   });
 
+  it("a sender that could not read its file stops it; sent again, the receiver takes it again, while one it cancelled stays so", async () => {
+    const w = wire({ keepBytes: true });
+    w.attach();
+    let unreadable = true;
+    const src = source(200_000);
+    w.a.sources.set("reread-1", { read: (offset, length) => (unreadable ? Promise.reject(new Error("The object can not be found here.")) : src.read(offset, length)), digest: () => src.digest() });
+    w.a.files.offer(file("reread-1", 200_000));
+    await until(() => state(w.b, "in", "reread-1") === "cancelled");
+    expect(w.a.records.get("out:reread-1")).toMatchObject({ state: "failed", error: "Could not read the file: The object can not be found here." });
+    unreadable = false;
+    expect(w.a.files.resend("reread-1")).toBe(true);
+    await until(() => state(w.a, "out", "reread-1") === "done");
+    expect(Uint8Array.from(w.b.disks.get("reread-1")!.bytes!)).toEqual(pattern(0, 200_000));
+
+    // The receiver's own cancel is final: offered again, it is refused.
+    w.b.decide = async () => "ask";
+    send(w, file("mine-001", 50_000));
+    await until(() => state(w.b, "in", "mine-001") === "asking");
+    w.b.files.cancel("in", "mine-001");
+    await until(() => state(w.a, "out", "mine-001") === "cancelled");
+    expect(w.a.files.resend("mine-001")).toBe(false);
+  });
+
   it("a lost chunk (a transport switch) makes the receiver say where it stands, and the sender goes back", async () => {
     let lost = false;
     const w = wire({ keepBytes: true, drop: (frame) => {

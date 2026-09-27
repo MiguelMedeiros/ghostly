@@ -13,7 +13,7 @@ import {
 import type { ServicesPlatform, WalletPlatform } from "../../../../src/lib/platform";
 import type { WalletNetwork } from "@ghostly/core";
 import { fileStore } from "../shared/idb";
-import { SMALL_FILE_BYTES, fileBytes, fileBytesOf } from "../shared/fileBytes";
+import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { storedBlob } from "../shared/storedFiles";
 import type { FileTransferState } from "../../../../src/lib/platform";
 import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
@@ -279,7 +279,9 @@ export const servicesPlatform: ServicesPlatform | null = {
     const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice };
     const transfer = { state: "transferring" as const, transferred: 0, size: file.size };
     if (source.size <= SMALL_FILE_BYTES) {
-      await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+      // Its digest from the bytes in hand (a recording in memory): sending never has to read the stored copy back whole.
+      const digest = await blobDigest(source);
+      await fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
       await engine.call("sendFile", { linkId: link.id, file, timestamp });
       return { timestamp, file };
     }
