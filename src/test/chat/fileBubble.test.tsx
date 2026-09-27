@@ -39,6 +39,9 @@ describe("what a file's status line says", () => {
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
     ["copying before the offer", t({ stage: "preparing" }), "Preparing… 62% of 4.2 GB"],
     ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Declined"],
+    ["cancelled", { state: "failed", transferred: 0, size: f.size, error: "Cancelled by the sender" } as FileTransferState, "Cancelled"],
+    ["broken off, arriving here", { state: "failed", direction: "in", transferred: 0, size: f.size, error: "Connection lost" } as FileTransferState, "Did not arrive"],
+    ["broken off, sent from here", { state: "failed", direction: "out", transferred: 0, size: f.size, error: "Connection lost" } as FileTransferState, "Not sent"],
     ["stuck", t({ stalled: true, rate: 12 * 1024 ** 2 }), "Not moving · 62% of 4.2 GB"],
     ["stuck, no connection: the connection is the reason", t({ stalled: true, stage: "waiting" }), "Waiting for connection · 62% done"],
   ])("%s", (_, transfer, text) => {

@@ -2,6 +2,7 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
+import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -326,6 +327,21 @@ describe("MessageBubble: delivery", () => {
     const { user, engine } = bubble({ sender: "me", delivery: "failed" });
     await user.click(screen.getByRole("button", { name: "Not sent. Send again" }));
     expect(engine.callsTo("retryMessage")).toEqual([]);
+  });
+
+  it("a file of mine has the clock while its bytes travel, and the red mark (which sends it again) when they did not go", async () => {
+    vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
+    const file = { id: "link-1-out-f", name: "report.pdf", size: 10, mime: "application/pdf" };
+    const { user, engine } = bubble({ sender: "me", text: "report.pdf", file, delivery: "delivered" });
+    act(() => engine.update({ transfers: { [file.id]: { state: "transferring", direction: "out", transferred: 2, size: 10 } } }));
+    expect(mark()).toHaveAttribute("data-delivery", "sending");
+    act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 2, size: 10, error: "Connection lost", retry: true } } }));
+    await user.click(screen.getByRole("button", { name: "Not sent. Send again" }));
+    expect(retryFile).toHaveBeenCalledWith(file.id);
+    // Declined: the message arrived, its file did not; the ticks stay and nothing is offered again.
+    act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 0, size: 10, error: "Declined by your contact" } } }));
+    expect(mark()).toHaveAttribute("data-delivery", "delivered");
   });
 
   it("marks a picture of mine on the dark chip over it, the same way", () => {

@@ -756,6 +756,8 @@
     "packages/core/src/{files,pairedFiles,chatFiles}.ts": ["files.*","delivery.hold.picture"],
     "packages/browser/src/engine/fileDesk.ts": ["files.*"],
     "src/lib/fileStatus.ts": ["files.*"],
+    "{src/components/chat/DeliveryStatus.tsx,src/lib/delivery.ts}": ["chat.waiting","chat.paired.receipts","chat.paired.offline-send","chat.dht.*","delivery.hold.*","app.theme.bubbles","app.menus"],
+    "src/components/chat/RoundRetry.tsx": ["files.*","app.theme.bubbles"],
     "packages/core/src/voice.ts": ["files.voice.*","files.download"],
     "src/lib/fileDownload.ts": ["files.download"],
     "packages/core/src/linkPreview.ts": ["chat.link-preview.*"],

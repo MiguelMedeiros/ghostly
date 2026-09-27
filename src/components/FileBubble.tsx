@@ -3,12 +3,12 @@ import { PREVIEWABLE_IMAGE, sanitizeFileName } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { fileStatus, stalledAction } from "../lib/fileStatus";
+import { canRetryFile, fileStatus, stalledAction } from "../lib/fileStatus";
 import type { FileAction } from "../lib/platform";
 import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import type { ChatFile } from "../lib/types";
 
-const linkButton = "text-xs underline px-2 py-1 bg-transparent border-none text-inherit cursor-pointer";
+const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
 /** A file in the chat: progress while it travels, then a preview (images) and a way to save it. */
 export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile; peerName?: string }) {
@@ -72,7 +72,7 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
   const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
-  const canRetry = transfer?.state === "failed" && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+  const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer) : null;
   const failed = transfer?.state === "failed";
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
@@ -148,7 +148,7 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
         </div>
       )}
       {(controls && !offered) && (
-        <div className="flex gap-1 px-1">
+        <div className="flex gap-1.5 px-2 pb-1">
           {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>Pause</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>Resume</button>}
           <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>Cancel</button>

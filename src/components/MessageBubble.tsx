@@ -15,6 +15,7 @@ import { MessageLinkCards } from "./LinkPreviewBubble";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState } from "../lib/fileDownload";
+import { canRetryFile } from "../lib/fileStatus";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import type { QuoteView } from "../lib/replies";
@@ -476,8 +477,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
+  const platform = useServicesPlatform();
+  const transfer = isMe && message.file ? platform?.getTransfer(message.file.id) ?? null : null;
+  // A file of mine goes by its bytes, WhatsApp's way: a clock while they travel, the red mark when they did not go.
+  const fileFailed = !!message.file && canRetryFile(message.file, transfer, platform);
+  const shown = fileFailed ? "failed" as const
+    : transfer?.state === "transferring" && !["waiting", "held", "queued"].includes(message.delivery ?? "") ? "sending" as const
+    : message.delivery;
   /** A message that was not sent, sent again: its red mark, or its ⋮. */
   const retry = () => {
+    if (fileFailed) { void platform!.retryFile!(message.file!.id).catch(() => {}); return; }
     const link = engine.linkByPeer(peerPubKey);
     if (link) void engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
   };
@@ -488,7 +497,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const link = engine.linkByPeer(peerPubKey);
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
   };
-  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && message.delivery === "failed" ? { onRetry: retry } : {};
+  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: retry } : {};
   const time = new Date(message.timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -574,7 +583,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>
-      {isMe && <DeliveryStatus delivery={message.delivery} acked={isAcked} onRetry={retry} />}
+      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} />}
     </span>
   );
 
@@ -673,7 +682,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
-              {isMe && <DeliveryStatus delivery={message.delivery} acked={isAcked} onRetry={retry} onPicture />}
+              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} onPicture />}
             </span>
           </div>
         ) : bigEmoji ? (

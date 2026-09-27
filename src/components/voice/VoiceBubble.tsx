@@ -3,7 +3,7 @@ import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n } from "../../contexts/I18nContext";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
-import { fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { ChatFile } from "../../lib/types";
 import {
   applyVoiceRate,
@@ -272,9 +272,11 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
   let status: string | null = null;
   // Where it stands, as a file says it: "Waiting for connection", "Not moving", never a bare 0% that looks alive.
   if (transfer?.state === "transferring" || transfer?.state === "failed") status = fileStatus(file, transfer, peerName, false);
+  // One of mine that has not started for want of a connection: the clock beside the time says it.
+  if (sender === "me" && transfer?.state === "transferring" && transfer.stage === "waiting" && transfer.transferred === 0) status = null;
   const stuck = platform?.fileAction ? stalledAction(transfer) : null;
   const failed = transfer?.state === "failed";
-  const canRetry = failed && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+  const canRetry = canRetryFile(file, transfer, platform);
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
   const reason = retryError || (failed ? transfer.error : undefined);
   const moving = transfer?.state === "transferring" && !transfer.stalled;
@@ -366,7 +368,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
             <span data-testid="voice-time" className={`tabular-nums ${unplayed ? "text-accent-hover font-medium" : ""}`}>
               {active ? formatVoiceDuration(position * 1000) : formatVoiceDuration(file.voice.duration)}
             </span>
-            {status && <span data-testid="voice-status" className={`min-w-0 truncate ${failed ? "text-danger-ink" : ""}`}>· {status}</span>}
+            {status && <span data-testid="voice-status" className={`min-w-0 truncate ${failed ? "text-danger-ink" : ""}`}>· <bdi>{status}</bdi></span>}
             {reason && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="voice-why" danger />}
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { formatFileSize } from "./format";
-import type { FileAction, FileTransferState } from "./platform";
+import type { FileAction, FileTransferState, ServicesPlatform } from "./platform";
 import type { ChatFile } from "./types";
 
 /** "3 min left", "2 h 5 min left", "less than a minute left". */
@@ -13,6 +13,14 @@ export function timeLeft(seconds: number): string {
 }
 
 const percent = (transfer: FileTransferState) => Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100);
+
+/**
+ * Whether a file sent from here that did not go can be sent again: not one the contact declined or the sender
+ * cancelled (files/3 says so with `retry`), and only where the platform sends files.
+ */
+export function canRetryFile(file: ChatFile, transfer: FileTransferState | null, platform: ServicesPlatform | null): boolean {
+  return transfer?.state === "failed" && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+}
 
 /**
  * A transfer that ended without the file, in two words: declined, cancelled, or not sent / did not arrive. The
