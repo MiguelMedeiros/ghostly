@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Experimental provider `domain`: `packages/core/src/domainProofs.ts`, `packages/browser/src/proofs/domain.ts`, `packages/browser/src/proofs/providers/domain.ts` |
+| Summary | Show a contact that you control a domain, with a DNS record or a file on your site. |
+| Availability | Available |
+| Notes | Experimental. Looked up through a DNS-over-HTTPS resolver the contact chooses and re-checked after a day, so removing the record withdraws the proof. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

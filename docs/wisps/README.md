@@ -15,6 +15,10 @@
 
 Ghost is the minimal Pkarr/DHT rendezvous and small-record primitive. Ghostly is the reference application composing that primitive with local state, transports and capabilities. WISPs make those boundaries reviewable; this series does not rename the current wire protocol or expand the WISP acronym by decree.
 
+## One source
+
+WISP content lives in `docs/wisps` only; the site is generated. What [ghostly.tools](https://ghostly.tools/developers/catalog) says about a WISP (its summary, availability and notes) is read from the rows of that WISP's header table, defined in [the process](00-process.md#header-fields-the-site-reads); the roadmap page is read from the [adapter roadmap](ADAPTER-ROADMAP.md). To change what the site says, change the document and run `npm run sync:references` in `website/`.
+
 ## Read first
 
 - [Adapter and ecosystem roadmap](ADAPTER-ROADMAP.md): the one place where each candidate's implementation status lives; candidate inventory, not implementation claims.

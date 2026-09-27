@@ -9,6 +9,9 @@
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
 | Implementation | Compatibility chats (`_call`) and the chat session of every new chat (`calls/1`); capture varies by platform. Desktop on Linux runs WebRTC in Rust and media in GStreamer (#331), with no screen sharing yet. |
+| Summary | One-to-one calls over WebRTC media, with compact call signaling. |
+| Availability | Available |
+| Notes | Screen sharing needs a computer; phone browsers can't share a screen. |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

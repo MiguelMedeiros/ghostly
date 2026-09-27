@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md) |
 | Implementation | One bearer invite (`ghostly1…`) for every new chat, which pins the inviter's participation key; consumable admission protocol proposed |
+| Summary | Turn a private invitation into a mutually admitted connection. |
+| Availability | Available |
+| Feature | [The invitation](https://ghostly.tools/#invite) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

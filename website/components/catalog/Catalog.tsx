@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/site/icons";
 import { LevelBadge } from "@/components/site/Level";
 import { LEVELS, type Level } from "@/lib/status";
-import type { GroupId } from "@/lib/wisp-editorial";
+import type { GroupId } from "@/lib/wisps";
 import type { CatalogCopy } from "@/content/catalog";
 import { shell } from "@/content/shell";
 

@@ -9,6 +9,7 @@ import type { Level } from "@/lib/status";
 import candidates from "@/lib/roadmap-candidates.json";
 import { timeline } from "@/content/roadmap-timeline";
 import { wisps } from "@/lib/wisps";
+import { roadmapTracks } from "@/lib/roadmap";
 import { BlockGrid } from "@/components/dev/BlockGrid";
 import { Timeline } from "./Timeline";
 import "@/app/developers.css";
@@ -17,7 +18,7 @@ import "@/app/roadmap.css";
 export function RoadmapPage() {
   const t = roadmap;
   const sections = [...new Set(candidates.map((c) => c.section))];
-  const titleOf = (id: string) => t.tracks.find((x) => x.id === id);
+  const titleOf = (id: string) => roadmapTracks.find((x) => x.id === id);
   const tl = timeline;
   const wispRefs = wisps.map((w) => ({ slug: w.slug, number: w.number, name: w.name }));
   return (
@@ -64,7 +65,7 @@ export function RoadmapPage() {
         <details className="rm-details">
           <summary>{tl.detailsTitle}</summary>
         <ol>
-          {t.tracks.map((track) => (
+          {roadmapTracks.map((track) => (
             <Reveal as="article" key={track.id} className="rm-track" id={track.id}>
               <div className="rm-track-num mono" aria-hidden="true">
                 {track.n}
@@ -81,6 +82,11 @@ export function RoadmapPage() {
                           <LevelBadge level={i.level} small /> <span>{i.text}</span>
                         </li>
                       ))}
+                      {track.now.length === 0 && (
+                        <li>
+                          <LevelBadge level="planned" small /> <span>{t.nothing}</span>
+                        </li>
+                      )}
                     </ul>
                   </div>
                   <div>

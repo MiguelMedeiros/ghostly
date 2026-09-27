@@ -8,11 +8,15 @@ import {
 import { fileURLToPath } from "node:url";
 import { resolve, basename } from "node:path";
 import { roadmapCandidates } from "./roadmap-candidates.mjs";
+import { roadmapTracks } from "./roadmap-tracks.mjs";
+import { siteFields } from "./wisp-header.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "docs/wisps");
 const destination = resolve(root, "website/public/reference");
 const numbering = JSON.parse(readFileSync(resolve(source, "numbering.json"), "utf8"));
-const candidates = roadmapCandidates(readFileSync(resolve(source, "ADAPTER-ROADMAP.md"), "utf8"));
+const roadmap = readFileSync(resolve(source, "ADAPTER-ROADMAP.md"), "utf8");
+const candidates = roadmapCandidates(roadmap);
+writeFileSync(resolve(root, "website/lib/roadmap-tracks.json"), JSON.stringify(roadmapTracks(roadmap), null, 2) + "\n");
 writeFileSync(resolve(root, "website/lib/roadmap-candidates.json"), JSON.stringify(candidates, null, 2) + "\n");
 console.log(`Catalogue coverage: ${candidates.length} roadmap inventory entries, each with a unique navigable ID.`);
 writeFileSync(resolve(root, "website/lib/wisp-numbering.json"), JSON.stringify(numbering, null, 2) + "\n");
@@ -82,7 +86,7 @@ const plain = (text) =>
     .trim();
 // What a WISP says about itself in its header table and first section, so the
 // catalogue follows the documents instead of a copy of them.
-function describe(body) {
+function describe(body, file) {
   const field = (...names) => {
     for (const name of names) {
       const row = body.match(new RegExp(`^\\|\\s*${name}\\s*\\|\\s*(.+?)\\s*\\|\\s*$`, "m"));
@@ -108,6 +112,8 @@ function describe(body) {
     dependencies,
     summary: paragraph ? plain(paragraph).slice(0, 420) : undefined,
     notices,
+    // The catalogue's own line, availability and caveat: written in the header, nowhere on the site.
+    ...siteFields(body, file),
   };
 }
 const entries = paths.map((sourcePath) => {
@@ -120,7 +126,7 @@ const entries = paths.map((sourcePath) => {
     aliases: numbering.filter((entry) => entry.file === file && entry.oldFile !== file).map((entry) => entry.oldFile.replace(/\.md$/, "").toLowerCase()),
     slug: file.replace(/\.md$/, "").toLowerCase(),
     title: body.match(/^#\s+(.+)$/m)?.[1] ?? file,
-    ...(numbering.some((entry) => entry.file === file) ? describe(body) : { dependencies: [], notices: [] }),
+    ...(numbering.some((entry) => entry.file === file) ? describe(body, file) : { dependencies: [], notices: [] }),
   };
 });
 for (const entry of numbering.filter((entry) => entry.oldFile !== entry.file)) {
@@ -131,6 +137,18 @@ if (new Set(entries.map((e) => e.slug)).size !== entries.length)
 writeFileSync(
   resolve(root, "website/lib/reference-index.json"),
   JSON.stringify(entries, null, 2) + "\n",
+);
+// What the map's blocks (lib/composition.ts) light up by: small, because the map runs in the browser.
+writeFileSync(
+  resolve(root, "website/lib/levels.json"),
+  JSON.stringify(
+    {
+      wisps: Object.fromEntries(entries.filter((e) => "level" in e).map((e) => [e.slug, e.level])),
+      rows: Object.fromEntries(candidates.map((c) => [c.id, c.level])),
+    },
+    null,
+    2,
+  ) + "\n",
 );
 console.log(
   `Synced ${entries.length} reference documents and their route index.`,

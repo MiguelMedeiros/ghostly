@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md); did:dht resolution: [3xx-did-dht](3xx-did-dht.md) |
 | Implementation | Experimental provider `did`; see below |
+| Summary | A decentralized identifier (did:key, did:jwk, did:dht or did:web) signs once with one of its keys, or a did:web publishes beside its did.json. |
+| Availability | Available |
+| Notes | Experimental, under Advanced. Each contact resolves the DID again. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

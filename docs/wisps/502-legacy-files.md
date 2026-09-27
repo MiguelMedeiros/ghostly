@@ -10,6 +10,8 @@
 | Dependencies | [500](500-files.md) |
 | Disposition | Retained for compatibility chats ([402](402-legacy-chat.md)) only; never negotiated in a new chat |
 | Implementation | Compatibility chats' live data links; both peers online. |
+| Summary | File frames of chats with Ghostly 0.4 contacts, so they can still send and receive files. |
+| Availability | Available |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

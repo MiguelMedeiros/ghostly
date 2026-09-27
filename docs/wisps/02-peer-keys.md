@@ -9,6 +9,8 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md) |
 | Implementation | Existing per-link keys; lifecycle extensions proposed |
+| Summary | A fresh identity for every connection, and pinning the key of the person you paired with. |
+| Availability | Available |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

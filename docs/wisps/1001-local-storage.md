@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [1000](1000-storage.md), [05](05-backups.md) |
 | Implementation | Experimental: web, desktop and browser extension clients |
+| Summary | The simplest place: a file you keep. No account, no network. |
+| Availability | Available |
+| Notes | Backups only: a file has no address to hand a contact, so it cannot hold messages. |
 
 > This is a review draft. See the [catalogue](README.md) and the [storage contract](1000-storage.md).
 

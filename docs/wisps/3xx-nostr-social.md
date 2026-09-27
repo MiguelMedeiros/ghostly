@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md), [301](301-nostr.md) |
 | Implementation | Experimental: `packages/browser/src/nostr/`, `packages/browser/src/engine/nostrSocial.ts`; see [below](#implementation-2026-09-23) |
+| Summary | What a proven Nostr key lets a contact see (profile, follows, notes) and, if you turn it on, posting through your own signer. |
+| Availability | Available |
+| Notes | Experimental. Loaded only on request, from relays you choose; publishing is off by default and each post is confirmed. Web, desktop and extension (NIP-46 only there). Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

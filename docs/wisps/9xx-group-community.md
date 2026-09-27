@@ -9,6 +9,9 @@
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [900](900-group-sessions.md), [9xx · Group Mesh](9xx-group-mesh.md) |
 | Implementation | `group-community/1`: core protocol in [`groupCommunity.ts`](../../packages/core/src/groupCommunity.ts) and [`communityRendezvous.ts`](../../packages/core/src/communityRendezvous.ts); engine in [`community.ts`](../../packages/browser/src/engine/community.ts), payments in [`communityPay.ts`](../../packages/browser/src/engine/communityPay.ts); UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test |
+| Summary | A group whose link is the way in: anyone who opens it joins, any member lets them in while the admin is away, up to 256 members. |
+| Availability | Available |
+| Notes | Text, a picture and payments, sealed to the two members and carried by the hubs. Online members elect a few hubs that relay; whoever was away is caught up by whoever is there. The cap is what a headless load test measured. Number not yet assigned. |
 
 > This Draft documents the second distribution profile of [900](900-group-sessions.md) as implemented. Numbers and wire formats are not registered standards.
 

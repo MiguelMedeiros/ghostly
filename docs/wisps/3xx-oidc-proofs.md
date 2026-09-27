@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Built, not offered: `packages/browser/src/proofs/oidc/`, provider `oidc`. Every client ID in `oidc/providers.ts` is empty, so no provider is offered or accepted until the maintainer registers them ([checklist](../OIDC-PROVIDERS.md)) |
+| Summary | Show a contact that an account at Google, Microsoft, Apple, GitLab or Twitch signed in for this conversation. |
+| Availability | Planned |
+| Notes | Attested by the provider, not a key you hold; the contact trusts that company. Built, but not offered until the maintainer registers Ghostly's OAuth clients. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee.
 

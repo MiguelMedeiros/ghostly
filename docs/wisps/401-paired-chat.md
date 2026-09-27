@@ -9,6 +9,10 @@
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
 | Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`) and `files/3` on the live session. |
+| Summary | The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT. |
+| Availability | Available |
+| Notes | Every new chat on web, desktop and extension, calls included while it is live. |
+| Feature | [Chat](https://ghostly.tools/#next) |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

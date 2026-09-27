@@ -9,6 +9,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
 | Implementation | Two profiles: [`group-mesh/1`](9xx-group-mesh.md) (private, up to eight) and [`group-community/1`](9xx-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members |
+| Summary | How a group agrees on who is in it, locks out whoever left, and moves messages between members, never through the DHT. |
+| Availability | Available |
+| Notes | Two profiles implemented: group-mesh/1 (private, up to eight members, one admin) and group-community/1 (a link anyone can open, up to 256). Text, a picture and payments between members; web, desktop and extension. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

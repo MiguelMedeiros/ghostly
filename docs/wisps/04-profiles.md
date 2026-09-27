@@ -9,6 +9,10 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [200](200-payments.md), [700](700-local-services.md) |
 | Implementation | Experimental: web, desktop and browser extension clients |
+| Summary | Keep separate lives on one device (chats, wallets, services and settings), never announced to contacts. |
+| Availability | Available |
+| Notes | Web, desktop and extension. Switch from the account bar in one tap. |
+| Feature | [Your space](https://ghostly.tools/#space) |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md) and [implementation evidence](IMPLEMENTATION.md).
 
