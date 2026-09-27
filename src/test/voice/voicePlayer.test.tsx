@@ -304,9 +304,9 @@ describe("a voice message in the chat", () => {
     } });
     chat(retryable, cancelled);
     const [first, second] = bubbles();
-    expect(within(first).getByText("Retry sending")).toBeInTheDocument();
-    expect(within(second).queryByText("Retry sending")).toBeNull();
-    expect(within(second).getByTestId("voice-status")).toHaveTextContent("Failed: Cancelled by your contact");
+    expect(within(first).getByTestId("voice-retry")).toBeInTheDocument();
+    expect(within(second).queryByTestId("voice-retry")).toBeNull();
+    expect(within(second).getByTestId("voice-status")).toHaveTextContent("· Cancelled");
   });
 
   it("stuck on its way, it says so instead of a bare 0%, and offers Send again (sent) or Ask again (received)", async () => {
