@@ -1,19 +1,28 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
 import { bytesToMs, type CallRate } from "./pcm";
 
 /**
- * A call's audio socket (WISP 11xx § Calls): `<profile>/calls/<call>.sock`, 0600, or under /tmp by a name derived
- * from that path when it is too long for a Unix socket; a named pipe on Windows.
+ * A call's audio socket (WISP 11xx § Calls): `<profile>/calls/<call>.sock`, 0600, in a folder only the owner may
+ * open. When that path is too long for a Unix socket: `/tmp/ghostly-calls-<hash of the profile>/<call>.sock`, in a
+ * folder of the owner's, 0700, checked as such before use. A named pipe on Windows.
  */
 export function audioSocketPath(profileDir: string, callId: string): string {
   const inside = join(profileDir, "calls", `${callId}.sock`);
-  const hash = createHash("sha256").update(inside).digest("hex").slice(0, 24);
-  if (process.platform === "win32") return `\\\\.\\pipe\\ghostly-call-${hash}`;
+  if (process.platform === "win32") return `\\\\.\\pipe\\ghostly-call-${createHash("sha256").update(inside).digest("hex").slice(0, 24)}`;
   if (Buffer.byteLength(inside) <= 100) return inside;
-  return join("/tmp", `ghostly-call-${hash}.sock`);
+  return join("/tmp", `ghostly-calls-${createHash("sha256").update(profileDir).digest("hex").slice(0, 24)}`, `${callId}.sock`);
+}
+
+/** The socket's folder: made owner-only, and refused when someone else made it or may enter it. */
+function privateFolder(path: string): void {
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  const info = statSync(path);
+  if ((process.getuid && info.uid !== process.getuid()) || (info.mode & 0o077) !== 0) {
+    throw new Error(`${path} is not a folder of this user's alone: calls will not put their audio there`);
+  }
 }
 
 /** How far a program may fall behind reading the call's audio before frames are dropped for it. */
@@ -34,7 +43,7 @@ export class AudioSocket {
 
   static async open(path: string, rate: CallRate, handlers: { onAudio(chunk: Buffer): void; onClient?(connected: boolean): void }): Promise<AudioSocket> {
     if (process.platform !== "win32") {
-      mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+      privateFolder(join(path, ".."));
       if (existsSync(path)) rmSync(path, { force: true });
     }
     let self: AudioSocket | null = null;

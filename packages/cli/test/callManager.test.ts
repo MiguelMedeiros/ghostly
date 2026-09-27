@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,10 +85,17 @@ describe("the audio socket", () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  it("moves to /tmp when the profile's path is too long for a socket", () => {
-    const long = join("/tmp", "x".repeat(120));
-    expect(audioSocketPath(long, "abc")).toMatch(/^\/tmp\/ghostly-call-[0-9a-f]{24}\.sock$/);
+  it("moves to a private folder in /tmp when the profile's path is too long for a socket, and refuses a shared one", async () => {
+    const long = join(tmp(), "x".repeat(120));
+    const path = audioSocketPath(long, "abc");
+    expect(path).toMatch(/^\/tmp\/ghostly-calls-[0-9a-f]{24}\/abc\.sock$/);
     expect(audioSocketPath("/home/bot/.ghostly/profiles/p", "abc")).toBe("/home/bot/.ghostly/profiles/p/calls/abc.sock");
+    const socket = await AudioSocket.open(path, 48000, { onAudio: () => {} });
+    expect(statSync(join(path, "..")).mode & 0o777).toBe(0o700);
+    await socket.close();
+    chmodSync(join(path, ".."), 0o755);
+    await expect(AudioSocket.open(path, 48000, { onAudio: () => {} })).rejects.toThrow(/not a folder of this user's alone/);
+    rmSync(join(path, ".."), { recursive: true, force: true });
   });
 });
 

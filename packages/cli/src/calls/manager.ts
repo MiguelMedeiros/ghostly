@@ -6,7 +6,7 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath } from "./audioSocket";
 import { CallMedia, loadCallStack, type CallStack } from "./media";
-import { DEFAULT_RATE, FRAME_MS, isCallRate, type CallRate } from "./pcm";
+import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
 
 /**
  * Voice calls on the headless Ghostly (WISP 11xx § Calls): the calls/1 signals of the chat session (WISP 601), the
@@ -60,6 +60,8 @@ interface Call {
   offerTs: number;
   media: CallMedia | null;
   socket: AudioSocket | null;
+  /** What the program wrote and the call has not sent yet: kept from the moment the socket opens. */
+  queue: PlaybackQueue | null;
   startedAt: number;
   connectedAt: number | null;
   timer: ReturnType<typeof setTimeout> | null;
@@ -200,7 +202,7 @@ export class CallManager {
   /** Drops the audio the program queued and the call has not sent yet (barge-in). */
   flush(ref: string | undefined): Record<string, unknown> {
     const call = this.find(ref);
-    const flushedMs = call.media?.audio.queue.flush() ?? 0;
+    const flushedMs = call.queue?.flush() ?? 0;
     return { call: call.id, chat: call.chat, flushedMs };
   }
 
@@ -232,7 +234,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      media: null, socket: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
+      media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
     };
     this.calls.set(call.id, call);
     return call;
@@ -240,11 +242,13 @@ export class CallManager {
 
   /** The call's socket (open from now on: a program may connect before the media is up) and its media. */
   private async attach(call: Call, create: (options: Parameters<typeof CallMedia.offer>[1]) => Promise<CallMedia>): Promise<void> {
+    const queue = (call.queue = new PlaybackQueue(call.rate));
     call.socket = await AudioSocket.open(audioSocketPath(this.host.profileDir, call.id), call.rate, {
-      onAudio: (chunk) => call.media?.audio.queue.push(chunk),
+      onAudio: (chunk) => queue.push(chunk),
     });
     call.media = await create({
       rate: call.rate,
+      queue,
       onFrame: (frame) => call.socket?.write(frame),
       onState: (state) => {
         if (call.ended) return;
@@ -334,7 +338,7 @@ export class CallManager {
       call: call.id, chat: call.chat, direction: call.direction, state: call.state, video: call.video,
       startedAt: call.startedAt, connectedAt: call.connectedAt,
       audio: this.audioInfo(call),
-      ...(audio ? { stats: { framesIn: audio.received, framesOut: audio.sent, queuedMs: audio.queue.queuedMs, programConnected: !!call.socket?.connected } } : {}),
+      ...(call.socket ? { stats: { framesIn: audio?.received ?? 0, framesOut: audio?.sent ?? 0, queuedMs: call.queue?.queuedMs ?? 0, programConnected: call.socket.connected } } : {}),
     };
   }
 

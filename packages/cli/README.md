@@ -245,8 +245,9 @@ ghostly listen --type call.                # call.incoming … call.connected {"
 node examples/call-echo.mjs greeting.wav   # a program that answers, greets, then echoes after 1 s
 ```
 
-**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `/tmp/ghostly-call-<hash>.sock` when that path
-is too long; `call start`, `call answer`, `call list` and the `call.connected` event name it. It carries raw PCM,
+**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `/tmp/ghostly-calls-<hash>/<call>.sock` (in a
+folder of yours alone, 0700) when that path is too long; `call start`, `call answer`, `call list` and the
+`call.connected` event name it. It carries raw PCM,
 with no framing:
 
 - s16le, mono, at the call's rate: 48000 by default, or 24000, 16000, 12000, 8000 with `--rate`. Opus runs at that

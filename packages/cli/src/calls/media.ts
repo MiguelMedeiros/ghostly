@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { PeerConnection, Track } from "node-datachannel";
 import { buildSdpFromSignal, extractParamsFromSdp, RTC_CONFIG, type CallSignal } from "@ghostly/core";
 import { CallAudio, type OpusCodec } from "./audio";
-import type { CallRate } from "./pcm";
+import type { CallRate, PlaybackQueue } from "./pcm";
 
 /**
  * A call's media on Node (WISP 601, WISP 11xx § Calls): libdatachannel (node-datachannel, the same native module
@@ -73,6 +73,8 @@ export interface MediaOptions {
   /** A 20 ms frame of the contact's audio. */
   onFrame(frame: Buffer): void;
   onState(state: MediaState): void;
+  /** The call's queue of the program's audio. */
+  queue?: PlaybackQueue;
 }
 
 /** How long a description waits for its candidates: a server reflexive one and a little after it, or this long. */
@@ -138,7 +140,7 @@ export class CallMedia {
       const audio = new CallAudio({
         rate: options.rate, payloadType, ssrc,
         track: { send: (packet) => { if (track.isOpen()) track.sendMessageBinary(packet); }, onPacket: (listener) => listeners.push(listener) },
-        encoder: stack.opus(options.rate), decoder: stack.opus(options.rate), onFrame: options.onFrame,
+        encoder: stack.opus(options.rate), decoder: stack.opus(options.rate), onFrame: options.onFrame, queue: options.queue,
       });
       const media = new CallMedia(pc, track, videoTrack, local, audio);
       track.onOpen(() => audio.start());

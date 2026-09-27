@@ -24,6 +24,8 @@ export interface CallAudioOptions {
   decoder: OpusCodec;
   /** A 20 ms frame of the contact's audio, decoded. */
   onFrame(frame: Buffer): void;
+  /** What the program wrote, to send (the call's own, kept from before the media existed); a new one if none. */
+  queue?: PlaybackQueue;
   now?: () => number;
 }
 
@@ -51,7 +53,7 @@ export class CallAudio {
 
   constructor(private readonly options: CallAudioOptions) {
     const now = options.now ?? Date.now;
-    this.queue = new PlaybackQueue(options.rate, now);
+    this.queue = options.queue ?? new PlaybackQueue(options.rate, now);
     this.writer = new RtpWriter(options.ssrc, options.payloadType);
     this.frame = frameBytes(options.rate);
     this.samples = frameSamples(options.rate);

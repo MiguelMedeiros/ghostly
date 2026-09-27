@@ -148,7 +148,7 @@ A bot or an agent joins a voice call with the apps: the CLI takes part in [601](
 - **Candidates.** A signal on the chat session may carry eight; a headless host often has several interfaces (Docker, VPNs, Tailscale) of which the first is not the one the contact reaches. So a CLI signal carries every IPv4 host candidate first, then the server reflexive one, then IPv6 hosts, without their related addresses.
 - **Availability.** The CLI offers `calls/1` only when node-datachannel and Opus load (not with `GHOSTLY_WEBRTC=0`); otherwise its contacts' call buttons say why.
 
-**Audio contract.** One Unix socket per call, 0600, in the profile's folder (`calls/<call>.sock`, or under `/tmp` by a hash when the path is too long for a socket). It exists from the moment the call is placed or answered.
+**Audio contract.** One Unix socket per call, 0600, in the profile's folder (`calls/<call>.sock`, or `/tmp/ghostly-calls-<hash>/<call>.sock` when the path is too long for a socket, in a 0700 folder the CLI refuses when another user made it or may enter it). It exists from the moment the call is placed or answered.
 
 | | |
 |---|---|
