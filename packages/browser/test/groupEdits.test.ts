@@ -135,13 +135,13 @@ describe("GroupEdits on its own", () => {
 
 /** A peer of `world` with edits wired as the engine wires them. `old`: an app from before edits. */
 function member(world: CommunityWorld, name: string, old = false): { peer: Peer; edits: GroupEdits } {
-  let edits: GroupEdits | undefined;
+  // The hooks run once frames flow, after `edits` below exists.
   const peer = world.add(name, p => old ? {} : ({
-    storeMessage: async message => { if (!p.messages.some(m => m.id === message.id)) { p.messages.push(message); await edits!.stored(message); } },
-    groupEdit: async (groupId, { sender, ...edit }) => { await edits!.receive(groupId, sender, edit); },
-    communityApp: async (groupId, sender, frame) => { const edit = parseCommunityEdit(frame, sender); if (edit) await edits!.receive(groupId, sender, edit); },
+    storeMessage: async message => { if (!p.messages.some(m => m.id === message.id)) { p.messages.push(message); await edits.stored(message); } },
+    groupEdit: async (groupId, { sender, ...edit }) => { await edits.receive(groupId, sender, edit); },
+    communityApp: async (groupId, sender, frame) => { const edit = parseCommunityEdit(frame, sender); if (edit) await edits.receive(groupId, sender, edit); },
   }));
-  edits = new GroupEdits({
+  const edits: GroupEdits = new GroupEdits({
     ...rows(peer.messages),
     changed: () => {},
     membership: groupId => {
