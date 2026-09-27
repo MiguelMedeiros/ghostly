@@ -219,6 +219,10 @@ export async function setDhtOnly(page: Page, on: boolean): Promise<void> {
 /** The open conversation, without the chat list (which previews the last message too). */
 export const chat = (peer: Peer) => peer.page.locator(".chat-wallpaper");
 
+/** A message's delivery mark (MessageBubble's clock, ticks or red circle), in one state or any. */
+export const delivered = (scope: Locator, state: "sending" | "queued" | "waiting" | "held" | "sent" | "delivered" | "failed" = "delivered") =>
+  scope.locator(`[data-testid="message-delivery"][data-delivery="${state}"]`);
+
 export type WalletKind = "cashu" | "lightning" | "arkade" | "bark" | "spark" | "usdt" | "bitcoin" | "fedimint";
 export type WalletNetwork = "mainnet" | "testnet";
 /** A wallet's card: `arkade-testnet`, or a kind alone for the first card of that kind (a test that has one of it). */

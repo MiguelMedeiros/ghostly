@@ -1,4 +1,4 @@
-import { chat, connect, expect, GIF, link, openProfilePage, say, test, useTestnet, type Peer } from "../support/fixtures";
+import { chat, connect, delivered, expect, GIF, link, openProfilePage, say, test, useTestnet, type Peer } from "../support/fixtures";
 import { signS3 } from "../../packages/browser/src/backup/s3";
 import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
@@ -22,6 +22,20 @@ async function holdOn(p: Peer) {
 /** Past the 256 bytes the DHT carries: short text to an away contact takes the DHT floor (WISP 403); longer text is held. */
 const LONG = " " + "and a few more words, to go past what the DHT carries. ".repeat(6);
 const held = (p: Peer, text: string) => chat(p).locator(".group").filter({ hasText: text });
+
+/** Why a message of mine did not go: the bubble has only its red mark, the reason is in ⋮ → Details. */
+async function deliveryNote(p: Peer, text: string): Promise<string> {
+  const row = held(p, text);
+  await row.hover();
+  await row.getByTestId("message-options").click();
+  await p.page.getByTestId("message-details").click();
+  const section = p.page.locator('[data-testid="message-details-section"][data-section="delivery"]');
+  await expect(section).toBeVisible();
+  const note = (await section.textContent()) ?? "";
+  await p.page.keyboard.press("Escape");
+  await expect(section).toHaveCount(0);
+  return note;
+}
 /** Bob's page is closed and Alice's side has noticed: what she sends now is held. */
 async function away(alice: Peer, bob: Peer): Promise<string> {
   const url = bob.page.url();
@@ -78,14 +92,14 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   // Bob leaves. Alice sends text, a picture and a request: each is held, and the chat says how much waits.
   const url = await away(alice, bob);
   await say(alice, `held while you were out${LONG}`);
-  await expect(held(alice, "held while you were out").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
+  await expect(delivered(held(alice, "held while you were out"), "held")).toBeVisible({ timeout: 30_000 });
   await alice.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
-  await expect(held(alice, "ghost.gif").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
+  await expect(delivered(held(alice, "ghost.gif"), "held")).toBeVisible({ timeout: 30_000 });
   await (await composerRow(alice.page, "payment-button")).click();
   await paymentCard(alice.page, "cashu-testnet").click();
   await alice.page.getByTestId("payment-amount").fill("10");
   await alice.page.getByTestId("payment-request").click();
-  await expect(held(alice, "You requested").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
+  await expect(delivered(held(alice, "You requested"), "held")).toBeVisible({ timeout: 30_000 });
   await alice.page.keyboard.press("Escape");
   await expect(alice.page.getByTestId("hold-indicator")).toContainText("3 items held for");
   // Alice's bucket holds sealed objects only: nothing of the text, the picture's name or the request.
@@ -106,7 +120,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   expect(at("held while you were out")).toBeGreaterThan(at("hello from"));
   expect(at("ghost.gif")).toBeGreaterThan(at("held while you were out"));
   expect(at("Requests")).toBeGreaterThan(at("ghost.gif"));
-  for (const text of ["held while you were out", "ghost.gif", "You requested"]) await expect(held(alice, text).getByText("Received by peer")).toBeVisible({ timeout: 90_000 });
+  for (const text of ["held while you were out", "ghost.gif", "You requested"]) await expect(delivered(held(alice, text))).toBeVisible({ timeout: 90_000 });
   await expect(alice.page.getByTestId("hold-indicator")).toHaveCount(0);
   await expect.poll(async () => ((await (await s3("GET", "?list-type=2")).text()).match(/\.ghostly-held<\/Key>/g) ?? []).length, { timeout: 60_000 }).toBe(0);
   // The session is back too: what is sent now goes live, and Bob's side keeps the held ones once.
@@ -119,15 +133,15 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   // A held object changed in storage is refused by Bob, told to Alice as such, and never shown.
   const again = await away(alice, bob);
   await say(alice, `this one gets tampered${LONG}`);
-  await expect(held(alice, "this one gets tampered").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
+  await expect(delivered(held(alice, "this one gets tampered"), "held")).toBeVisible({ timeout: 30_000 });
   const keys = [...(await (await s3("GET", "?list-type=2")).text()).matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1]).filter((k) => !k.endsWith("manifest.ghostly-held"));
   expect(keys).toHaveLength(1);
   const original = Buffer.from(await (await s3("GET", `/${keys[0]}`)).arrayBuffer());
   original[original.length - 2] ^= 0x01;
   expect((await s3("PUT", `/${keys[0]}`, original)).ok).toBe(true);
   await back(bob, again);
-  await expect(held(alice, "this one gets tampered").getByText("Delivery unconfirmed")).toBeVisible({ timeout: 90_000 });
-  await expect(held(alice, "this one gets tampered")).toContainText("refused this item");
+  await expect(delivered(held(alice, "this one gets tampered"), "failed")).toBeVisible({ timeout: 90_000 });
+  expect(await deliveryNote(alice, "this one gets tampered")).toContain("refused this item");
   await expect(chat(bob).getByText("this one gets tampered")).toHaveCount(0);
   const dialog = await openHold(bob);
   await expect(dialog.getByTestId("chat-hold-refused")).toContainText("1 held item");
@@ -139,8 +153,9 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("data-status", "Connected", { timeout: 60_000 });
   const once = await away(alice, bob);
   await say(alice, `nobody will read this in time${LONG}`);
-  await expect(held(alice, "nobody will read this in time").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
-  await expect(held(alice, "nobody will read this in time")).toContainText("whole lifetime", { timeout: 90_000 });
+  await expect(delivered(held(alice, "nobody will read this in time"), "held")).toBeVisible({ timeout: 30_000 });
+  await expect(delivered(held(alice, "nobody will read this in time"), "failed")).toBeVisible({ timeout: 90_000 });
+  expect(await deliveryNote(alice, "nobody will read this in time")).toContain("whole lifetime");
   await back(bob, once);
   await expect(chat(bob).getByText("back and live")).toBeVisible();
   await expect(chat(bob).getByText("nobody will read this in time")).toHaveCount(0);
@@ -161,15 +176,18 @@ test("a contact whose app does not hold is unaffected: nothing is held, offline 
   // Not "held": short text falls back to the DHT mailbox of WISP 403, exactly as before.
   await expect(carol.page.getByTestId("connection-options")).not.toHaveAttribute("data-status", "Connected", { timeout: 60_000 });
   await say(carol, "old way while away");
-  await expect(held(carol, "old way while away").getByText("Sent · waiting for receipt")).toBeVisible({ timeout: 30_000 });
+  await expect(delivered(held(carol, "old way while away"), "sent")).toBeVisible({ timeout: 30_000 });
   // Longer than the DHT carries, and nothing holds it: it waits, with a cancel, and goes when the chat is live.
   await say(carol, `long while away${LONG}`);
-  await expect(held(carol, "long while away").getByText("Sends when live")).toBeVisible({ timeout: 30_000 });
-  await expect(held(carol, "long while away").getByTestId("cancel-waiting")).toBeVisible();
+  await expect(delivered(held(carol, "long while away"), "waiting")).toBeVisible({ timeout: 30_000 });
+  await held(carol, "long while away").hover();
+  await held(carol, "long while away").getByTestId("message-options").click();
+  await expect(carol.page.getByTestId("message-cancel-sending")).toBeVisible();
+  await carol.page.keyboard.press("Escape");
   await expect(carol.page.getByTestId("hold-indicator")).toHaveCount(0);
   await back(dave, url);
   await expect(chat(dave).getByText("old way while away")).toBeVisible({ timeout: 60_000 });
-  await expect(held(carol, "old way while away").getByText("Received by peer")).toBeVisible({ timeout: 60_000 });
+  await expect(delivered(held(carol, "old way while away"))).toBeVisible({ timeout: 60_000 });
   await expect(chat(dave).getByText("long while away")).toBeVisible({ timeout: 90_000 });
-  await expect(held(carol, "long while away").getByText("Received by peer")).toBeVisible({ timeout: 60_000 });
+  await expect(delivered(held(carol, "long while away"))).toBeVisible({ timeout: 60_000 });
 });

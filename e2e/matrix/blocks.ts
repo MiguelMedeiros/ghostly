@@ -110,7 +110,7 @@ export const pair: Block = {
  * the next one waits for it, as a person would be told to.
  */
 const receipted = (actor: Actor) =>
-  expect(chatPane(actor).getByText(either("Sent · waiting for receipt"))).toHaveCount(0, { timeout: 120_000 });
+  expect(chatPane(actor).locator('[data-testid="message-delivery"][data-delivery="sent"]')).toHaveCount(0, { timeout: 120_000 });
 
 export const talk: Block = {
   id: "talk",
@@ -189,10 +189,10 @@ export const delivery: Block = {
     if (combo.delivery === "dht") {
       const back = await away(b);
       await say(a, "waiting in the DHT mailbox");
-      await expect(chatPane(a).getByText(either("Sent · waiting for receipt"))).toBeVisible();
+      await expect(chatPane(a).locator('[data-testid="message-delivery"][data-delivery="sent"]').last()).toBeVisible();
       await back();
       await sees(b, "waiting in the DHT mailbox");
-      await expect(chatPane(a).getByText(either("Received by peer")).first()).toBeVisible({ timeout: 90_000 });
+      await expect(chatPane(a).locator('[data-testid="message-delivery"][data-delivery="delivered"]').first()).toBeVisible({ timeout: 90_000 });
       // The rest of the story needs a live link: files, payments, groups.
       await dhtOnly(b, false);
       await dhtOnly(a, false);
@@ -781,7 +781,7 @@ export const restore: Block = {
     await say(a, "welcome back");
     for (const p of [a, restored]) await connected(p);
     await sees(restored, "welcome back", 120_000);
-    await expect(chatPane(a).locator(".group").filter({ hasText: "welcome back" })).toContainText("Received by peer", { timeout: 120_000 });
+    await expect(chatPane(a).locator(".group").filter({ hasText: "welcome back" }).locator('[data-delivery="delivered"]')).toBeVisible({ timeout: 120_000 });
     await expect(chatPane(restored).getByText("welcome back", { exact: true })).toHaveCount(1);
     await say(restored, "restored and here");
     await sees(a, "restored and here", 120_000);

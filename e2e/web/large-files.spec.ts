@@ -143,10 +143,13 @@ test("a declined offer says so to the sender; a transfer cancelled by the sender
   await alice.page.getByTestId("file-input").setInputFiles(first);
   const offered = bob.page.getByTestId("file-bubble").filter({ hasText: "not for me.bin" });
   await offered.getByTestId("file-decline").click({ timeout: 60_000 });
-  await expect(offered.getByTestId("file-status")).toHaveText("Failed: You declined it");
+  await expect(offered.getByTestId("file-status")).toHaveText("Declined");
   const refused = alice.page.getByTestId("file-bubble").filter({ hasText: "not for me.bin" });
-  await expect(refused.getByTestId("file-status")).toHaveText("Failed: Declined by your contact");
-  await expect(refused.getByText("Retry sending")).toHaveCount(0);
+  await expect(refused.getByTestId("file-status")).toHaveText("Declined");
+  // Who declined it is behind the ⓘ; a declined file has no ↻.
+  await refused.getByTestId("file-why").click();
+  await expect(refused.getByTestId("file-why-text")).toHaveText("Declined by your contact");
+  await expect(refused.getByTestId("file-retry")).toHaveCount(0);
 
   const second = testInfo.outputPath("changed my mind.bin");
   await generate(second, 200 * 1024 * 1024);
@@ -156,8 +159,8 @@ test("a declined offer says so to the sender; a transfer cancelled by the sender
   const sending = alice.page.getByTestId("file-bubble").filter({ hasText: "changed my mind.bin" });
   await expect.poll(() => percent(sending), { timeout: 60_000 }).toBeGreaterThanOrEqual(5);
   await sending.getByTestId("file-cancel").click();
-  await expect(sending.getByTestId("file-status")).toHaveText("Failed: You cancelled it");
-  await expect(receiving.getByTestId("file-status")).toHaveText("Failed: Cancelled by the sender", { timeout: 30_000 });
+  await expect(sending.getByTestId("file-status")).toHaveText("Cancelled");
+  await expect(receiving.getByTestId("file-status")).toHaveText("Cancelled", { timeout: 30_000 });
   // Nothing of it stays on Bob's side.
   await expect.poll(async () => Object.keys(await opfsFiles(bob)).length).toBe(0);
 });

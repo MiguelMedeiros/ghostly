@@ -44,13 +44,14 @@ describe("the chat list's rows (compact, the default)", () => {
   });
 
   it.each([
-    ["delivered", "Received"],
+    ["delivered", "Delivered"],
     ["sent", "Sent"],
-    ["held", "Sent"],
+    ["held", "Waiting for your contact to be online"],
+    ["waiting", "Waiting for your contact to be online"],
     [undefined, "Sent"],
     ["sending", "Sending"],
     ["queued", "Sending"],
-    ["failed", "Not delivered"],
+    ["failed", "Not sent"],
   ] as const)("marks my last message %s as %s", (delivery, label) => {
     saveSession(chat("d", { nick: "Dan", messages: [message({ sender: "me", text: "⚡ Requested 100 sats", delivery })] }));
     list();

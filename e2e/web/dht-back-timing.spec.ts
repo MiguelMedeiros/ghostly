@@ -75,7 +75,7 @@ test("time leaving DHT-only after the contact reloaded, step by step", { tag: ["
     bob.page = await bob.context.newPage();
     await bob.page.goto(url);
     await expect(chatPane(bob).getByText("waiting in the DHT mailbox")).toBeVisible({ timeout: 90_000 });
-    await expect(chatPane(alice).getByText("Received by peer").first()).toBeVisible({ timeout: 90_000 });
+    await expect(chatPane(alice).locator('[data-testid="message-delivery"][data-delivery="delivered"]').first()).toBeVisible({ timeout: 90_000 });
 
     const t0 = Date.now();
     await dhtOnly(bob, false);

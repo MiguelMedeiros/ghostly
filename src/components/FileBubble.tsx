@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { PREVIEWABLE_IMAGE, sanitizeFileName } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
 import { fileStatus, stalledAction } from "../lib/fileStatus";
 import type { FileAction } from "../lib/platform";
+import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import type { ChatFile } from "../lib/types";
 
 const linkButton = "text-xs underline px-2 py-1 bg-transparent border-none text-inherit cursor-pointer";
@@ -15,6 +16,10 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   const transfer = platform?.getTransfer(file.id) ?? null;
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+  /** A resend or a request asked for, until the transfer answers by moving on. */
+  const [busy, setBusy] = useState(false);
+  const [why, setWhy] = useState(false);
+  const whyId = useId();
   const [missing, setMissing] = useState(false);
   /** The file is kept, but too large for this app to hand out: it is saved through the system instead. */
   const [saveOnly, setSaveOnly] = useState(false);
@@ -24,6 +29,7 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   useEffect(() => {
     if (transfer?.state === "transferring") setWatched(true);
   }, [transfer?.state]);
+  useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
 
   // A small file can be announced before its transfer shows up: look again once it has.
   useEffect(() => {
@@ -68,6 +74,14 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
   const canRetry = transfer?.state === "failed" && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
   const stuck = platform?.fileAction ? stalledAction(transfer) : null;
+  const failed = transfer?.state === "failed";
+  // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
+  const reason = actionError || (failed ? transfer.error : undefined);
+  const again = (action: () => Promise<unknown>) => {
+    setActionError("");
+    setBusy(true);
+    void action().catch((error: Error) => { setBusy(false); setActionError(String(error.message ?? error)); });
+  };
 
   return (
     <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
@@ -75,21 +89,27 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
         <img src={blobUrl} alt={file.name} className="rounded-[4px] max-w-full max-h-[330px] object-contain block mb-1" />
       )}
       <div className="flex items-center gap-3 px-2 py-1.5">
-        <span className="w-9 h-9 rounded-full bg-black/20 flex items-center justify-center shrink-0">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-          </svg>
-        </span>
+        {canRetry ? (
+          <RoundRetry danger busy={busy} testId="file-retry" label="Send again" hint="Not sent. Send it again."
+            onClick={() => again(() => platform!.retryFile!(file.id))} />
+        ) : stuck ? (
+          <RoundRetry busy={busy} testId={`file-${stuck.action}`} label={stuck.label} hint={stuck.hint}
+            onClick={() => again(() => platform!.fileAction!(file.id, stuck.action))} />
+        ) : (
+          <span className="w-9 h-9 rounded-full bg-black/20 flex items-center justify-center shrink-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
             {file.name}
           </p>
-          <p
-            className={`text-[11px] m-0 ${transfer?.state === "failed" || missing ? "text-danger-ink" : "text-text-primary/65"}`}
-            data-testid="file-status"
-          >
-            {status}
+          <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
+            <span className="min-w-0 truncate" data-testid="file-status">{status}</span>
+            {reason && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger />}
           </p>
         </div>
         {(blobUrl || saveOnly) && (
@@ -131,14 +151,10 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
         <div className="flex gap-1 px-1">
           {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>Pause</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>Resume</button>}
-          {stuck && <button type="button" className={linkButton} data-testid={`file-${stuck.action}`} title={stuck.hint} onClick={() => act(stuck.action)}>{stuck.label}</button>}
           <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>Cancel</button>
         </div>
       )}
-      {canRetry && (
-        <button className="text-xs underline px-2 py-1" onClick={() => { setActionError(""); void platform!.retryFile!(file.id).catch(error => setActionError(String(error.message ?? error))); }}>Retry sending</button>
-      )}
-      {actionError && <p className="text-xs text-danger-ink px-2" role="alert">{actionError}</p>}
+      {reason && why && <WhyText id={whyId} testId="file-why-text">{reason}</WhyText>}
       {moving && transfer.stage !== "asking" && (
         <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
           <div

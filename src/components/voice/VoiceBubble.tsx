@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n } from "../../contexts/I18nContext";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
@@ -19,6 +19,7 @@ import {
   voiceRate,
 } from "../../lib/voicePlayback";
 import { decodeToWav } from "../../lib/voiceDecode";
+import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { Waveform } from "./Waveform";
 import "./voice.css";
 
@@ -55,6 +56,11 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
   const [failure, setFailure] = useState<string | null>(null);
   const [saveUrl, setSaveUrl] = useState<string | null>(null);
   const [retryError, setRetryError] = useState("");
+  /** A resend or a request asked for, until the transfer answers by moving on. */
+  const [busy, setBusy] = useState(false);
+  const [why, setWhy] = useState(false);
+  const whyId = useId();
+  useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const playRef = useRef<HTMLButtonElement>(null);
@@ -267,6 +273,16 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
   // Where it stands, as a file says it: "Waiting for connection", "Not moving", never a bare 0% that looks alive.
   if (transfer?.state === "transferring" || transfer?.state === "failed") status = fileStatus(file, transfer, peerName, false);
   const stuck = platform?.fileAction ? stalledAction(transfer) : null;
+  const failed = transfer?.state === "failed";
+  const canRetry = failed && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+  // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
+  const reason = retryError || (failed ? transfer.error : undefined);
+  const moving = transfer?.state === "transferring" && !transfer.stalled;
+  const run = (action: () => Promise<unknown>) => {
+    setRetryError("");
+    setBusy(true);
+    void action().catch((error: Error) => { setBusy(false); setRetryError(String(error.message ?? error)); });
+  };
 
   return (
     <div
@@ -283,21 +299,32 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
       style={{ ["--voice-fill" as string]: sender === "me" ? "var(--color-text-primary)" : "var(--color-accent-hover)" }}
     >
       <div className="flex items-center gap-1.5">
-        <button
-          ref={playRef}
-          type="button"
-          data-testid="voice-play"
-          aria-label={state === "playing" ? "Pause voice message" : "Play voice message"}
-          disabled={!ready || state === "loading"}
-          onClick={() => (state === "playing" ? pause() : void play())}
-          className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/15"
-        >
-          {state === "playing" ? (
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
-          ) : (
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z" /></svg>
-          )}
-        </button>
+        {canRetry ? (
+          <RoundRetry danger busy={busy} testId="voice-retry" label="Send again" hint="Not sent. Send it again."
+            onClick={() => run(() => platform!.retryFile!(file.id))} />
+        ) : stuck ? (
+          <RoundRetry busy={busy} testId={`voice-${stuck.action}`} label={stuck.label} hint={stuck.hint}
+            onClick={() => run(() => platform!.fileAction!(file.id, stuck.action))} />
+        ) : (
+          <span className="relative w-9 h-9 shrink-0">
+            <button
+              ref={playRef}
+              type="button"
+              data-testid="voice-play"
+              aria-label={state === "playing" ? "Pause voice message" : "Play voice message"}
+              disabled={!ready || state === "loading"}
+              onClick={() => (state === "playing" ? pause() : void play())}
+              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/15"
+            >
+              {state === "playing" ? (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+              ) : (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z" /></svg>
+              )}
+            </button>
+            {moving && <ProgressRing fraction={transfer.transferred / Math.max(1, transfer.size)} testId="voice-progress" />}
+          </span>
+        )}
         <div className="flex-1 min-w-0">
           <Waveform
             ref={waveRef}
@@ -339,7 +366,8 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
             <span data-testid="voice-time" className={`tabular-nums ${unplayed ? "text-accent-hover font-medium" : ""}`}>
               {active ? formatVoiceDuration(position * 1000) : formatVoiceDuration(file.voice.duration)}
             </span>
-            {status && <span data-testid="voice-status" className={`min-w-0 ${transfer?.state === "failed" ? "text-danger-ink truncate" : "truncate"}`}>· {status}</span>}
+            {status && <span data-testid="voice-status" className={`min-w-0 truncate ${failed ? "text-danger-ink" : ""}`}>· {status}</span>}
+            {reason && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="voice-why" danger />}
           </div>
         </div>
       </div>
@@ -349,15 +377,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
           {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">Save</a>}
         </p>
       )}
-      {/* As in FileBubble: a files/3 transfer says whether it can go again (not one the contact cancelled or declined). */}
-      {transfer?.state === "failed" && file.id.includes("-out-") && platform?.retryFile && (transfer.direction ? !!transfer.retry : true) && (
-        <button className="text-xs underline px-1 py-1 bg-transparent border-none text-inherit cursor-pointer" onClick={() => { setRetryError(""); void platform.retryFile!(file.id).catch((error) => setRetryError(String(error.message ?? error))); }}>Retry sending</button>
-      )}
-      {stuck && (
-        <button type="button" data-testid={`voice-${stuck.action}`} title={stuck.hint} className="text-xs underline px-1 py-1 bg-transparent border-none text-inherit cursor-pointer"
-          onClick={() => { setRetryError(""); void platform!.fileAction!(file.id, stuck.action).catch((error: Error) => setRetryError(String(error.message ?? error))); }}>{stuck.label}</button>
-      )}
-      {retryError && <p className="text-xs text-danger-ink px-1 m-0" role="alert">{retryError}</p>}
+      {reason && why && <WhyText id={whyId} testId="voice-why-text">{reason}</WhyText>}
     </div>
   );
 }
