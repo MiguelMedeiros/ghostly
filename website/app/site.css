@@ -23,7 +23,12 @@
   --lvl-planned: #60a5fa;
   --lvl-research: #94a3b8;
   --radius: 18px;
-  --wrap: 1180px;
+  /* The one content width. Backgrounds run full-bleed; everything read or looked at (the nav's row, every section,
+     the story's stage and copy, the pages, the footer) sits in a centred column this wide, gutters included.
+     --inset is where that column's content starts from either window edge. */
+  --wrap: 1280px;
+  --gutter: 24px;
+  --inset: max(var(--gutter), calc((100vw - var(--wrap)) / 2 + var(--gutter)));
   --nav-h: 64px;
   /* Motion tokens: mirror lib/motion.ts; rules in website/MOTION.md.
      enter = arriving (the default, also --ease), exit = leaving, move = travelling on screen. */
@@ -118,11 +123,11 @@ body {
   width: 100%;
   max-width: var(--wrap);
   margin-inline: auto;
-  padding-inline: 24px;
+  padding-inline: var(--gutter);
 }
 @media (max-width: 640px) {
-  .wrap {
-    padding-inline: 16px;
+  :root {
+    --gutter: 16px;
   }
 }
 
@@ -659,7 +664,18 @@ body {
   pointer-events: none;
   overflow: hidden;
 }
-.act-backdrop .stage {
+/* The act's field and room run full-bleed; the stage the story is drawn on (the actors here, each chapter's picture
+   in .scene-visual) is the content column, full height, so on a wide window the picture stays beside its copy.
+   It still draws past its box (.stage overflows), and story/framing.ts keeps each chapter's picture inside it. */
+.act-backdrop > .stage,
+.scene-visual .stage {
+  position: absolute;
+  inset: 0;
+  width: min(100%, var(--wrap));
+  height: 100%;
+  margin-inline: auto;
+}
+.act-field .stage {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -723,10 +739,6 @@ body {
   position: absolute;
   inset: 0;
 }
-.scene-visual .stage {
-  width: 100%;
-  height: 100%;
-}
 .stage text {
   font-family: var(--font-inter), system-ui, sans-serif;
 }
@@ -747,17 +759,23 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   z-index: 1;
   pointer-events: none;
 }
+/* The wash's stops follow the content column (--sx is the gutter outside it, --sw its width), so on a wide window it
+   fades beside the copy and never over the picture; up to the column's width it is what it always was. */
+.scene-wash {
+  --sw: min(100%, var(--wrap));
+  --sx: calc((100% - var(--sw)) / 2);
+}
 .scene[data-copy="left"] .scene-wash {
-  background: linear-gradient(90deg, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.8) 24%, rgb(var(--chapter-rgb) / 0.35) 40%, transparent 52%);
+  background: linear-gradient(90deg, rgb(var(--chapter-rgb) / 0.94) var(--sx), rgb(var(--chapter-rgb) / 0.8) calc(var(--sx) + 0.24 * var(--sw)), rgb(var(--chapter-rgb) / 0.35) calc(var(--sx) + 0.4 * var(--sw)), transparent calc(var(--sx) + 0.52 * var(--sw)));
 }
 .scene[data-copy="right"] .scene-wash {
-  background: linear-gradient(270deg, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.8) 24%, rgb(var(--chapter-rgb) / 0.35) 40%, transparent 52%);
+  background: linear-gradient(270deg, rgb(var(--chapter-rgb) / 0.94) var(--sx), rgb(var(--chapter-rgb) / 0.8) calc(var(--sx) + 0.24 * var(--sw)), rgb(var(--chapter-rgb) / 0.35) calc(var(--sx) + 0.4 * var(--sw)), transparent calc(var(--sx) + 0.52 * var(--sw)));
 }
 .scene[data-copy="bottom-left"] .scene-wash {
-  background: radial-gradient(ellipse 64% 115% at 0% 100%, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.7) 42%, rgb(var(--chapter-rgb) / 0.25) 72%, transparent 100%);
+  background: radial-gradient(ellipse calc(var(--sx) + 0.64 * var(--sw)) 115% at 0% 100%, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.7) 42%, rgb(var(--chapter-rgb) / 0.25) 72%, transparent 100%);
 }
 .scene[data-copy="bottom-right"] .scene-wash {
-  background: radial-gradient(ellipse 64% 115% at 100% 100%, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.7) 42%, rgb(var(--chapter-rgb) / 0.25) 72%, transparent 100%);
+  background: radial-gradient(ellipse calc(var(--sx) + 0.64 * var(--sw)) 115% at 100% 100%, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.7) 42%, rgb(var(--chapter-rgb) / 0.25) 72%, transparent 100%);
 }
 .scene-copy {
   position: absolute;
@@ -777,11 +795,11 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
 }
 .scene[data-copy="left"] .scene-copy,
 .scene[data-copy="bottom-left"] .scene-copy {
-  left: max(24px, calc((100vw - var(--wrap)) / 2 + 24px));
+  left: var(--inset);
 }
 .scene[data-copy="right"] .scene-copy,
 .scene[data-copy="bottom-right"] .scene-copy {
-  right: max(24px, calc((100vw - var(--wrap)) / 2 + 24px));
+  right: var(--inset);
 }
 .scene[data-copy="bottom-left"] .scene-copy,
 .scene[data-copy="bottom-right"] .scene-copy {
@@ -1020,7 +1038,7 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   gap: 28px;
   max-width: var(--wrap);
   margin-inline: auto;
-  padding-inline: 24px;
+  padding-inline: var(--gutter);
 }
 html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-visual {
   position: relative;
@@ -1120,7 +1138,7 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 }
 .footer-sleeper {
   position: absolute;
-  right: max(24px, calc((100vw - var(--wrap)) / 2 + 24px));
+  right: var(--inset);
   bottom: 84px;
   width: 56px;
   opacity: 0.55;

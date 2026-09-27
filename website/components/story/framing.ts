@@ -2,8 +2,9 @@ import { STAGE, type Chapter } from "./poses";
 
 /**
  * Where a chapter's picture goes on this screen. The film draws every chapter
- * on the 1440×900 landscape stage, cropped to fill the window, with the copy in
- * a fixed-width panel over it. On a window narrower or squarer than the stage
+ * on the 1440×900 landscape stage, cropped to fill the content column (the
+ * window up to site.css `--wrap` wide, full height), with the copy in a
+ * fixed-width panel over it. Below, "window" means that column. On a window narrower or squarer than the stage
  * was composed for, the panel covers more of the stage and the crop cuts into
  * its sides, so the picture would slide under the copy or off the screen. A
  * framing moves and scales the whole picture (never its parts) just enough to
@@ -136,12 +137,16 @@ function banded(boxes: Box[], space: Rect, s0: number, ox: number, oy: number): 
   return { k: round(k), x: round(((1 - k) * (left - ox) + dx) / s0), y: round(((1 - k) * (top - oy) + dy) / s0) };
 }
 
-/** A chapter's framing on the current window, read from its section (the copy panel is measured where it is pinned). */
+/**
+ * A chapter's framing on the current window, read from its section (the copy panel is measured where it is pinned).
+ * The stage is the content column, not the window (site.css `--wrap`): on a wide window the picture is framed, and
+ * kept, inside that column, so it stays beside its copy instead of drifting to the window's edge.
+ */
 export function measureFraming(section: HTMLElement | null, chapter: Chapter): Framing {
   const panel = section?.querySelector<HTMLElement>(".scene-copy");
-  const sticky = section?.querySelector<HTMLElement>(".scene-sticky");
-  if (!section || !panel || !sticky) return IDENTITY;
-  const s = sticky.getBoundingClientRect();
+  const stage = section?.querySelector<SVGSVGElement>(".scene-visual svg.stage") ?? section?.querySelector<HTMLElement>(".scene-sticky");
+  if (!section || !panel || !stage) return IDENTITY;
+  const s = stage.getBoundingClientRect();
   const c = panel.getBoundingClientRect();
   const nav = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
   // The copy's place comes from the layout: site.css sets --copy-at: band where an upright window has it across the bottom.

@@ -82,6 +82,9 @@ const VIEWPORTS = [
   { w: 1000, h: 800, name: "the window the overlap was reported from" },
   { w: 1009, h: 1239, name: "the app's browser panel, upright" },
   { w: 900, h: 1200, name: "upright" },
+  // Wider than the content column (site.css --wrap): the stage is the column, not the window.
+  { w: 2560, h: 1440, name: "wide" },
+  { w: 2560, h: 1080, name: "ultrawide" },
 ];
 
 for (const { w, h, name } of VIEWPORTS) {

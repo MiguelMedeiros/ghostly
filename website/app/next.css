@@ -202,7 +202,6 @@ html.js .nx-line[data-drawn="true"] path {
 /* Words and screens side by side, sides alternating; the phone stands on the outer side of the window. */
 @media (min-width: 1024px) {
   .nx-list {
-    --wrap: 1320px;
     gap: clamp(88px, 9vw, 128px);
   }
   .nx-item {
