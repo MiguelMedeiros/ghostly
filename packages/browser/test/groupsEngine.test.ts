@@ -407,7 +407,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     expect(world.publishes).toBe(3);
   });
 
-  it("an admission that does not finish in time is dropped and that key is not answered again for a while", async () => {
+  it("an admission that does not finish in time is dropped, and that key is answered again after 30 s, then a minute, doubling", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t0 = Date.now();
     const world = new World();
@@ -420,15 +420,28 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     // Dan never finishes (the entry is not ready on both sides); three minutes on, the admin gives up.
     await alice.tick(t0 + 3 * 60_000 + 1);
     expect(hostEntries()).toBe(0);
-    vi.setSystemTime(t0 + 4 * 60_000);
-    await dan.tick(t0 + 4 * 60_000);
-    await alice.tick(t0 + 4 * 60_000 + 2_000);
-    expect(hostEntries()).toBe(0); // knocked again, but refused for now
-    vi.setSystemTime(t0 + 14 * 60_000);
-    await dan.tick(t0 + 14 * 60_000);
-    await alice.tick(t0 + 14 * 60_000 + 2_000);
-    // The refusal ran out during that look; the next one answers.
-    await alice.tick(t0 + 14 * 60_000 + 4_000);
+    const t1 = t0 + 3 * 60_000 + 1;
+    vi.setSystemTime(t1 + 10_000);
+    await dan.tick(t1 + 10_000);
+    await alice.tick(t1 + 12_000);
+    expect(hostEntries()).toBe(0); // knocked again, but a timeout is waited out first (30 s)
+    vi.setSystemTime(t1 + 40_000);
+    await dan.tick(t1 + 40_000);
+    await alice.tick(t1 + 42_000);
+    await alice.tick(t1 + 44_000);
+    expect(hostEntries()).toBe(1); // answered again: a slow network is no refusal
+    // It times out again: the wait doubles (a minute), not ten.
+    const t2 = t1 + 44_000 + 3 * 60_000 + 1;
+    await alice.tick(t2);
+    expect(hostEntries()).toBe(0);
+    vi.setSystemTime(t2 + 40_000);
+    await dan.tick(t2 + 40_000);
+    await alice.tick(t2 + 42_000);
+    expect(hostEntries()).toBe(0);
+    vi.setSystemTime(t2 + 70_000);
+    await dan.tick(t2 + 70_000);
+    await alice.tick(t2 + 72_000);
+    await alice.tick(t2 + 74_000);
     expect(hostEntries()).toBe(1);
   });
 
