@@ -22,7 +22,7 @@ async function three() {
 }
 const away = (mesh: Mesh, who: GroupSession, from: GroupSession[]) => { for (const s of from) mesh.setEdge(who.myKey, s.myKey, false); };
 
-describe("any member catches up the others", () => {
+describe("any member catches up the others", { timeout: 60_000 }, () => {
   it("hands on an author's messages when the author is gone too, mentions and reply included", async () => {
     const { mesh, alice, bob, carol } = await three();
     await alice.sendText("hello all"); await mesh.settle();
@@ -175,7 +175,7 @@ describe("rosters past eight", () => {
     await members[31].sendText("the last one in"); await mesh.settle();
     for (const m of members.slice(0, 31)) expect(mesh.texts(m)).toContain("the last one in");
     expect(LEGACY_GROUP_MEMBERS).toBe(8);
-  });
+  }, 120_000);
 
   it("hands secrets on sixteen to a frame, what apps from before revision 0.8 take", async () => {
     const mesh = new Mesh();

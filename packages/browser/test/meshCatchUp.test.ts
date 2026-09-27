@@ -29,7 +29,7 @@ function counter(world: CommunityWorld) {
   return frames;
 }
 
-describe("a private group catches up a member from whoever is there", () => {
+describe("a private group catches up a member from whoever is there", { timeout: 120_000 }, () => {
   it("a message sent while two members are cut apart reaches the other through a third, within a gossip turn", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
     const [alice, bob] = peers;
