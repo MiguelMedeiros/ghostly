@@ -47,8 +47,10 @@
     "fake-indexeddb": "6.2.5",
     "hyperdht": "6.34.0",
     "keet-identity-key": "3.2.0",
+    "mpg123-decoder": "1.0.3",
     "node-datachannel": "^0.33.4",
-    "nostr-tools": "2.25.2"
+    "nostr-tools": "2.25.2",
+    "opus-decoder": "0.7.12"
   },
   "devDependencies": {
     "@ghostly/browser": "*",

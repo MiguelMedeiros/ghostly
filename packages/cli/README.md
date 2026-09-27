@@ -98,7 +98,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
 | `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin |
 | `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link; the picture |
-| `file send <chat> <path> [--name n] [--mime t] [--voice <ms> [--peaks …]]` | A file, or a voice note |
+| `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]]` | A file, or a voice note (its length and waveform measured from the file unless given) |
 | `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel <chat> <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3) |
 | `file resend <file>`, `file request <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
 | `file save <file> [--dir d \| --path p] [--force]` | Write a received file to disk (never over one without `--force`; an unfinished one says how many bytes are here) |
@@ -125,6 +125,16 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 
 Arguments: an option's value is taken as is, even when it starts with `-`. A positional that starts with `-` is
 refused (a mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash.
+
+### Voice notes
+
+`file send <chat> <path> --voice` sends an audio file as a voice note. Its length (`--voice <ms>`) and its 64
+waveform bars (`--peaks 0,40,…`, 0-255) may be given; whatever is not given is measured from the file with the
+app's own meter (`voicePeaksOf` in packages/core `voice.ts`: a reading every 50 ms, the loudest per bar), so the
+bars look like the app's recordings. WAV, Opus in WebM or Ogg and MP3 are decoded in the CLI (wasm, no native code);
+AAC in MP4/M4A and other kinds need `ffmpeg` on the PATH (`GHOSTLY_FFMPEG` names another). When the sound cannot be
+read, a note with a given length goes out flat with a warning on stderr (the socket API answers `warning`), and one
+without is refused (`bad_request`). `--voice` takes the next word only when it is a number.
 
 ### The secret guard
 

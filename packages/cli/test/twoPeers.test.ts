@@ -159,6 +159,34 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listen.stop();
   });
 
+  it("send a voice note from a file: its length and waveform measured here, the contact sees the bars", async () => {
+    const listen = new Running(["--home", bob, "listen", "--type", "message.received"], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    const recording = join(import.meta.dirname, "../../../e2e/support/voice-fixtures/chromium.webm");
+    const sent = await as(alice, "file", "send", "bob", recording, "--voice");
+    expect(ok(sent)).toMatchObject({ file: { mime: "audio/webm", voice: true } });
+    expect(sent.stderr).not.toMatch(/Sent without a waveform/);
+    const message = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: { voice?: boolean } }).file?.voice);
+    const id = (message.message as { file: { id: string } }).file.id;
+    const listed = (ok(await as(bob, "file", "list", "alice")).files as { file: { id: string; voice?: { duration: number; peaks: number[] } } }[]).find((f) => f.file.id === id);
+    const voice = listed!.file.voice!;
+    expect(voice.peaks).toHaveLength(64);
+    expect(Math.max(...voice.peaks)).toBe(255);
+    expect(Math.min(...voice.peaks)).toBeLessThan(128);
+    expect(voice.duration).toBeGreaterThan(1400);
+    expect(voice.duration).toBeLessThan(1800);
+    await listen.stop();
+    // Sound this side cannot read: sent flat with a warning on stderr when the length is given, refused when not.
+    const noise = join(alice, "noise.wav");
+    writeFileSync(noise, randomBytes(4000));
+    const flat = await as(alice, "file", "send", "bob", noise, "--voice", "1200");
+    expect(ok(flat)).toMatchObject({ file: { voice: true } });
+    expect(flat.json.warning).toBeUndefined();
+    expect(flat.stderr).toMatch(/^ghostly: Sent without a waveform: could not read the sound/m);
+    expect(error(await as(alice, "file", "send", "bob", noise, "--voice"), "bad_request", 1).message).toMatch(/give its length as --voice <ms>/);
+  });
+
   it("prove an SSH key with ssh-keygen and show it to the contact, who checks it", async () => {
     const key = join(alice, "id_ed25519");
     execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "bot", "-f", key]);

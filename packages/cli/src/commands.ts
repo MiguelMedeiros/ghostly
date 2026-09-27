@@ -188,8 +188,8 @@ export const COMMANDS: Record<string, Command> = {
   "payment reclaim": { method: "payment.reclaim", usage: "payment reclaim <payment>", summary: "Take back ecash the contact has not taken", args: ["payment"], params: (_, a) => ({ payment: a.payment }) },
 
   "file send": {
-    method: "file.send", usage: "file send <chat> <path> [--name n] [--mime t] [--voice <ms> [--peaks 0,40,…]]", summary: "Send a file (or, with --voice, a voice note)",
-    args: ["chat", "path"], options: { name: { type: "string", description: "The name the contact sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", description: "A voice note of this many milliseconds" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated" } },
+    method: "file.send", usage: "file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]]", summary: "Send a file (or, with --voice, a voice note)",
+    args: ["chat", "path"], options: { name: { type: "string", description: "The name the contact sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" } },
     params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, voice: options.voice, peaks: typeof options.peaks === "string" ? options.peaks.split(",") : undefined }),
   },
   "file list": { method: "file.list", usage: "file list <chat>", summary: "A chat's files and their transfers", args: ["chat"], params: (_, { chat }) => ({ chat }) },

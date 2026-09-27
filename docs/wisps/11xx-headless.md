@@ -122,7 +122,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Chats | Rich text | Not applicable: text is text; the bot formats it |
 | Chats | Link previews made by the sender | Planned (not in phases 1 to 4; `--preview`) |
 | Chats | Hold for an away contact (S3) | Planned (not in phases 1 to 4) |
-| Files | Send, save to a folder, consent for files over 25 MiB (files/3; the engine re-asks after expiry, #302), pause, resume, cancel, events; voice notes (`--voice <ms>`) | Phase 3a |
+| Files | Send, save to a folder, consent for files over 25 MiB (files/3; the engine re-asks after expiry, #302), pause, resume, cancel, events; voice notes (`--voice [ms]`: length and the 64 waveform bars measured from the file with the recorder's meter, `voicePeaksOf`; WAV, Opus and MP3 decoded in wasm, other audio through `ffmpeg` when present) | Phase 3a |
 | Groups | Create (community with its link, or a private mesh), join by link, leave, forget, accept or decline an invitation, list, send, history, @mentions in and out | Phase 1 (needs WebRTC) |
 | Groups | Admin: remove, make admin, rotate, link on/off/reset, picture; invite a contact | Phase 3a |
 | Payments | Wallet instances per network (the New flow types), list, balance, remove with the #303 protections | Phase 2 (Bark and Fedimint: app only, see below) |

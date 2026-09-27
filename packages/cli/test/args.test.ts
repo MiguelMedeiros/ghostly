@@ -19,6 +19,16 @@ describe("the argument parser", () => {
     expect(parseArgs(["--profile", "bot", "--", "chat", "-a dash"], {})).toEqual({ positionals: ["chat", "-a dash"], options: { profile: "bot" } });
   });
 
+  it("lets --voice stand alone, taking the next word only when it is a number", () => {
+    const { options } = COMMANDS["file send"]!;
+    expect(parseArgs(["alice", "note.webm", "--voice"], options!)).toEqual({ positionals: ["alice", "note.webm"], options: { voice: true } });
+    expect(parseArgs(["alice", "--voice", "note.webm"], options!)).toEqual({ positionals: ["alice", "note.webm"], options: { voice: true } });
+    expect(parseArgs(["alice", "note.webm", "--voice", "4200"], options!).options).toEqual({ voice: 4200 });
+    expect(parseArgs(["alice", "note.webm", "--voice=4200", "--name", "hi.webm"], options!).options).toEqual({ voice: 4200, name: "hi.webm" });
+    expect(parseArgs(["alice", "note.webm", "--voice", "--name", "hi.webm"], options!).options).toEqual({ voice: true, name: "hi.webm" });
+    expect(() => parseArgs(["--voice=soon"], options!)).toThrow(/takes a number/);
+  });
+
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
     const spec = { force: { type: "boolean" as const, description: "" }, mention: { type: "list" as const, description: "" } };
     expect(parseArgs(["-p", "bot", "g", "--mention", "a", "--no-force", "--mention", "b", "--pretty"], spec).options).toEqual({ profile: "bot", mention: ["a", "b"], force: false, pretty: true });
