@@ -9,6 +9,9 @@ import {
   recordingMime,
   voiceDownloadName,
   voiceFileName,
+  voiceLevel,
+  voiceLevelsOf,
+  voicePeaksOf,
 } from "../src/voice";
 // covers: files.voice.meta
 
@@ -154,5 +157,40 @@ describe("served types", () => {
   it("serves recorded audio with its type, and nothing that could run", () => {
     for (const type of ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/aac", "audio/wav"]) expect(safeBlobType(type)).toBe(type);
     for (const type of ["audio/svg+xml", "audio/html", "text/html", "video/webm"]) expect(safeBlobType(type)).toBe("application/octet-stream");
+  });
+});
+
+describe("the recorder's meter, on a recording made elsewhere", () => {
+  const tone = (rate: number, seconds: number, gain: (t: number) => number) =>
+    Float32Array.from({ length: Math.round(rate * seconds) }, (_, i) => gain(i / rate) * Math.sin(2 * Math.PI * 440 * (i / rate)));
+
+  it("reads a level as the recorder does: RMS, lifted four times, at most 1", () => {
+    expect(voiceLevel([])).toBe(0);
+    expect(voiceLevel([0.1, -0.1, 0.1, -0.1])).toBeCloseTo(0.4);
+    expect(voiceLevel([0.5, -0.5])).toBe(1);
+  });
+
+  it("takes one reading every 50 ms, over the analyser's window ending there", () => {
+    const sound = tone(48_000, 1, (t) => (t < 0.5 ? 0.05 : 0.2));
+    const levels = voiceLevelsOf(sound, 48_000);
+    expect(levels).toHaveLength(20);
+    // The reading at 150 ms is the last 1024 samples before it.
+    expect(levels[2]).toBe(voiceLevel(sound.subarray(7200 - 1024, 7200)));
+    expect(levels[0]).toBeCloseTo(0.05 * Math.SQRT1_2 * 4, 2);
+    expect(levels[19]).toBeCloseTo(0.2 * Math.SQRT1_2 * 4, 2);
+  });
+
+  it("keeps the window as long in time at another rate", () => {
+    const sound = tone(44_100, 0.2, () => 0.1);
+    expect(voiceLevelsOf(sound, 44_100)[1]).toBe(voiceLevel(sound.subarray(4410 - 941, 4410)));
+    expect(voiceLevelsOf(new Float32Array(0), 48_000)).toEqual([]);
+  });
+
+  it("draws the bars from those readings", () => {
+    const sound = tone(48_000, 3.2, (t) => (t < 1.6 ? 0.02 : 0.08));
+    const peaks = voicePeaksOf(sound, 48_000);
+    expect(peaks).toEqual(downsamplePeaks(voiceLevelsOf(sound, 48_000)));
+    expect(peaks[0]).toBeLessThan(peaks[63]!);
+    expect(peaks[63]).toBe(255);
   });
 });

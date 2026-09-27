@@ -47,7 +47,7 @@ export async function decodeSound(path: string): Promise<Sound> {
     return await decodeWithFfmpeg(path);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(own ? `${own.message}; ${reason}` : reason);
+    throw new Error(own ? `${own.message}; ${reason}` : reason, { cause: error });
   }
 }
 
