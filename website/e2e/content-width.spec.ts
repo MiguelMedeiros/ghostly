@@ -126,3 +126,26 @@ test(`${W}×${H}: no story shape or ghost comes within ${EDGE * 100}% of the win
   }
   expect(found, found.slice(0, 12).join("\n")).toEqual([]);
 });
+
+// The statement between the acts stands alone on the screen: every line of it sits on the window's centre axis.
+for (const path of ["/", "/pt-br"]) {
+  test(`1920×1080: ${path} centres the statement between the acts`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto(path, { waitUntil: "networkidle" });
+    const m = await page.evaluate(() => {
+      const words = [...document.querySelectorAll(".statement-word")].map((w) => w.getBoundingClientRect());
+      const lines = new Map<number, { left: number; right: number }>();
+      for (const r of words) {
+        const key = Math.round(r.top / 10);
+        const line = lines.get(key) ?? { left: Infinity, right: -Infinity };
+        lines.set(key, { left: Math.min(line.left, r.left), right: Math.max(line.right, r.right) });
+      }
+      const all = { left: Math.min(...words.map((r) => r.left)), right: Math.max(...words.map((r) => r.right)) };
+      return { vw: document.documentElement.clientWidth, all, lines: [...lines.values()] };
+    });
+    const mid = m.vw / 2;
+    expect(m.lines.length, "the statement breaks into lines").toBeGreaterThan(1);
+    expect(Math.abs((m.all.left + m.all.right) / 2 - mid), `text box ${Math.round(m.all.left)} to ${Math.round(m.all.right)}`).toBeLessThanOrEqual(4);
+    for (const l of m.lines) expect(Math.abs((l.left + l.right) / 2 - mid), `line ${Math.round(l.left)} to ${Math.round(l.right)}`).toBeLessThanOrEqual(4);
+  });
+}
