@@ -25,7 +25,7 @@ export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
-interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean }
+interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null }
 interface GroupShape { status: string | null; members: string[] }
 
 /**
@@ -178,8 +178,14 @@ export class EventHub {
         this.emit("chat.connection", `chat.connection:${id}:${shape.live ? shape.transport : "down"}:${at}`, { chat: id, live: shape.live, transport: shape.transport, text: link.textDelivery ?? null });
       }
       if (shape.name !== before.name) this.emit("chat.renamed", `chat.renamed:${id}:${this.now()}`, { chat: id, name: shape.name });
-      // The contact started or stopped writing (WISP 401 § Typing): it stops by itself 6 s after its last word.
-      if (shape.typing !== before.typing) this.emit(shape.typing ? "typing.started" : "typing.stopped", `typing.${shape.typing ? "started" : "stopped"}:${id}:${this.now()}`, { chat: id });
+      // The contact started or stopped writing (WISP 401 § Typing): it stops by itself 6 s after its last word. What
+      // it is doing (typing, recording, thinking, a bot's status) goes with the start, and a change while it lasts
+      // is a start again (its id then carries the sequence, so two changes in one millisecond stay apart).
+      if (shape.typing !== before.typing) {
+        this.emit(shape.typing ? "typing.started" : "typing.stopped", `typing.${shape.typing ? "started" : "stopped"}:${id}:${this.now()}`, { chat: id, ...(shape.typing ? typingFields(shape) : {}) });
+      } else if (shape.typing && (shape.typingKind !== before.typingKind || shape.typingStatus !== before.typingStatus)) {
+        this.emit("typing.started", `typing.started:${id}:${this.now()}:${this.seq + 1}`, { chat: id, ...typingFields(shape) });
+      }
     }
     for (const id of [...this.chats.keys()]) {
       if (links.has(id)) continue;
@@ -371,7 +377,15 @@ function splitState(state: string): [string, number] {
 
 function chatShape(link: LinkView): ChatShape {
   const view = chatJson(link);
-  return { stage: view.stage, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping };
+  return {
+    stage: view.stage, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping,
+    typingKind: link.peerTyping ? link.peerTypingKind ?? "typing" : "typing", typingStatus: link.peerTyping ? link.peerTypingStatus ?? null : null,
+  };
+}
+
+/** A `typing.started`'s word: the kind, and the contact's status line when it gave one (already cleaned). */
+function typingFields(shape: ChatShape): { kind: string; status?: string } {
+  return { kind: shape.typingKind, ...(shape.typingStatus ? { status: shape.typingStatus } : {}) };
 }
 
 function groupShape(group: GroupView): GroupShape {

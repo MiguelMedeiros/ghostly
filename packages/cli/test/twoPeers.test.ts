@@ -160,6 +160,34 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listen.stop();
   });
 
+  it("show the contact a bot is thinking, with its status, and then recording", async () => {
+    const listen = new Running(["--home", bob, "listen", "--type", "typing.started", "--type", "typing.stopped"], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(ok(await as(alice, "typing", "bob", "--kind", "thinking", "--status", "Transcribing your audio…")))
+      .toMatchObject({ chat: chatA, typing: true, kind: "thinking", status: "Transcribing your audio…", live: true });
+    expect(await listen.waitFor((l) => l.type === "typing.started" && l.kind === "thinking"))
+      .toMatchObject({ chat: chatB, kind: "thinking", status: "Transcribing your audio…" });
+    // A new kind goes at once, not at the next refresh, and it is a start again on the contact's stream.
+    ok(await as(alice, "typing", "bob", "--kind", "recording"));
+    const recording = await listen.waitFor((l) => l.type === "typing.started" && l.kind === "recording");
+    expect(recording).toMatchObject({ chat: chatB });
+    expect(recording).not.toHaveProperty("status");
+    ok(await as(alice, "typing", "bob", "--stop"));
+    await listen.waitFor((l) => l.type === "typing.stopped");
+    // --for keeps the kind and status it was given: past the contact's 6 s it is still thinking, never plain typing.
+    const before = listen.lines.length;
+    ok(await as(alice, "typing", "bob", "--kind", "thinking", "--status", "Working", "--for", "10"));
+    await listen.waitFor((l) => l.type === "typing.started" && l.status === "Working");
+    await new Promise((r) => setTimeout(r, 8000));
+    expect(listen.lines.slice(before).map((l) => [l.type, l.kind, l.status])).toEqual([["typing.started", "thinking", "Working"]]);
+    await listen.waitFor((l) => l.type === "typing.stopped" && listen.lines.indexOf(l) >= before);
+    // What the contact's app would not show is refused here.
+    const refused = error(await as(alice, "typing", "bob", "--status", "see https://x.example"), "bad_request", 1);
+    expect(refused.message).toContain("no link or markup");
+    await listen.stop();
+  });
+
   it("hold a chat off its direct link: the contact does not redial, text still goes over the DHT, chat connect ends it", async () => {
     const held = ok(await as(alice, "chat", "disconnect", "bob", "--hold", "1"));
     expect(held.heldUntil).toBeGreaterThan(Date.now());

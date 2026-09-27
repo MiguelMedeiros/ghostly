@@ -59,11 +59,35 @@ describe("chats", () => {
 
   it("typing tells the engine this side writes, or stopped, and says whether the chat is live", async () => {
     const { ctx, node } = fake();
-    expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, live: false, sendTyping: true });
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });
     expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: true });
     expect(await callApi(ctx, "chat.typing", { chat: "Alice", stop: true })).toMatchObject({ typing: false });
     expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: false });
     await expect(callApi(ctx, "chat.typing", { chat: "zed" })).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("typing says a kind and a bot's status, checked before anything is said", async () => {
+    const { ctx, node } = fake();
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice", kind: "recording" })).toMatchObject({ typing: true, kind: "recording" });
+    expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: true, kind: "recording" });
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice", kind: "thinking", status: "Transcribing your\naudio…" }))
+      .toMatchObject({ typing: true, kind: "thinking", status: "Transcribing your audio…" });
+    expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: true, kind: "thinking", status: "Transcribing your audio…" });
+    // A status with plain typing is fine too.
+    await callApi(ctx, "chat.typing", { chat: "Alice", status: "Reading" });
+    expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: true, status: "Reading" });
+    node.setTyping.mockClear();
+    for (const [params, message] of [
+      [{ kind: "dancing" }, "kind must be one of typing, recording, thinking"],
+      [{ status: "x".repeat(41) }, "status: at most 40 characters"],
+      [{ status: "see https://x.example" }, "status: plain text, with no link or markup"],
+      [{ status: "<b>hi</b>" }, "status: plain text, with no link or markup"],
+      [{ status: "\u202E\u200B" }, "status: plain text, with no link or markup"],
+      [{ stop: true, kind: "thinking" }, "kind and status go with a start, not with stop"],
+      [{ stop: true, status: "done" }, "kind and status go with a start, not with stop"],
+    ] as const) await expect(callApi(ctx, "chat.typing", { chat: "Alice", ...params }), message).rejects.toMatchObject({ code: "bad_request", message });
+    expect(node.setTyping).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "chat.typing", { chat: "Alice", status: "x".repeat(40) })).toMatchObject({ status: "x".repeat(40) });
   });
 
   it("send waits for the delivery it was asked for, and fails with the engine's words", async () => {

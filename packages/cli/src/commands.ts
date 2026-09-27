@@ -85,9 +85,15 @@ export const COMMANDS: Record<string, Command> = {
   },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "typing": {
-    method: "chat.typing", usage: "typing <chat> [--for s] [--stop]", summary: "Show the contact you are writing (live chats; it fades after 6 s unless said again, or kept with --for; a send or --stop ends it)", args: ["chat"],
-    options: { stop: { type: "boolean", description: "Say you stopped" }, for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" } },
-    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, for: options.for }),
+    method: "chat.typing", usage: "typing <chat> [--kind typing|recording|thinking] [--status \"<text>\"] [--for s] [--stop]",
+    summary: "Show the contact you are writing, recording or thinking (live chats; it fades after 6 s unless said again, or kept with --for; a send or --stop ends it)", args: ["chat"],
+    options: {
+      stop: { type: "boolean", description: "Say you stopped" },
+      kind: { type: "string", description: "typing (default), recording (a voice note) or thinking" },
+      status: { type: "string", description: "A short line shown instead, e.g. \"Transcribing your audio…\" (40 characters, no links)" },
+      for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
+    },
+    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, kind: options.kind, status: options.status, for: options.for }),
   },
   "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now (ends a --hold)", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "chat disconnect": {
