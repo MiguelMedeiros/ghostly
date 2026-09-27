@@ -80,17 +80,22 @@ export function mergePeek(profile: string, result: Pick<PeekResult, "chats">, no
 export const peekEnabled = (settings: Pick<AppSettings, "profilePeek">, desktop: boolean) => settings.profilePeek?.enabled ?? desktop;
 export const peekNotifies = (settings: Pick<AppSettings, "profilePeek">) => settings.profilePeek?.notify === true;
 
-/** Another profile's chat is muted there (read only: an ended mute is left for that profile to forget). */
-export function mutedInProfile(profile: string, peer: string, now = Date.now()): boolean {
+/**
+ * Another profile's chat is muted there (read only: an ended mute is left for that profile to forget). A community
+ * group is muted under its own name (`group:<id>`), a 1:1 chat under its session, found by the contact's key.
+ */
+export function mutedInProfile(profile: string, chat: Pick<PeekChat, "linkId" | "peer">, now = Date.now()): boolean {
   const prefix = prefixOf(profile);
+  const muted = (raw: string | null) => raw === "forever" || (!!raw && Number(raw) > now);
+  if (chat.linkId.startsWith("group:")) { try { return muted(localStorage.getItem(`${prefix}mute_${chat.linkId}`)); } catch { return false; } }
+  const peer = chat.peer;
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key?.startsWith(prefix) || key.slice(prefix.length).includes("_")) continue;
       const session = JSON.parse(localStorage.getItem(key) ?? "null") as ChatSession | null;
       if (session?.peerPubKeyB64 !== peer) continue;
-      const raw = localStorage.getItem(`${prefix}mute_${session.id}`);
-      return raw === "forever" || (!!raw && Number(raw) > now);
+      return muted(localStorage.getItem(`${prefix}mute_${session.id}`));
     }
   } catch { /* unreadable: not muted */ }
   return false;

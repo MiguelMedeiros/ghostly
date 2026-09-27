@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity } from "../src/identity";
 import { randomBytes, toBase64Url } from "../src/bytes";
+import { measureRecords, MAX_DNS_PACKET_BYTES } from "../src/pkarr";
 import {
-// covers: groups.protocol.community-topology
-  COMMUNITY_TOPOLOGY, beaconKeys, beaconRecords, freshHubs, lobbyKeys, lobbyRecords, mergeBeacon, mergeLobby, pickHubs, rankHubs, readBeacon, readLobby, shouldBeHub,
+// covers: groups.protocol.community-topology, groups.community.head
+  COMMUNITY_TOPOLOGY, beaconKeys, beaconRecords, freshHubs, newerHead, readBeaconHead, type CommunityHead, lobbyKeys, lobbyRecords, mergeBeacon, mergeLobby, pickHubs, rankHubs, readBeacon, readLobby, shouldBeHub,
   type Hub,
 } from "../src/communityRendezvous";
 
@@ -68,5 +69,28 @@ describe("community rendezvous: beacon and lobbies", () => {
     expect(rankHubs(subjects[0], hubs)).toEqual(rankHubs(subjects[0], [...hubs].reverse()));
     const firsts = new Set(subjects.map(s => rankHubs(s, hubs)[0]));
     expect(firsts.size).toBeGreaterThan(2);
+  });
+
+  it("carries the newest frame as a head beside the hubs, readable only as a head, and old readers still read the hubs", () => {
+    const now = Date.now(), k = beaconKeys(rv, G);
+    const hubs: Hub[] = keys(COMMUNITY_TOPOLOGY.maxHubs).map((key, i) => ({ key, ts: now - i * 1000, load: i, since: now - 60_000 }));
+    const head: CommunityHead = { s: createIdentity().pubKeyZ32, e: 7, h: "0123456789abcdef", n: 42, ts: Math.floor(now / 1000) * 1000 };
+    const records = beaconRecords(k, hubs, head);
+    // A full beacon and its head fit one Pkarr packet.
+    expect(measureRecords(k.identity.pubKeyZ32, records)).toBeLessThanOrEqual(MAX_DNS_PACKET_BYTES);
+    expect(readBeaconHead(k, records)).toEqual(head);
+    expect(readBeacon(k, records)).toHaveLength(COMMUNITY_TOPOLOGY.maxHubs);
+    // A beacon from before heads has none; another secret reads nothing; a hub list is not a head.
+    expect(readBeaconHead(k, beaconRecords(k, hubs))).toBeNull();
+    expect(readBeaconHead(beaconKeys(toBase64Url(randomBytes(32)), G), records)).toBeNull();
+    expect(readBeaconHead(k, records.map(r => ({ ...r, label: "_head", value: records[0].value })))).toBeNull();
+    // A head that is not one is left out.
+    expect(beaconRecords(k, hubs, { ...head, h: "not hex" })).toHaveLength(1);
+    // Several hubs write it: the newer stays, and one from the future is not taken.
+    const older = { ...head, n: 41, ts: head.ts - 5_000 };
+    expect(newerHead(older, head, now)).toEqual(head);
+    expect(newerHead(head, older, now)).toEqual(head);
+    expect(newerHead(head, { ...head, ts: now + 3_600_000 }, now)).toEqual(head);
+    expect(newerHead(null, null, now)).toBeNull();
   });
 });

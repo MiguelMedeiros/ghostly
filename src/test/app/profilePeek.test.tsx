@@ -94,8 +94,12 @@ describe("what was seen waiting for another profile", () => {
     chatIn(work, "c2", "peer-2");
     localStorage.setItem(`${prefixOf(work.id)}mute_c1`, "forever");
     localStorage.setItem(`${prefixOf(work.id)}mute_c2`, String(Date.now() - 1));
-    expect(mutedInProfile(work.id, "peer-1")).toBe(true);
-    expect(mutedInProfile(work.id, "peer-2")).toBe(false);
+    expect(mutedInProfile(work.id, { linkId: "l1", peer: "peer-1" })).toBe(true);
+    expect(mutedInProfile(work.id, { linkId: "l2", peer: "peer-2" })).toBe(false);
+    // A community group, under its own name.
+    localStorage.setItem(`${prefixOf(work.id)}mute_group:g1`, "forever");
+    expect(mutedInProfile(work.id, { linkId: "group:g1", peer: "" })).toBe(true);
+    expect(mutedInProfile(work.id, { linkId: "group:g2", peer: "" })).toBe(false);
     expect(localStorage.getItem(`${prefixOf(work.id)}mute_c2`), "that profile's storage is not written").not.toBeNull();
   });
 });

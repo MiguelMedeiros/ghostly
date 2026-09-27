@@ -1,6 +1,6 @@
 import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
-  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
+  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
   communityMessageId, type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type Hub, type Roster,
 } from "@ghostly/core";
@@ -134,6 +134,8 @@ interface Live {
   hub: boolean;
   hubSince: number;
   beacon: Hub[];
+  /** The newest message frame the beacon names (WISP 9xx § Head), as last read or written. */
+  head: CommunityHead | null;
   lastBeaconRead: number;
   lastBeaconWrite: number;
   lastBeaconTry: number;
@@ -579,18 +581,35 @@ export class Communities {
     const records = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null);
     // Hubs I do not know yet are members newer than my view of the roster: exactly whom I need to catch up.
     live.beacon = readBeacon(keys, records ?? []);
+    live.head = readBeaconHead(keys, records ?? []);
     this.noteHubs(live, now);
+  }
+
+  /**
+   * The newest message frame I hold, for the beacon's head (WISP 9xx § Head): what a member's other profile on the
+   * same device compares with what it took, to show that something new was said while it was not running.
+   */
+  private newestFrame(live: Live): CommunityHead | null {
+    let newest: CommunityHead | null = null;
+    for (const f of live.session.state.store) if (!newest || f.ts > newest.ts) newest = { s: f.s, e: f.e, h: f.h, n: f.n, ts: f.ts };
+    return newest;
   }
 
   private async publishBeacon(groupId: string, live: Live, now: number, listed: boolean): Promise<void> {
     live.lastBeaconTry = now;
     const keys = beaconKeys(live.session.state.rv, groupId);
     // Read this very tick already: what it said is what there is to merge with.
-    const existing = live.lastBeaconRead === now ? live.beacon : readBeacon(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null)) ?? []);
+    let existing = live.beacon, head = live.head;
+    if (live.lastBeaconRead !== now) {
+      const records = (await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null)) ?? [];
+      existing = readBeacon(keys, records); head = readBeaconHead(keys, records);
+    }
     // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
     const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: live.members.size, since: live.hubSince || now } : null, now, key => !live.session.wasRemoved(key));
-    await this.host.publish(keys.identity, beaconRecords(keys, hubs), true);
-    live.beacon = hubs;
+    // Nor a newer head: several hubs write this record in turn.
+    const newest = newerHead(head, this.newestFrame(live), now);
+    await this.host.publish(keys.identity, beaconRecords(keys, hubs, newest), true);
+    live.beacon = hubs; live.head = newest;
     this.noteHubs(live, now);
     live.lastBeaconWrite = now; live.lastBeaconRead = now;
   }
@@ -984,7 +1003,7 @@ export class Communities {
       clock: () => this.now(),
       relay: frame => { if (this.live.get(id)?.hub) for (const linkId of this.host.edges(id).values()) this.sendTo(linkId, frame); },
     });
-    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], lastBeaconRead: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
+    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(),
       knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,

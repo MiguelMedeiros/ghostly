@@ -32,6 +32,7 @@ export const COMMUNITY_TOPOLOGY = {
 
 const NONCE_LENGTH = 24;
 const BEACON_LABEL = "_hubs";
+const HEAD_LABEL = "_head";
 const LOBBY_LABEL = "_lobby";
 const info = (label: string) => utf8Encode(`ghostly-group-community/1 ${label}`);
 
@@ -107,8 +108,53 @@ export function doorHubs(hubs: Hub[], now = Date.now()): string[] {
   return (settled.length ? settled : lately).map(h => h.key);
 }
 
-export function beaconRecords(keys: { key: Uint8Array; aad: Uint8Array }, hubs: Hub[]): GhostRecord[] {
-  return seal(BEACON_LABEL, keys, pack(hubs.slice(0, COMMUNITY_TOPOLOGY.maxHubs), true));
+/**
+ * The newest message frame a hub holds (WISP 9xx · Group Community § Head): who sent it, in which epoch (number and
+ * first 16 hex of its commit hash), its sequence and time. Hubs publish it beside the hub list, so a member's other
+ * profile on the same device can tell something new was said without being online (WISP 04 § Checking other profiles).
+ */
+export interface CommunityHead { s: string; e: number; h: string; n: number; ts: number }
+const HEAD_BYTES = 32 + 4 + 8 + 4 + 4;
+/** The head is sealed with the beacon's key under its own associated data: it cannot be passed off as a hub list. */
+const headKeys = (keys: { key: Uint8Array; aad: Uint8Array }) => ({ key: keys.key, aad: concatBytes(keys.aad, utf8Encode("/head")) });
+function packHead(head: CommunityHead): Uint8Array {
+  const out = new Uint8Array(HEAD_BYTES), view = new DataView(out.buffer);
+  out.set(publicKeyFromZ32(head.s), 0);
+  view.setUint32(32, head.e);
+  for (let i = 0; i < 8; i++) out[36 + i] = parseInt(head.h.slice(i * 2, i * 2 + 2), 16);
+  view.setUint32(44, head.n);
+  view.setUint32(48, Math.floor(head.ts / 1000));
+  return out;
+}
+function unpackHead(bytes: Uint8Array): CommunityHead | null {
+  if (bytes.length !== HEAD_BYTES) return null;
+  try {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), s = toZ32(bytes.slice(0, 32));
+    publicKeyFromZ32(s);
+    const h = Array.from(bytes.slice(36, 44), (b) => b.toString(16).padStart(2, "0")).join("");
+    return { s, e: view.getUint32(32), h, n: view.getUint32(44), ts: view.getUint32(48) * 1000 };
+  } catch { return null; }
+}
+/** A frame can be a head: a member key, and numbers that fit. */
+export function validHead(head: CommunityHead | null | undefined): head is CommunityHead {
+  if (!head || !/^[0-9a-f]{16}$/.test(head.h) || ![head.e, head.n].every(n => Number.isSafeInteger(n) && n >= 0 && n <= 0xffffffff) || !Number.isSafeInteger(head.ts) || head.ts < 0 || head.ts / 1000 > 0xffffffff) return false;
+  try { publicKeyFromZ32(head.s); return true; } catch { return false; }
+}
+/** The newer of two heads, by time; a head from more than a minute ahead of now is not taken. */
+export function newerHead(a: CommunityHead | null, b: CommunityHead | null, now = Date.now()): CommunityHead | null {
+  const ok = (h: CommunityHead | null) => (h && h.ts <= now + 60_000 ? h : null);
+  const x = ok(a), y = ok(b);
+  return !x ? y : !y ? x : y.ts > x.ts ? y : x;
+}
+
+export function beaconRecords(keys: { key: Uint8Array; aad: Uint8Array }, hubs: Hub[], head?: CommunityHead | null): GhostRecord[] {
+  return [...seal(BEACON_LABEL, keys, pack(hubs.slice(0, COMMUNITY_TOPOLOGY.maxHubs), true)),
+    ...(validHead(head) ? seal(HEAD_LABEL, headKeys(keys), packHead(head)) : [])];
+}
+/** The head a beacon packet carries, if a hub of this revision wrote it last (an older hub's publication drops it). */
+export function readBeaconHead(keys: { key: Uint8Array; aad: Uint8Array }, records: GhostRecord[]): CommunityHead | null {
+  const body = open(HEAD_LABEL, headKeys(keys), records);
+  return body ? unpackHead(body) : null;
 }
 export function readBeacon(keys: { key: Uint8Array; aad: Uint8Array }, records: GhostRecord[]): Hub[] {
   const body = open(BEACON_LABEL, keys, records);
