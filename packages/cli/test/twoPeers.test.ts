@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
-// covers: files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit
+// covers: groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -573,6 +573,31 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       if (!reply) await new Promise((r) => setTimeout(r, 1000));
     }
     expect(reply).toMatchObject({ replyTo: { id: sent.messageId, found: true } });
+    await listen.stop();
+  });
+
+  it("update a group status in place: group send, group edit three times, the other member sees the last text and each edit once", async () => {
+    const listen = new Running(["--home", bob, "listen", "--type", "group.message.edited"], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    const id = ok(await as(alice, "group", "send", "Mesh crew", "Deploy: 0 of 3")).messageId as string;
+    const shown = Date.now() + 90_000;
+    while (Date.now() < shown && !(ok(await as(bob, "group", "history", "Mesh crew")).messages as { id: string }[]).some((m) => m.id === id)) await new Promise((r) => setTimeout(r, 1000));
+    expect(ok(await as(alice, "group", "edit", "Mesh crew", id, "Deploy: 1 of 3"))).toMatchObject({ messageId: id, edits: 1 });
+    expect(ok(await as(alice, "group", "edit", "Mesh crew", id, "--text", "Deploy: 2 of 3"))).toMatchObject({ edits: 2 });
+    // From stdin, as a bot pipes it.
+    expect(ok(await ghostly(["--home", alice, "group", "edit", "Mesh crew", id, "--stdin"], { env, input: "Deploy: done\n" }))).toMatchObject({ edits: 3 });
+    const last = async () => (ok(await as(bob, "group", "history", "Mesh crew")).messages as { id: string; text: string; edits?: number }[]).find((m) => m.id === id);
+    await expect.poll(async () => (await last())?.text, { timeout: 60_000 }).toBe("Deploy: done");
+    expect(await last()).toMatchObject({ edits: 3 });
+    // One event per edit Bob's side took, the last one with the final text; never a second message.
+    await expect.poll(() => listen.lines.at(-1)?.edits, { timeout: 30_000 }).toBe(3);
+    expect(listen.lines.every((l) => l.messageId === id)).toBe(true);
+    expect((listen.lines.at(-1)!.message as { text: string }).text).toBe("Deploy: done");
+    expect(new Set(listen.lines.map((l) => l.edits)).size).toBe(listen.lines.length);
+    expect((ok(await as(bob, "group", "history", "Mesh crew")).messages as { text: string }[]).filter((m) => m.text.startsWith("Deploy"))).toHaveLength(1);
+    // Only mine: Bob cannot edit Alice's message.
+    error(await as(bob, "group", "edit", "Mesh crew", id, "mine now"), "refused", 1);
     await listen.stop();
   });
 
