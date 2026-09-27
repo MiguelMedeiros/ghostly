@@ -9,6 +9,7 @@ import {
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
+import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
 import { IDENTITY_METHODS } from "./identities";
@@ -198,7 +199,8 @@ const METHODS: Record<string, Method> = {
     return { chats: state(ctx).links.map(chatJson).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
-    return chatDetailsJson(chatOf(ctx, params));
+    const link = chatOf(ctx, params);
+    return { ...chatDetailsJson(link), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -275,15 +277,27 @@ const METHODS: Record<string, Method> = {
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     return chatDetailsJson(findChat(state(ctx).links, link.id));
   },
+  /** Reconnects now; a chat held off its direct link (`chat disconnect --hold`) leaves the hold first. */
   async "chat.connect"(ctx, params) {
     const link = chatOf(ctx, params);
+    await releaseHold(ctx, link.id, "connect");
     await node(ctx).connect({ linkId: link.id });
     return chatJson(findChat(state(ctx).links, link.id));
   },
+  /**
+   * Closes the live session; the contact's app may dial again at once. `hold` (minutes): the chat stays off its
+   * direct link that long, on the DHT (its "DHT only" choice, taken back after); 0 ends a hold now.
+   */
   async "chat.disconnect"(ctx, params) {
     const link = chatOf(ctx, params);
-    node(ctx).disconnect({ linkId: link.id });
-    return chatJson(findChat(state(ctx).links, link.id));
+    if (params.hold === undefined) {
+      node(ctx).disconnect({ linkId: link.id });
+      return chatJson(findChat(state(ctx).links, link.id));
+    }
+    const minutes = num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
+    if (minutes === 0) await releaseHold(ctx, link.id, "lifted");
+    else await holdChat(ctx, link, minutes);
+    return { ...chatJson(findChat(state(ctx).links, link.id)), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.verify"(ctx, params) {
     const link = chatOf(ctx, params);

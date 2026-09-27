@@ -43,9 +43,22 @@ function requireProfile(g: Globals): void {
 /** A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. */
 interface Session { mode: "daemon" | "one-shot"; call(method: string, params?: unknown): Promise<unknown>; close(): Promise<void> }
 
+/** Said on stderr when the daemon runs another release than this command (it started before an upgrade). */
+export function versionWarning(daemon: unknown, cli: string): string | null {
+  if (typeof daemon !== "string" || daemon === cli) return null;
+  return `ghostly: the daemon runs ${daemon} and this command is ${cli}: \`ghostly daemon restart\` runs the new code`;
+}
+
+async function warnVersion(client: DaemonClient): Promise<void> {
+  const status = await client.call("status").catch(() => null) as { version?: unknown } | null;
+  const warning = versionWarning(status?.version, VERSION);
+  if (warning) process.stderr.write(warning + "\n");
+}
+
 async function session(g: Globals): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
+  if (client) await warnVersion(client);
   if (client) return { mode: "daemon", call: (m, p) => client.call(m, p), close: async () => client.close() };
   const host = await openHost(g.paths, "one-shot", VERSION);
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
@@ -288,22 +301,41 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "stop") {
     const client = await connectDaemon(g.paths.socket);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
-    const { pid } = await client.call("daemon.stop") as { pid: number };
-    client.close();
-    const until = Date.now() + (Number(parsed.options.timeout) || 20) * 1000;
-    while (lockOwner(g.paths) === pid && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
-    if (lockOwner(g.paths) === pid) throw new CliError("timeout", `The daemon (process ${pid}) has not stopped yet`);
-    print({ stopped: true, pid });
+    print({ stopped: true, pid: await stopDaemon(g, client, Number(parsed.options.timeout) || 20) });
     return;
   }
-  if (sub) throw new CliError("usage", "ghostly daemon [--detach] | daemon status | daemon stop");
+  if (sub === "restart") {
+    // The running one stops (if one runs), and this command's own code starts in the background.
+    const client = await connectDaemon(g.paths.socket);
+    const before = client ? (await client.call("status").catch(() => null) as { version?: string } | null)?.version ?? null : null;
+    const stopped = client ? await stopDaemon(g, client, Number(parsed.options.timeout) || 20) : null;
+    const started = await startDetached(g, Number(parsed.options.timeout) || 60);
+    print({ restarted: true, stopped, before, version: VERSION, ...started });
+    return;
+  }
+  if (sub) throw new CliError("usage", "ghostly daemon [--detach] | daemon status | daemon stop | daemon restart");
   if (!parsed.options.detach) { await runDaemon(g); return; }
+  print(await startDetached(g, Number(parsed.options.timeout) || 60));
+}
+
+/** Asks the daemon to stop and waits until its process let go of the profile; its pid. */
+async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Promise<number> {
+  const { pid } = await client.call("daemon.stop") as { pid: number };
+  client.close();
+  const until = Date.now() + seconds * 1000;
+  while (lockOwner(g.paths) === pid && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+  if (lockOwner(g.paths) === pid) throw new CliError("timeout", `The daemon (process ${pid}) has not stopped yet`);
+  return pid;
+}
+
+/** A daemon in the background, running this command's code, once its socket answers. */
+async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
   if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
   const log = openSync(g.paths.log, "a", 0o600);
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log] });
   child.unref();
-  const until = Date.now() + (Number(parsed.options.timeout) || 60) * 1000;
+  const until = Date.now() + seconds * 1000;
   let client: DaemonClient | null = null;
   while (!client && Date.now() < until) {
     if (child.exitCode !== null) break;
@@ -312,7 +344,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   }
   if (!client) throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
   client.close();
-  print({ daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log });
+  return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
 }
 
 async function listenCommand(argv: string[]): Promise<void> {
@@ -337,6 +369,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const onEvent = (event: GhostlyEvent) => { since = event.seq; handle(event); };
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
+  if (client) await warnVersion(client);
   if (client) {
     // Followed until stopped; a daemon that restarts is picked up again after the last event seen.
     let current: DaemonClient | null = client;
@@ -462,6 +495,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
   if (client) {
+    await warnVersion(client);
     const watcher = await connectDaemon(g.paths.socket);
     await watcher?.subscribe(undefined, tell);
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }

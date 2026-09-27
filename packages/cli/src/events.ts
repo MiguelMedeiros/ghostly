@@ -16,6 +16,9 @@ export const JOURNAL_KEEP = 10_000;
 const SEEN_DB = "ghostly-cli";
 const SEEN = "seen";
 
+/** How long a `file.*` event waits for the message that carries its file. */
+export const FILE_MESSAGE_WAIT_MS = 2_000;
+
 /** The notice an app sends when a chat first goes live (src/hooks/useChat.ts): shown as a line, not a message. */
 export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 
@@ -43,6 +46,10 @@ export class EventHub {
   private payments = new Map<string, string>();
   private transfers = new Map<string, string>();
   private received = new Map<string, string>();
+  /** File id to the message that carries it, for `file.*` events. */
+  private fileMessages = new Map<string, string>();
+  /** `file.*` events whose message was not seen yet: they wait for it a moment (the engine stores it right after). */
+  private pendingFiles = new Map<string, { timer: ReturnType<typeof setTimeout>; emits: ((messageId: string | null) => void)[] }>();
   private baselined = false;
   private db!: IDBDatabase;
   state: EngineState | null = null;
@@ -219,15 +226,42 @@ export class EventHub {
       if (quiet || before === shape) continue;
       const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
       const fields = { chat, file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
-      if (transfer.state === "done") this.emit("file.done", `file.done:${id}`, fields);
-      else if (transfer.state === "failed") this.emit("file.failed", `file.failed:${id}:${this.now()}`, { ...fields, retry: !!transfer.retry });
-      else if (transfer.stage === "asking" && fields.direction === "in") this.emit("file.offered", `file.offered:${id}:${this.now()}`, { ...fields, room: transfer.room ?? null });
-      else if (transfer.stage) this.emit("file.stage", `file.stage:${id}:${transfer.stage}:${this.now()}`, { ...fields, stage: transfer.stage, ...(transfer.pausedBy ? { pausedBy: transfer.pausedBy } : {}) });
+      let emit: ((messageId: string | null) => void) | null = null;
+      if (transfer.state === "done") { const key = `file.done:${id}`; emit = (messageId) => this.emit("file.done", key, { ...fields, messageId }); }
+      else if (transfer.state === "failed") { const key = `file.failed:${id}:${this.now()}`; emit = (messageId) => this.emit("file.failed", key, { ...fields, messageId, retry: !!transfer.retry }); }
+      else if (transfer.stage === "asking" && fields.direction === "in") { const key = `file.offered:${id}:${this.now()}`; emit = (messageId) => this.emit("file.offered", key, { ...fields, messageId, room: transfer.room ?? null }); }
+      else if (transfer.stage) {
+        const key = `file.stage:${id}:${transfer.stage}:${this.now()}`, stage = { stage: transfer.stage, ...(transfer.pausedBy ? { pausedBy: transfer.pausedBy } : {}) };
+        emit = (messageId) => this.emit("file.stage", key, { ...fields, messageId, ...stage });
+      }
+      if (emit) this.fileEvent(id, emit);
     }
     this.state = state;
     for (const listener of this.stateListeners) {
       try { listener(state); } catch { /* its own */ }
     }
+  }
+
+  /**
+   * A `file.*` event names the message that carries the file. The engine can say where a transfer stands before it
+   * stores that message: the event then waits for it, up to 2 s, and goes with `messageId: null` after that.
+   */
+  private fileEvent(fileId: string, emit: (messageId: string | null) => void): void {
+    const pending = this.pendingFiles.get(fileId);
+    const messageId = this.fileMessages.get(fileId);
+    if (messageId && !pending) { emit(messageId); return; }
+    if (pending) { pending.emits.push(emit); return; }
+    const timer = setTimeout(() => this.flushFile(fileId, null), FILE_MESSAGE_WAIT_MS);
+    timer.unref?.();
+    this.pendingFiles.set(fileId, { timer, emits: [emit] });
+  }
+
+  private flushFile(fileId: string, messageId: string | null): void {
+    const pending = this.pendingFiles.get(fileId);
+    if (!pending) return;
+    this.pendingFiles.delete(fileId);
+    clearTimeout(pending.timer);
+    for (const emit of pending.emits) emit(messageId);
   }
 
   /** Whether this side said something once in a chat (the join notice): kept with the seen set. */
@@ -251,8 +285,10 @@ export class EventHub {
     const quiet = this.firstRun && !this.baselined;
     const changes: [string, string | null][] = [];
     const present = new Set<string>();
+    const files: [string, string][] = [];
     for (const message of messages) {
       present.add(message.id);
+      if (message.file && this.fileMessages.get(message.file.id) !== message.id) { this.fileMessages.set(message.file.id, message.id); files.push([message.file.id, message.id]); }
       const state = deliveryOf(message), before = known.get(message.id);
       if (before === state) continue;
       known.set(message.id, state);
@@ -279,6 +315,8 @@ export class EventHub {
       if (!quiet) this.emit(group ? "group.deleted" : "message.deleted", `${group ? "group" : "message"}.deleted:${group ?? chat}:${id}`, group ? { group, messageId: id } : { chat, messageId: id });
     }
     if (changes.length) this.persist(chat, changes);
+    // After the message's own event: what waited for it goes now.
+    for (const [fileId, messageId] of files) this.flushFile(fileId, messageId);
   }
 
   private persist(chat: string, changes: [string, string | null][]): void {

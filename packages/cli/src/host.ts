@@ -7,6 +7,7 @@ import { callApi, type ApiContext } from "./api";
 import { CallManager } from "./calls/manager";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
+import { resumeHolds } from "./holds";
 import { acquireLock, type ProfilePaths } from "./profiles";
 import { startRuntime } from "./runtime/engine";
 
@@ -53,6 +54,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     throw error;
   }
   const ctx: ApiContext = { runtime, hub, mode, version, calls };
+  resumeHolds(ctx);
   let closing: Promise<void> | null = null;
   return {
     ctx,

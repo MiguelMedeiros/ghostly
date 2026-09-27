@@ -86,8 +86,12 @@ export const COMMANDS: Record<string, Command> = {
     options: { stop: { type: "boolean", description: "Say you stopped" }, for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" } },
     params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, for: options.for }),
   },
-  "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now", args: ["chat"], params: (_, { chat }) => ({ chat }) },
-  "chat disconnect": { method: "chat.disconnect", usage: "chat disconnect <chat>", summary: "Close a chat's live session", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now (ends a --hold)", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "chat disconnect": {
+    method: "chat.disconnect", usage: "chat disconnect <chat> [--hold <minutes>]", summary: "Close a chat's live session (the contact may redial; --hold keeps it on the DHT that long, 0 ends it)", args: ["chat"],
+    options: { hold: { type: "number", description: "Stay off the direct link this many minutes (up to 10080): DHT only, taken back after" } },
+    params: ({ options }, { chat }) => ({ chat, hold: options.hold }),
+  },
   "chat verify": {
     method: "chat.verify", usage: "chat verify <chat> --code <code>", summary: "Mark a contact verified after comparing codes", args: ["chat"],
     options: { code: { type: "string", description: "The code the contact reads out" } }, params: ({ options }, { chat }) => ({ chat, code: options.code }),
