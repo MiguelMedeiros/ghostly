@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.10 |
+| Revision | 0.11 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
@@ -269,6 +269,7 @@ A full mesh costs each member one edge per other member: its connection, its Pka
 - Edges are pairwise Pkarr links: relays see one rendezvous key per member per edge and its signaling; the group id and the roster never touch the DHT.
 - A member's device holds its member seed, the chain, the secrets of recent epochs and its own recent messages in the clear at rest, as chats are held today. Profile backups include them.
 - Denial of service by an insider is bounded to what one edge can carry; a validly signed fork by the admin halts the group by design.
+- Nothing on the network says that a member has frames waiting: they wait on the other members' devices until an edge opens (§ Catch-up). So checking a member's other profile for new messages from the same device ([04](04-profiles.md#checking-other-profiles)) does not cover mesh groups. Covering them would take a new sealed record written by the members who hold the frames (for example a flag on the edge's own Pkarr record, which only the two members of an edge can derive), and a publication on every send, which costs relay requests on the web; the community profile has its beacon's head instead.
 
 ## Conformance
 
@@ -284,6 +285,7 @@ Private payments in a group (no note, or amounts hidden); more metadata (renamin
 
 ## Revision log
 
+- 0.11 (2026-09-27): a note that checking other profiles for new messages does not cover mesh groups, and why.
 - 0.10 (2026-09-27): edits handed on like messages: every member keeps the latest edit per message and hands an asked-for author's on; an edit handed on is taken with the author's signature, while both members are in the roster.
 - 0.9 (2026-09-27): up to 32 members (past eight only when every member's app announces `paired-groups` version 3); any member hands on what another missed (`ask`, `miss`, `xs`), removed members neither handed on nor taken from a third member; a large mesh paces its edges and announces who is back (`group-here`) (#373).
 - 0.8 (2026-09-27): edits of sent messages, `group-edit` (#378).

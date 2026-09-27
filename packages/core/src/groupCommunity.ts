@@ -322,6 +322,23 @@ const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
 const messageSigned = (f: Omit<CommunityMessageFrame, "sig" | "t" | "v">) => utf8Encode(JSON.stringify(["ghostly-group/2 msg", f.g, f.e, f.h, f.s, f.n, f.ts, f.nn, f.c]));
 export const communityMessageId = (sender: string, epoch: number, h: string, seq: number) => `${sender}:${epoch}:${h}:${seq}`;
 const seenKey = (e: number, h: string) => `${e}:${h}`;
+/** Whether a frame, by its identity, is one this state took already (or is too old to be taken again). */
+function seenIn(seen: CommunityState["seen"], f: { s: string; e: number; h: string; n: number }): boolean {
+  const entry = seen[f.s]?.[seenKey(f.e, f.h)];
+  if (!entry || f.n > entry.high) return false;
+  if (f.n <= entry.high - COMMUNITY_LIMITS.replay) return true;
+  return f.n === entry.high || entry.window.includes(f.n);
+}
+/**
+ * Whether a stored community state holds the frame a beacon's head names (WISP 9xx § Head), read without running
+ * the group: its own frame, one it took, or one of an epoch so far behind its own that it would not be taken now.
+ */
+export function communityHasFrame(state: Pick<CommunityState, "seen" | "seedB64" | "chain">, f: { s: string; e: number; h: string; n: number }): boolean {
+  if (f.s === identityFromSeedB64(state.seedB64).pubKeyZ32) return true;
+  const epoch = state.chain.length ? state.chain[state.chain.length - 1].e : 0;
+  if (f.e < epoch - COMMUNITY_LIMITS.window) return true;
+  return seenIn(state.seen, f);
+}
 
 function isSealed(v: unknown): v is SealedSecret {
   return !!v && typeof v === "object" && ["e", "n", "c"].every(k => typeof (v as Record<string, unknown>)[k] === "string" && B64.test((v as Record<string, string>)[k]) && (v as Record<string, string>)[k].length <= 128);
@@ -1136,12 +1153,7 @@ export class CommunitySession {
     return true;
   }
 
-  private isDuplicate(f: CommunityMessageFrame): boolean {
-    const entry = this.state.seen[f.s]?.[seenKey(f.e, f.h)];
-    if (!entry || f.n > entry.high) return false;
-    if (f.n <= entry.high - COMMUNITY_LIMITS.replay) return true;
-    return f.n === entry.high || entry.window.includes(f.n);
-  }
+  private isDuplicate(f: CommunityMessageFrame): boolean { return seenIn(this.state.seen, f); }
   private markSeen(f: CommunityMessageFrame): void {
     const bySender = (this.state.seen[f.s] ??= {});
     const entry = (bySender[seenKey(f.e, f.h)] ??= { high: -1, window: [] });

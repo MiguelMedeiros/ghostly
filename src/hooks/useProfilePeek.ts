@@ -33,7 +33,7 @@ export function useProfilePeek(): void {
       onFresh: (target, chats) => {
         const { settings: now, t: say } = latest.current;
         // Off by default; the system's Do Not Disturb holds it back like any other notice, and a chat muted in that profile stays quiet.
-        if (!peekNotifies(now) || !now.notifications.systemEnabled || chats.every((chat) => mutedInProfile(target.id, chat.peer))) return;
+        if (!peekNotifies(now) || !now.notifications.systemEnabled || chats.every((chat) => mutedInProfile(target.id, chat))) return;
         void showPrivateNotification(`peek-${target.id || "default"}-${Date.now()}`, say("profilePeek.notice", { name: target.name }), `${PROFILE_NOTICE}${target.id}`);
       },
       testMs: testPace(),

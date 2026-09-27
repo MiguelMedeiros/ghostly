@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.9 |
+| Revision | 0.10 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [900](900-group-sessions.md), [9xx · Group Mesh](9xx-group-mesh.md) |
@@ -101,6 +101,18 @@ Edges are the mesh's: a paired-chat/1 link per pair of member keys, derived from
 A hub that receives a frame it had not seen passes it on to every edge but the one it came on: its members and the other hubs. Each hub does so once per frame, since frames are deduplicated by their identity (a message by sender, epoch, commit and sequence; a commit by hash), so this is a bounded flood among at most eight hubs, and it does not need every pair of hubs to have its edge up, which after a change of hubs they do not. A hub relays only what it could verify: messages signed by a member of the epoch they name, commits that follow the chain or wait for a gap to fill. Nobody can read what they relay unless they are a member of that epoch, which a hub is.
 
 A frame for one member (the secret of a fresh epoch sealed to it) carries `to`; a hub hands it to that member if it holds its edge, and otherwise to the other hubs, once per frame.
+
+### Head
+
+Since revision 0.10 the beacon packet carries a second sealed record beside the hub list, `_head`: the newest message frame the writing hub holds, by its identity alone.
+
+```
+_head = nonce(24) ‖ XChaCha20-Poly1305(beacon key, aad = "beacon/<g>/head", s(32) ‖ e(u32) ‖ h(8) ‖ n(u32) ‖ ts(u32 seconds))
+```
+
+`s`, `e`, `h`, `n` and `ts` are the frame's own (§ Messages and catch-up). A hub writes it every time it republishes the beacon, with the newer (by `ts`) of the head it read there and the newest frame in its store; a head more than a minute in the future is not taken. So it costs no request of its own: the beacon goes out every 30 seconds anyway. It serves a member's other profile on the same device ([04](04-profiles.md#checking-other-profiles)): while that member's profile is not running, the running one reads the beacon with the stored rendezvous secret and shows "New" when the head names a frame the stored state has not taken (not its own, not in `seen`, not from an epoch so far behind that it would be refused). Nothing is fetched or opened but the head.
+
+Any frame counts: a text, an application frame (a reaction, an edit, a payment note) or a pair payload for another member. A hub from before this revision republishes the beacon without `_head`, and the next hub of this revision puts it back; readers from before ignore a record they do not know. Mesh groups have no shared record of this kind ([9xx · Group Mesh](9xx-group-mesh.md#security-and-privacy)).
 
 ## Messages and catch-up
 
@@ -227,6 +239,7 @@ The final admin changes (revision 0.6) change only which branch a member follows
 - The admin cannot be bypassed for removal, role, rotation or link changes, and a member cannot undo one by outgrowing it with a longer branch (§ Races and forks). The admin cannot equivocate without halting the group, nor can an admin who handed the role on.
 - A compromised member seed is healed by removal, as in the mesh; there are no member key updates.
 - Hubs see who is connected to them and when, and relay ciphertext they can read (they are members), except pair payloads: those only their recipient opens.
+- The beacon's head (§ Head) tells anyone who holds the rendezvous secret when the group last had a frame and from which member key. Members see that anyway; a removed member keeps the secret, so it can also follow the group's activity by time after its removal (never what was said), as it can already follow who the hubs are.
 - Payments: the group (hubs included) sees who pays or asks whom, how much, over what and the memo, through the note; it never sees a token, invoice or address sent between two members. A hub can drop a pair payload, like any frame; it cannot read, alter, forge or replay one. Another hub, or the next sync, carries it.
 
 ## Conformance
@@ -281,6 +294,7 @@ Approval of each entry, expiry and use count; several admins; member key updates
 
 ## Revision log
 
+- 0.10 (2026-09-27): the beacon's head: hubs publish the newest frame they hold, by its identity, beside the hub list, for a member's other profile on the same device (§ Head).
 - 0.8 (2026-09-27): reactions as a sealed, signed application frame that every member and hub carries, caught up like messages (#354).
 - 0.7 (2026-09-27): replies: `r` inside the sealed payload, beside the mentions (#347).
 - 0.6 (2026-09-26): the admin's changes are final: a member's longer branch cannot undo a remove, a role, a rotation or a new link (#300).

@@ -5,8 +5,9 @@ import { DhtDelivery, DiscoveryBudgetError, HoldKeys, createIdentity, identityFr
 import { PEEK_LIMITS, ProfilePeek, readPathOf, readProfileStore, type ProfilePeekHost } from "../src/engine/profilePeek";
 import { databaseExists } from "../src/backup/database";
 import { STORES, wrap } from "../src/shared/idb";
-import type { StoredLink } from "../src/shared/types";
-// covers: profiles.peek
+import type { StoredGroup, StoredLink } from "../src/shared/types";
+import { CommunityWorld } from "./communityWorld";
+// covers: profiles.peek, groups.community.head
 
 /*
  * Checking other profiles (WISP 04 § Checking other profiles): a contact, C, and the profile it writes to, B, which is
@@ -173,8 +174,51 @@ it("reads another profile's database without creating, upgrading or changing it"
     open.result.createObjectStore(STORES.settings).put({ relays: ["https://r.example"] }, "settings");
   };
   (await wrap(open)).close();
-  expect(await readProfileStore("ghostly_other")).toEqual({ links: [{ id: "x", peerPubKeyZ32: "p" }], settings: { relays: ["https://r.example"] } });
+  expect(await readProfileStore("ghostly_other")).toEqual({ links: [{ id: "x", peerPubKeyZ32: "p" }], groups: [], settings: { relays: ["https://r.example"] } });
   const again = await wrap(indexedDB.open("ghostly_other"));
   expect(again.version).toBe(3);
   again.close();
+});
+
+it("sees a community group's new frame from its beacon's head, and nothing once that profile took it", { timeout: 120_000 }, async () => {
+  const world = new CommunityWorld();
+  const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+  const id = await alice.groups.create("Open door");
+  const link = await alice.groups.enableLink(id);
+  for (const p of [bob, carol]) await p.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+  await world.until(() => [bob, carol].every((p) => world.member(p, id)), 10 * 60_000);
+  await world.run(40_000);
+  // Bob's profile stops running; the running one (another profile of his device) reads the network as it would.
+  bob.online = false;
+  const transport: PkarrTransport = { resolve: async (key) => { const records = world.pkarr.get(key); return records ? { pubKeyZ32: key, records, timestamp: 0n } as unknown as SignedPacket : null; },
+    publish: vi.fn(async () => { throw new Error("no"); }), describe: () => ({ protocol: "world", relays: [] }) };
+  const bobStored = async () => ({ links: [], groups: await bob.store.getGroups(), settings: {} });
+  const peek = new ProfilePeek(host(transport, () => [], { read: bobStored, now: () => world.now }));
+  const quiet = await peek.peek("bob", "ghostly_bob");
+  expect(quiet.chats).toEqual([expect.objectContaining({ linkId: `group:${id}`, text: null })]);
+  await carol.groups.send(id, "carol, while bob is away");
+  // A hub republishes the beacon within 30 s, with the newest frame it holds.
+  await world.run(40_000);
+  const seen = await peek.peek("bob", "ghostly_bob");
+  expect(seen.reads).toBe(1);
+  expect(seen.chats[0].text).toMatch(/:\d+:[0-9a-f]{16}:\d+$/);
+  expect(transport.publish).not.toHaveBeenCalled();
+  // Bob runs again and is caught up: the same head is no longer new for him.
+  bob.online = true;
+  await world.until(() => world.texts(bob, id).includes("carol, while bob is away"), 3 * 60_000);
+  await world.run(5_000);
+  // A session saves what it took (`seen`) a second after taking it.
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  bob.online = false;
+  const after = await peek.peek("bob", "ghostly_bob");
+  expect(after.chats[0].text).toBeNull();
+  expect(after.chats[0].peerSequence).toBeGreaterThan(seen.chats[0].peerSequence);
+});
+
+it("leaves mesh groups and groups it left out: they publish nothing to look at", async () => {
+  const dht = fakeDht();
+  const base = { createdAt: 1 } as const;
+  const groups = [{ id: "mesh", ...base, state: {} }, { id: "gone", ...base, community: { status: "left", rv: "x" } }, { id: "left", ...base, left: { at: 1, admin: "a" }, community: { status: "active", rv: "x" } }] as unknown as StoredGroup[];
+  const result = await new ProfilePeek(host(dht.transport, () => [], { read: async () => ({ links: [], groups, settings: {} }) })).peek("b", "ghostly_b");
+  expect(result).toEqual({ status: "done", reads: 0, chats: [] });
 });
