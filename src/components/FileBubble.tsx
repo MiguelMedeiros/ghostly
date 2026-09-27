@@ -14,7 +14,9 @@ const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-blac
 export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile; peerName?: string }) {
   const platform = useServicesPlatform();
   const transfer = platform?.getTransfer(file.id) ?? null;
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
+  const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
+  const blobUrl = preview?.id === file.id ? preview.url : null;
   const [actionError, setActionError] = useState("");
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
@@ -31,28 +33,28 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   }, [transfer?.state]);
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
 
-  // A small file can be announced before its transfer shows up: look again once it has.
+  // The sender holds its bytes from the start: its preview shows at once, not after the transfer. A received file is
+  // read once it is all here. A small file can be announced before its transfer shows up: look again once it has.
+  const readable = settled || file.id.includes("-out-");
   useEffect(() => {
-    if (!platform || !settled) return;
-    let url: string | null = null;
+    if (!platform || !readable || blobUrl) return;
     let cancelled = false;
     void platform.getFile(file.id).then((blob) => {
       if (cancelled) return;
       if (!blob) {
+        if (!settled) return;
         setSaveOnly(!!platform.saveFile && transfer?.state === "done");
         setMissing(!platform.saveFile || transfer?.state !== "done");
         return;
       }
-      url = URL.createObjectURL(blob);
-      setBlobUrl(url);
+      setPreview({ id: file.id, url: URL.createObjectURL(blob) });
       setMissing(false);
       setSaveOnly(false);
     });
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [platform, file.id, settled, transfer?.state]);
+    return () => { cancelled = true; };
+  }, [platform, file.id, readable, settled, transfer?.state, blobUrl]);
+  // Revoked only once nothing shows it: another file in this bubble, or the bubble gone.
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
 
   const act = (action: FileAction) => {
     setActionError("");

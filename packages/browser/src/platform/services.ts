@@ -27,6 +27,16 @@ import { engine } from "./engine";
  * how far the copy got. Gone once the peer has the file, or with the reason the copy failed.
  */
 const preparing = new Map<string, FileTransferState>();
+/**
+ * The last few files sent from this page, as they were handed over (a recording, a paste, a pick): their bubble shows
+ * them at once from these bytes, without reading the stored copy back. Small files only; gone on a reload.
+ */
+const justSent = new Map<string, Blob>();
+const JUST_SENT_MAX = 8;
+function keepJustSent(id: string, blob: Blob): void {
+  justSent.set(id, blob);
+  while (justSent.size > JUST_SENT_MAX) justSent.delete(justSent.keys().next().value!);
+}
 const preparingListeners = new Set<() => void>();
 let preparingTold = 0;
 function preparingChanged(force = false): void {
@@ -301,6 +311,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (source.size <= SMALL_FILE_BYTES) {
       // Its digest from the bytes in hand (a recording in memory): sending never has to read the stored copy back whole.
       const digest = await blobDigest(source);
+      keepJustSent(file.id, new Blob([source], { type: file.mime }));
       await fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
       await engine.call("sendFile", { linkId: link.id, file, timestamp });
       return { timestamp, file };
@@ -334,6 +345,8 @@ export const servicesPlatform: ServicesPlatform | null = {
     await engine.call("sendFile", { linkId: stored.linkId, file: { id: fileId, ...stored.metadata }, timestamp: stored.metadata.timestamp });
   },
   async deleteMessage(peerPubKeyZ32, messageId) {
+    // A deleted file is not shown again from memory either.
+    justSent.clear();
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) await engine.call("deleteMessage", { linkId: link.id, messageId });
   },
@@ -346,6 +359,8 @@ export const servicesPlatform: ServicesPlatform | null = {
     await engine.call("fileAction", { linkId, fileId, action });
   },
   async getFile(fileId) {
+    const held = justSent.get(fileId);
+    if (held) return held.slice(0, held.size, safeBlobType(held.type));
     const stored = await fileStore.get(fileId);
     if (!stored) return null;
     // Files stored before received types were cleaned up may still carry the peer's type.

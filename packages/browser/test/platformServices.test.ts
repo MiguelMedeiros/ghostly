@@ -157,6 +157,22 @@ describe("sending files", () => {
     expect(stored?.transfer).toEqual({ state: "transferring", transferred: 0, size: 5 });
   });
 
+  it("shows a file just sent from the bytes handed over, at once, until the message is deleted", async () => {
+    withLinks(chat({ id: "pic-link" }));
+    const png = new File([new Uint8Array([137, 80, 78, 71])], "Pasted image.png", { type: "image/png" });
+    const { file } = await services.sendFile("peer-1", png);
+    // Even with the stored copy unreadable (WebKit lost an IndexedDB Blob), the sender's bubble has its picture.
+    const get = vi.spyOn(fileStore, "get").mockRejectedValue(new Error("The object can not be found here."));
+    const shown = await services.getFile(file.id);
+    expect(shown?.type).toBe("image/png");
+    expect(new Uint8Array(await shown!.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]));
+    expect(get).not.toHaveBeenCalled();
+    get.mockRestore();
+    await services.deleteMessage("peer-1", "me_1");
+    await fileStore.delete(file.id);
+    expect(await services.getFile(file.id)).toBeNull();
+  });
+
   it("retries only a file this device sent, on a chat that still takes files", async () => {
     await fileStore.put({ id: "in-file", linkId: "link-1", blob: new Blob(["x"]), createdAt: 1, direction: "in", metadata: { name: "a", size: 1, mime: "text/plain", timestamp: 1 } });
     await fileStore.put({ id: "out-file", linkId: "link-1", blob: new Blob(["x"]), createdAt: 1, direction: "out", metadata: { name: "a", size: 1, mime: "text/plain", timestamp: 3 } });
