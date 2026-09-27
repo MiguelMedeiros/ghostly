@@ -177,7 +177,8 @@ export function buildDetails(message: ChatMessage, view: MessageDetailsView | nu
   const edit = message.edit;
   if (edit) add("edits", "Edits", [
     { label: "Edits", value: `${edit.seq}, the last at ${formatTime(edit.at)}` },
-    edit.pending ? { label: "Contact", value: "Not shown yet: it goes when the chat is live and their app shows edits" } : undefined,
+    edit.pending ? group ? { label: "Group", value: "Not sent yet: it goes as soon as the group can take it" }
+      : { label: "Contact", value: "Not shown yet: it goes when the chat is live and their app shows edits" } : undefined,
     ...edit.history.map((version): DetailRow => ({ label: `${version.at === message.timestamp ? "Original" : "Before"}, ${formatTime(version.at)}`, value: version.text, copy: version.text })),
   ]);
 

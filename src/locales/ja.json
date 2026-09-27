@@ -84,7 +84,8 @@
       "edit": "編集",
       "edited": "編集済み",
       "editedAt": "{{time}}に編集",
-      "editPending": "まだ相手に表示されていません"
+      "editPending": "まだ相手に表示されていません",
+      "editPendingGroup": "まだグループに送信されていません"
     },
     "options": "オプション",
     "menu": {

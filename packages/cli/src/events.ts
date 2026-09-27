@@ -311,7 +311,11 @@ export class EventHub {
           const type = notice ? (message.sender === "peer" ? "chat.joined" : "chat.announced") : message.sender === "peer" ? "message.received" : "message.sent";
           this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json, ...(notice ? { name: notice[1] ?? null } : {}) });
         }
-      } else if (!group) {
+      } else if (group) {
+        // A new text in a group (WISP 9xx § Edits): mine as made here, a member's as it came. Once per edit number.
+        const [, edits] = splitState(state), [, edited] = splitState(before);
+        if (edits > edited) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edits}`, { group, messageId: message.id, edits, message: json });
+      } else {
         const [delivery, edits] = splitState(state), [was, edited] = splitState(before);
         // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number.
         if (edits > edited) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json });

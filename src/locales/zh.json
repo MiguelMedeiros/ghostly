@@ -84,7 +84,8 @@
       "edit": "编辑",
       "edited": "已编辑",
       "editedAt": "编辑于 {{time}}",
-      "editPending": "对方还看不到"
+      "editPending": "对方还看不到",
+      "editPendingGroup": "尚未发送到群组"
     },
     "options": "选项",
     "menu": {
