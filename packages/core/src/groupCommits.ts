@@ -46,6 +46,11 @@ export interface GroupCommit {
  */
 export const MAX_GROUP_MEMBERS = 32;
 export const LEGACY_GROUP_MEMBERS = 8;
+/**
+ * The cap the chain rules and the engine apply: `MAX_GROUP_MEMBERS`, always, in the apps. Only the scale harness raises
+ * it, to measure what hubs would cost past 32 (WISP 9xx · Group Mesh § Cost per member); an app never does.
+ */
+export const GROUP_MEMBER_CAP = { max: MAX_GROUP_MEMBERS as number };
 /** The `paired-groups` version an app announces when it takes mesh rosters of up to `MAX_GROUP_MEMBERS`. */
 export const GROUP_VERSION_LARGE = 3;
 export const MAX_GROUP_CHAIN = 1024;
@@ -74,7 +79,7 @@ function parseCommit(raw: unknown): GroupCommit | null {
   const c = raw as Record<string, unknown>;
   if (c.v !== 1 || typeof c.g !== "string" || !GROUP_ID.test(c.g) || !Number.isSafeInteger(c.e) || (c.e as number) < 0 ||
     typeof c.p !== "string" || (c.p !== "" && !HASH.test(c.p)) || !["create", "add", "remove", "role", "rotate"].includes(c.k as string) ||
-    !Array.isArray(c.m) || c.m.length === 0 || c.m.length > MAX_GROUP_MEMBERS ||
+    !Array.isArray(c.m) || c.m.length === 0 || c.m.length > GROUP_MEMBER_CAP.max ||
     !c.m.every(entry => Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "string" && MEMBER_KEY.test(entry[0]) && (entry[1] === "admin" || entry[1] === "member")) ||
     typeof c.by !== "string" || !MEMBER_KEY.test(c.by) || (c.s !== undefined && (typeof c.s !== "string" || !MEMBER_KEY.test(c.s))) ||
     !Number.isSafeInteger(c.ts) || (c.ts as number) <= 0 || typeof c.c !== "string" || !TAG.test(c.c) || typeof c.sig !== "string" || !SIG.test(c.sig)) return null;
@@ -90,7 +95,7 @@ export function expectedRoster(previous: Roster | null, kind: CommitKind, by: st
   if (!previous || rosterAdmin(previous) !== by) return null;
   switch (kind) {
     case "add":
-      if (!subject || subject === by || rosterHas(previous, subject) || previous.length >= MAX_GROUP_MEMBERS) return null;
+      if (!subject || subject === by || rosterHas(previous, subject) || previous.length >= GROUP_MEMBER_CAP.max) return null;
       return sortRoster([...previous, [subject, "member"]]);
     case "remove":
       if (!subject || subject === by || !rosterHas(previous, subject)) return null;

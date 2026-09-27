@@ -78,6 +78,7 @@ export * from "./reactions";
 export * from "./groupEntry";
 export * from "./groupCommunity";
 export * from "./communityRendezvous";
+export * from "./groupHubs";
 export * from "./groupMeta";
 export * from "./pairingProgress";
 export { setLinkTraceSink } from "./linkTrace";
