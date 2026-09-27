@@ -9,11 +9,20 @@ type Phase = "starting" | "recording" | "paused" | "sending";
 
 /** Released sooner than this, a press was a tap: on touch a hint, with a mouse hands-free recording. */
 const TAP_MS = 300;
+/**
+ * A mouse let go before this much was recorded (a slow click, a microphone still waking up) meant
+ * "record", not "send": it records hands-free, as a click does in WhatsApp Web.
+ */
+const MOUSE_SEND_MS = 1000;
 /** How far the finger travels to cancel (sideways) or to lock (up). */
 const CANCEL_PX = 110;
 const LOCK_PX = 80;
 const HINT_MS = 2500;
 const PREVIEW_BARS = 40;
+/** Esc throws away a recording shorter than this at once; a longer one asks first. */
+const CONFIRM_MS = 3000;
+/** How long the bin shows after a slide throws a recording away. */
+const BIN_MS = 700;
 
 interface Props {
   onSend(file: File, voice: VoiceMeta): Promise<string | null>;
@@ -25,11 +34,31 @@ interface Props {
   onActiveChange?(active: boolean): void;
 }
 
+const MicIcon = ({ size = 22, color = "currentColor" }: { size?: number; color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" /></svg>
+);
+const SendIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+);
+const BinIcon = ({ size = 20 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <g className="voice-bin-lid"><polyline points="3 6 5 6 21 6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></g>
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" />
+  </svg>
+);
+const PlayIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z" /></svg>
+);
+const PauseIcon = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+);
+
 /**
  * The mic that takes the send button's place while the message is empty, as in WhatsApp.
- * Hold to record and release to send; slide sideways to cancel, up to lock. Locked (or
- * started with a click or the keyboard) it records hands-free: pause and resume, listen to
- * what is recorded so far, delete, or send. Esc cancels, Enter sends.
+ * Hold to record and release to send; slide sideways to cancel, up to lock. A mouse click (or the
+ * keyboard) records hands-free straight away, like WhatsApp Web. Hands-free, the mic becomes the
+ * send button at once: one press sends. Beside it: discard, pause (listen back while paused) and
+ * resume. Enter sends; Esc discards, asking first once there is more than a few seconds to lose.
  */
 export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, onActiveChange }: Props) {
   const [mode, setMode] = useState<Mode>("idle");
@@ -40,19 +69,35 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const [hint, setHint] = useState<string | null>(null);
   const [announce, setAnnounce] = useState("");
   const [preview, setPreview] = useState<{ peaks: number[]; playing: boolean } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [binned, setBinned] = useState(false);
 
   const recorderRef = useRef<VoiceRecorder | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
   const gestureRef = useRef<{ id: number; x: number; y: number; at: number; mouse: boolean } | null>(null);
+  /** A press on the send button (hands-free): it sends when that pointer lets go on it. */
+  const sendPressRef = useRef<number | null>(null);
+  /**
+   * The click after a pointer gesture this button already acted on. Cleared by the next press too, so a
+   * click the engine never delivered (a release away from the button) cannot swallow the next one.
+   */
   const suppressClickRef = useRef(false);
   const sendingRef = useRef(false);
+  /** Send was asked for before the microphone answered: it sends once it does. */
+  const pendingSendRef = useRef(false);
+  /** Whether the recording was running when Esc asked "discard?", so Keep carries on. */
+  const confirmResumeRef = useRef(false);
   const modeRef = useRef<Mode>("idle");
+  const confirmingRef = useRef(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const binTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewAudio = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
   const previewWave = useRef<HTMLDivElement>(null);
   const previewFrame = useRef(0);
 
   const setModeBoth = (next: Mode) => { modeRef.current = next; setMode(next); };
+  const setConfirmingBoth = (next: boolean) => { confirmingRef.current = next; setConfirming(next); };
   const activeChange = useRef(onActiveChange);
   activeChange.current = onActiveChange;
   useEffect(() => { activeChange.current?.(mode !== "idle"); }, [mode]);
@@ -75,6 +120,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     stopPreview();
     recorderRef.current = null;
     gestureRef.current = null;
+    sendPressRef.current = null;
+    pendingSendRef.current = false;
+    setConfirmingBoth(false);
     setModeBoth("idle");
     setPhase("starting");
     setElapsed(0);
@@ -82,7 +130,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setDrag({ x: 0, y: 0 });
   }, [stopPreview]);
 
-  const cancel = useCallback((why = "Voice message deleted") => {
+  const cancel = useCallback((why = "Voice message discarded") => {
     recorderRef.current?.cancel();
     reset();
     setAnnounce(why);
@@ -91,15 +139,20 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const send = useCallback(async () => {
     const recorder = recorderRef.current;
     if (!recorder || sendingRef.current) return;
-    // Nothing is recorded until the microphone answers.
-    if (!recorder.recording && !recorder.paused) return cancel();
+    if (!recorder.recording && !recorder.paused) {
+      // Hands-free, the send button shows before the microphone answers: a press then is kept, not lost.
+      if (modeRef.current === "locked") { pendingSendRef.current = true; setPhase("sending"); return; }
+      return cancel();
+    }
+    const locked = modeRef.current === "locked";
     sendingRef.current = true;
+    setConfirmingBoth(false);
     setPhase("sending");
     stopPreview();
     try {
       const recording = await recorder.stop();
       reset();
-      if (!recording) { showHint("Too short. Hold to record, release to send"); return; }
+      if (!recording) { showHint(locked ? "Too short to send" : "Too short. Hold to record, release to send"); return; }
       setAnnounce("Voice message sent");
       const error = await onSend(recording.file, recording.voice);
       if (error) onError(error);
@@ -126,8 +179,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       return;
     }
     if (recorderRef.current !== recorder) return;
-    setPhase("recording");
     setAnnounce("Recording");
+    if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
+    setPhase("recording");
   }, [disabled, unavailable, onError, reset, showHint, send]);
 
   // A chat left mid-recording gives the microphone back.
@@ -136,6 +190,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     cancelAnimationFrame(previewFrame.current);
     if (previewAudio.current) URL.revokeObjectURL(previewAudio.current.url);
     if (hintTimer.current) clearTimeout(hintTimer.current);
+    if (binTimer.current) clearTimeout(binTimer.current);
   }, []);
 
   // The clock, while anything is recorded.
@@ -145,31 +200,79 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     return () => clearInterval(timer);
   }, [mode]);
 
-  // Esc cancels, Enter sends — wherever focus is while recording.
+  const pauseRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder?.recording) return;
+    recorder.pause();
+    setPhase("paused");
+    setElapsed(recorder.elapsed());
+    // Fewer bars than a message: the bar beside it has buttons on both sides.
+    setPreview({ peaks: recorder.peaks(PREVIEW_BARS), playing: false });
+  }, []);
+
+  const resumeRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder?.paused) return;
+    stopPreview();
+    recorder.resume();
+    setPhase("recording");
+  }, [stopPreview]);
+
+  /** Esc: a short recording goes at once; a longer one waits, paused, for "Discard?" to be answered. */
+  const askDiscard = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (modeRef.current !== "locked" || !recorder || recorder.elapsed() < CONFIRM_MS) return cancel();
+    confirmResumeRef.current = recorder.recording;
+    pauseRecording();
+    setConfirmingBoth(true);
+  }, [cancel, pauseRecording]);
+
+  const keep = useCallback(() => {
+    setConfirmingBoth(false);
+    if (confirmResumeRef.current) resumeRecording();
+    buttonRef.current?.focus();
+  }, [resumeRecording]);
+
+  useEffect(() => { if (confirming) keepRef.current?.focus(); }, [confirming]);
+
+  // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps.
   useEffect(() => {
     if (mode === "idle") return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); cancel(); }
+      if (sendingRef.current) return;
+      if (confirmingRef.current) {
+        if (event.key === "Escape") { event.preventDefault(); keep(); }
+        return;
+      }
+      if (event.key === "Escape") { event.preventDefault(); askDiscard(); }
       else if (event.key === "Enter" && !event.repeat && modeRef.current === "locked") { event.preventDefault(); void send(); }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [mode, cancel, send]);
+  }, [mode, askDiscard, keep, send]);
 
   const lock = useCallback(() => {
     gestureRef.current = null;
     setDrag({ x: 0, y: 0 });
     setModeBoth("locked");
-    setAnnounce("Recording hands-free. Enter sends, Escape deletes.");
+    setAnnounce("Recording hands-free. Enter sends, Escape discards.");
     buttonRef.current?.focus();
+  }, []);
+
+  const bin = useCallback(() => {
+    if (binTimer.current) clearTimeout(binTimer.current);
+    setBinned(true);
+    binTimer.current = setTimeout(() => setBinned(false), BIN_MS);
   }, []);
 
   const direction = () => (buttonRef.current && getComputedStyle(buttonRef.current).direction === "rtl" ? -1 : 1);
 
   const onPointerDown = (event: PointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0 || modeRef.current !== "idle") return;
-    event.preventDefault();
     suppressClickRef.current = false;
+    if (event.button !== 0) return;
+    if (modeRef.current === "locked") { sendPressRef.current = event.pointerId; return; }
+    if (modeRef.current !== "idle") return;
+    event.preventDefault();
     gestureRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, at: Date.now(), mouse: event.pointerType === "mouse" };
     try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic events have no pointer to hold */ }
     void begin("hold");
@@ -180,27 +283,38 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     if (!gesture || gesture.id !== event.pointerId || modeRef.current !== "hold") return;
     const x = (event.clientX - gesture.x) * direction();
     const y = event.clientY - gesture.y;
-    if (x < -CANCEL_PX) { suppressClickRef.current = true; cancel("Voice message cancelled"); return; }
+    if (x < -CANCEL_PX) { suppressClickRef.current = true; cancel("Voice message discarded"); bin(); return; }
     if (y < -LOCK_PX) { suppressClickRef.current = true; lock(); return; }
     setDrag({ x: Math.min(0, x), y: Math.min(0, y) });
   };
 
   const onPointerUp = (event: PointerEvent<HTMLButtonElement>) => {
+    // Hands-free: the send button sends as the press ends on it, whether or not a click follows.
+    if (modeRef.current === "locked") {
+      if (sendPressRef.current !== event.pointerId) return;
+      sendPressRef.current = null;
+      suppressClickRef.current = true;
+      void send();
+      return;
+    }
     const gesture = gestureRef.current;
     if (!gesture || gesture.id !== event.pointerId || modeRef.current !== "hold") return;
     suppressClickRef.current = true;
     gestureRef.current = null;
-    if (Date.now() - gesture.at < TAP_MS) {
-      // A click with a mouse records hands-free; a tap on a touch screen was a question.
-      if (gesture.mouse) return lock();
-      cancel("");
-      showHint("Hold to record, release to send");
+    const tap = Date.now() - gesture.at < TAP_MS;
+    if (gesture.mouse) {
+      const recorder = recorderRef.current;
+      if (tap || !recorder?.recording || recorder.elapsed() < MOUSE_SEND_MS) return lock();
+      void send();
       return;
     }
+    // A tap on a touch screen was a question.
+    if (tap) { cancel(""); showHint("Hold to record, release to send"); return; }
     void send();
   };
 
   const onPointerCancel = () => {
+    sendPressRef.current = null;
     if (modeRef.current === "hold") cancel("Voice message cancelled");
   };
 
@@ -212,24 +326,15 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    // A key press is not the click of a pointer gesture: Space sends even after a lock whose click never came.
+    suppressClickRef.current = false;
     // Enter on the focused send button is the document's Enter: send once.
     if (event.key === "Enter" && modeRef.current === "locked") event.preventDefault();
   };
 
   const togglePause = () => {
-    const recorder = recorderRef.current;
-    if (!recorder) return;
-    if (recorder.paused) {
-      stopPreview();
-      recorder.resume();
-      setPhase("recording");
-    } else {
-      recorder.pause();
-      setPhase("paused");
-      setElapsed(recorder.elapsed());
-      // Fewer bars than a message: the bar beside it has buttons on both sides.
-      setPreview({ peaks: recorder.peaks(PREVIEW_BARS), playing: false });
-    }
+    if (recorderRef.current?.paused) resumeRecording();
+    else pauseRecording();
   };
 
   const togglePreview = async () => {
@@ -256,59 +361,80 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   const recording = mode !== "idle";
   const paused = phase === "paused";
+  const sending = phase === "sending";
   const nearLock = drag.y < -LOCK_PX / 2;
   const slideFade = Math.max(0.15, 1 - Math.abs(drag.x) / CANCEL_PX);
   const time = formatVoiceDuration(elapsed);
+  const locked = mode === "locked";
 
   return (
     <>
       {recording && (
-        <div className="voice-bar" data-testid="voice-bar" data-mode={mode} data-phase={phase} role="group" aria-label="Voice message">
-          {mode === "locked" && (
-            <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label="Delete voice message" onClick={() => cancel()}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-              </svg>
-            </button>
-          )}
-          <span className="voice-bar-dot" aria-hidden="true" />
-          <span className="text-[15px] tabular-nums text-text-primary min-w-[40px]" data-testid="voice-timer" aria-label={`Recorded ${time}`}>{time}</span>
-          {mode === "hold" ? (
-            <>
-              <LiveWaveform levels={levels} bars={24} className="voice-hold-live" />
-              <span className="voice-slide" style={{ opacity: slideFade, transform: `translateX(${drag.x * direction() * 0.6}px)` }} data-testid="voice-slide">
-                <svg className="voice-slide-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
-                Slide to cancel
-              </span>
-            </>
-          ) : paused && preview ? (
-            <>
-              <button type="button" className="voice-icon-button" data-testid="voice-preview" aria-label={preview.playing ? "Pause preview" : "Play what is recorded"} onClick={() => void togglePreview()}>
-                {preview.playing
-                  ? <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
-                  : <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z" /></svg>}
-              </button>
-              <Waveform ref={previewWave} peaks={preview.peaks} className="flex-1 min-w-0" data-testid="voice-preview-wave" style={{ ["--voice-fill" as string]: "var(--color-accent)" }} />
-            </>
+        <div className="voice-bar" data-testid="voice-bar" data-mode={mode} data-phase={phase} data-confirming={confirming || undefined} role="group" aria-label="Voice message">
+          {confirming ? (
+            <div className="voice-confirm" role="alertdialog" aria-label="Discard voice message?" data-testid="voice-confirm">
+              <span className="voice-confirm-text">Discard voice message?</span>
+              <button ref={keepRef} type="button" className="voice-text-button" data-testid="voice-confirm-keep" onClick={keep}>Keep</button>
+              <button type="button" className="voice-text-button voice-text-danger" data-testid="voice-confirm-discard" onClick={() => cancel()}>Discard</button>
+            </div>
           ) : (
-            <LiveWaveform levels={levels} />
-          )}
-          {mode === "locked" && (
-            <button type="button" className="voice-icon-button" data-testid="voice-pause" disabled={phase === "starting" || phase === "sending"}
-              aria-label={paused ? "Resume recording" : "Pause recording"} onClick={togglePause}>
-              {paused
-                ? <svg width="20" height="20" viewBox="0 0 24 24" fill="#ea4335" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" /></svg>
-                : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><line x1="9" y1="5" x2="9" y2="19" /><line x1="15" y1="5" x2="15" y2="19" /></svg>}
-            </button>
+            <>
+              {locked && (
+                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label="Discard" title="Discard" onClick={() => cancel()}>
+                  <BinIcon />
+                </button>
+              )}
+              {paused && preview ? (
+                <>
+                  <button type="button" className="voice-icon-button" data-testid="voice-preview"
+                    aria-label={preview.playing ? "Pause playback" : "Play"} title={preview.playing ? "Pause playback" : "Play"} onClick={() => void togglePreview()}>
+                    {preview.playing ? <PauseIcon /> : <PlayIcon />}
+                  </button>
+                  <Waveform ref={previewWave} peaks={preview.peaks} className="flex-1 min-w-0" data-testid="voice-preview-wave" style={{ ["--voice-fill" as string]: "var(--color-accent)" }} />
+                  <span className="text-[13px] tabular-nums text-text-secondary min-w-[36px]" data-testid="voice-timer" aria-label={`Recorded ${time}`}>{time}</span>
+                </>
+              ) : (
+                <>
+                  <span className="voice-bar-dot" aria-hidden="true" />
+                  <span className="text-[15px] tabular-nums text-text-primary min-w-[40px]" data-testid="voice-timer" aria-label={`Recorded ${time}`}>{time}</span>
+                  {mode === "hold" ? (
+                    <>
+                      <LiveWaveform levels={levels} bars={24} className="voice-hold-live" />
+                      <span className="voice-slide" style={{ opacity: slideFade, transform: `translateX(${drag.x * direction() * 0.6}px)` }} data-testid="voice-slide">
+                        <svg className="voice-slide-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
+                        Slide to cancel
+                      </span>
+                    </>
+                  ) : (
+                    <LiveWaveform levels={levels} />
+                  )}
+                </>
+              )}
+              {locked && (
+                <button type="button" className="voice-icon-button voice-pause-button" data-testid="voice-pause" data-paused={paused || undefined}
+                  disabled={phase === "starting" || sending}
+                  aria-label={paused ? "Resume" : "Pause"} title={paused ? "Resume" : "Pause"} onClick={togglePause}>
+                  {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
 
       {mode === "hold" && (
         <div className="voice-lock" data-testid="voice-lock-hint" data-near={nearLock ? "true" : "false"} style={{ transform: `translateY(${Math.max(-LOCK_PX, drag.y) * 0.5}px)` }} aria-hidden="true">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15" /></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="5" y="11" width="14" height="10" rx="2" />
+            {/* Open until the finger is nearly there, then it snaps shut. */}
+            <path d={nearLock ? "M8 11V7a4 4 0 0 1 8 0v4" : "M8 11V7a4 4 0 0 1 7.8-1.2"} />
+          </svg>
+          <svg className="voice-lock-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15" /></svg>
         </div>
+      )}
+
+      {binned && (
+        <div className="voice-binned" data-testid="voice-binned" aria-hidden="true"><BinIcon size={22} /></div>
       )}
 
       {hint && <div className="voice-hint" role="status" data-testid="voice-hint">{hint}</div>}
@@ -317,11 +443,12 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       <button
         ref={buttonRef}
         type="button"
-        data-testid={mode === "locked" ? "voice-send" : "voice-record"}
+        data-testid={locked ? "voice-send" : "voice-record"}
         data-mode={mode}
-        aria-label={mode === "locked" ? "Send voice message" : "Record a voice message"}
+        aria-label={locked ? "Send" : "Record a voice message"}
         aria-disabled={disabled || !!unavailable || undefined}
-        title={mode === "idle" ? (unavailable ?? "Hold to record, release to send. Click to record hands-free.") : undefined}
+        aria-busy={sending || undefined}
+        title={locked ? "Send" : mode === "idle" ? (unavailable ?? "Hold to record, or click for hands-free") : undefined}
         disabled={disabled}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -333,11 +460,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
         style={{ touchAction: "none" }}
         className={`voice-record-button relative w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center rounded-full shrink-0 cursor-pointer select-none bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${unavailable ? "opacity-60" : ""}`}
       >
-        {mode === "locked" ? (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
-        ) : (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" /></svg>
-        )}
+        {/* One element either way (so a press's target never leaves the page); the send icon pops in by CSS. */}
+        <span className="voice-button-icon">{locked ? <SendIcon /> : <MicIcon />}</span>
       </button>
     </>
   );

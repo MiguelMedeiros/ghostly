@@ -130,6 +130,18 @@
   animation: fade-in 120ms ease-out;
 }
 .voice-lock[data-near="true"] { color: var(--color-accent); }
+.voice-lock-arrow { transition: opacity 120ms linear; }
+.voice-lock[data-near="true"] .voice-lock-arrow { opacity: 0; }
+
+/* The icon inside the mic/send button: never the target of a press, so the button always is. */
+.voice-button-icon { display: flex; pointer-events: none; }
+/* Locked: the mic turns into send at once, with a small pop so the change is seen. */
+.voice-record-button[data-mode="locked"] .voice-button-icon { animation: voice-pop 220ms ease-out; }
+@keyframes voice-pop {
+  from { transform: scale(0.4) rotate(-35deg); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.voice-record-button[aria-busy="true"] { opacity: 0.7; cursor: progress; }
 
 .voice-hint {
   position: absolute;
@@ -162,8 +174,72 @@
 .voice-icon-button:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .voice-icon-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .voice-icon-button:disabled { opacity: 0.35; cursor: not-allowed; }
+/* Pause is red while it records, as in WhatsApp; paused, the red mic resumes. */
+.voice-pause-button:not(:disabled) { color: var(--color-danger); }
+
+/* Esc on a longer recording: "Discard?" in the bar itself (no system dialog in the Desktop webview). */
+.voice-confirm {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.voice-confirm-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+.voice-text-button {
+  flex: none;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 999px;
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+.voice-text-button:hover { filter: brightness(1.1); }
+.voice-text-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.voice-text-danger { color: var(--color-danger); }
+
+/* A slide to cancel ends in the bin: it drops in, the lid shuts, it fades. */
+.voice-binned {
+  position: absolute;
+  top: 50%;
+  inset-inline-start: 6px;
+  z-index: 10;
+  width: 40px;
+  height: 40px;
+  margin-top: -20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-panel-header);
+  color: var(--color-danger);
+  pointer-events: none;
+  animation: voice-bin 700ms ease-in forwards;
+}
+.voice-binned .voice-bin-lid { transform-box: fill-box; transform-origin: 0% 100%; animation: voice-lid 700ms ease-in-out; }
+@keyframes voice-bin {
+  0% { transform: translateY(-10px) scale(0.6); opacity: 0; }
+  20% { transform: none; opacity: 1; }
+  70% { transform: none; opacity: 1; }
+  100% { transform: translateY(6px) scale(0.85); opacity: 0; }
+}
+@keyframes voice-lid {
+  0%, 15% { transform: rotate(-35deg); }
+  45%, 100% { transform: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .voice-bar-dot, .voice-slide-arrow { animation: none; }
+  .voice-bar-dot, .voice-slide-arrow, .voice-binned .voice-bin-lid, .voice-record-button[data-mode="locked"] .voice-button-icon { animation: none; }
+  .voice-binned { animation: none; opacity: 0.8; }
   .voice-record-button[data-mode="hold"] { transition: none; }
 }
