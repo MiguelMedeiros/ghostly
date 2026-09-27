@@ -69,7 +69,7 @@ async function setup() {
     },
     changed: (record) => { records.set(`${record.direction}:${record.id}`, record); },
     room: async () => 50 * 1024 ** 3,
-    writable: () => peer.link?.filesWritable() ?? Promise.resolve(),
+    writable: () => peer.link?.filesWritable(),
   });
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: true,

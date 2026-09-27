@@ -159,11 +159,12 @@ export interface ChatFilesHost {
   /** Bytes a file may still take here, or null when the platform does not say. */
   room?(): Promise<number | null>;
   /**
-   * Resolves once the session can take another data frame without crowding out everything else on it. Channels with a
+   * Resolves once the session can take another data frame without crowding out everything else on it (nothing when it
+   * can now: a large file does not make a promise per frame). Channels with a
    * small send budget (native, iroh) refuse frames past it; sending into a full one again at once spun a loop of
    * promises that never let the budget drain, and froze the app.
    */
-  writable?(): Promise<void>;
+  writable?(): Promise<void> | undefined;
   now?(): number;
 }
 
@@ -386,7 +387,8 @@ export class ChatFiles {
       while (this.shouldPump(entry) && generation === out.generation) {
         const offset = out.next;
         const chunk = await this.chunkAt(entry, offset);
-        await this.host.writable?.();
+        const room = this.host.writable?.();
+        if (room) await room;
         if (generation !== out.generation || !this.shouldPump(entry) || out.next !== offset) break;
         if (!this.send({ t: "pf-data", id: entry.record.id, offset, data: toBase64Url(chunk) })) { refused = true; break; }
         out.next = offset + chunk.length;

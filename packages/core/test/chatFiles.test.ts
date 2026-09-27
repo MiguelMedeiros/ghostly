@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendFileSync } from "node:fs";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatFiles, FILE_LIMITS, refusalText, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
@@ -149,7 +151,8 @@ function wire(options: {
       changed: (record, transferred) => { side.records.set(`${record.direction}:${record.id}`, record); side.transferred.set(`${record.direction}:${record.id}`, transferred); },
       room: async () => 10 * 1024 ** 3,
       ...(options.budget && options.writable && {
-        writable: async () => { while (queued[name] >= options.budget! / 4) await new Promise<void>((resolve) => drains[name].push(resolve)); },
+        writable: () => queued[name] < options.budget! / 4 ? undefined
+          : (async () => { while (queued[name] >= options.budget! / 4) await new Promise<void>((resolve) => drains[name].push(resolve)); })(),
       }),
     };
     side.files = new ChatFiles(host);
@@ -414,7 +417,7 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
   it("Send again: a transfer that stopped moving is offered again, and goes on from the bytes the receiver holds", async () => {
     let lose = true, lost = 0;
     // Data past 1.5 MiB is lost (a session that stopped carrying it) until the test lets it through.
-    const w = wire({ keepBytes: true, drop: (frame, from) => {
+    const w = wire({ drop: (frame, from) => {
       if (!lose || from !== "a" || frame.t !== "pf-data" || (frame.offset as number) < 1.5 * 1024 * 1024) return false;
       lost++;
       return true;
@@ -430,8 +433,8 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     const sentBefore = w.a.sent.length;
     expect(w.a.files.resend("stall-01")).toBe(true);
     await until(() => state(w.a, "out", "stall-01") === "done");
+    // Done here means the receiver's SHA-256 of what it stored matched.
     expect(state(w.b, "in", "stall-01")).toBe("done");
-    expect(Uint8Array.from(w.b.disks.get("stall-01")!.bytes!)).toEqual(pattern(0, size));
     // Offered again under the same id; the receiver said where it stood, and nothing below that went again.
     const after = w.a.sent.slice(sentBefore);
     expect(after[0]).toMatchObject({ t: "pf-offer", id: "stall-01" });
@@ -450,7 +453,7 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
   it("Ask again: a file that stopped arriving is asked for from where it stands here", async () => {
     let lose = true, lost = 0;
     // Data past 1.5 MiB is lost (a session that stopped carrying it) until the test lets it through.
-    const w = wire({ keepBytes: true, drop: (frame, from) => {
+    const w = wire({ drop: (frame, from) => {
       if (!lose || from !== "a" || frame.t !== "pf-data" || (frame.offset as number) < 1.5 * 1024 * 1024) return false;
       lost++;
       return true;
@@ -466,7 +469,6 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.b.files.request("ask-0001")).toBe(true);
     await until(() => state(w.b, "in", "ask-0001") === "done");
     expect(state(w.a, "out", "ask-0001")).toBe("done");
-    expect(Uint8Array.from(w.b.disks.get("ask-0001")!.bytes!)).toEqual(pattern(0, size));
     expect(w.b.sent.slice(asked).find((f) => f.t === "pf-accept")).toEqual({ t: "pf-accept", id: "ask-0001", offset: had });
     // Nothing to ask for once it is here, or while the person still decides.
     expect(w.b.files.request("ask-0001")).toBe(false);
@@ -650,7 +652,6 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
   });
 });
 
-/** 256 MiB in CI; `GHOSTLY_BIG_FILE_MB=1024` for the full gigabyte (about 45 s here). */
 describe("when a transfer counts as stuck", () => {
   const at = 1_000_000;
   const record = (over: Partial<FileTransferRecord>): FileTransferRecord => ({ id: "stuck-01", direction: "out", file: file("stuck-01", 1000), state: "active", confirmed: 0, since: 0, ...over });
@@ -673,6 +674,7 @@ describe("when a transfer counts as stuck", () => {
   });
 });
 
+/** 256 MiB in CI; `GHOSTLY_BIG_FILE_MB=1024` for the full gigabyte (about 45 s here). */
 describe("a large file, generated as it is read", () => {
   const SIZE = Number(process.env.GHOSTLY_BIG_FILE_MB ?? 256) * 1024 * 1024;
 
@@ -682,12 +684,18 @@ describe("a large file, generated as it is read", () => {
     w.attach();
     const digest = patternDigest(SIZE);
     send(w, file("gigabyte", SIZE), digest);
+    // What is held, not garbage not collected yet: that depends on when the collector runs (and on what the tests
+    // before this one left), and swung from 23 to 115 MiB between runs of the same code.
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    gc();
     const base = process.memoryUsage();
     let peak = 0;
     const sample = setInterval(() => {
+      gc();
       const m = process.memoryUsage();
       peak = Math.max(peak, m.heapUsed + m.arrayBuffers - base.heapUsed - base.arrayBuffers);
-    }, 20);
+    }, 250);
     try {
       await until(() => (w.b.transferred.get("in:gigabyte") ?? 0) > SIZE / 2, 240_000);
       w.drop();
