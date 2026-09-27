@@ -140,6 +140,8 @@ function member(world: CommunityWorld, name: string, old = false): { peer: Peer;
     storeMessage: async message => { if (!p.messages.some(m => m.id === message.id)) { p.messages.push(message); await edits.stored(message); } },
     groupEdit: async (groupId, { sender, ...edit }) => { await edits.receive(groupId, sender, edit); },
     communityApp: async (groupId, sender, frame) => { const edit = parseCommunityEdit(frame, sender); if (edit) await edits.receive(groupId, sender, edit); },
+    // As the engine does (node.ts): an edge of a private group that comes up hears my latest edits again.
+    edgeUp: (groupId, peerKey) => { void edits.resend(groupId, peerKey); },
   }));
   const edits: GroupEdits = new GroupEdits({
     ...rows(peer.messages),
@@ -175,6 +177,9 @@ describe("edits on headless peers", { timeout: 120_000 }, () => {
     expect(edit.seq).toBe(3);
     expect(edit.history[0].text).toBe("Working: 0 of 3");
     expect(bob.peer.messages.find(m => m.id === messageId)!.edit).not.toHaveProperty("pending");
+    // Taken by the edges to Bob's hubs: the message, and the edit riding in a frame of its own.
+    expect(bob.peer.groups.taken(id, messageId!)).toBeGreaterThan(0);
+    expect(bob.peer.groups.taken(id, messageId!, 3)).toBeGreaterThan(0);
     // Carol was away: whoever is there catches her up, edits included.
     carol.peer.online = true;
     await world.until(() => textOf(carol.peer, messageId!) === "Done: 3 of 3", 3 * 60_000);
@@ -189,7 +194,7 @@ describe("edits on headless peers", { timeout: 120_000 }, () => {
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
 
-  it("a private group: the edit goes to every member over the edges; one whose edge was down hears it when it opens", async () => {
+  it("a private group: the edit goes to every member over the edges; one whose edge was down hears it when it opens, by itself", async () => {
     const world = new CommunityWorld();
     const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
     const id = await alice.peer.groups.create("Mesh crew", "mesh");
@@ -208,11 +213,22 @@ describe("edits on headless peers", { timeout: 120_000 }, () => {
     await world.until(() => textOf(alice.peer, messageId!) === "status: shipped", 60_000);
     expect(textOf(carol.peer, messageId!)).toBe("status: testing");
     carol.peer.online = true;
-    const carolKey = world.view(carol.peer, id)!.myKey!;
-    await world.until(() => world.view(bob.peer, id)!.members.find(m => m.key === carolKey)?.online === true, 3 * 60_000);
-    await bob.edits.resend(id, carolKey);
-    await world.until(() => textOf(carol.peer, messageId!) === "status: shipped", 60_000);
+    // Nobody asks: Bob's side of the edge coming up says his latest edits again.
+    await world.until(() => textOf(carol.peer, messageId!) === "status: shipped", 3 * 60_000);
     expect(carol.peer.messages.find(m => m.id === messageId)!.edit).toMatchObject({ seq: 2 });
+    // What `group send --wait sent` reads: which edges took my message, and my edit.
+    expect(bob.peer.groups.taken(id, messageId!)).toBeGreaterThanOrEqual(2);
+    expect(bob.peer.groups.taken(id, messageId!, 2)).toBeGreaterThanOrEqual(2);
+    expect(bob.peer.groups.taken(id, messageId!, 9)).toBe(0);
+    // Alone in the group for a moment: nothing takes it, until an edge opens and the catch-up carries it.
+    alice.peer.online = false; carol.peer.online = false;
+    await world.run(5_000);
+    const alone = (await bob.peer.groups.send(id, "anyone there?")).messageId!;
+    await world.run(5_000);
+    expect(bob.peer.groups.taken(id, alone)).toBe(0);
+    carol.peer.online = true;
+    await world.until(() => bob.peer.groups.taken(id, alone) > 0, 3 * 60_000);
+    await world.until(() => textOf(carol.peer, alone) === "anyone there?", 60_000);
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
 });
