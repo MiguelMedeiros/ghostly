@@ -333,6 +333,26 @@ describe("files sent to a contact", () => {
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_3", file: { id: file.id } });
   });
 
+  it("a file can answer a message: the reply goes with it, stays on its row, and goes again when it is sent again", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const wireId = "AbCdEfGhIjKlMnOpQrStUv";
+    await db.putMessage({ linkId: chat.id, id: `peer_${wireId}`, wireId, text: "shall we?", sender: "peer", timestamp: 1 });
+    const file = { id: `${chat.id}-out-w2`, name: "yes.webm", size: 5, mime: "audio/webm" };
+    await fileStore.put({ id: file.id, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "out", wireId: "w2" });
+    await expect(node.sendFile({ linkId: chat.id, file, timestamp: 3, replyTo: "peer_nothing" })).rejects.toThrow(/not in this chat/);
+    await node.sendFile({ linkId: chat.id, file, timestamp: 3, replyTo: `peer_${wireId}` });
+    const link = linkOf(chat.id);
+    await vi.waitFor(() => expect(link.sendFile).toHaveBeenCalledOnce());
+    expect(link.sendFile.mock.calls[0][0]).toMatchObject({ id: "w2", reply: { i: wireId, s: "shall we?", f: "recipient" } });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id)).find(m => m.id === "me_3")?.replyTo)
+      .toEqual({ id: wireId, snippet: "shall we?", from: "peer", messageId: `peer_${wireId}` }));
+    link.options.events.onFileFailed("w2", "interrupted", "out");
+    await node.sendFile({ linkId: chat.id, file, timestamp: 3 });
+    await vi.waitFor(() => expect(link.sendFile).toHaveBeenCalledTimes(2));
+    expect(link.sendFile.mock.calls[1][0]).toMatchObject({ id: "w2", reply: { i: wireId, s: "shall we?", f: "recipient" } });
+  });
+
   it("waits while the chat is not live and nothing holds it, and goes when the session opens", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);

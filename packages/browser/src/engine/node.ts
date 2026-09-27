@@ -1719,7 +1719,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * Sends a file, or sends it again (the same `timestamp`). `replyTo` quotes a message of the chat (WISP 401 § Replies),
-   * as a text reply does; sent again, the file keeps the reply its message has.
+   * as a text reply does; sent again, the file keeps the reply its message has (`transferFile`). Without a reply, it
+   * does what it does before any wait, so a second call for the same file finds it already transferring.
    */
   async sendFile({ linkId, file, timestamp, replyTo }: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string }): Promise<void> {
     let reply: MessageReply | undefined;
@@ -1727,7 +1728,7 @@ export class GhostlyNode implements EngineImplementation {
       const found = await this.replyFor(linkId, replyTo);
       if (typeof found === "string") throw new Error(found);
       reply = found;
-    } else reply = (await db.getMessages(linkId)).find(m => m.id === `me_${timestamp}`)?.replyTo;
+    }
     const answers = reply && { replyTo: reply };
     const wire = reply && pairedWireReply(reply);
     const live = this.links.get(linkId);
@@ -1783,6 +1784,11 @@ export class GhostlyNode implements EngineImplementation {
     if (!link) return fail("You are offline");
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     void (async () => {
+      // Sent again: the reply its message carries goes with it again.
+      if (!reply) {
+        const message = (await db.getMessages(live.stored.id)).find(m => m.id === `me_${timestamp}`);
+        reply = message && GhostlyNode.wireReply(message);
+      }
       const large = await GhostlyNode.largeFilesAgreed(link), at = Date.now();
       await this.noteDetails(live.stored.id, `me_${timestamp}`, details => ({ ...withSend(details, { at, ...pathSnapshot(live, "datalink"), result: "sent" }), sentAt: at, wire: fileWire(large ? "files/3" : "files/2", file.size) }));
       if (large) {
