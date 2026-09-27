@@ -327,10 +327,10 @@ pub fn native_call_stats(id: Option<String>) -> Result<serde_json::Value, String
                 .values()
                 .find_map(|l| l.call.clone()),
         };
-        return match call {
+        match call {
             Some(call) => serde_json::to_value(call.stats()).map_err(|e| e.to_string()),
             None => Ok(serde_json::Value::Null),
-        };
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
