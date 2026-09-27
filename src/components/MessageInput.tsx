@@ -7,6 +7,7 @@ import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
 import type { LinkPreview, VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { useIsLocked } from "../contexts/LockScreenContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
 import { SecretGuardDialog } from "./SecretGuardDialog";
@@ -116,6 +117,7 @@ export function MessageInput({
 }: MessageInputProps) {
   const { t } = useI18n();
   const phone = useIsMobile();
+  const locked = useIsLocked();
   const [showPayment, setShowPayment] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   /** The picker closed because an identity was shared: the keys go back to the message, not to the +. */
@@ -304,6 +306,7 @@ export function MessageInput({
    * files or a picture from the page).
    */
   const takePaste = (data: DataTransfer | null): boolean => {
+    if (locked) return false;
     const files = pastedFiles(data);
     if (files) return offerFiles(files);
     if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
@@ -335,7 +338,8 @@ export function MessageInput({
     if (await sendChosen(files)) await sendCaption(caption);
   };
 
-  const canAttach = !!onSendFile && !disabled;
+  // Behind the lock screen nothing is pasted or dropped in (the composer stays mounted under it).
+  const canAttach = !!onSendFile && !disabled && !locked;
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here.
   useEffect(() => {
     if (!canAttach) return;
@@ -583,7 +587,7 @@ export function MessageInput({
             else void handleSubmit(true);
           }} />
       )}
-      {attached && (
+      {attached && !locked && (
         <AttachmentSheet files={attached}
           onAdd={(more) => setAttached((was) => [...(was ?? []), ...more])}
           onRemove={(index) => setAttached((was) => was && was.length > 1 ? was.filter((_, i) => i !== index) : null)}

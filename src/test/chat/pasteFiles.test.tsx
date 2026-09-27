@@ -1,7 +1,7 @@
 import { act, createEvent, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
-import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
 import { guardFileDrops, pastedFiles, pastedImageName, PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
 import { fakeEngine } from "../fakeEngine";
 import type { ClipboardFile } from "@ghostly/browser/host";
@@ -135,6 +135,23 @@ describe("a pasted picture or file", () => {
     composer({ onSendFile: undefined });
     expect(paste(field(), { files: [png()] })).toBe(true);
     expect(sheet()).toBeNull();
+  });
+
+  it("behind the lock screen, a paste opens nothing", () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}"),
+      lockScreen: { enabled: true, passwordHash: "hash", timeout: 5 } }));
+    let locked = false;
+    function Lock() { locked = useLockScreen().isLocked; return null; }
+    renderApp(<LockScreenProvider><Lock /><MessageInput onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    try {
+      // Locked from the start (a lock with a password), the composer mounted under it: nothing opens.
+      expect(locked).toBe(true);
+      expect(paste(field(), { files: [png()] })).toBe(true);
+      expect(sheet()).toBeNull();
+      expect(paste(document.body, { files: [png()] })).toBe(true);
+      expect(sheet()).toBeNull();
+      expect(onSendFile).not.toHaveBeenCalled();
+    } finally { localStorage.removeItem("ghostly_app_settings"); }
   });
 
   it("a paste with nothing focused (the messages clicked last) still brings the picture", async () => {
@@ -286,8 +303,11 @@ describe("pastedFiles and the names of pasted pictures", () => {
       fireEvent(document.body, over);
       expect(over.defaultPrevented).toBe(true);
       expect(fireEvent.drop(document.body, { dataTransfer: transfer({ files: [png()] }) })).toBe(false);
-      // Text dragged into a field is none of its business.
+      // Text dragged into a field is none of its business, and a file field takes its own drop.
       expect(fireEvent.drop(document.body, { dataTransfer: transfer({ text: "words" }) })).toBe(true);
+      const input = document.body.appendChild(Object.assign(document.createElement("input"), { type: "file" }));
+      expect(fireEvent.drop(input, { dataTransfer: transfer({ files: [png()] }) })).toBe(true);
+      input.remove();
     } finally { stop(); }
   });
 });

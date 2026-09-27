@@ -74,12 +74,15 @@ export function dragHasFiles(data: DataTransfer | null): boolean {
  * has already said so.
  */
 export function guardFileDrops(target: Window = window): () => void {
+  // A file field on the page (a backup to restore) takes its drop as the browser does.
+  const ours = (e: DragEvent) => !e.defaultPrevented && dragHasFiles(e.dataTransfer)
+    && !(e.target instanceof Element && e.target.closest("input[type='file']"));
   const over = (e: DragEvent) => {
-    if (e.defaultPrevented || !dragHasFiles(e.dataTransfer)) return;
+    if (!ours(e)) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
   };
-  const drop = (e: DragEvent) => { if (!e.defaultPrevented && dragHasFiles(e.dataTransfer)) e.preventDefault(); };
+  const drop = (e: DragEvent) => { if (ours(e)) e.preventDefault(); };
   target.addEventListener("dragover", over);
   target.addEventListener("drop", drop);
   return () => { target.removeEventListener("dragover", over); target.removeEventListener("drop", drop); };
