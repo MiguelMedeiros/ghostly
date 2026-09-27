@@ -141,7 +141,7 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect([...world.peers.get("alice")!.edges.values()].map(e => e.peer)).toEqual([key(bob)]);
 
     expect(await carol.send(groupId, "still here?")).toEqual({ error: expect.stringMatching(/removed/) });
-    expect(await alice.send(groupId, "after carol")).toEqual({ error: null });
+    expect(await alice.send(groupId, "after carol")).toEqual({ error: null, messageId: expect.any(String) });
     await world.settle();
     expect(world.texts("bob")).toContain("after carol");
     // Even the frame itself, handed to Carol directly, is not read: her secrets went with her membership.
@@ -176,7 +176,7 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect(view(bob, groupId)).toMatchObject({ epoch: 2, canSend: true });
     expect(world.events("alice")).toContain("rotated");
     expect(world.events("bob")).toContain("rotated");
-    expect(await bob.send(groupId, "fresh keys")).toEqual({ error: null });
+    expect(await bob.send(groupId, "fresh keys")).toEqual({ error: null, messageId: expect.any(String) });
     await world.settle();
     expect(world.texts("alice")).toContain("fresh keys");
   });

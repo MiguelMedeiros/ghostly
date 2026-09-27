@@ -91,15 +91,15 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `message retry\|delete\|details <chat> <message>` | One message |
 | `group create <name> [--mesh]`, `group join <link>` | A community (a link anyone can open), or a private mesh |
-| `group list`, `group show <group>`, `group history <group>` | Groups, members, history |
-| `group send <group> [text…] [--mention <member>]… [--reply <message>]` | Send; each mentioned member is written as `@name` in the text |
+| `group list [--show-secret]`, `group show <group> [--show-secret]`, `group history <group>` | Groups, members, history; a message names its author (`member` key, `nick` from the roster). The entry link prints as `<hidden>` without `--show-secret` |
+| `group send <group> [text…] [--mention <member>]… [--reply <message>]` | Send; each mentioned member is written as `@name` in the text. Answers `{group, messageId, sent}`: the id `--reply` and `group react` take |
 | `group react <group> <message> <emoji> [--remove]` | React to a group's message |
 | `group leave <group>`, `group forget <group> --yes`, `group accept\|decline <group>` | Membership |
 | `listen [--since seq] [--cursor file] [--type t]… [--exec cmd] [--webhook url] [--print]` | The event stream |
 | `events [--since seq]` | What the event journal holds, without following |
 | `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
-| `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin |
-| `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link; the picture |
+| `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin (each prints the group; `--show-secret` for its link) |
+| `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link (printed: asking for it is asking for the secret); the picture |
 | `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does |
 | `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3). A file's id names its chat, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
@@ -217,7 +217,9 @@ is paid); on a real mint, the mint's answer decides.
 
 Nothing prints a seed, a key, a wallet phrase or ecash unless asked with `--show-secret`: `settings get` masks
 credentials, and engine calls that answer with secrets (`exportLinks`, `walletExport`, the wallets' backups) are
-refused without it.
+refused without it. A group's entry link lets anyone who reads it join: `group show`, `group list`, the admin
+commands, `group.created` events and `engine getState` print it as `<hidden>`; `--show-secret`, `group create` and
+`group link` print it.
 
 ## Events
 
@@ -233,8 +235,8 @@ refused without it.
   waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
   announced itself; not a message), `chat.announced`, `message.received`, `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.deleted`, `group.created`,
-  `group.status`, `group.members` (`joined`, `left`), `group.message` (`message.mentioned` when it names this
-  profile), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
+  `group.status`, `group.members` (`joined`, `left`), `group.message` (`message.member` is the author's key,
+  `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
   `file.stage`, `file.done`, `file.failed` (each with `chat`, `file`, `messageId`), `chat.held` and
   `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
   showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted`, `group.removed`, `payment.created` and

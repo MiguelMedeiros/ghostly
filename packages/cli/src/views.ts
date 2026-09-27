@@ -143,7 +143,22 @@ export function reactionsJson(message: StoredMessage): { by: string; emoji: stri
   return Object.entries(message.reactions ?? {}).filter(([, r]) => r.e).sort(([, a], [, b]) => a.at - b.at).map(([by, r]) => ({ by, emoji: r.e, at: r.at }));
 }
 
-export function groupJson(group: GroupView) {
+/**
+ * A group's message with its author named: mesh and community messages are kept with the member's key only (the
+ * name rides on the edge or the roster), so the roster fills `nick` when the message has none.
+ */
+export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, "members"> | undefined): MessageJson {
+  const json = messageJson(message);
+  if (json.nick || !message.member) return json;
+  const nick = group?.members.find((m) => m.key === message.member)?.nick;
+  return nick ? { ...json, nick } : json;
+}
+
+/**
+ * A group as the CLI prints it. The entry link lets anyone who reads it join, so it is `<hidden>` unless asked for
+ * (`--show-secret`, or `group link`); null when the group has none.
+ */
+export function groupJson(group: GroupView, showSecret = false) {
   return {
     id: group.id,
     name: group.name,
@@ -153,7 +168,7 @@ export function groupJson(group: GroupView) {
     admin: group.isAdmin,
     me: group.myKey ?? null,
     canSend: group.canSend,
-    link: group.entryLink ?? null,
+    link: group.entryLink ? (showSecret ? group.entryLink : "<hidden>") : null,
     lastMessageAt: group.lastMessageAt,
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online })),
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,

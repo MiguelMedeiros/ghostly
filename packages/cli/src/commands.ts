@@ -52,6 +52,9 @@ function pairs(values: unknown): Record<string, string> | undefined {
 const rate: OptionSpec = { type: "number", description: "The audio's sample rate: 48000 (default), 24000, 16000, 12000 or 8000" };
 const force: OptionSpec = { type: "boolean", description: "Send even if the text looks like a seed, a key or ecash" };
 const reply: OptionSpec = { type: "string", description: "Reply to this message (its id, from history or an event)" };
+/** The group's entry link lets anyone join: printed only when asked for. */
+const showSecret: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print the group's entry link (anyone who has it can join)" } };
+const secret = (options: Parsed["options"]) => (options["show-secret"] === true ? { showSecret: true } : {});
 
 export const COMMANDS: Record<string, Command> = {
   "status": { method: "status", usage: "status", summary: "The profile, its chats and whether a daemon runs it" },
@@ -117,8 +120,11 @@ export const COMMANDS: Record<string, Command> = {
     params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community" }),
   },
   "group join": { method: "group.join", usage: "group join <link>", summary: "Join a group by its link", args: ["link"], params: (_, { link }) => ({ link }) },
-  "group list": { method: "group.list", usage: "group list", summary: "Groups and invitations" },
-  "group show": { method: "group.get", usage: "group show <group>", summary: "A group and its members", args: ["group"], params: (_, { group }) => ({ group }) },
+  "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups and invitations", options: showSecret, params: ({ options }) => secret(options) },
+  "group show": {
+    method: "group.get", usage: "group show <group> [--show-secret]", summary: "A group and its members (its entry link only with --show-secret)", args: ["group"],
+    options: showSecret, params: ({ options }, { group }) => ({ group, ...secret(options) }),
+  },
   "group history": {
     method: "group.history", usage: "group history <group> [--limit n] [--before id|ms] [--after id|ms]", summary: "A group's messages (a page)", args: ["group"],
     options: { limit: { type: "number", description: "Messages per page (default 50)" }, before: { type: "string", description: "Only before this message id or timestamp" }, after: { type: "string", description: "Only after this message id or timestamp" } },
@@ -234,10 +240,22 @@ export const COMMANDS: Record<string, Command> = {
     }),
   },
 
-  "group invite": { method: "group.invite", usage: "group invite <group> <chat>", summary: "Invite a contact into a group you administer", args: ["group", "chat"], params: (_, a) => ({ group: a.group, chat: a.chat }) },
-  "group remove": { method: "group.remove", usage: "group remove <group> <member>", summary: "Remove a member (admin)", args: ["group", "member"], params: (_, a) => ({ group: a.group, member: a.member }) },
-  "group admin": { method: "group.admin", usage: "group admin <group> <member>", summary: "Make a member the admin (admin)", args: ["group", "member"], params: (_, a) => ({ group: a.group, member: a.member }) },
-  "group rotate": { method: "group.rotate", usage: "group rotate <group>", summary: "A fresh group secret, members unchanged (admin)", args: ["group"], params: (_, a) => ({ group: a.group }) },
+  "group invite": {
+    method: "group.invite", usage: "group invite <group> <chat> [--show-secret]", summary: "Invite a contact into a group you administer", args: ["group", "chat"],
+    options: showSecret, params: ({ options }, a) => ({ group: a.group, chat: a.chat, ...secret(options) }),
+  },
+  "group remove": {
+    method: "group.remove", usage: "group remove <group> <member> [--show-secret]", summary: "Remove a member (admin)", args: ["group", "member"],
+    options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
+  },
+  "group admin": {
+    method: "group.admin", usage: "group admin <group> <member> [--show-secret]", summary: "Make a member the admin (admin)", args: ["group", "member"],
+    options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
+  },
+  "group rotate": {
+    method: "group.rotate", usage: "group rotate <group> [--show-secret]", summary: "A fresh group secret, members unchanged (admin)", args: ["group"],
+    options: showSecret, params: ({ options }, a) => ({ group: a.group, ...secret(options) }),
+  },
   "group link": {
     method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Turn the group's link on (--reset: a new one), or --off", args: ["group"],
     options: { off: { type: "boolean", description: "Turn the link off" }, reset: { type: "boolean", description: "Replace it: the old link stops working" } },

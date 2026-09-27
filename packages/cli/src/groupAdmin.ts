@@ -37,29 +37,29 @@ async function picture(params: Params): Promise<string | null> {
   return pictureFrom(str(params, "path", true));
 }
 
-const view = (ctx: ApiContext, id: string) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }));
+const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   async "group.invite"(ctx, params) {
     const group = groupOf(ctx, params);
     const link = chatOf(ctx, params);
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
-    return view(ctx, group.id);
+    return view(ctx, group.id, params);
   },
   async "group.remove"(ctx, params) {
     const group = groupOf(ctx, params);
     await node(ctx).removeGroupMember({ groupId: group.id, key: findMember(group, str(params, "member", true)).key });
-    return view(ctx, group.id);
+    return view(ctx, group.id, params);
   },
   async "group.admin"(ctx, params) {
     const group = groupOf(ctx, params);
     await node(ctx).makeGroupAdmin({ groupId: group.id, key: findMember(group, str(params, "member", true)).key });
-    return view(ctx, group.id);
+    return view(ctx, group.id, params);
   },
   async "group.rotate"(ctx, params) {
     const group = groupOf(ctx, params);
     await node(ctx).rotateGroup({ groupId: group.id });
-    return view(ctx, group.id);
+    return view(ctx, group.id, params);
   },
   async "group.link"(ctx, params) {
     const group = groupOf(ctx, params);

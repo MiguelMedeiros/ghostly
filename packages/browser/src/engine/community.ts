@@ -297,11 +297,11 @@ export class Communities {
     void this.knock(group, since).catch(() => {});
   }
 
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply): Promise<{ error: string | null }> {
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply): Promise<{ error: string | null; messageId?: string }> {
     const live = this.live.get(groupId);
     if (!live) return { error: "You are not in this group yet" };
     const result = await live.session.sendText(text, this.host.myNick?.(), Date.now(), mentions, reply);
-    return "error" in result ? { error: result.error } : { error: null };
+    return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
   }
 
   /** An application frame to everyone in the group (WISP 9xx · Group Community § Payments). */
