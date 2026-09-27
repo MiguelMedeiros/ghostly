@@ -287,7 +287,7 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
                 </h4>
                 <p className="fin-card-body">{t.cli.body}</p>
               </div>
-              <a className="btn fin-dl" href="/cli">
+              <a className="btn fin-dl" href={t.cli.href}>
                 {t.cli.cta} <span aria-hidden="true">→</span>
               </a>
             </div>

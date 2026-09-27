@@ -23,7 +23,7 @@ export function SiteFooter({ locale = "en" }: { locale?: Locale }) {
         { label: t.links.overview, href: href(locale, "/developers") },
         { label: t.links.catalog, href: href(locale, "/developers/catalog") },
         { label: t.links.protocol, href: "/docs" },
-        { label: t.links.cli, href: "/cli" },
+        { label: t.links.cli, href: href(locale, "/cli") },
         { label: t.links.roadmap, href: href(locale, "/roadmap") },
       ],
     },

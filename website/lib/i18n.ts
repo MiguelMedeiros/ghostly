@@ -15,7 +15,7 @@ export const LOCALE_META: Record<Locale, { label: string; short: string; html: s
 };
 
 /** Pages that exist in every locale; the rest are English only. */
-const TRANSLATED = [/^\/$/, /^\/developers(\/.*)?$/, /^\/roadmap$/];
+const TRANSLATED = [/^\/$/, /^\/developers(\/.*)?$/, /^\/roadmap$/, /^\/cli$/];
 
 export function isTranslated(path: string): boolean {
   const clean = path.split(/[?#]/)[0] || "/";

@@ -4,11 +4,11 @@ import { cli } from "@/content/cli";
 import { alternates } from "@/lib/i18n";
 
 export const metadata: Metadata = {
-  title: cli.en.meta.title,
-  description: cli.en.meta.description,
-  alternates: alternates("/cli", "en"),
+  title: cli["pt-br"].meta.title,
+  description: cli["pt-br"].meta.description,
+  alternates: alternates("/cli", "pt-br"),
 };
 
 export default function Page() {
-  return <CliPage locale="en" />;
+  return <CliPage locale="pt-br" />;
 }
