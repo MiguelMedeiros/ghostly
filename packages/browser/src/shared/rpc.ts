@@ -149,7 +149,7 @@ export interface EngineApi {
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
   sendFile(params: { linkId: string; file: MessageFile; timestamp: number }): void;
   /** files/3: answers an offer (`accept`, `decline`), or pauses, resumes or cancels a transfer, either way. */
-  fileAction(params: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" }): void;
+  fileAction(params: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void;
   setDeliveryMode(params: { linkId: string; mode: DeliveryMode }): void;
   setTransportPreference(params: { linkId: string; preferred: PairedTransport; fallback: boolean }): void;
   /** One chat's connection from its menu: a transport both sides can use, `auto` for the app's rule, or `dht` for DHT only. */

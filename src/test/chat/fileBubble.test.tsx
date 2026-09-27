@@ -7,7 +7,7 @@ import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: files.large.offer, files.large.resume, files.size-label
+// covers: files.large.offer, files.large.resume, files.size-label, files.large.resend, files.large.request
 
 const GB = 1024 ** 3;
 // The root tsconfig has no Array.at.
@@ -39,6 +39,8 @@ describe("what a file's status line says", () => {
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
     ["copying before the offer", t({ stage: "preparing" }), "Preparing… 62% of 4.2 GB"],
     ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Failed: Declined by your contact"],
+    ["stuck", t({ stalled: true, rate: 12 * 1024 ** 2 }), "Not moving · 62% of 4.2 GB"],
+    ["stuck, no connection: the connection is the reason", t({ stalled: true, stage: "waiting" }), "Waiting for connection · 62% done"],
   ])("%s", (_, transfer, text) => {
     expect(fileStatus(f, transfer, "Ana", false)).toBe(text);
   });
@@ -80,6 +82,32 @@ describe("FileBubble: files/3", () => {
     fireEvent.click(screen.getByTestId("file-cancel"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
     view.unmount();
+  });
+
+  it("a stuck file sent from here offers Send again, a stuck one arriving here Ask again; a moving one neither", async () => {
+    const sending = show({ state: "transferring", direction: "out", transferred: GB, size: 4.2 * GB, stalled: true }, { id: "chat1-out-stuck" });
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Not moving · 23% of 4.2 GB");
+    expect(screen.queryByTestId("file-request")).toBeNull();
+    expect(screen.getByTestId("file-resend")).toHaveAttribute("title", "Offers it again. It goes on from what your contact already has.");
+    fireEvent.click(screen.getByTestId("file-resend"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-out-stuck", action: "resend" }));
+    // Moving again: the button goes.
+    act(() => fakeEngine.update({ transfers: { "chat1-out-stuck": { state: "transferring", direction: "out", transferred: 2 * GB, size: 4.2 * GB } } }));
+    expect(screen.queryByTestId("file-resend")).toBeNull();
+    sending.unmount();
+
+    show({ state: "transferring", stage: "waiting", direction: "in", transferred: GB, size: 4.2 * GB, stalled: true });
+    expect(screen.queryByTestId("file-resend")).toBeNull();
+    fireEvent.click(screen.getByTestId("file-request"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
+  });
+
+  it("an offer or a pause is waiting for a person, not stuck: no Send again or Ask again", () => {
+    const offer = show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB });
+    expect(screen.queryByTestId("file-request")).toBeNull();
+    offer.unmount();
+    show({ state: "transferring", stage: "paused", pausedBy: "peer", direction: "out", transferred: GB, size: 4.2 * GB }, { id: "chat1-out-p" });
+    expect(screen.queryByTestId("file-resend")).toBeNull();
   });
 
   it("a declined or cancelled file cannot be sent again; a failed one can", () => {

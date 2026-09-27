@@ -3,7 +3,7 @@ import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n } from "../../contexts/I18nContext";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
-import { formatFileSize } from "../../lib/format";
+import { fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { ChatFile } from "../../lib/types";
 import {
   applyVoiceRate,
@@ -40,7 +40,7 @@ function describeFailure(what: string, error: unknown): string {
  * received — a mark until it has been listened to. The bytes are read only when it first
  * plays; the waveform was measured by the sender, so nothing is decoded to draw it.
  */
-export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer" }) {
+export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
   const platform = useServicesPlatform();
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
   const transfer = platform?.getTransfer(file.id) ?? null;
@@ -264,8 +264,9 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
   const active = state === "playing" || state === "paused" || position > 0;
   const unplayed = sender === "peer" && !played;
   let status: string | null = null;
-  if (transfer?.state === "transferring") status = `${Math.round((transfer.transferred / Math.max(1, transfer.size)) * 100)}% of ${formatFileSize(file.size)}`;
-  else if (transfer?.state === "failed") status = `Failed: ${transfer.error ?? "transfer interrupted"}`;
+  // Where it stands, as a file says it: "Waiting for connection", "Not moving", never a bare 0% that looks alive.
+  if (transfer?.state === "transferring" || transfer?.state === "failed") status = fileStatus(file, transfer, peerName, false);
+  const stuck = platform?.fileAction ? stalledAction(transfer) : null;
 
   return (
     <div
@@ -350,6 +351,10 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
       )}
       {transfer?.state === "failed" && file.id.includes("-out-") && platform?.retryFile && (
         <button className="text-xs underline px-1 py-1 bg-transparent border-none text-inherit cursor-pointer" onClick={() => { setRetryError(""); void platform.retryFile!(file.id).catch((error) => setRetryError(String(error.message ?? error))); }}>Retry sending</button>
+      )}
+      {stuck && (
+        <button type="button" data-testid={`voice-${stuck.action}`} title={stuck.hint} className="text-xs underline px-1 py-1 bg-transparent border-none text-inherit cursor-pointer"
+          onClick={() => { setRetryError(""); void platform!.fileAction!(file.id, stuck.action).catch((error: Error) => setRetryError(String(error.message ?? error))); }}>{stuck.label}</button>
       )}
       {retryError && <p className="text-xs text-danger-ink px-1 m-0" role="alert">{retryError}</p>}
     </div>

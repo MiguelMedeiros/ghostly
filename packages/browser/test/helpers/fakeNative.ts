@@ -10,6 +10,11 @@ const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(
  */
 export class FakeNativeNet {
   latencyMs = 2;
+  /**
+   * Bytes a channel queues before `send` throws, as the Desktop's and the browser's Iroh channels do (120 KiB). What is
+   * queued leaves as each frame arrives. Absent: channels queue freely.
+   */
+  sendBudget?: number;
   /** Transports whose dials fail, as an unreachable relay or a blocked port would. */
   readonly unreachable = new Set<NativeTransport>();
   /** Every channel opened, newest last. */
@@ -72,20 +77,31 @@ export class FakeNativeNet {
     const make = () => {
       let reader: FrameChannel["onMessage"] = null;
       const waiting: (string | Uint8Array)[] = [];
+      const budget = this.sendBudget;
+      const drains: (() => void)[] = [];
       const end = {
         closed: false, peer: null as unknown as FrameChannel & { closed: boolean; deliver(data: string | Uint8Array): void },
-        bufferedAmount: 0, drained: async () => {}, onClose: null as FrameChannel["onClose"],
+        bufferedAmount: 0, sendBudget: budget, onClose: null as FrameChannel["onClose"],
+        drained: () => (end.bufferedAmount ? new Promise<void>((resolve) => drains.push(resolve)) : Promise.resolve()),
         get onMessage() { return reader; },
         set onMessage(value: FrameChannel["onMessage"]) { reader = value; if (value) for (const data of waiting.splice(0)) value(data); },
         deliver(data: string | Uint8Array) { if (this.closed) return; if (reader) reader(data); else waiting.push(data); },
         send: (data: string | Uint8Array) => {
           if (end.closed) throw new Error("Connection closed");
+          if (budget !== undefined && end.bufferedAmount + data.length > budget) throw new Error("Native channel is closed or its send budget is full");
           const copy = typeof data === "string" ? data : data.slice();
-          setTimeout(() => { if (!end.closed) end.peer.deliver(copy); }, this.latencyMs);
+          end.bufferedAmount += data.length;
+          setTimeout(() => {
+            end.bufferedAmount -= copy.length;
+            if (!end.bufferedAmount) for (const drained of drains.splice(0)) drained();
+            if (!end.closed) end.peer.deliver(copy);
+          }, this.latencyMs);
         },
         close() {
           if (end.closed) return;
           end.closed = true; end.onClose?.();
+          end.bufferedAmount = 0;
+          for (const drained of drains.splice(0)) drained();
           end.peer.close();
         },
       };

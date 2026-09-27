@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
-import { fakeEngine } from "../fakeEngine";
+import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { audio, endPlayback, installFakeAudio } from "./fakeMedia";
 
-// covers: files.voice.play, files.voice.autoplay
+// covers: files.voice.play, files.voice.autoplay, files.large.resend, files.large.request
 
 const peaks = Array.from({ length: 64 }, (_, i) => (i * 37) % 256);
 let n = 0;
@@ -265,5 +265,27 @@ describe("a voice message in the chat", () => {
     chat(message);
     expect(screen.getByTestId("voice-play")).toBeDisabled();
     expect(screen.getByTestId("voice-status")).toHaveTextContent("50% of");
+  });
+
+  it("stuck on its way, it says so instead of a bare 0%, and offers Send again (sent) or Ask again (received)", async () => {
+    fakeEngine.on("fileAction", () => undefined);
+    const mine = voice({ id: "me_1", sender: "me" });
+    mine.file!.id = "link-1-out-voice-stuck";
+    const theirs = voice();
+    fakeEngine.update({ links: [linkView({ id: "link-1" })], transfers: {
+      [mine.file!.id]: { state: "transferring", direction: "out", transferred: 0, size: 1234, stalled: true },
+      [theirs.file!.id]: { state: "transferring", direction: "in", stage: "waiting", transferred: 617, size: 1234, stalled: true },
+    } });
+    chat(mine, theirs);
+    const [sent, received] = bubbles();
+    expect(within(sent).getByTestId("voice-status")).toHaveTextContent("Not moving · 0% of 1.2 KB");
+    expect(within(received).getByTestId("voice-status")).toHaveTextContent("Waiting for connection · 50% done");
+    fireEvent.click(within(sent).getByTestId("voice-resend"));
+    fireEvent.click(within(received).getByTestId("voice-request"));
+    await vi.waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([
+      { linkId: "link-1", fileId: mine.file!.id, action: "resend" },
+      { linkId: "link-1", fileId: theirs.file!.id, action: "request" },
+    ]));
+    expect(within(sent).queryByTestId("voice-request")).toBeNull();
   });
 });

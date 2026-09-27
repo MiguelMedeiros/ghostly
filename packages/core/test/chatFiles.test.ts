@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, FILE_LIMITS, refusalText, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
+import { ChatFiles, FILE_LIMITS, refusalText, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
-// covers: files.large.offer, files.large.resume, files.large.integrity, files.large.limits
+// covers: files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request
 
 /** Deterministic bytes for any range: files of any size exist without being held. */
 function pattern(offset: number, length: number): Uint8Array {
@@ -411,6 +411,90 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.b, "in", "wedged-1")).toBe("done");
   });
 
+  it("Send again: a transfer that stopped moving is offered again, and goes on from the bytes the receiver holds", async () => {
+    let lose = true, lost = 0;
+    // Data past 1.5 MiB is lost (a session that stopped carrying it) until the test lets it through.
+    const w = wire({ keepBytes: true, drop: (frame, from) => {
+      if (!lose || from !== "a" || frame.t !== "pf-data" || (frame.offset as number) < 1.5 * 1024 * 1024) return false;
+      lost++;
+      return true;
+    } });
+    w.attach();
+    const size = 3 * 1024 * 1024 + 5;
+    send(w, file("stall-01", size));
+    let sent = -1;
+    await until(() => { const now = w.a.sent.length; const still = lost > 0 && now === sent; sent = now; return still; });
+    const had = w.b.disks.get("stall-01")!.length;
+    expect(had).toBeLessThan(size);
+    lose = false;
+    const sentBefore = w.a.sent.length;
+    expect(w.a.files.resend("stall-01")).toBe(true);
+    await until(() => state(w.a, "out", "stall-01") === "done");
+    expect(state(w.b, "in", "stall-01")).toBe("done");
+    expect(Uint8Array.from(w.b.disks.get("stall-01")!.bytes!)).toEqual(pattern(0, size));
+    // Offered again under the same id; the receiver said where it stood, and nothing below that went again.
+    const after = w.a.sent.slice(sentBefore);
+    expect(after[0]).toMatchObject({ t: "pf-offer", id: "stall-01" });
+    expect(w.b.sent.filter((f) => f.t === "pf-accept").at(-1)!.offset).toBe(had);
+    expect(after.filter((f) => f.t === "pf-data" && (f.offset as number) < had)).toEqual([]);
+  });
+
+  it("Send again with no session: nothing goes now, and it is offered on the next session", async () => {
+    const w = wire();
+    send(w, file("offline1", 40_000));
+    expect(w.a.files.resend("offline1")).toBe(false);
+    w.attach();
+    await until(() => state(w.a, "out", "offline1") === "done");
+  });
+
+  it("Ask again: a file that stopped arriving is asked for from where it stands here", async () => {
+    let lose = true, lost = 0;
+    // Data past 1.5 MiB is lost (a session that stopped carrying it) until the test lets it through.
+    const w = wire({ keepBytes: true, drop: (frame, from) => {
+      if (!lose || from !== "a" || frame.t !== "pf-data" || (frame.offset as number) < 1.5 * 1024 * 1024) return false;
+      lost++;
+      return true;
+    } });
+    w.attach();
+    const size = 3 * 1024 * 1024 + 9;
+    send(w, file("ask-0001", size));
+    let sent = -1;
+    await until(() => { const now = w.a.sent.length; const still = lost > 0 && now === sent; sent = now; return still; });
+    const had = w.b.disks.get("ask-0001")!.length;
+    lose = false;
+    const asked = w.b.sent.length;
+    expect(w.b.files.request("ask-0001")).toBe(true);
+    await until(() => state(w.b, "in", "ask-0001") === "done");
+    expect(state(w.a, "out", "ask-0001")).toBe("done");
+    expect(Uint8Array.from(w.b.disks.get("ask-0001")!.bytes!)).toEqual(pattern(0, size));
+    expect(w.b.sent.slice(asked).find((f) => f.t === "pf-accept")).toEqual({ t: "pf-accept", id: "ask-0001", offset: had });
+    // Nothing to ask for once it is here, or while the person still decides.
+    expect(w.b.files.request("ask-0001")).toBe(false);
+  });
+
+  it("nothing arriving and the sender not offering again: the receiver asks by itself after a quiet spell", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let lose = true, lost = 0;
+    // The sender's own offers again never arrive (an older app, one stuck): only the receiver can put them back in step.
+    // Data past 1.5 MiB is lost until the test lets it through.
+    const w = wire({ drop: (frame, from) => {
+      if (from !== "a") return false;
+      if (frame.t === "pf-offer") return w.a.sent.filter((f) => f.t === "pf-offer").length > 1;
+      if (lose && frame.t === "pf-data" && (frame.offset as number) >= 1.5 * 1024 * 1024) { lost++; return true; }
+      return false;
+    } });
+    w.attach();
+    send(w, file("nudge-01", 3 * 1024 * 1024));
+    // Until the sender has filled its window and waits: nothing moves on its own now.
+    let sent = -1;
+    await until(() => { const now = w.a.sent.length; const still = lost > 0 && now === sent; sent = now; return still; });
+    lose = false;
+    const accepts = w.b.sent.filter((f) => f.t === "pf-accept").length;
+    await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs + 10);
+    await until(() => state(w.a, "out", "nudge-01") === "done");
+    expect(w.b.sent.filter((f) => f.t === "pf-accept").length).toBeGreaterThan(accepts);
+  });
+
   it("a lost chunk (a transport switch) makes the receiver say where it stands, and the sender goes back", async () => {
     let lost = false;
     const w = wire({ keepBytes: true, drop: (frame) => {
@@ -567,6 +651,28 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
 });
 
 /** 256 MiB in CI; `GHOSTLY_BIG_FILE_MB=1024` for the full gigabyte (about 45 s here). */
+describe("when a transfer counts as stuck", () => {
+  const at = 1_000_000;
+  const record = (over: Partial<FileTransferRecord>): FileTransferRecord => ({ id: "stuck-01", direction: "out", file: file("stuck-01", 1000), state: "active", confirmed: 0, since: 0, ...over });
+  it.each<[string, Partial<FileTransferRecord>, number, boolean, boolean]>([
+    ["moving", {}, at - 1_000, false, false],
+    ["quiet for the stall time", {}, at - FILE_LIMITS.stallMs, false, true],
+    ["kept from before a restart, not moved since", {}, at, true, true],
+    ["waiting for a session, quiet", { state: "queued" }, at - FILE_LIMITS.stallMs, false, true],
+    ["sent whole, the receiver never said it checked out", { state: "verifying" }, at - FILE_LIMITS.stallMs, false, true],
+    ["received whole and being checked here", { state: "verifying", direction: "in" }, at - FILE_LIMITS.stallMs, true, false],
+    ["the contact decides", { state: "asking" }, 0, true, false],
+    ["paused", { state: "paused", pausedBy: "peer" }, 0, true, false],
+    ["failed (it has Retry)", { state: "failed" }, 0, true, false],
+    ["done", { state: "done" }, 0, true, false],
+  ])("%s", (_, over, movedAt, restored, stuck) => {
+    expect(transferStalled(record(over), movedAt, restored, at)).toBe(stuck);
+  });
+  it("waits longer than the automatic offer again, so that goes first", () => {
+    expect(FILE_LIMITS.stallMs).toBeGreaterThan(FILE_LIMITS.idleMs);
+  });
+});
+
 describe("a large file, generated as it is read", () => {
   const SIZE = Number(process.env.GHOSTLY_BIG_FILE_MB ?? 256) * 1024 * 1024;
 

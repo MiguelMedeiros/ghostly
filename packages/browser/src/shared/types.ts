@@ -271,7 +271,11 @@ export interface FileTransferView {
   /** Receiving, `asking`: bytes this device can still take for files, when it says. */
   room?: number | null;
   /** Failed but the sender can offer it again (files/3). */
-  retry?: boolean;
+  retry?: boolean;  /**
+   * files/3, unfinished and not moving for a while (or not since the app started): the sender can send it again
+   * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
+   */
+  stalled?: boolean;
 }
 
 /** Ecash held by this peer. One row per proof; `reserved` while an operation is using it. */

@@ -7,7 +7,7 @@ import { db } from "../src/engine/db";
 import { fileStore } from "../src/shared/idb";
 import { fileBytes } from "../src/shared/fileBytes";
 import { FakeNativeNet } from "./helpers/fakeNative";
-// covers: files.large.offer, files.large.resume, files.large.integrity, files.storage
+// covers: files.large.offer, files.large.resume, files.large.integrity, files.storage, files.large.resend, files.large.request
 
 /**
  * files/3 in the engine: a real node (the app) and its contact's link over stand-ins for Iroh and HyperDHT, the
@@ -34,6 +34,8 @@ afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await st
 
 async function setup() {
   const net = new FakeNativeNet();
+  // As the real Iroh and HyperDHT channels: past 120 KiB queued, a frame is refused.
+  net.sendBudget = 120 * 1024;
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
   const id = `files3-${crypto.randomUUID()}`;
@@ -67,6 +69,7 @@ async function setup() {
     },
     changed: (record) => { records.set(`${record.direction}:${record.id}`, record); },
     room: async () => 50 * 1024 ** 3,
+    writable: () => peer.link?.filesWritable() ?? Promise.resolve(),
   });
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: true,
@@ -159,22 +162,81 @@ it("a drop, then a restart of the app, and the file still arrives whole, from wh
   expect(await (await fileBytes()).digest((await t.incoming("resume-001"))!.fileId)).toBe(digestOf(size));
 }, 150_000);
 
+/** A file the app sends, stored as the composer stores it, then sent. */
+async function put(t: Awaited<ReturnType<typeof setup>>, wireId: string, size: number, timestamp = 5) {
+  const file = { id: `${t.id}-out-${wireId}`, name: `${wireId}.bin`, size, mime: "application/octet-stream" };
+  await fileStore.put({ id: file.id, linkId: t.id, blob: new Blob([pattern(0, size) as BlobPart]), createdAt: 1, direction: "out", wireId,
+    metadata: { name: file.name, size, mime: file.mime, timestamp } });
+  t.node().sendFile({ linkId: t.id, file, timestamp });
+  return file;
+}
+
+it("a 115 KB voice-note-sized file goes whole over a native channel's 120 KiB send budget (it froze the Desktop app)", async () => {
+  const t = await setup();
+  const sent = await put(t, "voice-0001", 115_395);
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", direction: "out", transferred: 115_395 }), { timeout: 20_000 });
+  await vi.waitFor(() => expect(t.records.get("in:voice-0001")?.state).toBe("done"));
+  // And the other way, a few MiB: the contact's frames wait for room too.
+  t.offer("back-00001", 3 * 1024 * 1024 + 11);
+  await vi.waitFor(async () => expect((await t.incoming("back-00001"))?.transfer).toMatchObject({ state: "done" }), { timeout: 30_000 });
+  expect(await (await fileBytes()).digest((await t.incoming("back-00001"))!.fileId)).toBe(digestOf(3 * 1024 * 1024 + 11));
+}, 60_000);
+
+it("stuck after a restart, a sent file offers Send again; it goes on from the contact's bytes, one message on each side", async () => {
+  const t = await setup();
+  // The contact stops taking data (a session that stopped carrying it).
+  let deaf = false;
+  const handle = t.files.handle.bind(t.files);
+  t.files.handle = async (frame) => { if (deaf && frame.t === "pf-data") return; return handle(frame); };
+  const size = 3 * 1024 * 1024 + 3;
+  const sent = await put(t, "stuck-0001", size, 7);
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]?.transferred).toBeGreaterThan(1024 * 1024), { timeout: 20_000 });
+  deaf = true;
+  await t.restartApp();
+  // Unfinished when the app started, and not moved since: stuck.
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "transferring", direction: "out", stalled: true }));
+  deaf = false;
+  const accepts: number[] = [];
+  const send = t.contact.sendFilesFrame.bind(t.contact);
+  t.contact.sendFilesFrame = (frame) => { if (frame.t === "pf-accept") accepts.push(frame.offset as number); return send(frame); };
+  t.node().fileAction({ linkId: t.id, fileId: sent.id, action: "resend" });
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", transferred: size }), { timeout: 20_000 });
+  expect(t.node().getState().transfers[sent.id].stalled).toBeUndefined();
+  expect(accepts[0], "it went on from what the contact held").toBeGreaterThan(1024 * 1024);
+  expect((await db.getMessages(t.id)).filter((m) => m.file?.id === sent.id)).toHaveLength(1);
+  expect(t.records.get("in:stuck-0001")?.state).toBe("done");
+  expect(() => t.node().fileAction({ linkId: t.id, fileId: sent.id, action: "request" }), "a sent file is not asked for").toThrow();
+}, 90_000);
+
+it("a received file that stopped arriving is asked for again, from where it stands here", async () => {
+  const t = await setup();
+  let lose = false;
+  const send = t.contact.sendFilesFrame.bind(t.contact);
+  t.contact.sendFilesFrame = (frame) => (lose && frame.t === "pf-data" ? true : send(frame));
+  const size = 4 * 1024 * 1024 + 1;
+  t.offer("ask-000001", size);
+  await vi.waitFor(async () => expect((await t.incoming("ask-000001"))?.transfer?.transferred ?? 0).toBeGreaterThan(1024 * 1024), { timeout: 20_000 });
+  lose = true;
+  const { fileId } = (await t.incoming("ask-000001"))!;
+  let last = -1;
+  await vi.waitFor(() => { const now = t.node().getState().transfers[fileId].transferred; const still = now === last; last = now; expect(still).toBe(true); }, { timeout: 10_000, interval: 300 });
+  lose = false;
+  t.node().fileAction({ linkId: t.id, fileId, action: "request" });
+  await vi.waitFor(async () => expect((await t.incoming("ask-000001"))?.transfer).toMatchObject({ state: "done", transferred: size }), { timeout: 20_000 });
+  expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(size));
+  expect((await db.getMessages(t.id)).filter((m) => m.id === "peer_ask-000001")).toHaveLength(1);
+}, 60_000);
+
 it("sends a file to a contact with files/3, and cancels one on both sides", async () => {
   const t = await setup();
-  const put = async (wireId: string, size: number) => {
-    const file = { id: `${t.id}-out-${wireId}`, name: `${wireId}.bin`, size, mime: "application/octet-stream" };
-    await fileStore.put({ id: file.id, linkId: t.id, blob: new Blob([pattern(0, size) as BlobPart]), createdAt: 1, direction: "out", wireId,
-      metadata: { name: file.name, size, mime: file.mime, timestamp: 5 } });
-    t.node().sendFile({ linkId: t.id, file, timestamp: 5 });
-    return file;
-  };
-  const sent = await put("send-0001", 3 * 1024 * 1024 + 7);
+  const put1 = (wireId: string, size: number) => put(t, wireId, size);
+  const sent = await put1("send-0001", 3 * 1024 * 1024 + 7);
   await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", direction: "out" }), { timeout: 30_000 })
     .catch((e) => { throw new Error(`${e} ${JSON.stringify(t.node().getState().transfers[sent.id])} ${JSON.stringify(t.records.get("in:send-0001"))}`); });
   await vi.waitFor(() => expect(t.records.get("in:send-0001")?.state).toBe("done"));
 
   t.decide = () => "ask";
-  const cancelled = await put("send-0002", 1000);
+  const cancelled = await put1("send-0002", 1000);
   await vi.waitFor(() => expect(t.node().getState().transfers[cancelled.id]).toMatchObject({ stage: "asking" }));
   t.node().fileAction({ linkId: t.id, fileId: cancelled.id, action: "cancel" });
   await vi.waitFor(() => expect(t.records.get("in:send-0002")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));

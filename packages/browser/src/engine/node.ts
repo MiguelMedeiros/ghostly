@@ -1754,10 +1754,13 @@ export class GhostlyNode implements EngineImplementation {
     })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
   }
 
-  fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" }): void {
-    if (!this.links.get(linkId)) throw new Error("No such chat");
-    if (!["accept", "decline", "pause", "resume", "cancel"].includes(action)) throw new Error("Unknown file action");
-    this.fileDesk.act(linkId, fileId, action);
+  fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void {
+    const live = this.links.get(linkId);
+    if (!live) throw new Error("No such chat");
+    if (!["accept", "decline", "pause", "resume", "cancel", "resend", "request"].includes(action)) throw new Error("Unknown file action");
+    const now = this.fileDesk.act(linkId, fileId, action);
+    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now.
+    if (!now && (action === "resend" || action === "request") && live.link && !live.link.isDataLinkOpen) void this.connect({ linkId }).catch(() => {});
   }
 
   /** The contact can take a file on the open session: files/2 or files/3. */

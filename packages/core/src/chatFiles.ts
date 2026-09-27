@@ -21,7 +21,8 @@ import { parseVoiceMeta } from "./voice";
  *
  * The offer is repeated on every session until the transfer ends, so every answer is idempotent: the
  * receiver says where it stands (accept from an offset, wait, done, refuse) and the sender goes on from
- * there. Nothing but the offset a receiver confirms moves a sender forward.
+ * there. Nothing but the offset a receiver confirms moves a sender forward. A receiver may say `pf-accept`
+ * again at any time (nothing arrived for a while, or its person asked again): the sender goes on from that offset.
  */
 
 export const FILE_LIMITS = {
@@ -39,8 +40,16 @@ export const FILE_LIMITS = {
   maxActiveIncoming: 3,
   /** An offer nobody answered ends after this long. */
   offerTtlMs: 7 * 24 * 60 * 60 * 1000,
-  /** No answer while something is outstanding: the sender offers again, which puts both sides back in step. */
+  /**
+   * No answer while something is outstanding: the sender offers again, which puts both sides back in step. Nothing
+   * arriving for a file under way: the receiver says again where it stands.
+   */
   idleMs: 30_000,
+  /**
+   * A transfer that has not moved for this long (or not since the app started) offers its person "Send again" or
+   * "Ask again". Longer than `idleMs`, so what happens on its own has its turn first.
+   */
+  stallMs: 60_000,
   /** A receiver makes what it stored durable, and records the point to resume from, this often. */
   checkpointBytes: 8 * 1024 * 1024,
   /** A receiver confirms at least this often while writing. */
@@ -100,6 +109,17 @@ export interface FileTransferRecord {
 
 const FINAL: ReadonlySet<TransferState> = new Set(["done", "failed", "declined", "cancelled"]);
 export const transferEnded = (record: FileTransferRecord): boolean => FINAL.has(record.state);
+
+/**
+ * Whether an unfinished transfer is stuck, so its person is offered to push it: "Send again" (sending) or "Ask again"
+ * (receiving). `movedAt` is when its bytes last moved, `restored` that it has not moved since the app started. What
+ * waits for a person (an answer, a pause) is not stuck, and a failed one has its own "Retry".
+ */
+export function transferStalled(record: FileTransferRecord, movedAt: number, restored: boolean, now: number): boolean {
+  if (transferEnded(record) || record.state === "asking" || record.state === "paused") return false;
+  if (record.direction === "in" && record.state === "verifying") return false;
+  return restored || now - movedAt >= FILE_LIMITS.stallMs;
+}
 
 /** A file being sent, read in ranges. */
 export interface OutgoingSource {
@@ -165,6 +185,10 @@ interface Outgoing {
 
 interface Incoming {
   target?: Promise<IncomingTarget>;
+  /** Nothing arrived for a while: the receiver says again where it stands. */
+  timer?: ReturnType<typeof setTimeout>;
+  /** When data last came (the timer is not moved for every chunk). */
+  heardAt?: number;
   /** Bytes taken in order (some may still be on their way to storage). */
   written: number;
   stored: number;
@@ -252,6 +276,8 @@ export class ChatFiles {
       if (transferEnded(entry.record)) continue;
       if (entry.record.direction === "out") this.announce(entry);
       else if (entry.record.state === "queued") this.startIncoming(entry);
+      // The sender offers again on its own; one that does not (an older app, one stuck) is asked.
+      else if (entry.record.state === "active") this.armNudge(entry);
     }
   }
 
@@ -262,6 +288,7 @@ export class ChatFiles {
     this.peerRoomValue = null;
     for (const entry of this.entries.values()) {
       if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
+      if (entry.in) clearTimeout(entry.in.timer);
       if (entry.in && !transferEnded(entry.record)) void this.checkpoint(entry);
     }
   }
@@ -432,6 +459,8 @@ export class ChatFiles {
       entry.in!.gapAt = undefined;
       this.changed(entry);
       this.send({ t: "pf-accept", id: entry.record.id, offset: entry.in!.written });
+      entry.in!.heardAt = this.now();
+      this.armNudge(entry);
     }, (error) => {
       this.end(entry, "failed", `Could not store the file: ${error instanceof Error ? error.message : String(error)}`);
       this.send({ t: "pf-refuse", id: entry.record.id, why: "no-room" });
@@ -498,6 +527,7 @@ export class ChatFiles {
   private onData(entry: Entry, frame: Record<string, unknown>): void {
     const { record } = entry, incoming = entry.in!;
     if (record.state !== "active" || !incoming.target) return;
+    incoming.heardAt = this.now();
     const { offset, data } = frame;
     if (!isInt(offset) || typeof data !== "string" || !data.length || data.length > Math.ceil(FILE_LIMITS.chunkBytes * 4 / 3) || !DATA.test(data)) return;
     if (offset < incoming.written) {
@@ -551,6 +581,32 @@ export class ChatFiles {
     incoming.checkpointed = Math.max(incoming.checkpointed, stored);
     // Kept at once (not as progress): a restart resumes from here.
     if (!transferEnded(entry.record)) { entry.record.confirmed = incoming.checkpointed; this.changed(entry); }
+  }
+
+  /** Nothing arrives for a file under way: after a quiet spell the receiver says again where it stands. */
+  private armNudge(entry: Entry, delay: number = FILE_LIMITS.idleMs): void {
+    const incoming = entry.in!;
+    clearTimeout(incoming.timer);
+    if (!this.attached || entry.record.state !== "active") return;
+    incoming.heardAt ??= this.now();
+    incoming.timer = setTimeout(() => {
+      const quiet = this.now() - (incoming.heardAt ?? 0);
+      if (quiet < FILE_LIMITS.idleMs) this.armNudge(entry, FILE_LIMITS.idleMs - quiet);
+      else void this.askAgain(entry);
+    }, delay);
+  }
+
+  /** `pf-accept` from what is taken here: the sender goes on from there (it ignores it for a transfer that ended). */
+  private async askAgain(entry: Entry): Promise<void> {
+    const { record } = entry, incoming = entry.in!;
+    // Kept from before a restart, not opened yet: opening it says where it stands.
+    if (!incoming.target) { this.startIncoming(entry); return; }
+    await incoming.writing;
+    if (!this.attached || record.state !== "active" || incoming.verifying) return;
+    incoming.gapAt = undefined;
+    this.send({ t: "pf-accept", id: record.id, offset: incoming.written });
+    incoming.heardAt = this.now();
+    this.armNudge(entry);
   }
 
   private async onSum(entry: Entry, frame: Record<string, unknown>): Promise<void> {
@@ -658,6 +714,7 @@ export class ChatFiles {
     record.error = error;
     record.pausedBy = record.waitingFor = undefined;
     if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; }
+    if (entry.in) clearTimeout(entry.in.timer);
     this.changed(entry);
   }
 
@@ -733,6 +790,40 @@ export class ChatFiles {
     entry.out = { next: 0, generation: entry.out!.generation + 1 };
     this.changed(entry);
     if (this.attached) this.announce(entry);
+  }
+
+  /**
+   * "Send again": a sent file that failed, or stopped moving, is offered again now (or on the next session). The
+   * receiver answers from what it holds, so it goes on from there, never twice in the chat: same id, same message.
+   * True when it went now.
+   */
+  resend(id: string): boolean {
+    const entry = this.entry("out", id), { record } = entry;
+    if (record.state === "failed") { this.retry(id); return this.attached; }
+    if (transferEnded(record)) return false;
+    if (record.state === "paused" && record.pausedBy === "me") { this.resume("out", id); return this.attached; }
+    if (!this.attached) return false;
+    this.announce(entry);
+    return true;
+  }
+
+  /**
+   * "Ask again": a file that stopped arriving is asked for again from where it stands here. files/3 has this already:
+   * a receiver's `pf-accept` moves the sender to its offset, and an app that knows nothing more ignores nothing new.
+   * True when it went now.
+   */
+  request(id: string): boolean {
+    const entry = this.entry("in", id), { record } = entry;
+    if (transferEnded(record) || record.state === "asking" || record.state === "verifying") return false;
+    if (record.state === "paused") {
+      if (record.pausedBy !== "me") return false;
+      this.resume("in", id);
+      return this.attached;
+    }
+    if (!this.attached) return false;
+    if (record.state === "queued") this.startIncoming(entry);
+    else void this.askAgain(entry);
+    return true;
   }
 
   /** Forgets a transfer (its message was deleted): an unfinished one is cancelled on both sides first. */

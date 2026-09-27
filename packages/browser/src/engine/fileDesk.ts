@@ -5,6 +5,7 @@ import {
   randomBytes,
   toBase64Url,
   transferEnded,
+  transferStalled,
   type FileInfo,
   type FileTransferRecord,
   type IncomingTarget,
@@ -54,6 +55,8 @@ export const outgoingFileId = (linkId: string, wireId: string) => `${linkId}-out
 /** Progress is written to the database at most this often; every change of state is written at once. */
 const SAVE_EVERY_MS = 2_000;
 
+export type FileDeskAction = "accept" | "decline" | "pause" | "resume" | "cancel" | "retry" | "resend" | "request";
+
 /**
  * files/3 for every chat of this profile (WISP 501 rev 0.3): each chat's `ChatFiles`, the bytes in file
  * storage, the records in the files store (so a transfer resumes after a restart), the chat message a file
@@ -62,6 +65,12 @@ const SAVE_EVERY_MS = 2_000;
 export class FileDesk {
   private readonly chats = new Map<string, Chat>();
   private readonly speeds = new Map<string, Speed>();
+  /** By local id: when its bytes last moved (for the stall rule). */
+  private readonly moved = new Map<string, { at: number }>();
+  /** Unfinished when the app started, and not moved since. */
+  private readonly restored = new Set<string>();
+  /** A look again when a transfer would count as stuck, by local id. */
+  private readonly stallChecks = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly deps: FileDeskDeps) {}
 
@@ -92,7 +101,8 @@ export class FileDesk {
       if (!file.wire3) continue;
       records.push(file.wire3);
       if (file.wire3.direction === "in") chat.local.set(file.wire3.id, file.id);
-      this.deps.transfers.set(file.id, this.view(chat, file.wire3, file.wire3.confirmed));
+      if (!transferEnded(file.wire3)) this.restored.add(file.id);
+      this.deps.transfers.set(file.id, this.view(chat, file.wire3, file.wire3.confirmed, transferStalled(file.wire3, Date.now(), this.restored.has(file.id), Date.now())));
     }
     chat.files.restore(records);
   }
@@ -126,12 +136,16 @@ export class FileDesk {
     chat.files.offer({ id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }) }, stored.digest);
   }
 
-  /** The person answers an offer, or pauses, resumes, cancels or sends again a transfer. */
-  act(linkId: string, fileId: string, action: "accept" | "decline" | "pause" | "resume" | "cancel" | "retry"): void {
+  /**
+   * The person answers an offer, or pauses, resumes, cancels or sends again a transfer. `resend` (sending) and
+   * `request` (receiving) push one that stopped moving: false when no session is open, and it goes on the next one.
+   */
+  act(linkId: string, fileId: string, action: FileDeskAction): boolean {
     const chat = this.chat(linkId);
     const out = fileId.startsWith(`${linkId}-out-`);
     const wireId = out ? fileId.slice(`${linkId}-out-`.length) : [...chat.local].find(([, local]) => local === fileId)?.[0];
-    if (!wireId || !chat.files.get(out ? "out" : "in", wireId)) throw new Error("No such file transfer");
+    const record = wireId && chat.files.get(out ? "out" : "in", wireId);
+    if (!wireId || !record) throw new Error("No such file transfer");
     const direction = out ? "out" : "in";
     switch (action) {
       case "accept": if (!out) chat.files.accept(wireId); break;
@@ -140,7 +154,19 @@ export class FileDesk {
       case "resume": chat.files.resume(direction, wireId); break;
       case "cancel": chat.files.cancel(direction, wireId); break;
       case "retry": if (out) chat.files.retry(wireId); break;
+      case "resend": case "request": {
+        if ((action === "resend") !== out) throw new Error(out ? "A file you sent is sent again, not asked for" : "A file you receive is asked for again, not sent");
+        const now = out ? chat.files.resend(wireId) : chat.files.request(wireId);
+        // Pushed: it counts as stuck again only after another quiet spell.
+        this.restored.delete(fileId);
+        this.moved.set(fileId, { at: Date.now() });
+        const current = chat.files.get(direction, wireId);
+        if (current) this.show(linkId, chat, current, chat.files.transferred(direction, wireId));
+        this.deps.changed();
+        return now;
+      }
     }
+    return chat.files.live;
   }
 
   /** Whether this local file is a files/3 transfer, and not finished. */
@@ -163,6 +189,7 @@ export class FileDesk {
     chat.files.forget(out ? "out" : "in", wireId);
     if (!out) chat.local.delete(wireId);
     this.speeds.delete(fileId);
+    this.unwatch(fileId);
   }
 
   /** Offers nobody answered in a week end; the peer calls this now and then. */
@@ -174,6 +201,15 @@ export class FileDesk {
   drop(linkId: string): void {
     this.chats.get(linkId)?.files.detach();
     this.chats.delete(linkId);
+    for (const id of [...this.moved.keys(), ...this.restored, ...this.stallChecks.keys()]) if (id.startsWith(`${linkId}-`)) this.unwatch(id);
+  }
+
+  /** Stops tracking whether a transfer is stuck. */
+  private unwatch(id: string): void {
+    clearTimeout(this.stallChecks.get(id));
+    this.stallChecks.delete(id);
+    this.moved.delete(id);
+    this.restored.delete(id);
   }
 
   // ─── The host of each ChatFiles ─────────────────────────────────────────
@@ -253,7 +289,7 @@ export class FileDesk {
           details: { wire: fileWire("files/3", file.size) } });
       }).catch(() => {});
     }
-    this.show(linkId, chat, record, transferred);
+    this.show(linkId, chat, record, transferred, progress);
     const id = record.direction === "out" ? outgoingFileId(linkId, record.id) : chat.local.get(record.id)!;
     const now = Date.now();
     if (!progress || now - (chat.lastSaved.get(id) ?? 0) >= SAVE_EVERY_MS) {
@@ -265,10 +301,10 @@ export class FileDesk {
     this.deps.changed(progress ? 250 : 50);
   }
 
-  private show(linkId: string, chat: Chat, record: FileTransferRecord, transferred: number): void {
+  private show(linkId: string, chat: Chat, record: FileTransferRecord, transferred: number, progress = false): void {
     const id = record.direction === "out" ? outgoingFileId(linkId, record.id) : chat.local.get(record.id);
     if (!id) return;
-    const view = this.view(chat, record, transferred);
+    const view = this.view(chat, record, transferred, this.stalled(linkId, id, record, progress));
     if (view.state === "transferring" && !view.stage) {
       const now = Date.now(), last = this.speeds.get(id);
       if (!last) this.speeds.set(id, { bytes: transferred, at: now, rate: 0 });
@@ -284,6 +320,36 @@ export class FileDesk {
     if (!transferEnded(record)) this.underway.add(id);
     else if (!this.ended.has(id)) { this.ended.add(id); this.deps.settled?.(linkId, id, record, this.underway.delete(id)); }
   }
+
+  /**
+   * Whether a transfer is stuck (`transferStalled`): not moved for `FILE_LIMITS.stallMs`, or not since the app started.
+   * Only bytes moving count (`progress`: confirmed by the receiver, stored here), not a session saying again where it
+   * stands. A stall is nothing happening, so a timer looks again when it would be one.
+   */
+  private stalled(linkId: string, id: string, record: FileTransferRecord, progress: boolean): boolean {
+    if (transferEnded(record)) { this.unwatch(id); return false; }
+    const now = Date.now();
+    if (progress || !this.moved.has(id)) this.moved.set(id, { at: now });
+    if (progress) this.restored.delete(id);
+    const movedAt = this.moved.get(id)!.at;
+    const stalled = transferStalled(record, movedAt, this.restored.has(id), now);
+    // Only what can be stuck is looked at again (not an offer waiting for an answer, nor a pause).
+    if (!stalled && !this.stallChecks.has(id) && transferStalled(record, 0, true, now)) {
+      const check = setTimeout(() => {
+        this.stallChecks.delete(id);
+        const chat = this.chats.get(linkId), wireId = record.id;
+        const current = chat?.files.get(record.direction, wireId);
+        if (!chat || !current) return;
+        const before = this.deps.transfers.get(id)?.stalled;
+        this.show(linkId, chat, current, chat.files.transferred(record.direction, wireId));
+        if (this.deps.transfers.get(id)?.stalled !== before) this.deps.changed();
+      }, Math.max(1_000, movedAt + FILE_LIMITS.stallMs - now));
+      // A headless app (the CLI) is not kept running for it.
+      (check as { unref?: () => void }).unref?.();
+      this.stallChecks.set(id, check);
+    }
+    return stalled;
+  }
   /** Transfers already reported as ended, by local id. */
   private readonly ended = new Set<string>();
   /** Transfers seen under way in this run, until they end. */
@@ -298,8 +364,8 @@ export class FileDesk {
     this.deps.changed();
   }
 
-  private view(chat: Chat, record: FileTransferRecord, transferred: number): FileTransferView {
-    const base = { transferred, size: record.file.size, direction: record.direction };
+  private view(chat: Chat, record: FileTransferRecord, transferred: number, stalled = false): FileTransferView {
+    const base = { transferred, size: record.file.size, direction: record.direction, ...(stalled && { stalled: true }) };
     switch (record.state) {
       case "done": return { ...base, state: "done", transferred: record.file.size };
       case "failed": return { ...base, state: "failed", error: record.error, retry: record.direction === "out" };

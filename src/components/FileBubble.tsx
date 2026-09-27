@@ -3,7 +3,8 @@ import { PREVIEWABLE_IMAGE, sanitizeFileName } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { fileStatus } from "../lib/fileStatus";
+import { fileStatus, stalledAction } from "../lib/fileStatus";
+import type { FileAction } from "../lib/platform";
 import type { ChatFile } from "../lib/types";
 
 const linkButton = "text-xs underline px-2 py-1 bg-transparent border-none text-inherit cursor-pointer";
@@ -47,7 +48,7 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
     };
   }, [platform, file.id, settled, transfer?.state]);
 
-  const act = (action: "accept" | "decline" | "pause" | "resume" | "cancel") => {
+  const act = (action: FileAction) => {
     setActionError("");
     void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
   };
@@ -66,6 +67,7 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
   const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
   const canRetry = transfer?.state === "failed" && file.id.includes("-out-") && !!platform?.retryFile && (transfer.direction ? !!transfer.retry : true);
+  const stuck = platform?.fileAction ? stalledAction(transfer) : null;
 
   return (
     <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
@@ -129,6 +131,7 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
         <div className="flex gap-1 px-1">
           {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>Pause</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>Resume</button>}
+          {stuck && <button type="button" className={linkButton} data-testid={`file-${stuck.action}`} title={stuck.hint} onClick={() => act(stuck.action)}>{stuck.label}</button>}
           <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>Cancel</button>
         </div>
       )}
