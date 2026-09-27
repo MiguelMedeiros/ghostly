@@ -1,4 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
+import { unseenSatsLabel, useUnseenSats } from "../hooks/useUnseenSats";
+import { UnseenSatsDot } from "./UnseenSatsDot";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { useLocation } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
@@ -24,8 +26,6 @@ function useCurrentProfile() {
   useEffect(() => { window.addEventListener("profiles-updated", bump); return () => window.removeEventListener("profiles-updated", bump); }, []);
   return currentProfile();
 }
-/** 21 → "21", 1500 → "1.5k", 2_000_000 → "2M": short enough for a badge on an icon. */
-const compact = (sats: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(sats);
 
 export function AccountBar() {
   const nav = useAppNavigation();
@@ -34,16 +34,10 @@ export function AccountBar() {
   const { settings } = useSettings();
   const platform = useServicesPlatform();
   const panelRoot = useRef<HTMLDivElement>(null);
-  /** What arrived while the wallet was closed, real and test sats apart: it has to be noticed. */
-  const [unseen, setUnseen] = useState({ real: 0, test: 0 });
-
   const wallet = platform?.wallet;
-  const walletState = wallet?.getState();
-  // The balance is not shown here (the Wallet page and its cards have it), but what came in while the wallet was
-  // closed is counted on the icon, real and test sats apart: test sats are worthless. Each network's Cashu wallet
-  // says its own (an older engine, only the flat one: its test mints' sats are test sats).
-  const realBalance = walletState?.networks ? walletState.networks.mainnet.balance : (walletState?.balance ?? 0) - (walletState?.mints.filter((m) => wallet?.testMintUrls.includes(m.url)).reduce((sum, m) => sum + m.balance, 0) ?? 0);
-  const testBalance = walletState?.networks ? walletState.networks.testnet.balance : (walletState?.balance ?? 0) - realBalance;
+  // The balance is not shown here (the Wallet page and its cards have it). What came in while the wallet was closed
+  // is a dot on the icon, filled for real sats, hollow for test sats; how many is in the tooltip and the name.
+  const unseen = useUnseenSats();
   // The Profile place wears the profile's name (renamed or switched, it follows); "Profile" only for a profile with none.
   const profile = useCurrentProfile();
   const profileName = profile.name || t("tabs.profile");
@@ -68,7 +62,6 @@ export function AccountBar() {
   }, [t, profileName]);
   const identityAttention = useIdentityAttention();
   const onIdentities = location.pathname === "/identities";
-  const lastBalanceRef = useRef({ real: realBalance, test: testBalance });
   const online = platform?.isOnline() ?? false;
   const name = settings.defaultNickname;
 
@@ -82,20 +75,7 @@ export function AccountBar() {
   const glances = useProfileGlances();
   const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? "Online" : "Offline"}${
     canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
-  useEffect(() => {
-    const last = lastBalanceRef.current;
-    const real = Math.max(0, realBalance - last.real), test = Math.max(0, testBalance - last.test);
-    if ((real || test) && !onWallet) setUnseen((u) => ({ real: u.real + real, test: u.test + test }));
-    lastBalanceRef.current = { real: realBalance, test: testBalance };
-  }, [realBalance, testBalance, onWallet]);
-
-  useEffect(() => {
-    if (onWallet) setUnseen({ real: 0, test: 0 });
-  }, [onWallet]);
-  // Real sats say how many; test sats only that some came (they are worth nothing).
-  const unseenLabel = unseen.real ? `+${compact(unseen.real)}` : unseen.test ? `+${compact(unseen.test)}` : "";
-  const unseenTitle = unseen.real ? `${unseen.real.toLocaleString()} new sats` : `${unseen.test.toLocaleString()} new test sats`;
-
+  const walletLabel = unseenSatsLabel(t("tabs.wallets"), unseen);
 
   return (
     <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar">
@@ -131,22 +111,18 @@ export function AccountBar() {
           <button
             data-testid="wallet-chip"
             onClick={() => (onWallet ? nav.home() : nav.place("/wallet"))}
-            aria-label={`${t("tabs.wallets")}${unseenLabel ? `, ${unseenTitle}` : ""}`}
+            aria-label={walletLabel}
             aria-current={onWallet ? "page" : undefined}
             className={`account-action relative ${
               onWallet ? "bg-surface-hover text-accent" : "text-text-secondary hover:text-text-primary"
             }`}
-            title={unseenLabel ? `${t("tabs.wallets")}: ${unseenTitle}` : t("tabs.wallets")}
+            title={walletLabel}
           >
             <span className="relative shrink-0 flex">
               <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 7H5a2 2 0 0 1 0-4h13v4 M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1 M21 11h-5v6h5"/><path d="M18 14h.01"/>
               </svg>
-              {/* On the icon itself, saying how much came in: it belongs to the wallet, not to the space beside it. */}
-              {unseenLabel && (
-                <span data-testid="wallet-new" aria-hidden="true" title={unseenTitle}
-                  className={`wallet-new ${unseen.real ? "" : "wallet-new-test"}`} key={unseenLabel}>{unseenLabel}</span>
-              )}
+              <UnseenSatsDot unseen={unseen} />
             </span>
             <span className="account-label">{t("tabs.wallets")}</span>
           </button>
