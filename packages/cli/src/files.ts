@@ -4,9 +4,10 @@ import { basename, extname, join, resolve } from "node:path";
 import { LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, sanitizeFileName, sanitizeMime, toBase64Url } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
-import type { MessageFile } from "@ghostly/browser/shared/types";
-import { bool, chatOf, list, node, num, oneOf, state, str, type Method } from "./apiKit";
+import type { LinkView, MessageFile } from "@ghostly/browser/shared/types";
+import { bool, chatOf, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
+import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
 
 /**
@@ -33,6 +34,19 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
     file: { id: m.file!.id, name: m.file!.name, size: m.file!.size, mime: m.file!.mime, ...(m.file!.voice ? { voice: m.file!.voice } : {}) },
     transfer: transfers[m.file!.id] ?? null,
   }));
+}
+
+/**
+ * The chat a file belongs to: a file id starts with its chat's id, so the chat may be left out; given, it must be
+ * the file's own.
+ */
+function fileChat(ctx: ApiContext, params: Params, fileId: string): LinkView {
+  const link = params.chat === undefined
+    ? state(ctx).links.find((l) => fileId.startsWith(`${l.id}-in-`) || fileId.startsWith(`${l.id}-out-`))
+    : chatOf(ctx, params);
+  if (!link) throw new CliError("not_found", `No file ${fileId}`);
+  if (!fileId.startsWith(`${link.id}-`)) throw new CliError("not_found", `No file ${fileId} in this chat`);
+  return link;
 }
 
 const VOICE_ONLY = "A voice note is audio (webm, ogg, mp4, mpeg, aac, m4a or wav) of at most 15 minutes, with peaks from 0 to 255";
@@ -78,6 +92,7 @@ export const FILE_METHODS: Record<string, Method> = {
       metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, ...(voice ? { voice } : {}) },
       transfer: { state: "transferring", transferred: 0, size: file.size },
     });
+    endTyping(ctx, link.id, true);
     await node(ctx).sendFile({ linkId: link.id, file, timestamp });
     return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}) }, ...(warning ? { warning } : {}) };
   },
@@ -93,12 +108,8 @@ export const FILE_METHODS: Record<string, Method> = {
    */
   async "file.action"(ctx, params) {
     const fileId = str(params, "file", true);
-    const link = params.chat === undefined
-      ? state(ctx).links.find((l) => fileId.startsWith(`${l.id}-in-`) || fileId.startsWith(`${l.id}-out-`))
-      : chatOf(ctx, params);
-    if (!link) throw new CliError("not_found", `No file ${fileId}`);
+    const link = fileChat(ctx, params, fileId);
     const action = oneOf(params, "action", ACTIONS, "accept");
-    if (!fileId.startsWith(`${link.id}-`)) throw new CliError("not_found", `No file ${fileId} in this chat`);
     if (action === "resend" || action === "request") {
       const outgoing = fileId.startsWith(`${link.id}-out-`);
       if (outgoing !== (action === "resend")) throw new CliError("bad_request", outgoing ? "A file sent from here is sent again: file resend" : "A received file is asked for again: file request");
@@ -110,9 +121,33 @@ export const FILE_METHODS: Record<string, Method> = {
     return { chat: link.id, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
 
+  /**
+   * Until a transfer ends: done answers, failed is an `engine` error with the transfer's words (and whether `file
+   * resend` can go on). A file whose transfer this run has not seen answers from the file store.
+   */
+  async "file.wait"(ctx, params) {
+    const fileId = str(params, "file", true);
+    const link = fileChat(ctx, params, fileId);
+    const stored = await fileStore.get(fileId);
+    if (!stored && !state(ctx).transfers[fileId]) throw new CliError("not_found", `No file ${fileId}`);
+    const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
+    const transfer = await waitForState(ctx, (s) => {
+      const now = s.transfers[fileId] ?? stored?.transfer;
+      return now && (now.state === "done" || now.state === "failed") ? now : undefined;
+    }, ms, `file ${fileId} to arrive`).catch((error: unknown) => {
+      const now = state(ctx).transfers[fileId];
+      if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${now.stage}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
+      throw error;
+    });
+    if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, chat: link.id, retry: !!transfer.retry });
+    return { chat: link.id, file: fileId, state: "done", size: transfer.size };
+  },
+
   /** Writes a received (or sent) file to disk: into `dir` under its own name, or to `path`. Never over a file unless `force`. */
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
+    if (params.chat !== undefined) fileChat(ctx, params, fileId);
+    if (bool(params, "wait")) await FILE_METHODS["file.wait"](ctx, { file: fileId, timeout: params.timeout });
     const stored = await fileStore.get(fileId);
     if (!stored?.metadata) throw new CliError("not_found", `No file ${fileId}`);
     const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
