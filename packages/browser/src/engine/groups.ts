@@ -1,5 +1,5 @@
 import {
-  GroupSession, GROUP_EDIT_FRAME, groupMessageId, MAX_GROUP_CHAIN, MAX_GROUP_MEMBERS, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
+  GroupSession, GROUP_EDIT_FRAME, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
   type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
@@ -8,6 +8,7 @@ import { groupReply } from "../shared/replies";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, pictureText, type CommunityTimings } from "./community";
+import { MESH_HUB_TIMINGS, MeshHubs, type MeshHubTimings } from "./meshHubs";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
 export interface GroupsHost {
@@ -61,6 +62,13 @@ export interface GroupsHost {
   groupEdit?(groupId: string, edit: GroupIncomingEdit): Promise<void> | void;
   /** A private group's edge to `peerKey` came up and both sides said where they are: what is said again on it goes now. */
   edgeUp?(groupId: string, peerKey: string): void;
+  /**
+   * This app stays online (the Desktop app, the CLI): in a private group past 16 members it offers to be a hub
+   * (WISP 9xx · Group Mesh § Hubs). A browser tab does not, unless the admin pins it.
+   */
+  staysOnline?(): boolean;
+  /** False: this app takes no part in hubs and keeps every private group a full mesh (tests of older apps). */
+  meshHubs?(): boolean;
 }
 
 /** The key an edit of message `id` goes by in `FramesTaken`. */
@@ -211,9 +219,14 @@ export class Groups {
   readonly communities: Communities;
   /** My messages and edits an edge of a private group took. */
   private readonly frames = new FramesTaken();
+  /** Hubs of the private groups past 16 members (WISP 9xx · Group Mesh § Hubs). */
+  private readonly hubs: MeshHubs;
+  /** Groups whose edges are being reconciled because their hubs changed: one at a time. */
+  private readonly hubReconcile = new Set<string>();
 
-  constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number) {
+  constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
     this.communities = new Communities(host, store, communityTimings, random);
+    this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
   }
 
   async load(): Promise<void> {
@@ -254,13 +267,19 @@ export class Groups {
       }
       const nicks = session.state.nicks;
       const entry = session.isAdmin ? this.entryOf(group) : undefined;
+      const now = this.now(), onHubs = this.hubs.active(group.id, session, now);
+      const hubKeys = new Set(onHubs ? this.hubs.hubs(group.id, session, now) : []), policy = session.hubPolicy;
+      if (onHubs && this.hubs.isHub(group.id)) hubKeys.add(session.myKey);
       return { ...base, name: session.name, status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
         ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}), ...(session.picture ? { picture: session.picture } : {}),
         canSend: session.status === "active" && session.readableEpochs.includes(session.epoch),
+        ...(onHubs ? { hubs: { hub: this.hubs.isHub(group.id) } } : {}),
         members: session.roster.map(([key, role]) => {
           const edge = edges.get(key);
+          const direct = key === session.myKey || (!!edge && this.host.linkReady(edge)), viaHub = !direct && onHubs && this.hubs.viaHub(group.id, key);
+          const hubRole = policy.pin.includes(key) ? "pin" as const : policy.no.includes(key) ? "exclude" as const : undefined;
           return { key, role, me: key === session.myKey, nick: key === session.myKey ? undefined : (edge && this.host.edgeNick(edge)) || nicks[key],
-            online: key === session.myKey || (!!edge && this.host.linkReady(edge)), missing: session.missing(key) };
+            online: direct || viaHub, ...(viaHub ? { viaHub } : {}), ...(hubKeys.has(key) ? { hub: true } : {}), ...(hubRole ? { hubRole } : {}), missing: session.missing(key) };
         }) };
     }).sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
   }
@@ -268,8 +287,14 @@ export class Groups {
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
 
   private isCommunity(groupId: string): boolean { return this.communities.has(groupId); }
-  /** Members of a private group's roster (0 for none): what paces its edges (`meshEdgeIntervals`). */
-  meshSize(groupId: string): number { return this.sessions.get(groupId)?.roster.length ?? 0; }
+  /**
+   * What paces a private group's edges (`meshEdgeIntervals`), as a roster of that many members would: the roster in a
+   * full mesh, the edges this member keeps (and one) with hubs. 0 for no group.
+   */
+  meshSize(groupId: string): number {
+    const session = this.sessions.get(groupId);
+    return session ? this.hubs.edgeLoad(groupId, session) : 0;
+  }
   /** A community group (`group-community/1`) rather than a private one. */
   isCommunityGroup(groupId: string): boolean { return this.isCommunity(groupId); }
   /** Through a community group: an application frame to everyone, or a payload sealed to one member. */
@@ -320,7 +345,7 @@ export class Groups {
     if (!session.isAdmin) throw new Error("Only the admin can invite");
     const group = this.stored.get(groupId)!;
     if (Object.entries(group.contacts ?? {}).some(([key, id]) => id === linkId && rosterHas(session.roster, key))) throw new Error("This contact is already a member");
-    if (session.roster.length + (this.invited.get(groupId)?.size ?? 0) >= MAX_GROUP_MEMBERS) throw new Error(`A group holds ${MAX_GROUP_MEMBERS} members at most`);
+    if (session.roster.length + (this.invited.get(groupId)?.size ?? 0) >= GROUP_MEMBER_CAP.max) throw new Error(`A group holds ${GROUP_MEMBER_CAP.max} members at most`);
     if (!this.host.linkReady(linkId)) throw new Error("Connect to this contact first. Their app needs groups (an updated Ghostly).");
     const blocked = this.growthBlocked(group, session, session.roster.length + (this.invited.get(groupId)?.size ?? 0) + 1, linkId);
     if (blocked) throw new Error(blocked);
@@ -391,9 +416,14 @@ export class Groups {
       await session.transferAdmin(next);
     }
     const admin = session.admin!;
+    // With hubs, my leave is signed so that they carry it to an admin I have no edge with; the tombstone keeps the
+    // edges to them and says it again whenever one opens.
+    const onHubs = this.hubs.active(groupId, session, this.now());
+    const hubs = onHubs ? [...this.host.edges(groupId).keys()].filter(key => key !== admin && this.hubs.hubs(groupId, session, this.now()).includes(key)) : [];
+    const bye = onHubs ? session.byeFrame() : undefined;
     // The history goes with the row; what stays is a tombstone the list does not show. Written
     // before anyone is told, so the admin's answer cannot arrive before it and be undone by it.
-    group.left = { at: Date.now(), admin };
+    group.left = { at: Date.now(), admin, ...(hubs.length ? { hubs } : {}), ...(bye ? { bye } : {}) };
     delete group.entry;
     this.invited.delete(groupId);
     this.pendingEntries.delete(groupId);
@@ -404,6 +434,7 @@ export class Groups {
     for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
     this.host.emit();
     await session.leave();
+    if (bye) for (const key of hubs) { const edge = this.host.edges(groupId).get(key); if (edge && this.host.linkReady(edge)) { try { this.host.sendOnLink(edge, bye); } catch { /* when it opens again */ } } }
     // The admin may be off; its contact chat, if that is how I got here, hears it too.
     const contact = group.contacts?.[admin];
     if (contact) { try { this.host.sendOnLink(contact, { t: "group-leave", g: groupId }); } catch { /* the edge already carried it, or nobody is there */ } }
@@ -426,6 +457,15 @@ export class Groups {
   }
 
   makeAdmin(groupId: string, key: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.makeAdmin(groupId, key) : this.session(groupId).transferAdmin(key); }
+  /**
+   * The admin pins a member of a private group as a hub, excludes one from being a hub, or leaves it to the member's
+   * app (`null`): said in the group's metadata, which every member keeps (WISP 9xx · Group Mesh § Hubs).
+   */
+  async setHub(groupId: string, key: string, role: "pin" | "exclude" | null): Promise<void> {
+    if (this.isCommunity(groupId)) throw new Error("A community group chooses its hubs by itself");
+    await this.session(groupId).setHub(key, role);
+    this.host.emit();
+  }
   rotate(groupId: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.rotate(groupId) : this.session(groupId).rotate(); }
   /** The admin sets or removes the group's picture; every member gets it over the edges (WISP 9xx § Metadata). */
   async setPicture(groupId: string, picture: string | null): Promise<void> {
@@ -445,6 +485,7 @@ export class Groups {
     this.knocked.delete(groupId);
     this.justMet.delete(groupId);
     this.relayAsked.delete(groupId);
+    this.hubs.forget(groupId);
     this.lastGossip.delete(groupId);
     this.downSince.delete(groupId);
     this.hereHeard.delete(groupId);
@@ -551,14 +592,34 @@ export class Groups {
         }
         const every = now < (this.warmUntil.get(group.id) ?? 0) ? this.timings.warmPollMs : this.timings.pollMs;
         // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
-        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= MAX_GROUP_MEMBERS;
+        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
         if (!busy && now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
       for (const [key, { at }] of this.entryTimeouts) if (now - at > 60 * 60_000) this.entryTimeouts.delete(key);
       this.meshTick(now);
       await this.communities.tick(now);
+      await this.hubsTick(now);
     } finally { this.ticking = false; }
+  }
+
+  /**
+   * Private groups past 16 members: their hubs (WISP 9xx · Group Mesh § Hubs), then their edges, when what the hubs
+   * ask for is not what exists (a hub came or went, I became one, a member asked me).
+   */
+  private async hubsTick(now: number): Promise<void> {
+    for (const [groupId, session] of this.sessions) {
+      const group = this.stored.get(groupId);
+      if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) continue;
+      await this.hubs.tick(groupId, session, group, now).catch(() => false);
+      if (this.hubReconcile.has(groupId)) continue;
+      const wanted = this.hubs.wanted(groupId, session, group, now) ?? new Set(session.others);
+      const edges = this.host.edges(groupId);
+      if ([...wanted].some(key => !edges.has(key)) || [...edges.keys()].some(key => !wanted.has(key))) {
+        this.hubReconcile.add(groupId);
+        this.reconcileEdges(groupId, () => this.hubReconcile.delete(groupId));
+      }
+    }
   }
 
   /** An entry session came up with groups on both sides: the admin's side invites over it. */
@@ -621,7 +682,7 @@ export class Groups {
       const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
       const size = session.roster.length + contactsInvited + (pending?.size ?? 0);
       // Full, or past eight while a member's app takes only eight (the newcomer's own app is checked on its entry session).
-      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || size >= MAX_GROUP_MEMBERS || this.growthBlocked(group, session, size + 1)) break;
+      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || size >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, size + 1)) break;
       if (!pending) this.pendingEntries.set(group.id, (pending = new Map()));
       pending.set(key, now);
       this.warmUntil.set(group.id, now + this.timings.warmMs);
@@ -677,7 +738,7 @@ export class Groups {
         // Through the link, the member key must be the one the entry session is pinned to: the one that knocked.
         const entryPeer = this.hostEntry(g, linkId);
         if ([...this.host.entries(g).values()].includes(linkId) && entryPeer !== frame.key) return;
-        if (session.roster.length >= MAX_GROUP_MEMBERS || this.growthBlocked(group, session, session.roster.length + 1, linkId)) return;
+        if (session.roster.length >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, session.roster.length + 1, linkId)) return;
         if (!entryPeer) {
           // The contact's name on our chat is the best name for them until their edge says otherwise.
           await session.setNick(frame.key, this.host.contactName(linkId));
@@ -766,13 +827,23 @@ export class Groups {
     }
     const session = this.sessions.get(groupId);
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
-    await session?.handle(peerKey, frame);
+    if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
+      const group = this.stored.get(groupId);
+      if (group && this.hubs.enabled && this.hubs.reached(groupId, session, group, peerKey, frame as Record<string, unknown>, this.now())) await this.store.putGroup(group);
+      this.host.emit();
+      return;
+    }
+    if (!session) return;
+    const taken = await session.handle(peerKey, frame);
+    // As a hub, what was new here goes on to the other edges (WISP 9xx · Group Mesh § Hubs).
+    if (taken.length) this.hubs.passOn(groupId, session, peerKey, taken);
   }
 
   /** A validly signed commit, by the admin I told, that takes me out of the roster. */
   private removesMe(groupId: string, from: string, raw: unknown): boolean {
     const group = this.stored.get(groupId), session = this.sessions.get(groupId);
-    if (!group?.left || !session || from !== group.left.admin || !raw || typeof raw !== "object" || (raw as { t?: unknown }).t !== "group-commit") return false;
+    // The admin's signature is what counts: with hubs, its commit comes through one of them.
+    if (!group?.left || !session || (from !== group.left.admin && !group.left.hubs?.includes(from)) || !raw || typeof raw !== "object" || (raw as { t?: unknown }).t !== "group-commit") return false;
     const commit = verifyCommitSignature((raw as { commit?: unknown }).commit);
     return !!commit && commit.g === groupId && commit.by === group.left.admin && !rosterHas(commit.m, session.myKey);
   }
@@ -782,13 +853,17 @@ export class Groups {
     if (this.isCommunity(groupId)) { this.communities.edgeReady(groupId, peerKey, linkId); return; }
     const left = this.stored.get(groupId)?.left;
     if (left) {
-      // The admin was away when I left: now it hears it.
+      // The admin was away when I left: now it hears it (and a hub carries it, signed, to an admin I have no edge with).
       if (peerKey === left.admin) { try { this.host.sendOnLink(linkId, { t: "group-leave", g: groupId }); } catch { /* next time it opens */ } }
+      else if (left.bye && left.hubs?.includes(peerKey)) { try { this.host.sendOnLink(linkId, left.bye); } catch { /* next time it opens */ } }
       return;
     }
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (!session || !group || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
-    if (this.host.linkReady(linkId, GROUP_VERSION_LARGE) && this.markLarge(group, peerKey)) void this.store.putGroup(group).catch(() => {});
+    const large = this.host.linkReady(linkId, GROUP_VERSION_LARGE) && this.markLarge(group, peerKey);
+    // Whether its app takes part in hubs: one that does not keeps edges with the hubs (WISP 9xx · Group Mesh § Hubs).
+    const legacy = this.hubs.enabled && this.hubs.edgeReady(groupId, session, group, peerKey, this.host.linkReady(linkId, GROUP_VERSION_HUBS), this.now());
+    if (large || legacy) void this.store.putGroup(group).catch(() => {});
     try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
     this.announceHere(groupId, session, peerKey);
     this.host.edgeUp?.(groupId, peerKey);
@@ -808,7 +883,9 @@ export class Groups {
    * the newcomer's, on `linkId`.
    */
   private growthBlocked(group: StoredGroup, session: GroupSession, size: number, linkId?: string): string | null {
-    if (size > MAX_GROUP_MEMBERS) return `A group holds ${MAX_GROUP_MEMBERS} members at most`;
+    if (size > GROUP_MEMBER_CAP.max) return `A group holds ${GROUP_MEMBER_CAP.max} members at most`;
+    // While hubs carry the group, a newcomer must take part: an app without hubs would wait on edges nobody opens.
+    if (linkId && this.hubs.active(group.id, session, this.now()) && !this.host.linkReady(linkId, GROUP_VERSION_HUBS)) return "This group runs through hubs, which their app does not take part in: they need an updated Ghostly first.";
     if (size <= LEGACY_GROUP_MEMBERS) return null;
     if (linkId && !this.host.linkReady(linkId, GROUP_VERSION_LARGE)) return `Their app takes groups of ${LEGACY_GROUP_MEMBERS} at most: they need an updated Ghostly first.`;
     const large = new Set(group.large ?? []);
@@ -908,7 +985,8 @@ export class Groups {
       if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
       if (reconcile) {
         const edges = this.host.edges(groupId);
-        if (session.others.some(key => !edges.has(key))) this.reconcileEdges(groupId);
+        // A large group's edges follow its hubs, every tick (`hubsTick`).
+        if (!this.hubs.large(session) && session.others.some(key => !edges.has(key))) this.reconcileEdges(groupId);
       }
       const away = this.unreachable(groupId, session);
       this.noteDown(groupId, session, away, now);
@@ -984,7 +1062,9 @@ export class Groups {
     else if (session.status === "forked") await this.event(groupId, "forked", session.state.statusReason ?? "The membership history forked", when, session.epoch);
     else if (session.status === "active") {
       for (const [key] of after) if (!rosterHas(before, key) && key !== session.myKey) await this.event(groupId, "joined", `${name(key)} joined`, when, top.e, key);
-      for (const [key] of before) if (!rosterHas(after, key)) await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
+      const gone = before.filter(([key]) => !rosterHas(after, key)).map(([key]) => key);
+      this.hubs.removed(groupId, gone, this.now());
+      for (const key of gone) await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
       if (top.k === "role") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === session.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
     }
@@ -998,28 +1078,33 @@ export class Groups {
     this.host.emit();
   }
 
-  /** Every other member has an edge, nobody else does; none once I am out. */
-  private reconcileEdges(groupId: string): void {
+  /**
+   * Every other member has an edge, nobody else does; none once I am out. With hubs, only the edges they ask for
+   * (`MeshHubs.wanted`); after I left, the edges to the admin and to the hubs that carry my leave.
+   */
+  private reconcileEdges(groupId: string, done?: () => void): void {
     this.reconciling = this.reconciling.then(async () => {
-      const session = this.sessions.get(groupId);
+      const session = this.sessions.get(groupId), group = this.stored.get(groupId);
       const existing = this.host.edges(groupId);
-      const left = this.stored.get(groupId)?.left;
-      const wanted = session?.status === "active" ? new Set(session.others) : left ? new Set([left.admin]) : new Set<string>();
+      const left = group?.left;
+      const wanted = session?.status === "active" && group ? this.hubs.wanted(groupId, session, group, this.now()) ?? new Set(session.others)
+        : left ? new Set([left.admin, ...left.hubs ?? []]) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);
       const met = this.justMet.get(groupId);
       if (session) for (const key of wanted) if (!existing.has(key)) {
-        const expect = !!met?.delete(key);
+        const expect = !!met?.delete(key) || this.hubs.takeExpect(groupId, key);
         try { await this.host.openEdge(session.state, key, expect); } catch { /* tried again next time */ }
       }
       this.host.emit();
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => done?.());
   }
 
-  /** The admin and the member it admits were both here a moment ago: the edge between them is expected at once. */
+  /** The admin and the member it admits were both here a moment ago: the edge between them is expected at once, and kept a while with hubs. */
   private meet(groupId: string, key: string): void {
     let set = this.justMet.get(groupId);
     if (!set) this.justMet.set(groupId, (set = new Set()));
     set.add(key);
+    this.hubs.met(groupId, key, this.now());
   }
 
   /** `member`: whom it is about, so the apps can name them as they are known now, not as they were then. */

@@ -17,7 +17,7 @@ import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSoc
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, IdentityTimelineEntry, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, LiveAttempt, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
-import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
+import type { CommunityState, GroupByeFrame, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
 export interface StoredLink {
@@ -132,11 +132,19 @@ export interface StoredGroup {
    */
   large?: string[];
   /**
+   * Past 16 members, with hubs (WISP 9xx · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
+   * where my edges go when the app starts again, before the beacon is read.
+   */
+  hubs?: string[];
+  /** Members whose edge came up without `paired-groups` version 4: their apps take no hubs, so hubs keep edges with them. */
+  legacy?: string[];
+  /**
    * I left: the group is gone from the list and its history from the device. What is kept is the
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
-   * a leave said while the admin was away still reaches it.
+   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, and my
+   * signed leave (`bye`) that they carry to the admin.
    */
-  left?: { at: number; admin: string };
+  left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /** A community group (`group-community/1`) I am in: its session state. Mesh groups use `state`. */
   community?: CommunityState;
   /**
@@ -151,8 +159,13 @@ export interface GroupMemberView {
   role: GroupRole;
   me: boolean;
   nick?: string;
-  /** The pairwise edge to this member is open (always true for me). */
+  /** The pairwise edge to this member is open, or a hub I am connected to reaches them (always true for me). */
   online: boolean;
+  /** Reached through a hub, not an edge of mine (WISP 9xx · Group Mesh § Hubs). */
+  viaHub?: boolean;
+  /** A hub of the group now (listed in its beacon), and what the admin said: pinned as a hub, or never one. */
+  hub?: boolean;
+  hubRole?: "pin" | "exclude";
   /** Messages of the current epoch known to be missing from this member. */
   missing: number;
   /** The pairwise edge to this member as the engine sees it: absent for me, and until the edge exists. */
@@ -209,6 +222,11 @@ export interface GroupView {
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
+  /**
+   * A private group past 16 members that runs on hubs (WISP 9xx · Group Mesh § Hubs): `hub` when I am one. Absent for
+   * the full mesh.
+   */
+  hubs?: { hub: boolean };
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
   community?: { hub: boolean; hubs: number; connected: number };
 }
