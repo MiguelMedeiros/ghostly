@@ -357,7 +357,7 @@
       "camera": "Câmera",
       "cameraInfo": "Usada em chamadas e fotos. Fica neste dispositivo, para este perfil.",
       "speaker": "Alto-falante",
-      "speakerInfo": "Onde as chamadas tocam. Fica neste dispositivo, para este perfil.",
+      "speakerInfo": "Onde tocam chamadas, mensagens de voz, vídeos e sons. Fica neste dispositivo, para este perfil.",
       "systemDefault": "Padrão do sistema",
       "missing": "{{name}} não está conectado. Usando o padrão.",
       "failed": "Não foi possível abrir. Verifique se o Ghostly tem permissão.",
@@ -412,6 +412,23 @@
     "unmute": "Ativar som",
     "camera": "Câmera",
     "cameraOff": "Câmera desligada",
+    "connecting": "Conectando...",
+    "end": "Encerrar chamada",
+    "turnCameraOff": "Desligar câmera",
+    "turnCameraOn": "Ligar câmera",
+    "shareScreen": "Compartilhar tela",
+    "stopSharing": "Parar de compartilhar",
+    "sharing": {
+      "you": "Você está compartilhando sua tela",
+      "peer": "{{name}} está compartilhando a tela",
+      "both": "Você e {{name}} estão compartilhando as telas"
+    },
+    "window": {
+      "small": "Manter a chamada em uma janela pequena",
+      "full": "Voltar para a tela cheia",
+      "chat": "Voltar para a conversa"
+    },
+    "selfView": "Arraste para mover, puxe um canto para redimensionar, clique duas vezes para restaurar",
     "devices": {
       "menu": "Dispositivos",
       "lost": "{{name}} desconectado. Usando o padrão.",

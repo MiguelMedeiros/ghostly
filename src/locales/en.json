@@ -357,7 +357,7 @@
       "camera": "Camera",
       "cameraInfo": "Used for calls and photos. Kept on this device, for this profile.",
       "speaker": "Speaker",
-      "speakerInfo": "Where calls play. Kept on this device, for this profile.",
+      "speakerInfo": "Where calls, voice messages, videos and sounds play. Kept on this device, for this profile.",
       "systemDefault": "System default",
       "missing": "{{name}} is not connected. Using the default.",
       "failed": "Could not open it. Check that Ghostly may use it.",
@@ -412,6 +412,23 @@
     "unmute": "Unmute",
     "camera": "Camera",
     "cameraOff": "Camera off",
+    "connecting": "Connecting...",
+    "end": "End call",
+    "turnCameraOff": "Turn camera off",
+    "turnCameraOn": "Turn camera on",
+    "shareScreen": "Share screen",
+    "stopSharing": "Stop sharing",
+    "sharing": {
+      "you": "You're sharing your screen",
+      "peer": "{{name}} is sharing their screen",
+      "both": "You and {{name}} are sharing your screens"
+    },
+    "window": {
+      "small": "Keep the call in a small window",
+      "full": "Back to full screen",
+      "chat": "Back to the chat"
+    },
+    "selfView": "Drag to move, pull a corner to resize, double-click to reset",
     "devices": {
       "menu": "Devices",
       "lost": "{{name}} disconnected. Using the default.",

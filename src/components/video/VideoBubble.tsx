@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { formatFileSize, formatVideoDuration, safeBlobType, sanitizeFileName } from "@ghostly/core";
+import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
@@ -41,6 +42,7 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
 
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  useChosenSpeaker(videoRef, phase === "playing" ? src : null);
   const srcRef = useRef<string | null>(null);
   /** Lets go of the source: revokes a blob URL, or stops the platform serving a streamed file. */
   const releaseRef = useRef<(() => void) | null>(null);

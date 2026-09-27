@@ -86,6 +86,7 @@ export function CallOverlay({
   layer,
   devices = null,
 }: CallOverlayProps) {
+  const { t } = useI18n();
   // A shared screen has to be seen whole; a face can be cropped to fill the window.
   const [remoteIsWide, setRemoteIsWide] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -161,13 +162,13 @@ export function CallOverlay({
   }, [callState, callStartedAt]);
 
   const statusText = {
-    offering: "Calling...",
-    answering: "Connecting...",
-    connecting: "Connecting...",
+    offering: t("calls.outgoing"),
+    answering: t("calls.connecting"),
+    connecting: t("calls.connecting"),
     connected: formatDuration(duration),
     idle: "",
     incoming: "",
-    ended: "Call ended",
+    ended: t("calls.ended"),
   }[callState];
 
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
@@ -175,9 +176,9 @@ export function CallOverlay({
   const cameraOn = !isVideoOff && !isScreenSharing;
   // Sharing is never a surprise, to either side.
   const sharingNotice = callState !== "connected" ? null
-    : isScreenSharing && remoteIsScreenSharing ? `You and ${peerName} are sharing your screens`
-    : isScreenSharing ? "You're sharing your screen"
-    : remoteIsScreenSharing ? `${peerName} is sharing their screen` : null;
+    : isScreenSharing && remoteIsScreenSharing ? t("calls.sharing.both", { name: peerName })
+    : isScreenSharing ? t("calls.sharing.you")
+    : remoteIsScreenSharing ? t("calls.sharing.peer", { name: peerName }) : null;
 
   // Hung outside the chat, which may be off screen; the call is not.
   return createPortal(
@@ -196,7 +197,7 @@ export function CallOverlay({
       <button
         onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
         className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
-        title={pinned ? "Back to the chat" : mini ? "Back to full screen" : "Keep the call in a small window"}
+        title={pinned ? t("calls.window.chat") : mini ? t("calls.window.full") : t("calls.window.small")}
         data-testid="call-minimize"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -233,7 +234,7 @@ export function CallOverlay({
       <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
         <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
-            <span className="text-accent">Audio call</span>
+            <span className="text-accent">{t("calls.audio")}</span>
           )}
           {statusText && (
             <span className={callState === "connected" ? "ml-2" : ""}>
@@ -265,7 +266,7 @@ export function CallOverlay({
           {...selfView.boxProps}
           onDoubleClick={selfView.reset}
           data-testid="call-self-view"
-          title={mini ? undefined : "Drag to move, pull a corner to resize, double-click to reset"}
+          title={mini ? undefined : t("calls.selfView")}
           className={`call-preview absolute rounded-lg overflow-hidden border border-border/50 shadow-lg z-10 bg-black ${
             mini ? "top-4 right-4 w-36 h-28" : "floating"
           }`}
@@ -304,7 +305,8 @@ export function CallOverlay({
               ? "bg-danger/30 text-danger"
               : "bg-white/10 text-white hover:bg-white/20"
           }`}
-          title={isMuted ? "Unmute" : "Mute"}
+          data-testid="call-mute"
+          title={isMuted ? t("calls.unmute") : t("calls.mute")}
         >
           {isMuted ? (
             <svg
@@ -351,7 +353,8 @@ export function CallOverlay({
                 ? "bg-danger/30 text-danger"
                 : "bg-white/10 text-white hover:bg-white/20"
             }`}
-            title={cameraOn ? "Turn camera off" : "Turn camera on"}
+            data-testid="call-camera"
+            title={cameraOn ? t("calls.turnCameraOff") : t("calls.turnCameraOn")}
           >
             {!cameraOn ? (
               <svg
@@ -393,12 +396,12 @@ export function CallOverlay({
             onClick={onToggleScreenShare}
             disabled={!canShareScreen}
             data-testid="share-screen"
-            aria-label={isScreenSharing ? "Stop sharing" : "Share screen"}
+            aria-label={isScreenSharing ? t("calls.stopSharing") : t("calls.shareScreen")}
             aria-pressed={isScreenSharing}
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white enabled:hover:bg-white/20"
             }`}
-            title={isScreenSharing ? "Stop sharing" : canShareScreen ? "Share screen" : screenShareUnavailable ?? "Share screen"}
+            title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ?? t("calls.shareScreen")}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="4" width="20" height="13" rx="2" />
@@ -411,7 +414,8 @@ export function CallOverlay({
         <button
           onClick={onHangUp}
           className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
-          title="End call"
+          data-testid="call-hang-up"
+          title={t("calls.end")}
         >
           <svg
             width="28"
