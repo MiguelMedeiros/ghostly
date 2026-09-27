@@ -1098,6 +1098,30 @@
     "sourceAnchor": "plugins-apps-catalogs-and-ghostlyos"
   },
   {
+    "id": "candidate-ghostly-for-ios",
+    "title": "Ghostly for iOS",
+    "family": "runtime",
+    "kind": "Runtime / product composition",
+    "status": "Planned",
+    "level": "planned",
+    "range": "Unassigned",
+    "section": "Plugins, apps, catalogs and GhostlyOS",
+    "body": "**Proposed deliverable**\n\nA native iPhone and iPad app, the same UI and engine as the other clients; route to be decided: Tauri mobile (the Desktop's Rust side) or React Native\n\n**Dependencies / trust boundary**\n\n**Planned**, no code on `dev`: today a phone runs the web app, added to the home screen. To check: Iroh natively (Rust), HyperDHT (its Desktop sidecar is Node, which iOS cannot run), the wallet SDKs (WebAssembly today) and background delivery under iOS limits; App Store review of wallets.",
+    "sourceAnchor": "plugins-apps-catalogs-and-ghostlyos"
+  },
+  {
+    "id": "candidate-ghostly-for-android",
+    "title": "Ghostly for Android",
+    "family": "runtime",
+    "kind": "Runtime / product composition",
+    "status": "Planned",
+    "level": "planned",
+    "range": "Unassigned",
+    "section": "Plugins, apps, catalogs and GhostlyOS",
+    "body": "**Proposed deliverable**\n\nA native Android app, the same UI and engine as the other clients; route to be decided: Tauri mobile or React Native\n\n**Dependencies / trust boundary**\n\n**Planned**, no code on `dev`: today a phone runs the web app, installed from the browser. To check: Iroh natively (Rust), HyperDHT without a Node sidecar, the wallet SDKs (WebAssembly today) and background delivery; Play Store review of wallets.",
+    "sourceAnchor": "plugins-apps-catalogs-and-ghostlyos"
+  },
+  {
     "id": "candidate-future-clients",
     "title": "Future clients",
     "family": "runtime",
@@ -1106,7 +1130,7 @@
     "level": "planned",
     "range": "Unassigned",
     "section": "Plugins, apps, catalogs and GhostlyOS",
-    "body": "**Proposed deliverable**\n\nReact Native, improved PWA behavior and plugin hosts\n\n**Dependencies / trust boundary**\n\n**Planned**: there is no mobile app beyond the web app's phone layout, and no plugin host. Each client advertises what it actually supports. Native SDK availability is not proof of a Ghostly mobile integration, background delivery, battery performance or App Store acceptance. The headless CLI is the row above.",
+    "body": "**Proposed deliverable**\n\nImproved PWA behavior and plugin hosts\n\n**Dependencies / trust boundary**\n\n**Planned**: no plugin host yet. Each client advertises what it actually supports. Native SDK availability is not proof of a Ghostly mobile integration, background delivery, battery performance or store acceptance. The headless CLI and the mobile apps are the rows above.",
     "sourceAnchor": "plugins-apps-catalogs-and-ghostlyos"
   }
 ]

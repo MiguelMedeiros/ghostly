@@ -77,7 +77,7 @@ const en: Timeline = {
       title: "Chat & connection",
       items: {
         now: ["One ghostly1 invite: code, QR, link", "DHT start and self-upgrade in every chat", "Chats: files of any size, payments, local apps", "Calls in every chat, while live, Linux included", "Iroh and HyperDHT on desktop; Iroh in browsers through relays", "Pairing progress you can watch", "Voice messages, rich text, mentions, link previews"],
-        planned: ["Typing and presence", "Mobile apps", "Local network discovery, QUIC and WebSocket relay profiles"],
+        planned: ["Typing and presence", "Native iOS and Android apps", "Local network discovery, QUIC and WebSocket relay profiles"],
         later: [{ text: "Tor, libp2p, Pear components", level: "research" }],
       },
     },
