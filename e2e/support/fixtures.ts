@@ -33,6 +33,11 @@ export interface PeerOptions {
    * the suite stays offline, and a browser is WebRTC only, as most specs expect.
    */
   irohRelay?: string;
+  /**
+   * Lets the web app's service worker run (web/src/sw). The web project blocks it everywhere else: requests a worker
+   * answers never reach `context.route`, which the stubs above rely on.
+   */
+  serviceWorkers?: "allow";
 }
 
 /**
@@ -68,6 +73,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     viewport: options.viewport ?? (options.mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }),
     ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
     ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
+    ...(options.serviceWorkers ? { serviceWorkers: options.serviceWorkers } : {}),
   });
   await guardArchive(context);
   await guardPublicProfiles(context);

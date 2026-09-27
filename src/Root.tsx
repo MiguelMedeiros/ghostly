@@ -141,6 +141,8 @@ function GroupLinkIntake() {
  */
 function isIntake(pathname: string): boolean {
   if (pathname.startsWith("/join/") || /^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null) return true;
+  // The app icon's shortcuts: the sidebar acts on them and takes them out of the history.
+  if (pathname === "/new" || pathname === "/scan") return true;
   const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
   return !!rest && (rest.includes("/") || !loadSession(decodeURIComponent(rest)));
 }

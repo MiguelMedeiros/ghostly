@@ -58,7 +58,7 @@ function installed(registration: ServiceWorkerRegistration, timeoutMs: number): 
  * reloads on it. The worker never does this on its own, so a deploy never swaps the app under a chat. With no
  * worker, or none newer after a while, it is a plain reload.
  */
-export async function applyUpdate(timeoutMs = 60_000): Promise<void> {
+export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.location.reload() } = {}): Promise<void> {
   const workers = container();
   const registration = await workers?.getRegistration().catch(() => undefined);
   if (workers && registration?.active && workers.controller) {
@@ -72,7 +72,7 @@ export async function applyUpdate(timeoutMs = 60_000): Promise<void> {
       });
     }
   }
-  window.location.reload();
+  reload();
 }
 
 // ---------- share target ----------
