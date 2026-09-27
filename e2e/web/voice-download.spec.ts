@@ -56,16 +56,14 @@ test("a voice message downloads from its ⋮ menu, under a readable name, the sa
   await expect(received.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
   const message = voiceRow(bob);
 
-  // Reply, then Download and Download as MP3, then Details, then Delete last.
+  // Reply (and React, where the contact has reactions), then Download and Download as MP3, then Details, then Delete last.
   const items = await openMenu(bob.page, message);
   expect(items[0]).toBe("message-reply");
-  expect(items[1]).toBe("message-download");
-  expect(items[2]).toBe("message-download-mp3");
-  expect(items.indexOf("message-details")).toBe(3);
+  const at = items.indexOf("message-download");
+  expect(items.slice(at)).toEqual(["message-download", "message-download-mp3", "message-details", "message-delete"]);
   await expect(bob.page.getByTestId("message-download")).toBeEnabled();
   await expect(bob.page.getByTestId("message-download-mp3")).toBeEnabled();
-  // Five rows, each on one line and none cut (the menus rule, as e2e/web/menus.spec.ts checks the others).
-  expect(items).toHaveLength(5);
+  // Each row on one line and none cut (the menus rule, as e2e/web/menus.spec.ts checks the others).
   const texts = await bob.page.getByTestId("message-menu").locator("[data-menu-text]").evaluateAll((els) => els.map((text) => ({
     text: text.textContent,
     lines: Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)),
