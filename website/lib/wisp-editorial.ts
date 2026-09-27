@@ -4,7 +4,7 @@ import type { Localized } from "./i18n";
 /**
  * Editorial layer over the WISP drafts: the family a draft is presented in, a
  * one-line benefit, and its availability as checked in the code on `dev` (the
- * 0.5.0 release): "available" when the app runs it. Numbers, titles, status
+ * 1.0.0 release): "available" when the app runs it. Numbers, titles, status
  * and dependencies come from the documents, never from here.
  */
 export type GroupId =
@@ -17,7 +17,8 @@ export type GroupId =
   | "services"
   | "identity"
   | "keep"
-  | "together";
+  | "together"
+  | "headless";
 
 export const GROUPS: {
   id: GroupId;
@@ -130,6 +131,16 @@ export const GROUPS: {
       "pt-br": "Grupos privados de até oito pessoas e comunidades de até 256: texto, uma foto e pagamentos entre membros.",
     },
   },
+  {
+    id: "headless",
+    ranges: [[1100, 1199]],
+    icon: "terminal",
+    title: { en: "Headless & bots", "pt-br": "Headless e bots" },
+    blurb: {
+      en: "The app's own engine without a screen, driven by other programs on the same machine.",
+      "pt-br": "O próprio motor do app sem tela, comandado por outros programas na mesma máquina.",
+    },
+  },
 ];
 
 type Entry = {
@@ -180,8 +191,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Every new chat negotiates its abilities on its live link. Chats with Ghostly 0.4 contacts keep a fixed set. Planned: announcing them on the DHT before a live link exists.",
-      "pt-br": "Todo chat novo negocia suas capacidades no link direto. Chats com contatos no Ghostly 0.4 mantêm um conjunto fixo. Planejado: anunciá-las na DHT antes de existir um link direto.",
+      en: "Every new chat announces its abilities in a record on the DHT before a live link exists, then agrees on them on the live link. Chats with Ghostly 0.4 contacts keep a fixed set.",
+      "pt-br": "Todo chat novo anuncia suas capacidades num registro na DHT antes de existir um link direto, e depois as combina no link direto. Chats com contatos no Ghostly 0.4 mantêm um conjunto fixo.",
     },
     feature: inApp("agree", "The agreement", "O acordo"),
   },
@@ -219,13 +230,13 @@ export const editorial: Record<string, Entry> = {
   },
   "101-webrtc": {
     benefit: {
-      en: "Carry a session over a WebRTC data channel, the path every Ghostly app has today.",
-      "pt-br": "Levar a sessão por um canal de dados WebRTC, o caminho que todo app Ghostly tem hoje.",
+      en: "Carry a session over a WebRTC data channel, the direct path browsers have.",
+      "pt-br": "Levar a sessão por um canal de dados WebRTC, o caminho direto que os navegadores têm.",
     },
     level: "available",
     note: {
-      en: "Browser, extension and desktop. May use STUN/TURN servers to get through networks.",
-      "pt-br": "Navegador, extensão e desktop. Pode usar servidores STUN/TURN para atravessar redes.",
+      en: "Browser, extension and desktop, except Linux, whose webview has no WebRTC. May use STUN/TURN servers to get through networks.",
+      "pt-br": "Navegador, extensão e desktop, menos no Linux, cujo webview não tem WebRTC. Pode usar servidores STUN/TURN para atravessar redes.",
     },
   },
   "102-iroh": {
@@ -235,8 +246,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Desktop app only, after a first WebRTC pairing. Planned: tried from the first contact, without WebRTC first.",
-      "pt-br": "Só no app desktop, depois de um primeiro pareamento por WebRTC. Planejado: tentado desde o primeiro contato, sem WebRTC antes.",
+      en: "Experimental. Direct between desktop apps, tried from the first contact. The web app and extension use it through relays (n0's public ones unless you set others), so a web chat can reach a desktop.",
+      "pt-br": "Experimental. Direto entre apps desktop, tentado desde o primeiro contato. O app web e a extensão usam por relays (os públicos da n0, a menos que você defina outros), então um chat web alcança um desktop.",
     },
   },
   "103-hyperdht": {
@@ -246,8 +257,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Desktop app only, after a first WebRTC pairing. Planned: tried from the first contact, without WebRTC first.",
-      "pt-br": "Só no app desktop, depois de um primeiro pareamento por WebRTC. Planejado: tentado desde o primeiro contato, sem WebRTC antes.",
+      en: "Experimental. Between desktop apps, tried from the first contact. The web app and extension reach it only through a relay you set: none runs by default.",
+      "pt-br": "Experimental. Entre apps desktop, tentado desde o primeiro contato. O app web e a extensão só chegam nela por um relay que você define: nenhum roda por padrão.",
     },
   },
   "200-payments": {
@@ -277,8 +288,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Experimental. New profiles get a Bitcoin mainnet wallet automatically; payment flows were exercised only on a local regtest network. There is no unilateral exit yet.",
-      "pt-br": "Experimental. Perfis novos ganham automaticamente uma carteira na mainnet do Bitcoin; os pagamentos foram exercitados só numa rede regtest local. Ainda não há saída unilateral.",
+      en: "Experimental. New makes a Mainnet wallet or a Testnet one in one click; payment flows were exercised only on a local regtest network. There is no unilateral exit yet.",
+      "pt-br": "Experimental. O Novo cria uma carteira na Mainnet ou na Testnet com um clique; os pagamentos foram exercitados só numa rede regtest local. Ainda não há saída unilateral.",
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },
@@ -289,8 +300,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "The Lightning source is your Cashu mint or your own node or wallet: NWC, LND, Core Lightning, WebLN in the web app, Breez (regtest only) or a Fedimint federation (test networks only). Any other wallet can pay the invoice from its QR code.",
-      "pt-br": "A fonte Lightning é o seu mint Cashu ou seu próprio nó ou carteira: NWC, LND, Core Lightning, WebLN no app web, Breez (só regtest) ou uma federação Fedimint (só redes de teste). Qualquer outra carteira paga a fatura pelo QR code.",
+      en: "Several Lightning cards per network, one of them the default for receiving: your Cashu mint or your own node or wallet (NWC, LND, Core Lightning, WebLN in the web app, Breez or a Fedimint federation, those two on test networks only). Any other wallet can pay the invoice from its QR code.",
+      "pt-br": "Vários cartões Lightning por rede, um deles o padrão para receber: o seu mint Cashu ou seu próprio nó ou carteira (NWC, LND, Core Lightning, WebLN no app web, Breez ou uma federação Fedimint, esses dois só em redes de teste). Qualquer outra carteira paga a fatura pelo QR code.",
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },
@@ -301,8 +312,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Experimental, test networks only (Second's signet server or a local regtest); Mainnet makes no Bark wallet yet. Not interchangeable with Arkade: its own payment method and capability.",
-      "pt-br": "Experimental, só em redes de teste (o servidor signet da Second ou um regtest local); a Mainnet ainda não cria carteira Bark. Não é intercambiável com o Arkade: método e capacidade próprios.",
+      en: "Experimental. Mainnet on Second's Bitcoin server, Testnet on their signet server; no unilateral exit yet. Not interchangeable with Arkade: its own payment method and capability.",
+      "pt-br": "Experimental. Mainnet no servidor Bitcoin da Second, Testnet no servidor signet deles; ainda sem saída unilateral. Não é intercambiável com o Arkade: método e capacidade próprios.",
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },
@@ -325,8 +336,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Experimental. Testnet runs on Breez's hosted regtest with no key; Mainnet needs a Breez API key and moves real bitcoin. The same wallet can be your Lightning source.",
-      "pt-br": "Experimental. A Testnet roda no regtest hospedado da Breez, sem chave; a Mainnet precisa de uma chave de API da Breez e movimenta bitcoin de verdade. A mesma carteira pode ser sua fonte Lightning.",
+      en: "Experimental, test networks only: Testnet runs on Breez's hosted regtest with no key; Mainnet is not offered yet. The same wallet can be your Lightning source. Number not yet assigned.",
+      "pt-br": "Experimental, só em redes de teste: a Testnet roda no regtest hospedado da Breez, sem chave; a Mainnet ainda não é oferecida. A mesma carteira pode ser sua fonte Lightning. Número ainda não atribuído.",
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },
@@ -349,8 +360,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Rebuilt on 2026-09-23: a proof is made once in Profile → Identities, shared per chat only when you choose, withdrawable and revocable through a DHT record. Web, desktop and extension; not the CLI.",
-      "pt-br": "Refeito em 23/09/2026: a prova é feita uma vez em Perfil → Identidades, compartilhada por chat só quando você quiser, retirável e revogável por um registro na DHT. Web, desktop e extensão; não a CLI.",
+      en: "Rebuilt on 2026-09-23: a proof is made once in Profile → Identities, shared per chat only when you choose, withdrawable and revocable through a DHT record. Web, desktop, extension and the headless CLI.",
+      "pt-br": "Refeito em 23/09/2026: a prova é feita uma vez em Perfil → Identidades, compartilhada por chat só quando você quiser, retirável e revogável por um registro na DHT. Web, desktop, extensão e a CLI headless.",
     },
   },
   "301-nostr": {
@@ -436,6 +447,18 @@ export const editorial: Record<string, Entry> = {
       "pt-br": "Experimental, em Avançado. Cada contato resolve o DID de novo. Número ainda não atribuído.",
     },
   },
+  "3xx-did-dht": {
+    group: "identity",
+    benefit: {
+      en: "Every profile gets a public identifier of its own, a did:dht that any resolver reads from the DHT, with no Ghostly server.",
+      "pt-br": "Todo perfil ganha um identificador público próprio, um did:dht que qualquer resolvedor lê na DHT, sem servidor do Ghostly.",
+    },
+    level: "available",
+    note: {
+      en: "Experimental. Its own key, never a chat's; it lists an identity only when you switch it on. Web, desktop and extension. Number not yet assigned.",
+      "pt-br": "Experimental. Chave própria, nunca a de um chat; só lista uma identidade quando você liga. Web, desktop e extensão. Número ainda não atribuído.",
+    },
+  },
   "3xx-oidc-proofs": {
     group: "identity",
     benefit: {
@@ -489,8 +512,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Messages with storage receipts and retries work today, and short texts fall back to the DHT when a live link drops. Planned: a first pairing that finds no direct path starts on the DHT, and every chat returns to a live link by itself.",
-      "pt-br": "Mensagens com confirmação de armazenamento e novas tentativas já funcionam, e textos curtos passam pela DHT quando o link direto cai. Planejado: um primeiro pareamento sem caminho direto começa na DHT, e todo chat volta sozinho a um link direto.",
+      en: "Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only.",
+      "pt-br": "Mensagens com confirmação de armazenamento e novas tentativas. Um primeiro pareamento sem caminho direto começa na DHT, textos curtos voltam para ela quando o link direto cai, e todo chat volta sozinho a um link direto. Dá para manter um chat só na DHT.",
     },
     feature: inApp("next", "Chat", "Conversar"),
   },
@@ -520,8 +543,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "256 bytes, retried for five minutes: after a live link drops, or in a chat set to DHT only. Planned: the first contact of every chat. Chats with 0.4 contacts: up to 500 bytes (WISP 402).",
-      "pt-br": "256 bytes, com novas tentativas por cinco minutos: depois que o link direto cai, ou num chat só na DHT. Planejado: o primeiro contato de todo chat. Chats com contatos no 0.4: até 500 bytes (WISP 402).",
+      en: "256 bytes, retried for five minutes: the first contact of every chat, after a live link drops, or in a chat set to DHT only. Chats with 0.4 contacts: up to 500 bytes (WISP 402).",
+      "pt-br": "256 bytes, com novas tentativas por cinco minutos: o primeiro contato de todo chat, depois que o link direto cai, ou num chat só na DHT. Chats com contatos no 0.4: até 500 bytes (WISP 402).",
     },
   },
   "4xx-store-and-forward": {
@@ -543,8 +566,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Up to 100 MiB per file; both people online. A retry sends the whole file again.",
-      "pt-br": "Até 100 MiB por arquivo; as duas pessoas online. Uma nova tentativa reenvia o arquivo inteiro.",
+      en: "Any size, with both people online; above 25 MB the receiver accepts first, and a transfer resumes where it stopped. Chats with 0.4 contacts: up to 100 MiB.",
+      "pt-br": "Qualquer tamanho, com as duas pessoas online; acima de 25 MB quem recebe aceita antes, e a transferência continua de onde parou. Chats com contatos no 0.4: até 100 MiB.",
     },
     feature: inApp("next", "Send files", "Enviar arquivos"),
   },
@@ -623,8 +646,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Today: an invite link, a text code and a QR code you scan with a camera or from an image. Planned: one ghostly1… code, checked for typos, and a ghostly.tools link.",
-      "pt-br": "Hoje: um link de convite, um código de texto e um QR code lido pela câmera ou de uma imagem. Planejado: um único código ghostly1…, que detecta erros de digitação, e um link em ghostly.tools.",
+      en: "One ghostly1… code, checked for typos, shared as text, a QR code or a ghostly.tools link that opens the app. Older codes are still read.",
+      "pt-br": "Um único código ghostly1…, que detecta erros de digitação, compartilhado como texto, QR code ou um link em ghostly.tools que abre o app. Códigos antigos continuam sendo lidos.",
     },
     feature: inApp("invite", "The invitation", "O convite"),
   },
@@ -706,6 +729,18 @@ export const editorial: Record<string, Entry> = {
     note: {
       en: "Backups and held messages on every client. The bucket's CORS rules must allow the app (and GET from your contacts' apps, to hold).",
       "pt-br": "Backups e mensagens guardadas em todos os clientes. As regras de CORS do bucket precisam liberar o app (e GET dos apps dos contatos, para guardar mensagens).",
+    },
+  },
+  "11xx-headless": {
+    group: "headless",
+    benefit: {
+      en: "Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares.",
+      "pt-br": "Rodar o Ghostly sem tela para um bot: um daemon mantém o perfil online, um fluxo de eventos em JSON conta o que chegou, e o comando ghostly responde, paga e compartilha.",
+    },
+    level: "available",
+    note: {
+      en: "Experimental, the same engine as the apps on Node: ghostly1 invites, chats, groups, wallets, files, identity proofs and shared apps. Not on npm yet; no Bark or Fedimint wallets, and the DHT only through relays. Number not yet assigned.",
+      "pt-br": "Experimental, o mesmo motor dos apps no Node: convites ghostly1, chats, grupos, carteiras, arquivos, provas de identidade e apps compartilhados. Ainda fora do npm; sem carteiras Bark ou Fedimint, e a DHT só por relays. Número ainda não atribuído.",
     },
   },
 };

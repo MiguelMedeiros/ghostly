@@ -43,7 +43,7 @@ export function markdown(rows: readonly MatrixRow[], meta: { seed?: string; wall
   const cell = (text: string) => text.replaceAll("|", "\\|").replaceAll("\n", " ");
   for (const row of [...rows].sort((a, b) => a.id.localeCompare(b.id))) {
     const note = row.status === "passed"
-      ? (row.skippedBlocks.length ? ` partial — ${cell(row.skippedBlocks.join("; ")).slice(0, 140)}` : "")
+      ? (row.skippedBlocks.length ? ` partial: ${cell(row.skippedBlocks.join("; ")).slice(0, 140)}` : "")
       : ` ${cell(row.failedStep ? `${row.failedStep}: ${row.note}` : row.note).slice(0, 140)}`;
     lines.push(`| \`${row.id}\` | ${DIMENSIONS.map((d) => row.combination[d.id] ?? "").join(" | ")} | ${icon(row)}${note} |`);
   }

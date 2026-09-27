@@ -100,7 +100,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 ## Parity with the app
 
-Status: **Phase 1** (in the first pull request), **Planned (phase n)**, or **Not applicable** with the reason. Every engine call is reachable from the first phase through `ghostly engine <method>`; a phase adds the commands, checks and tests that make the feature usable without knowing the engine.
+Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327), **Planned**, or **Not applicable** with the reason. Every engine call is reachable from the first phase through `ghostly engine <method>`; a phase adds the commands, checks and tests that make the feature usable without knowing the engine.
 
 | Area | Feature | Status |
 |---|---|---|
@@ -117,8 +117,8 @@ Status: **Phase 1** (in the first pull request), **Planned (phase n)**, or **Not
 | Chats | Message details | Phase 1 |
 | Chats | Secret guard | Phase 1: `send` refuses seeds, keys and ecash unless `--force` (the app's detector) |
 | Chats | Rich text | Not applicable: text is text; the bot formats it |
-| Chats | Link previews made by the sender | Planned (phase 3, `--preview`) |
-| Chats | Hold for an away contact (S3) | Planned (phase 3) |
+| Chats | Link previews made by the sender | Planned (not in phases 1 to 4; `--preview`) |
+| Chats | Hold for an away contact (S3) | Planned (not in phases 1 to 4) |
 | Files | Send, save to a folder, consent for files over 25 MiB (files/3; the engine re-asks after expiry, #302), pause, resume, cancel, events; voice notes (`--voice <ms>`) | Phase 3a |
 | Groups | Create (community with its link, or a private mesh), join by link, leave, forget, accept or decline an invitation, list, send, history, @mentions in and out | Phase 1 (needs WebRTC) |
 | Groups | Admin: remove, make admin, rotate, link on/off/reset, picture; invite a contact | Phase 3a |

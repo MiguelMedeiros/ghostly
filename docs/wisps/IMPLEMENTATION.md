@@ -4,7 +4,7 @@ Inspection date: 2026-09-20. Baseline commit: `bbe142f08d88cefa173d1dc586608f64b
 
 The subsequent [paired-chat increment](PAIRED-CHAT-INCREMENT.md) adds an opt-in participation-pinned WebRTC chat profile; the table below remains explicitly the pre-increment baseline.
 
-## Current matrix (2026-09-26)
+## Current matrix (2026-09-27)
 
 What `dev` runs on each client today. The sections after this one are dated history; update this table, not them.
 
@@ -12,17 +12,18 @@ What `dev` runs on each client today. The sections after this one are dated hist
 |---|---|---|---|---|
 | DHT (Pkarr) | HTTP relays | HTTP relays | Mainline DHT read directly; writes to the DHT and the relays | #289, #293 |
 | One chat: `ghostly1` invite, DHT first contact and floor, self-upgrade | Yes | Yes | Yes | #209, #210, #229 |
-| WebRTC | Yes | Yes | macOS only (Linux WebKitGTK has none) | [101](101-webrtc.md) |
+| WebRTC | Yes | Yes | macOS and Windows (Linux WebKitGTK has none) | [101](101-webrtc.md) |
 | Iroh | Relay only, on by default | Relay only, on by default | Native | #225, #270 |
 | HyperDHT | Only through a relay the person sets | Same | Native sidecar | #187, #231 |
 | Files (`files/2`, `files/3` of any size) | Yes | Yes | Yes | #233 |
-| Calls, screen share inside a call | Yes | Yes | macOS only | #207, #253 |
+| Calls, screen share inside a call | Yes | Yes | macOS; Linux with its own media (webrtc-rs, GStreamer), no screen share yet; Windows untested | #207, #253, #331 |
 | Shared apps (host / open) | No / No | Yes / Yes | Yes / Yes | #207, #268 |
 | Profiles and backups | Yes | Yes | Yes | #171 |
 | Wallets (per network) | Yes; WebLN web only | Yes | Yes; Bitcoin Core RPC Desktop only | #276, #277, #314, #317 |
 | Identity proofs | Yes | Yes | Yes | [300](300-peer-proofs.md) |
 | Groups (mesh, community) | Yes | Yes | Yes | [900](900-group-sessions.md) |
-| CLI | Compatibility client only: older DHT records, no `ghostly1` codes, no chat sessions | | | [CLI](../CLI.md) |
+| Headless CLI (`ghostly`) | The app's engine on Node, for bots: `ghostly1` invites, one chat, groups, wallets (not Bark or Fedimint), files, identity proofs, shared apps; DHT through relays only | | | [11xx](11xx-headless.md), #323 to #327 |
+| Rust `ghostly-cli` | Compatibility client only: older DHT records, no `ghostly1` codes, no chat sessions | | | [CLI](../CLI.md) |
 
 
 ## Observed baseline

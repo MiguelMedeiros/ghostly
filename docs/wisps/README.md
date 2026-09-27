@@ -1,16 +1,17 @@
 # WISP working catalogue
 
-> **State on `dev` (2026-09-26).** One chat, one invite (chat family revision 0.2, decided 2026-09-25) is implemented:
+> **State on `dev` (2026-09-27).** One chat, one invite (chat family revision 0.2, decided 2026-09-25) is implemented:
 >
 > - Every new chat starts from one bech32m code, `ghostly1…`, also shared as `https://ghostly.tools/#ghostly1…` ([801](801-invitation-profiles.md), #210).
 > - The DHT is the rendezvous and floor of every 1:1 chat. First contact goes over the DHT and a live link at once; the chat upgrades to WebRTC, Iroh or HyperDHT by itself and falls back to DHT text when none connects ([400](400-chat.md), #209, #229). A person can keep a chat on DHT only.
-> - Calls, shared apps, files of any size and payments run on the live session ([401](401-paired-chat.md), #207, #233).
+> - Calls, shared apps, files of any size and payments run on the live session ([401](401-paired-chat.md), #207, #233). Desktop on Linux calls with its own media ([601](601-webrtc-media.md#desktop-on-linux), #331).
 > - Chats with Ghostly 0.4 contacts keep working as compatibility chats ([402](402-legacy-chat.md)).
+> - Bots run the app's own engine without a screen: the `ghostly` CLI, its daemon and its event stream ([11xx](11xx-headless.md), #323 to #327).
 > - Identity proofs are back, rebuilt (2026-09-23, [WISP 300](300-peer-proofs.md#implementation-2026-09-23-identity-proofs)): made once per profile, shared per contact by choice, through one provider contract ([PROOFS.md](../../packages/browser/src/proofs/PROOFS.md)). Identity cards of a verified Nostr, Pubky or Bluesky identity show its public profile ([PUBLIC-PROFILES.md](PUBLIC-PROFILES.md), #292).
 >
 > Start at [400](400-chat.md); the invite is in [801](801-invitation-profiles.md).
 
-**All 52 entries remain Draft.** The maintainer approved family-based numbering on 2026-09-22. This editorial migration does not assign new wire identifiers or claim new implementation support. See [numbering and compatibility](NUMBERING.md) for the old-to-new map and independent families. Future adapters need substantive contracts, not empty numbered placeholders.
+**All 53 entries remain Draft.** The maintainer approved family-based numbering on 2026-09-22. This editorial migration does not assign new wire identifiers or claim new implementation support. See [numbering and compatibility](NUMBERING.md) for the old-to-new map and independent families. Future adapters need substantive contracts, not empty numbered placeholders.
 
 Ghost is the minimal Pkarr/DHT rendezvous and small-record primitive. Ghostly is the reference application composing that primitive with local state, transports and capabilities. WISPs make those boundaries reviewable; this series does not rename the current wire protocol or expand the WISP acronym by decree.
 
@@ -29,7 +30,7 @@ The implementation column is independent of document status. Existing features c
 
 ## Draft catalogue by family
 
-Implementation evidence below is what is merged on `dev` on 2026-09-26. Pull request numbers point to the change that shipped it.
+Implementation evidence below is what is merged on `dev` on 2026-09-27. Pull request numbers point to the change that shipped it.
 
 | Candidate | Document | Status | Implementation evidence |
 |---|---|---|---|
@@ -66,14 +67,14 @@ Implementation evidence below is what is merged on `dev` on 2026-09-26. Pull req
 | [DID · 3xx planned](3xx-did.md) | Decentralized identifiers (did:key, did:jwk, did:dht, did:web) | Draft | Experimental provider `did` (#249), under Advanced in the picker |
 | [400](400-chat.md) | Chat Messaging | Draft | One chat on two layers in every new chat: DHT first contact and floor, live link, self-upgrade, DHT only per chat (#209, #229) |
 | [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared apps (`services/1`) while live |
-| [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 and CLI clients; existing chats and v0.4 codes only; "Continue in a new chat" |
+| [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 apps and the Rust compatibility CLI; existing chats and v0.4 codes only; "Continue in a new chat" |
 | [403](403-dht-text.md) | DHT Text (formerly Bounded DHT Text) | Draft | First contact and floor of every chat, fallback after a drop, DHT only per chat; pinned mailboxes (#302) |
 | [Store-and-forward · 4xx planned](4xx-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1` (#108), opt-in: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests |
 | [500](500-files.md) | File Transfer | Draft | 1:1 files of any size, with consent, resume and a digest check (#228, #233) |
 | [501](501-paired-files.md) | Chat Files (formerly Paired Files) | Draft | `files/2` (100 MiB) and `files/3` (any size) on every chat's live link |
 | [502](502-legacy-files.md) | Compatibility File Frames | Draft; retained for compatibility | Compatibility chats only; both peers online |
 | [600](600-media.md) | Voice and Video | Draft | 1:1 calls in every chat while live; screen sharing from inside a call (#253); Linux Desktop with native media, no screen sharing yet |
-| [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); capture varies by platform |
+| [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); Desktop on Linux with WebRTC in Rust and GStreamer media (#331) |
 | [700](700-local-services.md) | Local Services | Draft | HTTP proxy in every chat, hosted from Desktop and the extension; Shared apps from the composer's + (#268) |
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | `ph` frames in the chat session (`services/1`, #207); the web app can neither host nor open one |
 | [800](800-invite-join.md) | Invite and Join | Draft | Bearer `ghostly1` invite that pins the inviter's participation key (#210); a copy cannot stop a paired chat (#302); admission protocol proposed |
@@ -85,7 +86,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-26. Pull req
 | [1000](1000-storage.md) | Storage Contract | Draft | Experimental: object contract, naming and adapter rules |
 | [1001](1001-local-storage.md) | Local File Storage | Draft | Experimental adapter |
 | [1002](1002-s3-storage.md) | S3-Compatible Storage | Draft | Experimental adapter; local S3 server end-to-end |
-| [Headless · 11xx planned](11xx-headless.md) | Headless Runtime and Local Control API | Draft | Experimental: the app's engine on Node, a per-profile daemon, the `ghostly` CLI and its event stream (phase 1) |
+| [Headless · 11xx planned](11xx-headless.md) | Headless Runtime and Local Control API | Draft | Experimental: the app's engine on Node for bots: a per-profile daemon, the `ghostly` CLI and its event stream; chats, groups, wallets, files, proofs and shared apps (#323 to #327); npm package not published |
 
 Dependencies in headers describe the candidate modular design. Conditional dependencies are stated in the body (for example, existing media requires WebRTC). A document can refer to another without making its entire capability mandatory. In particular, 100 does not require a particular transport, 300 does not require an external identity, and 900 does not require GossipSub; the group mesh (9xx) is the first profile of 900 and 901 an optional later one. Group chat uses 400, group file sharing uses 500, and neither implies group payments or localhost permissions.
 
@@ -162,6 +163,8 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 | 1002 S3-Compatible Storage | Experimental | Adapter of 1000; the person's own bucket |
 
 ## Revision record
+
+2026-09-27: the headless runtime (11xx) through its fourth phase, calls on Desktop on Linux (601), the count of entries (53). Numbers, file names, wire identifiers and Draft status unchanged.
 
 2026-09-26: the index follows what is merged on `dev`: one chat and the `ghostly1` invite implemented, rows for OpenID Connect and AT Protocol added, identity providers and wallets brought up to date. Numbers, file names, wire identifiers and Draft status unchanged.
 
