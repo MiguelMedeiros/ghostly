@@ -1032,6 +1032,8 @@ export class GhostlyNode implements EngineImplementation {
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
+    for (const timer of this.reactionTimers.values()) clearTimeout(timer);
+    this.reactionTimers.clear();
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
     this.identities.stop();
