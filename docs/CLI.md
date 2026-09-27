@@ -95,7 +95,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 
 Main types: `message.received`, `message.delivery`, `chat.pairing`, `chat.connection`, `chat.joined`,
 `typing.started` and `typing.stopped`, `message.reaction` and `group.reaction`,
-`group.message` (with `mentioned`), `group.members`, `file.offered`, `file.done`, `payment.created`,
+`group.message` (with `member`, `nick` and `mentioned`), `group.members`, `file.offered`, `file.done`, `payment.created`,
 `payment.updated`, `identity.received`, `call.incoming`, `call.connected`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
 
@@ -119,7 +119,7 @@ Safety rules the CLI enforces:
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
   unless `--force`.
-- **Secrets stay hidden.** Seeds, keys, wallet phrases and backups are printed only with `--show-secret`.
+- **Secrets stay hidden.** Seeds, keys, wallet phrases, backups and group entry links are printed only with `--show-secret` (or `group link`, for a group's link).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out) or
 5 (needs `--force`, `--yes` or `--confirm-real`).

@@ -23,6 +23,18 @@ const sockets: Record<string, string> = {};
 let env: NodeJS.ProcessEnv;
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 
+/** Waits until `dir`'s roster of `group` names a member `name` (names come over the edges, a moment after joining). */
+async function waitForMember(dir: string, group: string, name: string): Promise<void> {
+  const until = Date.now() + 120_000;
+  let shown: Record<string, unknown> = {};
+  while (Date.now() < until) {
+    shown = ok(await as(dir, "group", "show", group));
+    if ((shown.members as { name: string | null; me: boolean }[]).some((m) => !m.me && m.name === name)) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  expect.fail(`${group} on ${dir} never named ${name}: ${JSON.stringify(shown)}`);
+}
+
 beforeAll(async () => {
   relay = await localRelay();
   dht = await hyperdhtTestnet();
@@ -433,12 +445,19 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     }
     const bobSide = ok(await as(bob, "group", "list"));
     expect((group.members as { name: string | null; me: boolean }[]).filter((m) => !m.me).map((m) => m.name), `Bob's side: ${JSON.stringify(bobSide)}`).toEqual(["Bob"]);
+    // The entry link lets anyone join: printed only when asked for.
+    expect(ok(await as(alice, "group", "show", "Bot crew"))).toMatchObject({ link: "<hidden>" });
+    expect(ok(await as(alice, "group", "show", "Bot crew", "--show-secret"))).toMatchObject({ link: created.link });
+    expect(JSON.stringify(ok(await as(alice, "group", "list")))).not.toContain(created.link as string);
+    // Bob's roster names Alice before the message comes, so the stream can name her (the message has her key only).
+    await waitForMember(bob, "Bot crew", "Alice bot");
     const listen = new Running(["--home", bob, "listen", "--type", "group."], env);
     running.push(listen);
     await new Promise((r) => setTimeout(r, 1000));
-    ok(await as(alice, "group", "send", "Bot crew", "hey @Bob", "--mention", "Bob"));
+    const sent = ok(await as(alice, "group", "send", "Bot crew", "hey @Bob", "--mention", "Bob"));
+    expect(sent).toMatchObject({ group: created.group, messageId: expect.any(String), sent: true });
     const event = await listen.waitFor((l) => l.type === "group.message", 60_000);
-    expect(event).toMatchObject({ group: joined.group, message: { text: "hey @Bob", mentioned: true } });
+    expect(event).toMatchObject({ group: joined.group, message: { id: sent.messageId, text: "hey @Bob", mentioned: true, nick: "Alice bot", member: expect.any(String) } });
 
     // The admin's tools: a picture everyone sees (only the admin sets it), a new link (the old one stops working),
     // a fresh secret. A picture that is not a JPEG is refused before the engine is asked.
@@ -467,6 +486,43 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       await new Promise((r) => setTimeout(r, 1000));
     }
     expect(chat.peerPicture).toBe(true);
+    await listen.stop();
+  });
+
+  it("talk in a private mesh group: the stream names the sender, and a reply names the id group send gave", async () => {
+    ok(await as(alice, "group", "create", "Mesh crew", "--mesh"));
+    ok(await as(alice, "group", "invite", "Mesh crew", "bob"));
+    const invited = Date.now() + 60_000;
+    let groups: { name: string; status: string | null }[] = [];
+    while (Date.now() < invited) {
+      groups = ok(await as(bob, "group", "list")).groups as typeof groups;
+      if (groups.some((g) => g.name === "Mesh crew")) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    expect(groups.find((g) => g.name === "Mesh crew"), JSON.stringify(groups)).toMatchObject({ status: "invited" });
+    ok(await as(bob, "group", "accept", "Mesh crew"));
+    await waitForMember(alice, "Mesh crew", "Bob");
+    await waitForMember(bob, "Mesh crew", "Alice bot");
+    const listen = new Running(["--home", bob, "listen", "--type", "group.message"], env);
+    running.push(listen);
+    await new Promise((r) => setTimeout(r, 1000));
+    const sent = ok(await as(alice, "group", "send", "Mesh crew", "status: building"));
+    expect(sent.messageId).toEqual(expect.any(String));
+    const event = await listen.waitFor((l) => (l.message as { text?: string } | undefined)?.text === "status: building", 90_000);
+    const aliceKey = (ok(await as(alice, "group", "show", "Mesh crew")).me as string);
+    expect(event.message).toMatchObject({ id: sent.messageId, member: aliceKey, nick: "Alice bot" });
+    const history = ok(await as(bob, "group", "history", "Mesh crew")).messages as { id: string; nick: string | null; member?: string }[];
+    expect(history.find((m) => m.id === sent.messageId)).toMatchObject({ nick: "Alice bot", member: aliceKey });
+    // The id is what a reply names (ids can start with a dash: --reply=<id> keeps it a value).
+    ok(await as(bob, "group", "send", "Mesh crew", "nice", `--reply=${sent.messageId as string}`));
+    const replied = Date.now() + 90_000;
+    type Line = { text: string; replyTo?: { id: string; found: boolean } };
+    let reply: Line | undefined;
+    while (Date.now() < replied && !reply) {
+      reply = (ok(await as(alice, "group", "history", "Mesh crew")).messages as Line[]).find((m) => m.text === "nice");
+      if (!reply) await new Promise((r) => setTimeout(r, 1000));
+    }
+    expect(reply).toMatchObject({ replyTo: { id: sent.messageId, found: true } });
     await listen.stop();
   });
 

@@ -104,8 +104,11 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
 ghostly group create "Support"                     # a community: {"group","link"}; share the link
 ghostly group join "<group2/… link>"
 ghostly group send Support "hi @Ana" --mention Ana # the mentioned member is written as @name in the text
-ghostly group send Support --reply <message id> "on it"  # a reply in the group
-ghostly group history Support
+                                                   # {"group","messageId","sent"}: keep messageId to reply or react later
+ghostly group send Support --reply=<message id> "on it"  # a reply in the group (=: an id may start with a dash)
+ghostly group history Support                      # each message: member (key) and nick (name, from the roster)
+ghostly group show Support                         # link is "<hidden>": it lets anyone join
+ghostly group link Support                         # the link itself, to share on purpose
 ```
 
 ## Files
@@ -188,6 +191,7 @@ that exact payment.
 - Spending real money (Mainnet) needs `--confirm-real`. Never add it unless the person who owns the wallet asked for
   that exact payment.
 - Seeds, keys and backups are never printed without `--show-secret`. Do not put their output in a chat or a log.
+- A group's entry link is a join secret: `group show` and `group list` hide it; post it only where everyone may join.
 
 ## Anything else the app does
 
