@@ -163,3 +163,44 @@ export async function rateInPage(fixtures, rate = 2, { attempts = 3 } = {}) {
   }
   return out;
 }
+
+/**
+ * In the page: decodes each fixture as Download as MP3 does (`src/lib/voiceDecode.ts` `decodeToMono`): Web Audio's
+ * decoder, then one channel at `sampleRate` rendered offline. Reports `{ [name]: { duration, samples, peak, pcm, error? } }`:
+ * the decoder's own duration in seconds, the samples made, their loudest value, and the samples as 16-bit PCM in
+ * base64, for an encoder outside the page.
+ */
+export async function decodeInPage(fixtures, sampleRate = 24_000) {
+  const Live = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+  const Offline = globalThis.OfflineAudioContext ?? globalThis.webkitOfflineAudioContext;
+  const out = {};
+  for (const { name, base64 } of fixtures) {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const live = new Live();
+    try {
+      const decoded = await live.decodeAudioData(bytes.buffer);
+      const offline = new Offline(1, Math.max(1, Math.ceil(decoded.duration * sampleRate)), sampleRate);
+      const source = offline.createBufferSource();
+      source.buffer = decoded;
+      source.connect(offline.destination);
+      source.start();
+      const samples = (await offline.startRendering()).getChannelData(0);
+      const pcm = new Int16Array(samples.length);
+      let peak = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const sample = Math.max(-1, Math.min(1, samples[i]));
+        peak = Math.max(peak, Math.abs(sample));
+        pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      }
+      const raw = new Uint8Array(pcm.buffer);
+      let binary = "";
+      for (let i = 0; i < raw.length; i += 0x8000) binary += String.fromCharCode(...raw.subarray(i, i + 0x8000));
+      out[name] = { duration: decoded.duration, samples: samples.length, peak, pcm: btoa(binary) };
+    } catch (error) {
+      out[name] = { error: `${error?.name}: ${error?.message}` };
+    } finally {
+      await live.close().catch(() => {});
+    }
+  }
+  return out;
+}

@@ -50,6 +50,7 @@
     "test:group-load": "GROUP_LOAD=${GROUP_LOAD:-256} npm run test:group-load -w @ghostly/browser"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@emoji-mart/data": "^1.2.1",
     "@ghostly/browser": "*",
     "@ghostly/core": "*",

@@ -45,8 +45,11 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([view.buffer], { type: "audio/wav" });
 }
 
-/** The recording as WAV, or null when Web Audio cannot decode it either. */
-export async function decodeToWav(blob: Blob): Promise<Blob | null> {
+/**
+ * The recording as one channel of samples (-1…1) at `sampleRate`, or null when Web Audio cannot decode it.
+ * Web Audio has no decoder in a worker, so this runs on the page; the engine decodes off the main thread anyway.
+ */
+export async function decodeToMono(blob: Blob, sampleRate: number): Promise<Float32Array | null> {
   const classes = contexts();
   if (!classes) return null;
   let live: AudioContext | null = null;
@@ -54,16 +57,22 @@ export async function decodeToWav(blob: Blob): Promise<Blob | null> {
     live = new classes.Live();
     const decoded = await live.decodeAudioData(await blob.arrayBuffer());
     // Resampled and mixed down to one channel by rendering it once, offline.
-    const offline = new classes.Offline(1, Math.max(1, Math.ceil(decoded.duration * SAMPLE_RATE)), SAMPLE_RATE);
+    const offline = new classes.Offline(1, Math.max(1, Math.ceil(decoded.duration * sampleRate)), sampleRate);
     const source = offline.createBufferSource();
     source.buffer = decoded;
     source.connect(offline.destination);
     source.start();
     const rendered = await offline.startRendering();
-    return encodeWav(rendered.getChannelData(0), SAMPLE_RATE);
+    return rendered.getChannelData(0);
   } catch {
     return null;
   } finally {
     void live?.close().catch(() => {});
   }
+}
+
+/** The recording as WAV, or null when Web Audio cannot decode it either. */
+export async function decodeToWav(blob: Blob): Promise<Blob | null> {
+  const samples = await decodeToMono(blob, SAMPLE_RATE);
+  return samples && encodeWav(samples, SAMPLE_RATE);
 }

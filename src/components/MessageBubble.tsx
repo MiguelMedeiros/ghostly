@@ -14,7 +14,7 @@ import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
-import { downloadFile, downloadName, downloadState } from "../lib/fileDownload";
+import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile } from "../lib/fileStatus";
 import { useServicesPlatform, useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
@@ -308,32 +308,38 @@ const cancelIcon = (
 );
 
 /**
- * Saves a copy of the file a message carries (a voice message, a picture, a document). Greyed with the reason
- * while the file is still arriving, when it did not arrive, or when its bytes are gone from this device.
+ * Saves a copy of the file a message carries (a voice message, a picture, a document), or a voice message
+ * converted to MP3 here. Greyed with the reason while the file is still arriving, when it did not arrive, when
+ * its bytes are gone from this device, or when this device could not convert it.
  */
-function DownloadItem({ file, name, sender, onDone }: { file: ChatFile; name: string; sender: "me" | "peer"; onDone: () => void }) {
+function DownloadItem({ file, name, sender, format = "original", onDone }: { file: ChatFile; name: string; sender: "me" | "peer"; format?: DownloadFormat; onDone: () => void }) {
   const { t } = useI18n();
   const platform = useServicesPlatform();
-  const [missing, setMissing] = useState(false);
+  const [problem, setProblem] = useState<"missing" | "unconverted" | null>(null);
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const state = downloadState(platform?.getTransfer(file.id) ?? null, sender);
-  const reason = missing ? t("chat.message.downloadMissing")
+  const reason = problem === "missing" ? t("chat.message.downloadMissing")
+    : problem === "unconverted" ? t("chat.message.downloadUnconverted")
     : state === "preparing" ? t("chat.message.downloadPreparing")
     : state === "arriving" ? t("chat.message.downloadArriving")
     : state === "failed" ? t("chat.message.downloadFailed")
+    : busy && format === "mp3" ? t("chat.message.downloadConverting")
     : undefined;
   const run = () => {
     if (!platform || busy) return;
     setBusy(true);
-    void downloadFile(platform, file, name)
-      .then((result) => { if (result === "missing") setMissing(true); else onDone(); })
-      .catch(() => setMissing(true))
-      .finally(() => setBusy(false));
+    // A conversion goes on when the menu closes: the file is still saved once it is made.
+    void downloadFile(platform, file, name, format)
+      .then((result) => { if (!mounted.current) return; if (result === "missing") setProblem("missing"); else onDone(); })
+      .catch(() => { if (mounted.current) setProblem(format === "mp3" ? "unconverted" : "missing"); })
+      .finally(() => { if (mounted.current) setBusy(false); });
   };
   return (
-    <MenuItem testId="message-download" onClick={run} disabled={!platform || !!reason} hint={reason} title={reason ?? name}
-      data={{ "data-download-state": missing ? "missing" : state }} icon={downloadIcon}>
-      {t("chat.message.download")}
+    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || !!reason} hint={reason} title={reason ?? name}
+      data={{ "data-download-state": problem ?? (busy ? "busy" : state) }} icon={downloadIcon}>
+      {t(format === "mp3" ? "chat.message.downloadMp3" : "chat.message.download")}
     </MenuItem>
   );
 }
@@ -352,8 +358,8 @@ function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download, o
   /** Opens the reactions' quick bar (WISP 400 § Reactions): after Reply. */
   onReact?: () => void;
   align: "left" | "right";
-  /** A message carrying a file: the file, the name to save it under and who sent it. */
-  download?: { file: ChatFile; name: string; sender: "me" | "peer" };
+  /** A message carrying a file: the file, the name to save it under and who sent it (and, for a voice message, the MP3's name). */
+  download?: { file: ChatFile; name: string; sender: "me" | "peer"; mp3Name?: string };
   /** Drops a message of mine that waits to be sent: in the place of Delete, which would say the contact keeps a copy. */
   onCancelSend?: () => void;
   /** Sends a message of mine that was not sent again. */
@@ -395,7 +401,8 @@ function MessageMenu({ onDelete, onDetails, onReply, onReact, align, download, o
         {onRetry && <MenuItem testId="message-retry" onClick={() => { setOpen(false); onRetry(); }} icon={retryIcon}>
           {t("chat.message.retry")}
         </MenuItem>}
-        {download && <DownloadItem {...download} onDone={() => setOpen(false)} />}
+        {download && <DownloadItem file={download.file} name={download.name} sender={download.sender} onDone={() => setOpen(false)} />}
+        {download?.mp3Name && <DownloadItem file={download.file} name={download.mp3Name} sender={download.sender} format="mp3" onDone={() => setOpen(false)} />}
         <MenuItem testId="message-details" onClick={() => { setOpen(false); onDetails(); }}
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>}>
           {t("chat.message.details")}
@@ -502,7 +509,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   });
   const contentType = imgError || message.file || message.paymentId ? "text" : detectContentType(message.text);
   const download = message.file && !isSystem
-    ? { file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const }
+    ? {
+      file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const,
+      ...(message.file.voice ? { mp3Name: downloadName(message.file, message.timestamp, "mp3") } : {}),
+    }
     : undefined;
   const detailsPanel = details && (
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}

@@ -453,6 +453,8 @@ export interface ServicesPlatform {
    * `name` is the name to suggest; the file's own name when left out.
    */
   saveFile?(fileId: string, name?: string): Promise<boolean | null>;
+  /** Saves bytes made here (a voice message as MP3) the same way as `saveFile`: true, false, or null. */
+  saveBlob?(blob: Blob, name: string): Promise<boolean | null>;
   /** Forgets a message this device deleted: the peer's copy of it and the bytes of any file it carried. */
   deleteMessage(peerPubKeyZ32: string, messageId: string): Promise<void>;
   wallet: WalletPlatform;

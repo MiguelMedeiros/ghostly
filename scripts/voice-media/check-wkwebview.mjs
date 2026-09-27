@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadFixtures, playInPage, rateInPage } from "../../e2e/support/voice-media.mjs";
+import { decodeInPage, loadFixtures, playInPage, rateInPage } from "../../e2e/support/voice-media.mjs";
 import { desktopPolicy, inWebView } from "./webview.mjs";
 
 /**
@@ -42,5 +42,19 @@ for (const [name, result] of Object.entries(fast)) {
 }
 if (failed) {
   console.error(`\n${failed} recording(s) do not play faster with the pitch kept in WKWebView.`);
+  process.exit(1);
+}
+
+// Download as MP3: WKWebView's Web Audio decodes every recording to one channel at 24 kHz, as the app does before
+// its worker encodes (the encoder is plain JavaScript, checked on the web in e2e/web/voice-codecs.spec.ts).
+const decoded = inWebView(decodeInPage, [loadFixtures(), 24_000], { csp: policy });
+for (const [name, result] of Object.entries(decoded)) {
+  const expected = result.duration * 24_000;
+  const ok = !result.error && result.duration > 0.5 && Math.abs(result.samples / expected - 1) < 0.01 && result.peak > 0.05;
+  if (!ok) failed++;
+  console.log(`${ok ? "✓" : "✗"} ${name.padEnd(28)} for MP3: ${result.error ?? `${result.duration?.toFixed(3)} s, ${result.samples} samples at 24 kHz, peak ${result.peak?.toFixed(2)}`}`);
+}
+if (failed) {
+  console.error(`\n${failed} recording(s) do not decode in WKWebView for Download as MP3.`);
   process.exit(1);
 }

@@ -35,6 +35,23 @@ function preparingChanged(force = false): void {
   for (const listener of preparingListeners) listener();
 }
 
+/**
+ * Saves bytes kept in memory (a small received file, a voice message made MP3 here) through the system's save
+ * dialog where files are real files (Desktop): a copy staged next to them, saved, and removed only once the save
+ * has finished (the command answers after the dialog and the copy). Null where there is no such dialog.
+ */
+async function saveStaged(blob: Blob, name: string): Promise<boolean | null> {
+  const native = await fileBytesOf("native");
+  if (!native?.save) return null;
+  const copy = `save-${crypto.randomUUID()}`;
+  try {
+    await native.stage(copy, blob);
+    return await native.save(copy, name);
+  } finally {
+    await native.remove(copy).catch(() => {});
+  }
+}
+
 /** Ephemeral services for the shared UI, backed by the browser peer. */
 /**
  * The wallet calls, acting on one network's wallets when bound to it (the card they are made on), else on the
@@ -337,18 +354,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (!stored || !saveAs) return null;
     const bytes = stored.bytes && await fileBytesOf(stored.bytes);
     if (bytes?.save) return bytes.save(fileId, saveAs);
-    // A small file (a voice message, most pictures) is kept as a Blob. Where files can be saved through the
-    // system's dialog (Desktop), it goes the same way: a copy staged next to the real files, saved, then removed.
-    const native = stored.blob && await fileBytesOf("native");
-    if (!stored.blob || !native?.save) return null;
-    const copy = `save-${crypto.randomUUID()}`;
-    try {
-      await native.stage(copy, stored.blob);
-      return await native.save(copy, saveAs);
-    } finally {
-      await native.remove(copy).catch(() => {});
-    }
+    // A small file (a voice message, most pictures) is kept as a Blob, saved like any bytes made here.
+    return stored.blob ? saveStaged(stored.blob, saveAs) : null;
   },
+  saveBlob: (blob, name) => saveStaged(blob, name),
 
   wallet: walletPlatform(),
 
