@@ -456,15 +456,13 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const ref = parsed.positionals.join(" ") || undefined;
   const client = await connectDaemon(g.paths.socket);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
-  let calls: { call: string; chat: string; audio: { socket: string; rate: number } | null }[];
-  try { ({ calls } = await client.call("call.list") as { calls: typeof calls }); } finally { client.close(); }
-  const matches = ref ? calls.filter((c) => c.call === ref || c.chat === ref || c.chat.startsWith(ref)) : calls;
-  if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? "More than one call is on: name one" : ref ? `No call ${ref}` : "No call is on");
-  const audio = matches[0].audio;
+  let call: { call: string; audio: { socket: string; rate: number } | null };
+  try { call = await client.call("call.get", ref ? { call: ref } : {}) as typeof call; } finally { client.close(); }
+  const audio = call.audio;
   if (!audio) throw new CliError("unavailable", "That call has no audio yet: answer it first");
   const socket = connect(audio.socket);
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
-  process.stderr.write(`ghostly: call ${matches[0].call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
+  process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
   process.stdin.pipe(socket);
   socket.pipe(process.stdout);
   socket.on("close", () => exit(0));

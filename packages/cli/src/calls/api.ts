@@ -14,6 +14,9 @@ export const CALL_METHODS: Record<string, Method> = {
   async "call.list"(ctx) {
     return { calls: ctx.calls.list(), autoAnswer: ctx.calls.getAuto(), available: ctx.runtime.callsUnavailable === null, ...(ctx.runtime.callsUnavailable ? { unavailable: ctx.runtime.callsUnavailable } : {}) };
   },
+  async "call.get"(ctx, params) {
+    return ctx.calls.get(str(params, "call"));
+  },
   async "call.flush"(ctx, params) {
     return ctx.calls.flush(str(params, "call"));
   },

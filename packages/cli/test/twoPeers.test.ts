@@ -1,12 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
-// covers: files.large.resend, files.large.request, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing
+import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
+import { dominantHz, tone } from "./support/tone";
+// covers: files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -24,7 +25,8 @@ const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args],
 beforeAll(async () => {
   relay = await localRelay();
   dht = await hyperdhtTestnet();
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
+  // Calls bind their media to loopback: on some machines (a VPN on a Mac) UDP to the machine's own LAN address is dropped.
+  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1" };
 }, 30_000);
 
 afterAll(async () => {
@@ -123,6 +125,50 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(alice, "send", "bob", "done typing", "--wait", "delivered"));
     await expect.poll(() => count("typing.stopped"), { timeout: 30_000 }).toBe(2);
     await listen.stop();
+  });
+
+  it("call by voice: auto-answer, audio both ways over the socket and `call pipe`, hang-up events", async () => {
+    const listenA = new Running(["--home", alice, "listen", "--type", "call."], env);
+    const listenB = new Running(["--home", bob, "listen", "--type", "call."], env);
+    running.push(listenA, listenB);
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(ok(await as(alice, "status"))).toMatchObject({ calls: true });
+    expect(ok(await as(alice, "call", "auto", "on", "--from", "bob", "--rate", "16000"))).toEqual({ autoAnswer: { on: true, from: [chatA], rate: 16000 } });
+    const placed = ok(await as(bob, "call", "start", "alice")) as { call: string; audio: { socket: string } };
+    expect(placed).toMatchObject({ chat: chatB, direction: "out", state: "ringing", audio: { rate: 48000, channels: 1, format: "s16le", frameMs: 20 } });
+    expect(await listenA.waitFor((e) => e.type === "call.incoming")).toMatchObject({ chat: chatA, name: "bob", video: false, auto: true });
+    const connected = await listenA.waitFor((e) => e.type === "call.connected");
+    expect(connected).toMatchObject({ chat: chatA, direction: "in", audio: { rate: 16000 } });
+    await listenB.waitFor((e) => e.type === "call.connected");
+
+    // Bob's program on the socket; Alice's through `call pipe` (stdin to the call, the call to stdout).
+    const bobHeard: Buffer[] = [];
+    const program = connect(placed.audio.socket);
+    program.on("data", (d: Buffer) => bobHeard.push(d));
+    const pipe = spawn(process.execPath, [BIN, "--home", alice, "call", "pipe", "bob"], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const aliceHeard: Buffer[] = [];
+    pipe.stdout.on("data", (d: Buffer) => aliceHeard.push(d));
+    await new Promise((r) => setTimeout(r, 500));
+    program.write(tone(440, 48000, 2000));
+    pipe.stdin.write(tone(660, 16000, 2000));
+    await expect.poll(() => Buffer.concat(aliceHeard).length, { timeout: 20_000 }).toBeGreaterThan(640 * 80);
+    await expect.poll(() => Buffer.concat(bobHeard).length, { timeout: 20_000 }).toBeGreaterThan(1920 * 80);
+    const heardByAlice = Buffer.concat(aliceHeard), heardByBob = Buffer.concat(bobHeard);
+    expect(dominantHz(heardByAlice.subarray(heardByAlice.length - 640 * 50), 16000)).toBeCloseTo(440, -1);
+    expect(dominantHz(heardByBob.subarray(heardByBob.length - 1920 * 50), 48000)).toBeCloseTo(660, -1);
+    expect(ok(await as(bob, "call", "list")).calls).toMatchObject([{ call: placed.call, state: "connected", stats: { programConnected: true } }]);
+    expect(ok(await as(bob, "call", "flush"))).toMatchObject({ call: placed.call, flushedMs: expect.any(Number) });
+
+    const pipeClosed = new Promise((r) => pipe.once("exit", r));
+    ok(await as(bob, "call", "hangup"));
+    expect(await listenA.waitFor((e) => e.type === "call.ended")).toMatchObject({ chat: chatA, reason: "remote-hangup", duration: expect.any(Number) });
+    expect(await listenB.waitFor((e) => e.type === "call.ended")).toMatchObject({ chat: chatB, reason: "hangup" });
+    await pipeClosed;
+    program.destroy();
+    error(await as(bob, "call", "hangup"), "not_found", 3);
+    ok(await as(alice, "call", "auto", "off"));
+    await listenA.stop();
+    await listenB.stop();
   });
 
   it("send files: a small one taken at once, a large one only once accepted, saved byte for byte", async () => {
@@ -245,7 +291,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   it("answer from a hook: an echo bot on listen --exec", async () => {
     const script = join(bob, "echo.mjs");
     writeFileSync(script, `
-      import { execFileSync } from "node:child_process";
+      import { execFileSync, spawn } from "node:child_process";
       let input = ""; for await (const c of process.stdin) input += c;
       const event = JSON.parse(input);
       execFileSync(process.execPath, [${JSON.stringify(join(import.meta.dirname, "../dist/ghostly.mjs"))}, "--home", ${JSON.stringify(bob)}, "send", event.chat, "--", "echo: " + event.message.text]);

@@ -186,6 +186,11 @@ export class CallManager {
     return { ...view, state: "ended", reason: "hangup" };
   }
 
+  /** One call, by its id or its chat (or the only one). */
+  get(ref: string | undefined): Record<string, unknown> {
+    return this.view(this.find(ref));
+  }
+
   list(): Record<string, unknown>[] {
     return [...this.calls.values()].map((call) => this.view(call));
   }

@@ -50,13 +50,13 @@ function iceServers(): string[] {
  * interfaces (Docker, VPNs, Tailscale) of which the first is not the one the contact reaches. So: every IPv4 host
  * candidate first, then the server reflexive one, then IPv6 hosts, up to eight. The related address is left out.
  */
-export function signalCandidates(sdp: string): string[] {
+export function signalCandidates(sdp: string, { loopback = false } = {}): string[] {
   const lines = sdp.split(/\r?\n/).filter((line) => line.startsWith("a=candidate:")).map((line) => line.slice("a=candidate:".length).trim());
   const udp = lines.filter((c) => / udp /i.test(c));
   const address = (c: string) => c.split(" ")[4] ?? "";
   const type = (c: string) => / typ (\S+)/.exec(c)?.[1];
   const ipv4 = (c: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(address(c));
-  const usable = (c: string) => !/^(169\.254\.|fe80:|::1$|127\.)/i.test(address(c)) && address(c) !== "::" && address(c) !== "0.0.0.0";
+  const usable = (c: string) => (loopback || !/^(169\.254\.|fe80:|::1$|127\.)/i.test(address(c))) && address(c) !== "::" && address(c) !== "0.0.0.0";
   const hosts = udp.filter((c) => type(c) === "host" && usable(c));
   const picked = [
     ...hosts.filter(ipv4).slice(0, 6),
@@ -129,7 +129,8 @@ export class CallMedia {
       const sdp = pc.localDescription()?.sdp;
       if (!sdp) throw new Error("No local description");
       const params = extractParamsFromSdp(sdp);
-      const local: Partial<CallSignal> = { ...params, c: signalCandidates(sdp), ss: [ssrc] };
+      // Bound to loopback (tests, GHOSTLY_CALL_BIND=127.0.0.1): that is the one candidate there is.
+      const local: Partial<CallSignal> = { ...params, c: signalCandidates(sdp, { loopback: !!bind }), ss: [ssrc] };
       // An answer lists the offer's sections, video too: the rebuilt SDP must have as many as the offer.
       if (offer?.m) local.m = [...offer.m];
       const listeners: ((packet: Buffer) => void)[] = [];
