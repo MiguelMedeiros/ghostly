@@ -238,6 +238,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     } finally {
       example.kill();
     }
+  });
+
   it("react to a message: the contact's stream says it, its history shows it, a new one replaces it, --remove takes it back", async () => {
     const listen = new Running(["--home", bob, "listen", "--type", "message.reaction"], env);
     running.push(listen);
