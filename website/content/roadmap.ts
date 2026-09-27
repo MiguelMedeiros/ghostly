@@ -52,7 +52,7 @@ const en = {
       ],
       next: [
         { text: "Typing and presence, each a capability of its own that you can keep private", level: "planned" },
-        { text: "Mobile apps", level: "planned" },
+        { text: "Native apps for iOS and Android (route to be decided)", level: "planned" },
       ],
       gate: "Every client tested against every other one, on each transport it offers.",
       after: [],
