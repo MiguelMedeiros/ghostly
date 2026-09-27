@@ -172,10 +172,17 @@ default route on the app's machine is the usual cause on one Mac.
 Voice only: a video call is answered as a voice call. The details are in the
 [package README](../packages/cli/README.md#calls).
 
+## Pkarr: relays and the Mainline DHT
+
+The CLI publishes every Pkarr packet to the relays in its settings and to the Mainline DHT (BEP 44, over UDP, as the
+Desktop does), and reads the relays first, the DHT when every relay fails. So a bot keeps finding its contacts, and its
+group's edges come up, while the relays answer errors. `GHOSTLY_DHT=0` leaves the DHT out (relays only, as the web app);
+`GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces the public bootstrap routers (a private testnet). The daemon is then a DHT node like any
+other: it answers other nodes' queries and keeps the small values they store for a while, as the Desktop's Pkarr client
+does.
+
 ## Not there yet
 
-- **DHT-direct.** The Desktop reads the Mainline DHT itself; the CLI reaches the DHT through Pkarr relays, as the
-  web app does. It needs a BEP 44 client on Node.
 - **Bark and Fedimint wallets.** Their SDKs run only in a browser. `wallet list` shows them as unavailable.
 - **A single binary.** The CLI needs Node; there is no standalone executable yet.
 - **An npm release.** Install from source until the package is published.

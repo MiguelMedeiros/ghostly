@@ -34,6 +34,18 @@ export function hyperdhtNetwork(env = process.env.GHOSTLY_HYPERDHT_BOOTSTRAP): {
 }
 
 /**
+ * The Mainline DHT, for Pkarr beside the relays (`RelaysAndDht`): `GHOSTLY_DHT=0` leaves it out (relays only, as the web
+ * app), `GHOSTLY_DHT_BOOTSTRAP` ("host:port,…") replaces the public routers (a testnet; one all on loopback binds there).
+ */
+export function mainlineNetwork(env = process.env): { off: true } | { off: false; bootstrap?: string[]; host?: string } {
+  if (env.GHOSTLY_DHT === "0") return { off: true };
+  const bootstrap = (env.GHOSTLY_DHT_BOOTSTRAP ?? "").split(",").map((node) => node.trim()).filter(Boolean);
+  if (!bootstrap.length) return { off: false };
+  const loopback = bootstrap.every((node) => /^(127\.0\.0\.1|localhost):\d+$/.test(node));
+  return { off: false, bootstrap, ...(loopback ? { host: "127.0.0.1" } : {}) };
+}
+
+/**
  * WebRTC for the engine (WISP 101): libdatachannel through node-datachannel's W3C polyfill. Chats go live over it with
  * browsers directly, and groups need it (their links use WebRTC alone). A native module: without it, or with
  * `GHOSTLY_WEBRTC=0`, the CLI runs without WebRTC and says so.
@@ -83,7 +95,7 @@ function irohWasmBytes(): Buffer {
 /**
  * Starts the app's engine on this profile (WISP 11xx § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
  * HyperDHT native in this process, Iroh's wasm build (relay only, as the web app), Pkarr through the relays in the
- * settings.
+ * settings and the Mainline DHT directly (read when the relays fail, written always).
  * The caller holds the profile's lock.
  */
 export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
@@ -106,7 +118,11 @@ export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
     import("../../../../native-transports/hyperdht/endpoint.mjs"),
   ]);
   const network = hyperdhtNetwork();
+  const dht = mainlineNetwork();
+  const mainline = dht.off ? null : new (await import("./mainline")).Mainline({ bootstrap: dht.bootstrap, host: dht.host });
+  const transport = mainline && new (await import("./mainline")).RelaysAndDht(mainline);
   const server = new EngineServer({
+    ...(transport ? { transport } : {}),
     irohWeb: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
     // No wallet starts by itself: a bot has the wallets it made (WISP 11xx § Wallet SDKs on Node).
@@ -120,6 +136,7 @@ export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
   try {
     await server.ready;
   } catch (error) {
+    await mainline?.destroy().catch(() => {});
     await store.close().catch(() => {});
     throw error;
   }
@@ -128,6 +145,7 @@ export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
     paths, server, store, webrtc, callsUnavailable,
     close: () => (closing ??= (async () => {
       await server.node.shutdown().catch(() => {});
+      await mainline?.destroy().catch(() => {});
       await store.close();
     })()),
   };

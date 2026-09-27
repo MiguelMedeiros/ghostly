@@ -261,6 +261,7 @@ for a private network as much as for tests:
 |---|---|
 | `GHOSTLY_PKARR_RELAYS` | comma-separated Pkarr relay URLs used instead of the Mainline DHT and the public relays, with no read budget (`src-tauri/src/pkarr_network.rs`). The matrix points it at the test's relay (`relay.listen()`), which the browsers reach by request interception |
 | `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`src-tauri/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
+| `GHOSTLY_DHT` | `0` keeps the headless CLI off the Mainline DHT (relays only); the e2e helpers and the CLI's own tests set it unless a test runs its own DHT testnet (`GHOSTLY_DHT_BOOTSTRAP`) |
 | `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native-transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
 
 `DesktopApp` clicks, types (`type`, with `\uE007` for Enter), reads text and attributes, and runs a script in the
