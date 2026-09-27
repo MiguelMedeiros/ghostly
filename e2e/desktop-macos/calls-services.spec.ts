@@ -337,15 +337,24 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
     });
 
     await test.step("DHT only: the call buttons are off and say why, and come back live", async () => {
+      // DHT only is one of the connection choices; off goes back to Automatic. In DHT only a Desktop app releases its
+      // Iroh and HyperDHT endpoints, which leaves it one transport: no Automatic row then, and choosing WebRTC is what
+      // leaves (back to Automatic). The first match in the page is Automatic when there is one.
+      const choice = '[data-testid="connection-option-dht"]', back = '[data-testid="connection-option-auto"], [data-testid="connection-option-webrtc"]';
+      // The rows are off while the choice before is carried out (entering DHT only waits for the Iroh endpoint to
+      // close, up to about 3 s), and a click then does nothing. Off through their fieldset: `:disabled`, never `.disabled`.
+      const takes = (p: DesktopPerson, row: string) => p.app.execute<boolean | null>(`const e = document.querySelector(arguments[0]); return e && e.matches(":enabled");`, row);
       const dhtOnly = async (p: DesktopPerson, on: boolean) => {
+        const row = on ? choice : back;
         await p.go(p.chatHash!);
-        if ((await p.app.attribute('[data-testid="connection-menu"]', "open")) === null) await p.app.click('[data-testid="connection-options"]');
-        // DHT only is one of the connection choices; off goes back to Automatic, or to WebRTC in an app that runs
-        // only that (no Automatic row there). The first match in the page is Automatic when there is one.
-        const choice = '[data-testid="connection-option-dht"]', back = '[data-testid="connection-option-auto"], [data-testid="connection-option-webrtc"]';
-        await expect.poll(() => p.app.attribute(choice, "aria-checked"), { message: `${p.name}'s DHT only choice` }).not.toBeNull();
-        if ((await p.app.attribute(choice, "aria-checked")) !== String(on)) await p.app.click(on ? choice : back);
-        await expect.poll(() => p.app.attribute(choice, "aria-checked")).toBe(String(on));
+        // Until the choice shows: the row takes clicks again, then the click, once per round.
+        await expect(async () => {
+          if ((await p.app.attribute('[data-testid="connection-menu"]', "open")) === null) await p.app.click('[data-testid="connection-options"]');
+          await test.step(`${p.name}'s connection menu takes a choice`, () =>
+            expect.poll(() => takes(p, row), { timeout: 30_000, message: `${p.name}'s connection menu is still busy with the choice before` }).toBe(true));
+          if ((await p.app.attribute(choice, "aria-checked")) !== String(on)) await p.app.click(row);
+          await expect.poll(() => p.app.attribute(choice, "aria-checked"), { timeout: 10_000, message: `${p.name}'s DHT only choice` }).toBe(String(on));
+        }).toPass({ timeout: 90_000 });
         await p.app.execute(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));`);
       };
       for (const p of [alice, bob]) await dhtOnly(p, true);
@@ -366,7 +375,9 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       const complaints = await p.app.execute<string[] | null>(`return window.__e2eLog ?? null;`).catch(() => null);
       const sdp = await p.app.execute<string[] | null>(`return (window.__e2ePeers ?? []).map((pc) => pc.connectionState + "\\n" + (pc.localDescription?.sdp ?? "") + "\\n---remote---\\n" + (pc.remoteDescription?.sdp ?? ""));`).catch(() => null);
       if (sdp?.length) await keep(`${p.name}-call-sdp.txt`, sdp.join("\n\n======\n\n"));
-      await keep(`${p.name}-page.txt`, `${await p.snapshot().catch((e: unknown) => String(e))}\n\n--- console ---\n${(complaints ?? []).join("\n")}`);
+      // The connection menu's rows as the page has them: checked, and whether a click would take (innerText says neither).
+      const rows = await p.app.execute<string[] | null>(`return [...document.querySelectorAll('[data-testid^="connection-option-"]')].map((e) => e.dataset.testid + " checked=" + e.getAttribute("aria-checked") + (e.matches(":disabled") ? " off" : " on") + (e.title ? " · " + e.title : ""));`).catch(() => null);
+      await keep(`${p.name}-page.txt`, `${await p.snapshot().catch((e: unknown) => String(e))}\n\n--- connection rows ---\n${(rows ?? []).join("\n")}\n\n--- console ---\n${(complaints ?? []).join("\n")}`);
     }
     for (const d of apps) await keep(`${d.bundleId}-log.txt`, d.log.join(""));
     throw error;
