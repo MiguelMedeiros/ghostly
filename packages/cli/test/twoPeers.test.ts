@@ -415,7 +415,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const until = Date.now() + 150_000;
     let group: Record<string, unknown> = {};
     while (Date.now() < until) {
-      group = ok(await as(alice, "group", "show", created.group as string));
+      group = ok(await as(alice, "group", "show", "--", created.group as string));
       if ((group.members as { name: string | null; me: boolean }[]).some((m) => !m.me && m.name)) break;
       await new Promise((r) => setTimeout(r, 1000));
     }
@@ -441,7 +441,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const shown = Date.now() + 60_000;
     let seen: Record<string, unknown> = {};
     while (Date.now() < shown) {
-      seen = ok(await as(bob, "group", "show", joined.group as string));
+      seen = ok(await as(bob, "group", "show", "--", joined.group as string));
       if (seen.picture) break;
       await new Promise((r) => setTimeout(r, 1000));
     }
