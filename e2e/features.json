@@ -569,6 +569,8 @@
     "src/hooks/useIsMobile.ts": ["*"],
     "src/hooks/useServicesPlatform.ts": ["*"],
     "src/hooks/useViewportHeight.ts": ["app.mobile-layout","app.responsive"],
+    "src/hooks/useUnseenSats.ts": ["wallet.badge","app.mobile-layout"],
+    "src/components/UnseenSatsDot.tsx": ["wallet.badge","app.mobile-layout"],
     "src/hooks/useCountUp.ts": ["payments.chat.cards","wallet.cashu.*","wallet.history","app.reduce-motion"],
     "src/hooks/useFloatingBox.ts": ["calls.*"],
     "src/hooks/useWebRTC.ts": ["calls.*"],
