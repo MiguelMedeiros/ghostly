@@ -72,21 +72,51 @@ describe("group-edit frames (a private group)", () => {
     expect(meshMessageRef(id)).toEqual({ s: frame.s, e: frame.e, n: frame.n });
   });
 
-  it("only its author edits a message, and only from its own edge", async () => {
+  it("only its author edits a message: a member can hand the author's edit on, never alter or forge one", async () => {
     const { mesh, alice, bob, carol } = await trio();
     const id = ((await bob.sendText("mine")) as { id: string }).id;
     expect(await carol.sendEdit(id, { v: 1, ts: 1, text: "not yours" })).toEqual({ error: "Only your own messages can be edited" });
     expect(await carol.sendEdit("garbage", { v: 1, ts: 1, text: "x" })).toHaveProperty("error");
     await bob.sendEdit(id, { v: 1, ts: 1, text: "fixed" });
     await mesh.settle();
-    // Bob's frame relayed by Carol is not Carol's to carry: an edge vouches for its own member only.
-    const frame = mesh.sent.find(f => f.frame.t === GROUP_EDIT_FRAME && f.to === carol.myKey)!.frame;
+    const frame = mesh.sent.find(f => f.frame.t === GROUP_EDIT_FRAME && f.to === carol.myKey)!.frame as GroupEditFrame;
+    // Handed on by Carol, a member: Bob's own edit, taken again (the engine shows it once).
     await alice.handle(carol.myKey, clone(frame));
-    // A forged one: Carol's frame, claiming Bob's message.
-    const forged = { ...clone(frame) as GroupEditFrame, v: 2 };
-    await alice.handle(bob.myKey, forged);
-    expect(mesh.of(alice)).toHaveLength(1);
-    expect(mesh.of(alice)[0]).toMatchObject({ e: 1, m: "fixed" });
+    expect(mesh.of(alice).map(e => [e.sender, e.e, e.m])).toEqual([[bob.myKey, 1, "fixed"], [bob.myKey, 1, "fixed"]]);
+    // Altered on the way (a higher number, another text box): the author's signature no longer holds.
+    await alice.handle(carol.myKey, { ...clone(frame), v: 2 });
+    await alice.handle(carol.myKey, { ...clone(frame), c: clone(frame).c.slice(0, -4) + "AAAA" });
+    // From someone not in the group: nothing.
+    await alice.handle(createIdentity().pubKeyZ32, clone(frame));
+    expect(mesh.of(alice)).toHaveLength(2);
+  });
+
+  it("a member hands an edit on to one whose edge to the author is down, when its sync asks for the author", async () => {
+    const { mesh, alice, bob, carol } = await trio();
+    const id = ((await bob.sendText("Deploy: 0 of 2")) as { id: string }).id;
+    await mesh.settle();
+    // Carol's edge to Bob goes down; Bob edits twice.
+    mesh.setEdge(bob, carol, false);
+    await bob.sendEdit(id, { v: 1, ts: 1, text: "Deploy: 1 of 2" });
+    await bob.sendEdit(id, { v: 2, ts: 2, text: "Deploy: done" });
+    await mesh.settle();
+    expect(mesh.of(carol)).toEqual([]);
+    expect(mesh.of(alice).map(e => e.e)).toEqual([1, 2]);
+    // Carol asks Alice for Bob (the catch-up of revision 0.9): Alice hands on the latest edit she kept, signed by Bob.
+    await alice.handle(carol.myKey, clone(carol.syncFrame([bob.myKey])));
+    await mesh.settle();
+    expect(mesh.of(carol)).toEqual([{ id, sender: bob.myKey, e: 2, ts: 2, m: "Deploy: done" }]);
+    expect(mesh.sent.filter(f => f.frame.t === GROUP_EDIT_FRAME && f.from === alice.myKey && f.to === carol.myKey)).toHaveLength(1);
+    // Nothing of Bob's is handed on once he is out of the group, and nothing handed on is taken.
+    await alice.remove(bob.myKey);
+    await mesh.settle();
+    const before = mesh.sent.length;
+    await alice.handle(carol.myKey, clone(carol.syncFrame([bob.myKey])));
+    await mesh.settle();
+    expect(mesh.sent.slice(before).some(f => f.frame.t === GROUP_EDIT_FRAME)).toBe(false);
+    const kept = mesh.sent.find(f => f.frame.t === GROUP_EDIT_FRAME && f.from === alice.myKey)!.frame;
+    await carol.handle(alice.myKey, clone(kept));
+    expect(mesh.of(carol)).toHaveLength(1);
   });
 
   it("a removed member's edits are dropped, even of what it sent while a member", async () => {

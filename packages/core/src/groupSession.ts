@@ -46,6 +46,11 @@ export const GROUP_LIMITS = {
    */
   relay: 256,
   relayBytes: 256 * 1024,
+  /** Other members' edits kept to hand on, the latest per message (WISP 9xx § Edits): count and ciphertext bytes. */
+  relayEdits: 64,
+  relayEditBytes: 512 * 1024,
+  /** Edits of one member handed on for one sync that asks for them: fewer than a receiver takes in a window. */
+  handOnEdits: 16,
   /** Sequence numbers below the highest seen that a sync names as missing, per sender and epoch. */
   miss: 32,
   /** Per sender and epoch, the sequence numbers remembered below the highest seen. */
@@ -114,6 +119,8 @@ export interface GroupState {
   sent: GroupMessageFrame[];
   /** Other members' frames, in the order they arrived, for members who missed them. Absent in states from before revision 0.9. */
   relay?: GroupMessageFrame[];
+  /** Other members' edits, the latest per message, for members who missed them. Absent in states from before edits were handed on. */
+  relayEdits?: GroupEditFrame[];
   /** Sender → epoch → highest sequence seen and the ones seen below it. */
   seen: Record<string, Record<string, { high: number; window: number[] }>>;
   /** Names members announced on their edges. */
@@ -174,6 +181,9 @@ function isEditFrame(v: unknown): v is GroupEditFrame {
 
 /** What a frame weighs in a log, roughly: its boxes plus the fixed fields around them. */
 const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + 400;
+
+/** Only the fields an edit frame has, as `clean` does for a message. */
+const cleanEdit = (f: GroupEditFrame): GroupEditFrame => ({ t: GROUP_EDIT_FRAME, g: f.g, e: f.e, s: f.s, n: f.n, v: f.v, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig });
 
 /** Only the fields a message frame has: what a member keeps and hands on carries nothing else its author put there. */
 function clean(f: GroupMessageFrame): GroupMessageFrame {
@@ -401,6 +411,19 @@ export class GroupSession {
   /** Someone out of the roster is not handed on any more, whatever they sent while in it (WISP 9xx § Catch-up). */
   private pruneRelay(): void {
     if (this.state.relay?.length) this.state.relay = this.state.relay.filter(f => rosterHas(this.roster, f.s));
+    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s));
+  }
+
+  /** Another member's edit, kept to hand on: the latest per message; the oldest go once the log is full. False: one as new was kept. */
+  private keepEdit(frame: GroupEditFrame): boolean {
+    const same = (f: GroupEditFrame) => f.s === frame.s && f.e === frame.e && f.n === frame.n;
+    const log = this.state.relayEdits ?? [];
+    if (log.some(f => same(f) && f.v >= frame.v)) return false;
+    const next = [...log.filter(f => !same(f)), cleanEdit(frame)];
+    let bytes = next.reduce((sum, f) => sum + f.c.length, 0);
+    while (next.length > GROUP_LIMITS.relayEdits || bytes > GROUP_LIMITS.relayEditBytes) bytes -= next.shift()!.c.length;
+    this.state.relayEdits = next;
+    return true;
   }
 
   /** A frame of another member, kept to hand on; the oldest go once the log is full. */
@@ -445,6 +468,7 @@ export class GroupSession {
     this.state.secrets = {};
     this.state.sent = [];
     this.state.relay = [];
+    this.state.relayEdits = [];
     this.waiting = []; this.waitingBytes = 0; this.pendingCommits.clear();
   }
 
@@ -602,12 +626,13 @@ export class GroupSession {
   }
 
   /**
-   * An edit from the member the edge is pinned to, of one of its own messages: believed only while it is still in the
-   * roster (someone removed edits nothing), for an epoch it and I were both members of, with a valid signature and a
-   * box that opens. One for an epoch or a secret not here yet waits, as a message does.
+   * An edit of a member's own message, from its author's edge or handed on by another member: believed only while its
+   * author is still in the roster (someone removed edits nothing), and the member handing it on too; for an epoch the
+   * author and I were both members of, with the author's signature over the whole frame and a box that opens. One for
+   * an epoch or a secret not here yet waits, as a message does. Taken, it is kept to hand on in turn.
    */
   private async receiveEdit(from: string, raw: unknown): Promise<void> {
-    if (!isEditFrame(raw) || raw.s !== from || raw.s === this.myKey || !rosterHas(this.roster, raw.s)) return;
+    if (!isEditFrame(raw) || raw.s === this.myKey || !rosterHas(this.roster, raw.s) || !rosterHas(this.roster, from)) return;
     if (raw.e > this.epoch) { this.parkEdit(from, raw); return; }
     const commit = this.state.chain[raw.e];
     if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
@@ -621,6 +646,7 @@ export class GroupSession {
     if (!body || typeof body !== "object" || !validEditText(body.text)) return;
     const k = validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s);
     await this.hooks.edit?.({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}) });
+    if (this.keepEdit(raw)) await this.persist();
   }
 
   private parkEdit(from: string, frame: GroupEditFrame): void {
@@ -792,6 +818,11 @@ export class GroupSession {
     for (const sent of this.state.sent) if (rosterHas(this.state.chain[sent.e].m, from) && lacks(sent)) this.hooks.send(from, sent);
     const asked = new Set(Array.isArray(frame.ask) ? frame.ask.filter(k => typeof k === "string" && k !== from && k !== this.myKey && rosterHas(this.roster, k)) : []);
     if (asked.size) for (const kept of this.state.relay ?? []) if (asked.has(kept.s) && this.state.chain[kept.e] && rosterHas(this.state.chain[kept.e].m, from) && lacks(kept)) this.hooks.send(from, kept);
+    // Their latest edits too, after the messages they change (a sync says nothing of edits: one they have changes nothing).
+    for (const author of asked) {
+      const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from));
+      for (const edit of edits.slice(-GROUP_LIMITS.handOnEdits)) this.hooks.send(from, edit);
+    }
     // The group's picture, when theirs is older (after the commits and secrets above, which it may need).
     this.offerMeta(from, frame.mt);
   }
