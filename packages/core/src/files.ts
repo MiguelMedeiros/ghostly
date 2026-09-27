@@ -8,6 +8,7 @@ import {
   type FrameChannel,
   type ResetFrame,
 } from "./frames";
+import type { WireReply } from "./replies";
 import { PLAYABLE_AUDIO, type VoiceMeta } from "./voice";
 
 /**
@@ -25,6 +26,8 @@ export interface FileInfo {
   timestamp: number;
   /** A voice message: its length and the shape of its sound (files/2 and held items only). */
   voice?: VoiceMeta;
+  /** The message this file answers (`r`, WISP 401 § Replies): files/2, files/3 and held items; older apps ignore it. */
+  reply?: WireReply;
 }
 
 /** Where a platform puts incoming bytes: memory, IndexedDB, disk. */

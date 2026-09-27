@@ -153,7 +153,7 @@ export interface EngineApi {
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
-  sendFile(params: { linkId: string; file: MessageFile; timestamp: number }): void;
+  sendFile(params: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string }): Promise<void>;
   /** files/3: answers an offer (`accept`, `decline`), or pauses, resumes or cancels a transfer, either way. */
   fileAction(params: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void;
   setDeliveryMode(params: { linkId: string; mode: DeliveryMode }): void;

@@ -87,4 +87,17 @@ describe("paired files with durable receipts", () => {
     expect(other.received).toHaveBeenCalledWith({ ...file, id: "voice-bin-0001" });
     other.a.closeAll(); other.b.closeAll();
   });
+  it("carries the message a file answers (r), and drops one that does not check out", async () => {
+    const reply = { i: "AbCdEfGhIjKlMnOpQrStUv", s: "listen to this", f: "recipient" };
+    const t = setup();
+    await t.a.send({ ...file, reply }, source());
+    expect(t.received).toHaveBeenCalledWith({ ...file, reply });
+    t.a.closeAll(); t.b.closeAll();
+
+    // An author that is neither side: the file arrives without the reply.
+    const lied = setup(undefined, frame => frame.replace('"f":"recipient"', '"f":"someone"'));
+    await lied.a.send({ ...file, id: "reply-bad-0001", reply }, source());
+    expect(lied.received).toHaveBeenCalledWith({ ...file, id: "reply-bad-0001" });
+    lied.a.closeAll(); lied.b.closeAll();
+  });
 });

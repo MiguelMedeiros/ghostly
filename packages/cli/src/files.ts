@@ -4,6 +4,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, sanitizeFileName, sanitizeMime, toBase64Url } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
+import { replyRef } from "@ghostly/browser/shared/replies";
 import type { LinkView, MessageFile } from "@ghostly/browser/shared/types";
 import { bool, chatOf, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
@@ -64,6 +65,12 @@ export const FILE_METHODS: Record<string, Method> = {
     if (!link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
     const mime = mimeOf(path, str(params, "mime"));
+    // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
+    const replyTo = str(params, "reply");
+    if (replyTo) {
+      const messages = await node(ctx).getMessages(link.id);
+      if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
+    }
     let voice, warning: string | undefined;
     if (params.voice !== undefined) {
       if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", VOICE_ONLY);
@@ -93,7 +100,7 @@ export const FILE_METHODS: Record<string, Method> = {
       transfer: { state: "transferring", transferred: 0, size: file.size },
     });
     endTyping(ctx, link.id, true);
-    await node(ctx).sendFile({ linkId: link.id, file, timestamp });
+    await node(ctx).sendFile({ linkId: link.id, file, timestamp, ...(replyTo ? { replyTo } : {}) });
     return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}) }, ...(warning ? { warning } : {}) };
   },
 

@@ -100,7 +100,7 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 | `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
 | `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin |
 | `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link; the picture |
-| `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]]` | A file, or a voice note (its length and waveform measured from the file unless given) |
+| `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does |
 | `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3). A file's id names its chat, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
 | `file wait [<chat>] <file> [--timeout s]` | Wait until a transfer ends: exit `0` when the file is all here, `1` with the transfer's error when it failed (`details.retry`: `file resend` can go on), `4` on timeout (default 300 s) |
