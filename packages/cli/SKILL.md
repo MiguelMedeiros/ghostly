@@ -148,6 +148,5 @@ that exact payment.
 ## Anything else the app does
 
 Every call of the app's engine is reachable: `ghostly engine --list`, then `ghostly engine <method> '<json params>'`.
-Files and identities get their own commands in a later phase; until then use `engine`. Bark and Fedimint wallets
-are app-only for now.
+Not on the CLI yet: Bark and Fedimint wallets, OpenID Connect proofs and calls (app only).
 See the [README](https://github.com/MiguelMedeiros/ghostly/blob/dev/packages/cli/README.md) and WISP 11xx.
