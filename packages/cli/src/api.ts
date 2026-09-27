@@ -34,6 +34,20 @@ async function waitForEdit(ctx: ApiContext, chat: string, messageId: string, ms:
   }
 }
 
+/**
+ * Waits until an edge took my group message, or its edit number `edit` (WISP 9xx: a group has no receipts, so this is
+ * as far as the author sees): a member's edge in a private group, an edge to one of my hubs in a community.
+ */
+async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | undefined, ms: number): Promise<number> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const taken = node(ctx).groupTaken({ groupId, messageId, ...(edit ? { edit } : {}) });
+    if (taken > 0) return taken;
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: no member's edge took it yet. It stays in the group and goes when one opens, while this profile is online`, { messageId, ...(edit ? { edits: edit } : {}) });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 async function waitForMessage(ctx: ApiContext, chat: string, messageId: string, target: "sent" | "delivered", ms: number): Promise<StoredMessage> {
   const want = DELIVERY_RANK[target];
   const look = (message: StoredMessage | undefined) => {
@@ -399,9 +413,13 @@ const METHODS: Record<string, Method> = {
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
+    const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}) });
     if (result.error) throw new CliError("unavailable", result.error);
-    return { group: group.id, messageId: result.messageId ?? null, sent: true };
+    const messageId = result.messageId ?? null;
+    // `edges`: how many took it so far (none yet is not an error: it goes when one opens).
+    const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
+    return { group: group.id, messageId, sent: true, edges };
   },
   /**
    * WISP 9xx § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
@@ -417,10 +435,15 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
+    const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
-    return { group: group.id, messageId, edits: message?.edit?.seq ?? 0, sent: !!message && !message.edit?.pending };
+    const edits = message?.edit?.seq ?? 0;
+    // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
+    const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000)
+      : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
+    return { group: group.id, messageId, edits, sent: edges > 0 || (!!message && !message.edit?.pending), edges };
   },
   async "group.react"(ctx, params) {
     const group = groupOf(ctx, params);

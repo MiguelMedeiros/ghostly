@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.8.1 |
+| Revision | 0.8.2 |
 | Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
@@ -134,6 +134,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Chats | Delivery states, retry, delete, rename | Phase 1 |
 | Chats | Edit a sent text in place (a status a bot updates); `message.edited`; `edits` and `editedAt` in history | `ghostly edit <chat> <message> [text \| --text <text> \| --stdin] [--wait confirmed]` (#351) |
 | Groups | Edit a text sent to a group in place; `group.message.edited`; `edits` and `editedAt` in group history | `ghostly group edit <group> <message> [text \| --text <text> \| --stdin] [--mention <member>]` |
+| Groups | Wait until a group message or edit left: groups have no receipts, so `--wait sent` on `group send` and `group edit` returns once at least one edge took it (a member's in a private group, one of the profile's hubs' in a community), with `edges` in the answer; exit 4 after `--timeout` | `ghostly group send\|edit … --wait sent [--timeout s]` |
 | Chats | Transport per chat (auto, webrtc, iroh, hyperdht, dht) and fallback; connection status and history | Phase 1 |
 | Chats | Pin and mute | Not applicable: both are UI-only in the app (local display state); a bot filters for itself |
 | Chats | Message details | Phase 1 |
@@ -230,6 +231,7 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 
 ## Revision log
 
+- 0.8.2 (2026-09-27): `--wait sent` and `edges` on `group send` and `group edit`.
 - 0.8.1 (2026-09-27): group edits: `ghostly group edit`, `group.message.edited`, `edits` and `editedAt` in group history (#378).
 - 0.8 (2026-09-27): groups for bots: messages name their author from the roster, `group send` answers with the message id, the entry link is printed only with `--show-secret` (#372); `file send --reply` (#359); calls log their ICE candidates and state, and `call list` shows the pair (#362); ids that start with a dash are read as ids (#367); calls use the profile's ICE servers, a TURN relay included (#375).
 - 0.7.3 (2026-09-27): `typing --kind recording|thinking --status <text>`, and `typing.started` carries them (#361).

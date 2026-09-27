@@ -68,8 +68,9 @@ ghostly react alice peer_jY7N… --remove            # takes it back
 id=$(ghostly send alice "Working: 0 of 3" | jq -r .messageId)   # a status message…
 ghostly edit alice "$id" --text "Working: 2 of 3"  # …updated in place: the contact sees one message, marked edited
 echo "Done: 3 of 3" | ghostly edit alice "$id" --stdin
-gid=$(ghostly group send crew "Deploy: 0 of 3" | jq -r .messageId)  # the same in a group…
-ghostly group edit crew "$gid" --text "Deploy: done"      # …every member sees one message, marked edited
+gid=$(ghostly group send crew "Deploy: 0 of 3" --wait sent | jq -r .messageId)  # the same in a group…
+ghostly group edit crew "$gid" --text "Deploy: done" --wait sent  # …every member sees one message, marked edited
+# A group has no receipts: --wait sent returns once a member's edge (or a hub's) took it; exit 4 on --timeout
 ghostly chat history alice --limit 20              # oldest first
 ghostly chat list
 ```

@@ -20,6 +20,11 @@ const wait: Record<string, OptionSpec> = {
   wait: { type: "string", description: "none, sent or delivered (default: none with a daemon, sent without)" },
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
+/** A group has no receipts: `sent` waits until an edge took the frame (a member's, or one of my hubs'). */
+const groupWait: Record<string, OptionSpec> = {
+  wait: { type: "string", description: "none or sent: until an edge took it (default none)" },
+  timeout: { type: "number", description: "Seconds to wait (default 30)" },
+};
 const net: OptionSpec = { type: "string", description: "mainnet or testnet (default testnet)" };
 const card: OptionSpec = { type: "string", description: "A Lightning card (its id; default: the network's default)" };
 const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
@@ -339,12 +344,12 @@ export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "g
     options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, wait: { type: "string", description: "none or confirmed (default: none with a daemon, confirmed without)" }, timeout: wait.timeout },
   },
   "group send": {
-    method: "group.send", target: "group", args: ["group", "text..."], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--stdin] [--force]", summary: "Send to a group; mention members written as @name in the text",
-    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" } },
+    method: "group.send", target: "group", args: ["group", "text..."], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--stdin] [--force] [--wait none|sent] [--timeout s]", summary: "Send to a group; mention members written as @name in the text",
+    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" }, ...groupWait },
   },
   "group edit": {
-    method: "group.edit", target: "group", message: true, args: ["group", "message", "text..."], usage: "group edit <group> <message> [text... | --text <text> | --stdin] [--mention <member>]... [--force]", summary: "Replace the text of a message you sent to a group (the id group send gave)",
-    options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, mention: { type: "list", description: "A member newly named as @name in the text (those the message named stay)" } },
+    method: "group.edit", target: "group", message: true, args: ["group", "message", "text..."], usage: "group edit <group> <message> [text... | --text <text> | --stdin] [--mention <member>]... [--force] [--wait none|sent] [--timeout s]", summary: "Replace the text of a message you sent to a group (the id group send gave)",
+    options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, mention: { type: "list", description: "A member newly named as @name in the text (those the message named stay)" }, ...groupWait },
   },
 };
 
