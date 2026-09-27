@@ -50,7 +50,8 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, isPlayableVideoType, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
@@ -220,7 +221,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         : source.size > platform.maxFileBytes ? `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).` : null;
       if (tooLarge) return tooLarge;
       try {
-        const { timestamp, file } = await platform.sendFile(peerKey, source, { voice });
+        // A video goes with its length, size and first frame, so the contact sees it before it arrives.
+        const video = !voice && isPlayableVideoType(source.type) ? await videoMetaOf(source).catch(() => undefined) : undefined;
+        const { timestamp, file } = await platform.sendFile(peerKey, source, { voice, ...(video && { video }) });
         addSystemMessage({ id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, file });
         window.dispatchEvent(new Event("session-updated"));
         return null;

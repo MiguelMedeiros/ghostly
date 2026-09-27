@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatFiles, FILE_LIMITS, refusalText, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
-// covers: files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request
+// covers: files.video.meta, files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request
 
 /** Deterministic bytes for any range: files of any size exist without being held. */
 function pattern(offset: number, length: number): Uint8Array {
@@ -231,6 +231,17 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     send(w, file("empty-01", 0));
     await until(() => state(w.a, "out", "empty-01") === "done");
     expect(state(w.b, "in", "empty-01")).toBe("done");
+  });
+
+  it("a video's description goes with its offer; a bad poster is dropped, the file still arrives", async () => {
+    const w = wire({ keepBytes: true });
+    w.attach();
+    const poster = b64(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]));
+    send(w, file("video-01", 40_000, { mime: "video/mp4", video: { duration: 3000, width: 320, height: 180, poster } }));
+    send(w, file("video-02", 40_000, { mime: "video/mp4", video: { duration: 3000, width: 320, height: 180, poster: "not a jpeg" } }));
+    await until(() => state(w.b, "in", "video-01") === "done" && state(w.b, "in", "video-02") === "done");
+    expect(w.b.records.get("in:video-01")!.file.video).toEqual({ duration: 3000, width: 320, height: 180, poster });
+    expect(w.b.records.get("in:video-02")!.file.video).toEqual({ duration: 3000, width: 320, height: 180 });
   });
 
   it("a file offered while no session is open waits, then goes on the next one", async () => {

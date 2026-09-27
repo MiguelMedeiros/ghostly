@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { decodeInPage, loadFixtures, playInPage, rateInPage } from "../../e2e/support/voice-media.mjs";
 import { desktopPolicy, inWebView } from "./webview.mjs";
 
@@ -56,5 +57,54 @@ for (const [name, result] of Object.entries(decoded)) {
 }
 if (failed) {
   console.error(`\n${failed} recording(s) do not decode in WKWebView for Download as MP3.`);
+  process.exit(1);
+}
+
+// Videos (e2e/support/video-fixtures/): an H.264 MP4 plays from a blob in the chat's <video>, and a poster is drawn
+// from its first frame on a canvas (what the sender sends with it). VP9 in MP4 is reported, not required.
+const videoDir = new URL("../../e2e/support/video-fixtures/", import.meta.url);
+const videoFixtures = Object.fromEntries(["ghosts-h264.mp4", "ghosts.mp4"].map((name) => [name, readFileSync(new URL(name, videoDir)).toString("base64")]));
+const videos = inWebView(async (fixtures) => {
+  const out = {};
+  for (const [name, base64] of Object.entries(fixtures)) {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    document.body.append(video);
+    const result = { canPlay: video.canPlayType("video/mp4") };
+    try {
+      video.src = URL.createObjectURL(new Blob([bytes], { type: "video/mp4" }));
+      await new Promise((resolve, reject) => {
+        video.onloadeddata = resolve;
+        video.onerror = () => reject(new Error(`MediaError ${video.error?.code}`));
+        setTimeout(() => reject(new Error("no data in 5 s")), 5000);
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      const poster = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.7));
+      result.poster = poster?.size ?? 0;
+      await video.play();
+      const start = video.currentTime;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      result.played = video.currentTime > start + 0.2;
+      result.at = video.currentTime;
+    } catch (error) {
+      result.error = String(error);
+    }
+    out[name] = result;
+  }
+  return out;
+}, [videoFixtures], { csp: policy });
+for (const [name, result] of Object.entries(videos)) {
+  const required = name.includes("h264");
+  const ok = result.played && result.poster > 0;
+  if (!ok && required) failed++;
+  console.log(`${ok ? "✓" : required ? "✗" : "·"} ${name.padEnd(28)} canPlayType=${JSON.stringify(result.canPlay)} poster=${result.poster ?? 0} B at=${result.at ?? "?"}${result.error ? `  ${result.error}` : ""}`);
+}
+if (failed) {
+  console.error(`\nAn H.264 video does not play, or gives no poster, in WKWebView${policy ? " under Desktop's CSP" : ""}.`);
   process.exit(1);
 }

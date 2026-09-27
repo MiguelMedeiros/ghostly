@@ -1,3 +1,5 @@
+import { formatVideoDuration, type VideoMeta } from "./video";
+
 /**
  * Voice messages. A voice message is an ordinary file (files/2, or a held item) whose
  * announcement also carries a `voice` description: how long it is and the shape of its
@@ -153,6 +155,8 @@ export function formatVoiceDuration(ms: number): string {
 }
 
 /** The line a file message shows in the chat list and in notifications. */
-export function fileMessageText(file: { name: string; voice?: VoiceMeta }): string {
-  return file.voice ? `🎤 Voice message (${formatVoiceDuration(file.voice.duration)})` : `📎 ${file.name}`;
+export function fileMessageText(file: { name: string; voice?: VoiceMeta; video?: VideoMeta }): string {
+  if (file.voice) return `🎤 Voice message (${formatVoiceDuration(file.voice.duration)})`;
+  if (file.video) return `🎬 Video (${formatVideoDuration(file.video.duration)})`;
+  return `📎 ${file.name}`;
 }

@@ -156,7 +156,7 @@ describe("names and times", () => {
 describe("served types", () => {
   it("serves recorded audio with its type, and nothing that could run", () => {
     for (const type of ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/aac", "audio/wav"]) expect(safeBlobType(type)).toBe(type);
-    for (const type of ["audio/svg+xml", "audio/html", "text/html", "video/webm"]) expect(safeBlobType(type)).toBe("application/octet-stream");
+    for (const type of ["audio/svg+xml", "audio/html", "text/html", "video/x-matroska"]) expect(safeBlobType(type)).toBe("application/octet-stream");
   });
 });
 

@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 501; editorial family allocation |
 | Status | Draft |
-| Revision | 0.4 |
+| Revision | 0.4.1 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
@@ -28,7 +28,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 
 | Frame | From | Meaning |
 |---|---|---|
-| `pf-offer {id, name, mime, size, ts, voice?, r?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
+| `pf-offer {id, name, mime, size, ts, voice?, video?, r?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
 | `pf-accept {id, offset}` | receiver | Send from `offset` (0, or where the stored part ends) |
 | `pf-wait {id, why}` | receiver | Not now: `consent` (its person has not decided), `paused`, `busy` (other files arrive first) |
 | `pf-data {id, offset, data}` | sender | base64url bytes at `offset`, at most 16 KiB |
@@ -46,6 +46,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 - **Resume.** Every answer is idempotent, so the sender only follows the last one: an `accept` moves it to that offset, backwards too. A receiver that sees data past what it has (a chunk lost in a transport switch) answers with an `accept` at what it has, once per gap. A sender that hears nothing for 30 s while something is outstanding offers again; a receiver that gets no data for 30 s on a file under way says `accept` again at what it has, so a sender that never offers again (an older app, a stuck one) is still put back in step. A receiver makes what it stored durable every 8 MiB and records that point; after a restart it truncates the file there and accepts from it.
 - **Stuck transfers (0.3.2, no wire change).** An unfinished transfer that has not moved for 60 s, or not since the app started, and is not waiting for a person (an answer, a pause) offers its person **Send again** (sender: the offer goes again now, under its id) or **Ask again** (receiver: `accept` at what it has). Either goes on from the bytes the receiver holds, and the chat keeps one message on each side. With no live session the action waits for the next one, and the app tries to connect. A failed transfer keeps its own **Retry**.
 - **Backpressure.** A sender puts a data frame on the session only when the session has room: channels with a small send budget (the native and Iroh ones refuse frames past 120 KiB queued) give files a quarter of it, so pings and messages still fit. Sending again into a full channel at once never let it drain, and froze the app (0.3.2).
+- **Video description (0.4.1).** A `video/*` file's offer (and a `files/2` `pf-start`, and a held file's meta in [4xx](4xx-store-and-forward.md)) may carry `video {duration, width, height, poster?}`: milliseconds, pixels as it plays, and a JPEG of an early frame in base64url, at most 12 KiB, so the receiver shows a picture and a length before a byte has arrived (and before its person accepts a large one). Optional and advisory: an app that does not know it ignores it, and a malformed one is dropped without refusing the file (a bad poster alone drops only the poster). The receiver may make its own poster from the first frame once the file is in. Received video of a playable type (MP4, WebM, QuickTime, Ogg, M4V) is handed to a player with its type; anything else stays opaque bytes.
 - **Integrity.** The receiver computes the SHA-256 of what it stored (read back, not what passed through memory) and compares it with `pf-sum`. A mismatch deletes the file and is refused with `damaged`; the sender may offer it again under the same id, and the receiver takes it from the start without asking again.
 - **Pause and cancel.** The sender pauses by offering with `paused` and resumes by offering without it; the receiver pauses with `pf-wait` `paused` and resumes with `pf-accept`. Either side cancels: the sender with `pf-abort`, the receiver with `pf-refuse` `cancelled`; the receiver removes what it stored.
 - **Storage.** Received bytes go to storage as they arrive and are read back in ranges, so no file is held whole in memory (browsers: the origin-private file system, IndexedDB pieces where it is missing; Desktop: files in the app's data folder). There is no size limit but the receiver's space and safe integers (2^53 - 1 bytes).
@@ -66,6 +67,7 @@ For `files/2`: the common contract's 100 MiB file bound, three concurrent incomi
 
 ## Revision log
 
+- 0.4.1 (2026-09-27): optional `video` description on an offer (length, size, poster); no change for apps that ignore it.
 - 0.4 (2026-09-27): `r` on `pf-offer` and `pf-start`: a file that answers a message. A reply that does not check out is dropped; the file is taken all the same. Older apps ignore it.
 - 0.3.1 (2026-09-26): an offer that expired unanswered is refused when offered again, never taken without consent.
 - 0.3 (2026-09-25): `files/3`: offer and consent, advertised room, 1 MiB window, resume from the stored offset after a drop, a switch or a restart, SHA-256 checked on what was stored, pause and cancel from either side. `files/2` kept for older apps.

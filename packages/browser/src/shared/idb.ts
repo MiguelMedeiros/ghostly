@@ -51,7 +51,7 @@ export interface StoredFile {
   /** The id the file had on the data link. */
   wireId?: string;
   digest?: string;
-  metadata?: { name: string; size: number; mime: string; timestamp: number; voice?: import("@ghostly/core").VoiceMeta };
+  metadata?: { name: string; size: number; mime: string; timestamp: number; voice?: import("@ghostly/core").VoiceMeta; video?: import("@ghostly/core").VideoMeta };
   transfer?: { state: "transferring" | "done" | "failed"; transferred: number; size: number; error?: string };
   /** files/3: the transfer's own record (`@ghostly/core` `FileTransferRecord`), kept so it resumes after a restart. */
   wire3?: import("@ghostly/core").FileTransferRecord;
