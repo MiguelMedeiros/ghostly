@@ -565,9 +565,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("update a group status in place: group send, group edit three times, the other member sees the last text and each edit once", async () => {
-    const listen = new Running(["--home", bob, "listen", "--type", "group.message.edited"], env);
-    running.push(listen);
-    await new Promise((r) => setTimeout(r, 1000));
+    const listen = await listenTo(bob, "--type", "group.message.edited");
     // --wait sent: back once Bob's edge took it (a group has no receipts).
     const sent = ok(await as(alice, "group", "send", "Mesh crew", "Deploy: 0 of 3", "--wait", "sent"));
     expect(sent.edges).toBeGreaterThanOrEqual(1);
