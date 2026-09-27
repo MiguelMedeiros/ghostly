@@ -129,7 +129,7 @@ describe("settings", () => {
     const link = stubLink();
     const chat = await addChat(node, link);
     node.setTyping({ linkId: chat.id, typing: true });
-    expect(link.setTyping).toHaveBeenLastCalledWith(true);
+    expect(link.setTyping).toHaveBeenLastCalledWith(true, { kind: "typing" });
     await node.updateSettings({ settings: { sendTyping: false } });
     // Turning it off ends what stands at once.
     expect(link.setTyping).toHaveBeenLastCalledWith(false);
@@ -140,7 +140,24 @@ describe("settings", () => {
     await node.updateSettings({ settings: { sendTyping: true } });
     expect(await db.getSettings()).not.toHaveProperty("sendTyping");
     node.setTyping({ linkId: chat.id, typing: true });
-    expect(link.setTyping).toHaveBeenLastCalledWith(true);
+    expect(link.setTyping).toHaveBeenLastCalledWith(true, { kind: "typing" });
+  });
+
+  it("typing: a kind and a status go to the link checked, and none of it once the switch is off", async () => {
+    const { node } = engine();
+    const link = stubLink();
+    const chat = await addChat(node, link);
+    node.setTyping({ linkId: chat.id, typing: true, kind: "recording" });
+    expect(link.setTyping).toHaveBeenLastCalledWith(true, { kind: "recording" });
+    node.setTyping({ linkId: chat.id, typing: true, kind: "thinking", status: " Transcribing your\naudio… " });
+    expect(link.setTyping).toHaveBeenLastCalledWith(true, { kind: "thinking", status: "Transcribing your audio…" });
+    // An unknown kind is plain typing; a status with a link is not said.
+    node.setTyping({ linkId: chat.id, typing: true, kind: "dancing" as never, status: "see https://x.example" });
+    expect(link.setTyping).toHaveBeenLastCalledWith(true, { kind: "typing" });
+    await node.updateSettings({ settings: { sendTyping: false } });
+    link.setTyping.mockClear();
+    node.setTyping({ linkId: chat.id, typing: true, kind: "thinking", status: "Thinking" });
+    expect(link.setTyping.mock.calls).toEqual([[false]]);
   });
 
   it("typing: sending a message ends it; a group edge or an unknown chat is never told", async () => {
@@ -164,6 +181,16 @@ describe("settings", () => {
     expect(node.getState().links.find(l => l.id === chat.id)?.peerTyping).toBeUndefined();
     link.peerTyping = true;
     expect(node.getState().links.find(l => l.id === chat.id)?.peerTyping).toBe(true);
+    expect(node.getState().links.find(l => l.id === chat.id)).not.toHaveProperty("peerTypingKind");
+    // What the contact is doing, and a bot's status, go with it.
+    Object.assign(link, { peerTypingActivity: { kind: "thinking", status: "Transcribing your audio…" } });
+    expect(node.getState().links.find(l => l.id === chat.id)).toMatchObject({ peerTyping: true, peerTypingKind: "thinking", peerTypingStatus: "Transcribing your audio…" });
+    Object.assign(link, { peerTypingActivity: { kind: "recording" } });
+    const view = node.getState().links.find(l => l.id === chat.id);
+    expect(view).toMatchObject({ peerTypingKind: "recording" });
+    expect(view).not.toHaveProperty("peerTypingStatus");
+    link.peerTyping = false;
+    expect(node.getState().links.find(l => l.id === chat.id)).not.toHaveProperty("peerTypingKind");
   });
 
   it("removing the held-message storage removes it from the saved settings", async () => {

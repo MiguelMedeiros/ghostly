@@ -54,6 +54,8 @@
     "offline": "离线",
     "connecting": "连接中",
     "typing": "正在输入…",
+    "typingRecording": "正在录音…",
+    "typingThinking": "正在思考…",
     "lastSeen": "最后上线 {{time}}",
     "today": "今天",
     "yesterday": "昨天",

@@ -54,6 +54,8 @@
     "offline": "オフライン",
     "connecting": "接続中",
     "typing": "入力中…",
+    "typingRecording": "録音中…",
+    "typingThinking": "考え中…",
     "lastSeen": "最終オンライン {{time}}",
     "today": "今日",
     "yesterday": "昨日",

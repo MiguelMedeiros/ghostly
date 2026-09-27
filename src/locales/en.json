@@ -54,6 +54,8 @@
     "offline": "offline",
     "connecting": "connecting",
     "typing": "typing…",
+    "typingRecording": "recording audio…",
+    "typingThinking": "thinking…",
     "lastSeen": "Last seen {{time}}",
     "today": "Today",
     "yesterday": "Yesterday",

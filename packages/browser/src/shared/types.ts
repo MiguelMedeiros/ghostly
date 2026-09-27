@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, LinkPreview, PairingProgress, PaymentMethodName, VideoMeta, VoiceMeta, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, LinkPreview, PairingProgress, PaymentMethodName, TypingKind, VideoMeta, VoiceMeta, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -1160,6 +1160,10 @@ export interface LinkView {
   callsUnavailable?: string | null;
   /** Paired 1:1 chats: the contact is typing now (`typing/1` on the live session). Absent otherwise. Never stored. */
   peerTyping?: boolean;
+  /** While `peerTyping`: what the contact is doing when it is not plain typing (recording a voice note, thinking). */
+  peerTypingKind?: Exclude<TypingKind, "typing">;
+  /** While `peerTyping`: the contact's (a bot's) status line, sanitized: one line, at most 40 characters, no links. */
+  peerTypingStatus?: string;
   availableTransports?: PairedTransport[];
   /** Transports a session with this contact would cross a relay on (a browser's HyperDHT or Iroh): a fallback, and shown as relayed. */
   relayedTransports?: PairedTransport[];

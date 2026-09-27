@@ -5,7 +5,7 @@ import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
 import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
-import type { LinkPreview, VoiceMeta } from "@ghostly/core";
+import type { LinkPreview, TypingKind, VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { useIsLocked } from "../contexts/LockScreenContext";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -77,8 +77,11 @@ interface MessageInputProps {
   mentions?: ComposerMentions;
   /** A link in the draft gets a preview made here, sent with the message (a paired chat, with the setting on). */
   linkPreviews?: boolean;
-  /** Typing (a paired chat): true on a keystroke that leaves text, false when the text is cleared or sent. */
-  onTyping?: (typing: boolean) => void;
+  /**
+   * Typing (a paired chat): true on a keystroke that leaves text, false when the text is cleared or sent; with
+   * `"recording"` while a voice note is recorded, false when it is sent or thrown away.
+   */
+  onTyping?: (typing: boolean, kind?: TypingKind) => void;
   /**
    * The message being answered (WISP 400 § Replies), shown above the field with ✕; Escape cancels too. The page keeps
    * it and sends it with the text. A new `key` (another message) brings the focus to the field.
@@ -560,7 +563,8 @@ export function MessageInput({
             unavailable={fileUnavailable}
             disabled={disabled}
             onError={showToast}
-            onActiveChange={(active) => { if (active) closeAll(); }}
+            // Recording: the composer's pickers close, and the contact sees "recording audio…" until it ends.
+            onActiveChange={(active) => { if (active) closeAll(); onTyping?.(active, "recording"); }}
           />
         ) : <button
           aria-label="Send message"

@@ -54,6 +54,8 @@
     "offline": "hors ligne",
     "connecting": "connexion",
     "typing": "écrit…",
+    "typingRecording": "enregistre un audio…",
+    "typingThinking": "réfléchit…",
     "lastSeen": "Vu {{time}}",
     "today": "Aujourd'hui",
     "yesterday": "Hier",
