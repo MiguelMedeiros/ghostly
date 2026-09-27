@@ -1,6 +1,6 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
-import { shownUrl, type Atom, type TimeData } from "../../lib/parse";
+import { shownUrl, SPOILER_PLAIN, type Atom, type MdLinkData, type Segment, type TimeData } from "../../lib/parse";
 import { CopyButton } from "./CopyButton";
 
 /**
@@ -14,6 +14,35 @@ export function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
       {shownUrl(atom.text)}
     </a>
   );
+}
+
+/**
+ * A link's label: its formatting, and a spoiler stays covered (a tap on it would follow the link). Code never gets
+ * here: backticks pair before links are looked for.
+ */
+function labelNodes(label: Segment[], key = ""): React.ReactNode[] {
+  return label.map((s, i) => {
+    const k = key + i;
+    if (s.type !== "span") return s.text;
+    if (s.style === "spoiler") return SPOILER_PLAIN;
+    const inner = labelNodes(s.children, `${k}.`);
+    return s.style === "bold" ? <strong key={k} className="font-semibold">{inner}</strong> : s.style === "italic" ? <em key={k}>{inner}</em> : <s key={k}>{inner}</s>;
+  });
+}
+
+/**
+ * `[text](https://…)`: the text as a link, with the host it goes to (and the whole address) on hover; a long press
+ * gets the browser's own menu, which names the address too. Text that reads as another address than the link's
+ * (`labelMisleads`) is not shown: the address is, as `LinkView` shows one.
+ */
+export function MdLinkView({ atom }: { atom: Atom<"md-link", MdLinkData> }) {
+  const { url, label, showUrl } = atom.data;
+  const shown = shownUrl(url);
+  let title = shown;
+  try { title = `${new URL(url).hostname}\n${shown}`; } catch { /* the parser only takes addresses a URL parser reads */ }
+  return showUrl
+    ? <a data-testid="rich-md-link" data-shows="url" href={url} title={title} dir="ltr" target="_blank" rel="noopener noreferrer" className="text-link underline hover:decoration-2 break-all">{shown}</a>
+    : <a data-testid="rich-md-link" data-shows="text" href={url} title={title} target="_blank" rel="noopener noreferrer" className="text-link underline hover:decoration-2">{labelNodes(label)}</a>;
 }
 
 /** A long key or token: one line until "Show all", and Copy either way. */

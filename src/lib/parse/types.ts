@@ -1,7 +1,7 @@
 /**
- * What a message's text is made of, once parsed: blocks (paragraphs and fenced code), and inside a paragraph the
- * segments a renderer draws. Nothing here is HTML: every segment carries plain text, and the renderer builds
- * elements from it.
+ * What a message's text is made of, once parsed: blocks (paragraphs, fenced code, lists, quotes, headings), and
+ * inside them the segments a renderer draws. Nothing here is HTML: every segment carries plain text, and the renderer
+ * builds elements from it.
  */
 
 /** A styled stretch of text: `*bold*`, `_italic_`, `~~strike~~`, `||spoiler||`. */
@@ -24,10 +24,28 @@ export type Segment =
   | { type: "span"; style: SpanStyle; children: Segment[] }
   | Atom;
 
+/**
+ * One item of a list. `marker` is what the author wrote before it ("1.", "2)"; "•" for any bullet), so numbers are
+ * never redone; `number` is its value when ordered. `children` holds the lists indented under it (one level).
+ */
+export interface ListItem {
+  marker: string;
+  number?: number;
+  segments: Segment[];
+  children: ListBlock[];
+}
+
+export type ListBlock = { type: "list"; ordered: boolean; items: ListItem[] };
+
 export type Block =
   | { type: "paragraph"; segments: Segment[] }
   /** `lang` is what followed the opening fence, lower-cased, when it looks like a language name. */
-  | { type: "codeblock"; code: string; lang?: string };
+  | { type: "codeblock"; code: string; lang?: string }
+  | ListBlock
+  /** Lines starting with `> `: what they hold, read again as blocks (paragraphs, lists, headings; no quote in a quote). */
+  | { type: "quote"; blocks: Block[] }
+  /** `# ` to `### ` at the start of a line. */
+  | { type: "heading"; level: 1 | 2 | 3; segments: Segment[] };
 
 /** What a detector may know about the message beyond its text. */
 export interface ParseContext {

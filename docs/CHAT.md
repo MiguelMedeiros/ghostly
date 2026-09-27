@@ -76,6 +76,7 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 | Feature | What | PR |
 |---|---|---|
 | Rich text | `*bold*`, `_italic_`, `~~strike~~`, `` `code` ``, `\|\|spoiler\|\|`, fenced code blocks (highlighted on first use), JSON pretty-printed, long keys folded, times with a zone in local time | #282 |
+| Lists, quotes, headings, links | `- ` / `1. ` lists (the author's numbers, one nested level), `> ` quotes, `# ` headings, `[text](https://…)` links that show the address when the text names another host | #370 |
 | Entity cards | `ghostly1` invites, group links, Nostr (npub, nprofile, note, nevent), Pubky and DID identities; checksum-valid only, 3 per message | #281 |
 | Money | invoices, offers, addresses, tokens: see [WALLETS.md](WALLETS.md#money-in-messages) | #284 |
 | Link previews | made by the **sender** and sent with the message (`pv`, a small JPEG); the receiver never contacts the site. Desktop fetches public addresses only; web and extension only where CORS allows. Setting: "Link previews". | #280 |

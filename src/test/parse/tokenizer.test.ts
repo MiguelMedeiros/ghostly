@@ -217,8 +217,9 @@ describe("plain text for previews", () => {
     expect(plainText("snake_case 2*3 a ~ b | c")).toBe("snake_case 2*3 a ~ b | c");
   });
 
-  it("is the text itself whenever it has no marker, backtick or long run", () => {
-    fc.assert(fc.property(fc.string({ maxLength: 200 }).filter((s) => !/[*_~|`{[]/.test(s) && !/\S{80}/.test(s)), (s) => plainText(s) === s));
+  it("is the text itself whenever it has no marker, backtick, long run or line start a list, quote or heading takes", () => {
+    const blockStart = /(^|\n)[ \t]*[-\u2022>#\d]/;
+    fc.assert(fc.property(fc.string({ maxLength: 200 }).filter((s) => !/[*_~|`{[]/.test(s) && !/\S{80}/.test(s) && !blockStart.test(s)), (s) => plainText(s) === s));
   });
 });
 
@@ -254,7 +255,8 @@ describe("adversarial input", () => {
   });
 
   it("keeps the text between markers intact", () => {
-    fc.assert(fc.property(fc.string({ unit: fc.constantFrom("*", "_", "a", "b", " ", "."), maxLength: 200 }), (s) => {
+    // "* a" at the start is a list item, which previews with a "•" (markdown.test.ts).
+    fc.assert(fc.property(fc.string({ unit: fc.constantFrom("*", "_", "a", "b", " ", "."), maxLength: 200 }).filter((s) => !/^ *\* +\S/.test(s)), (s) => {
       // Stripping the markers from the input and from the preview gives the same letters.
       const letters = (x: string) => x.replace(/[*_]/g, "");
       expect(letters(plainText(s))).toBe(letters(s));
@@ -283,6 +285,13 @@ describe("adversarial input", () => {
     ["fences with no end", (n) => "```\n".repeat(n / 4)],
     ["almost JSON", (n) => `[${"1,".repeat(n / 2)}`],
     ["nested openers", (n) => "*_".repeat(n / 2) + "x"],
+    ["list lines", (n) => "- a\n".repeat(n / 4)],
+    ["nested items and continuations", (n) => "1. a\n  - b\n  c\n".repeat(n / 16)],
+    ["quoted lists", (n) => "> - a\n> # b\n".repeat(n / 12)],
+    ["heading marks", (n) => "#".repeat(n)],
+    ["link texts that never close", (n) => `[${"a".repeat(199)}`.repeat(n / 200)],
+    ["link addresses that never close", (n) => "[a](https://x.example/".repeat(n / 22)],
+    ["links", (n) => "[ghostly.tools](https://ghostly.tools) ".repeat(n / 39)],
   ])("stays linear on %s (1 MB)", (_, make) => {
     const quarter = cost(make(MB / 4));
     const whole = cost(make(MB));
