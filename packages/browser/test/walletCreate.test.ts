@@ -5,7 +5,7 @@ import { DEFAULT_MINTS, TEST_MINT } from "../src/shared/mints";
 import { FakeBarkServer } from "./helpers/fakeBark";
 import { FakeBreezNetwork } from "./helpers/fakeBreez";
 import { FakeFedimintSdk } from "./helpers/fakeFedimint";
-// covers: wallet.instances.create, wallet.instances.networks, wallet.bark.mainnet, wallet.fedimint.mainnet-off, wallet.test-coins
+// covers: wallet.instances.create, wallet.instances.networks, wallet.bark.mainnet, wallet.fedimint.mainnet, wallet.spark.mainnet-key, wallet.test-coins
 
 // Every server is faked: these tests cover what one click makes, checks and saves, never a network.
 const info = vi.fn(async () => ({ network: "mutinynet", signerPubkey: `02${"ab".repeat(32)}` }));
@@ -26,8 +26,8 @@ const { cashuMint } = await import("../src/engine/paymentAdapters/providers/cash
 const { FakeLightningProvider, FakeOnchainProvider, fakeLightning, fakeOnchain } = await import("../src/engine/paymentAdapters/providers/testing");
 const { TESTNET_BARK } = await import("../src/engine/paymentAdapters/barkWallet");
 const { TESTNET_ARK, DEFAULT_ARK } = await import("../src/engine/paymentAdapters/arkWallet");
-const { FEDIMINT_MAINNET_UNAVAILABLE } = await import("../src/engine/paymentAdapters/fedimintWallet");
-const { SPARK_MAINNET_NOT_YET, createTiming } = await import("../src/engine/paymentAdapters/walletInstances");
+const { SPARK_MAINNET_NEEDS_KEY } = await import("../src/engine/paymentAdapters/sparkWallet");
+const { createTiming } = await import("../src/engine/paymentAdapters/walletInstances");
 const { barkTiming } = await import("../src/engine/paymentAdapters/bark");
 barkTiming.serverWaitMs = 1;
 
@@ -140,30 +140,35 @@ describe("one click makes a wallet of a type on a network", () => {
     await expect(node.walletCreate({ type: "usdt", network: "testnet" })).rejects.toThrow("RPC unavailable. Nothing was saved");
   });
 
-  it("Bark and Spark: Testnet in one click; Spark's Mainnet is not offered yet and says why, Bark's is (barkMainnet.test.ts)", async () => {
-    const { node, wallets, started } = engine();
+  it("Bark and Spark: Testnet in one click; Spark's Mainnet asks for the person's Breez API key, Bark's is one click too (barkMainnet.test.ts)", async () => {
+    const { node, breez, wallets, started } = engine();
     await started;
     expect((await node.walletCreate({ type: "bark", network: "testnet" })).config).toEqual({ chain: "signet", provider: TESTNET_BARK.provider });
     expect((await node.walletCreate({ type: "spark", network: "testnet" })).config).toEqual({ chain: "regtest" });
-    await expect(node.walletCreate({ type: "spark", network: "mainnet" })).rejects.toThrow(SPARK_MAINNET_NOT_YET);
+    expect(node.getState().wallet.offers?.find((o) => o.type === "spark" && o.network === "mainnet")).toMatchObject({ available: true, exists: false, needs: "apiKey" });
+    await expect(node.walletCreate({ type: "spark", network: "mainnet" })).rejects.toThrow(SPARK_MAINNET_NEEDS_KEY);
     expect(wallets()).toEqual(["bark:testnet", "spark:testnet"]);
+    expect((await node.walletCreate({ type: "spark", network: "mainnet", apiKey: "breez-key" })).config).toEqual({ chain: "bitcoin" });
+    expect(breez.connects.at(-1)).toMatchObject({ network: "mainnet", apiKey: "breez-key" });
+    expect(wallets()).toEqual(["bark:testnet", "spark:mainnet", "spark:testnet"]);
     const offers = node.getState().wallet.offers ?? [];
     expect(offers.find((o) => o.type === "bark" && o.network === "mainnet")).toMatchObject({ available: true, exists: false });
-    expect(offers.find((o) => o.type === "spark" && o.network === "mainnet")).toMatchObject({ available: false, reason: SPARK_MAINNET_NOT_YET });
+    expect(offers.find((o) => o.type === "spark" && o.network === "mainnet")).toMatchObject({ available: true, exists: true });
     expect(offers.find((o) => o.type === "bark" && o.network === "testnet")).toMatchObject({ available: true, exists: true });
   });
 
-  it("Fedimint asks for its one thing, an invite, and joins only a federation of its network", async () => {
+  it("Fedimint asks for its one thing, an invite, on either network, and joins only a federation of that network", async () => {
     const { node, fedimint, wallets, started } = engine();
     await started;
     const federation = fedimint.federation({ name: "Regtest federation" });
+    const real = fedimint.federation({ name: "Real federation", network: "bitcoin" });
     await expect(node.walletCreate({ type: "fedimint", network: "testnet" })).rejects.toThrow("Paste the federation's invite code");
-    await expect(node.walletCreate({ type: "fedimint", network: "mainnet", invite: federation.invite })).rejects.toThrow(FEDIMINT_MAINNET_UNAVAILABLE);
-    const real = fedimint.federation({ network: "bitcoin" });
+    await expect(node.walletCreate({ type: "fedimint", network: "mainnet", invite: federation.invite })).rejects.toThrow("it belongs in a Testnet Fedimint wallet");
     await expect(node.walletCreate({ type: "fedimint", network: "testnet", invite: real.invite })).rejects.toThrow("it belongs in a Mainnet Fedimint wallet");
     expect((await node.walletCreate({ type: "fedimint", network: "testnet", invite: federation.invite })).config).toEqual({ federations: "1" });
-    expect(wallets()).toEqual(["fedimint:testnet"]);
-    expect(node.getState().wallet.offers?.find((o) => o.type === "fedimint" && o.network === "testnet")).toMatchObject({ available: true, needs: "invite" });
+    expect((await node.walletCreate({ type: "fedimint", network: "mainnet", invite: real.invite })).config).toEqual({ federations: "1" });
+    expect(wallets()).toEqual(["fedimint:mainnet", "fedimint:testnet"]);
+    for (const network of ["mainnet", "testnet"] as const) expect(node.getState().wallet.offers?.find((o) => o.type === "fedimint" && o.network === network)).toMatchObject({ available: true, needs: "invite" });
   });
 
   it("Lightning and on-chain ask only for their source's form, filled with the network's defaults; a source of another network is refused", async () => {

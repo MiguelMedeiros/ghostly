@@ -8,7 +8,7 @@
 | Revision | 0.1 |
 | Updated | 2026-09-26 |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Lightning 203](203-lightning.md) (the Breez source shares the wallet), authenticated live data transport |
-| Implementation | Experimental browser adapter, Breez SDK Spark `@breeztech/breez-sdk-spark` 0.26.0 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click. Mainnet is not offered yet ("Not yet" in New: never tried with real funds). |
+| Implementation | Experimental browser adapter, Breez SDK Spark `@breeztech/breez-sdk-spark` 0.26.0 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click, and a Mainnet wallet once the person gives their Breez API key. |
 
 ## Scope and SDK choice
 
@@ -18,7 +18,7 @@ Checked on 2026-09-24:
 
 - **SDK.** Breez SDK Spark already sends and receives on Spark natively. `receivePayment` makes a Spark address or a Spark invoice. `prepareSendPayment` of either answers with `paymentMethod.type` `sparkAddress` / `sparkInvoice` and a flat fee, and `sendPayment` takes an idempotency key. So the SDK the Breez source already loads serves the rail too: the same WebAssembly runs in the web app, the extension's offscreen document and Desktop's WebView. Spark's own SDK (`@buildonspark/spark-sdk`) was not chosen. A second SDK would keep a second copy of the same seed's leaves, and two SDKs moving one seed's leaves would race.
 - **One seed.** The rail owns a wallet per profile and network. The Breez connection is shared per seed and storage (`openBreez`): the Spark rail and a Breez Lightning source of the same seed are one SDK instance, one database and one balance. "Use for Lightning too" (Testnet) adds a Breez Lightning card on the Spark wallet's own phrase and makes it the default for receiving.
-- **Network and key.** Breez offers `mainnet` and `regtest`. Regtest is hosted by Breez and Lightspark and needs **no API key** (verified here and in 203). Mainnet needs a Breez API key (free, https://breez.technology/request-api-key/), sealed with the phrase and never committed. The engine can open a Mainnet wallet with one, but New does not offer Spark on Mainnet yet (`SPARK_MAINNET_NOT_YET`). Spark's own testnet and signet are not offered by the SDK, so the payment networks are `bitcoin` and `regtest` only.
+- **Network and key.** Breez offers `mainnet` and `regtest`. Regtest is hosted by Breez and Lightspark and needs **no API key** (verified here and in 203). Mainnet needs a Breez API key (free, https://breez.technology/request-api-key/), sealed with the phrase and never committed. New asks for it on Mainnet ("Create…") and makes nothing without one. Spark's own testnet and signet are not offered by the SDK, so the payment networks are `bitcoin` and `regtest` only.
 - **Tokens.** Spark carries tokens (BTKN), and the SDK takes a `tokenIdentifier`. This draft pays sats only: a token invoice is refused, and the prepared payment must carry no token. A token rail is later work (asset, decimals, review wording).
 
 ## Addresses, invoices and targets

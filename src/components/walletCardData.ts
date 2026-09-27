@@ -131,7 +131,6 @@ function lightningCard(s:WalletState,cashu:string,unit:string):Face {
 function fedimintCard(s:WalletState,unit:string):Face {
  const fm=s.fedimint,federations=fm?.federations??[],ready=federations.some(f=>f.status==='ready');
  const detail=federations.length===1?federations[0].name??'1 federation':federations.length?`${federations.length} federations`:'Federation ecash';
- if(fm?.unavailable)return {name:'Fedimint',balance:'Testnet only',detail,status:'Not on Mainnet yet',ready:false};
  if(!federations.length)return {name:'Fedimint',balance:'No federation',detail,status:'Set up',ready:false};
  return {name:'Fedimint',balance:ready?`${(fm!.balance).toLocaleString()} ${unit}`:federations.some(f=>f.status==='error')?'Unavailable':'Connecting…',detail,status:ready?'Ready':'Connecting…',ready};
 }

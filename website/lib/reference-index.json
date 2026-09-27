@@ -352,7 +352,7 @@
     "title": "WISP 2xx: Fedimint ecash and Lightning through a federation",
     "status": "Draft",
     "updated": "2026-09-26",
-    "implementation": "Experimental browser adapter on the Fedimint web SDK (@fedimint/core canary, pinned). Testnet only: New shows Mainnet Fedimint as \"Not yet\" (FEDIMINTMAINNET); regtest evidence below.",
+    "implementation": "Experimental browser adapter on the Fedimint web SDK (@fedimint/core canary, pinned). Mainnet and Testnet, each joined by invite code; regtest evidence below (Mainnet not yet exercised with real funds).",
     "documentKind": "Adapter",
     "dependencies": [
       "200-payments.md",
@@ -370,7 +370,7 @@
     "title": "WISP 2xx: Spark payments",
     "status": "Draft",
     "updated": "2026-09-26",
-    "implementation": "Experimental browser adapter, Breez SDK Spark @breeztech/breez-sdk-spark 0.26.0 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click. Mainnet is not offered yet (\"Not yet\" in New: never tried with real funds).",
+    "implementation": "Experimental browser adapter, Breez SDK Spark @breeztech/breez-sdk-spark 0.26.0 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click, and a Mainnet wallet once the person gives their Breez API key.",
     "documentKind": "Adapter",
     "dependencies": [
       "200-payments.md",

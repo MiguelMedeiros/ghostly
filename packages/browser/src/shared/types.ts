@@ -512,7 +512,7 @@ export interface WalletOffer {
   exists?: boolean;
   /** A network can have several of it (Lightning): New adds one more, whatever `exists` says. */
   several?: boolean;
-  needs?: "invite" | "provider";
+  needs?: "invite" | "provider" | "apiKey";
   /** Lightning and on-chain: the sources that can be picked on this network. */
   providers?: ProviderDescriptorView[];
 }
@@ -526,6 +526,8 @@ export interface WalletCreate {
   values?: Record<string, string>;
   /** Fedimint: the federation's invite code. */
   invite?: string;
+  /** Spark on Mainnet: the person's Breez API key. */
+  apiKey?: string;
 }
 
 /** What Remove asks the engine to take away (see `walletRemove`). */

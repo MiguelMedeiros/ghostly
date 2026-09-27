@@ -28,10 +28,12 @@ describe("SourcePicker", () => {
       expect(status()).toHaveTextContent("Not set up");
       expect(screen.getByText("Choose a source")).toBeInTheDocument();
       expect(screen.queryByTestId("lightning-source-clear")).not.toBeInTheDocument();
-      expect(screen.getByRole("combobox", { name: "Lightning source" })).toHaveTextContent("5 available…");
+      expect(screen.getByRole("combobox", { name: "Lightning source" })).toHaveTextContent("7 available…");
       // Registry order; custodial and experimental ones say so.
       expect((await options(user)).map((o) => o.text)).toEqual([
         "Cashu mints · Custodial",
+        "Fedimint · Custodial · Experimental",
+        "Breez (Spark) · Experimental",
         "Nostr Wallet Connect",
         "Core Lightning",
         "Browser wallet (WebLN) · Experimental",
@@ -106,8 +108,8 @@ describe("SourcePicker", () => {
       expect(screen.getByTestId("lightning-source-none-offered")).toHaveTextContent(/^No Lightning provider is available here yet in Testnet\.$/);
     });
 
-    it("offers Breez in Testnet only, as experimental", async () => {
-      const { user } = picker("lightning", sourceView({ mode: "testnet", offered: offered("lightning", "testnet") }));
+    it.each(["mainnet", "testnet"] as const)("offers Breez in %s, as experimental", async (mode) => {
+      const { user } = picker("lightning", sourceView({ mode, offered: offered("lightning", mode) }));
       expect((await options(user)).map((o) => o.text)).toContain("Breez (Spark) · Experimental");
     });
 

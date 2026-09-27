@@ -215,11 +215,11 @@
     "family": "2",
     "kind": "Payment rail",
     "status": "Available",
-    "note": "test networks only",
+    "note": "Mainnet and Testnet",
     "level": "available",
     "range": "2xx",
     "section": "Rails and wallet adapters",
-    "body": "**Provider / signer route**\n\nFedimint web SDK (`@fedimint/core` canary, pinned; WebAssembly client in Ghostly's own worker, one OPFS database per federation), v1 mint/ln modules, the federation's gateway\n\n**Runtime and platform route**\n\nWeb/WASM, one path for web, extension offscreen page and Desktop WebView; upstream Rust client for native\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Available: test networks only** (#192): [technical reference](https://docs.fedimint.org/), [web SDK](https://github.com/fedimint/fedimint-sdk). Its own method `fedimint` (`fedimint-ecash/1`, paired-payments list only); notes are never Cashu tokens. Checked 2026-09-24/25 on a regtest federation (fedimintd/gatewayd 0.12.1, LND gateway) in e2e/infra: join by invite after a preview, ecash in over the gateway, notes out/redeemed/taken back, a chat Send in ecash reviewed and redeemed, a request paid over the gateway's Lightning, Lightning out to another node; the `fedimint` Lightning source. Journal before spend, operation-log reconciliation, federation identity (id, network) and recovery-based restore are implemented; Mainnet joins no federation and says so (`FEDIMINT_MAINNET = false`, `wallet.fedimint.mainnet-off`); Mainnet, iroh federations, gateway refunds and multi-guardian failures remain open. See [Draft 2xx](2xx-fedimint.md).",
+    "body": "**Provider / signer route**\n\nFedimint web SDK (`@fedimint/core` canary, pinned; WebAssembly client in Ghostly's own worker, one OPFS database per federation), v1 mint/ln modules, the federation's gateway\n\n**Runtime and platform route**\n\nWeb/WASM, one path for web, extension offscreen page and Desktop WebView; upstream Rust client for native\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Available: Mainnet and Testnet** (#192): [technical reference](https://docs.fedimint.org/), [web SDK](https://github.com/fedimint/fedimint-sdk). Its own method `fedimint` (`fedimint-ecash/1`, paired-payments list only); notes are never Cashu tokens. Checked 2026-09-24/25 on a regtest federation (fedimintd/gatewayd 0.12.1, LND gateway) in e2e/infra: join by invite after a preview, ecash in over the gateway, notes out/redeemed/taken back, a chat Send in ecash reviewed and redeemed, a request paid over the gateway's Lightning, Lightning out to another node; the `fedimint` Lightning source. Journal before spend, operation-log reconciliation, federation identity (id, network) and recovery-based restore are implemented; Mainnet joins federations on Bitcoin by invite like Testnet (`wallet.fedimint.mainnet`), not yet exercised with real funds; iroh federations, gateway refunds and multi-guardian failures remain open. See [Draft 2xx](2xx-fedimint.md).",
     "sourceAnchor": "rails-and-wallet-adapters"
   },
   {
@@ -228,11 +228,11 @@
     "family": "2",
     "kind": "Payment rail",
     "status": "Available",
-    "note": "test networks only",
+    "note": "Mainnet and Testnet",
     "level": "available",
     "range": "2xx",
     "section": "Rails and wallet adapters",
-    "body": "**Provider / signer route**\n\nBreez SDK Spark (WebAssembly `@breeztech/breez-sdk-spark` 0.26.0, nodeless), the same SDK and seed as the Breez Lightning source; Spark's operators and Lightspark's SSP\n\n**Runtime and platform route**\n\nOne WebAssembly path for web, extension offscreen page and Desktop WebView\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Available: test networks only** (#188): its own method `spark` (announced in the session's payment list only), [Draft 2xx](2xx-spark.md). Spark to Spark with Spark addresses (static: the wallet's identity) and Spark invoices (per request: amount, expiry, id), no Lightning hop. Testnet on Breez and Lightspark's hosted regtest (no API key, proven, `payments.spark.send`); Mainnet is not offered: New shows it as \"Not yet\", never tried with real funds (`SPARK_MAINNET_NOT_YET`); the engine still needs the person's own Breez API key for a Mainnet Spark wallet (`wallet.spark.mainnet-key`). \"Use for Lightning too\" makes the same wallet the Breez source. Unilateral exit, Spark tokens and the faucet (reCAPTCHA) remain open.",
+    "body": "**Provider / signer route**\n\nBreez SDK Spark (WebAssembly `@breeztech/breez-sdk-spark` 0.26.0, nodeless), the same SDK and seed as the Breez Lightning source; Spark's operators and Lightspark's SSP\n\n**Runtime and platform route**\n\nOne WebAssembly path for web, extension offscreen page and Desktop WebView\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Available: Mainnet and Testnet** (#188): its own method `spark` (announced in the session's payment list only), [Draft 2xx](2xx-spark.md). Spark to Spark with Spark addresses (static: the wallet's identity) and Spark invoices (per request: amount, expiry, id), no Lightning hop. Testnet on Breez and Lightspark's hosted regtest (no API key, proven, `payments.spark.send`); Mainnet on the person's own Breez API key, which New asks for (`wallet.spark.mainnet-key`). \"Use for Lightning too\" makes the same wallet the Breez source. Unilateral exit, Spark tokens and the faucet (reCAPTCHA) remain open.",
     "sourceAnchor": "rails-and-wallet-adapters"
   },
   {

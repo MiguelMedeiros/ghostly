@@ -6,7 +6,7 @@ import type { WalletNetwork, WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
 import { arkReady, barkReady, sparkReady, bitcoinSource, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "./fixtures";
 
-// covers: wallet.deck, wallet.mode, wallet.instances.networks, wallet.fedimint.join, wallet.fedimint.mainnet-off
+// covers: wallet.deck, wallet.mode, wallet.instances.networks, wallet.fedimint.join
 
 const cardsOf = (wallet: Partial<WalletView> = {}) => walletCards(walletView(wallet) as WalletState);
 /** One wallet's card, as the wallet page and the chat's picker show it, by its id (`cashu:testnet`). */
@@ -248,10 +248,6 @@ describe("USDT", () => {
 describe("Fedimint", () => {
   const federation = (over: Record<string, unknown> = {}) => ({ id: "ab".repeat(32), name: "Ghostly regtest", guardians: [{ name: "g0", url: "ws://127.0.0.1:47095" }], consensusVersion: "2.1", network: "regtest" as const,
     modules: ["ln", "mint", "wallet"], joinedAt: 1, invite: "fed11qq", balance: 0, status: "ready" as const, lightning: true, ...over });
-  it("says it is Testnet only on Mainnet", () => {
-    expect(faceOf("fedimint", "mainnet", { fedimint: { unavailable: "not yet", federations: [], balance: 0, history: [] } }))
-      .toEqual({ name: "Fedimint", balance: "Testnet only", detail: "Federation ecash", status: "Not on Mainnet yet", ready: false });
-  });
   it("asks for a federation, and joins none by itself", () => {
     const fedimint = { federations: [], balance: 0, history: [] };
     expect(cardsOf({ fedimint }).map((c) => c.id)).toEqual([]);

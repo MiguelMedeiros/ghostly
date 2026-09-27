@@ -622,7 +622,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `wallet.ark.boarding` | 202 | WED | 1 | · | 1 | · | · | · |
 | `wallet.ark.send` | 202 | WED | 1 | · | · | · | · | 2 |
 | `wallet.ark.recover` | 202 | WED | 1 | · | · | · | · | · |
-| `wallet.fedimint.mainnet-off` | 207 | WED | 3 | · | 2 | · | · | · |
+| `wallet.fedimint.mainnet` | 207 | WED | 2 | · | 2 | · | · | · |
 | `wallet.fedimint.join` | 207 | WED | 2 | · | · | · | · | 1 |
 | `wallet.fedimint.notes` | 207 | WED | 1 | · | · | · | · | 1 |
 | `wallet.fedimint.backup` | 207 | WED | 1 | · | · | · | · | · |
@@ -630,7 +630,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `wallet.bark.create` | 204 | WED | 3 | · | 1 | · | · | · |
 | `wallet.bark.send` | 204 | WED | 2 | · | · | · | · | 1 |
 | `wallet.bark.backup` | 204 | WED | 2 | · | · | · | · | · |
-| `wallet.spark.mainnet-key` | 206 | WED | 2 | · | 1 | · | · | · |
+| `wallet.spark.mainnet-key` | 206 | WED | 3 | · | 1 | · | · | · |
 | `wallet.spark.create` | 206 | WED | 1 | · | 1 | · | · | · |
 | `wallet.spark.send` | 206 | WED | 2 | · | · | · | · | 1 |
 | `wallet.spark.backup` | 206 | WED | 1 | · | 1 | · | · | · |

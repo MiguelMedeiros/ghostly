@@ -65,7 +65,7 @@ export const roadmap = {
         { text: "Mainnet and Testnet wallets side by side, a confirmation before real money moves", level: "available" },
         { text: "Cashu and Lightning, through the mint or your own sources (NWC, LND, Core Lightning, WebLN), several Lightning cards per network", level: "available" },
         { text: "Lightning addresses, and paying a request from any wallet", level: "available" },
-        { text: "Ark (Arkade and Bark), Spark, Fedimint, USDT and on-chain bitcoin, experimental; several on test networks only", level: "available" },
+        { text: "Ark (Arkade and Bark), Spark, Fedimint, USDT and on-chain bitcoin, experimental; BDK on test networks only", level: "available" },
       ],
       next: [
         { text: "Mainnet for Spark, Breez, BDK and Fedimint, once reviewed with real money in mind", level: "planned" },

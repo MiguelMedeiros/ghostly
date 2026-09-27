@@ -6,7 +6,7 @@ import { paymentCard } from "../support/payments";
 /**
  * Spark as its own way of paying: Spark to Spark, with Spark addresses and invoices, through the Breez SDK (the
  * same WebAssembly the Breez Lightning source loads). A Testnet Spark wallet, made with New, runs on Breez and
- * Lightspark's hosted regtest, with no API key; New makes no Mainnet one yet, and says why.
+ * Lightspark's hosted regtest, with no API key; a Mainnet one needs the person's Breez API key, which New asks for.
  *
  * Money moving: GHOSTLY_SPARK_REGTEST=1 and GHOSTLY_SPARK_COUNTERPART (a funded regtest wallet's phrase, see
  * e2e/support/spark.ts and e2e/README.md).
@@ -20,19 +20,23 @@ const composer = async (p: Peer, amount: string) => {
   await p.page.getByTestId("payment-amount").fill(amount);
 };
 
-test("Spark is not on Mainnet yet: New says so, with its reason, and makes nothing", { tag: ["@feature:wallet.spark.mainnet-key", "@feature:wallet.instances.create"] }, async ({ peer }) => {
+test("Spark on Mainnet: New asks for a Breez API key first, and makes nothing without one", { tag: ["@feature:wallet.spark.mainnet-key", "@feature:wallet.instances.create"] }, async ({ peer }) => {
   const alice = await peer("spark-mainnet", { offlineMainnet: true });
   await openWallet(alice);
   await alice.page.getByTestId("wallet-add").click();
   const dialog = alice.page.getByTestId("new-wallet");
   await dialog.getByRole("radio", { name: "Mainnet" }).click();
   const spark = dialog.getByTestId("new-wallet-type-spark");
-  await expect(spark).toHaveAttribute("aria-disabled", "true");
-  await expect(dialog.getByTestId("new-wallet-type-spark-status")).toHaveText("Not yet");
-  await expect(spark).toContainText("Spark on Mainnet has not been tried with real funds yet");
-  await expect(spark).toHaveAttribute("title", /Create a Testnet Spark wallet/);
-  await spark.click({ force: true });
+  await expect(dialog.getByTestId("new-wallet-type-spark-status")).toHaveText("Create…");
+  await expect(spark).toContainText("with your Breez API key");
+  await spark.click();
   await expect(dialog.getByTestId("new-wallet-progress")).toHaveCount(0);
+  const key = dialog.getByTestId("new-wallet-api-key");
+  await expect(key).toHaveAttribute("type", "password");
+  await expect(dialog.getByTestId("new-wallet-create")).toBeDisabled();
+  await key.fill("breez-key");
+  await expect(dialog.getByTestId("new-wallet-create")).toBeEnabled();
+  await dialog.getByTestId("new-wallet-back").click();
   await dialog.getByRole("radio", { name: "Testnet" }).click();
   await expect(dialog.getByTestId("new-wallet-type-spark-status")).toHaveText("Create");
   await alice.page.keyboard.press("Escape");

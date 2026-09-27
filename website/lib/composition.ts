@@ -75,14 +75,14 @@ export const BLOCKS: Block[] = [
   // Payments
   b("cashu", "pay", "Cashu", "available", ["200-payments", "201-cashu"], "Ecash tokens in the chat; a mint you choose holds the funds."),
   b("lightning", "pay", "Lightning", "available", ["203-lightning"], "Invoices in the chat, paid and received through your Cashu mint or your own Lightning source. Several Lightning cards per network, one of them the default for receiving."),
-  b("lnproviders", "pay", "Lightning sources", "available", ["203-lightning"], "Your own node or wallet as the Lightning source: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only), Breez (test networks only) or a Fedimint federation (test networks only)."),
+  b("lnproviders", "pay", "Lightning sources", "available", ["203-lightning"], "Your own node or wallet as the Lightning source: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only), Breez (Mainnet with your own API key) or a Fedimint federation."),
   b("lnurl", "pay", "Lightning addresses", "available", ["205-lnurl"], "Pay name@domain or an LNURL through your Lightning source, from the wallet or from a chat. Paying only: receiving on an address needs a server."),
   b("external", "pay", "Pay from any wallet", "available", ["200-payments"], "A request paid by a wallet that is not Ghostly: QR, text or a lightning:/bitcoin: link. The payee's own source confirms it, never the payer's word."),
   b("onchain", "pay", `On-chain${D}BDK${D}Bitcoin Core`, "available", [], "Plain bitcoin in a chat, through a BDK wallet (test networks) or your own Bitcoin Core node (desktop).", ["adapter-roadmap"]),
   b("arkade", "pay", `Ark${D}Arkade`, "available", ["202-arkade"], "Exact Ark payments through a pinned operator: Arkade on Mainnet, mutinynet on Testnet. Experimental: payments were tested on regtest only, and there is no unilateral exit yet."),
   b("bark", "pay", `Ark${D}Bark`, "available", ["204-bark"], "A second Ark provider (Second's Bark): on Mainnet through Second's server, signet on Testnet, with no unilateral exit yet. Its own method and capability, not interchangeable with Arkade."),
-  b("spark", "pay", "Spark", "available", ["2xx-spark"], "Spark to Spark, wallet to wallet, on the same seed as the Breez Lightning source. Testnet only: Mainnet shows as Not yet."),
-  b("fedimint", "pay", "Fedimint", "available", ["2xx-fedimint"], "Ecash from a federation you join by invite code, in a chat and as a Lightning source through its gateway. Test networks only: Mainnet joins nothing yet."),
+  b("spark", "pay", "Spark", "available", ["2xx-spark"], "Spark to Spark, wallet to wallet, on the same seed as the Breez Lightning source. Mainnet with your own Breez API key; Testnet on regtest."),
+  b("fedimint", "pay", "Fedimint", "available", ["2xx-fedimint"], "Ecash from a federation you join by invite code, in a chat and as a Lightning source through its gateway, on Mainnet and Testnet."),
   b("usdt", "pay", `USDT${D}WDK`, "available", [], "USDT on Ethereum through Tether WDK, signed locally. Experimental; no WISP number.", ["usdt-integration"]),
   b("testnet", "pay", "Wallets per network", "available", [], "A wallet per network, Mainnet and Testnet side by side; test coins come from Get test coins. Real money is always confirmed first, and a wallet with money still on its way is not removed by accident."),
 

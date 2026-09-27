@@ -43,8 +43,6 @@ export function FedimintWalletPanel({ wallet, state }: { wallet: WalletPlatform;
   const ready = current?.status === "ready";
   const lnSource = state.lightning?.providerId === "fedimint";
 
-  if (fm?.unavailable) return <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="fedimint-wallet"><p className="text-text-primary">Fedimint is Testnet only for now</p><Notice testId="fedimint-unavailable">{fm.unavailable}</Notice></div>;
-
   const join = <Section title={federations.length ? "Join another federation" : "Join a federation"}>
     <Block>
       <p className="text-xs text-text-muted">A federation is a group of guardians who hold the bitcoin together and issue ecash for it. Joining one is trusting them with what you keep there. Paste its invite code (fed1…).</p>

@@ -1,20 +1,20 @@
 import { BREEZ_TESTNET, counterpart, type Counterpart } from "../support/breez";
 import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
-import { choose, optionsOf, close } from "../support/select";
+import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
 
 /**
  * Breez (the nodeless Breez SDK, on Spark) as the Lightning source. Its wallet is Ghostly's to make: a
  * new one gets a recovery phrase shown once, an existing one is restored from its phrase. New offers it for a
- * Testnet Lightning wallet only for now (Breez's regtest); Mainnet needs an API key and is not offered yet.
+ * Lightning wallet on Testnet (Breez's regtest, no API key) and on Mainnet, where its form requires a Breez API key.
  *
  * Money moving, on Breez's hosted regtest (no API key, worthless sats): GHOSTLY_BREEZ_TESTNET=1, with a
  * counterpart wallet run from Node (e2e/support/breez.ts). See e2e/README.md.
  */
 const source = (p: Peer) => p.page.getByTestId("lightning-source");
 
-test("Breez is offered for Testnet Lightning only, and its form makes or restores a wallet", { tag: ["@feature:wallet.lightning.breez.connect", "@feature:wallet.instances.create"] }, async ({ peer }) => {
+test("Breez is offered for Lightning on both networks (Mainnet asks for its API key), and its form makes or restores a wallet", { tag: ["@feature:wallet.lightning.breez.connect", "@feature:wallet.instances.create"] }, async ({ peer }) => {
   const alice = await peer("breez-form");
   await openWallet(alice);
   await alice.page.getByTestId("wallet-add").click();
@@ -22,8 +22,14 @@ test("Breez is offered for Testnet Lightning only, and its form makes or restore
   const sources = dialog.getByTestId("new-wallet-provider-select");
   await dialog.getByRole("radio", { name: "Mainnet" }).click();
   await dialog.getByTestId("new-wallet-type-lightning").click();
-  await expect((await optionsOf(sources)).filter({ hasText: /Breez/ })).toHaveCount(0);
-  await close(sources);
+  await choose(sources, "breez");
+  const mainnetForm = dialog.getByTestId("provider-form-breez");
+  await mainnetForm.getByTestId("breez-phrase-written").check();
+  // Mainnet needs the person's Breez API key before anything is made.
+  await expect(mainnetForm.getByTestId("provider-save")).toBeDisabled();
+  await mainnetForm.getByLabel("Breez API key").fill("breez-key");
+  await expect(mainnetForm.getByTestId("provider-save")).toBeEnabled();
+  await dialog.getByTestId("new-wallet-back").click();
 
   await dialog.getByRole("radio", { name: "Testnet" }).click();
   await dialog.getByTestId("new-wallet-type-lightning").click();
