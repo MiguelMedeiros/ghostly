@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, DiscoveryBudgetError, REQUESTS_PER_MINUTE, RelayTransport, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, CHAT_RESERVE, DiscoveryBudgetError, REQUESTS_PER_MINUTE, RelayTransport, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 // covers: core.relay-client
 
 describe("relay transport", () => {
@@ -332,5 +332,115 @@ describe("relay transport: the budget holds requests back as a wait", () => {
     const foreign = Object.assign(new Error("Discovery request budget reached; retry shortly"), { code: "discovery-budget", retryInMs: 1_000 });
     expect(isDiscoveryBudgetError(foreign)).toBe(true);
     expect(isDiscoveryBudgetError(new Error("Discovery request budget reached; retry shortly"))).toBe(false);
+  });
+});
+
+describe("relay transport: a chat before its groups", () => {
+  // A profile in several groups: an edge per member polls and signals. A 1:1 chat that is using the relay keeps the
+  // last CHAT_RESERVE requests of each minute; with no chat about, the groups have them all.
+  const id = createIdentity();
+  function counting() {
+    const log: { method: string; at: number }[] = [];
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+      log.push({ method: init?.method ?? "GET", at: Date.now() });
+      return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+    }) as typeof fetch });
+    return { relay, log, group: withRequestOptions(relay, { group: true }) };
+  }
+
+  it("leaves a chat that is using the relay the end of the minute, whatever the groups ask", async () => {
+    const { relay, log, group } = counting();
+    await relay.resolve(id.pubKeyZ32);
+    // The groups' edges poll and signal: they stop short of the chat's share…
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32).catch(() => {});
+    expect(log).toHaveLength(REQUESTS_PER_MINUTE - CHAT_RESERVE);
+    const refused = await group.publish(createIdentity(), [{ label: "_ts", value: "1" }]).catch((e: unknown) => e);
+    expect(isDiscoveryBudgetError(refused)).toBe(true);
+    await expect(group.resolve(createIdentity().pubKeyZ32)).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    // …and the chat's message goes out at once, as do its looks for the receipt.
+    await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }]);
+    for (let i = 0; i < CHAT_RESERVE - 1; i++) await relay.resolve(id.pubKeyZ32);
+    expect(log).toHaveLength(REQUESTS_PER_MINUTE);
+  });
+
+  it("counts a group's background looks (a community hub's) toward the groups' share too", async () => {
+    const { relay, log, group } = counting();
+    await relay.resolve(id.pubKeyZ32);
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32, { background: true }).catch(() => {});
+    expect(log).toHaveLength(Math.min(1 + BACKGROUND_REQUESTS_PER_MINUTE, REQUESTS_PER_MINUTE - CHAT_RESERVE));
+  });
+
+  it("gives the groups the whole minute when no chat is about, and again a minute after the chat's last request", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { relay, log, group } = counting();
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32);
+      expect(log).toHaveLength(REQUESTS_PER_MINUTE);
+
+      const start = Date.now() + 60_000;
+      vi.setSystemTime(start);
+      await relay.resolve(id.pubKeyZ32);
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32);
+      expect(log).toHaveLength(REQUESTS_PER_MINUTE + REQUESTS_PER_MINUTE - CHAT_RESERVE);
+      // The chat went quiet: once its minute is over, the groups take what is free.
+      vi.setSystemTime(start + 60_000);
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32);
+      expect(log.filter((r) => r.at >= start + 60_000)).toHaveLength(REQUESTS_PER_MINUTE);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("says how long a group's request waits: until the chat's reserve lapses or the minute frees one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { relay, group } = counting();
+      const start = Date.now();
+      await relay.resolve(id.pubKeyZ32);
+      vi.setSystemTime(start + 5_000);
+      for (let i = 0; i < REQUESTS_PER_MINUTE - CHAT_RESERVE - 1; i++) await group.resolve(id.pubKeyZ32);
+      vi.setSystemTime(start + 10_000);
+      const refused = await group.publish(createIdentity(), [{ label: "_ts", value: "1" }]).catch((e: unknown) => e) as DiscoveryBudgetError;
+      expect(isDiscoveryBudgetError(refused)).toBe(true);
+      // The chat's request at `start` frees a request of the groups' share, and ends its reserve, at start + 60 s.
+      expect(refused.retryInMs).toBe(50_000);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("lets a chat's refused write go before a group's requests, and a group's refused write never holds a chat back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { relay, log, group } = counting();
+      const start = Date.now();
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await relay.resolve(id.pubKeyZ32);
+      const message = createIdentity();
+      await expect(relay.publish(message, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+      // The chat tries again every few seconds, refused while the minute is full…
+      vi.setSystemTime(start + 57_000);
+      await expect(relay.publish(message, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+      // …then the minute frees a request: the group's poll and even its write wait, the chat's write goes.
+      vi.setSystemTime(start + 60_000);
+      await expect(group.resolve(createIdentity().pubKeyZ32)).rejects.toBeInstanceOf(DiscoveryBudgetError);
+      await expect(group.publish(createIdentity(), [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+      await relay.publish(message, [{ label: "_ts", value: "2" }]);
+      expect(log.filter((r) => r.method === "PUT")).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not hold a chat's reads back for a group's refused write", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { relay, log, group } = counting();
+      const start = Date.now(), offer = createIdentity();
+      // No chat about: the groups spend the minute, and an edge's offer is refused, and again at its next try.
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32);
+      await expect(group.publish(offer, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+      vi.setSystemTime(start + 57_000);
+      await expect(group.publish(offer, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+      // The first request frees: a chat's read takes it, the offer does not hold it back…
+      vi.setSystemTime(start + 60_000);
+      await relay.resolve(id.pubKeyZ32);
+      expect(log).toHaveLength(REQUESTS_PER_MINUTE + 1);
+      // …while a group's own read still lets the offer go first.
+      await expect(group.resolve(createIdentity().pubKeyZ32)).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    } finally { vi.useRealTimers(); }
   });
 });

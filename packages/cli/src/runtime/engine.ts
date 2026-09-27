@@ -92,13 +92,16 @@ function irohWasmBytes(): Buffer {
   return readFileSync(createRequire(import.meta.url).resolve("@ghostly/iroh-web/wasm"));
 }
 
+/** How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat). */
+export interface RuntimeOptions { deferGroups?: boolean }
+
 /**
  * Starts the app's engine on this profile (WISP 11xx § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
  * HyperDHT native in this process, Iroh's wasm build (relay only, as the web app), Pkarr through the relays in the
  * settings and the Mainline DHT directly (read when the relays fail, written always).
  * The caller holds the profile's lock.
  */
-export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
+export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions = {}): Promise<Runtime> {
   // `GHOSTLY_LINK_TRACE=<file>`: each step of each chat's way to live, one JSON line (packages/core/src/linkTrace.ts),
   // as the Desktop writes to its log. For measuring, not needed to run.
   const trace = process.env.GHOSTLY_LINK_TRACE;
@@ -136,6 +139,7 @@ export async function startRuntime(paths: ProfilePaths): Promise<Runtime> {
     localFetch: nodeLocalFetch,
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
+    ...(options.deferGroups ? { deferGroups: true } : {}),
   });
   try {
     await server.ready;

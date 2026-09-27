@@ -3,6 +3,12 @@ import { createRelayPayload, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
+/** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
+interface Asker { background: boolean; group: boolean; write: boolean }
+const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, write });
+/** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
+const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
+
 /**
  * Public Pkarr relays. They are generic Pkarr infrastructure (an HTTP bridge to
  * the Mainline DHT), not a Ghostly backend: they only ever see signed,
@@ -43,6 +49,13 @@ export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
  * only thing that peer is waiting for) would go out only once the polling slowed down, half a minute later.
  */
 export const WRITE_FIRST_MS = 5_000;
+/**
+ * While a 1:1 chat is using a relay (a request of its signaling or delivery, neither `background` nor `group`, in the
+ * last minute), group requests leave it the last this many of the minute. A profile in several groups starts an edge
+ * per member, and their first polls spent a fresh app's minute in seconds: a message then waited for the next one.
+ * With no chat about, groups get the whole budget.
+ */
+export const CHAT_RESERVE = 10;
 /** A relay that fails at the network level is left alone for this long. */
 const NETWORK_ERROR_COOLDOWN_MS = 20_000;
 /**
@@ -88,8 +101,10 @@ export class RelayTransport implements PkarrTransport {
   private cursor = 0;
   private readonly spent = new Map<string, number[]>();
   private readonly spentBackground = new Map<string, number[]>();
-  /** When a link's write was last refused on each relay, while it waits for the budget. */
+  /** When a link's write was last refused on each relay (`chat <relay>`, `group <relay>`), while it waits for the budget. */
   private readonly writeWaiting = new Map<string, number>();
+  /** When a 1:1 chat last asked each relay for a request: for the next minute, groups leave it `CHAT_RESERVE`. */
+  private readonly chatAsked = new Map<string, number>();
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
   private readonly lastPut = new Map<string, bigint>();
   private readonly perMinute: number;
@@ -200,9 +215,14 @@ export class RelayTransport implements PkarrTransport {
    */
   private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions): Promise<void> {
     const waitingBefore = new Map(this.writeWaiting);
+    const writer = firstWriter(asker(options, true));
     // Out on one relay: the link will not try again, so a relay that refused it has no write to wait for.
     const noWriteWaits = () => {
-      for (const relay of this.relays) if (this.writeWaiting.get(relay) !== waitingBefore.get(relay)) this.writeWaiting.delete(relay);
+      if (!writer) return;
+      for (const relay of this.relays) {
+        const key = `${writer} ${relay}`;
+        if (this.writeWaiting.get(key) !== waitingBefore.get(key)) this.writeWaiting.delete(key);
+      }
     };
     // Every relay left alone for failing: one of them is asked anyway, now and then (`allDownProbe`).
     const probe = this.breaker.allDownProbe(this.relays);
@@ -213,9 +233,9 @@ export class RelayTransport implements PkarrTransport {
 
       // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
       // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
-      let response = await this.put(relay, pubKeyZ32, payload, previous, options.background, relay === probe);
+      let response = await this.put(relay, pubKeyZ32, payload, previous, asker(options, true), relay === probe);
       // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
-      if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, options.background);
+      if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, asker(options, true));
       // The relay's own rate limit: this packet did not go in, and goes once the relay says so.
       if (response.status === 429) throw new DiscoveryBudgetError(this.coolDown(relay, response), `${relay} responded 429; retry shortly`);
       if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
@@ -261,6 +281,7 @@ export class RelayTransport implements PkarrTransport {
     const probe = this.breaker.allDownProbe(this.relays);
     // The soonest a relay passed over for its budget takes a request again, and whether one was down instead.
     let budgetWait = Infinity, down = false;
+    const who = asker(options, false);
     for (let i = 0; i < this.relays.length; i++) {
       const relay = this.relays[(start + i) % this.relays.length];
       if (relay !== probe && this.networkCoolingDown(relay, "GET")) { down = true; continue; }
@@ -272,7 +293,7 @@ export class RelayTransport implements PkarrTransport {
         if (this.breaker.blockedKind(relay) === "throttled") budgetWait = Math.min(budgetWait, blocked); else down = true;
         continue;
       }
-      if (!this.take(relay, options.background, false)) { budgetWait = Math.min(budgetWait, this.freeInMs(relay, options.background, false)); continue; }
+      if (!this.take(relay, who)) { budgetWait = Math.min(budgetWait, this.heldFor(relay, who)); continue; }
       if (relay === probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
       let status = 0;
       try {
@@ -307,8 +328,7 @@ export class RelayTransport implements PkarrTransport {
       }
     }
     if (!reachable) {
-      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || this.breaker.blockedFor(r) > 0 || (this.spent.get(r)?.length ?? 0) >= this.limitOf(r) || this.writeFirst(r)
-        || (!!options.background && (this.spentBackground.get(r)?.length ?? 0) >= this.backgroundPerMinute));
+      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || this.breaker.blockedFor(r) > 0 || this.heldFor(r, who) > 0);
       // Holding back is not an outage: report what is already known…
       if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
       // …or, knowing nothing yet, that the read waits for the budget.
@@ -318,7 +338,7 @@ export class RelayTransport implements PkarrTransport {
     return this.newest.get(pubKeyZ32) ?? null;
   }
 
-  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint, background = false, probe = false): Promise<Response> {
+  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces: bigint | undefined, who: Asker, probe = false): Promise<Response> {
     if (!probe && this.networkCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
     const limited = this.rateLimitedFor(relay);
     if (limited > 0) throw new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
@@ -327,7 +347,7 @@ export class RelayTransport implements PkarrTransport {
       if (this.breaker.blockedKind(relay) === "throttled") throw new DiscoveryBudgetError(blocked, "Discovery relay is throttling this address; retry shortly");
       throw new Error(`${relay} is left alone after failing; asked again in ${Math.max(1, Math.ceil(this.breaker.askedAgainIn(relay, this.relays) / 1000))} s`);
     }
-    if (!this.take(relay, background, true)) throw new DiscoveryBudgetError(this.freeInMs(relay, background, true));
+    if (!this.take(relay, who)) throw new DiscoveryBudgetError(this.heldFor(relay, who));
     if (probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
     let response: Response;
     try { response = await this.request(`${relay}/${pubKeyZ32}`, {
@@ -347,39 +367,53 @@ export class RelayTransport implements PkarrTransport {
   }
 
   /**
-   * Discovery reads and writes share a bounded per-relay request budget; background requests only part
-   * of it. A link's write the budget refused goes before any read once a request is free again.
+   * Discovery reads and writes share a bounded per-relay request budget; background requests only part of it, and
+   * groups leave a chat that is using the relay its reserve. A link's write the budget refused goes before any read
+   * once a request is free again.
    */
-  private take(relay: string, background: boolean | undefined, write: boolean): boolean {
+  private take(relay: string, who: Asker): boolean {
     const now = Date.now();
-    const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
-    const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
-    this.spent.set(relay, recent);
-    this.spentBackground.set(relay, recentBackground);
-    const linkWrite = write && !background;
-    if (recent.length >= this.limitOf(relay) || (background && recentBackground.length >= this.backgroundPerMinute) || (!linkWrite && this.writeFirst(relay, now))) {
-      if (linkWrite) this.writeWaiting.set(relay, now);
+    if (!who.background && !who.group) this.chatAsked.set(relay, now);
+    const writer = firstWriter(who);
+    if (this.heldFor(relay, who, now) > 0) {
+      if (writer) this.writeWaiting.set(`${writer} ${relay}`, now);
       return false;
     }
-    if (linkWrite) this.writeWaiting.delete(relay);
-    recent.push(now);
-    if (background) recentBackground.push(now);
+    if (writer) this.writeWaiting.delete(`${writer} ${relay}`);
+    this.spent.get(relay)!.push(now);
+    if (who.background) this.spentBackground.get(relay)!.push(now);
     return true;
   }
 
   /**
-   * How long until this relay's budget takes the request `take` just refused: the oldest request of the minute over
-   * the limit ages out, or a waiting link write has had its turn. `take` keeps the lists to the minute, oldest first.
+   * How long until this relay's budget takes this request, 0 when it would now: the oldest request of the minute over
+   * a limit ages out, a chat's reserve lapses, or a waiting write has had its turn. Keeps the lists to the minute, oldest first.
+   *
+   * Who goes first: a chat's refused write holds back everything but chat writes; a group's refused write holds back
+   * group reads and background requests, never a chat's.
    */
-  private freeInMs(relay: string, background: boolean | undefined, write: boolean, now = Date.now()): number {
-    const recent = this.spent.get(relay) ?? [], recentBackground = this.spentBackground.get(relay) ?? [];
-    let wait = 0;
+  private heldFor(relay: string, who: Asker, now = Date.now()): number {
+    const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
+    const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
+    this.spent.set(relay, recent);
+    this.spentBackground.set(relay, recentBackground);
+    // Until the `limit`-th newest request of the minute ages out; 0 while fewer than `limit` were made.
+    const over = (list: number[], limit: number) => (list.length >= limit ? list[list.length - limit] + 60_000 - now : 0);
     const limit = this.limitOf(relay);
-    if (recent.length >= limit) wait = Math.max(wait, recent[recent.length - limit] + 60_000 - now);
-    if (background && recentBackground.length >= this.backgroundPerMinute)
-      wait = Math.max(wait, recentBackground[recentBackground.length - this.backgroundPerMinute] + 60_000 - now);
-    if (!(write && !background) && this.writeFirst(relay, now)) wait = Math.max(wait, this.writeWaiting.get(relay)! + WRITE_FIRST_MS - now);
-    return Math.max(wait, 1);
+    let wait = over(recent, limit);
+    if (who.background) wait = Math.max(wait, over(recentBackground, this.backgroundPerMinute));
+    if (who.group) {
+      const chatFor = (this.chatAsked.get(relay) ?? -Infinity) + 60_000 - now;
+      if (chatFor > 0) wait = Math.max(wait, Math.min(chatFor, over(recent, limit - this.reserveOf(relay))));
+    }
+    const writer = firstWriter(who);
+    const waiting = (lane: "chat" | "group") => {
+      const at = this.writeWaiting.get(`${lane} ${relay}`);
+      return at !== undefined && now - at < WRITE_FIRST_MS ? at + WRITE_FIRST_MS - now : 0;
+    };
+    if (writer !== "chat") wait = Math.max(wait, waiting("chat"));
+    if ((writer === null && who.group) || who.background) wait = Math.max(wait, waiting("group"));
+    return Math.max(wait, 0);
   }
 
   /** Requests allowed to this relay a minute: this client's budget, or less for a relay known to allow few. */
@@ -387,9 +421,9 @@ export class RelayTransport implements PkarrTransport {
     return Math.min(this.perMinute, RELAY_REQUESTS_PER_MINUTE[relay] ?? Infinity);
   }
 
-  /** A link's write is waiting for this relay's budget: reads (and background writes) let it go first. */
-  private writeFirst(relay: string, now = Date.now()): boolean {
-    return now - (this.writeWaiting.get(relay) ?? -Infinity) < WRITE_FIRST_MS;
+  /** What groups leave a chat on this relay: `CHAT_RESERVE`, or a third of a smaller budget. */
+  private reserveOf(relay: string): number {
+    return Math.min(CHAT_RESERVE, Math.floor(this.limitOf(relay) / 3));
   }
 
   private isCoolingDown(relay: string, method: "GET" | "PUT"): boolean {

@@ -33,7 +33,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, type WireEdit } from "@ghostly/core";
+import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, withRequestOptions, type WireEdit } from "@ghostly/core";
 import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
@@ -314,6 +314,11 @@ export interface NodeOptions {
    */
   callsSupport?: boolean;
   callsUnavailable?: string;
+  /**
+   * Leave the groups' sessions (edges, entry sessions, the admission and community timers) unstarted: a headless
+   * one-shot that only talks to one chat, whose relay budget they would spend in seconds. What is stored stays as it is.
+   */
+  deferGroups?: boolean;
 }
 
 export interface NodeEvents {
@@ -346,6 +351,8 @@ function sentNow(message: StoredMessage): StoredMessage {
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
   private readonly transport: PkarrTransport;
+  /** The same, for groups' requests: a relay budget keeps a chat's share from them (`CHAT_RESERVE`). */
+  private readonly groupTransport: PkarrTransport;
   private readonly relays: RelayTransport | null;
   /** Other profiles of this device, looked at for new messages (WISP 04 § Checking other profiles). */
   private readonly profilePeek: ProfilePeek;
@@ -796,8 +803,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
     linkSeen: linkId => { const live = this.links.get(linkId); return !!live?.presence?.online || (!!live?.dataLink && live.dataLink !== "idle"); },
-    publish: (identity, records, background) => this.transport.publish(identity, records, { background }),
-    resolve: async (pubKeyZ32, background) => (await this.transport.resolve(pubKeyZ32, { background }))?.records ?? null,
+    publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
+    resolve: async (pubKeyZ32, background) => (await this.groupTransport.resolve(pubKeyZ32, { background }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: linkId => this.closeGroupLink(linkId),
@@ -909,6 +916,7 @@ export class GhostlyNode implements EngineImplementation {
     // Relays are a setting only where relays are the transport.
     this.relays = options.transport ? null : new RelayTransport();
     this.transport = options.transport ?? this.relays!;
+    this.groupTransport = withRequestOptions(this.transport, { group: true });
     this.profilePeek = new ProfilePeek({ transport: this.transport, direct: !!this.transport.configure, online: () => this.settings.online !== false,
       readPath: () => readPathOf(this.relays ? { relays: this.relays.describe().relays } : this.settings, !!this.transport.configure) });
     this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
@@ -3276,7 +3284,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private startGroupEntries(): void {
-    if (this.groupEntryTimer || this.shuttingDown) return;
+    if (this.groupEntryTimer || this.shuttingDown || this.options.deferGroups) return;
     this.groupEntryTimer = setInterval(() => void this.groups.tick().catch(() => {}), 1_000);
   }
   private stopGroupEntries(): void {
@@ -3286,7 +3294,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private startEdge(linkId: string): void {
     const live = this.links.get(linkId);
-    if (!live || live.link) return;
+    if (!live || live.link || this.options.deferGroups) return;
     const { stored } = live;
     const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
     const role = stored.groupEntry ?? "edge";
@@ -3303,7 +3311,7 @@ export class GhostlyNode implements EngineImplementation {
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
       pairing: { credentials: { seedB64: stored.participationSeed!, peerKey: peer, requireSignedSignals: true, verifiedPeerKey: peer },
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
-      transport: this.transport,
+      transport: this.groupTransport,
       nick: this.sharedNick,
       // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 9xx § Cost per member).
       pollIntervals: entry || this.groups.isCommunityGroup(group) ? this.pollIntervals : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),

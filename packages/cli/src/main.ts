@@ -55,17 +55,27 @@ async function warnVersion(client: DaemonClient): Promise<void> {
   if (warning) process.stderr.write(warning + "\n");
 }
 
-async function session(g: Globals): Promise<Session> {
+/**
+ * A command about one 1:1 chat: a one-shot for it leaves the groups' sessions unstarted. A fresh process starts an edge
+ * per group member, and their first polls spent the relays' 30 requests a minute in seconds: the chat's message then
+ * waited for the next minute (60 s and more instead of 3 to 5).
+ */
+export function chatOnly(method: string, params: Record<string, unknown>): boolean {
+  return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+}
+
+async function session(g: Globals, chat = false): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
   if (client) await warnVersion(client);
   if (client) return { mode: "daemon", call: (m, p) => client.call(m, p), close: async () => client.close() };
-  const host = await openHost(g.paths, "one-shot", VERSION);
+  const host = await openHost(g.paths, "one-shot", VERSION, { deferGroups: chat });
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
 }
 
-async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>): Promise<T> {
-  const s = await session(g);
+/** `chat`: the command is about one 1:1 chat (`chatOnly`), and a one-shot needs nothing of the groups. */
+async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, chat = false): Promise<T> {
+  const s = await session(g, chat);
   try { return await work(s); } finally { await s.close(); }
 }
 
@@ -484,7 +494,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     }
     return s.call(spec.method, params);
-  }));
+  }, spec.target === "chat"));
 }
 
 /**
@@ -552,7 +562,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       await s.call("chat.wait", { chat: result.chat, until: "paired", timeout: 60 }).catch(() => {});
     }
     return result;
-  });
+  }, chatOnly(command.method, params));
   // Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer.
   if (typeof result?.warning === "string") {
     process.stderr.write(`ghostly: ${result.warning}\n`);
