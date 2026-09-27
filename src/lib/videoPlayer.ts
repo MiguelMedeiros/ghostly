@@ -25,3 +25,17 @@ export function videoBox(width: number | undefined, height: number | undefined):
   const boxWidth = Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, MAX_HEIGHT * ratio)));
   return { width: boxWidth, height: Math.round(Math.min(MAX_HEIGHT, boxWidth / ratio)) };
 }
+
+const AUDIO_FORMATS: Record<string, string> = {
+  "audio/mpeg": "MP3", "audio/mp3": "MP3", "audio/mp4": "M4A", "audio/x-m4a": "M4A", "audio/aac": "AAC", "audio/ogg": "Ogg", "audio/opus": "Opus",
+  "audio/webm": "WebM", "audio/wav": "WAV", "audio/x-wav": "WAV", "audio/wave": "WAV", "audio/flac": "FLAC", "audio/x-flac": "FLAC",
+};
+/** An audio file's format, as a person knows it: "MP3", "FLAC". */
+export const audioFormat = (mime: string) => AUDIO_FORMATS[mime.split(";")[0]!.trim().toLowerCase()] ?? (mime.split("/")[1]?.toUpperCase() || "this type");
+
+/** Whether this device plays an audio file's type, served as itself (`safeBlobType`). */
+export function canPlayAudio(mime: string): boolean {
+  const type = safeBlobType(mime);
+  if (!type.startsWith("audio/") || typeof document === "undefined") return false;
+  try { return document.createElement("audio").canPlayType(type) !== ""; } catch { return false; }
+}

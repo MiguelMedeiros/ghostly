@@ -390,7 +390,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
  * there only while one plays or waits mid-way; when it goes (the recording ended) with the keyboard on it,
  * the keyboard goes back to play rather than to the page.
  */
-function SpeedPill({ rate, locale, onGone }: { rate: number; locale: string; onGone: () => void }) {
+export function SpeedPill({ rate, locale, onGone }: { rate: number; locale: string; onGone: () => void }) {
   const ref = useRef<HTMLButtonElement>(null);
   const goneRef = useRef(onGone);
   goneRef.current = onGone;

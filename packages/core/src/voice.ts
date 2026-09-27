@@ -28,7 +28,15 @@ export const VOICE_LIMITS = {
  * Audio a player may be handed as it is. None of these runs anything in the page's origin,
  * so received bytes of these types are served with their type (see `safeBlobType`).
  */
-export const PLAYABLE_AUDIO = /^audio\/(webm|ogg|mp4|mpeg|aac|x-m4a|wav)$/;
+export const PLAYABLE_AUDIO = /^audio\/(webm|ogg|opus|mp4|mpeg|mp3|aac|x-m4a|wav|x-wav|wave|flac|x-flac)$/;
+
+/**
+ * Whether a file sent as a file (not a voice message) is shown with a player: a type a player may be handed.
+ * Other audio types (MIDI, AIFF, WMA) are files, saved to be played elsewhere.
+ */
+export function isPlayableAudioType(mime: string): boolean {
+  return PLAYABLE_AUDIO.test(baseMime(mime));
+}
 
 /** The part of a type before its parameters, in lower case: `audio/webm;codecs=opus` → `audio/webm`. */
 export function baseMime(mime: string): string {
