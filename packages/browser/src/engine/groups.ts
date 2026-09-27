@@ -1,5 +1,5 @@
 import {
-  GroupSession, MAX_GROUP_CHAIN, MAX_GROUP_MEMBERS, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
+  GroupSession, GROUP_EDIT_FRAME, groupMessageId, MAX_GROUP_CHAIN, MAX_GROUP_MEMBERS, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
   type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
@@ -59,6 +59,25 @@ export interface GroupsHost {
   communityPair?(groupId: string, sender: string, payload: Record<string, unknown>): Promise<void> | void;
   /** An edit a member of a private group made of its message, authenticated as theirs (WISP 9xx § Edits). */
   groupEdit?(groupId: string, edit: GroupIncomingEdit): Promise<void> | void;
+  /** A private group's edge to `peerKey` came up and both sides said where they are: what is said again on it goes now. */
+  edgeUp?(groupId: string, peerKey: string): void;
+}
+
+/** The key an edit of message `id` goes by in `FramesTaken`. */
+export const editKey = (id: string, e: number) => `${id}#e${e}`;
+
+/**
+ * Which of my frames an edge took (handed to an open session), per group: what `ghostly group send --wait sent` waits
+ * for. A message by its id, an edit by `editKey`. A group has no receipts: this is as far as the author can see.
+ */
+export class FramesTaken {
+  private readonly counts = new Map<string, number>();
+  add(groupId: string, key: string): void {
+    const at = `${groupId}\n${key}`;
+    this.counts.set(at, (this.counts.get(at) ?? 0) + 1);
+    if (this.counts.size > 2048) this.counts.delete(this.counts.keys().next().value!);
+  }
+  count(groupId: string, key: string): number { return this.counts.get(`${groupId}\n${key}`) ?? 0; }
 }
 
 /** Where groups and their history are kept: the engine's database, or a test's memory. */
@@ -182,6 +201,8 @@ export class Groups {
   private ticking = false;
   /** Community groups (`group-community/1`) live in their own engine; this class routes to it. */
   readonly communities: Communities;
+  /** My messages and edits an edge of a private group took. */
+  private readonly frames = new FramesTaken();
 
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number) {
     this.communities = new Communities(host, store, communityTimings, random);
@@ -246,6 +267,15 @@ export class Groups {
   /** Through a community group: an application frame to everyone, or a payload sealed to one member. */
   sendCommunityApp(groupId: string, frame: Record<string, unknown>): Promise<void> { return this.communities.sendApp(groupId, frame); }
   sendCommunityPair(groupId: string, to: string, payload: Record<string, unknown>): Promise<void> { return this.communities.sendPair(groupId, to, payload); }
+
+  /**
+   * How many edges took my message `messageId` (or its edit number `edit`) so far: in a private group, members' edges;
+   * in a community, the edges to my hubs, which pass it on. 0 while none did.
+   */
+  taken(groupId: string, messageId: string, edit?: number): number {
+    const key = edit ? editKey(messageId, edit) : messageId;
+    return this.isCommunity(groupId) ? this.communities.taken(groupId, key) : this.frames.count(groupId, key);
+  }
 
   /**
    * Says an edit of my message to the group (WISP 9xx § Edits): over the edges of a private group (to member `to`
@@ -744,8 +774,9 @@ export class Groups {
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (!session || !group || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
     if (this.host.linkReady(linkId, GROUP_VERSION_LARGE) && this.markLarge(group, peerKey)) void this.store.putGroup(group).catch(() => {});
-    try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { /* it closed again */ }
+    try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
     this.announceHere(groupId, session, peerKey);
+    this.host.edgeUp?.(groupId, peerKey);
     this.host.emit();
   }
 
@@ -903,7 +934,12 @@ export class Groups {
       send: (to, frame: GroupEdgeFrame) => {
         const edge = this.host.edges(state.id).get(to);
         if (!edge) return;
-        try { this.host.sendOnLink(edge, frame); } catch { /* down: the sync on reopening carries it */ }
+        try { this.host.sendOnLink(edge, frame); } catch { return; /* down: the sync on reopening carries it */ }
+        // Mine, taken by an edge (the first time, or again in a catch-up): what `--wait sent` waits for.
+        if ((frame.t === "group-msg" || frame.t === GROUP_EDIT_FRAME) && frame.s === session.myKey) {
+          const id = groupMessageId(frame.s, frame.e, frame.n);
+          this.frames.add(state.id, frame.t === GROUP_EDIT_FRAME ? editKey(id, frame.v) : id);
+        }
       },
       message: async m => {
         // The sender picks the time: one far ahead would pin the group to the top of the list.

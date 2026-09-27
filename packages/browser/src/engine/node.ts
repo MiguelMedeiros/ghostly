@@ -811,6 +811,8 @@ export class GhostlyNode implements EngineImplementation {
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
       : this.communityPay.receiveApp(groupId, sender, frame),
     groupEdit: async (groupId, { sender, ...edit }) => { await this.groupEdits.receive(groupId, sender, edit); },
+    // My latest edits, again, to a member whose edge opened: a private group has no catch-up for them.
+    edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
   });
 
@@ -2277,6 +2279,8 @@ export class GhostlyNode implements EngineImplementation {
     return this.groups.send(groupId, text, Array.isArray(mentions) ? mentions : [], reply && { i: reply.id, s: reply.snippet, f: reply.member! });
   }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
+  /** How many edges took my message (or its edit number `edit`) so far: what `group send --wait sent` waits for. */
+  groupTaken({ groupId, messageId, edit }: { groupId: string; messageId: string; edit?: number }): number { return this.groups.taken(groupId, messageId, edit); }
 
   /**
    * Reacts to a message of a chat or a group (WISP 400 § Reactions): shown here at once; a 1:1 chat keeps it until the
@@ -3299,8 +3303,6 @@ export class GhostlyNode implements EngineImplementation {
             else {
               this.groups.edgeReady(group, peer, linkId); void this.groupPayments.edgeReady(group, linkId).catch(() => {});
               if (!this.groups.isCommunityGroup(group)) void this.resendGroupReactions(group, linkId).catch(() => {});
-              // My latest edits too: a private group has no catch-up for them.
-              if (!this.groups.isCommunityGroup(group)) void this.groupEdits.resend(group, peer).catch(() => {});
             }
           }
           this.emitState();

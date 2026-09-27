@@ -470,6 +470,10 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
       // A one-shot leaves once its command is done: by default it stays until the message went out.
       params.wait = parsed.options.wait ?? (s.mode === "one-shot" ? (spec.message ? "confirmed" : "sent") : "none");
       if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
+    } else {
+      // A group has no receipts: `--wait sent` waits until an edge took it. None by default.
+      if (parsed.options.wait !== undefined) params.wait = parsed.options.wait;
+      if (parsed.options.timeout !== undefined) params.timeout = parsed.options.timeout;
     }
     return s.call(spec.method, params);
   }));

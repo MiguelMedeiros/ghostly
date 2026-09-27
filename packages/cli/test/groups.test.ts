@@ -33,6 +33,7 @@ function fake(messages: StoredMessage[] = []) {
     getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     groupMessages: vi.fn(async () => messages),
     sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:7" })),
+    groupTaken: vi.fn(() => 0),
     removeGroupMember: vi.fn(async () => undefined),
     rotateGroup: vi.fn(async () => undefined),
   };
@@ -70,9 +71,19 @@ describe("a group message names its author", () => {
 describe("group send", () => {
   it("answers with the id the message is kept under", async () => {
     const { ctx, node } = fake();
-    expect(await callApi(ctx, "group.send", { group: "Crew", text: "status: busy", reply: "anakey:0:1" })).toEqual({ group: "g1", messageId: "mekey:0:7", sent: true });
+    expect(await callApi(ctx, "group.send", { group: "Crew", text: "status: busy", reply: "anakey:0:1" })).toEqual({ group: "g1", messageId: "mekey:0:7", sent: true, edges: 0 });
     expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: "g1", text: "status: busy", replyTo: "anakey:0:1" });
     expect(TEXT_COMMANDS["group send"].usage).toContain("--reply <message>");
+  });
+
+  it("--wait sent: until an edge took it, or a timeout (exit 4) that says it still goes", async () => {
+    expect(TEXT_COMMANDS["group send"].usage).toContain("[--wait none|sent] [--timeout s]");
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "anyone?", wait: "sent", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: expect.stringMatching(/goes when one opens/) });
+    node.groupTaken.mockImplementation(() => 2);
+    expect(await callApi(ctx, "group.send", { group: "Crew", text: "anyone?", wait: "sent" })).toMatchObject({ messageId: "mekey:0:7", edges: 2 });
+    expect(node.groupTaken).toHaveBeenLastCalledWith({ groupId: "g1", messageId: "mekey:0:7" });
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "x", wait: "delivered" })).rejects.toMatchObject({ code: "bad_request" });
   });
 });
 

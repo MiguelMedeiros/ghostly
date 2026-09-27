@@ -2,11 +2,11 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  type CommunityFrame, type GroupEdit, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type Hub, type Roster,
+  communityMessageId, type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type Hub, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { mentionAt, mentionFields, type GroupStore, type GroupsHost } from "./groups";
+import { FramesTaken, editKey, mentionAt, mentionFields, type GroupStore, type GroupsHost } from "./groups";
 import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
@@ -193,6 +193,10 @@ export class Communities {
   /** Joiners: groups whose knock is out (published), and the knock record it is in. */
   private readonly knocked = new Set<string>();
   private readonly knockAt = new Map<string, number>();
+  /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
+  private readonly frames = new FramesTaken();
+  private readonly carriers = new Map<string, string>();
+
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore, private readonly timings: CommunityTimings = COMMUNITY_TIMINGS, private readonly random: () => number = Math.random) {}
 
   /** Application frames and pair payloads handed to the engine, one after the other per group. */
@@ -317,7 +321,13 @@ export class Communities {
     const live = this.live.get(groupId);
     if (!live) return "You are not in this group yet";
     const result = await live.session.sendEdit({ id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k }, this.host.myNick?.());
-    return "error" in result ? result.error : null;
+    if ("error" in result) return result.error;
+    // The edit rides in a frame of its own: what takes that frame (now, or in a catch-up later) takes the edit.
+    const key = editKey(edit.id, edit.e);
+    this.carriers.set(result.id, key);
+    if (this.carriers.size > 512) this.carriers.delete(this.carriers.keys().next().value!);
+    for (let i = 0; i < this.frames.count(groupId, result.id); i++) this.frames.add(groupId, key);
+    return null;
   }
 
   /** A payload for one member only, sealed to them and carried by the group (hubs relay it, members keep it for them). */
@@ -903,8 +913,22 @@ export class Communities {
   }
   private sendTo(linkId: string | undefined, frame: object): void {
     if (!linkId || !this.host.linkReady(linkId, 2)) return;
-    try { this.host.sendOnLink(linkId, frame); } catch { /* down: the next sync carries it */ }
+    try { this.host.sendOnLink(linkId, frame); } catch { return; /* down: the next sync carries it */ }
+    this.noteTaken(frame);
   }
+
+  /** My frame went out on an edge (at first, or in a catch-up): the message it is, or the edit it carries, was taken. */
+  private noteTaken(frame: object): void {
+    const f = frame as Partial<CommunityMessageFrame>;
+    if (f.t !== "group-msg" || typeof f.g !== "string" || f.s !== this.live.get(f.g)?.session.myKey) return;
+    const id = communityMessageId(f.s!, f.e!, f.h!, f.n!);
+    this.frames.add(f.g, id);
+    const edit = this.carriers.get(id);
+    if (edit) this.frames.add(f.g, edit);
+  }
+
+  /** How many edges took my frame `key` (a message id, or `editKey`). */
+  taken(groupId: string, key: string): number { return this.frames.count(groupId, key); }
 
   /** An edge came up: both sides say where they are. */
   edgeReady(groupId: string, peerKey: string, linkId: string): void {
