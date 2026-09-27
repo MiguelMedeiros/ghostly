@@ -50,6 +50,9 @@ export default defineConfig({
       testDir: "./web",
       use: {
         ...devices["Desktop Chrome"],
+        // The app's service worker would answer requests before `context.route` sees them, and the stubs rely on
+        // routes: blocked here, allowed by the specs about it (web/pwa.spec.ts, `serviceWorkers` in openPeer).
+        serviceWorkers: "block",
         launchOptions: {
           args: [
             // Every peer is on this machine: let ICE use plain host addresses.

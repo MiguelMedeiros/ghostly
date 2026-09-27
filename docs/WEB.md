@@ -43,9 +43,24 @@ A host (`packages/browser/src/host.ts`) is the small part that differs: how a pa
 
 Below 768px the app shows one screen at a time, like a messenger: the chat list, then the conversation with a back arrow, and a bottom bar for Chats, Wallets, Identities, Services and Settings. Emoji, GIFs and payments open as bottom sheets, calls take the whole screen, and the layout follows the visible viewport so the message input stays above the keyboard.
 
-It installs to the home screen (`manifest.json`, `display: standalone`, Apple metas). There is deliberately no service worker: a cached copy of the app would keep running after the server's copy changed, and the app is small.
+It installs to the home screen and runs in a window of its own: see [Install it](#install-it).
 
 Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the call's Share screen button does not show there. Elsewhere it is in every connected call, voice or video (there is no button for it in the chat header).
+
+## Install it
+
+The web app is an installable app (a PWA). Everything below is behind feature detection: a browser without one of these APIs runs the app as a plain page.
+
+- **Install.** Chromium browsers (Chrome, Edge, Brave, Android) offer it, and **Settings → Install** has the button while they do. On iPhone and iPad, Settings says where it is instead: Safari's Share button, then *Add to Home Screen*. Installed, it opens in a window of its own, portrait on phones.
+- **Offline.** A service worker (`web/src/sw/`, built into `/sw.js` by `web/pwa.ts`) keeps the build's own files: the page, the hashed JavaScript and CSS, sounds, icons and the manifest, precached at install, and a wallet's WebAssembly once it has been loaded. Offline, the app still opens and shows every chat (they live in this browser already), with **Offline** above the chat list; nothing goes out until the network is back.
+- **What it never caches.** Only those build files enter its cache (`web/src/sw/policy.ts` is an allowlist): never a message, a relay or DHT answer, a mint, wallet or provider API, another origin, `/version.json`, the sign-in callback, or a request with a query. An invite's keys ride in the address's fragment, which the cache never keys on: every address of the app is the same cached page.
+- **Share to Ghostly.** Installed, Ghostly is a share target: text, links, pictures and files shared from another app open **Share to…**, a list of chats. The chat picked opens with the text in the draft and the files on the attachment sheet (the one a paste opens), to look over and send there. The service worker holds what was shared in memory until the app asks for it, and drops it after two minutes; it is never written to a cache. Groups take text only, as files are not part of groups yet.
+- **`web+ghostly:` links.** Installed from a Chromium browser, the app handles `web+ghostly:` links: `web+ghostly:ghostly1…` opens the invite like an `app.ghostly.tools/#ghostly1…` link, and leaves the address the same way.
+- **Shortcuts.** The icon's menu (long press, or right click on the dock or taskbar) has **New chat**, **Scan invite** (Join with the camera on) and **Wallets**.
+- **Badge.** The icon shows the number of unread messages where the system has badges (installed Chromium apps, iOS 16.4 and later with notifications allowed). A muted chat's messages do not count, like its sound and notification; a group counts one while it has something new.
+- **Lock screen controls.** A voice message or an audio file playing shows on the lock screen and in the system's media controls (Media Session), which play, pause and seek it, and go to the next voice message.
+- **Screen on during calls.** A call keeps the screen from dimming (Screen Wake Lock), asked again each time the app comes back to the foreground.
+- **Not here.** Opening files with Ghostly from the file manager (`file_handlers`, desktop Chromium only) is left out: the app has no use for a file it did not receive in a chat. No push either: a message reaches the app only while it is open (the options are in [the pull request that added all this](https://github.com/MiguelMedeiros/ghostly/pull/390)).
 
 ## What a web page cannot do
 
@@ -67,5 +82,7 @@ Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the ca
 ## Keeping up to date
 
 The build writes `/version.json` next to the app, and a tab asks for it on load, every four hours and whenever it comes back to the foreground. Different version, or the same version from a different commit, and the app offers a reload, never on its own, because reloading ends the peer and every call it holds. The question goes to the origin serving the app and to nobody else, and **Settings → Updates** turns it off.
+
+The service worker keeps the version it was built with, so a deploy never swaps the app under a running chat, and reloading the tab on its own reloads the same version. The browser fetches the new `/sw.js` when a tab loads, and at once when the version check finds a deploy; the new worker installs beside the old one and waits. **Reload** on *New version* tells it to take over, then reloads into the new build, and the old version's cache is deleted. Once no tab of the app is left, the waiting worker takes over by itself, so the next start is the new version. Before there was a worker, no cached copy existed to go stale; now the explicit Reload is what keeps a tab and the server in step.
 
 Self-hosting works the same way: `/version.json` is whatever you built, so your visitors are told about your deploys, not about ours.

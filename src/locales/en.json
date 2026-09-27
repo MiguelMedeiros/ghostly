@@ -701,5 +701,22 @@
     "domainLookups": "Domain lookups",
     "domainLookupsHint": "Checks contacts' domain proofs. The resolver sees which domain.",
     "domainLookupsInfo": "When a contact shares a domain proof, this app looks up its record through {{name}}, a DNS-over-HTTPS resolver. If it cannot be reached, the next of Quad9, Cloudflare and Google is asked. The resolver learns which domain was looked up and when, never your chats. Proofs published as a file on a website are downloaded from that website, which sees your IP address."
+  },
+  "pwa": {
+    "offline": "Offline",
+    "offlineHint": "Your chats are here. Nothing goes out until you're back online.",
+    "installTitle": "Install",
+    "installLabel": "Install Ghostly",
+    "installHint": "Its own window, and an icon on your home screen or dock.",
+    "install": "Install",
+    "iosLabel": "Add to Home Screen",
+    "iosHint": "In Safari, tap Share, then Add to Home Screen.",
+    "shareTitle": "Share to…",
+    "shareHint": "Pick a chat. You check it and send it there.",
+    "shareWaiting": "Getting what was shared...",
+    "shareNone": "Nothing was shared, or it was already picked up.",
+    "shareNoChats": "No chats yet. Start one, then share again.",
+    "shareOneFile": "1 file",
+    "shareFiles": "{{count}} files"
   }
 }

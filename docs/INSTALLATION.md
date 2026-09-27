@@ -6,7 +6,10 @@ Every download is on the latest GitHub release: **https://github.com/MiguelMedei
 
 Open **https://app.ghostly.tools** in any modern browser.
 
-- On a phone, add it to the home screen (Share, *Add to Home Screen* on iOS; ⋮, *Install app* on Android) and it opens like an app.
+- **Install it as an app** and it opens in a window of its own, even offline, with other apps able to share into it:
+  - Chrome, Edge or Brave (computer or Android): **Settings → Install** in Ghostly, or the install icon in the address bar (⋮, *Install app* on Android).
+  - iPhone and iPad: in Safari, tap Share, then *Add to Home Screen*.
+  - What installing adds (offline start, Share to Ghostly, `web+ghostly:` links, shortcuts, the unread badge): [WEB.md](WEB.md#install-it).
 - Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
 - **Self-hosted:** `docker compose up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
 

@@ -9,6 +9,7 @@ import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { audioFormat, canPlayAudio } from "../../lib/videoPlayer";
 import { applyVoiceRate, claimPlayback, onVoiceRate, registerVoicePlayer, releasePlayback, voiceRate } from "../../lib/voicePlayback";
+import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
 
@@ -45,6 +46,8 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
   const playRef = useRef<HTMLButtonElement>(null);
   const srcRef = useRef<string | null>(null);
   const resumeAt = useRef(0);
+  /** What the system's media controls call (lock screen, media keys): set on every render, below. */
+  const mediaRef = useRef<MediaSessionPlayer | null>(null);
 
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
   useEffect(() => onVoiceRate((next) => {
@@ -56,6 +59,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
     const audio = audioRef.current;
     if (audio) { resumeAt.current = audio.ended ? 0 : audio.currentTime; audio.pause(); }
     releasePlayback(file.id);
+    releaseMediaSession(file.id);
     if (srcRef.current) URL.revokeObjectURL(srcRef.current);
     srcRef.current = null;
     setSrc(null);
@@ -106,6 +110,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
 
   useEffect(() => () => {
     releasePlayback(file.id);
+    releaseMediaSession(file.id);
     if (srcRef.current) URL.revokeObjectURL(srcRef.current);
     srcRef.current = null;
   }, [file.id]);
@@ -117,6 +122,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
     resumeAt.current = clamped;
     if (audioRef.current && srcRef.current) audioRef.current.currentTime = clamped;
   };
+  mediaRef.current = { title: file.name, artist: sender === "me" ? "You" : peerName, play: () => void play(), pause, seekTo: seek };
 
   const act = (action: FileAction) => {
     setActionError("");
@@ -257,9 +263,19 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
           data-testid="audio-element"
           onLoadedMetadata={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d)) setDuration(d); }}
           onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d)) setDuration(d); }}
-          onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
-          onPlay={() => { claimPlayback(file.id); setPlayState("playing"); }}
-          onPause={() => { releasePlayback(file.id); setPlayState((was) => (was === "playing" ? "paused" : was)); }}
+          onTimeUpdate={(event) => {
+            const audio = event.currentTarget;
+            setPosition(audio.currentTime);
+            mediaSessionPosition(file.id, audio.currentTime, audio.duration, audio.playbackRate);
+          }}
+          onPlay={() => {
+            claimPlayback(file.id);
+            setPlayState("playing");
+            // The lock screen and media keys drive the one playing now.
+            const shown = mediaRef.current!;
+            claimMediaSession(file.id, { title: shown.title, artist: shown.artist, play: () => mediaRef.current?.play(), pause: () => mediaRef.current?.pause(), seekTo: (at) => mediaRef.current?.seekTo(at) });
+          }}
+          onPause={() => { releasePlayback(file.id); mediaSessionState(file.id, "paused"); setPlayState((was) => (was === "playing" ? "paused" : was)); }}
           onEnded={() => { resumeAt.current = 0; setPosition(0); unload(); setPlayState("idle"); }}
           onError={() => { unload(); setPlayState("idle"); setProblem("unsupported"); }}
         />

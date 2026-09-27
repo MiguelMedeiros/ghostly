@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { serviceWorker } from "./pwa";
 import { ghostlyPlatformModules, repositoryRoot, tauriAliases } from "../packages/browser/vite-plugin";
 
 const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
@@ -47,7 +48,7 @@ function versionFile(): Plugin {
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version), __APP_BUILD__: JSON.stringify(build) },
-  plugins: [versionFile(), ghostlyPlatformModules(), react(), tailwindcss()],
+  plugins: [versionFile(), serviceWorker(build), ghostlyPlatformModules(), react(), tailwindcss()],
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },
   server: { port: 5180, strictPort: true },

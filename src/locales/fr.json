@@ -701,5 +701,22 @@
     "domainLookups": "Recherches de domaine",
     "domainLookupsHint": "Vérifie les preuves de domaine des contacts. Le résolveur voit quel domaine.",
     "domainLookupsInfo": "Quand un contact partage une preuve de domaine, cette app cherche son enregistrement via {{name}}, un résolveur DNS-over-HTTPS. S’il ne répond pas, le suivant parmi Quad9, Cloudflare et Google est interrogé. Le résolveur apprend quel domaine a été cherché et quand, jamais vos discussions. Les preuves publiées comme fichier sur un site sont téléchargées depuis ce site, qui voit votre adresse IP."
+  },
+  "pwa": {
+    "offline": "Hors ligne",
+    "offlineHint": "Vos discussions sont là. Rien ne part avant votre retour en ligne.",
+    "installTitle": "Installer",
+    "installLabel": "Installer Ghostly",
+    "installHint": "Sa propre fenêtre, et une icône sur l'écran d'accueil ou le dock.",
+    "install": "Installer",
+    "iosLabel": "Sur l'écran d'accueil",
+    "iosHint": "Dans Safari, touchez Partager, puis Sur l'écran d'accueil.",
+    "shareTitle": "Partager vers…",
+    "shareHint": "Choisissez une discussion. Vous vérifiez et envoyez là-bas.",
+    "shareWaiting": "Réception du partage...",
+    "shareNone": "Rien n'a été partagé, ou c'est déjà récupéré.",
+    "shareNoChats": "Pas encore de discussion. Commencez-en une, puis partagez à nouveau.",
+    "shareOneFile": "1 fichier",
+    "shareFiles": "{{count}} fichiers"
   }
 }

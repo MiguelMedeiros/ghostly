@@ -701,5 +701,22 @@
     "domainLookups": "域名查询",
     "domainLookupsHint": "验证联系人的域名证明。解析器能看到是哪个域名。",
     "domainLookupsInfo": "当联系人分享域名证明时,本应用会通过 DNS-over-HTTPS 解析器 {{name}} 查询其记录。如果无法访问它,则询问 Quad9、Cloudflare 和 Google 中的下一个。解析器能知道查询了哪个域名以及何时查询,但看不到你的聊天。以文件形式发布在网站上的证明会从该网站下载,该网站能看到你的 IP 地址。"
+  },
+  "pwa": {
+    "offline": "离线",
+    "offlineHint": "你的聊天都在这里。恢复联网前不会发出任何内容。",
+    "installTitle": "安装",
+    "installLabel": "安装 Ghostly",
+    "installHint": "独立窗口，并在主屏幕或程序坞上有图标。",
+    "install": "安装",
+    "iosLabel": "添加到主屏幕",
+    "iosHint": "在 Safari 中点按分享，然后点按添加到主屏幕。",
+    "shareTitle": "分享到…",
+    "shareHint": "选择一个聊天。在那里检查后发送。",
+    "shareWaiting": "正在接收分享的内容...",
+    "shareNone": "没有分享任何内容，或已被接收。",
+    "shareNoChats": "还没有聊天。先开始一个，再重新分享。",
+    "shareOneFile": "1 个文件",
+    "shareFiles": "{{count}} 个文件"
   }
 }

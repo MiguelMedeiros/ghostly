@@ -14,6 +14,8 @@ import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
 import { useEngineNick } from "./hooks/useAvatars";
 import { guardFileDrops } from "./lib/pastedFiles";
+import { useWakeLock } from "./hooks/useWakeLock";
+import { useAppBadge } from "./lib/appBadge";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -90,6 +92,8 @@ function useProfileNameSync() {
 function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
   const [callSession, setCallSession] = useState<string | null>(null);
+  // A call keeps the screen on (Screen Wake Lock, where there is one).
+  useWakeLock(!!callSession);
   // The call window hangs here instead of inside its chat, which may be off
   // screen. Still within `LockGate`, so the lock reaches it like the rest.
   const [callLayer, setCallLayer] = useState<HTMLElement | null>(null);
@@ -146,6 +150,7 @@ export function App() {
   // A file dropped outside a chat never opens in place of the app; a chat takes its own drops.
   useEffect(() => guardFileDrops(), []);
   useWakeOnReturn();
+  useAppBadge();
   const chats = useLoadedChats();
 
   const inChat = pathname.startsWith("/chat");

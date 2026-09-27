@@ -701,5 +701,22 @@
     "domainLookups": "Ricerche di dominio",
     "domainLookupsHint": "Verifica le prove di dominio dei contatti. Il resolver vede quale dominio.",
     "domainLookupsInfo": "Quando un contatto condivide una prova di dominio, questa app cerca il suo record tramite {{name}}, un resolver DNS-over-HTTPS. Se non risponde, si interroga il successivo tra Quad9, Cloudflare e Google. Il resolver sa quale dominio è stato cercato e quando, mai le tue chat. Le prove pubblicate come file su un sito web vengono scaricate da quel sito, che vede il tuo indirizzo IP."
+  },
+  "pwa": {
+    "offline": "Offline",
+    "offlineHint": "Le tue chat sono qui. Non parte nulla finché non torni online.",
+    "installTitle": "Installa",
+    "installLabel": "Installa Ghostly",
+    "installHint": "Una finestra tutta sua e un'icona nella schermata Home o nel Dock.",
+    "install": "Installa",
+    "iosLabel": "Aggiungi alla schermata Home",
+    "iosHint": "In Safari, tocca Condividi, poi Aggiungi alla schermata Home.",
+    "shareTitle": "Condividi in…",
+    "shareHint": "Scegli una chat. Controlli e invii da lì.",
+    "shareWaiting": "Ricezione di ciò che è stato condiviso...",
+    "shareNone": "Non è stato condiviso nulla, o è già stato ritirato.",
+    "shareNoChats": "Ancora nessuna chat. Iniziane una, poi condividi di nuovo.",
+    "shareOneFile": "1 file",
+    "shareFiles": "{{count}} file"
   }
 }
