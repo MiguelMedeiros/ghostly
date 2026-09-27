@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 /**
  * The join page (WISP 801, Q11): a visit to ghostly.tools/#ghostly1… opens a dialog over the page,
@@ -11,40 +11,111 @@ const V2 = "ghostly1zqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvj
 const V0 = "ghostly1qqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l87y36t7p";
 const SHORT = "ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tu5fqcad";
 const TYPO = CODE.slice(0, 100) + (CODE[100] === "q" ? "p" : "q") + CODE.slice(101);
+const APP = "https://app.ghostly.tools";
 // A stretch of the code that any leak would carry.
 const SECRET = CODE.slice(9, 60);
 
+/** The web app, stood in for: the check is where the page goes and with what, not the app itself. */
+async function standInApp(page: Page) {
+  await page.route(`${APP}/**`, (route) => route.fulfill({ contentType: "text/html", body: "<title>app</title>" }));
+}
+
+/** Every request whose address, referrer or body carries the code. */
+function watchLeaks(context: BrowserContext) {
+  const leaks: string[] = [];
+  context.on("request", (request) => {
+    const seen = [request.url(), request.headers()["referer"] ?? "", request.postData() ?? ""].join(" ").toLowerCase();
+    if (seen.includes(SECRET)) leaks.push(request.url());
+  });
+  return leaks;
+}
+
+/** Chose the Ghostly app on an earlier visit. */
+async function preferApp(context: BrowserContext) {
+  await context.addInitScript(() => localStorage.setItem("ghostly.join.open", "app"));
+}
+
 test.describe("join page", () => {
-  test("offers the three ways to open an invite, and the code never leaves this browser", async ({ page, context }) => {
-    const leaks: string[] = [];
-    context.on("request", (request) => {
-      const seen = [request.url(), request.headers()["referer"] ?? "", request.postData() ?? ""].join(" ").toLowerCase();
-      if (seen.includes(SECRET)) leaks.push(request.url());
-    });
+  test("a scanned invite opens the chat in the web app by itself, and the code never leaves this browser", async ({ page, context }) => {
+    const leaks = watchLeaks(context);
+    let analytics = "";
+    await standInApp(page);
     await page.goto(`/#${CODE}`);
     const dialog = page.getByTestId("join-landing");
-    await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("heading", { name: "You're invited to a chat" })).toBeVisible();
     // Out of the address (and so out of analytics and the history) before anything else ran.
     expect(page.url()).not.toContain("#");
-    await expect(dialog.getByTestId("join-browser")).toHaveAttribute("href", `https://app.ghostly.tools/#${CODE}`);
-    await expect(dialog.getByTestId("join-browser")).toHaveAttribute("rel", "noreferrer");
+    await expect(dialog.getByTestId("join-going")).toContainText(/Opening the chat in [123]/);
+    await expect(dialog.getByRole("status")).toHaveText("Opening the chat in your browser in 3 seconds.");
+    await expect(dialog.getByTestId("join-cancel")).toBeFocused();
+    await expect(dialog.getByTestId("join-go-now")).toHaveAttribute("rel", "noreferrer");
     await expect(dialog.getByText("The invite stays in this browser. It was never sent to ghostly.tools.")).toBeVisible();
-    await page.waitForLoadState("networkidle").catch(() => {});
+    analytics = await page.evaluate(() => JSON.stringify((window as { dataLayer?: unknown }).dataLayer ?? []));
+    await expect(page).toHaveURL(`${APP}/#${CODE}`, { timeout: 10_000 });
+    expect(analytics.toLowerCase()).not.toContain(SECRET);
+    // replace, not a new entry: Back does not come back to the countdown.
+    expect(await page.evaluate(() => history.length)).toBe(1);
     expect(leaks).toEqual([]);
   });
 
-  test("a code in capitals, as a QR holds it, opens in lower case", async ({ page }) => {
-    await page.goto(`/#${CODE.toUpperCase()}`);
-    await expect(page.getByTestId("join-browser")).toHaveAttribute("href", `https://app.ghostly.tools/#${CODE}`);
+  test("Cancel stays on the page and offers the three ways to open it", async ({ page }) => {
+    await standInApp(page);
+    await page.goto(`/#${CODE}`);
+    await page.getByTestId("join-cancel").click();
+    const browser = page.getByTestId("join-browser");
+    await expect(browser).toBeFocused();
+    await expect(browser).toHaveAttribute("href", `${APP}/#${CODE}`);
+    await expect(browser).toHaveAttribute("rel", "noreferrer");
+    await expect(page.getByTestId("join-desktop")).toHaveText("Open in the Ghostly app");
+    await expect(page.getByTestId("join-download")).toBeVisible();
+    await page.waitForTimeout(4_000);
+    expect(new URL(page.url()).host).not.toBe(new URL(APP).host);
+    await expect(page.getByTestId("join-going")).toHaveCount(0);
   });
 
-  test("the desktop app: the invite is copied, with what to do next", async ({ page, context }) => {
+  test("Open now goes at once", async ({ page }) => {
+    await standInApp(page);
+    await page.goto(`/#${CODE}`);
+    await page.getByTestId("join-go-now").click();
+    await expect(page).toHaveURL(`${APP}/#${CODE}`);
+  });
+
+  test("a code in capitals, as a QR holds it, opens in lower case", async ({ page }) => {
+    await standInApp(page);
+    await page.goto(`/#${CODE.toUpperCase()}`);
+    await expect(page.getByTestId("join-go-now")).toHaveAttribute("href", `${APP}/#${CODE}`);
+    await expect(page).toHaveURL(`${APP}/#${CODE}`, { timeout: 10_000 });
+  });
+
+  test("the Ghostly app: the invite is copied, with what to do next, and this device is remembered", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.goto(`/#${CODE}`);
     await page.getByTestId("join-desktop").click();
     await expect(page.getByRole("status")).toHaveText("Invite copied. In Ghostly, choose Join, then Paste.");
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(CODE);
+    await expect(page.getByTestId("join-going")).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("ghostly.join.open"))).toBe("app");
+  });
+
+  test("a device that chose the Ghostly app: no countdown, the app first", async ({ page, context }) => {
+    await preferApp(context);
+    await page.goto(`/#${CODE}`);
+    await expect(page.getByTestId("join-landing")).toBeVisible();
+    await expect(page.getByTestId("join-going")).toHaveCount(0);
+    await expect(page.getByTestId("join-desktop")).toBeFocused();
+    await expect(page.locator(".join-actions > .btn").first()).toHaveAttribute("data-testid", "join-desktop");
+    await page.waitForTimeout(4_000);
+    await expect(page.getByTestId("join-landing")).toBeVisible();
+  });
+
+  test("choosing the browser again forgets the app", async ({ page, context }) => {
+    await preferApp(context);
+    await standInApp(page);
+    await page.goto(`/#${CODE}`);
+    await page.getByTestId("join-browser").click();
+    await expect(page).toHaveURL(`${APP}/#${CODE}`);
+    await page.goto("/");
+    expect(await page.evaluate(() => localStorage.getItem("ghostly.join.open"))).toBeNull();
   });
 
   test("download closes the dialog and goes to the downloads", async ({ page }) => {
@@ -65,6 +136,7 @@ test.describe("join page", () => {
   });
 
   test("a code pasted into the address bar later opens too", async ({ page }) => {
+    await standInApp(page);
     await page.goto("/");
     await page.evaluate((code) => { location.hash = code; }, CODE);
     await expect(page.getByTestId("join-landing")).toBeVisible();
@@ -81,11 +153,14 @@ test.describe("join page", () => {
       await page.goto(`/#${code}`);
       await expect(page.getByTestId("join-refused")).toHaveText(message);
       await expect(page.getByTestId("join-browser")).toHaveCount(0);
+      // A code that does not read is never handed to the web app.
+      await expect(page.getByTestId("join-going")).toHaveCount(0);
       expect(page.url()).not.toContain("#");
     });
   }
 
   test("an invite link from the old /pt-br pages opens in English", async ({ page }) => {
+    await standInApp(page);
     await page.goto(`/pt-br#${CODE}`);
     await expect(page.getByRole("heading", { name: "You're invited to a chat" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/");

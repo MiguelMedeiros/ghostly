@@ -85,3 +85,55 @@
   margin-top: 18px;
   line-height: 1.5;
 }
+/* The countdown to the web app: the number ticks, the bar fills once. */
+.join-going {
+  margin-top: 14px;
+}
+.join-going-text {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.join-going-bar {
+  height: 4px;
+  margin: 12px auto 0;
+  max-width: 220px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.join-going-bar span {
+  display: block;
+  height: 100%;
+  background: var(--cyan);
+  transform-origin: left;
+  animation: join-going-fill linear forwards;
+}
+@keyframes join-going-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .join-going-bar {
+    display: none;
+  }
+}
+.join-actions--pair {
+  grid-template-columns: 1fr 1fr;
+  margin-top: 20px;
+}
+.join-more {
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--dim);
+}
+.join-link {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 10px 4px;
+}
+.join-link:hover,
+.join-link:focus-visible {
+  color: var(--text);
+}
