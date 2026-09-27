@@ -50,7 +50,7 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, isVideoMime, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, isPlayableVideoType, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
@@ -222,7 +222,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       if (tooLarge) return tooLarge;
       try {
         // A video goes with its length, size and first frame, so the contact sees it before it arrives.
-        const video = !voice && isVideoMime(source.type) ? await videoMetaOf(source).catch(() => undefined) : undefined;
+        const video = !voice && isPlayableVideoType(source.type) ? await videoMetaOf(source).catch(() => undefined) : undefined;
         const { timestamp, file } = await platform.sendFile(peerKey, source, { voice, ...(video && { video }) });
         addSystemMessage({ id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, file });
         window.dispatchEvent(new Event("session-updated"));
