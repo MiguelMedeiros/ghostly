@@ -54,6 +54,11 @@ export interface CallMedia {
   getDisplayMedia?(options: DisplayMediaStreamOptions): Promise<MediaStream>;
   /** Why the screen cannot be shared, where it cannot: the call window shows it on the share button, turned off. */
   screenUnavailable?: string;
+  /**
+   * `getUserMedia` captures from the `deviceId` asked for, and `replaceTrack` on the audio sender switches the
+   * microphone: the profile's devices and the call's device menu work as with the browser's own media.
+   */
+  choosesDevices?: boolean;
 }
 
 export function compressSdp(sdp: string): string {

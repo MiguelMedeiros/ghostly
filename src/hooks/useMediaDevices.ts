@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { DEVICES_EVENT, EMPTY_DEVICES, hasMediaDevices, listDevices, loadDeviceChoices, type DeviceChoices, type DeviceList } from "../lib/mediaDevices";
+import { DEVICES_EVENT, EMPTY_DEVICES, hasMediaDevices, listDevices, loadDeviceChoices, watchDevices, type DeviceChoices, type DeviceList } from "../lib/mediaDevices";
 
 /**
  * The microphones, cameras and speakers this device has, and which ones this profile chose. The list follows
@@ -26,11 +26,10 @@ export function useMediaDevices(): {
     let live = true;
     const update = () => { void listDevices().then((next) => { if (live) setList(next); }); };
     update();
-    const media = navigator.mediaDevices;
-    media.addEventListener?.("devicechange", update);
+    const stop = watchDevices(update);
     return () => {
       live = false;
-      media.removeEventListener?.("devicechange", update);
+      stop();
     };
   }, [supported]);
 
