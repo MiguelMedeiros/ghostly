@@ -21,7 +21,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragHasFiles, droppedFiles, pastedFiles } from "../lib/pastedFiles";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import "./composer/composer.css";
 
 interface MessageInputProps {
@@ -298,10 +298,24 @@ export function MessageInput({
   };
   const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
 
+  /**
+   * A paste's files to the sheet. True when the paste was taken; false leaves it to the field: no files, or a rich
+   * copy, is text as it always was. A paste that showed nothing at all asks the platform (a webview may keep copied
+   * files or a picture from the page).
+   */
+  const takePaste = (data: DataTransfer | null): boolean => {
+    const files = pastedFiles(data);
+    if (files) return offerFiles(files);
+    if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
+    const reading = platformPastedFiles();
+    if (!reading) return false;
+    reading.then((found) => { if (found.length) offerRef.current(found); }, (error: unknown) => showToast(error instanceof Error ? error.message : String(error)));
+    return true;
+  };
+  const takeRef = useRef(takePaste); takeRef.current = takePaste;
+
   const handlePaste = (e: ClipboardEvent) => {
-    const files = pastedFiles(e.clipboardData);
-    // No files, or a rich copy: the text goes into the field as it always did.
-    if (files && offerFiles(files)) e.preventDefault();
+    if (takePaste(e.clipboardData)) e.preventDefault();
   };
 
   /** A caption goes as a message of its own after the files, through the same checks as the draft. */
@@ -328,8 +342,7 @@ export function MessageInput({
     const paste = (e: globalThis.ClipboardEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       if (e.defaultPrevented || target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
-      const files = pastedFiles(e.clipboardData);
-      if (files && offerRef.current(files)) e.preventDefault();
+      if (takeRef.current(e.clipboardData)) e.preventDefault();
     };
     document.addEventListener("paste", paste);
     return () => document.removeEventListener("paste", paste);

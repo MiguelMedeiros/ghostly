@@ -97,6 +97,8 @@ macro_rules! commands {
             commands::open_web_link,
             share::share_text,
             clipboard::read_clipboard_text,
+            clipboard::read_clipboard_files,
+            clipboard::read_pasted_bytes,
             oidc::oidc_loopback_start,
             oidc::oidc_loopback_wait,
             oidc::oidc_loopback_cancel,
@@ -135,6 +137,14 @@ fn clipboard_source() -> clipboard::ClipboardSource {
     clipboard::ClipboardSource::system()
 }
 
+/// Files and pictures on the system clipboard, for a paste; none in a build for the end-to-end tests.
+fn paste_source() -> clipboard::PasteSource {
+    #[cfg(feature = "e2e-driver")]
+    return clipboard::PasteSource::fixed(|| Ok(clipboard::Pasted::Nothing));
+    #[cfg(not(feature = "e2e-driver"))]
+    clipboard::PasteSource::system()
+}
+
 fn main() {
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
@@ -151,6 +161,8 @@ fn main() {
         .manage(hyperdht::HyperState::default())
         .manage(oidc::OidcState::default())
         .manage(clipboard_source())
+        .manage(paste_source())
+        .manage(clipboard::PasteShelf::default())
         .setup(|app| {
             // The app's log, where the peer and the Pkarr client say how a link is doing.
             if let Ok(dir) = app.path().app_log_dir() {
@@ -303,7 +315,7 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 69, "{declared:?}");
+        assert_eq!(declared.len(), 71, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

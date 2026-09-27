@@ -2,7 +2,9 @@ import { act, createEvent, fireEvent, screen, waitFor, within } from "@testing-l
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
-import { guardFileDrops, pastedFiles, pastedImageName } from "../../lib/pastedFiles";
+import { guardFileDrops, pastedFiles, pastedImageName, PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
+import { fakeEngine } from "../fakeEngine";
+import type { ClipboardFile } from "@ghostly/browser/host";
 import { renderApp } from "../render";
 
 // covers: app.composer.paste-files
@@ -140,6 +142,64 @@ describe("a pasted picture or file", () => {
     act(() => field().blur());
     expect(paste(screen.getByTestId("messages"), { files: [png()] })).toBe(false);
     expect(await screen.findByTestId("attachment-sheet")).toBeInTheDocument();
+  });
+});
+
+/** What the desktop host holds for a paste, read back a few bytes at a time as Rust hands them. */
+function held(name: string | null, bytes: number[], mime: string | null = null): ClipboardFile {
+  return { name, size: bytes.length, mime, read: vi.fn(async (offset: number, length: number) => new Uint8Array(bytes.slice(offset, offset + Math.min(length, 3)))) };
+}
+
+describe("a paste the webview showed nothing of (the desktop app reads the clipboard itself)", () => {
+  afterEach(() => { fakeEngine.readClipboardFiles = undefined; });
+
+  it("a picture only the platform could see opens the sheet and sends as a PNG", async () => {
+    fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, [137, 80, 78, 71, 13, 10, 26, 10], "image/png")]);
+    const { user } = composer();
+    expect(paste(field(), {})).toBe(false);
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getByTestId("attachment-name").textContent).toMatch(/^Pasted image .*\.png · 8 B$/);
+    await user.click(within(open).getByTestId("attachment-send"));
+    await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
+    const [sent] = onSendFile.mock.calls[0];
+    expect(sent.type).toBe("image/png");
+    expect([...new Uint8Array(await sent.arrayBuffer())]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  });
+
+  it("files copied in a file manager keep their names and get their types", async () => {
+    fakeEngine.readClipboardFiles = vi.fn(async () => [held("scan.pdf", [37, 80, 68, 70]), held("notes", [1])]);
+    const { user } = composer();
+    paste(field(), {});
+    await user.click(await screen.findByTestId("attachment-send"));
+    await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(2));
+    expect(onSendFile.mock.calls.map(([f]) => [f.name, f.type, f.size])).toEqual([["scan.pdf", "application/pdf", 4], ["notes", "", 1]]);
+  });
+
+  it("text, or files the paste already showed, never ask the platform", async () => {
+    fakeEngine.readClipboardFiles = vi.fn(async () => []);
+    composer();
+    expect(paste(field(), { text: "words" })).toBe(true);
+    paste(field(), { files: [png()] });
+    await screen.findByTestId("attachment-sheet");
+    expect(fakeEngine.readClipboardFiles).not.toHaveBeenCalled();
+  });
+
+  it("nothing on the clipboard is nothing; too large says where to send it from", async () => {
+    fakeEngine.readClipboardFiles = vi.fn(async () => []);
+    composer();
+    paste(field(), {});
+    await waitFor(() => expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1));
+    expect(sheet()).toBeNull();
+    const huge: ClipboardFile = { name: "film.mkv", size: PLATFORM_PASTE_MAX + 1, mime: null, read: vi.fn() };
+    fakeEngine.readClipboardFiles = vi.fn(async () => [huge]);
+    paste(field(), {});
+    expect(await screen.findByRole("alert")).toHaveTextContent("That is too large to paste. Send it with + → Document.");
+    expect(huge.read).not.toHaveBeenCalled();
+  });
+
+  it("the web app has no such read: an empty paste is left alone", () => {
+    composer();
+    expect(paste(field(), {})).toBe(true);
   });
 });
 

@@ -4,11 +4,24 @@
  * copy (a spreadsheet's cells, a document's paragraph) that carries a picture of itself beside its
  * text and HTML.
  */
+import type { ClipboardFile } from "@ghostly/browser/host";
+import { servicesPlatform } from "./platform";
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/bmp": "bmp",
   "image/tiff": "tiff", "image/heic": "heic", "image/heif": "heif", "image/avif": "avif", "image/svg+xml": "svg",
 };
+
+/** Types by extension, for files the platform read (a browser's File already has one). */
+const TYPES: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(IMAGE_EXTENSIONS).map(([type, ext]) => [ext, type])), jpeg: "image/jpeg", tif: "image/tiff",
+  pdf: "application/pdf", txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json", zip: "application/zip",
+  mp3: "audio/mpeg", m4a: "audio/mp4", ogg: "audio/ogg", opus: "audio/ogg", wav: "audio/wav", mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+};
+
+/** The most a paste read by the platform brings into the page: larger files go through + → Document. */
+export const PLATFORM_PASTE_MAX = 256 * 1024 * 1024;
+const READ_STEP = 16 * 1024 * 1024;
 
 /** A name a browser gives an image that has none of its own ("image.png", or nothing). */
 const GENERIC_IMAGE = /^(image\.\w+)?$/i;
@@ -70,4 +83,36 @@ export function guardFileDrops(target: Window = window): () => void {
   target.addEventListener("dragover", over);
   target.addEventListener("drop", drop);
   return () => { target.removeEventListener("dragover", over); target.removeEventListener("drop", drop); };
+}
+
+/**
+ * Whether a paste showed the page nothing at all: no files and no text. Some webviews keep copied
+ * files or a picture from the page; the platform may still read them (`platformPastedFiles`).
+ */
+export function pasteShowsNothing(data: DataTransfer | null): boolean {
+  return !!data && !filesOf(data).length && !data.getData("text/plain") && !data.getData("text/html");
+}
+
+/** What the platform read from the clipboard, as files to send; a picture is named after the moment. */
+export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new Date()): Promise<File[]> {
+  if (clips.some((clip) => clip.size > PLATFORM_PASTE_MAX)) throw new Error("That is too large to paste. Send it with + → Document.");
+  const files: File[] = [];
+  for (const clip of clips) {
+    const parts: Uint8Array[] = [];
+    for (let offset = 0; offset < clip.size;) {
+      const bytes = await clip.read(offset, READ_STEP);
+      if (!bytes.length) break;
+      parts.push(bytes);
+      offset += bytes.length;
+    }
+    const type = clip.mime ?? TYPES[clip.name?.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+    files.push(new File(parts as BlobPart[], clip.name ?? pastedImageName(type || "image/png", at), { type, lastModified: at.getTime() }));
+  }
+  return files;
+}
+
+/** The clipboard's files as the platform reads them (the desktop app), or null where the paste event is the only way. */
+export function platformPastedFiles(): Promise<File[]> | null {
+  const read = servicesPlatform?.readClipboardFiles();
+  return read ? read.then((clips) => readPlatformFiles(clips)) : null;
 }

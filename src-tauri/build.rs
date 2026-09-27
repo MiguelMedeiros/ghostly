@@ -47,6 +47,8 @@ const COMMANDS: &[&str] = &[
     "open_web_link",
     "share_text",
     "read_clipboard_text",
+    "read_clipboard_files",
+    "read_pasted_bytes",
     "oidc_loopback_start",
     "oidc_loopback_wait",
     "oidc_loopback_cancel",

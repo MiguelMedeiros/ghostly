@@ -150,6 +150,8 @@ export class FakeEngine implements BrowserHost {
   openPaymentLink?: BrowserHost["openPaymentLink"];
   /** The desktop host's native clipboard read, when a test gives one; left out, the page's Clipboard API is used. */
   readClipboardText?: BrowserHost["readClipboardText"];
+  /** The desktop host's native read of copied files or a picture, when a test gives one. */
+  readClipboardFiles?: BrowserHost["readClipboardFiles"];
   /** Every web host can sign in to an AT Protocol server; this window never answers unless a test replaces it. */
   atproto?: BrowserHost["atproto"] = { platform: "web", open: () => new Promise(() => {}) };
 
@@ -200,6 +202,7 @@ export class FakeEngine implements BrowserHost {
     this.handlers.clear();
     this.openPaymentLink = undefined;
     this.readClipboardText = undefined;
+    this.readClipboardFiles = undefined;
     this.setState({});
   }
 
