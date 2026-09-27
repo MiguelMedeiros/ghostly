@@ -125,6 +125,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 - Bytes stream to storage, never whole in memory: OPFS on web and extension, files on Desktop, IndexedDB as fallback.
 - A transfer that has not moved for 60 s offers **Send again** (sender) or **Ask again** (receiver); both go on from what the receiver already holds. A receiver with no data for 30 s asks again by itself (#348, #352).
 - A file can answer a message, with the same quote a text shows (#359).
+- **Videos** (#371): an MP4, WebM, MOV, Ogg or M4V plays in its bubble, with the sender's poster and length. The bytes are read on tap; one video or voice message plays at a time. A type this device cannot play offers Download. On Desktop, videos over 64 MiB are downloaded, not played in place.
 - Older contacts: files/2, up to 100 MiB ([WISP 500](wisps/500-files.md)).
 
 ## Calls and shared services

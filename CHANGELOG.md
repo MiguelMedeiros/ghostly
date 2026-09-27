@@ -15,7 +15,7 @@ Ghostly 1.0. One kind of chat: it finds your contact on the DHT and goes peer to
 - Delivery marks beside the time: a clock, one tick, two ticks, or a red mark you press to send again.
 - Rich text with lists, quotes, headings and links. Cards for invites, payment codes, Nostr keys and identities. Link previews made by the sender. A check before a seed or a private key goes out as text.
 - Voice messages: hold to record, or lock, pause and discard. Play at 1.5× or 2×. Download, also as MP3.
-- Files of any size, resumed where they stopped and checked on arrival. Paste a screenshot or drop files into the chat. A stuck transfer can be sent again or asked for again.
+- Files of any size, resumed where they stopped and checked on arrival. Videos play inside the chat. Paste a screenshot or drop files into the chat. A stuck transfer can be sent again or asked for again.
 - Messages held for a contact who is away, in your own S3 bucket (experimental; both of you turn it on).
 - Pin or mute a chat, a message's details, sounds by category.
 

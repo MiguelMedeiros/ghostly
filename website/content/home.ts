@@ -146,7 +146,7 @@ export const home = {
         icon: "file",
         title: "Send the actual thing.",
         body: "Paste a screenshot or drop a file into the chat. It goes straight from your device to theirs, checked on arrival.",
-        extra: "Any size, with both of you online. A big file picks up where it stopped, and a stuck one can be sent again. Voice messages also download as MP3.",
+        extra: "Any size, with both of you online. Videos play right in the chat. A big file picks up where it stopped, and a stuck one can be sent again.",
       },
       {
         id: "calls",

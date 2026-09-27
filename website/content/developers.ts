@@ -266,7 +266,7 @@ export const developers = {
       { name: "Rich text, link previews, cards, secret check", cells: [A, A, A, null] },
       { name: "Replies, edits, emoji reactions, typing indicator", cells: [A, A, A, A] },
       { name: "Files of any size, resumed or sent again", cells: [A, A, A, A] },
-      { name: "Paste or drop pictures and files", cells: [A, A, A, null] },
+      { name: "Paste or drop pictures and files, videos played in the chat", cells: [A, A, A, null] },
       { name: "Voice messages", cells: [A, A, A, A] },
       { name: "Voice calls", cells: [A, A, A, A] },
       { name: "Video calls, screen sharing", cells: [A, A, A, null] },

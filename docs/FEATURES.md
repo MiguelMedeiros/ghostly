@@ -9,7 +9,7 @@ What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.m
 - Replies, edits of your own texts, emoji reactions, a typing indicator (1:1, can be turned off) and WhatsApp-style delivery marks.
 - Rich text with lists, quotes, headings and links, @mentions in groups, link previews made by the sender, location cards, and cards for invites, Nostr keys, identities and payment codes.
 - Voice messages you can lock, pause, discard and play at 1.5× or 2×, and download as MP3. GIFs, emoji, message details, per-chat mute.
-- Files of any size, resumable and checked by digest, pasted or dropped into the chat. Large files ask the receiver first; a stuck one can be sent again.
+- Files of any size, resumable and checked by digest, pasted or dropped into the chat. Videos play inside the chat. Large files ask the receiver first; a stuck one can be sent again.
 - Voice and video calls, with screen sharing inside the call (not yet on Linux Desktop, which calls with its own media: WebKitGTK has no WebRTC).
 - Private groups and larger communities, joined by a link.
 
