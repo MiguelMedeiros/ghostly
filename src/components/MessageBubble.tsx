@@ -318,7 +318,7 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
   const [problem, setProblem] = useState<"missing" | "unconverted" | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const state = downloadState(platform?.getTransfer(file.id) ?? null, sender);
   const reason = problem === "missing" ? t("chat.message.downloadMissing")
     : problem === "unconverted" ? t("chat.message.downloadUnconverted")
