@@ -10,12 +10,15 @@ import { expect } from "vitest";
 /** The built CLI (test/support/build.ts builds it before the tests). */
 export const BIN = resolve(import.meta.dirname, "../../dist/ghostly.mjs");
 
+/** Tests stay off the public Mainline DHT unless one gives its own testnet (`GHOSTLY_DHT_BOOTSTRAP`) or turns it on. */
+const TEST_ENV: NodeJS.ProcessEnv = { GHOSTLY_DHT: "0" };
+
 export interface Result { code: number; stdout: string; stderr: string; json: Record<string, unknown> }
 
 /** Runs `ghostly` to its end (asynchronously: the relay these tests serve lives in this process). */
 export function ghostly(args: string[], options: { env?: NodeJS.ProcessEnv; input?: string } = {}): Promise<Result> {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [BIN, ...args], { env: { ...process.env, ...options.env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [BIN, ...args], { env: { ...TEST_ENV, ...process.env, ...options.env }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
@@ -48,7 +51,7 @@ export class Running {
   readonly child: ChildProcess;
   stderr = "";
   constructor(args: string[], env: NodeJS.ProcessEnv = {}) {
-    this.child = spawn(process.execPath, [BIN, ...args], { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    this.child = spawn(process.execPath, [BIN, ...args], { env: { ...TEST_ENV, ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
     createInterface({ input: this.child.stdout! }).on("line", (line) => { try { this.lines.push(JSON.parse(line)); } catch { /* not JSON */ } });
     this.child.stderr!.on("data", (d) => (this.stderr += d));
   }

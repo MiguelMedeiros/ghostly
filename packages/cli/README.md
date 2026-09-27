@@ -354,15 +354,15 @@ addresses and when and how much is sent.
 ## Transports
 
 The engine picks as the app does: WebRTC (libdatachannel), HyperDHT (native, in process), Iroh (the wasm build,
-relay only, as in the web app), and the DHT floor through the Pkarr relays in the settings. Tests and private
-networks: `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` replaces HyperDHT's bootstrap nodes, `settings set relays
+relay only, as in the web app), and the DHT floor through the Pkarr relays in the settings and the Mainline DHT
+directly (every packet to both; reads from the DHT when every relay fails). Tests and private networks:
+`GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces its bootstrap routers,
+`GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` replaces HyperDHT's bootstrap nodes, `settings set relays
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
 turns WebRTC off.
 
 ## Not yet
 
-- **DHT-direct**: the DHT floor goes through the Pkarr relays, as in the web app; reading the Mainline DHT directly,
-  as the Desktop does, needs a BEP 44 client on Node.
 - **Bark and Fedimint** wallets (see above), **OpenID Connect** proofs (a browser window), and video in calls
   (calls are voice only).
 - **A single binary**: the CLI needs Node.

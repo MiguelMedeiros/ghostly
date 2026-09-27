@@ -303,7 +303,7 @@
     "notices": [],
     "benefit": "Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares.",
     "level": "available",
-    "note": "Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions), groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, no video in calls, and the DHT only through relays. Number not yet assigned."
+    "note": "Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions), groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned."
   },
   {
     "file": "200-payments.md",

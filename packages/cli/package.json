@@ -42,6 +42,7 @@
     "@synonymdev/pubky": "0.12.0",
     "@tetherto/wdk-wallet-evm": "1.0.0-beta.19",
     "b4a": "1.9.0",
+    "bittorrent-dht": "11.0.12",
     "ethers": "6.17.0",
     "eventsource": "^5.1.2",
     "fake-indexeddb": "6.2.5",

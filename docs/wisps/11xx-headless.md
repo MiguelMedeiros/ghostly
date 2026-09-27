@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.8.2 |
+| Revision | 0.9 |
 | Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
@@ -12,7 +12,7 @@
 | Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is not published |
 | Summary | Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares. |
 | Availability | Available |
-| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions), groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, no video in calls, and the DHT only through relays. Number not yet assigned. |
+| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions), groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -40,7 +40,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 |---|---|---|
 | Storage (IndexedDB) | The browser's IndexedDB | fake-indexeddb for the exact semantics, made durable per profile: a snapshot plus an append-only journal, each committed read-write transaction fsynced before the engine hears `complete` (`packages/cli/src/runtime/storage.ts`). A SQLite-backed store can replace it behind the same module. |
 | Files | OPFS (web), native files through Rust (Desktop) | Real files under the profile's folder (`files/<space>/<id>`, 0600), registered as the engine's `native` backend (`src/runtime/fileBytes.ts`) |
-| DHT floor, Pkarr | HTTP relays (web); Mainline DHT direct (Desktop, [#289](https://github.com/MiguelMedeiros/ghostly/pull/289)) | HTTP relays, as the web app; DHT-direct is planned (phase 3) |
+| DHT floor, Pkarr | HTTP relays (web); Mainline DHT direct (Desktop, [#289](https://github.com/MiguelMedeiros/ghostly/pull/289)) | HTTP relays, and the Mainline DHT directly (BEP 44 over UDP): every packet goes to both, reads go to the DHT when every relay fails (`GHOSTLY_DHT=0` turns it off) |
 | HyperDHT ([103](103-hyperdht.md)) | Through a relay (web); a Node sidecar (Desktop) | Native, in process: the Desktop sidecar's own endpoint (`native-transports/hyperdht/endpoint.mjs`) |
 | Iroh ([102](102-iroh.md)) | wasm, relay only (web); native (Desktop) | The wasm build, relay only, as the web app ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)). The native `iroh-peer` bridge is an option later. |
 | WebRTC ([101](101-webrtc.md)) | The browser's | libdatachannel through `node-datachannel`'s W3C polyfill (a native module with prebuilt binaries). Needed, not optional, for groups: the engine gives group links no native endpoints, so a group without WebRTC never joins. It is also how a bot goes live with a browser directly. Without the module (or with `GHOSTLY_WEBRTC=0`) the CLI still chats over HyperDHT, Iroh and the DHT, and says so. |
@@ -159,7 +159,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Calls | Voice: place, answer, decline, hang up, auto-answer; the audio to and from a program | Phase 5 ([#350](https://github.com/MiguelMedeiros/ghostly/pull/350)), see [Calls](#calls) |
 | Calls | Video, screen sharing | Not applicable: a video call is answered as a voice call |
 | Settings | Pkarr relays, Iroh relays, HyperDHT relay, ICE servers, public profiles, sharing the profile's name | Phase 1 through `settings set` and `profile set` |
-| Settings | DHT-direct (Mainline reached over UDP, as the Desktop) | Planned: needs a BEP 44 client on Node and a check against the real DHT; relays carry the DHT floor meanwhile, as in the web app |
+| Settings | DHT-direct (Mainline reached over UDP, as the Desktop) | Available beside the relays (`bittorrent-dht`): the same signed payload goes to relays and DHT; checked on a loopback testnet with relays answering 500 (a group joined by its link, its edge up and a message delivered in 16 s); `GHOSTLY_DHT_BOOTSTRAP` for private testnets |
 
 ## Calls
 
@@ -225,12 +225,13 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 
 1. The runtime, the daemon and the API, profiles, invites, one chat (send, receive, stream, transports), basic groups, the event stream and hooks. End-to-end: two CLI peers; a CLI peer and the web app.
 2. Wallets and payments on the test networks of the shared regtest stack, with `--confirm-real` on Mainnet.
-3. Files, identities, services, advanced groups, pictures, backups (DHT-direct left planned).
-4. Packaging: an npm package whose dependencies are exactly what the bundle imports (a test keeps them so), checked by installing the packed tarball outside the repository and running two bots and four wallets from it; the bot skill; examples (echo bot, payment bot). A single-file binary and DHT-direct remain open.
+3. Files, identities, services, advanced groups, pictures, backups; later the Mainline DHT beside the relays.
+4. Packaging: an npm package whose dependencies are exactly what the bundle imports (a test keeps them so), checked by installing the packed tarball outside the repository and running two bots and four wallets from it; the bot skill; examples (echo bot, payment bot). A single-file binary remains open.
 5. Voice calls with the apps, the audio handed to a program over a Unix socket per call ([Calls](#calls)); the `call-echo` example.
 
 ## Revision log
 
+- 0.9 (2026-09-27): Pkarr over the Mainline DHT beside the relays (BEP 44, `bittorrent-dht`): a bot keeps finding its contacts and its group's edges while the relays fail; `GHOSTLY_DHT`, `GHOSTLY_DHT_BOOTSTRAP`.
 - 0.8.2 (2026-09-27): `--wait sent` and `edges` on `group send` and `group edit`.
 - 0.8.1 (2026-09-27): group edits: `ghostly group edit`, `group.message.edited`, `edits` and `editedAt` in group history (#378).
 - 0.8 (2026-09-27): groups for bots: messages name their author from the roster, `group send` answers with the message id, the entry link is printed only with `--show-secret` (#372); `file send --reply` (#359); calls log their ICE candidates and state, and `call list` shows the pair (#362); ids that start with a dash are read as ids (#367); calls use the profile's ICE servers, a TURN relay included (#375).
