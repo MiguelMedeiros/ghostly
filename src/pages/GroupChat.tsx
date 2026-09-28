@@ -171,14 +171,23 @@ export function GroupChat() {
   useEffect(() => {
     if (!groupId) return;
     let current = true;
-    const show = (list: StoredMessage[]) => { if (current) setLoaded({ groupId, list }); };
+    let whole = false;
+    const show = (list: StoredMessage[]) => { if (current) { whole = true; setLoaded({ groupId, list }); } };
+    // Its newest page first, straight from the store's index: a long group shows before its whole history is read, and
+    // the rest comes in above it (useTailFirst). Not when the engine already sent this group's history, nor when the
+    // group opens on a message further up, which must be there when it opens.
+    const linkId = `group:${groupId}`;
+    if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
+      void engine.call("messagePage", { linkId }).then(page => { if (current && !whole) setLoaded({ groupId, list: page.messages }); }).catch(() => {});
+    }
     void engine.call("groupMessages", { groupId }).then(show).catch(() => {});
     const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
   // A long group draws its last rows first, and the older ones in the moment after (useTailFirst).
-  const firstRow = useTailFirst(messages.length, groupId ?? "", leftScrolledUp(groupId ?? ""));
+  const rowIds = useMemo(() => messages.map(m => m.id), [messages]);
+  const firstRow = useTailFirst(rowIds, groupId ?? "", leftScrolledUp(groupId ?? ""));
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
   // Always every message, drawn yet or not; a new list when older rows come in above (see Chat.tsx).
   // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above

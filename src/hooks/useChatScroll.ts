@@ -206,7 +206,10 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       return;
     }
     if (pending.current?.anchor && rowById(el, pending.current.anchor.id)) { restore(pending.current); return; }
-    const fresh = rows.filter(row => !seen.current.has(row.id));
+    // Older history coming in above every row seen (a group's newest page first, then the rest) is not new.
+    const oldestSeen = rows.findIndex(row => seen.current.has(row.id));
+    const fresh = rows.filter((row, i) => !seen.current.has(row.id) && i > oldestSeen);
+    for (let i = 0; i < oldestSeen; i++) seen.current.add(rows[i].id);
     if (fresh.length === 0) { settle(); return; }
     for (const row of fresh) seen.current.add(row.id);
     const last = rows[rows.length - 1];
