@@ -136,10 +136,10 @@ The rows are in alphabetical order of their first command, and every command of 
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
 | `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a new kind or status shows at once; a message to the chat or `--stop` ends it |
-| `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--invite code] [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `fedimint` (`--invite` is the federation's invite code), `usdt` |
+| `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--stdin] [--invite code] [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `fedimint` (`--invite` is the federation's invite code), `usdt`. With `--stdin`, secret fields come as `name=value` lines on stdin (`api-key=…` too), out of `ps` and the shell's history |
 | `wallet faucet <type>`, `wallet add-mint <url> [--primary]` | Test coins; another Cashu mint |
 | `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
-| `wallet receive <sats>`, `wallet address <type>`, `wallet redeem <token>`, `wallet history` | Receive, and what came and went |
+| `wallet receive <sats>`, `wallet address <type>`, `wallet redeem [<token>]`, `wallet history` | Receive, and what came and went. `wallet redeem` reads the token from stdin when none is given, which keeps it out of `ps` and the shell's history |
 | `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
 
 Help: `ghostly help` lists every command; `ghostly help file` (or `ghostly file --help`) a group; `ghostly help file
