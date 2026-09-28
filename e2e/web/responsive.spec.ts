@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { createWallet, expect, openWallet, test, useFakeProviders, useTestnet, walletCard } from "../support/fixtures";
+import { createWallet, expect, openProfilePage, openWallet, test, useFakeProviders, useTestnet, walletCard } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { choose } from "../support/select";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
@@ -200,7 +200,8 @@ async function navProblems(page: Page): Promise<string[]> {
       const r = item.getBoundingClientRect(), name = item.getAttribute("aria-label") ?? item.textContent;
       if (r.width < 40 || r.height < 40) problems.push(`${name} is ${Math.round(r.width)}×${Math.round(r.height)}`);
       if (r.left < edge.left - 1 || r.right > edge.right + 1) problems.push(`${name} sticks out of the bar`);
-      for (const label of item.querySelectorAll<HTMLElement>(".account-label, .truncate")) {
+      // The profile's own name (data-name) may end in "…": it is the user's, and its tooltip has it whole.
+      for (const label of item.querySelectorAll<HTMLElement>(".account-label:not([data-name]), .truncate")) {
         if (label.offsetWidth > 0 && getComputedStyle(label).visibility !== "hidden" && label.scrollWidth > label.clientWidth + 1) problems.push(`${name}: the label "${label.textContent}" is cut`);
       }
     }
@@ -235,6 +236,71 @@ test("the account bar keeps its five places at the list's narrowest", { tag: ["@
   expect(await navProblems(page)).toEqual([]);
   // "Configurações" does not fit in a fifth of 280px: the labels step aside together, the icons stay.
   await expect(page.getByRole("navigation", { name: "Account" })).toHaveAttribute("data-compact", "true");
+});
+
+/**
+ * The account bar's labels as the page lays them out: whether they are hidden, each one's text width against its
+ * place's width (fractions of a pixel, not the rounded scrollWidth), and the profile's name, which may end in "…".
+ */
+async function accountLabels(page: Page) {
+  return page.getByRole("navigation", { name: "Account" }).evaluate((nav) => {
+    const range = document.createRange();
+    const labels = [...nav.querySelectorAll<HTMLElement>(".account-label")].map((label) => {
+      range.selectNodeContents(label);
+      return { text: label.textContent ?? "", name: label.hasAttribute("data-name"), text_px: range.getBoundingClientRect().width,
+        place_px: label.closest("button")!.getBoundingClientRect().width, visible: getComputedStyle(label).visibility !== "hidden" };
+    });
+    return {
+      compact: nav.hasAttribute("data-compact"),
+      visible: labels.filter((l) => l.visible).map((l) => l.text),
+      placesCut: labels.filter((l) => !l.name && l.text_px > l.place_px).map((l) => l.text),
+      nameCut: labels.some((l) => l.name && l.text_px > l.place_px),
+    };
+  });
+}
+
+test("the account bar names its places whenever the names fit, however long the profile's name", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive", "@feature:app.i18n"] }, async ({ peer }) => {
+  const { page } = await peer("alice", { viewport: { width: 1440, height: 900 } });
+  // The list at its default width (420px): five places of about 77px.
+  expect(Math.round((await page.getByTestId("account-bar").boundingBox())!.width)).toBeGreaterThanOrEqual(419);
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: ["Personal", "Wallets", "Identities", "Services", "Settings"] });
+
+  // A profile name wider than its place ends in "…" (whole in the tooltip) and hides nothing.
+  const long = "This is Fine, a longer name";
+  await openProfilePage(page);
+  await page.getByTestId("profile-name").fill(long);
+  await page.getByTestId("profile-name").press("Enter");
+  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", `Profile: ${long}`);
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], nameCut: true, visible: [long, "Wallets", "Identities", "Services", "Settings"] });
+  expect(await navProblems(page)).toEqual([]);
+
+  // In Portuguese, whose names are longer, they still fit at 420px.
+  await page.getByTestId("account-settings").click();
+  await choose(page.getByTestId("settings-language"), "pt");
+  await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identidades");
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [], visible: [long, "Carteiras", "Identidades", "Serviços", "Configurações"] });
+
+  // At the list's narrowest (280px), "Configurações" would be cut: all the labels step aside, and come back with the width.
+  const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;
+  await page.mouse.move(handle.x + 1, handle.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(0, handle.y + 100, { steps: 5 });
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: true, visible: [] });
+  await page.mouse.move(handle.x + 1, handle.y + 100, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [] });
+
+  // In English, every place's name fits even at 280px, so the labels stay.
+  await choose(page.getByTestId("settings-language"), "en");
+  await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identities");
+  const again = (await page.getByTestId("sidebar-resize").boundingBox())!;
+  await page.mouse.move(again.x + 1, again.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(0, handle.y + 100, { steps: 5 });
+  await page.mouse.up();
+  expect(Math.round((await page.getByTestId("account-bar").boundingBox())!.width)).toBeLessThanOrEqual(281);
+  await expect.poll(() => accountLabels(page)).toMatchObject({ compact: false, placesCut: [] });
+  expect(await navProblems(page)).toEqual([]);
 });
 
 test("the page keeps a phone's width however wide the chat list is dragged", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive", "@feature:wallet.deck", "@feature:proofs.deck"] }, async ({ peer }) => {

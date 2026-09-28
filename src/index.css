@@ -734,8 +734,8 @@ body {
 .account-action:hover, .account-action[aria-expanded="true"], .account-action[aria-current="page"] { background: var(--theme-surface-hover); color: var(--theme-accent); }
 .account-action:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: -2px; }
 .account-label { font-size: 10px; line-height: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A label that would be cut at this width hides with the others; the icon, its tooltip and its name stay. It keeps
-   its line, so the icons stay level. */
+/* A place's name that would be cut at this width hides with the others; the icon, its tooltip and its name stay. It
+   keeps its line, so the icons stay level. The profile's own name never decides it: a long one ends in "…". */
 .account-actions[data-compact] .account-label { visibility: hidden; }
 /* Something to look at behind an icon (Identities, sats that came in): a dot on its corner, ringed in the bar's color. */
 .nav-dot { --dot-ring: var(--theme-sidebar-bg); position: absolute; top: -2px; right: -3px; width: 9px; height: 9px; border-radius: 999px;
