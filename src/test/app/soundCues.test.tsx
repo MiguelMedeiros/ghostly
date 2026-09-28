@@ -168,7 +168,8 @@ describe("AttentionFeedback plays the engine's cues", () => {
     setup();
     expect(await send(event({ type: "message", mention: true, linkId: "group:g" }), event({ type: "confirmed" }))).toEqual(["mention", "paid"]);
     setCues({ chat: false, payments: false });
-    expect(await send(event({ type: "message", mention: true, linkId: "group:g" }), event({ type: "confirmed" }))).toEqual(["message", "confirmed"]);
+    // Another group: the first one's burst (MESSAGE_BURST_MS) is still on.
+    expect(await send(event({ type: "message", mention: true, linkId: "group:h" }),event({ type: "confirmed" }))).toEqual(["message", "confirmed"]);
   });
 
   it("leaves a muted chat's cues out, and every new cue while the app is in the background", async () => {

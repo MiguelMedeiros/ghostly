@@ -162,7 +162,8 @@ import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
 import { CashuWallet, TEST_COINS_NOTE } from "./wallet";
-import { groupCue, identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
+import { identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
+import { messageAttention } from "./attention";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
 import { pushRelayProblem } from "../shared/pushRelay";
 import { traceJoin } from "./joinTrace";
@@ -411,9 +412,12 @@ export class GhostlyNode implements EngineImplementation {
   private cueFeedback({ cue, key }: Cue, linkId?: string) {
     this.feedback("cue", cue + ":" + key, linkId, false, cue);
   }
-  private messageFeedback(type: "message" | "sent", message: StoredMessage) {
-    if (message.timestamp < this.feedbackStartedAt || message.file || message.paymentId || /^👋 (?:.+ )?joined$/.test(message.text)) return;
-    this.feedback(type, message.linkId + ":" + message.id, message.linkId, type === "message" && !!message.mentioned, groupCue(message));
+  /** The newest time stored in each chat while this engine runs: a message landing well behind it is a catch-up. */
+  private readonly newestAt = new Map<string, number>();
+  /** Only a new message at the end of its chat, or mine going out, says anything (engine/attention.ts). */
+  private messageFeedback(type: "message" | "sent", message: StoredMessage, newest = this.newestAt.get(message.linkId)) {
+    const attention = messageAttention(type, message, { startedAt: this.feedbackStartedAt, newest, now: Date.now() });
+    if (attention) this.feedback(attention.type, message.linkId + ":" + message.id, message.linkId, attention.mention, attention.cue);
   }
   /**
    * The chat a link's facts belong to, as the pages mute it: a group member's edge, or a community member's
@@ -4376,7 +4380,9 @@ export class GhostlyNode implements EngineImplementation {
       message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
     }
     if (!(await db.addMessage(message))) return;
-    if (message.sender === "peer") this.messageFeedback("message", message);
+    const newest = this.newestAt.get(message.linkId);
+    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, message.timestamp));
+    if (message.sender === "peer") this.messageFeedback("message", message, newest);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
     // An edit that came before its message is shown now, and confirmed.
     const early = message.sender === "peer" && message.id.startsWith("peer_") ? this.editBuffer.take(message.linkId, message.id.slice(5)) : undefined;

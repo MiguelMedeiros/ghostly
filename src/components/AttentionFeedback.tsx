@@ -8,7 +8,7 @@ import {chatPath} from "../lib/url";
 import {groupPath} from "../lib/groups";
 import {loadSettings} from "../lib/settings";
 import {attentionOutcome,chatOfLink,mutedFor} from "../lib/chatMute";
-import {eventSound,playCue} from "../lib/cues";
+import {eventSound,firstOfBurst,playCue} from "../lib/cues";
 import {setDeckSwitchSound} from "./deck/motion";
 import {useI18n} from "../contexts/I18nContext";
 import {switchProfile} from "../lib/profiles";
@@ -45,7 +45,8 @@ export function AttentionFeedback(){
       if(event.type==="cue"){ if(event.cue) playCue(event.cue,{chat,key:event.id}); return; }
       const notifications=loadSettings().notifications;
       const outcome=attentionOutcome(event.type,muted,notifications,background);
-      if(outcome.sound && event.type!=="reaction") playSound(eventSound({...event,type:event.type},notifications));
+      // A chat's messages that come together are one sound (MESSAGE_BURST_MS); what I send, and the wallet's, are not.
+      if(outcome.sound && event.type!=="reaction" && (event.type!=="message" || firstOfBurst(chat ?? event.linkId ?? ""))) playSound(eventSound({...event,type:event.type},notifications));
       if(outcome.notice) await showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat);
     };
     if(navigator.locks) void navigator.locks.request("ghostly-feedback",run);
