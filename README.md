@@ -1,10 +1,8 @@
-<p align="center">
-  <img src="docs/assets/ghostly-app.webp" alt="Ghostly: a chat with a contact, the wallet deck with its Mainnet and Testnet tabs, and the identity cards" width="100%">
-</p>
-
 <h1 align="center">Ghostly</h1>
 
 <p align="center">An end-to-end encrypted, peer-to-peer messenger with a wallet and verifiable identities built in. No Ghostly server, no account.</p>
+
+https://github.com/user-attachments/assets/d660065c-607c-45de-b041-67418fcbda03
 
 **Download:** the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) (macOS, Windows, Linux, browser extension), or open [app.ghostly.tools](https://app.ghostly.tools). Step by step: [Installation](docs/INSTALLATION.md).
 
