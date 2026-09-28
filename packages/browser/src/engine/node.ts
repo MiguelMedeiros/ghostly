@@ -1778,8 +1778,13 @@ export class GhostlyNode implements EngineImplementation {
   async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
-    if (!live?.link) return { error: "You are offline" };
     const trimmed = text.trim();
+    // What a compatibility chat's DHT cannot carry is refused before it is kept: it must not show as sent. Whatever
+    // the link's state: one that has not started yet (a chat just added) has no data link either.
+    const bytes = new TextEncoder().encode(trimmed).length;
+    if (live && !live.stored.profile && !(live.link?.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
+      return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
+    if (!live?.link) return { error: "You are offline" };
     if (!trimmed) return { error: null };
 
     const timestamp = params.timestamp ?? Date.now();
@@ -1794,10 +1799,6 @@ export class GhostlyNode implements EngineImplementation {
     // A compatibility chat's records have no room for a reply (WISP 402): said, rather than sent without it.
     if (params.replyTo !== undefined) return { error: "Replies need a current chat; this compatibility chat sends text only.", refused: true };
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
-    // What the DHT cannot carry is refused before it is kept: it must not show as sent.
-    const bytes = new TextEncoder().encode(trimmed).length;
-    if (!(live.link.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
-      return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
     await this.storeMessage({ linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via });
     const at = Date.now(), snapshot = pathSnapshot(live, via);
     const error = await live.link.sendMessage(trimmed, timestamp);
