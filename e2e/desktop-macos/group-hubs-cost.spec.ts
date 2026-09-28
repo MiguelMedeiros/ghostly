@@ -136,11 +136,22 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
       await app.join(link);
       await expect.poll(async () => (await members()).length, { timeout: 180_000, message: "the app is let in" }).toBe(2)
         .catch(async (error) => { writeFileSync(testInfo.outputPath("app.txt"), `${await app.snapshot()}\n\n${desktop!.log.join("")}`); throw error; });
-      for (const [i, bot] of bots.slice(1).entries()) {
-        await bot.start(relayUrl, `Bot ${i + 1}`);
-        await bot.run("group", "join", link);
-        await expect.poll(async () => (await bot.run("group", "show", group)).status, { timeout: 600_000, intervals: [3_000] }).toBe("active");
-      }
+      // Three at a time (the admin runs four entry sessions at once). A join stuck for four minutes (the entry session
+      // under this load) is started again with a fresh key, as a person would: forget it, open the link again.
+      const status = async (bot: HeadlessBot) => (await bot.run("group", "show", group).catch(() => ({ status: null }))).status;
+      const join = async (bot: HeadlessBot, name: string) => {
+        await bot.start(relayUrl, name);
+        for (let attempt = 0; attempt < 4; attempt++) {
+          await bot.run("group", "join", link);
+          const until = Date.now() + 4 * 60_000;
+          while (Date.now() < until && (await status(bot)) !== "active") await new Promise((r) => setTimeout(r, 3_000));
+          if ((await status(bot)) === "active") { if (attempt) report.joinRetries = (report.joinRetries as number ?? 0) + attempt; return; }
+          await bot.run("group", "forget", group, "--yes").catch(() => bot.run("group", "forget", group));
+        }
+        throw new Error(`${name} could not join`);
+      };
+      const rest = bots.slice(1);
+      for (let i = 0; i < rest.length; i += 3) await Promise.all(rest.slice(i, i + 3).map((bot, j) => join(bot, `Bot ${i + j + 1}`)));
       await expect.poll(async () => (await members()).length, { timeout: 300_000 }).toBe(N);
     });
     const botKeys = new Set(await Promise.all(bots.map(async (bot) => (await bot.run("group", "show", group)).me as string)));
