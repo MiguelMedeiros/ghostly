@@ -21,6 +21,7 @@ export const metadata: Metadata = {
     title: "Privacy Policy | Ghostly",
     description: DESCRIPTION,
     images: ["https://ghostly.tools/og-image.png"],
+    creator: "@_miguelmedeiros",
   },
 };
 
@@ -51,7 +52,7 @@ export default function PrivacyPage() {
           You are never asked for an email address, a phone number, a username or a password.
         </p>
         <p>
-          The only data about you that reaches a computer of ours is what any web server receives when you visit it,
+          Our websites receive what any web server receives when you visit, and keep no record of who you are, as
           described next.
         </p>
       </Section>
@@ -95,11 +96,10 @@ export default function PrivacyPage() {
             <Term>ghostly.tools</Term> keeps no log of requests.
           </li>
           <li>
-            <Term>app.ghostly.tools</Term> keeps a standard web server log of each request: your IP address, the
-            time, the file asked for, the response, the page that linked you and your browser&apos;s user agent. The
-            part of an address after <Code>#</Code>, where invitations and sign-in answers travel, is never sent, so
-            it is never logged. We use this log only to run and fix the site, never to profile anyone, and it is
-            erased when the web app is redeployed.
+            <Term>app.ghostly.tools</Term> keeps no log of who visits. Its server records only the time, the file
+            asked for and the response, to see what fails. It records no IP address, no browser details, no page that
+            linked you and nothing after <Code>?</Code> or <Code>#</Code> in the address. The part after{" "}
+            <Code>#</Code>, where invitations and sign-in answers travel, never even reaches the server.
           </li>
           <li>
             <Term>The web app&apos;s code</Term> comes from app.ghostly.tools each time you open it, so whoever
@@ -253,7 +253,7 @@ export default function PrivacyPage() {
         <p>
           We do not sell, rent or share data about you, and there are no ads in Ghostly or on our sites. We have no
           such data to begin
-          with, apart from the server log described above.
+          with.
         </p>
       </Section>
 

@@ -21,6 +21,7 @@ export const metadata: Metadata = {
     title: "Terms of Service | Ghostly",
     description: DESCRIPTION,
     images: ["https://ghostly.tools/og-image.png"],
+    creator: "@_miguelmedeiros",
   },
 };
 
