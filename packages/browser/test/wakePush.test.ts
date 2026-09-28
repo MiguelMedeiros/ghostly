@@ -118,6 +118,35 @@ describe("sharing this profile's subscription", () => {
     expect((await saved(chat.id))?.wakeMuted).toBeUndefined();
   });
 
+  it("a deleted or muted chat's contact still holds the subscription: the app is asked to replace it", async () => {
+    const node = engine();
+    const a = stubLink(), b = stubLink(), c = stubLink();
+    const chatA = await addChat(node, a), chatB = await addChat(node, b);
+    const never = await addChat(node, c, { profile: undefined });
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(b.sendWake).toHaveBeenCalledTimes(1));
+    expect(node.getState().settings.wakeRotate).toBeUndefined();
+    // A chat that never got it changes nothing.
+    node.removeLink({ linkId: never.id });
+    await vi.waitFor(async () => expect(await saved(never.id)).toBeUndefined());
+    expect((await db.getSettings()).wakeRotate).toBeUndefined();
+    node.removeLink({ linkId: chatA.id });
+    await vi.waitFor(async () => expect((await db.getSettings()).wakeRotate).toBe(true));
+    expect(node.getState().settings.wakeRotate).toBe(true);
+    // The new subscription clears it, and the contact left gets a new token.
+    const before = (await saved(chatB.id))?.wakeToken;
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    expect((await db.getSettings()).wakeRotate).toBeUndefined();
+    await vi.waitFor(async () => expect((await saved(chatB.id))?.wakeToken).toBeTruthy());
+    expect((await saved(chatB.id))?.wakeToken).not.toBe(before);
+    await node.setWakeMuted({ linkId: chatB.id, muted: true });
+    expect((await db.getSettings()).wakeRotate).toBe(true);
+    // Only the engine sets it.
+    await node.setWakeSubscription({ subscription: null });
+    await node.updateSettings({ settings: { wakeRotate: true } as never });
+    expect(node["settings"].wakeRotate).toBeUndefined();
+  });
+
   it("refuses what is not a subscription, changing nothing", async () => {
     const node = engine();
     const { subscription } = browserSubscription();
