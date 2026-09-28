@@ -26,7 +26,7 @@ type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
 interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null }
-interface GroupShape { status: string | null; members: string[] }
+interface GroupShape { status: string | null; members: string[]; typing: Record<string, { kind: string; status?: string }> }
 
 /**
  * Turns the engine's events into the stream, keeps the journal, and remembers which messages it already reported
@@ -202,6 +202,15 @@ export class EventHub {
       const joined = shape.members.filter((key) => !before.members.includes(key));
       const left = before.members.filter((key) => !shape.members.includes(key));
       if (joined.length || left.length) this.emit("group.members", `group.members:${id}:${this.now()}`, { group: id, joined, left });
+      // A member started or stopped writing in a private group (WISP 9xx · Group Mesh § Typing), as `typing.*` in a chat.
+      for (const [member, word] of Object.entries(shape.typing)) {
+        const was = before.typing[member];
+        if (was && was.kind === word.kind && was.status === word.status) continue;
+        this.emit("group.typing.started", `group.typing.started:${id}:${member}:${this.now()}${was ? `:${this.seq + 1}` : ""}`, { group: id, member, ...word });
+      }
+      for (const member of Object.keys(before.typing)) {
+        if (!shape.typing[member]) this.emit("group.typing.stopped", `group.typing.stopped:${id}:${member}:${this.now()}`, { group: id, member });
+      }
     }
     for (const id of [...this.groups.keys()]) {
       if (groups.has(id)) continue;
@@ -393,5 +402,6 @@ function typingFields(shape: ChatShape): { kind: string; status?: string } {
 }
 
 function groupShape(group: GroupView): GroupShape {
-  return { status: group.status ?? (group.invitation ? "invited" : null), members: group.members.map((m) => m.key).sort() };
+  return { status: group.status ?? (group.invitation ? "invited" : null), members: group.members.map((m) => m.key).sort(),
+    typing: Object.fromEntries((group.typing ?? []).map((t) => [t.key, { kind: t.kind ?? "typing", ...(t.status ? { status: t.status } : {}) }])) };
 }

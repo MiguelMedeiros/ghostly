@@ -229,7 +229,12 @@ export interface GroupView {
   hubs?: { hub: boolean };
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
   community?: { hub: boolean; hubs: number; connected: number };
+  /** Private groups: the members typing now, in the order they started (WISP 9xx · Group Mesh § Typing). Never stored. */
+  typing?: GroupTypingView[];
 }
+
+/** A member typing in a group: `kind` when it is not plain typing, and a bot's status line, sanitized as in a 1:1 chat. */
+export interface GroupTypingView { key: string; kind?: Exclude<TypingKind, "typing">; status?: string }
 
 /** One item held in this device's storage for the contact, or on its way there. */
 export interface HeldEntry {

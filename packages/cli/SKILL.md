@@ -95,7 +95,7 @@ ghostly listen --type message.received            # one JSON object per line, un
   `message.text` as it is now (in a group: `group.message.edited`, with `group`); `chat history` shows the latest text with `edits` and `editedAt`.
 - Useful types: `message.received`, `message.delivery`, `chat.created`, `chat.joined` (a contact arrived: not a
   message, do not answer it as one), `chat.connection`, `group.message` (with `message.mentioned: true` when it
-  names this bot), `group.members`, `typing.started` / `typing.stopped` (the contact is writing, or stopped; a start has `kind`: typing, recording or thinking),
+  names this bot), `group.members`, `typing.started` / `typing.stopped` (the contact is writing, or stopped; a start has `kind`: typing, recording or thinking; `group.typing.*` with `member` in a private group),
   `message.reaction` / `group.reaction` (`by`, `emoji`, "" when taken back; `mine` when it is on your message).
 - Files: `message.received` carries `message.file` (`id`, `name`, `size`, `mime`, and for a voice note `voice`:
   `{duration, peaks}`); `file.done` and `file.failed` carry `file`, `chat` and `messageId`.

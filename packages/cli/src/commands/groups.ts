@@ -66,4 +66,15 @@ export const commands: Record<string, Command> = {
     method: "group.get", usage: "group show <group> [--show-secret]", summary: "A group and its members (its entry link only with --show-secret)", args: ["group"],
     options: showSecret, params: ({ options }, { group }) => ({ group, ...secret(options) }),
   },
+  "group typing": {
+    method: "group.typing", usage: "group typing <group> [--kind typing|recording|thinking] [--status \"<text>\"] [--for s] [--stop]",
+    summary: "Show the members you are writing, recording or thinking (private groups; it fades after 6 s unless said again, or kept with --for; a send or --stop ends it)", args: ["group"],
+    options: {
+      stop: { type: "boolean", description: "Say you stopped" },
+      kind: { type: "string", description: "typing (default), recording (a voice note) or thinking" },
+      status: { type: "string", description: "A short line shown instead, e.g. \"Reading the thread…\" (40 characters, no links)" },
+      for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
+    },
+    params: ({ options }, { group }) => ({ group, stop: options.stop === true, kind: options.kind, status: options.status, for: options.for }),
+  },
 };

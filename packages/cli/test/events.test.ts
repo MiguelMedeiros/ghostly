@@ -88,6 +88,25 @@ describe("the event stream", () => {
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
 
+  it("says when a member of a group starts and stops typing, with what it does, once per change", async () => {
+    const { h, events } = await hub("group-typing.jsonl");
+    const group = (typing?: unknown[]) => ({ id: "g1", status: "active", members: [{ key: "ana" }, { key: "bo" }], ...(typing ? { typing } : {}) });
+    h.baseline(state([], [group()]), new Map());
+    h.sink.post({ kind: "state", state: state([], [group([{ key: "ana" }])]) });
+    h.sink.post({ kind: "state", state: state([], [group([{ key: "ana" }, { key: "bo", kind: "thinking", status: "Reading" }])]) });
+    h.sink.post({ kind: "state", state: state([], [group([{ key: "ana", kind: "recording" }, { key: "bo", kind: "thinking", status: "Reading" }])]) });
+    h.sink.post({ kind: "state", state: state([], [group([{ key: "bo", kind: "thinking", status: "Reading" }])]) });
+    h.sink.post({ kind: "state", state: state([], [group()]) });
+    expect(events.map(({ type, group, member, kind, status }) => ({ type, group, member, kind, status }))).toEqual([
+      { type: "group.typing.started", group: "g1", member: "ana", kind: "typing", status: undefined },
+      { type: "group.typing.started", group: "g1", member: "bo", kind: "thinking", status: "Reading" },
+      { type: "group.typing.started", group: "g1", member: "ana", kind: "recording", status: undefined },
+      { type: "group.typing.stopped", group: "g1", member: "ana", kind: undefined, status: undefined },
+      { type: "group.typing.stopped", group: "g1", member: "bo", kind: undefined, status: undefined },
+    ]);
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
   it("after a restart: seq goes on, only what is new is reported, and the journal replays", async () => {
     const first = await hub("b.jsonl");
     first.h.baseline(state([link("c1")]), new Map([["c1", []]]));
