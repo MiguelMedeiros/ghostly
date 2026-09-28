@@ -11,7 +11,8 @@ import { LocalRelay } from "../support/relay";
  * at once in its page, about 46 to 49 (#402). What happens to a 1:1 chat and a call while it sits there?
  *
  * The app pairs a 1:1 chat with a headless bot, then its page is filled with loopback edges (two connections each,
- * connected to each other, one data channel: what a group edge is) until one more does not open. At that ceiling the
+ * connected to each other, one data channel: what a group edge is) until one more does not open, and with single
+ * connections until one gathers no candidate (a loopback edge needs two at once). At that ceiling the
  * app calls the bot (the bot answers by itself), and pairs a second, fresh 1:1 chat. Each is timed, and whether it
  * connected is recorded. Then the page goes down to 40 connections (the most a Mac gives its groups, `peerBudget`), and
  * the app calls again.
