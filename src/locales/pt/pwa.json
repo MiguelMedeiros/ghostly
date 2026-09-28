@@ -1,0 +1,17 @@
+{
+  "install": "Instalar",
+  "installHint": "Uma janela própria e um ícone na tela inicial ou no dock.",
+  "installLabel": "Instalar o Ghostly",
+  "installTitle": "Instalar",
+  "iosHint": "No Safari, toque em Compartilhar e depois em Adicionar à Tela de Início.",
+  "iosLabel": "Adicionar à Tela de Início",
+  "offline": "Offline",
+  "offlineHint": "Suas conversas estão aqui. Nada sai até você voltar a ficar online.",
+  "shareFiles": "{{count}} arquivos",
+  "shareHint": "Escolha uma conversa. Você confere e envia lá.",
+  "shareNoChats": "Nenhuma conversa ainda. Comece uma e compartilhe de novo.",
+  "shareNone": "Nada foi compartilhado, ou já foi recebido.",
+  "shareOneFile": "1 arquivo",
+  "shareTitle": "Compartilhar com…",
+  "shareWaiting": "Buscando o que foi compartilhado..."
+}

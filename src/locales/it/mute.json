@@ -1,0 +1,19 @@
+{
+  "bell": "Notifiche silenziate",
+  "bellUntil": "Notifiche silenziate fino alle {{time}}",
+  "choice": {
+    "15m": "15 minuti",
+    "1d": "1 giorno",
+    "1h": "1 ora",
+    "forever": "Finché non le riattivo"
+  },
+  "mentions": "Avvisami comunque quando vengo menzionato",
+  "muted": "Silenziata",
+  "mutedUntil": "Silenziata fino alle {{time}}",
+  "noEnd": "Senza scadenza",
+  "open": "Silenzia notifiche…",
+  "stillArrive": "I messaggi arrivano. Le chiamate squillano.",
+  "title": "Silenzia notifiche",
+  "unmute": "Riattiva notifiche",
+  "until": "Fino alle {{time}}"
+}

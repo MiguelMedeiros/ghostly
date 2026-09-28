@@ -1,0 +1,127 @@
+{
+  "compat": {
+    "continued": "Convidou o seu contacto para uma nova conversa.",
+    "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam a funcionar nos dois sentidos; uma nova conversa acrescenta ficheiros, pagamentos e mensagens guardadas.",
+    "label": "Conversa de compatibilidade · Ghostly antigo",
+    "open": "Abrir a nova conversa"
+  },
+  "connecting": "conectando",
+  "deleteMessage": "Apagar mensagem",
+  "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele.",
+  "delivery": {
+    "delivered": "Entregue",
+    "failed": "Não enviada",
+    "hint": {
+      "delivered": "O app do seu contato recebeu.",
+      "failed": "Não enviada. Toque para enviar de novo.",
+      "held": "Guardada para seu contato até ele ficar online.",
+      "queued": "Sem confirmação ainda. Envia de novo sozinha.",
+      "sending": "A caminho.",
+      "sent": "Enviada. Sem confirmação ainda.",
+      "waiting": "Envia sozinha quando seu contato estiver online."
+    },
+    "retry": "Não enviada. Enviar de novo",
+    "sending": "Enviando",
+    "sent": "Enviada",
+    "waiting": "Aguardando seu contato ficar online"
+  },
+  "edit": {
+    "cancel": "Cancelar edição",
+    "editing": "Editando"
+  },
+  "forward": {
+    "filesHint": "Grupos só recebem texto",
+    "forward": "Encaminhar",
+    "forwarded": "Encaminhada",
+    "many": "Encaminhada muitas vezes",
+    "messages": "{{count}} mensagens",
+    "noChats": "Nenhuma conversa ainda",
+    "noMatch": "Nenhuma conversa com esse nome",
+    "pick": "Escolha até {{count}}",
+    "search": "Buscar conversas",
+    "select": "Selecionar",
+    "selected": "{{count}} selecionadas",
+    "send": "Enviar",
+    "title": "Encaminhar para…"
+  },
+  "jump": {
+    "bottom": "Rolar até o fim",
+    "count": "{{count}} novas",
+    "new": "{{count}} mensagens novas, rolar até o fim",
+    "newOne": "1 mensagem nova, rolar até o fim"
+  },
+  "lastSeen": "Visto por último {{time}}",
+  "menu": {
+    "continueNew": "Continuar numa nova conversa",
+    "hold": "Reter mensagens…",
+    "pin": "Fixar conversa",
+    "refresh": "Atualizar",
+    "techInfo": "Informações técnicas",
+    "unpin": "Desafixar conversa"
+  },
+  "message": {
+    "cancelSending": "Cancelar envio",
+    "copied": "Copiado",
+    "copyHint": "Clique para copiar",
+    "copyJson": "Copiar tudo como JSON",
+    "details": "Detalhes",
+    "detailsClose": "Fechar",
+    "detailsTitle": "Detalhes da mensagem",
+    "download": "Baixar",
+    "downloadArriving": "Ainda não recebido",
+    "downloadConverting": "Convertendo…",
+    "downloadFailed": "Não chegou",
+    "downloadMissing": "Não está neste dispositivo",
+    "downloadMp3": "Baixar como MP3",
+    "downloadPreparing": "Ainda em preparo",
+    "downloadUnconverted": "Não foi possível converter",
+    "edit": "Editar",
+    "editPending": "Ainda não aparece para seu contato",
+    "editPendingGroup": "Ainda não enviado ao grupo",
+    "edited": "editada",
+    "editedAt": "Editada às {{time}}",
+    "keysHint": "Chaves nunca aparecem aqui.",
+    "options": "Opções da mensagem",
+    "reply": "Responder",
+    "retry": "Enviar de novo"
+  },
+  "offline": "offline",
+  "online": "online",
+  "options": "Opções",
+  "reactions": {
+    "chipLabel": "{{emoji}}: {{names}}",
+    "more": "Mais emojis",
+    "note": "{{name}} reagiu com {{emoji}} a \"{{snippet}}\"",
+    "noteMine": "Você reagiu com {{emoji}} a \"{{snippet}}\"",
+    "notice": "Alguém reagiu à sua mensagem",
+    "react": "Reagir"
+  },
+  "reply": {
+    "cancel": "Cancelar resposta",
+    "deleted": "Mensagem original apagada",
+    "jump": "Ir para a mensagem original",
+    "notHere": "A original não está nesta conversa",
+    "replyingTo": "Respondendo a {{name}}",
+    "unavailable": "Mensagem original indisponível",
+    "unverified": "Não encontrada nesta conversa",
+    "you": "Você"
+  },
+  "rich": {
+    "code": "Código",
+    "copied": "Copiado",
+    "copy": "Copiar",
+    "copyCode": "Copiar código",
+    "localTime": "{{time}} no seu horário",
+    "showAll": "Mostrar tudo",
+    "showLess": "Mostrar menos",
+    "spoiler": "Texto oculto. Toque para mostrar",
+    "unshowable": "Não foi possível mostrar esta mensagem."
+  },
+  "send": "Enviar",
+  "today": "Hoje",
+  "typeMessage": "Digite uma mensagem...",
+  "typing": "digitando…",
+  "typingRecording": "gravando áudio…",
+  "typingThinking": "pensando…",
+  "yesterday": "Ontem"
+}

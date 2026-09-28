@@ -93,3 +93,30 @@ test("formatted text is sent as typed and shows formatted on both sides", {
   await alice.page.goto("/#/");
   await expect(alice.page.getByText('{"amount":21,"memo":"coffee"}')).toBeVisible();
 });
+
+test("a link in a received message opens in a new tab: bulleted lines, an encoded query, a [text](url) link", {
+  tag: ["@feature:chat.paired.links", "@feature:chat.rich.mdlinks", "@feature:chat.rich.blocks"],
+}, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  // The new tabs load nothing from the Internet.
+  await bob.context.route("https://github.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>stub</title>" }));
+  await bob.context.route("https://ghostly.tools/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>stub</title>" }));
+
+  // The message whose links did not open in the macOS app (2026-09-27), as `ghostly send --stdin` sent it.
+  const pulls = "https://github.com/MiguelMedeiros/ghostly/pulls?q=is%3Apr+is%3Aopen+base%3Adev";
+  const rules = "https://github.com/MiguelMedeiros/ghostly/settings/rules/24090296";
+  await say(alice, `O que dá pra ver:\n• PRs abertos no dev: ${pulls}\n  Os armados mostram "Auto-merge enabled".\n• A regra do dev: ${rules}\nE [a doc](https://ghostly.tools/docs).`);
+  const words = bubble(bob, "O que dá pra ver").getByTestId("message-text");
+  await expect(words.getByRole("listitem")).toHaveCount(2);
+  for (const [name, url] of [[pulls, pulls], [rules, rules], ["a doc", "https://ghostly.tools/docs"]]) {
+    const anchor = words.getByRole("link", { name });
+    await expect(anchor).toHaveAttribute("href", url);
+    const [tab] = await Promise.all([bob.context.waitForEvent("page"), anchor.click()]);
+    await expect(tab).toHaveURL(url);
+    await tab.close();
+  }
+  // Bob is still in the chat.
+  await expect(words).toBeVisible();
+});

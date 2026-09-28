@@ -1,0 +1,13 @@
+{
+  "createChat": "Create New Chat",
+  "description": "Private, ephemeral messaging.",
+  "features": {
+    "decentralized": "No central server",
+    "encrypted": "End-to-end encrypted",
+    "ephemeral": "Messages disappear"
+  },
+  "linkFailed": "Could not open the link.",
+  "unpublishedVersion": "Local version — view published releases",
+  "viewRelease": "View this release",
+  "welcome": "Welcome to Ghostly"
+}
