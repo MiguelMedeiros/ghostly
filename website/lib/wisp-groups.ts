@@ -4,6 +4,8 @@
  * availability, notes and feature link are rows of its own header table in
  * docs/wisps, read by `npm run sync:references` (scripts/wisp-header.mjs).
  */
+import type { DimId } from "./composition";
+
 export type GroupId =
   | "meet"
   | "connect"
@@ -37,9 +39,12 @@ export const GROUPS: {
   title: string;
   blurb: string;
   icon: string;
+  /** Its colour: the row of the same pieces on the roadmap's map (DIMS in lib/composition.ts). */
+  dim: DimId;
 }[] = [
   {
     id: "meet",
+    dim: "base",
     ranges: [[0, 3], [6, 99], [800, 899]],
     order: ["00", "01", "02", "03", "800", "801"],
     icon: "spark",
@@ -48,6 +53,7 @@ export const GROUPS: {
   },
   {
     id: "connect",
+    dim: "transport",
     ranges: [[100, 199]],
     icon: "route",
     title: "Connect",
@@ -55,6 +61,7 @@ export const GROUPS: {
   },
   {
     id: "talk",
+    dim: "talk",
     ranges: [[400, 499]],
     icon: "chat",
     title: "Chat",
@@ -62,6 +69,7 @@ export const GROUPS: {
   },
   {
     id: "files",
+    dim: "talk",
     ranges: [[500, 599]],
     icon: "file",
     title: "Files",
@@ -69,6 +77,7 @@ export const GROUPS: {
   },
   {
     id: "calls",
+    dim: "talk",
     ranges: [[600, 699]],
     icon: "video",
     title: "Voice & video",
@@ -76,6 +85,7 @@ export const GROUPS: {
   },
   {
     id: "pay",
+    dim: "pay",
     ranges: [[200, 299]],
     icon: "bolt",
     title: "Payments",
@@ -83,6 +93,7 @@ export const GROUPS: {
   },
   {
     id: "services",
+    dim: "services",
     ranges: [[700, 799]],
     icon: "window",
     title: "Local services",
@@ -90,6 +101,7 @@ export const GROUPS: {
   },
   {
     id: "identity",
+    dim: "identity",
     ranges: [[300, 399]],
     icon: "badge",
     title: "Identity proofs",
@@ -97,6 +109,7 @@ export const GROUPS: {
   },
   {
     id: "keep",
+    dim: "keep",
     ranges: [[4, 5], [1000, 1099]],
     order: ["04", "05", "1000", "1001", "1002"],
     icon: "box",
@@ -105,6 +118,7 @@ export const GROUPS: {
   },
   {
     id: "together",
+    dim: "groups",
     ranges: [[900, 999]],
     order: ["900", "902", "901"],
     icon: "group",
@@ -113,6 +127,7 @@ export const GROUPS: {
   },
   {
     id: "headless",
+    dim: "ecosystem",
     ranges: [[1100, 1199]],
     icon: "terminal",
     title: "Headless & bots",
