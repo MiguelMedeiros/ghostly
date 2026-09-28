@@ -38,6 +38,21 @@ test("the layers stack the families, the core at the top", async ({ page }) => {
   expect(b!.y).toBe(a!.y);
 });
 
+test("each layer and family wears its colour from the roadmap's map", async ({ page }) => {
+  await page.goto("/developers/wisps");
+  const layerColors = await page.locator(".wmap-layer").evaluateAll((els) => els.map((el) => getComputedStyle(el).getPropertyValue("--c").trim()));
+  // Core, Link, Talk, In a chat, Many people, Programs: the colours of Meet, Connect, Chat, Payments, Groups, Headless.
+  expect(layerColors).toEqual(["#22d3ee", "#60a5fa", "#a78bfa", "#fbbf24", "#fb923c", "#94a3b8"]);
+  const bands = await page.locator(".wmap-family").evaluateAll((els) =>
+    Object.fromEntries(els.map((el) => [(el as HTMLElement).dataset.group, getComputedStyle(el).getPropertyValue("--c").trim()])),
+  );
+  expect(bands).toMatchObject({ keep: "#4ade80", services: "#2dd4bf", identity: "#f472b6", files: "#a78bfa" });
+  // A tile's number takes its family's colour; the process document stays neutral.
+  const num = (href: string) => page.locator(`.wmap-tile[href='${href}'] .wmap-num`).evaluate((el) => getComputedStyle(el).color);
+  expect(await num("/developers/wisps/201-cashu")).toBe("rgb(251, 191, 36)");
+  expect(await num("/developers/wisps/00-process")).not.toBe("rgb(34, 211, 238)");
+});
+
 test("only what works in the app today is drawn; what comes next is on the roadmap", async ({ page }) => {
   await page.goto("/developers/wisps");
   const levels = await page.locator(".wmap-tile").evaluateAll((els) => [...new Set(els.map((el) => (el as HTMLElement).dataset.level))]);

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Icon } from "@/components/site/icons";
 import { GROUPS, listedWisps, wisps, type Wisp } from "@/lib/wisps";
-import { LAYERS } from "@/lib/wisp-groups";
+import { LAYERS, type GroupId } from "@/lib/wisp-groups";
+import { DIMS } from "@/lib/composition";
 import numbering from "@/lib/wisp-numbering.json";
 import { shell } from "@/content/shell";
 import type { CatalogCopy } from "@/content/catalog";
@@ -11,6 +12,10 @@ export function legacyIds(w: Pick<Wisp, "id" | "file">) {
   const old = numbering.find((n) => n.file === w.file)?.oldId;
   return old && old !== w.id && /^\d+$/.test(old) && !wisps.some((x) => x.id === old) ? [old] : [];
 }
+
+/** A family's colour, the same as its row on the roadmap's map; a layer takes the colour of its first family. */
+const colorOf = (id: GroupId) => DIMS.find((d) => d.id === GROUPS.find((g) => g.id === id)?.dim)?.color ?? "#94a3b8";
+const tint = (c: string) => ({ "--c": c }) as React.CSSProperties;
 
 // Short labels for tiles; the full title is on the reader page.
 function short(name: string) {
@@ -48,7 +53,7 @@ function short(name: string) {
 /**
  * The WISPs at a glance, drawn as a stack: one band per family, the core at the top and each layer building
  * on the ones above it. Inside a band the tiles run left to right. The big tile is the family's contract;
- * small tiles are adapters and profiles. Only what works in the app today is drawn; the rest is on the roadmap.
+ * small tiles are adapters and profiles. Each family wears its colour from the roadmap's map. Only what works in the app today is drawn; the rest is on the roadmap.
  * Old links into the page land here: `#list` on the stack, `#family-…` on a band, `#wisp-…` on a tile.
  */
 export function WispMap({ t }: { t: CatalogCopy }) {
@@ -63,7 +68,7 @@ export function WispMap({ t }: { t: CatalogCopy }) {
           const families = layer.groups.map((id) => GROUPS.find((g) => g.id === id)!).filter((g) => listedWisps.some((w) => w.group === g.id));
           if (!families.length) return null;
           return (
-            <li key={layer.label} className="wmap-layer">
+            <li key={layer.label} className="wmap-layer" style={tint(colorOf(layer.groups[0]))}>
               <p className="wmap-layer-label mono">{layer.label}</p>
               <div className="wmap-bands">
                 {families.map((g) => {
@@ -71,7 +76,7 @@ export function WispMap({ t }: { t: CatalogCopy }) {
                   // A contract that others implement gets the wide tile; its adapters follow.
                   const isLead = (id: string) => items.some((x) => x.parent === id);
                   return (
-                    <section key={g.id} id={`family-${g.id}`} className="wmap-family" data-group={g.id} aria-labelledby={`wmap-${g.id}`}>
+                    <section key={g.id} id={`family-${g.id}`} className="wmap-family" data-group={g.id} style={tint(colorOf(g.id))} aria-labelledby={`wmap-${g.id}`}>
                       <header>
                         <Icon name={g.icon} />
                         <h2 id={`wmap-${g.id}`}>{g.title}</h2>

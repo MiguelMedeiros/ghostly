@@ -50,7 +50,9 @@
   width: 28px;
   flex: none;
 }
-/* The stack: one row per layer, the layer's name in a rail on the left, then one band per family. */
+/* The stack: one row per layer, the layer's name in a rail on the left, then one band per family. Each family
+   wears its colour from the roadmap's map (`--c`, set on the layer and on each band); the process tile stays
+   neutral. Everything drawn works in the app today, so the colour says which piece it is, not its level. */
 .wmap-stack {
   display: grid;
   gap: 10px;
@@ -65,15 +67,11 @@
   display: flex;
   align-items: center;
   padding-left: 12px;
-  border-left: 2px solid var(--line-2);
+  border-left: 2px solid var(--c, var(--line-2));
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--dim);
-}
-.wmap-layer:first-child .wmap-layer-label {
-  border-left-color: var(--cyan);
-  color: var(--cyan);
+  color: var(--c, var(--dim));
 }
 .wmap-bands {
   display: grid;
@@ -87,15 +85,15 @@
   align-items: center;
   padding: 10px 12px 10px 16px;
   border-radius: 14px;
-  border: 1px solid var(--line);
-  background: var(--bg-2);
+  border: 1px solid color-mix(in srgb, var(--c, var(--line-2)) 40%, var(--line));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--c, transparent) 10%, var(--bg-2)), var(--bg-2) 70%);
 }
 .wmap-family header {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  color: var(--cyan);
+  color: var(--c, var(--cyan));
 }
 .wmap-family header svg {
   width: 18px;
@@ -131,7 +129,7 @@
 }
 .wmap-tile-wrap:target .wmap-tile,
 .wmap-tile-wrap:has(.wmap-anchor:target) .wmap-tile {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--c, var(--cyan));
   outline-offset: 2px;
 }
 .wmap-tile {
@@ -156,17 +154,7 @@
   background: color-mix(in srgb, var(--l) 26%, var(--surface));
 }
 .wmap-tile[data-level="available"] {
-  --l: var(--lvl-available);
-}
-.wmap-tile[data-level="planned"] {
-  --l: var(--lvl-planned);
-  border-style: dashed;
-  background: color-mix(in srgb, var(--l) 7%, var(--surface));
-}
-.wmap-tile[data-level="research"] {
-  --l: var(--lvl-research);
-  border-style: dashed;
-  background: color-mix(in srgb, var(--l) 6%, var(--surface));
+  --l: var(--c, var(--lvl-available));
 }
 .wmap-num {
   font-size: 15px;
