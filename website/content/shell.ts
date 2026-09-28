@@ -24,7 +24,7 @@ export const shell = {
         download: "Download",
         privacy: "Privacy",
         overview: "Build with Ghostly",
-        catalog: "WISP catalog",
+        catalog: "WISPs",
         protocol: "Protocol docs",
         cli: "CLI",
         roadmap: "Roadmap",

@@ -79,7 +79,7 @@ export function HomePage({ version }: { version: string }) {
         cta={t.open.cta}
         catalog={t.open.catalog}
         devHref={"/developers"}
-        catalogHref={"/developers/catalog"}
+        catalogHref={"/developers/wisps"}
       />
       {/* Phones: the chapter's buttons after the picture instead of in the sheet over it. */}
       <div className="wrap open-after">
@@ -87,7 +87,7 @@ export function HomePage({ version }: { version: string }) {
           <Link className="btn btn--primary" href={"/developers"}>
             {t.open.cta} →
           </Link>
-          <Link className="btn" href={"/developers/catalog"}>
+          <Link className="btn" href={"/developers/wisps"}>
             {t.open.catalog}
           </Link>
         </div>

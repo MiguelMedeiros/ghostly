@@ -11,7 +11,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     entry("/", 1),
     entry("/developers", 0.9),
-    entry("/developers/catalog", 0.8),
+    entry("/developers/wisps", 0.8),
     entry("/roadmap", 0.8),
     ...references.map((ref) => entry(`/developers/wisps/${ref.slug}`, 0.6)),
     entry("/docs", 0.7),
