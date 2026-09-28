@@ -1,4 +1,4 @@
-import { REACTION_LIMITS, nextReactionNumber, reactionEmoji, reactionIsNewer, replySnippet, type WireReaction } from "@ghostly/core";
+import { REACTION_LIMITS, ReactionWindow, nextReactionNumber, reactionEmoji, reactionIsNewer, replySnippet, type WireReaction } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
 import type { ReactionNote, StoredMessage } from "../shared/types";
 
@@ -58,6 +58,8 @@ export class Reactions {
   private readonly waiting = new Map<string, { by: string; reaction: WireReaction; until: number }[]>();
   /** One chat's reactions at a time: a burst for one message lands in order. */
   private queue = Promise.resolve();
+  /** A group member's reactions taken per window (chat and member key), as a paired chat's session limits them. */
+  private readonly memberPace = new Map<string, ReactionWindow>();
 
   constructor(private readonly host: ReactionsHost) {}
 
@@ -96,6 +98,12 @@ export class Reactions {
    * yet keeps it for a minute; past the room for that, it is dropped (and, on a 1:1 session, not confirmed).
    */
   receive(chat: string, by: string, reaction: WireReaction): Promise<ReactionOutcome> {
+    if (isGroup(chat)) {
+      const key = `${chat}\n${by}`;
+      let pace = this.memberPace.get(key);
+      if (!pace) this.memberPace.set(key, pace = new ReactionWindow(REACTION_LIMITS.receive, REACTION_LIMITS.windowMs, () => this.now()));
+      if (!pace.take()) return Promise.resolve("dropped");
+    }
     return this.run(async () => {
       const messages = await this.host.messages(chat);
       const target = reactionTarget(messages, reaction.id, isGroup(chat));
