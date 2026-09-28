@@ -10,7 +10,7 @@ import {
 } from "../src/pins";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
 import type { FrameChannel } from "../src/frames";
-// covers: chat.pins.wire
+// covers: chat.pins.wire, groups.protocol.pins
 
 const ID = "AAAAAAAAAAAAAAAAAAAAAA";
 

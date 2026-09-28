@@ -225,7 +225,7 @@ export interface GroupView {
   lastMentionAt?: number;
   /** The latest reaction in the group, for the chat list. */
   lastReaction?: ReactionNote;
-  /** The group's pinned message (WISP 400 § Pinned message); absent when none is. */
+  /** The group's pin (WISP 400 § Pinned message): `id` "" once unpinned; absent when nothing was ever pinned. */
   pin?: PinView;
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
@@ -707,7 +707,7 @@ export interface MessagePage { messages: StoredMessage[]; more: boolean }
  */
 export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string }
 
-/** A chat's pinned message, as the pages and the CLI see it. `id`: the id both sides know it by; `messageId`: the row here. */
+/** A chat's pin, as the pages and the CLI see it. `id`: the id both sides know the message by ("" once unpinned); `messageId`: the row here. */
 export interface PinView { id: string; by: string; at: number; messageId?: string }
 
 /** One person's reaction to a message: the emoji ("" once taken back), their number (the highest wins), when it came. */
@@ -1323,7 +1323,7 @@ export interface LinkView {
   identitySharedAt?: number;
   /** The latest reaction in this chat, for the chat list; paired chats. */
   lastReaction?: ReactionNote;
-  /** The chat's pinned message (WISP 400 § Pinned message); absent when none is. */
+  /** The chat's pin (WISP 400 § Pinned message): `id` "" once unpinned; absent when nothing was ever pinned. */
   pin?: PinView;
   id: string;
   myPubKeyZ32: string;

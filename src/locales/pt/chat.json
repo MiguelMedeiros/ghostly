@@ -88,6 +88,13 @@
   "offline": "offline",
   "online": "online",
   "options": "Opções",
+  "pinned": {
+    "bar": "Mensagem fixada",
+    "info": "Uma mensagem fixada por conversa, vista por todos nela. Uma nova fixação substitui a anterior. Numa comunidade, só o admin fixa.",
+    "notHere": "Não está neste dispositivo",
+    "pin": "Fixar",
+    "unpin": "Desafixar"
+  },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",
     "more": "Mais emojis",

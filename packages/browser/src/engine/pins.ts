@@ -17,9 +17,9 @@ export interface PinsHost {
 
 const isGroup = (chat: string) => chat.startsWith("group:");
 
-/** What the pages and the CLI see of a pin: nothing once unpinned. */
+/** What the pages and the CLI see of a pin (`id` "" once unpinned, and by whom). */
 export function pinView(pin: StoredPin | undefined): PinView | undefined {
-  return pin?.id ? { id: pin.id, by: pin.by, at: pin.at, ...(pin.messageId && { messageId: pin.messageId }) } : undefined;
+  return pin && { id: pin.id, by: pin.by, at: pin.at, ...(pin.messageId && { messageId: pin.messageId }) };
 }
 
 /** Whether I may pin in this group now: the rule (`mayPin`) with my key and its admin's. */

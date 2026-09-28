@@ -56,6 +56,11 @@ export const commands: Record<string, Command> = {
   "message delete": { method: "chat.delete", usage: "message delete <chat> <message>", summary: "Forget a message on this device (the contact keeps theirs)", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message details": { method: "chat.details", usage: "message details <chat> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
+  "pin": {
+    method: "chat.pin", usage: "pin <chat|group> <message> [--remove]", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
+    args: ["chat", "message"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message" } },
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, remove: options.remove === true }),
+  },
   "react": {
     method: "chat.react", usage: "react <chat> <message> <emoji> [--remove]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
     args: ["chat", "message", "emoji..."], options: { remove: { type: "boolean", description: "Take your reaction back" } },
