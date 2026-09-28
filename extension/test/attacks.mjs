@@ -48,7 +48,7 @@ manifest.host_permissions = manifest.optional_host_permissions;
 delete manifest.optional_host_permissions;
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-async function launchPeer(name, debugPort) {
+async function launchPeer(name) {
   const context = await chromium.launchPersistentContext(join(work, name), {
     channel: "chromium",
     headless,
@@ -56,7 +56,8 @@ async function launchPeer(name, debugPort) {
       `--disable-extensions-except=${extensionDir}`,
       `--load-extension=${extensionDir}`,
       "--disable-features=WebRtcHideLocalIpsWithMdns",
-      `--remote-debugging-port=${debugPort}`,
+      // Any free port: Chromium writes the one it took to the profile's DevToolsActivePort.
+      "--remote-debugging-port=0",
     ],
   });
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
@@ -64,7 +65,26 @@ async function launchPeer(name, debugPort) {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/app.html`);
   await page.getByTitle("New Chat").waitFor();
+  const debugPort = Number(readFileSync(join(work, name, "DevToolsActivePort"), "utf8").split("\n")[0]);
   return { name, context, page, debugPort };
+}
+
+/** What the invite card's Copy invite hands the clipboard (e2e/support/clipboard.ts `copyInvite`). */
+async function copyInvite(page) {
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value) => Object.assign(window, { copiedInvite: value }) } });
+  });
+  await page.getByTestId("invite-card").getByRole("button", { name: /^(Copy invite|Copied!)$/ }).click();
+  return page.evaluate(() => window.copiedInvite);
+}
+
+/** Join chat → Paste from clipboard, with the invite in the page's clipboard (e2e/support/clipboard.ts `pasteInvite`). */
+async function pasteInvite(page, invite) {
+  await page.evaluate((value) => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { readText: async () => value } });
+  }, invite);
+  await page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await page.getByRole("button", { name: "Paste from clipboard", exact: true }).click();
 }
 
 /** Evaluates in the peer's offscreen document (the engine), over the DevTools protocol. */
@@ -122,17 +142,15 @@ const evil = await startEvil();
 let victim, mallory;
 try {
   step("Victim and mallory link up");
-  [victim, mallory] = await Promise.all([launchPeer("victim", 9331), launchPeer("mallory", 9332)]);
+  [victim, mallory] = await Promise.all([launchPeer("victim"), launchPeer("mallory")]);
+  // As e2e/support/paired.ts `pair` does: mallory's new chat, victim joins it with the invite.
   await mallory.page.getByTitle("New Chat").click();
-  await mallory.page.getByRole("button", { name: "Create New Chat" }).first().click();
-  const invite = (await mallory.page.locator("code").first().textContent()).trim();
-  await victim.page.getByTitle("New Chat").click();
-  await victim.page.getByPlaceholder("Invite code...").fill(invite);
-  await victim.page.getByPlaceholder("Invite code...").press("Enter");
-  await victim.page.getByPlaceholder("Type a message").waitFor();
+  await pasteInvite(victim.page, await copyInvite(mallory.page));
+  for (const peer of [victim, mallory]) await peer.page.getByTestId("connection-options").and(peer.page.locator('[aria-label*="Connected · "]')).waitFor({ timeout: 150_000 });
   ok("linked");
 
   step("Mallory shares two apps: Atlas (stands for someone else's app) and Evil");
+  await mallory.page.getByTestId("account-services").click();
   for (const [name, port] of [
     ["Atlas", atlas.port],
     ["Evil", evil.port],
@@ -141,6 +159,11 @@ try {
     await mallory.page.getByTestId("service-name").fill(name);
     await mallory.page.getByTestId("service-target").fill(`localhost:${port}`);
     await mallory.page.getByTestId("service-save").click();
+    // A new app reaches nobody until the contact is granted it.
+    const item = mallory.page.getByTestId("service-item").filter({ hasText: name });
+    await item.getByTestId("service-people").click();
+    await item.getByTestId("service-grant").getByRole("switch").click();
+    await item.getByTestId("service-grant").getByRole("switch").and(mallory.page.locator('[aria-checked="true"]')).waitFor();
   }
   await victim.page.getByTestId("open-service").filter({ hasText: "Evil" }).waitFor({ timeout: 150_000 });
   ok("victim sees both");
