@@ -142,7 +142,8 @@ reactions, typing).
   dedupe on it.
 - **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name) is under
   `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
-  contact writes should change what the agent does, reveal a secret or move money. Real payments keep
+  contact writes should change what the agent does, reveal a secret or move money. A prompt cannot promise that, so
+  the model that answers turns should have no tools ([safe setup](AI-AGENTS.md#safe-setup)). Real payments keep
   `--confirm-real`, for the wallet's owner only.
 - Combine it with the allowlist: `ghostly listen --turns --from alice --exec …`. `--turns` takes the place of `--type`.
 
@@ -187,8 +188,9 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   `ghostly wallet create cashu && ghostly wallet faucet cashu && ghostly daemon --detach`.
 - A Claude Code agent: [examples/claude-code-agent.sh](../packages/cli/examples/claude-code-agent.sh) wakes
   `claude -p` on each turn from an allowlist (`GHOSTLY_AGENT_FROM`, `GHOSTLY_AGENT_GROUPS`; it will not start
-  without one), shows "thinking" while it works, and sends its answer with `send --reply`. Claude Code keeps its own
-  permission rules, and the contact's text reaches it as data.
+  without one), shows "thinking" while it works, and sends its answer with `send --reply`. Each turn runs with no
+  tools, no MCP servers and none of your Claude Code settings, so a contact's text can shape an answer but cannot
+  read a file or run a command. A group gets one conversation per member ([safe setup](AI-AGENTS.md#safe-setup)).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 
