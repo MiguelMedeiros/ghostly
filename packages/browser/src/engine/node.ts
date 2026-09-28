@@ -878,6 +878,7 @@ export class GhostlyNode implements EngineImplementation {
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeMessage(message),
     completeMessage: message => this.completeGroupMessage(message),
+    membersChanged: groupId => this.groupMembersChanged(groupId),
     emit: () => this.emitState(),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
@@ -1503,6 +1504,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!subscription) delete this.settings.wake;
     // Replaced or turned off: whoever held the old subscription can no longer post to it.
     delete this.settings.wakeRotate;
+    delete this.settings.wakeHeldBy;
     await db.putSettings(this.settings);
     for (const live of this.links.values()) {
       const edge = this.meshEdge(live.stored);
@@ -1569,11 +1571,24 @@ export class GhostlyNode implements EngineImplementation {
     return !!stored.group && !!stored.groupPeer && !stored.groupEntry && !this.groups.isCommunityGroup(stored.group);
   }
 
+  /**
+   * A group's roster changed, or I am out of it: a member that holds this profile's subscription with no edge left
+   * (a group on hubs dropped it) and is no longer in the group, or a group I left or forgot, replaces it.
+   */
+  private groupMembersChanged(groupId: string): void {
+    const holders = this.settings.wakeHeldBy?.[groupId];
+    if (!holders?.length) return;
+    const members = this.membership(groupId)?.members;
+    if (members && holders.every(key => members.has(key))) return;
+    void this.rotateWake().then(() => this.emitState());
+  }
+
   private async setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
     const list = this.settings.wakeMutedGroups ?? [];
     if (list.includes(groupId) === muted) return;
     // Members told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
-    if (muted && [...this.links.values()].some(live => live.stored.group === groupId && this.meshEdge(live.stored) && live.stored.wakeToken)) await this.rotateWake();
+    // Those whose edges a group on hubs dropped hold it too, with no edge left to tell them.
+    if (muted && ([...this.links.values()].some(live => live.stored.group === groupId && this.meshEdge(live.stored) && live.stored.wakeToken) || this.settings.wakeHeldBy?.[groupId]?.length)) await this.rotateWake();
     const next = muted ? [...list, groupId] : list.filter(id => id !== groupId);
     this.settings = { ...this.settings, wakeMutedGroups: next.length ? next : undefined };
     if (!next.length) delete this.settings.wakeMutedGroups;
@@ -3506,6 +3521,7 @@ export class GhostlyNode implements EngineImplementation {
     delete (settings as Partial<Settings>).wake;
     delete (settings as Partial<Settings>).wakeRotate;
     delete (settings as Partial<Settings>).wakeMutedGroups;
+    delete (settings as Partial<Settings>).wakeHeldBy;
     const relayBefore = this.hyperdhtRelay;
     // Of the Nostr settings, only what the patch names changes; the rest stays as stored (or the defaults).
     if (nostr) {
@@ -3675,7 +3691,16 @@ export class GhostlyNode implements EngineImplementation {
     this.groupWakeReceived.delete(linkId);
     // A member who held the subscription and is no longer in the group (removed, or I left): the app replaces it.
     // An edge a group on hubs no longer keeps is still a member's: nothing to replace.
-    if (live.stored.wakeToken && this.meshEdge(live.stored) && !this.membership(live.stored.group)?.members.has(live.stored.groupPeer!)) void this.rotateWake().then(() => this.emitState());
+    // An edge a group on hubs no longer keeps is still a member's: it is remembered as holding the subscription, which
+    // is replaced once that member leaves the roster (`groupMembersChanged`).
+    if (live.stored.wakeToken && this.meshEdge(live.stored)) {
+      const group = live.stored.group, peer = live.stored.groupPeer!;
+      if (!this.membership(group)?.members.has(peer)) void this.rotateWake().then(() => this.emitState());
+      else if (this.settings.wake && !this.settings.wakeHeldBy?.[group]?.includes(peer)) {
+        this.settings = { ...this.settings, wakeHeldBy: { ...this.settings.wakeHeldBy, [group]: [...this.settings.wakeHeldBy?.[group] ?? [], peer] } };
+        await db.putSettings(this.settings);
+      }
+    }
     // An entry session is over once the admission is (or was given up): nobody waits on it, so it goes
     // without a last packet saying so, which would only spend two of the relays' requests at a busy moment.
     await live.link?.stop(!live.stored.groupEntry); await live.caps?.stop();

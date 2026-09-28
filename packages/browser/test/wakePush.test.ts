@@ -345,6 +345,56 @@ describe("private groups: a mention wakes a member whose app is closed", () => {
     await vi.waitFor(() => expect(node["settings"].wakeRotate).toBe(true));
   });
 
+  it("a member whose edge a group on hubs dropped still holds the subscription: replaced when it leaves the roster later", async () => {
+    const node = engine();
+    const [held, other] = [memberKey(), memberKey()];
+    const edge = await addEdge(node, "g", held, edgeLink());
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(async () => expect((await saved(edge.id))?.wakeToken).toBeTruthy());
+    let members = new Set([held, other]);
+    node["membership"] = vi.fn(() => ({ me: "me", members }));
+    // The hubs take over: the edge goes, the member stays.
+    await node["closeGroupLink"](edge.id);
+    expect(node["settings"].wakeRotate).toBeUndefined();
+    // Someone else leaves: nothing to replace.
+    members = new Set([held]);
+    node["groupMembersChanged"]("g");
+    expect(node["settings"].wakeRotate).toBeUndefined();
+    // The member it shared with is removed, with no edge left to close.
+    members = new Set();
+    node["groupMembersChanged"]("g");
+    await vi.waitFor(() => expect(node["settings"].wakeRotate).toBe(true));
+    // A new subscription: nobody holds it any more.
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    expect((await db.getSettings()).wakeHeldBy).toBeUndefined();
+  });
+
+  /** A member of group `g` got a token on its edge, which a group on hubs then dropped. */
+  async function heldWithoutEdge() {
+    const node = engine();
+    const held = memberKey();
+    const edge = await addEdge(node, "g", held, edgeLink());
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(async () => expect((await saved(edge.id))?.wakeToken).toBeTruthy());
+    node["membership"] = vi.fn(() => ({ me: "me", members: new Set([held]) }));
+    await node["closeGroupLink"](edge.id);
+    expect(node["settings"].wakeRotate).toBeUndefined();
+    return node;
+  }
+
+  it("muting a group whose members hold the subscription without an edge replaces it", async () => {
+    const node = await heldWithoutEdge();
+    await node.setWakeMuted({ linkId: "group:g", muted: true });
+    expect(node["settings"].wakeRotate).toBe(true);
+  });
+
+  it("leaving or forgetting a group whose members hold the subscription without an edge replaces it", async () => {
+    const node = await heldWithoutEdge();
+    node["membership"] = vi.fn(() => undefined);
+    node["groupMembersChanged"]("g");
+    await vi.waitFor(() => expect(node["settings"].wakeRotate).toBe(true));
+  });
+
   it("keeps what a member shares on its edge, for its group only, a handful a minute; null forgets it", async () => {
     const node = engine();
     const edge = await addEdge(node, "g", memberKey(), edgeLink());
