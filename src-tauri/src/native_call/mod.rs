@@ -216,7 +216,11 @@ pub async fn native_microphone_meter(
     #[cfg(target_os = "linux")]
     {
         let open = move || {
-            engine::Meter::open(engine::fake_media(), device.as_deref(), Arc::new(sink(levels)))
+            engine::Meter::open(
+                engine::fake_media(),
+                device.as_deref(),
+                Arc::new(sink(levels)),
+            )
         };
         let meter = logged("the microphone's meter", blocking(open).await)?;
         let device = meter.device.clone();

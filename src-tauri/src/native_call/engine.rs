@@ -370,23 +370,27 @@ impl Meter {
             |pipeline| {
                 let levels = levels.clone();
                 // Read where `level` posts them; anything else (an error) stays on the bus for `start`.
-                pipeline.bus().ok_or("No bus")?.set_sync_handler(move |_, message| {
-                    let gst::MessageView::Element(element) = message.view() else {
-                        return gst::BusSyncReply::Pass;
-                    };
-                    let Some(reading) = element.structure().filter(|s| s.name() == "level") else {
-                        return gst::BusSyncReply::Pass;
-                    };
-                    if let Ok(rms) = reading.get::<gst::glib::ValueArray>("rms") {
-                        let loudest = rms
-                            .iter()
-                            .filter_map(|v| v.get::<f64>().ok())
-                            .fold(f64::NEG_INFINITY, f64::max);
-                        let level = serde_json::json!({ "level": meter_level(loudest) });
-                        levels(level.to_string().into_bytes());
-                    }
-                    gst::BusSyncReply::Drop
-                });
+                pipeline
+                    .bus()
+                    .ok_or("No bus")?
+                    .set_sync_handler(move |_, message| {
+                        let gst::MessageView::Element(element) = message.view() else {
+                            return gst::BusSyncReply::Pass;
+                        };
+                        let Some(reading) = element.structure().filter(|s| s.name() == "level")
+                        else {
+                            return gst::BusSyncReply::Pass;
+                        };
+                        if let Ok(rms) = reading.get::<gst::glib::ValueArray>("rms") {
+                            let loudest = rms
+                                .iter()
+                                .filter_map(|v| v.get::<f64>().ok())
+                                .fold(f64::NEG_INFINITY, f64::max);
+                            let level = serde_json::json!({ "level": meter_level(loudest) });
+                            levels(level.to_string().into_bytes());
+                        }
+                        gst::BusSyncReply::Drop
+                    });
                 Ok(())
             },
         )?;
@@ -404,7 +408,8 @@ impl Drop for Meter {
 }
 
 /// The speakers' test: a tone, a second long.
-const SPEAKER_TEST: &str = "audiotestsrc wave=sine freq=660 volume=0.3 samplesperbuffer=4800 num-buffers=10 \
+const SPEAKER_TEST: &str =
+    "audiotestsrc wave=sine freq=660 volume=0.3 samplesperbuffer=4800 num-buffers=10 \
      ! audio/x-raw,rate=48000,channels=1 ! audioconvert ! audioresample ! {device}";
 
 /// Plays the speakers' test on the speaker named `wanted`, or the default one (nothing heard with `fake`, as in
@@ -1395,7 +1400,11 @@ mod tests {
         assert_eq!(meter_level(f64::NAN), 0.0);
         // A sine at 0.2 has an RMS of 0.141 (-17 dB): 0.57 on the meter, as `voiceLevel` gives its samples.
         let sine = 20.0 * (0.2 / 2f64.sqrt()).log10();
-        assert!((meter_level(sine) - 0.566).abs() < 0.001, "{}", meter_level(sine));
+        assert!(
+            (meter_level(sine) - 0.566).abs() < 0.001,
+            "{}",
+            meter_level(sine)
+        );
         assert_eq!(meter_level(0.0), 1.0);
         assert!(meter_level(-60.0) < 0.005);
     }
@@ -1417,7 +1426,9 @@ mod tests {
                 wanted,
                 Arc::new(move |bytes: Vec<u8>| {
                     let reading: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-                    into.lock().unwrap().push(reading["level"].as_f64().unwrap());
+                    into.lock()
+                        .unwrap()
+                        .push(reading["level"].as_f64().unwrap());
                 }),
             )
             .unwrap();
