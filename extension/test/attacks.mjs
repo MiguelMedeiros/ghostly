@@ -15,7 +15,8 @@
  *   npm run test:attacks -w @ghostly/extension
  *
  * EXT_DIR=<built extension> runs the same attacks against another build (the
- * payment attacks need an e2e build and are skipped otherwise).
+ * payment attacks need an e2e build and are skipped otherwise). The test sat
+ * attacks need the public test mint and are skipped while it does not answer.
  */
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,6 +34,7 @@ const TEST_MINT = "https://testnut.cashu.space";
 const step = (text) => console.log(`\n▸ ${text}`);
 const ok = (text) => console.log(`  ✓ ${text}`);
 const results = [];
+const skipped = [];
 const check = (label, passed, detail = "") => {
   results.push({ label, passed });
   console.log(`  ${passed ? "✓" : "✗ VULNERABLE:"} ${label}${detail ? ` (${detail})` : ""}`);
@@ -48,7 +50,7 @@ manifest.host_permissions = manifest.optional_host_permissions;
 delete manifest.optional_host_permissions;
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-async function launchPeer(name, debugPort) {
+async function launchPeer(name) {
   const context = await chromium.launchPersistentContext(join(work, name), {
     channel: "chromium",
     headless,
@@ -56,7 +58,8 @@ async function launchPeer(name, debugPort) {
       `--disable-extensions-except=${extensionDir}`,
       `--load-extension=${extensionDir}`,
       "--disable-features=WebRtcHideLocalIpsWithMdns",
-      `--remote-debugging-port=${debugPort}`,
+      // Any free port: Chromium writes the one it took to the profile's DevToolsActivePort.
+      "--remote-debugging-port=0",
     ],
   });
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
@@ -64,7 +67,46 @@ async function launchPeer(name, debugPort) {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/app.html`);
   await page.getByTitle("New Chat").waitFor();
+  const debugPort = Number(readFileSync(join(work, name, "DevToolsActivePort"), "utf8").split("\n")[0]);
   return { name, context, page, debugPort };
+}
+
+/** What the invite card's Copy invite hands the clipboard (e2e/support/clipboard.ts `copyInvite`). */
+async function copyInvite(page) {
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value) => Object.assign(window, { copiedInvite: value }) } });
+  });
+  await page.getByTestId("invite-card").getByRole("button", { name: /^(Copy invite|Copied!)$/ }).click();
+  return page.evaluate(() => window.copiedInvite);
+}
+
+/** Join chat → Paste from clipboard, with the invite in the page's clipboard (e2e/support/clipboard.ts `pasteInvite`). */
+async function pasteInvite(page, invite) {
+  await page.evaluate((value) => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { readText: async () => value } });
+  }, invite);
+  await page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await page.getByRole("button", { name: "Paste from clipboard", exact: true }).click();
+}
+
+/** Wallet → New → a network → Cashu, as a person does (e2e/support/fixtures.ts `createWallet`), then back to the chat. */
+async function cashuWallet(peer, network) {
+  const { page } = peer;
+  if (!(await page.getByTestId("wallet").isVisible())) await page.getByTestId("wallet-chip").click();
+  const tab = page.getByTestId(`wallet-network-${network}`);
+  if ((await tab.count()) && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
+  const card = page.getByTestId(`wallet-card-cashu-${network}`);
+  if (!(await card.count())) {
+    await page.getByTestId("wallet-add").click();
+    const dialog = page.getByTestId("new-wallet");
+    await dialog.getByTestId(`new-wallet-network-${network}`).click();
+    await dialog.getByTestId("new-wallet-type-cashu").click();
+    const error = dialog.getByTestId("new-wallet-error");
+    await card.or(error).waitFor({ timeout: 90_000 });
+    if (await error.isVisible()) throw new Error(`${peer.name}: no ${network} Cashu wallet: ${await error.innerText()}`);
+  }
+  await page.goBack();
+  await page.locator(".chat-wallpaper").waitFor();
 }
 
 /** Evaluates in the peer's offscreen document (the engine), over the DevTools protocol. */
@@ -122,17 +164,15 @@ const evil = await startEvil();
 let victim, mallory;
 try {
   step("Victim and mallory link up");
-  [victim, mallory] = await Promise.all([launchPeer("victim", 9331), launchPeer("mallory", 9332)]);
+  [victim, mallory] = await Promise.all([launchPeer("victim"), launchPeer("mallory")]);
+  // As e2e/support/paired.ts `pair` does: mallory's new chat, victim joins it with the invite.
   await mallory.page.getByTitle("New Chat").click();
-  await mallory.page.getByRole("button", { name: "Create New Chat" }).first().click();
-  const invite = (await mallory.page.locator("code").first().textContent()).trim();
-  await victim.page.getByTitle("New Chat").click();
-  await victim.page.getByPlaceholder("Invite code...").fill(invite);
-  await victim.page.getByPlaceholder("Invite code...").press("Enter");
-  await victim.page.getByPlaceholder("Type a message").waitFor();
+  await pasteInvite(victim.page, await copyInvite(mallory.page));
+  for (const peer of [victim, mallory]) await peer.page.getByTestId("connection-options").and(peer.page.locator('[aria-label*="Connected · "]')).waitFor({ timeout: 150_000 });
   ok("linked");
 
   step("Mallory shares two apps: Atlas (stands for someone else's app) and Evil");
+  await mallory.page.getByTestId("account-services").click();
   for (const [name, port] of [
     ["Atlas", atlas.port],
     ["Evil", evil.port],
@@ -141,6 +181,11 @@ try {
     await mallory.page.getByTestId("service-name").fill(name);
     await mallory.page.getByTestId("service-target").fill(`localhost:${port}`);
     await mallory.page.getByTestId("service-save").click();
+    // A new app reaches nobody until the contact is granted it.
+    const item = mallory.page.getByTestId("service-item").filter({ hasText: name });
+    await item.getByTestId("service-people").click();
+    await item.getByTestId("service-grant").getByRole("switch").click();
+    await item.getByTestId("service-grant").getByRole("switch").and(mallory.page.locator('[aria-checked="true"]')).waitFor();
   }
   await victim.page.getByTestId("open-service").filter({ hasText: "Evil" }).waitFor({ timeout: 150_000 });
   ok("victim sees both");
@@ -174,12 +219,20 @@ try {
   if (!hooked) {
     console.log("\n  (payment attacks skipped: this build has no e2e hook)");
   } else {
-    step("Payments: victim asks for 50 sats; its wallet only has real mints");
+    step("Payments: both make Mainnet Cashu wallets");
     await victim.page.bringToFront();
-    await victim.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" }).waitFor({ timeout: 120_000 });
-    const requestOnce = async () => {
-      await victim.page.getByTestId("composer-more").click();
-      await victim.page.getByTestId("payment-button").click();
+    // A request names one network's mints, and only reaches a contact with a Cashu wallet on it.
+    await cashuWallet(victim, "mainnet");
+    await cashuWallet(mallory, "mainnet");
+    ok("wallets made");
+
+    const requestOnce = async (network) => {
+      await victim.page.getByTestId("connection-options").and(victim.page.locator('[aria-label*="Connected · "]')).waitFor({ timeout: 120_000 });
+      if (!(await victim.page.getByTestId("composer-menu").isVisible())) await victim.page.getByTestId("composer-more").click();
+      await victim.page.getByTestId("composer-menu").getByTestId("payment-button").click();
+      const tab = victim.page.getByTestId(`payment-tab-${network}`);
+      if ((await tab.count()) && (await tab.getAttribute("aria-selected")) !== "true") await tab.click();
+      await victim.page.getByTestId(`payment-card-cashu-${network}`).click();
       await victim.page.getByTestId("payment-amount").fill("50");
       await victim.page.getByTestId("payment-request").click();
       let id = null;
@@ -193,7 +246,7 @@ try {
       engine(
         mallory,
         `(async () => {
-          const live = [...__ghostly.node.links.values()][0];
+          const live = [...__ghostly.node.links.values()].find((l) => l.link && !l.stored.group);
           await live.link.sendPayment({ id: "forged" + Date.now().toString(36) + "xx", timestamp: Date.now(), requestId: ${JSON.stringify(requestId)},
             amount: { value: "${amount}", asset: "sat" }, endpoint: ["cashu", ${JSON.stringify(token)}] });
           return true;
@@ -202,29 +255,52 @@ try {
     const victimRequest = (id) => engine(victim, `__ghostly.node.desk.payments.get(${JSON.stringify(id)})?.state ?? null`);
     const victimMints = () => engine(victim, `__ghostly.node.settings.mints`);
 
-    const first = await requestOnce();
+    step("Victim asks for 50 sats on Mainnet; mallory pays in ecash from a \"mint\" on the victim's machine");
+    const first = await requestOnce("mainnet");
     if (!first) throw new Error("the request never reached mallory (is a default mint reachable?)");
     const mintsBefore = await victimMints();
-    await forgePay(first, 50, await testSats(50));
-    await new Promise((resolve) => setTimeout(resolve, 8000));
-    check("50 worthless test sats do not pay a real request", (await victimRequest(first)) === "pending", `state ${await victimRequest(first)}`);
-    const mintsAfter = await victimMints();
-    check("a contact's ecash never adds a mint to the victim's wallet", !mintsAfter.includes(TEST_MINT) && mintsAfter.length === mintsBefore.length, mintsAfter.join(", "));
+    const trap = await startEvil();
+    const local = `http://127.0.0.1:${trap.port}`;
+    const fake = getEncodedToken({ mint: local, unit: "sat", proofs: [{ id: "009a1f293253e41e", amount: 64, secret: "forged", C: "02" + "11".repeat(32) }] });
+    await forgePay(first, 64, fake);
+    // The victim says a refusal in the chat: the frame arrived and was read.
+    const refusal = victim.page.locator(".chat-wallpaper").getByText(/^Could not receive 64 sats: /);
+    await refusal.waitFor({ timeout: 60_000 });
+    console.log(`    victim: "${await refusal.innerText()}"`);
+    trap.server.close();
+    check("a contact's ecash never makes the victim reach a local port", trap.requests.length === 0, `${trap.requests.length} request(s)`);
+    check("a contact's local mint never joins the victim's wallet", !(await victimMints()).includes(local));
+    check("ecash from a mint the request did not name does not pay it", (await victimRequest(first)) === "pending", `state ${await victimRequest(first)}`);
 
-    step("Victim now uses the test mint too and asks for 50 again");
-    await victim.page.getByTestId("wallet-settings").click();
-    await victim.page.getByTestId("wallet-test-mint").click();
-    await victim.page.getByTestId("wallet-test-balance").waitFor({ timeout: 30_000 });
-    await victim.page.getByTestId("wallet-settings").click();
-    const second = await requestOnce();
-    await forgePay(second, 50, await testSats(5));
-    const credited = await until(async () => (await engine(victim, `__ghostly.node.walletView.balance`)) > 0 || (await engine(victim, `[...__ghostly.node.desk.payments.values()].some(p => p.kind === "payment" && p.direction === "in")`)), "the 5 sats to arrive", 30_000);
-    console.log(`    5 sats ${credited ? "arrived" : "did not arrive"} with a claim of 50`);
-    check("5 sats claimed as 50 do not pay a 50 sat request", (await victimRequest(second)) === "pending", `state ${await victimRequest(second)}`);
+    const testMint = await fetch(`${TEST_MINT}/v1/info`, { signal: AbortSignal.timeout(20_000) }).then((r) => r.ok).catch(() => false);
+    if (!testMint) {
+      skipped.push("test sats paying a real request", "5 test sats claimed as 50");
+      console.log(`\n  (test sat attacks skipped: ${new URL(TEST_MINT).host} does not answer)`);
+    } else {
+      step("Mallory pays the Mainnet request with 50 worthless test sats");
+      await cashuWallet(mallory, "testnet");
+      await forgePay(first, 50, await testSats(50));
+      await new Promise((resolve) => setTimeout(resolve, 8000));
+      check("50 worthless test sats do not pay a real request", (await victimRequest(first)) === "pending", `state ${await victimRequest(first)}`);
+      // The public test mint may join (WISP 200: it holds nothing of value); no other mint does.
+      const added = (await victimMints()).filter((mint) => !mintsBefore.includes(mint));
+      check("a contact's ecash adds no mint but the public test mint", added.every((mint) => mint === TEST_MINT), `added ${added.join(", ") || "none"}`);
+
+      step("Victim uses the test mint too and asks for 50 test sats");
+      await cashuWallet(victim, "testnet");
+      const second = await requestOnce("testnet");
+      if (!second) throw new Error("the Testnet request never reached mallory");
+      const testBefore = await engine(victim, `__ghostly.node.walletView.networks.testnet.balance`);
+      await forgePay(second, 50, await testSats(5));
+      const credited = await until(async () => (await engine(victim, `__ghostly.node.walletView.networks.testnet.balance`)) > testBefore, "the 5 sats to arrive", 30_000);
+      console.log(`    5 sats ${credited ? "arrived" : "did not arrive"} with a claim of 50`);
+      check("5 sats claimed as 50 do not pay a 50 sat request", (await victimRequest(second)) === "pending", `state ${await victimRequest(second)}`);
+    }
   }
 
   failed = results.some((r) => !r.passed);
-  console.log(failed ? `\n${results.filter((r) => !r.passed).length} attack(s) worked.` : "\nEvery attack was refused. 👻");
+  console.log(failed ? `\n${results.filter((r) => !r.passed).length} attack(s) worked.` : `\nEvery attack tried was refused (${results.length}). 👻`);
+  if (skipped.length) console.log(`Not tried: ${skipped.join("; ")}.`);
 } catch (error) {
   failed = true;
   console.error("\n✗", error);
