@@ -1,0 +1,17 @@
+{
+  "install": "Installa",
+  "installHint": "Una finestra tutta sua e un'icona nella schermata Home o nel Dock.",
+  "installLabel": "Installa Ghostly",
+  "installTitle": "Installa",
+  "iosHint": "In Safari, tocca Condividi, poi Aggiungi alla schermata Home.",
+  "iosLabel": "Aggiungi alla schermata Home",
+  "offline": "Offline",
+  "offlineHint": "Le tue chat sono qui. Non parte nulla finché non torni online.",
+  "shareFiles": "{{count}} file",
+  "shareHint": "Scegli una chat. Controlli e invii da lì.",
+  "shareNoChats": "Ancora nessuna chat. Iniziane una, poi condividi di nuovo.",
+  "shareNone": "Non è stato condiviso nulla, o è già stato ritirato.",
+  "shareOneFile": "1 file",
+  "shareTitle": "Condividi in…",
+  "shareWaiting": "Ricezione di ciò che è stato condiviso..."
+}

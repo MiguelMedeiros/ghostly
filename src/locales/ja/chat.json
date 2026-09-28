@@ -1,0 +1,127 @@
+{
+  "compat": {
+    "continued": "相手を新しいチャットに招待しました。",
+    "hint": "このチャットは Ghostly 0.4 のコードで作成されました。テキストと通話は双方向で引き続き使えます。新しいチャットではファイル、支払い、保留メッセージも使えます。",
+    "label": "互換チャット · 旧バージョンの Ghostly",
+    "open": "新しいチャットを開く"
+  },
+  "connecting": "接続中",
+  "deleteMessage": "メッセージを削除",
+  "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。",
+  "delivery": {
+    "delivered": "配信済み",
+    "failed": "未送信",
+    "hint": {
+      "delivered": "相手のアプリが受信しました。",
+      "failed": "未送信。タップしてもう一度送信。",
+      "held": "相手がオンラインになるまで保管しています。",
+      "queued": "まだ受信確認がありません。自動で再送します。",
+      "sending": "送信しています。",
+      "sent": "送信済み。まだ受信確認がありません。",
+      "waiting": "相手がオンラインになると自動で送信します。"
+    },
+    "retry": "未送信。もう一度送信",
+    "sending": "送信中",
+    "sent": "送信済み",
+    "waiting": "相手がオンラインになるのを待っています"
+  },
+  "edit": {
+    "cancel": "編集をキャンセル",
+    "editing": "編集中"
+  },
+  "forward": {
+    "filesHint": "グループはテキストのみ",
+    "forward": "転送",
+    "forwarded": "転送されたメッセージ",
+    "many": "何度も転送されたメッセージ",
+    "messages": "{{count}}件のメッセージ",
+    "noChats": "チャットはまだありません",
+    "noMatch": "その名前のチャットはありません",
+    "pick": "最大{{count}}件まで選択",
+    "search": "チャットを検索",
+    "select": "選択",
+    "selected": "{{count}}件選択中",
+    "send": "送信",
+    "title": "転送先…"
+  },
+  "jump": {
+    "bottom": "最下部へ移動",
+    "count": "新着 {{count}} 件",
+    "new": "新着メッセージ {{count}} 件、最下部へ移動",
+    "newOne": "新着メッセージ 1 件、最下部へ移動"
+  },
+  "lastSeen": "最終オンライン {{time}}",
+  "menu": {
+    "continueNew": "新しいチャットで続ける",
+    "hold": "メッセージを保留…",
+    "pin": "チャットをピン留め",
+    "refresh": "更新",
+    "techInfo": "技術情報",
+    "unpin": "ピン留めを解除"
+  },
+  "message": {
+    "cancelSending": "送信を取り消す",
+    "copied": "コピーしました",
+    "copyHint": "クリックしてコピー",
+    "copyJson": "すべてJSONとしてコピー",
+    "details": "詳細",
+    "detailsClose": "閉じる",
+    "detailsTitle": "メッセージの詳細",
+    "download": "ダウンロード",
+    "downloadArriving": "まだ受信していません",
+    "downloadConverting": "変換中…",
+    "downloadFailed": "届きませんでした",
+    "downloadMissing": "この端末にありません",
+    "downloadMp3": "MP3でダウンロード",
+    "downloadPreparing": "準備中です",
+    "downloadUnconverted": "変換できません",
+    "edit": "編集",
+    "editPending": "まだ相手に表示されていません",
+    "editPendingGroup": "まだグループに送信されていません",
+    "edited": "編集済み",
+    "editedAt": "{{time}}に編集",
+    "keysHint": "鍵はここには表示されません。",
+    "options": "メッセージのオプション",
+    "reply": "返信",
+    "retry": "もう一度送信"
+  },
+  "offline": "オフライン",
+  "online": "オンライン",
+  "options": "オプション",
+  "reactions": {
+    "chipLabel": "{{emoji}}: {{names}}",
+    "more": "その他の絵文字",
+    "note": "{{name}}が「{{snippet}}」に{{emoji}}でリアクション",
+    "noteMine": "「{{snippet}}」に{{emoji}}でリアクションしました",
+    "notice": "あなたのメッセージにリアクションがありました",
+    "react": "リアクション"
+  },
+  "reply": {
+    "cancel": "返信をキャンセル",
+    "deleted": "元のメッセージは削除されました",
+    "jump": "元のメッセージへ移動",
+    "notHere": "元のメッセージはこのチャットにありません",
+    "replyingTo": "{{name}} に返信",
+    "unavailable": "元のメッセージは利用できません",
+    "unverified": "このチャットに見つかりません",
+    "you": "あなた"
+  },
+  "rich": {
+    "code": "コード",
+    "copied": "コピーしました",
+    "copy": "コピー",
+    "copyCode": "コードをコピー",
+    "localTime": "あなたの時刻で {{time}}",
+    "showAll": "すべて表示",
+    "showLess": "折りたたむ",
+    "spoiler": "非表示のテキスト。タップして表示",
+    "unshowable": "このメッセージは表示できませんでした。"
+  },
+  "send": "送信",
+  "today": "今日",
+  "typeMessage": "メッセージを入力...",
+  "typing": "入力中…",
+  "typingRecording": "録音中…",
+  "typingThinking": "考え中…",
+  "yesterday": "昨日"
+}

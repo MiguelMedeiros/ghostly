@@ -1,0 +1,16 @@
+{
+  "add": "添加资料",
+  "current": "当前资料",
+  "holdHint": "也可以在标签栏长按“设置”",
+  "locked": "已锁定",
+  "manage": "管理资料",
+  "new": "新消息",
+  "newShort": "新",
+  "open": "打开个人资料",
+  "othersNew": "其他资料中有新消息",
+  "othersUnread": "其他资料中有未读消息",
+  "switchTo": "切换到 {{name}}",
+  "switching": "正在打开 {{name}}…",
+  "title": "切换资料",
+  "unread": "{{count}} 条未读"
+}
