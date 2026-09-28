@@ -113,6 +113,10 @@ export const db = {
     const messages = await wrap<StoredMessage[]>((await store(STORES.messages, "readonly")).index("byLink").getAll(linkId));
     return messages.sort((a, b) => a.timestamp - b.timestamp);
   },
+  /** Whether the chat has a message with this id. */
+  async hasMessage(linkId: string, id: string): Promise<boolean> {
+    return (await wrap((await store(STORES.messages, "readonly")).getKey([linkId, id]))) !== undefined;
+  },
   /** Returns false when the message was already stored. */
   async addMessage(message: StoredMessage): Promise<boolean> {
     const tx = (await openDb()).transaction(STORES.messages, "readwrite");

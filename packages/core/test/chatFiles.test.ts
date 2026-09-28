@@ -71,7 +71,7 @@ interface Side {
   records: Map<string, FileTransferRecord>;
   transferred: Map<string, number>;
   sent: Record<string, unknown>[];
-  decide: (file: FileInfo) => Promise<OfferDecision>;
+  decide: (file: FileInfo, again?: boolean) => Promise<OfferDecision>;
   disks: Map<string, Disk>;
   sources: Map<string, OutgoingSource>;
 }
@@ -141,7 +141,7 @@ function wire(options: {
         deliver(other);
         return true;
       },
-      decide: (file) => side.decide(file),
+      decide: (file, again) => side.decide(file, again),
       openTarget: async (record) => {
         let disk = side.disks.get(record.id);
         if (!disk) { disk = new Disk(!!options.keepBytes); side.disks.set(record.id, disk); }
@@ -677,6 +677,25 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => state(w.a, "out", "full-002") === "failed");
     w.a.files.retry("full-002");
     await until(() => state(w.b, "in", "full-002") === "done");
+  });
+
+  it("a file taken without asking, offered again after it ended, is decided again: past the limits it is asked about", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("over-001", 2 * 1024 * 1024));
+    await until(() => w.b.disks.has("over-001"));
+    w.b.disks.get("over-001")!.failAt = 500_000;
+    await until(() => state(w.b, "in", "over-001") === "failed");
+    expect(w.b.records.get("in:over-001")?.agreed).toBe(true);
+    // Since then the contact used up what may be taken without asking: the same offer again is a question.
+    const again: [string, boolean | undefined][] = [];
+    w.b.decide = async (f, a) => { again.push([f.id, a]); return "ask"; };
+    const offer = w.a.sent.find((f) => f.t === "pf-offer" && f.id === "over-001")!;
+    w.b.sent.length = 0;
+    await w.b.files.handle({ ...offer });
+    expect(again).toEqual([["over-001", true]]);
+    expect(state(w.b, "in", "over-001")).toBe("asking");
+    expect(w.b.sent).toEqual([{ t: "pf-wait", id: "over-001", why: "consent" }]);
   });
 
   it("malformed offers are refused, and data for nothing, or out of bounds, is ignored", async () => {

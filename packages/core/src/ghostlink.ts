@@ -44,7 +44,7 @@ import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICE
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
-import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, type WireEdit } from "./pairedEdits";
+import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { traceLink } from "./linkTrace";
@@ -604,7 +604,8 @@ export class GhostLink {
       message: async (message, packet) => {
         // An edit (WISP 403 § Edits) is not a message of its own: it changes one, on an app that takes edits.
         const { edit, ...text } = message;
-        if (edit && options.editSupport) { await options.events?.onMessageEdit?.({ id: edit.i, e: edit.e, ts: message.timestamp, m: message.text }); return; }
+        // Its text holds as a live edit's must (never blank): one that does not is dropped, never shown as a text.
+        if (edit && options.editSupport) { if (validEditMessage(message.text)) await options.events?.onMessageEdit?.({ id: edit.i, e: edit.e, ts: message.timestamp, m: message.text }); return; }
         await options.events?.onMessage?.({ ...text, via: "pkarr", packet });
       },
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
