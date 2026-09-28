@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { LinkPreview } from "@ghostly/core";
+import { previewImageSize, type LinkPreview } from "@ghostly/core";
 import { videoSite } from "../lib/parse/linkPreview";
 import { formatCoordinates, locationIn, mapTiles, mapsUrl, openStreetMapUrl, type Place } from "../lib/parse/location";
 import { externalLinkProps, mapsPlatform } from "../lib/externalLink";
@@ -24,12 +24,15 @@ function PlayIcon() {
 export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
   const video = videoSite(preview.u);
   const site = preview.s ?? hostOf(preview.u);
+  // Its box from the JPEG's header, so the card is its full height before the picture decodes (the chat does not move).
+  const size = useMemo(() => previewImageSize(preview.i), [preview.i]);
   return (
     <a {...externalLinkProps(preview.u)} data-testid="link-preview-card" data-video={video ?? undefined}
       className="mt-1.5 mb-1 block w-[min(300px,68vw)] rounded-md overflow-hidden bg-text-primary/6 border-s-4 border-link no-underline text-text-primary hover:bg-text-primary/10 transition-colors">
       {preview.i && (
         <span className="relative block bg-text-primary/5">
-          <img src={preview.i} alt="" data-testid="link-preview-image" className="block w-full max-h-[170px] object-cover" draggable={false} />
+          <img src={preview.i} alt="" data-testid="link-preview-image" className="block w-full max-h-[170px] object-cover" draggable={false}
+            style={size ? { aspectRatio: `${size.width} / ${size.height}` } : undefined} />
           {video && <PlayIcon />}
         </span>
       )}

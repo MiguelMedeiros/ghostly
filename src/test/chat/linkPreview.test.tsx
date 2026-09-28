@@ -108,6 +108,8 @@ describe("a link preview in a message", () => {
     expect(within(card).getByTestId("link-preview-site")).toHaveTextContent("Example News");
     // The picture is the sender's own copy: a data URL, never the site's address.
     expect(within(card).getByTestId("link-preview-image")).toHaveAttribute("src", thumbnail);
+    // Its box is known before it decodes, from the JPEG's header: the chat does not move when it shows.
+    expect(within(card).getByTestId("link-preview-image").style.aspectRatio).toBe("320 / 180");
     expect(fetch).not.toHaveBeenCalled();
   });
 

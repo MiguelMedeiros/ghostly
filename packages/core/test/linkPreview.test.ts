@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LINK_PREVIEW_LIMITS, canonicalUrl, linksIn, parseLinkPreview, sanitizePreviewImage, type LinkPreview } from "../src/linkPreview";
+import { LINK_PREVIEW_LIMITS, canonicalUrl, linksIn, parseLinkPreview, previewImageSize, sanitizePreviewImage, type LinkPreview } from "../src/linkPreview";
 import { MAX_PAIRED_MESSAGE_FRAME, pairedMessageFrame } from "../src/ghostlink";
 // covers: chat.link-preview.wire
 
@@ -46,6 +46,15 @@ describe("sanitizePreviewImage", () => {
       jpeg(0, 10),
       jpeg(320, 180, LINK_PREVIEW_LIMITS.imageBytes), // over the byte cap
     ]) expect(sanitizePreviewImage(bad), String(bad).slice(0, 40)).toBeUndefined();
+  });
+});
+
+describe("previewImageSize", () => {
+  it("reads a thumbnail's size from its header, and nothing from anything else", () => {
+    expect(previewImageSize(jpeg(320, 180))).toEqual({ width: 320, height: 180 });
+    expect(previewImageSize(jpeg(240, 320))).toEqual({ width: 240, height: 320 });
+    for (const bad of [undefined, "https://x.example/a.jpg", "data:image/jpeg;base64,not base64!", jpeg(320, 180, LINK_PREVIEW_LIMITS.imageBytes)])
+      expect(previewImageSize(bad), String(bad).slice(0, 40)).toBeUndefined();
   });
 });
 
