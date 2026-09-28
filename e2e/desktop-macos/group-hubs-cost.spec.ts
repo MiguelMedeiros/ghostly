@@ -10,13 +10,14 @@ import { LocalRelay } from "../support/relay";
 /**
  * A measurement, not a check (WISP 9xx · Group Mesh § Cost per member): what a private group of 32 costs the Desktop
  * app on a Mac, the system WKWebView, where each edge is an `RTCPeerConnection` with one data channel. One app and
- * `E2E_MESH_COST_N - 1` headless bots (31 by default; packages/cli, `GHOSTLY_HUB=0`, so the admin decides who is a
- * hub) on a local relay. Three states of the same group, each measured idle and then while the bots post:
+ * `E2E_MESH_COST_N - 1` headless bots (31 by default; packages/cli, `GHOSTLY_HUB=0`, so the app, which stays online,
+ * is the only hub unless the admin decides otherwise) on a local relay. Three states of the same group, each measured
+ * idle and then while the bots post:
  *
- *   1. a full mesh: the admin excludes the app from being a hub and pins nobody, so every member keeps 31 edges;
- *   2. the app a plain member: two bots pinned as hubs, the app keeps two edges;
- *   3. the app the only hub: the bots unpinned, the app back to "hub if always on", so it keeps an edge with everyone
- *      and passes every message on.
+ *   1. the app the only hub: an edge with every member (what a member of a full mesh keeps) and every message passed on;
+ *   2. the app a plain member: two bots pinned as hubs and the app excluded, so it keeps two edges;
+ *   3. a full mesh: the bots unpinned, nobody a hub. Every pair must connect through the relay, which takes long with
+ *      32 apps on one machine: measured at whatever the app reached within `E2E_MESH_COST_MESH_MS` (10 minutes), and said.
  *
  * What is measured: the resident memory and CPU of the app's own process and of the WebKit processes that appeared
  * with it (its web content, networking and GPU processes; WebRTC's sockets live in the networking one), sampled with
@@ -154,27 +155,27 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
       await posting;
       return { ...result, messages: i };
     };
-    const state = async (name: string, wantEdges: number) => {
+    const state = async (name: string, wantEdges: number, within = 20 * 60_000, strict = true) => {
       const started = Date.now();
-      await expect.poll(edges, { timeout: 20 * 60_000, intervals: [5_000], message: `${name}: the app's edges` }).toBe(wantEdges);
-      report[name] = { edges: await edges(), settledSeconds: Math.round((Date.now() - started) / 1000), idle: await measure(pids, IDLE_MS), busy: await busy() };
+      const reached = expect.poll(edges, { timeout: within, intervals: [5_000], message: `${name}: the app's edges` }).toBe(wantEdges);
+      if (strict) await reached; else await reached.catch(() => {});
+      report[name] = { edges: await edges(), wanted: wantEdges, settledSeconds: Math.round((Date.now() - started) / 1000), idle: await measure(pids, IDLE_MS), busy: await busy() };
       writeFileSync(testInfo.outputPath("mesh-cost.json"), JSON.stringify(report, null, 2));
     };
 
-    await test.step("a full mesh: 31 edges", async () => {
-      await hub(appKey, "--exclude");
-      await state("fullMesh", N - 1);
+    await test.step("the app the only hub: an edge with everyone, passing everything on", async () => {
+      await state("theHub", N - 1);
     });
     await test.step("the app a plain member of a group on two hubs: two edges", async () => {
       await hub([...botKeys][1], "--pin");
       await hub([...botKeys][2], "--pin");
+      await hub(appKey, "--exclude");
       await state("memberWithHubs", 2);
     });
-    await test.step("the app the only hub: an edge with everyone, passing everything on", async () => {
-      await hub(appKey, "--auto");
+    await test.step("a full mesh: nobody a hub, every pair on its own edge", async () => {
       await hub([...botKeys][1], "--auto");
       await hub([...botKeys][2], "--auto");
-      await state("theHub", N - 1);
+      await state("fullMesh", N - 1, Number(process.env.E2E_MESH_COST_MESH_MS ?? 10 * 60_000), false);
     });
     console.log(`MESH_COST ${JSON.stringify(report)}`);
     await testInfo.attach("mesh-cost.json", { path: testInfo.outputPath("mesh-cost.json"), contentType: "application/json" });
