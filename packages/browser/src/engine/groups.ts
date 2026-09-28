@@ -58,6 +58,8 @@ export interface GroupsHost {
    * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
    */
   completeMessage?(message: StoredMessage): Promise<void>;
+  /** A private group's roster or my status in it changed, or I forgot it. */
+  membersChanged?(groupId: string): void;
   emit(): void;
   /** My name, for community groups, where it travels (encrypted) with my messages. */
   myNick?(): string | undefined;
@@ -544,6 +546,7 @@ export class Groups {
     this.hereActed.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
+    this.host.membersChanged?.(groupId);
     this.host.emit();
   }
 
@@ -1165,6 +1168,7 @@ export class Groups {
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
     }
     this.reconcileEdges(groupId);
+    this.host.membersChanged?.(groupId);
     this.host.emit();
   }
 
