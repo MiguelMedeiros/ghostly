@@ -26,17 +26,29 @@ pub fn init(dir: &Path) {
     let _ = fs::create_dir_all(dir);
     let path = dir.join(FILE_NAME);
     let written = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .ok();
+    let file = open(&path);
     let _ = LOG.set(Mutex::new(Log {
         path,
         file,
         written,
     }));
     log(&format!("log opened, app {}", env!("CARGO_PKG_VERSION")));
+}
+
+/// The log for appending: on Unix the user's alone (0600), since it names links and contacts' key prefixes. A log
+/// an older version made with the default mode is closed too.
+fn open(path: &Path) -> Option<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let file = options.open(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(fs::Permissions::from_mode(0o600));
+    }
+    Some(file)
 }
 
 /// The path of the log, once `init` ran.
@@ -65,11 +77,7 @@ pub fn log(line: &str) {
     if log.written + full.len() as u64 > ROTATE_AT_BYTES {
         let rotated = log.path.with_extension("log.1");
         let _ = fs::rename(&log.path, rotated);
-        log.file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log.path)
-            .ok();
+        log.file = open(&log.path);
         log.written = 0;
     }
     if let Some(file) = log.file.as_mut() {
@@ -98,6 +106,12 @@ mod tests {
         let (time, rest) = line.split_once(' ').unwrap();
         assert!(time.parse::<u128>().is_ok(), "{line}");
         assert_eq!(rest, "hello world");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(path().unwrap()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "the log is the user's alone");
+        }
         let _ = fs::remove_dir_all(dir);
     }
 }
