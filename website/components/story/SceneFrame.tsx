@@ -337,11 +337,12 @@ function PhoneChapter({
   const [take, setTake] = useState(0);
   const inView = useInView(figRef, { amount: 0.5 });
 
+  const end = stills[last];
   useEffect(() => {
     if (!calm) return;
-    p.set(stills[last]);
+    p.set(end);
     setStep(last);
-  }, [calm, last, p, stills]);
+  }, [calm, last, p, end]);
 
   // Play the step's beat while the picture is on screen, then hand over to the next step once its caption is read.
   // Numbers, not the chapter's arrays: a parent render with equal props must not restart the wait.
