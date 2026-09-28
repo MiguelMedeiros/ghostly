@@ -107,7 +107,7 @@ Lists that every feature adds to are kept sorted, one entry per line, so two pul
 | A feature | its line in `e2e/features.json`, at its place by id; its globs in `paths` by glob | `npm run test:map` (`-- --fix` sorts) |
 | A string | `src/locales/<language>/<area>.json`, below | `npm run locales:sort`, the i18n tests |
 | A release note | a file in `changes/` | `node scripts/changes.mjs` |
-| A WISP change | a file in `docs/wisps/changes/<wisp>/` | the website's `npm test` |
+| A WISP change | a file in `docs/wisps/changes/<wisp>/` | `npm run sync:references` in `website/` |
 | A Desktop command | its alphabetical place in `src-tauri/src/main.rs` (`commands!`), `src-tauri/build.rs` (`COMMANDS`) and `src-tauri/capabilities/default.json` (`allow-*`) | `cargo test` in `src-tauri` |
 | A CLI command | its alphabetical place in `packages/cli/src/commands/<area>.ts`, and its row in the command table of `packages/cli/README.md` | the CLI's `commands` and `readme` tests |
 

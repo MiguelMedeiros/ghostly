@@ -46,7 +46,7 @@ Ghostly 1.0. One kind of chat: it finds your contact on the DHT and goes peer to
 ### For developers
 
 - **WISPs.** 53 Draft contracts in [docs/wisps](docs/wisps/README.md); the website's catalogue and roadmap are generated from them. New since 0.4: one chat (400 to 403), the `ghostly1` invite (801), `files/3` (501), groups (900, group mesh, group community), store-and-forward (4xx), identity proofs (300 and its providers), the headless runtime (11xx).
-- **Session capabilities.** `calls/1`, `services/1`, `files/3`, `typing/1`, `react/1` and `edit/1`, announced after the handshake. A capability is on only while both sides list it; older apps ignore what they do not know.
+- **Session capabilities.** `calls/1`, `services/1`, `files/3`, `typing/1`, `react/1`, `edit/1` and `wake/1`, announced after the handshake. A capability is on only while both sides list it; older apps ignore what they do not know.
 - **Headless CLI.** `ghostly` ([docs/CLI.md](docs/CLI.md), `packages/cli`) runs the app's engine on Node for bots: a daemon, a socket API, JSON events and hooks. Chats, groups, files and voice notes, wallets, identity proofs, shared web apps, and voice calls with the audio on a Unix socket; a bot can say what it is doing (`typing --kind thinking --status …`). Built from source; not on npm yet.
 - **SDK.** `@ghostly/sdk`: an adapter registers as a plugin ([docs/SDK.md](docs/SDK.md)).
 - **The Rust `ghostly-cli`** is now the compatibility client for bots on v0.4 chats. New bots use `ghostly`.
