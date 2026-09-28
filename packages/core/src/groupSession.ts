@@ -338,7 +338,13 @@ export class GroupSession {
   /** The group's picture, if it has one. */
   get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
   /** Whom the admin pinned as hubs and excluded (WISP 9xx · Group Mesh § Hubs), from the group's metadata. */
-  get hubPolicy(): MeshHubPolicy { return (this.state.meta && parseGroupMetaBody(this.state.meta.body)?.hubs) || NO_HUB_POLICY; }
+  get hubPolicy(): MeshHubPolicy {
+    // Parsed once per statement: the body may hold a picture of 40,000 characters, and views ask for this per member.
+    const meta = this.state.meta;
+    if (!this.policyOf || this.policyOf.sig !== meta?.sig) this.policyOf = { sig: meta?.sig, policy: (meta && parseGroupMetaBody(meta.body)?.hubs) || NO_HUB_POLICY };
+    return this.policyOf.policy;
+  }
+  private policyOf: { sig: string | undefined; policy: MeshHubPolicy } | undefined;
   /** The current epoch's rendezvous secret (its beacon and lobbies), once its secret is here. */
   get rendezvous(): string | undefined {
     const secret = this.secret(this.epoch);
@@ -632,7 +638,8 @@ export class GroupSession {
           case "group-bye": await this.receiveBye(from, raw); break;
           case "group-leave": if (this.isAdmin && rosterHas(this.roster, from) && from !== this.myKey) await this.commit("remove", from, Date.now()); break;
         }
-        return this.state.status === "active" ? this.passOn : [];
+        // Removed, the last thing a hub passes on is the commit that says so: it may be the only way the others hear it.
+        return this.state.status === "active" ? this.passOn : this.state.status === "removed" ? this.passOn.filter(f => f.t === "group-commit") : [];
       } finally { this.passOn = null; }
     });
   }

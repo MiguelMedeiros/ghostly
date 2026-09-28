@@ -216,7 +216,7 @@ Past 16 members a full mesh costs every member one edge per other member (§ Cos
 
 **No hub.** With no hub in the beacon and none seen for three minutes, members fall back to the full mesh and the 60-second gossip turn: nothing is lost, the group costs what it costs without hubs, and it goes back to hubs when one lists itself again.
 
-**Removed members.** As for the community's admin changes (#300): the commit that removes a member moves the beacon and the lobbies to a rendezvous secret that member does not get; a hub keeps edges and takes lobby and beacon entries only for members of its roster; its edge to the removed member closes 15 seconds after the commit, the commit that tells it being the only thing passed on to it meanwhile; and its frames are neither passed on nor taken from a hub, even for epochs it was in (§ Catch-up).
+**Removed members.** As for the community's admin changes (#300): the commit that removes a member moves the beacon and the lobbies to a rendezvous secret that member does not get; a hub keeps edges and takes lobby and beacon entries only for members of its roster; its edge to the removed member closes 15 seconds after the commit, the commit that tells it being the only thing passed on to it meanwhile; and its frames are neither passed on nor taken from a hub, even for epochs it was in (§ Catch-up). A hub the admin removes passes on the commit that removes it, and closes its edges 15 seconds later: the admin may have had no other edge, and when it was the last hub, the members fall back to the full mesh as soon as they apply it.
 
 **What it gives and does not give.**
 

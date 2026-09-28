@@ -128,6 +128,8 @@ const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_RETRY_MS = 30_000;
 /** The welcome is on its way when the admin sends it; the session stays up a little for it to arrive. */
 const ENTRY_LINGER_MS = 20_000;
+/** Taken out of a group, my edges stay this long: as a hub, the commit that removed me is passed on over them. */
+const REMOVED_LINGER_MS = 15_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
 const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
 /**
@@ -225,6 +227,8 @@ export class Groups {
   private readonly hubs: MeshHubs;
   /** Groups whose edges are being reconciled because their hubs changed: one at a time. */
   private readonly hubReconcile = new Set<string>();
+  /** Groups a commit took me out of, and when: their edges close `REMOVED_LINGER_MS` later. */
+  private readonly removedAt = new Map<string, number>();
 
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
     this.communities = new Communities(host, store, communityTimings, random);
@@ -488,6 +492,7 @@ export class Groups {
     this.justMet.delete(groupId);
     this.relayAsked.delete(groupId);
     this.hubs.forget(groupId);
+    this.removedAt.delete(groupId);
     this.lastGossip.delete(groupId);
     this.downSince.delete(groupId);
     this.hereHeard.delete(groupId);
@@ -610,6 +615,7 @@ export class Groups {
    * ask for is not what exists (a hub came or went, I became one, a member asked me).
    */
   private async hubsTick(now: number): Promise<void> {
+    for (const [groupId, at] of this.removedAt) if (now - at >= REMOVED_LINGER_MS) { this.removedAt.delete(groupId); this.reconcileEdges(groupId); }
     for (const [groupId, session] of this.sessions) {
       const group = this.stored.get(groupId);
       if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) continue;
@@ -1076,7 +1082,11 @@ export class Groups {
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
       },
       edit: e => this.host.groupEdit?.(state.id, e),
-      changed: () => { void this.membershipChanged(state.id); },
+      changed: () => {
+        // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 9xx § Hubs).
+        if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());
+        void this.membershipChanged(state.id);
+      },
       metaChanged: (by, picture) => { void this.pictureChanged(state.id, session, by, picture); },
     });
     this.sessions.set(state.id, session);
@@ -1119,8 +1129,10 @@ export class Groups {
       const session = this.sessions.get(groupId), group = this.stored.get(groupId);
       const existing = this.host.edges(groupId);
       const left = group?.left;
+      const removed = this.removedAt.get(groupId);
       const wanted = session?.status === "active" && group ? this.hubs.wanted(groupId, session, group, this.now()) ?? new Set(session.others)
-        : left ? new Set([left.admin, ...left.hubs ?? []]) : new Set<string>();
+        : left ? new Set([left.admin, ...left.hubs ?? []])
+        : removed !== undefined && this.now() - removed < REMOVED_LINGER_MS ? new Set(existing.keys()) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);
       const met = this.justMet.get(groupId);
       if (session) for (const key of wanted) if (!existing.has(key)) {

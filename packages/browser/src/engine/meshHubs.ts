@@ -192,6 +192,10 @@ export class MeshHubs {
         // beacon (its relays' budget spent on the edges of a full mesh) still reaches it, and learns from it that it is
         // one (`group-reach`). The lobby only makes it look fast for those that asked.
         for (const key of session.others) out.add(key);
+      } else if (!live.myHubs.length) {
+        // Hubs known, none picked yet (the epoch's secret, which the lobbies need, has not arrived): nothing closes,
+        // and the known hubs are dialed, rather than being left with no edge at all.
+        for (const key of [...this.host.edges(groupId).keys(), ...hubs]) out.add(key);
       } else {
         for (const key of live.myHubs) out.add(key);
         // An admin on an app without hubs cannot be reached through them for a leave (it drops `group-bye`).

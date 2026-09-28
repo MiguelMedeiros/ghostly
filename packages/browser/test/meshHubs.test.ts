@@ -117,6 +117,51 @@ describe("hubs in a private group past 16 members", () => {
     for (const p of [...others, hubs[0]]) expect(world.texts(p, id)).toContain("one hub again");
   }, 300_000);
 
+  it("the admin removes a hub, then the last one: everyone moves on at once, then falls back and still reads each other", async () => {
+    const b = await build(20, { hubs: [2, 5] });
+    const { world, id, admin, peers } = b;
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const [first, last] = [peers[2], peers[5]];
+    // The admin has edges with the hubs only: the removed hub passes on the commit that removes it.
+    await admin.groups.remove(id, keyOf(b, first));
+    const others = peers.filter(p => p !== first);
+    await world.until(() => others.every(p => view(b, p).members.length === 19 && view(b, p).canSend), 60_000, 500,
+      () => others.filter(p => view(b, p).members.length !== 19 || !view(b, p).canSend).map(p => p.name).join(","));
+    expect(view(b, first).status).toBe("removed");
+    await peers[9].groups.send(id, "one hub left");
+    await world.run(3_000);
+    for (const p of others) expect(world.texts(p, id)).toContain("one hub left");
+    // The last hub goes too: the group falls back to direct edges, and nothing said is lost.
+    await admin.groups.remove(id, keyOf(b, last));
+    const rest = others.filter(p => p !== last);
+    await world.until(() => rest.every(p => view(b, p).members.length === 18 && view(b, p).canSend), 60_000, 500);
+    await peers[11].groups.send(id, "no hub at all");
+    await world.until(() => rest.every(p => world.texts(p, id).includes("no hub at all")), 10 * 60_000, 1000,
+      () => rest.filter(p => !world.texts(p, id).includes("no hub at all")).map(p => p.name).join(","));
+    expect(rest.every(p => !view(b, p).hubs)).toBe(true);
+  }, 300_000);
+
+  it("a member whose epoch secret has not arrived, with no hub picked, keeps its edges and catches up", async () => {
+    const b = await build(20, { hubs: [2, 5] });
+    const { world, id, peers } = b;
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const m = peers[12];
+    const g = m.groups as unknown as { sessions: Map<string, { state: GroupState; epoch: number }>; hubs: { live: Map<string, { myHubs: string[] }> } };
+    const session = g.sessions.get(id)!;
+    const secret = session.state.secrets[session.epoch];
+    delete session.state.secrets[session.epoch];
+    g.hubs.live.get(id)!.myHubs = [];
+    const before = edgesOf(b, m).length;
+    await world.run(30_000);
+    // Nothing closed while it could not pick (no rendezvous without the secret).
+    expect(edgesOf(b, m).length).toBeGreaterThanOrEqual(before);
+    await peers[9].groups.send(id, "while you wait");
+    await world.until(() => world.texts(m, id).includes("while you wait"), 5 * 60_000, 1000);
+    expect(session.state.secrets[session.epoch]).toBe(secret);
+  }, 300_000);
+
   it("a removed member reads nothing after, is carried for by no hub, and cannot find the new beacon", async () => {
     const b = await build(20, { hubs: [2, 5] });
     const { world, id, admin, peers } = b;
