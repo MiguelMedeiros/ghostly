@@ -297,6 +297,8 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (tooLarge) throw new Error(tooLarge);
 
     const wireId = toBase64Url(randomBytes(12));
+    // A reply (WISP 400 § Replies) goes with the file as it goes with a text: the engine keeps it and sends it along.
+    const replyTo = options?.replyTo;
     // A picture goes with its size, read from its first bytes, so the contact's chat keeps its place while it loads.
     const image = options?.voice || options?.video ? undefined : await readImageMeta(source, sanitizeMime(source.type));
     const file = {
@@ -322,7 +324,7 @@ export const servicesPlatform: ServicesPlatform | null = {
       keepJustSent(file.id, new Blob([source], { type: file.mime }));
       await fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
       try {
-        await engine.call("sendFile", { linkId: link.id, file, timestamp });
+        await engine.call("sendFile", { linkId: link.id, file, timestamp, ...(replyTo && { replyTo }) });
       } catch (error) {
         // Refused before it started (the contact's app takes no files, a stopped chat, offline): nothing is in the chat,
         // so the copy goes too, and the composer says why.
@@ -345,7 +347,7 @@ export const servicesPlatform: ServicesPlatform | null = {
       await fileStore.put({ id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
       // Copied: from here a refusal is the chat's, said as it is (its bubble keeps Retry), not a failed copy.
       staged = true;
-      await engine.call("sendFile", { linkId: link.id, file, timestamp });
+      await engine.call("sendFile", { linkId: link.id, file, timestamp, ...(replyTo && { replyTo }) });
       preparing.delete(file.id);
       preparingChanged(true);
     })().catch((error: unknown) => {

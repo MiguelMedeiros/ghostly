@@ -29,7 +29,7 @@ import { preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { quoteFor, replyIndex, replyTarget, type NameOf } from "../lib/replies";
+import { quoteFor, replyIndex, replyTarget, sentReply, type NameOf } from "../lib/replies";
 import { replySnippet } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
@@ -228,24 +228,43 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   // its card goes and the scene alone tells the rest. It comes back if the state says nobody is there any more.
   const invitePast = contactArrived(pairing.progress);
   const peerKey = params?.peerPubKeyB64;
+  /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  /**
+   * The reply as it is when something is sent, not as a render's closure saw it: a recording or a sheet of files
+   * started earlier goes with the reply set now. The first thing sent after Reply carries it (a text, a voice note, a
+   * file; of several files, the first), and nothing after it does: a caption after its files does not quote again.
+   */
+  const replyingRef = useRef(replyingTo);
+  replyingRef.current = replyingTo;
+  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile. */
+  const replied = useCallback((answering: ChatMessage) => {
+    if (replyingRef.current === answering) replyingRef.current = null;
+    setReplyingTo(current => current === answering ? null : current);
+  }, [setReplyingTo]);
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
       if (!platform || !peerKey) return null;
       const tooLarge = platform.fileTooLarge ? platform.fileTooLarge(peerKey, source.size)
         : source.size > platform.maxFileBytes ? `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).` : null;
       if (tooLarge) return tooLarge;
+      // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
+      const answering = paired ? replyingRef.current : null;
+      const reply = answering ? sentReply(answering) : undefined;
       try {
         // A video goes with its length, size and first frame, so the contact sees it before it arrives.
         const video = !voice && isPlayableVideoType(source.type) ? await videoMetaOf(source).catch(() => undefined) : undefined;
-        const { timestamp, file } = await platform.sendFile(peerKey, source, { voice, ...(video && { video }) });
-        addSystemMessage({ id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, file });
+        const { timestamp, file } = await platform.sendFile(peerKey, source, { voice, ...(video && { video }), ...(answering && reply && { replyTo: answering.id }) });
+        // This side's copy quotes it at once, as the engine keeps it: the engine's own row of a file is not copied here.
+        addSystemMessage({ id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, file, ...(reply && { replyTo: reply }) });
+        if (answering) replied(answering);
         window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
         return e instanceof Error ? e.message : String(e);
       }
     },
-    [platform, peerKey, addSystemMessage],
+    [platform, peerKey, paired, addSystemMessage, replied],
   );
 
   /**
@@ -314,8 +333,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   /** One of mine tapped in the timeline: the composer's picker opens on it. */
   const [myIdentity, setMyIdentity] = useState<{ id: string; at: number }>();
   const [showServices, setShowServices] = useState(false);
-  /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
-  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
@@ -709,9 +726,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         onTyping={paired ? onTyping : undefined}
         // A paired chat has no mentions; a link preview made in the composer goes with the text, and so does a reply.
         onSend={async (text, _mentions, extra) => {
-          const answering = replyingTo;
+          const answering = replyingRef.current;
           const error = await sendMessage(text, answering ? { ...extra, replyTo: answering.id } : extra);
-          if (!error && answering) setReplyingTo(current => current === answering ? null : current);
+          if (!error && answering) replied(answering);
           return error;
         }}
         reply={replyBar}
