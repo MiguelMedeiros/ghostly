@@ -12,6 +12,8 @@ import { FakeNativeNet } from "./helpers/fakeNative";
  * (relay-only) descriptors.
  */
 const links: { id: string; link: GhostLink }[] = [];
+/** The wall clock's timer, kept before a test fakes `setTimeout`. */
+const realSetTimeout = globalThis.setTimeout;
 afterEach(async () => {
   for (const { id, link } of links.splice(0)) { await link.stop(false); await db.deleteLink(id); }
 });
@@ -85,9 +87,10 @@ it("goes on to a relayed Iroh when a WebRTC attempt times out, and not before", 
     // WebRTC is still trying: nothing native yet.
     await vi.advanceTimersByTimeAsync(30_000);
     expect(states[0].transport).toBeUndefined();
-    // A second at a time: the Iroh session authenticates as the clock moves, as it would (a connection dialled in
-    // has 15 s to, and one jump of the clock would pass that before the handshake's hashing is done).
-    for (let s = 0; s < 90; s++) await vi.advanceTimersByTimeAsync(1_000);
+    // A second at a time, with a moment of real time after each: the handshake hashes with WebCrypto, which answers
+    // in real time, and a connection dialled in has 15 s of this clock to authenticate. A clock running ahead of the
+    // hashing on a busy machine would pass that before the session could answer.
+    for (let s = 0; s < 90; s++) { await vi.advanceTimersByTimeAsync(1_000); await new Promise(resolve => realSetTimeout(resolve, 5)); }
     await connected;
     await vi.waitFor(() => expect(states.map(s => [s.status, s.transport])).toEqual([["ready", "iroh/1"], ["ready", "iroh/1"]]));
   } finally { vi.useRealTimers(); }

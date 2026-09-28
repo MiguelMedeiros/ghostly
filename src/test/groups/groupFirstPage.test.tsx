@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
 import { forgetChatScroll } from "../../hooks/useChatScroll";
+import { MORE_ROWS } from "../../hooks/useTailFirst";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -40,11 +41,18 @@ describe("a long group", () => {
     expect(row(0)).toBeNull();
     expect(fakeEngine.callsTo("messagePage")).toEqual([{ linkId: "group:group-1" }]);
 
+    // From here the clock moves only when this test moves it. Following real time, a slow run drew the steps below while
+    // the rest was still coming in, and saw the whole history there at once.
+    vi.setTimerTickMode("manual");
     await act(async () => { whole(history); await vi.advanceTimersByTimeAsync(0); });
-    // The page's rows stay drawn; the older ones come in by steps until every one is there.
-    expect(row(COUNT - PAGE)).not.toBeNull();
-    expect(row(0)).toBeNull();
-    await act(() => vi.advanceTimersByTimeAsync(200));
+    // The page's rows stay drawn; the older ones come in by steps, MORE_ROWS each, until every one is there.
+    const older = COUNT - PAGE;
+    expect(row(older)).not.toBeNull();
+    expect(row(older - 1)).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(row(older - MORE_ROWS)).not.toBeNull();
+    expect(row(older - MORE_ROWS - 1)).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(0));
     expect(row(0)).not.toBeNull();
     expect(screen.queryByTestId("jump-latest")?.getAttribute("data-count") ?? "0").toBe("0");
   });

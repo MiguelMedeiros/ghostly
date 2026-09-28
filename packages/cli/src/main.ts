@@ -13,6 +13,7 @@ import { openHost, serve, type Host } from "./host";
 import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { restoreProfile } from "./backup";
+import { secretsFromStdin } from "./secretInput";
 import {
   checkProfileName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -582,6 +583,8 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
+  const secretWarning = await secretsFromStdin(command.method, params, readStdin);
+  if (secretWarning) process.stderr.write(`ghostly: ${secretWarning}\n`);
   const result = await withSession(g, async (s) => {
     const result = await s.call(command.method, params) as Record<string, unknown>;
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.

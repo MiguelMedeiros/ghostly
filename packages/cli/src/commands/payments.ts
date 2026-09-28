@@ -41,9 +41,9 @@ export const commands: Record<string, Command> = {
     args: ["type"], options: { network: net }, params: ({ options }, { type }) => ({ type, network: options.network }),
   },
   "wallet create": {
-    method: "wallet.create", usage: "wallet create <type> [--network testnet] [--provider <id>] [--value name=value]... [--invite <code>] [--api-key <key>]", summary: "A wallet: cashu, lightning, arkade, spark, bitcoin, fedimint, usdt (bark: app only)",
-    args: ["type"], options: { network: net, provider: { type: "string", description: "Lightning or on-chain source (wallet list shows them)" }, value: { type: "list", description: "A field of the source's form, name=value" }, invite: { type: "string", description: "Fedimint: the federation's invite" }, "api-key": { type: "string", description: "Spark on Mainnet: your Breez API key" } },
-    params: ({ options }, { type }) => ({ type, network: options.network, provider: options.provider, invite: options.invite, apiKey: options["api-key"], values: pairs(options.value) }),
+    method: "wallet.create", usage: "wallet create <type> [--network testnet] [--provider <id>] [--value name=value]... [--stdin] [--invite <code>] [--api-key <key>]", summary: "A wallet: cashu, lightning, arkade, spark, bitcoin, fedimint, usdt (bark: app only)",
+    args: ["type"], options: { network: net, provider: { type: "string", description: "Lightning or on-chain source (wallet list shows them)" }, value: { type: "list", description: "A field of the source's form, name=value" }, stdin: { type: "boolean", description: "Secret fields as name=value lines on stdin (api-key=… for the API key), kept out of ps" }, invite: { type: "string", description: "Fedimint: the federation's invite" }, "api-key": { type: "string", description: "Spark on Mainnet: your Breez API key (better on stdin: --stdin)" } },
+    params: ({ options }, { type }) => ({ type, network: options.network, provider: options.provider, invite: options.invite, apiKey: options["api-key"], values: pairs(options.value), stdin: options.stdin === true ? true : undefined }),
   },
   "wallet faucet": {
     method: "wallet.faucet", usage: "wallet faucet <type> [--card <id>]", summary: "Test coins from a Testnet wallet's faucet",
@@ -61,7 +61,7 @@ export const commands: Record<string, Command> = {
     method: "wallet.receive", usage: "wallet receive <sats> [--network testnet] [--card <id>]", summary: "A Lightning invoice to be paid",
     args: ["amount"], options: { network: net, card }, params: ({ options }, { amount }) => ({ amount: sats(amount), network: options.network, card: options.card }),
   },
-  "wallet redeem": { method: "wallet.redeem", usage: "wallet redeem <cashu-token>", summary: "Take the ecash of a Cashu token (its mint must be one of yours)", args: ["token"], params: (_, { token }) => ({ token }) },
+  "wallet redeem": { method: "wallet.redeem", usage: "wallet redeem [<cashu-token>]", summary: "Take the ecash of a Cashu token (its mint must be one of yours); the token on stdin keeps it out of ps", args: ["token?"], params: (_, { token }) => ({ token }) },
   "wallet remove": {
     method: "wallet.remove", usage: "wallet remove <type> [--network testnet] [--card <id>] [--accept-loss]", summary: "Remove a wallet; refused while it holds money or waits for some, unless --accept-loss",
     args: ["type"], options: { network: net, card: card, "accept-loss": { type: "boolean", description: "What it holds on this device is lost without its backup" } },
