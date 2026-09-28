@@ -115,7 +115,7 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     fedimintJoin: (invite, recover) => engine.call("fedimintJoin", { invite, recover, ...(network?{network}:{}) }),
     fedimintLeave: (federation) => engine.call("fedimintLeave", { federation }),
     fedimintRefresh: () => engine.call("fedimintRefresh", on),
-    fedimintSpendNotes: (federation, amount) => engine.call("fedimintSpendNotes", { federation, amount }),
+    fedimintSpendNotes: (federation, amount, confirmedReal) => engine.call("fedimintSpendNotes", { federation, amount, ...(confirmedReal ? { confirmedReal: true as const } : {}) }),
     fedimintReceiveNotes: (notes) => engine.call("fedimintReceiveNotes", { notes, ...(network?{network}:{}) }),
     fedimintInvoice: (federation, amount, memo) => engine.call("fedimintInvoice", { federation, amount, memo }),
     fedimintTakeBack: (federation, operation) => engine.call("fedimintTakeBack", { federation, operation }),

@@ -5,6 +5,7 @@ import type { WalletPlatform, WalletState } from "../lib/platform";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun, downloadJson } from "./wallet/run";
 import { Select } from "./ui/Select";
+import { ConfirmRealMoney } from "./ConfirmRealMoney";
 
 const short = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`;
 const KIND: Record<string, string> = { "notes-out": "Notes sent", "notes-in": "Notes received", "lightning-in": "Lightning received", "lightning-out": "Lightning paid", onchain: "On-chain" };
@@ -42,6 +43,10 @@ export function FedimintWalletPanel({ wallet, state }: { wallet: WalletPlatform;
   const unit = test ? "test sats" : "sats";
   const ready = current?.status === "ready";
   const lnSource = state.lightning?.providerId === "fedimint";
+  const [confirming, setConfirming] = useState(false);
+  // Real money when the federation says Bitcoin or this is the Mainnet wallet (the engine's rule too).
+  const real = current?.network === "bitcoin" || state.mode === "mainnet";
+  const spend = (confirmedReal: boolean) => { const id = current!.id; void run(async () => setNotesOut({ ...(await wallet.fedimintSpendNotes(id, Number(amount), confirmedReal || undefined)), federation: id })).finally(() => setConfirming(false)); };
 
   const join = <Section title={federations.length ? "Join another federation" : "Join a federation"}>
     <Block>
@@ -87,8 +92,10 @@ export function FedimintWalletPanel({ wallet, state }: { wallet: WalletPlatform;
         </div>}
         {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
           <p className="text-xs text-text-secondary">Notes are bearer ecash: whoever has the text can redeem it, once. If nobody does, take them back (they also come back by themselves after a week). In a chat, pay with the Fedimint card instead. To pay an invoice, make this federation the Lightning source (Settings below) and use the Lightning card.</p>
-          <Amount value={amount} onChange={(v) => { setAmount(v); setNotesOut(null); }} unit={unit} testId="fedimint-send-amount" />
-          {!notesOut ? <Button variant="primary" className="w-full" data-testid="fedimint-spend" disabled={busy || !ready || !Number(amount) || Number(amount) > current.balance} onClick={() => void run(async () => setNotesOut({ ...(await wallet.fedimintSpendNotes(current.id, Number(amount))), federation: current.id }))}>{Number(amount) > current.balance ? "More than this federation holds" : "Create notes"}</Button>
+          <Amount value={amount} onChange={(v) => { setAmount(v); setNotesOut(null); setConfirming(false); }} unit={unit} testId="fedimint-send-amount" />
+          {!notesOut ? (confirming ? <ConfirmRealMoney what={`${Number(amount).toLocaleString()} sats as notes`} busy={busy} onSend={() => spend(true)} onBack={() => setConfirming(false)} />
+            // Notes of a Mainnet federation are real money: the second step first, as for every other spend.
+            : <Button variant="primary" className="w-full" data-testid="fedimint-spend" disabled={busy || !ready || !Number(amount) || Number(amount) > current.balance} onClick={() => (real ? setConfirming(true) : spend(false))}>{Number(amount) > current.balance ? "More than this federation holds" : "Create notes"}</Button>)
             : <div className="space-y-2">
               <Address value={notesOut.notes} testId="fedimint-notes-out" note="Hand this over privately: it is the money itself." />
               <Button data-testid="fedimint-take-back" disabled={busy} onClick={() => void run(async () => { const state = await wallet.fedimintTakeBack(notesOut.federation, notesOut.operation); if (state === "pending") throw new Error("The federation has not answered yet: try again"); setNotesOut(null); setReceived(state === "canceled" ? "Taken back." : "Already redeemed by someone."); })}>Take them back</Button>

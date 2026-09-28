@@ -292,8 +292,8 @@ export interface WalletPlatform {
   fedimintJoin(invite: string, recover?: boolean): Promise<FedimintFederationView>;
   fedimintLeave(federation: string): Promise<void>;
   fedimintRefresh(): Promise<void>;
-  /** Out-of-band notes, to hand over; they come back by themselves if nobody redeems them in a week. */
-  fedimintSpendNotes(federation: string, amount: number): Promise<{ notes: string; operation: string }>;
+  /** Out-of-band notes, to hand over; they come back by themselves if nobody redeems them in a week. `confirmedReal`: required on Mainnet, as for `payQuote`. */
+  fedimintSpendNotes(federation: string, amount: number, confirmedReal?: boolean): Promise<{ notes: string; operation: string }>;
   fedimintReceiveNotes(notes: string): Promise<{ federation: string; amount: number }>;
   fedimintInvoice(federation: string, amount: number, memo?: string): Promise<{ invoice: string }>;
   fedimintTakeBack(federation: string, operation: string): Promise<"canceled" | "taken" | "pending">;

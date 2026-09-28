@@ -11,6 +11,7 @@ import { ProviderSources } from "../src/engine/paymentAdapters/providers/sources
 import { FakeLightningProvider, fakeInvoice, fakeLightning } from "../src/engine/paymentAdapters/providers/testing";
 import type { ProviderDescriptor, ProviderNetwork } from "../src/engine/paymentAdapters/providers/types";
 import { testInvoice } from "../../core/test/invoice";
+import { BITCOIN_INVOICE_ON_TESTNET } from "../src/shared/mints";
 // covers: wallet.lightning.sources, wallet.onchain.sources, wallet.mode
 
 /**
@@ -144,6 +145,21 @@ describe("quoting an invoice to pay", () => {
     const { lightning } = await ready(fake);
     expect((await lightning.quote(fakeInvoice(100, hash()))).feeReserve).toBe(10);
     expect((await lightning.quote(fakeInvoice(1_000, hash()))).feeReserve).toBe(30);
+  });
+
+  it("on Testnet, a Bitcoin (lnbc) invoice goes only to the mints, which pay it only through a test mint", async () => {
+    const fake = new FakeLightningProvider();
+    const pay = vi.spyOn(fake, "estimateFee");
+    const { lightning } = await ready(fake);
+    // Another Testnet source paying one would be a real node paying real money.
+    await expect(lightning.quote(testInvoice({ sats: 10, prefix: "lnbc" }))).rejects.toThrow(BITCOIN_INVOICE_ON_TESTNET);
+    expect(pay).not.toHaveBeenCalled();
+    await expect(lightning.quote(testInvoice({ sats: 10, prefix: "lntb" }))).resolves.toMatchObject({ amount: 10 });
+    // The mints take it to the wallet, which refuses it unless a test mint pays (wallet.test.ts).
+    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://testnut.cashu.space", amount: 10, feeReserve: 1 })), view: async () => ({ balance: 100 }) };
+    const mints = await ready(new CashuMintLightning(wallet as unknown as CashuWallet, "testnet"), { networks: ["testnet"] });
+    await expect(mints.lightning.quote(testInvoice({ sats: 10, prefix: "lnbc" }))).resolves.toMatchObject({ mint: "https://testnut.cashu.space" });
+    expect(wallet.quoteInvoice).toHaveBeenCalledWith(expect.stringMatching(/^lnbc10/), "testnet");
   });
 
   it("names the Cashu mint that will pay when the source is the mints", async () => {

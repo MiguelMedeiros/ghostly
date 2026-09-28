@@ -115,6 +115,10 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const stack = webrtc ? await loadCallStack() : "Calls need WebRTC, which is off on this headless Ghostly";
   const callsUnavailable = typeof stack === "string" ? stack : null;
   installFileFetch();
+  // `GHOSTLY_TEST_MINTS=<url,…>`: mints on this machine that are test servers with a fake Lightning backend (a regtest
+  // or e2e stack). Only through them does a Testnet wallet pay a Bitcoin (lnbc) invoice, as through the public test mint.
+  const testMints = process.env.GHOSTLY_TEST_MINTS;
+  if (testMints) (await import("@ghostly/browser/shared/mints")).declareTestMints(testMints.split(","));
   await installEventSource();
   await preloadWalletModules();
   // Loaded after IndexedDB is in place: nothing of the engine may open its database first.

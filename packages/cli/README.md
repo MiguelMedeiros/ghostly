@@ -225,7 +225,9 @@ Spark, BDK, Fedimint and USDT run as in the app. One does not yet: **Bark** (its
 federation=<id>` (`engine fedimintPreview '{"invite":"fed1…"}'` shows the id first). Its client runs in a worker
 thread, with one database file per federation in the profile's `fedimint/` folder. No wallet is made by itself: a bot has exactly the wallets it created. A Cashu test mint's invoice (from
 `wallet receive`) is credited once its payer vouches for it in a chat, as in the app (a test mint says every invoice
-is paid); on a real mint, the mint's answer decides.
+is paid); on a real mint, the mint's answer decides. A Testnet wallet pays a Bitcoin (`lnbc`) invoice only through
+the public test mint, as in the app: a mint on this machine may have real sats behind it. A local test mint with a fake
+Lightning backend (a regtest or e2e stack) is declared with `GHOSTLY_TEST_MINTS=<url,…>`.
 
 ### Secrets
 

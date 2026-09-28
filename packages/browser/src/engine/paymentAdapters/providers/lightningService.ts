@@ -1,6 +1,6 @@
 import { decodeBolt11, requestLnurlInvoice, resolveLightningDestination, type LnurlPayParams, type LnurlSuccessAction } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../../../shared/idb";
-import type { WalletMode } from "../../../shared/mints";
+import { BITCOIN_INVOICE_ON_TESTNET, type WalletMode } from "../../../shared/mints";
 import { CASHU_MINT_SOURCE, CashuMintLightning } from "./cashuMint";
 import type { LightningInvoice, LightningProvider, LightningProviderDescriptor } from "./lightning";
 import { ProviderSources, type SourceView } from "./sources";
@@ -210,6 +210,9 @@ export class LightningService {
     if (decoded.expiresAt * 1000 < Date.now()) throw new Error("That invoice has expired");
     this.checkNetwork(decoded.network);
     const { provider, descriptor } = await this.sources.use();
+    // A Bitcoin invoice on Testnet: only the mints can tell test sats from real ones (`fakesLightning`, checked when
+    // they quote it). Any other Testnet source that pays one is a real node, and would pay it with real money.
+    if (this.mode === "testnet" && decoded.network === "bitcoin" && !(provider instanceof CashuMintLightning)) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
     if (!provider.capabilities.send) throw new Error(`${descriptor.label} cannot pay invoices`);
     const maxFee = provider.estimateFee ? await provider.estimateFee(decoded.invoice, decoded.amountSat) : defaultFeeCap(decoded.amountSat);
     if (!Number.isSafeInteger(maxFee) || maxFee < 0) throw new Error(`${descriptor.label} returned an invalid fee`);
@@ -321,7 +324,7 @@ export class LightningService {
 
   private cardField(): Pick<LightningOp, "card"> { return this.options.card === undefined ? {} : { card: this.options.card }; }
 
-  /** A Mainnet source refuses an invoice on a test chain; the reverse is harmless (test mints use lnbc). */
+  /** A Mainnet source refuses an invoice on a test chain. The reverse (test mints use lnbc) is `quote`'s to refuse. */
   private checkNetwork(network: string) {
     if (this.mode === "mainnet" && network !== "bitcoin") throw new Error(`That invoice is for ${network}, a test network: pay it from a Testnet wallet`);
   }
