@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n } from "../../contexts/I18nContext";
-import { useServicesPlatform } from "../../hooks/useServicesPlatform";
+import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { ChatFile } from "../../lib/types";
@@ -44,9 +44,8 @@ function describeFailure(what: string, error: unknown): string {
  * plays; the waveform was measured by the sender, so nothing is decoded to draw it.
  */
 export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
-  const platform = useServicesPlatform();
+  const { platform, transfer } = useTransfer(file.id);
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
-  const transfer = platform?.getTransfer(file.id) ?? null;
   const ready = transfer === null || transfer.state === "done";
   const seconds = file.voice.duration / 1000;
 
