@@ -266,8 +266,10 @@ export async function openExtension(relay: LocalRelay, name: string): Promise<Pe
   const id = new URL(worker.url()).host;
   const page = context.pages()[0] ?? await context.newPage();
   page.on("pageerror", (e) => console.log(`  [${name}] ${e.message}`));
-  await page.goto(`chrome-extension://${id}/app.html#/settings`);
+  await page.goto(`chrome-extension://${id}/app.html#/settings/advanced`);
   await page.getByTestId("network-relays").fill(await relay.listen());
+  // Iroh would reach n0's public relays: a closed port keeps it off, as in e2e/support/extension.ts.
+  await page.getByTestId("network-iroh-relays").fill("http://127.0.0.1:9/");
   await page.getByTestId("network-save").click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.goto(`chrome-extension://${id}/app.html#/`);

@@ -1,19 +1,22 @@
 // "Made here. Open there.": Boo runs a photo gallery on their computer and lets Casper open it, from
 // the chat. Sharing needs the desktop app or the browser extension at both ends, so both run Ghostly
-// Browser (the built extension). The phone shot is the web app on a phone, where the same dialog
-// says what sharing needs: phones do not share apps.
+// Browser (the built extension). The phone shot is the web app on a phone, whose Services tab says
+// what sharing needs: phones do not share apps.
 import { test, expect } from "@playwright/test";
 import { LocalRelay } from "../../../e2e/support/relay";
 import { join } from "node:path";
-import { CAST, OUT, converse, dress, openExtension, pair, person, shot, type Peer } from "./helpers";
+import { CAST, OUT, converse, dress, openExtension, pair, person, route, shot, type Peer } from "./helpers";
 import { startGallery } from "./gallery";
+import { composerRow } from "../../../e2e/support/composer";
 
 /** Where the gallery listens: CAPTURE_APP_PORT, in the capture's port range. */
 const PORT = Number(process.env.CAPTURE_APP_PORT) || 4391;
 
+/** The chat's apps, from the composer's + → Shared services. Where sharing cannot run, the row is greyed out and the menu stays open. */
 async function grant(p: Peer) {
-  await p.page.getByTitle("Options").click();
-  await p.page.getByTestId("chat-services-open").click();
+  const row = await composerRow(p.page, "composer-services");
+  if (!await row.isEnabled()) return;
+  await row.click();
   await expect(p.page.getByTestId("chat-services")).toBeVisible();
 }
 
@@ -71,7 +74,11 @@ test("phone: what sharing needs, on a phone", async ({ browser, baseURL }) => {
   const [boo, casper] = await Promise.all([person(browser, relay, baseURL!, CAST.boo, { mobile: true }), person(browser, relay, baseURL!, CAST.casper)]);
   await pair(casper, boo);
   await converse([[casper, "can I see the photos from saturday?"], [boo, "open my gallery from your laptop, I'll share it there"]], [boo, casper]);
+  // The chat's + menu greys Shared services out on a phone; the Services tab says why.
   await grant(boo);
+  await boo.page.keyboard.press("Escape");
+  await route(boo, "#/services");
+  await expect(boo.page.getByText("Sharing a local web app needs the Ghostly browser extension or desktop app.")).toBeVisible();
   await boo.page.waitForTimeout(600);
   await shot(boo, "services-mobile.png");
   relay.close();
