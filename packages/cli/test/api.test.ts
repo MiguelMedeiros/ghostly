@@ -27,6 +27,7 @@ function fake(messages: StoredMessage[] = []) {
     storeMessage: vi.fn(),
     updateSettings: vi.fn(async () => undefined),
     setTyping: vi.fn(),
+    setGroupTyping: vi.fn(),
   };
   const ctx = {
     runtime: { server: { node }, paths: { name: "default" } },
@@ -64,6 +65,23 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.typing", { chat: "Alice", stop: true })).toMatchObject({ typing: false });
     expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: false });
     await expect(callApi(ctx, "chat.typing", { chat: "zed" })).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("group typing says it in a private group, with the same checks, and refuses a community", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "group.typing", { group: "Crew" })).rejects.toMatchObject({ code: "unavailable" });
+    const state = node.getState();
+    const mesh = { ...group, id: "m1", name: "Mesh", profile: "mesh", status: "active",
+      members: [...group.members.slice(0, 2), { ...group.members[2], online: false }] } as unknown as GroupView;
+    node.getState = () => ({ ...state, groups: [mesh] });
+    expect(await callApi(ctx, "group.typing", { group: "Mesh", kind: "thinking", status: "Reading the\nthread" }))
+      .toEqual({ group: "m1", typing: true, kind: "thinking", status: "Reading the thread", reached: 1, sendTyping: true });
+    expect(node.setGroupTyping).toHaveBeenLastCalledWith({ groupId: "m1", typing: true, kind: "thinking", status: "Reading the thread" });
+    expect(await callApi(ctx, "group.typing", { group: "Mesh", stop: true })).toMatchObject({ typing: false });
+    expect(node.setGroupTyping).toHaveBeenLastCalledWith({ groupId: "m1", typing: false });
+    await expect(callApi(ctx, "group.typing", { group: "Mesh", status: "see https://x.example" })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(callApi(ctx, "group.typing", { group: "Mesh", stop: true, for: 5 })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.setGroupTyping).toHaveBeenCalledTimes(2);
   });
 
   it("typing says a kind and a bot's status, checked before anything is said", async () => {
