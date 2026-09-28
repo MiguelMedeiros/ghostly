@@ -316,7 +316,7 @@ export interface NodeOptions {
   providers?: ProviderRegistry;
   /** Desktop: the Tauri commands the providers that need them call (see `ProviderHost.invoke`). */
   invoke?: ProviderHost["invoke"];
-  /** The Fedimint client (tests pass a fake: the real one needs a worker and the origin-private file system). */
+  /** The Fedimint client. Default: the browser's (a module worker, the origin-private file system); the CLI passes its Node one, tests a fake. */
   fedimintSdk?: () => Promise<FedimintSdk>;
   /**
    * Whether paired chats offer `services/1`: this app serves granted local web apps and opens a contact's.

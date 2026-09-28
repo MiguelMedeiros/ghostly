@@ -10,7 +10,7 @@
 | Implementation | Experimental: `packages/cli` (`@ghostly/cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is not published |
 | Summary | Run Ghostly without a screen for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares. |
 | Availability | Available |
-| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions), groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark or Fedimint wallets, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
+| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions), groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark wallet, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -147,7 +147,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Groups | Create (community with its link, or a private mesh), join by link, leave, forget, accept or decline an invitation, list, send, history, @mentions in and out | Phase 1 (needs WebRTC) |
 | Groups | For bots: `group send` answers with the message's id (what replies and reactions name); messages name their author (`member`, `nick` from the roster); the entry link is a secret, `<hidden>` unless `--show-secret` or `group link` | #372 |
 | Groups | Admin: remove, make admin, rotate, link on/off/reset, picture; invite a contact | Phase 3a |
-| Payments | Wallet instances per network (the New flow types), list, balance, remove with the #303 protections | Phase 2 (Bark and Fedimint: app only, see below) |
+| Payments | Wallet instances per network (the New flow types), list, balance, remove with the #303 protections | Phase 2 (Bark: app only, see below) |
 | Payments | Several Lightning cards, default for receiving | Phase 2 |
 | Payments | Testnet faucet | Phase 2 |
 | Payments | Pay and request in a chat, accept per chat per network, pay an invoice or a Lightning address/LNURL, history, payment events | Phase 2; BIP 21 and on-chain sends through `engine preparePayment`/`approvePayment` until phase 3 |
@@ -205,7 +205,9 @@ Checked on 2026-09-26 by creating each Testnet wallet in a headless profile:
 | Bitcoin (BDK) | `@bitcoindevkit/bdk-wallet-web` (wasm) | Works: `?url` assets become `file:` URLs beside the chunk that imports them, and the runtime's `fetch` reads `file:` URLs of `.wasm` files only. The CLI draws the recovery phrase the app's form would |
 | Lightning sources | NWC, LND REST, Core Lightning (Commando), Breez, LNURL | They load as in the web app (WebSocket and `fetch`); only the Cashu mints' card was exercised end to end so far. An LND behind a self-signed certificate is untested (the Desktop pins it through Rust) |
 | Bark | `@secondts/bark` (browser build only) | **Gap.** Its Rust storage insists on a browser `window`; pretending one gets further, then the wasm panics and takes the process down. App only until Bark ships a Node build |
-| Fedimint | web SDK (wasm in a module worker, OPFS) | **Gap.** No OPFS and no module worker on Node; needs the SDK's Node transport or the Rust client. App only |
+| Fedimint | web SDK (`@fedimint/core`, its wasm in a worker, a database per federation on OPFS) | Works, on a platform of the CLI's own (below). Checked on the shared stack's regtest federation: preview, join, Lightning in and out through its gateway, balance, restart |
+
+**Fedimint on Node.** The client's wasm reads and writes its database through a sync access handle, and calls only `read` and `write` (each with `{ at }`), `getSize`, `truncate`, `flush` and `close` on it; its network is `fetch` and `WebSocket`, which Node 22 has. So the CLI runs the app's SDK and wasm unchanged: each database in a `worker_threads` worker (`packages/cli/src/runtime/fedimintWorker.mjs`, the browser worker's protocol) on a file of the profile, `fedimint/ghostly-fedimint-<id>.db`, through a small `node:fs` handle, with `CloseEvent` (missing on Node 22) given in the worker. The engine takes it through its `fedimintSdk` option; `fedimintSdk.ts` takes its worker and files from a `FedimintPlatform`, and the browser's is the code it ran before. The profile's lock keeps a second process off its databases, as the exclusive handle does in a browser.
 
 No wallet is made by itself on Node (`automaticWallets` is off): a bot has only the wallets it created, and none on Mainnet unless asked.
 

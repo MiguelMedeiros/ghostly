@@ -43,10 +43,12 @@ describe("wallets", () => {
     expect(listed.offers.find((o) => o.type === "bark")).toMatchObject({ available: false, reason: expect.stringMatching(/browser/) });
   });
 
-  it("refuse Bark and Fedimint before the engine, and draw a BDK phrase that is never answered", async () => {
+  it("refuse Bark before the engine, pass Fedimint's invite on, and draw a BDK phrase that is never answered", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bark" })).rejects.toMatchObject({ code: "unavailable" });
-    await expect(callApi(ctx, "wallet.create", { type: "fedimint", invite: "x" })).rejects.toMatchObject({ code: "unavailable" });
+    expect(node.walletCreate).not.toHaveBeenCalled();
+    await callApi(ctx, "wallet.create", { type: "fedimint", invite: "fed1x" });
+    expect(node.walletCreate.mock.calls.at(-1)![0]).toMatchObject({ type: "fedimint", network: "testnet", invite: "fed1x" });
     const made = await callApi(ctx, "wallet.create", { type: "bitcoin", values: { network: "signet", script: "bip84" } });
     const asked = node.walletCreate.mock.calls.at(-1)![0] as unknown as { providerId: string; values: { mnemonic: string } };
     expect(asked.providerId).toBe("bdk");

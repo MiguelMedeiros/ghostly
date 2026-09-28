@@ -41,7 +41,7 @@ export const commands: Record<string, Command> = {
     args: ["type"], options: { network: net }, params: ({ options }, { type }) => ({ type, network: options.network }),
   },
   "wallet create": {
-    method: "wallet.create", usage: "wallet create <type> [--network testnet] [--provider <id>] [--value name=value]... [--invite <code>] [--api-key <key>]", summary: "A wallet: cashu, lightning, arkade, spark, bitcoin, usdt (bark, fedimint: app only)",
+    method: "wallet.create", usage: "wallet create <type> [--network testnet] [--provider <id>] [--value name=value]... [--invite <code>] [--api-key <key>]", summary: "A wallet: cashu, lightning, arkade, spark, bitcoin, fedimint, usdt (bark: app only)",
     args: ["type"], options: { network: net, provider: { type: "string", description: "Lightning or on-chain source (wallet list shows them)" }, value: { type: "list", description: "A field of the source's form, name=value" }, invite: { type: "string", description: "Fedimint: the federation's invite" }, "api-key": { type: "string", description: "Spark on Mainnet: your Breez API key" } },
     params: ({ options }, { type }) => ({ type, network: options.network, provider: options.provider, invite: options.invite, apiKey: options["api-key"], values: pairs(options.value) }),
   },

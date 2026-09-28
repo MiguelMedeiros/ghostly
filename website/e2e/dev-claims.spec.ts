@@ -7,8 +7,8 @@ import { expect, test } from "@playwright/test";
  * - Negotiation mirrors rankTransports() in packages/core/src/pairedTransports.ts:
  *   a browser offers Iroh through a relay, and a relayed transport ranks after
  *   every direct one; nothing in common keeps the chat on the DHT.
- * - The availability map has the headless CLI column, with Bark and Fedimint
- *   left to the app.
+ * - The availability map has the headless CLI column, with Fedimint on it and
+ *   Bark left to the app.
  */
 
 test.use({ reducedMotion: "reduce" });
@@ -38,7 +38,8 @@ test("the availability map has the headless CLI", async ({ page }) => {
   await expect(table.locator("thead th").last()).toHaveText("CLI");
   const cli = (name: string) => table.locator("tr", { has: page.locator("th", { hasText: name }) }).locator("td").last();
   await expect(cli("Text chat, ghostly1 invites")).toHaveText("✓");
-  await expect(cli("Bark & Fedimint wallets")).toHaveText("No");
+  await expect(cli("Fedimint wallets")).toHaveText("✓");
+  await expect(cli("Bark wallets")).toHaveText("No");
   await expect(cli("Voice calls")).toHaveText("✓");
   await expect(cli("Video calls, screen sharing")).toHaveText("No");
   await expect(page.locator(".avail-notes")).toContainText("--confirm-real");
