@@ -7,6 +7,8 @@ import { GROUPS, wisps, wispCount } from "@/lib/wisps";
 import { Catalog, type CatalogRow } from "./Catalog";
 import { Glossary } from "./Glossary";
 import { WispMap } from "./WispMap";
+// The list reads like a WISP's page, so it wears the reader's styles; catalog.css comes after and adjusts them.
+import "@/app/reader.css";
 import "@/app/catalog.css";
 
 export function CatalogPage() {
@@ -46,13 +48,9 @@ export function CatalogPage() {
       </section>
       <div className="wrap">
         <WispMap t={t} />
-        <h2 className="h-card catalog-list-title" id="list">
-          {t.listTitle}
-        </h2>
-        <p className="catalog-axes">
-          <span className="chip">Draft</span> {t.axes}
-        </p>
-        <Catalog rows={rows} groups={groups} t={t} />
+        <section className="catalog-all" id="list" aria-labelledby="list-title">
+          <Catalog rows={rows} groups={groups} t={t} />
+        </section>
 
         <section className="catalog-inventory" id="inventory" aria-labelledby="inventory-title">
           <h2 id="inventory-title" className="h-card">
