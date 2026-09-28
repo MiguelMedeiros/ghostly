@@ -15,6 +15,98 @@ export interface ListenOptions {
   cursor?: string;
   print: boolean;
   write: (line: string) => void;
+  /** `--from` and `--group`: events of anyone else stop here (they stay in the chat). */
+  allow?: Allowlist;
+  /** `--turns`: only agent turns, as `agent.turn` events. */
+  turns?: boolean;
+}
+
+/**
+ * Who `listen` passes on, checked before any hook or output: chats by id (a contact key is matched to its chat as
+ * events come, so a chat made after the start counts too), groups by id. An event of a chat or group not on it is
+ * dropped; one that names neither (`daemon.started`, `events.gap`, `identity.approval`) is this profile's own and
+ * passes.
+ */
+export class Allowlist {
+  private readonly peers = new Map<string, string>();
+
+  /** `peerOf`: a chat's contact key (null when it has none yet, or the chat is gone). */
+  constructor(private readonly chats: ReadonlySet<string>, private readonly keys: ReadonlySet<string>, private readonly groups: ReadonlySet<string>, private readonly peerOf: (chat: string) => Promise<string | null>) {}
+
+  async allows(event: GhostlyEvent): Promise<boolean> {
+    if ("group" in event) return typeof event.group === "string" && this.groups.has(event.group);
+    if (!("chat" in event)) return true;
+    const chat = event.chat;
+    if (typeof chat !== "string") return false;
+    if (this.chats.has(chat)) return true;
+    if (!this.keys.size) return false;
+    // Kept once known: a chat's contact key does not change. One not paired yet is asked again next time.
+    let key = this.peers.get(chat);
+    if (!key) { key = (await this.peerOf(chat).catch(() => null)) || undefined; if (key) this.peers.set(chat, key); }
+    return !!key && this.keys.has(key);
+  }
+}
+
+/** A contact key as chats show it (`peer`): 52 characters of z-base-32. */
+const CONTACT_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
+
+/**
+ * `--from` and `--group` as ids, resolved once at start: a chat by id, prefix or name, else a contact key; a group by
+ * id, prefix or name. A name that later changes (or a contact who renames themselves) moves nothing.
+ */
+export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
+  const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
+  for (const ref of from) {
+    try { chats.add(((await call("chat.get", { chat: ref })) as { id: string }).id); }
+    catch (error) {
+      if (!(error instanceof CliError && error.code === "not_found") || !CONTACT_KEY.test(ref)) throw error;
+      keys.add(ref);
+    }
+  }
+  for (const ref of groups) groupIds.add(((await call("group.get", { group: ref })) as { id: string }).id);
+  return new Allowlist(chats, keys, groupIds, peerOf);
+}
+
+/**
+ * One agent turn (docs/CLI.md § Agent turns): a message a contact sent in a chat, or a group message that mentions
+ * this profile. What the sender controls (the text, their name, a quoted snippet, a file's name) is under `untrusted`
+ * and nowhere else: an agent reads it as data, never as its instructions. `seq` is the source event's, so `--cursor`
+ * and `--since` work as for any event; `id` is stable for the message (dedupe on it).
+ */
+export interface AgentTurn extends GhostlyEvent {
+  type: "agent.turn";
+  source: "message.received" | "group.message";
+  chat?: string;
+  group?: string;
+  /** A group's author (their key). */
+  member?: string;
+  /** What `send --reply` (or `group send --reply`) takes to answer it. */
+  messageId: string;
+  timestamp: number;
+  untrusted: { text: string; name: string | null; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean } };
+}
+
+interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice?: unknown } }
+
+/** The turn an event starts, or null: only a contact's message, and a group message that mentions this profile. */
+export function toTurn(event: GhostlyEvent): AgentTurn | null {
+  const message = event.message as TurnMessage | undefined;
+  if (!message || typeof message.text !== "string") return null;
+  if (event.type === "message.received" && typeof event.chat === "string") return turn(event, "message.received", { chat: event.chat }, message);
+  if (event.type === "group.message" && typeof event.group === "string" && message.mentioned) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
+  return null;
+}
+
+function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<AgentTurn, "chat" | "group" | "member">, message: TurnMessage): AgentTurn {
+  const file = message.file;
+  return {
+    seq: event.seq, id: `agent.turn:${event.id}`, type: "agent.turn", at: event.at, source, ...where, messageId: message.id, timestamp: message.timestamp,
+    untrusted: {
+      text: message.text, name: message.nick ?? null,
+      ...(message.replyTo ? { replyTo: { id: message.replyTo.id, snippet: message.replyTo.snippet } } : {}),
+      ...(file ? { file: { id: file.id, name: file.name, size: file.size, mime: file.mime, voice: !!file.voice } } : {}),
+    },
+  };
 }
 
 /** Only loopback: events carry message text, and a webhook is a local bridge (WISP 11xx § Security). */
@@ -74,7 +166,14 @@ export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => v
   let chain = Promise.resolve();
   return (event) => {
     chain = chain.then(async () => {
-      if (!matches(event, options.types)) { if (options.cursor) writeCursor(options.cursor, event.seq); return; }
+      const skip = () => { if (options.cursor) writeCursor(options.cursor, event.seq); };
+      if (!matches(event, options.types)) return skip();
+      if (options.allow && !(await options.allow.allows(event))) return skip();
+      if (options.turns) {
+        const next = toTurn(event);
+        if (!next) return skip();
+        event = next;
+      }
       if (options.print) options.write(JSON.stringify(event));
       if (options.exec) {
         const code = await runExec(options.exec, event);
