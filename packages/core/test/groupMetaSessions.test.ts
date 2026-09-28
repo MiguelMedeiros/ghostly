@@ -245,7 +245,7 @@ describe("group name, group-mesh/1", () => {
     const join = async (welcomeName: unknown, inviteName: string) => {
       const seed = createIdentity().seedB64;
       const welcome = await alice.admit(identityFromSeedB64(seed).pubKeyZ32);
-      const last = { ...(welcome[welcome.length - 1] as Record<string, unknown>), name: welcomeName };
+      const last = { ...welcome[welcome.length - 1], name: welcomeName };
       const joined = GroupSession.join({ name: inviteName, admin: alice.myKey }, welcome.slice(0, -1), last, seed);
       if ("error" in joined) throw new Error(joined.error);
       return joined.state.name;
@@ -427,7 +427,7 @@ describe("group name, group-community/1", () => {
     const seedB64 = createIdentity().seedB64;
     const frames = await alice.session.admit(identityFromSeedB64(seedB64).pubKeyZ32);
     const join = (name: unknown) => {
-      const welcome = { ...clone(frames[frames.length - 1]) as Record<string, unknown>, name };
+      const welcome = { ...clone(frames[frames.length - 1]), name };
       const joined = CommunitySession.join({ g: alice.session.id, host: alice.session.entryKey }, clone(frames.slice(0, -1)), welcome, seedB64);
       if ("error" in joined) throw new Error(joined.error);
       return joined.state.name;
