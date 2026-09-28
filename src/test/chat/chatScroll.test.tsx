@@ -13,6 +13,8 @@ import { renderApp } from "../render";
 const VIEW = 300;
 const ROW = 50;
 const heights = new Map<string, number>();
+/** Rows still in their entry animation, and how far down it draws them for now (a transform: the layout does not move). */
+const entering = new Map<string, number>();
 const positions = new WeakMap<Element, number>();
 const isList = (el: Element) => el instanceof HTMLElement && el.dataset.testid === "list";
 const rowsIn = (el: Element) => [...el.querySelectorAll<HTMLElement>("[data-message-id]")];
@@ -58,10 +60,17 @@ beforeAll(() => {
         if (!list || !this.dataset.messageId) return rect.call(this);
         let y = -list.scrollTop;
         for (const row of rowsIn(list)) {
-          if (row === this) return new DOMRect(0, y, 400, heightOf(row));
+          if (row === this) return new DOMRect(0, y + (entering.get(row.dataset.messageId!) ?? 0), 400, heightOf(row));
           y += heightOf(row);
         }
         return rect.call(this);
+      },
+    },
+    getAnimations: {
+      configurable: true,
+      value(this: HTMLElement) {
+        const id = this.dataset.messageId;
+        return id && entering.has(id) ? [{ finish: () => { entering.delete(id); } }] : [];
       },
     },
   });
@@ -74,11 +83,11 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  for (const name of ["scrollHeight", "clientHeight", "scrollTop", "scrollTo", "getBoundingClientRect"]) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+  for (const name of ["scrollHeight", "clientHeight", "scrollTop", "scrollTo", "getBoundingClientRect", "getAnimations"]) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
   vi.unstubAllGlobals();
 });
 
-beforeEach(() => { heights.clear(); observed = []; forgetChatScroll(); });
+beforeEach(() => { heights.clear(); entering.clear(); observed = []; forgetChatScroll(); });
 
 function Timeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
   const jump = useChatScroll({ rows, chat });
@@ -132,6 +141,25 @@ describe("the chat timeline's scrolling", () => {
     resized();
     expect(topOf("peer_102")).toBe(before);
     expect(pill()).toHaveAttribute("data-count", "1");
+  });
+
+  it("scrolled up, a late catch-up of older messages (a group syncing after a reconnect) is not new and leaves the pill's target", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    const newer = theirs(10, 20);
+    rerender(<Timeline rows={[...rows, ...newer]} />);
+    expect(pill()).toHaveAttribute("data-count", "20");
+    // Older than the last message seen: each goes in its place by time, not at the end.
+    const late = [...rows.slice(0, 4), { id: "late_1", mine: false }, ...rows.slice(4), { id: "late_2", mine: false }, ...newer];
+    rerender(<Timeline rows={late} />);
+    expect(pill()).toHaveAttribute("data-count", "20");
+    // A newer one still counts.
+    rerender(<Timeline rows={[...late, ...theirs(30, 1)]} />);
+    expect(pill()).toHaveAttribute("data-count", "21");
+    // The pill still goes to the first new message, not to a late old one.
+    await user.click(pill()!);
+    expect(topOf("peer_10")).toBe(8);
   });
 
   it("one new message is said in the singular", () => {
@@ -342,6 +370,20 @@ describe("the chat timeline's scrolling", () => {
     act(() => { fireEvent.scroll(list()); });
     resized();
     expect(topOf("peer_2")).toBe(-30);
+  });
+
+  it("a chat left scrolled up opens exactly on its message while its bubbles still play their entry animation", () => {
+    const rows = theirs(0, 20);
+    const { unmount } = renderApp(<Timeline rows={rows} />);
+    scrollTo(130);
+    expect(topOf("peer_2")).toBe(-30);
+    unmount();
+    // Opened again seconds after a message came: each bubble starts its entry drawn 13 px down.
+    for (const row of rows) entering.set(row.id, 13);
+    renderApp(<Timeline rows={rows} />);
+    entering.clear();
+    expect(Math.abs(topOf("peer_2") + 30)).toBeLessThanOrEqual(1);
+    expect(list().scrollTop).toBe(130);
   });
 
   it("a chat left at its bottom opens at its bottom, with what came meanwhile", () => {

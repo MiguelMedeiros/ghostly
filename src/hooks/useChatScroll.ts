@@ -41,7 +41,7 @@ export function forgetChatScroll() {
 }
 
 const rowsOf = (list: HTMLElement) => list.querySelectorAll<HTMLElement>("[data-message-id]");
-const rowById = (list: HTMLElement, id: string) => [...rowsOf(list)].find(row => row.dataset.messageId === id);
+const rowById = (list: HTMLElement, id: string) => list.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
 const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const editable = (target: EventTarget | null) =>
   target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='dialog'], [role='menu']");
@@ -189,6 +189,8 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       anchor.current = was.anchor;
       firstNew.current = null;
       setCount(0);
+      // A bubble that came seconds ago still plays its entry, drawn a few pixels off: measured at rest, it lands exactly.
+      for (const animation of rowById(el, was.anchor!.id)?.getAnimations?.() ?? []) animation.finish();
       settle();
     };
     if (!opened.current) {
@@ -206,10 +208,12 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       return;
     }
     if (pending.current?.anchor && rowById(el, pending.current.anchor.id)) { restore(pending.current); return; }
-    // Older history coming in above every row seen (a group's newest page first, then the rest) is not new.
-    const oldestSeen = rows.findIndex(row => seen.current.has(row.id));
-    const fresh = rows.filter((row, i) => !seen.current.has(row.id) && i > oldestSeen);
-    for (let i = 0; i < oldestSeen; i++) seen.current.add(rows[i].id);
+    // Only what comes after the newest row seen is new. Older history coming in above (a group's newest page first, then
+    // the rest) or a late catch-up put in its place among the rows seen (a group syncing after a reconnect) is not.
+    let newestSeen = rows.length - 1;
+    while (newestSeen >= 0 && !seen.current.has(rows[newestSeen].id)) newestSeen--;
+    const fresh = rows.slice(newestSeen + 1);
+    for (let i = 0; i < newestSeen; i++) seen.current.add(rows[i].id);
     if (fresh.length === 0) { settle(); return; }
     for (const row of fresh) seen.current.add(row.id);
     const last = rows[rows.length - 1];
