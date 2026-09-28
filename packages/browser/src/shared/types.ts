@@ -689,6 +689,9 @@ export interface StoredMessage {
   forwarded?: number;
 }
 
+/** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
+export interface MessagePage { messages: StoredMessage[]; more: boolean }
+
 /** One person's reaction to a message: the emoji ("" once taken back), their number (the highest wins), when it came. */
 export interface MessageReaction { e: string; n: number; at: number }
 

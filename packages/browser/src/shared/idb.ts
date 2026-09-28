@@ -80,6 +80,9 @@ export function openDb(): Promise<IDBDatabase> {
       if (!has(STORES.messages)) {
         db.createObjectStore(STORES.messages, { keyPath: ["linkId", "id"] }).createIndex("byLink", "linkId");
       }
+      // v9: a chat's messages in time order, so its latest page is read without the rest.
+      const messages = request.transaction!.objectStore(STORES.messages);
+      if (!messages.indexNames.contains("byLinkTime")) messages.createIndex("byLinkTime", ["linkId", "timestamp"]);
       if (!has(STORES.proofs)) db.createObjectStore(STORES.proofs, { keyPath: "secret" });
       if (!has(STORES.payments)) db.createObjectStore(STORES.payments, { keyPath: "id" });
       if (!has(STORES.quotes)) db.createObjectStore(STORES.quotes, { keyPath: "quote" });
