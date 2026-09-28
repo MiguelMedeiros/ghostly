@@ -394,20 +394,43 @@ pub mod loopback {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
     use std::net::{TcpListener, TcpStream};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::time::Duration;
+
+    /// Connections served at once. The engine opens one per seek, a few at a time; past this a new one is closed at
+    /// once, so connections left idle (any program on the machine can open them) cannot take a thread each without end.
+    pub const MAX_CONNECTIONS: usize = 32;
+
+    /// A connection's place among the `MAX_CONNECTIONS`, given back when its thread ends (or never starts).
+    struct Slot(Arc<AtomicUsize>);
+
+    impl Drop for Slot {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
 
     /// Starts listening on a free port of 127.0.0.1 and serves until the app ends.
     pub fn start(store: FileStore, grants: StreamGrants) -> Result<u16, String> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+        let open = Arc::new(AtomicUsize::new(0));
         std::thread::Builder::new()
             .name("ghostly-file".into())
             .spawn(move || {
                 for stream in listener.incoming().flatten() {
+                    if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                        open.fetch_sub(1, Ordering::SeqCst);
+                        drop(stream);
+                        continue;
+                    }
+                    let slot = Slot(open.clone());
                     let (store, grants) = (store.clone(), grants.clone());
                     let _ = std::thread::Builder::new()
                         .name("ghostly-file-conn".into())
                         .spawn(move || {
+                            let _slot = slot;
                             let _ = serve(stream, &store, &grants, port);
                         });
                 }
@@ -1065,6 +1088,52 @@ mod tests {
         grants.close(&token);
         let (status, _, _) = over_http(port, &format!("GET /{token} HTTP/1.1\r\n{host}\r\n\r\n"));
         assert_eq!(status, "HTTP/1.1 404 Not Found");
+        fs_cleanup(dir);
+    }
+
+    #[test]
+    fn over_loopback_http_idle_connections_past_the_limit_are_closed_at_once() {
+        let (files, dir) = store();
+        let grants = StreamGrants::default();
+        files.append("p", "f", 0, b"bytes").unwrap();
+        let token = grants.open(&files, "p", "f", "video/mp4").unwrap();
+        let port = grants.loopback_port(&files).unwrap();
+        let idle: Vec<_> = (0..loopback::MAX_CONNECTIONS)
+            .map(|_| std::net::TcpStream::connect(("127.0.0.1", port)).unwrap())
+            .collect();
+        // One more: taken and closed at once, with the others still waiting.
+        let mut extra = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        extra
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        let mut rest = Vec::new();
+        assert!(
+            extra.read_to_end(&mut rest).is_ok(),
+            "closed, not left open"
+        );
+        assert!(rest.is_empty());
+        // Once they go, the server answers again.
+        drop(idle);
+        let host = format!("Host: 127.0.0.1:{port}");
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            std::io::Write::write_all(
+                &mut stream,
+                format!("GET /{token} HTTP/1.1\r\n{host}\r\n\r\n").as_bytes(),
+            )
+            .unwrap();
+            let mut raw = Vec::new();
+            let _ = stream.read_to_end(&mut raw);
+            if raw.starts_with(b"HTTP/1.1 200 OK") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < until,
+                "the server never came back"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         fs_cleanup(dir);
     }
 
