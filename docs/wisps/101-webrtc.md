@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 101; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md) |
 | Implementation | Existing adapter in the web app, the extension and Desktop on macOS and Windows (Linux WebKitGTK has no WebRTC); WISP binding proposed |
@@ -51,5 +49,4 @@ Connect independent engines; verify simultaneous offers, stale signaling rejecti
 
 ## Revision log
 
-- 0.2 (2026-09-25): place in the one chat; a failed attempt leaves the chat on the DHT instead of failing it.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/101-webrtc/](changes/101-webrtc/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

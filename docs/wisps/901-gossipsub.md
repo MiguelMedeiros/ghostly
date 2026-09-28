@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-20 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md), [900](900-group-sessions.md) |
 | Implementation | Proposed; no adapter found |
@@ -48,3 +46,7 @@ Two independent adapters relay identical encrypted group envelopes; test duplica
 ## References
 
 [Group sessions](900-group-sessions.md), [transport selection](100-transports.md), [chat](400-chat.md), [interoperability plan](INTEROP.md).
+
+## Revision log
+
+One file per change in [changes/901-gossipsub/](changes/901-gossipsub/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

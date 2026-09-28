@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Blocked on existing-identity signer API; see follow-up |
@@ -42,3 +40,7 @@ First gate: a documented API and reproducible proof/verification prototype. Only
 ## Implementation follow-up (2026-09-20)
 
 The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical. (Superseded: that per-chat proof dialog is retired and not reachable in the app; the identity-proof registry has no Keet provider.)
+
+## Revision log
+
+One file per change in [changes/303-keet/](changes/303-keet/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

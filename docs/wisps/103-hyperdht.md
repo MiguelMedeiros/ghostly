@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 103; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md) |
 | Implementation | Experimental: native adapter of the chat session (desktop); browsers through a HyperDHT relay (web app, extension; off until a relay is set); public key in the layer-0 capability record |
@@ -70,6 +68,4 @@ Demonstrate chat over HyperDHT and another adapter without changing application 
 
 ## Revision log
 
-- 0.3 (2026-09-25): browser profile through a non-custodial HyperDHT relay; the `relayed` descriptor field.
-- 0.2 (2026-09-25): place in the one chat; not the chat's layer 0; public key in the layer-0 capability record.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/103-hyperdht/](changes/103-hyperdht/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

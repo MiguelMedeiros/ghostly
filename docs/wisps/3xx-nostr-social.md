@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md), [301](301-nostr.md) |
 | Implementation | Experimental: `packages/browser/src/nostr/`, `packages/browser/src/engine/nostrSocial.ts`; see [below](#implementation-2026-09-23) |
@@ -80,3 +78,7 @@ Beside this layer, the identity cards now read a verified identity's public prof
 - The card face shows the kind-0 name and picture once the card is on screen; the contact's panel shows the chosen card's profile, follows and last notes while it is open. Both read from the person's relays, and only for a currently verified proof.
 - One setting governs them: Settings → Security → **Load public profiles**, on by default. This layer's own `autoLoadProfiles` stays off by default.
 - The profile name stands in for the chat's name only when the person picks it with **Show as** in the contact's panel; a nickname still wins.
+
+## Revision log
+
+One file per change in [changes/3xx-nostr-social/](changes/3xx-nostr-social/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

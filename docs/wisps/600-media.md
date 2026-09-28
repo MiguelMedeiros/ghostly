@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 600; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
 | Implementation | 1:1 calls, with screen sharing from inside a call, in every chat: compatibility chats (`_call`) and the chat session (`calls/1`, live only) |
@@ -44,6 +42,4 @@ Test independent WebRTC engines, accept/reject/hangup, stale call replay, simult
 
 ## Revision log
 
-- 0.3 (2026-09-25): calls in the chat session of every new chat (`calls/1`, [601](601-webrtc-media.md#paired-profile)).
-- 0.2 (2026-09-25): implementation line: calls exist in compatibility chats ([402](402-legacy-chat.md)) only; the chat session of every new chat ([401](401-paired-chat.md)) has none yet.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/600-media/](changes/600-media/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

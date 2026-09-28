@@ -5,8 +5,6 @@
 | Number | 204 |
 | Status | Draft |
 | Kind | Adapter |
-| Revision | 0.2 |
-| Updated | 2026-09-26 |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Capabilities 03](03-capabilities.md), authenticated live data transport |
 | Implementation | Experimental browser adapter, Second's Bark SDK `@secondts/bark` 0.25.0 (bark 0.7.1, WebAssembly). New makes a Mainnet wallet on Second's Bitcoin server and a Testnet one on their signet server, each in one click. Regtest evidence below; no Ghostly test has moved real money. |
 | Summary | A second Ark provider (Second's Bark) beside Arkade, so Ark isn't tied to one implementation. |
@@ -105,3 +103,7 @@ Not yet exercised: funded signet payments (the faucet needs a person's GitHub lo
 ## References
 
 [Bark Web SDK](https://second.tech/docs/bark-sdk/wasm), [connection details](https://second.tech/docs/connection-details), [pricing](https://second.tech/pricing), [terms](https://second.tech/terms), [coin lifetime](https://second.tech/docs/learn/lifetime.md), [unilateral exit](https://second.tech/docs/learn/exit.md), [backups](https://second.tech/docs/backups), [bark repository](https://gitlab.com/ark-bitcoin/bark), [bindings](https://gitlab.com/ark-bitcoin/bark-ffi-bindings), [shared payment contract](200-payments.md), [Arkade adapter](202-arkade.md).
+
+## Revision log
+
+One file per change in [changes/204-bark/](changes/204-bark/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

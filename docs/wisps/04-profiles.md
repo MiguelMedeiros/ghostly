@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 04; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [200](200-payments.md), [700](700-local-services.md) |
 | Implementation | Experimental: web, desktop and browser extension clients |
@@ -89,3 +87,7 @@ The web, desktop and browser extension clients implement the registry, the names
 ## Open decisions and conformance
 
 Running two profiles at once in separate windows; moving a chat between profiles. Conformance: an implementation MUST keep every linked item above within its profile, MUST NOT disclose profiles on the wire, and MUST restart (or fully stop) the previous profile's peer on switching.
+
+## Revision log
+
+One file per change in [changes/04-profiles/](changes/04-profiles/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

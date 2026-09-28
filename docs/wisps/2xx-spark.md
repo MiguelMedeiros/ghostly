@@ -5,8 +5,6 @@
 | Number | 2xx (planned, number to be defined) |
 | Status | Draft |
 | Kind | Adapter |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Lightning 203](203-lightning.md) (the Breez source shares the wallet), authenticated live data transport |
 | Implementation | Experimental browser adapter, Breez SDK Spark `@breeztech/breez-sdk-spark` 0.26.0 (WebAssembly, nodeless). New makes a Testnet wallet on Breez and Lightspark's hosted regtest in one click, and a Mainnet wallet once the person gives their Breez API key. |
 | Summary | Pay a contact who also has Spark straight from wallet to wallet: instant, off-chain, no Lightning hop. |
@@ -91,3 +89,7 @@ Not yet exercised: Mainnet with real money, the extension and Desktop with money
 ## References
 
 [Breez SDK Spark: sending](https://sdk-doc-spark.breez.technology/guide/send_payment.html), [Spark addressing](https://docs.spark.money/wallets/addressing), [Spark overview](https://docs.spark.money/wallets/overview), [Lightspark regtest faucet](https://app.lightspark.com/regtest-faucet), [shared payment contract](200-payments.md), [Lightning (Breez source)](203-lightning.md).
+
+## Revision log
+
+One file per change in [changes/2xx-spark/](changes/2xx-spark/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

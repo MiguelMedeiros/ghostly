@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Provider `openpgp` in the identity-proof registry; see [Implementation](#implementation) |
@@ -75,3 +73,7 @@ The implementation's vectors (`packages/browser/test/vectors/openpgp/`) are gene
 - **What `verify` returns**: the fingerprint, `source` naming the algorithm and whether a signing subkey signed, `expiresAt` when the key or subkey expires before the binding, and `display.name` = the key's first valid user ID, whose `display.source` is the warning that its holder wrote it and it proves no name or email.
 - **`lookupDisplay`** (on request): the first email keys.openpgp.org confirmed on this key, labelled as that keyserver's check; a revocation held there is reported as an error.
 - **Bundle**: the provider module is small; OpenPGP.js is imported only through `loadOpenPgp()`. The library is [OpenPGP.js](https://openpgpjs.org) 6, which has had two complete security audits by Cure53, is maintained by Proton, and already implementing both RFCs, subkey binding and back-signature checks, revocation semantics and algorithm policy. A verifier written for Ghostly alone would be smaller but unaudited, for a parser of untrusted input. Its "lightweight" build is loaded only when an OpenPGP proof is opened: about 233 KB minified (64 KB gzipped), plus a 46 KB curve chunk loaded for ECDSA keys only. No other page pays for it.
+
+## Revision log
+
+One file per change in [changes/3xx-openpgp/](changes/3xx-openpgp/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

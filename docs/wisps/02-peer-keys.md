@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 02; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-20 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md) |
 | Implementation | Existing per-link keys; lifecycle extensions proposed |
@@ -52,3 +50,7 @@ Restart/reconnect without reopening an invite; rotate without accepting replayed
 ## References
 
 [Identity](../../packages/core/src/identity.ts), [invite](../../packages/core/src/invite.ts), [local storage](../../packages/browser/src/engine/db.ts), [peer proofs](300-peer-proofs.md).
+
+## Revision log
+
+One file per change in [changes/02-peer-keys/](changes/02-peer-keys/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

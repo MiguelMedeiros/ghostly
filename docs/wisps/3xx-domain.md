@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Experimental provider `domain`: `packages/core/src/domainProofs.ts`, `packages/browser/src/proofs/domain.ts`, `packages/browser/src/proofs/providers/domain.ts` |
@@ -98,3 +96,7 @@ Formats: TXT tags strict; `ghostly.json` and `nostr.json` bounded and strict; NI
 ## References
 
 [300](300-peer-proofs.md), [provider contract](../../packages/browser/src/proofs/PROOFS.md), [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md), [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md), [RFC 8484](https://www.rfc-editor.org/rfc/rfc8484), [RFC 8615](https://www.rfc-editor.org/rfc/rfc8615), [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761), [RFC 6840 §5.7](https://www.rfc-editor.org/rfc/rfc6840#section-5.7), [RFC 6376 §3.2](https://www.rfc-editor.org/rfc/rfc6376#section-3.2), [RFC 7208 §3.3](https://www.rfc-editor.org/rfc/rfc7208#section-3.3).
+
+## Revision log
+
+One file per change in [changes/3xx-domain/](changes/3xx-domain/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

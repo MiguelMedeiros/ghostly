@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2.11 |
-| Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
 | Implementation | The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, `on-dht`, self-upgrade, DHT only per chat; replies, reactions, edits, forwards and the text's display conventions; compatibility chats for v0.4 |
@@ -284,16 +282,4 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
-- 0.2.11 (2026-09-27): forwards: a new message of the forwarder's with a hop count (1 to 255, "many times" from 5), never the original author; texts and files (from the bytes here) to at most 5 chats and groups; groups take texts only; payments, identity shares and call lines are not forwarded.
-- 0.2.10 (2026-09-27): edits in groups, private and community: authenticated as the author by the group, dropped once the author is out, no receipts; mentions carried with the new text, never notifying; older members keep the original.
-- 0.2.9 (2026-09-27): edits: the whole new text of one of the author's texts, numbered per message (highest wins, at most 100), no time limit; never rings, never unread; nothing to older apps.
-- 0.2.8 (2026-09-27): message text: the display conventions (formatting, code, lists, quotes, headings, `[text](url)` links), with the link rules; the text is still sent as typed.
-- 0.2.7 (2026-09-27): reactions: one emoji per person per message, the highest number winning; checked emoji; waiting a minute for an unknown message; no unread, no sound.
-- 0.2.6 (2026-09-27): replies: the original's id, a line of it and its author with a message; checked against this chat only; no text prefix for older apps.
-- 0.2.5 (2026-09-26): after the pin, another key on invite-derived channels (DHT mailbox, signals, a native connection dialled in) is ignored with a passive warning, not a stop; only an authenticated session this side can trust proves a key change.
-- 0.2.4 (2026-09-25): link previews ride layer 1 only; places in a text show as a location card whose map loads on request.
-- 0.2.3 (2026-09-25): transport rows record what matters (first connection, a change of transport, choices, a failed switch, an outage when it ends), not every reconnect or restart; everything else goes to the connection history.
-- 0.2.2 (2026-09-25): calls (`calls/1`) and hosted services (`services/1`) on layer 1, both live only.
-- 0.2.1 (2026-09-25): hosted local services run in the chat session today; only calls are the gap. Implementation status updated.
-- 0.2 (2026-09-25): one chat with a DHT layer and a peer-to-peer layer; chat states; what each state carries; the pairing-progress and transport-row wording; decisions Q1 to Q7 (decided 2026-09-25).
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/400-chat/](changes/400-chat/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

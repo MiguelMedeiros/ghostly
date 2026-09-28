@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 800; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md) |
 | Implementation | One bearer invite (`ghostly1…`) for every new chat, which pins the inviter's participation key; consumable admission protocol proposed |
@@ -71,5 +69,4 @@ Race two different joiners, replay consumed invites, duplicate the same join ret
 
 ## Revision log
 
-- 0.2 (2026-09-25): one invite for the one chat, a bech32m `ghostly1…` string with its version inside; refusal rules both ways (details in 801).
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/800-invite-join/](changes/800-invite-join/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.
