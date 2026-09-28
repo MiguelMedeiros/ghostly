@@ -24,6 +24,7 @@ import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareText, takeShareFor } from "../lib/incomingShare";
+import { fitFieldHeight } from "./composer/fieldHeight";
 import "./composer/composer.css";
 
 interface MessageInputProps {
@@ -193,8 +194,9 @@ export function MessageInput({
     // A draft holding a seed or a key is not written to storage; ecash is, since the draft may be its only copy.
     // Not while editing: the draft is the one kept aside.
     if (draftId && !editing) { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); }
+    // Text put in by the app (an emoji, an edit, a share): the field fits it. A keystroke was fitted already.
     const input=textareaRef.current;
-    if(input && text) { input.style.height="auto"; input.style.height=`${Math.min(input.scrollHeight,120)}px`; }
+    if(input && text) fitFieldHeight(input);
   }, [draftId,text,editing]);
 
   // An emoji goes in where the caret was; the caret stays after it.
@@ -274,10 +276,7 @@ export function MessageInput({
           : "That is too long for the DHT. Once you are connected peer to peer, long invoices and ecash tokens fit.",
       );
     }
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
-    }
+    if (textareaRef.current) fitFieldHeight(textareaRef.current);
   };
 
   const handleEmojiSelect = (emoji: string) => {

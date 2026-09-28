@@ -2,6 +2,10 @@
 
 /* Ghostly Browser builds this UI from another package root; name the sources explicitly. */
 @source "./";
+/* Class names the tests mention are not the app's. One of them (`group-has-[:focus-visible]`, a class a test says a row
+   must not have) made a `:has()` rule anchored on every `.group`, and each message row is one: WebKit then paid for
+   every keystroke in proportion to the chat's length. */
+@source not "./test";
 
 @theme {
   --color-app-bg: var(--theme-app-bg);
