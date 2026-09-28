@@ -33,6 +33,8 @@
   "turnCameraOn": "カメラをオン",
   "unmute": "ミュート解除",
   "video": "ビデオ通話",
+  "wakeGaveUp": "{{name}} は Ghostly を開きませんでした。",
+  "waking": "通話のために {{name}} を起こしています…",
   "window": {
     "chat": "チャットに戻る",
     "full": "全画面に戻る",

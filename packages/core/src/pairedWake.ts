@@ -74,25 +74,46 @@ export function parseWakeFrame(frame: Record<string, unknown>): WakeTarget | nul
   return target;
 }
 
-/** The wake-up's plaintext: the contact's token for this chat, and nothing else. */
-export function wakePayload(token: string): Uint8Array {
-  return utf8Encode(JSON.stringify({ wake: 1, k: token }));
+/**
+ * What a wake-up is for: a message waits, or a call does (the caller rings until the contact's app is live, then
+ * calls). The receiving app picks its own words for each; the push says nothing more.
+ */
+export type WakeKind = "message" | "call";
+
+/** At most one call wake-up per contact in this long: a caller who tries again at once is not a new push. */
+export const WAKE_CALL_INTERVAL_MS = 30_000;
+/** How long a caller waits for the woken contact's app to come live before giving up. */
+export const WAKE_CALL_WAIT_MS = 60_000;
+/** A call wake-up is useless once the caller stopped waiting: the push service may drop it after this. */
+export const WAKE_CALL_TTL_SECONDS = 60;
+
+/** The wake-up's plaintext: the contact's token for this chat, and whether it is for a call. Nothing else. */
+export function wakePayload(token: string, kind: WakeKind = "message"): Uint8Array {
+  return utf8Encode(JSON.stringify(kind === "call" ? { wake: 1, k: token, c: 1 } : { wake: 1, k: token }));
 }
 
-/** The token a wake-up carries, as the receiving service worker reads it; null for anything else. */
-export function readWakePayload(text: string | null | undefined): string | null {
+/** A wake-up as the receiving service worker reads it: the token and its kind; null for anything else. */
+export function readWake(text: string | null | undefined): { token: string; kind: WakeKind } | null {
   if (!text || text.length > 200) return null;
   try {
-    const value = JSON.parse(text) as { wake?: unknown; k?: unknown };
-    return value?.wake === 1 && typeof value.k === "string" && TOKEN.test(value.k) ? value.k : null;
+    const value = JSON.parse(text) as { wake?: unknown; k?: unknown; c?: unknown };
+    if (value?.wake !== 1 || typeof value.k !== "string" || !TOKEN.test(value.k)) return null;
+    return { token: value.k, kind: value.c === 1 ? "call" : "message" };
   } catch {
     return null;
   }
 }
 
+/** The token a wake-up carries; null for anything else. */
+export function readWakePayload(text: string | null | undefined): string | null {
+  return readWake(text)?.token ?? null;
+}
+
 /** The request that wakes the contact. Throws `WebPushError` when the target cannot be used. */
-export function wakeRequest(target: WakeTarget, now = Date.now()): PushRequest {
-  return pushRequest(target, target.vapid, wakePayload(target.token), { subject: WAKE_SUBJECT, ttlSeconds: WAKE_TTL_SECONDS, now });
+export function wakeRequest(target: WakeTarget, now = Date.now(), kind: WakeKind = "message"): PushRequest {
+  return pushRequest(target, target.vapid, wakePayload(target.token, kind), {
+    subject: WAKE_SUBJECT, ttlSeconds: kind === "call" ? WAKE_CALL_TTL_SECONDS : WAKE_TTL_SECONDS, now,
+  });
 }
 
 /** One wake-up per contact per `WAKE_INTERVAL_MS`. Kept in memory: a restart may send one more, never a flood. */

@@ -268,6 +268,8 @@ export interface EngineApi {
    * so no push for it reaches the browser at all (a push that shows nothing counts against the app with some browsers).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
+  /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
+  wakeForCall(params: { linkId: string }): Promise<boolean>;
   setFastPoll(params: { linkId: string; fast: boolean }): void;
 
   // Private groups (WISP 900, `group-mesh/1`). Group messages arrive as `messages` events under `group:<id>`.

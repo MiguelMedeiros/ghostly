@@ -33,6 +33,8 @@
   "turnCameraOn": "打开摄像头",
   "unmute": "取消静音",
   "video": "视频通话",
+  "wakeGaveUp": "{{name}} 没有打开 Ghostly。",
+  "waking": "正在唤醒 {{name}} 接听通话…",
   "window": {
     "chat": "返回聊天",
     "full": "返回全屏",

@@ -30,7 +30,7 @@ export interface PushPlatform {
   subscribe(profile: string, vapid: VapidKeys): Promise<PushKeys>;
   current(profile: string): Promise<PushKeys | null>;
   unsubscribe(profile: string): Promise<void>;
-  syncTable(profile: string, entries: readonly WakeTableEntry[], text: { title: string; body: string }): Promise<void>;
+  syncTable(profile: string, entries: readonly WakeTableEntry[], text: { title: string; body: string; call?: string }): Promise<void>;
 }
 
 let platform: PushPlatform | null = null;
@@ -70,11 +70,11 @@ export async function setWake(on: boolean): Promise<void> {
  * and its mute (#250: a muted chat is never shown). Also puts right a subscription the browser dropped while the
  * app was closed: made again when notifications are still allowed, else wake-ups are turned off.
  */
-export function useWakeTableSync(text: { title: string; body: string }): void {
+export function useWakeTableSync(text: { title: string; body: string; call?: string }): void {
   const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
   const wake = state?.settings.wake;
   const links = state?.links;
-  const { title, body } = text;
+  const { title, body, call } = text;
   useEffect(() => {
     const push = pushPlatform();
     if (!push || !links) return;
@@ -92,7 +92,7 @@ export function useWakeTableSync(text: { title: string; body: string }): void {
           entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }) });
         }
       }
-      void push.syncTable(profile, entries, { title, body }).catch(() => {});
+      void push.syncTable(profile, entries, { title, body, ...(call && { call }) }).catch(() => {});
     };
     write();
     window.addEventListener(MUTE_EVENT, write);
@@ -103,7 +103,7 @@ export function useWakeTableSync(text: { title: string; body: string }): void {
       window.removeEventListener("storage", write);
       window.removeEventListener("session-updated", write);
     };
-  }, [wake, links, title, body]);
+  }, [wake, links, title, body, call]);
 
   const endpoint = wake?.endpoint;
   useEffect(() => {

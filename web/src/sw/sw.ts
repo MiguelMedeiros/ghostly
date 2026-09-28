@@ -15,7 +15,7 @@
  */
 import { CACHE_PREFIX, SHARED_ROUTE, classify, pushScopeProfile, readShare, wakeNotice, type SharedItem } from "./policy";
 import { readWakeEntry } from "./wakeStore";
-import { readWakePayload } from "../../../packages/core/src/pairedWake";
+import { readWake } from "../../../packages/core/src/pairedWake";
 import { SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
 
 declare const __SW_BUILD__: string;
@@ -167,13 +167,15 @@ worker.addEventListener("push", (event) => {
   if (PUSH_PROFILE === null) return;
   const profile = PUSH_PROFILE;
   event.waitUntil((async () => {
-    const token = readWakePayload(event.data?.text());
-    const found = token ? await readWakeEntry(profile, token).catch(() => undefined) : undefined;
+    const wake = readWake(event.data?.text());
+    const found = wake ? await readWakeEntry(profile, wake.token).catch(() => undefined) : undefined;
     const appVisible = (await appWindows()).some((client) => client.focused || client.visibilityState === "visible");
-    const notice = wakeNotice(found, { now: Date.now(), appVisible, profile });
+    const notice = wakeNotice(found, { now: Date.now(), appVisible, profile, kind: wake?.kind });
     if (!notice) return;
+    // A call stays until it is answered or dismissed, and buzzes again: a web app cannot ring like a phone call.
     await worker.registration.showNotification(notice.title, {
-      body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", renotify: false,
+      body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png",
+      renotify: notice.call, requireInteraction: notice.call, ...(notice.call && { vibrate: [300, 200, 300, 200, 300] }),
     });
   })());
 });
