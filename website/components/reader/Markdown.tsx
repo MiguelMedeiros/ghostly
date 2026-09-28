@@ -48,17 +48,23 @@ function Diagram({ source }: { source: string }) {
   );
 }
 
-/** Renders a synced reference document with anchored headings and in-site links. */
+/**
+ * Renders a synced reference document with anchored headings and in-site links. Under a page title (`belowTitle`)
+ * the document's own "# Title" repeats it, so it is only an anchor (old links to it still land) and the page keeps
+ * a single h1.
+ */
 export function ReferenceMarkdown({
   body,
   sourcePath,
   idPrefix = "",
   repoLabel = "repository",
+  belowTitle = false,
 }: {
   body: string;
   sourcePath: string;
   idPrefix?: string;
   repoLabel?: string;
+  belowTitle?: boolean;
 }) {
   type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[]; data?: { hProperties?: Record<string, string> } };
   const headingIds = () => (tree: MarkdownNode) => {
@@ -86,7 +92,7 @@ export function ReferenceMarkdown({
       );
     };
   const components: Components = {
-    h1: heading("h1"),
+    h1: belowTitle ? ({ id }) => <span id={id} /> : heading("h1"),
     h2: heading("h2"),
     h3: heading("h3"),
     h4: heading("h4"),

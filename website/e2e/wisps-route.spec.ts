@@ -137,3 +137,13 @@ test("an old link lands on /wisps, anchor kept", async ({ page }) => {
   await expect(page.locator("details#glossary")).toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Every contract, in one place.");
 });
+
+test("a WISP page has one h1, the page title, and the document's own title is only an anchor", async ({ page }) => {
+  await page.goto("/wisps/01-ghost-core");
+  const h1 = page.locator("h1");
+  await expect(h1).toHaveCount(1);
+  await expect(h1).toHaveText("Ghost Core Protocol");
+  // Links to the document's "# WISP 01: Ghost Core Protocol" still land; its sections stay h2 under the title.
+  await expect(page.locator(".reader-prose #wisp-01-ghost-core-protocol")).toBeAttached();
+  await expect(page.locator(".reader-prose h2#purpose-and-current-behavior")).toBeAttached();
+});

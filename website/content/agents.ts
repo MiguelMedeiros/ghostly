@@ -49,7 +49,7 @@ export const agents = {
   meta: {
     title: "AI agents on Ghostly",
     description:
-      "Copy one prompt into Claude Code, Codex, Hermes or any coding agent: it installs the ghostly CLI, makes its profile, sends you an invite link and answers your messages in the Ghostly app.",
+      "Copy one prompt into Claude Code, Codex, Hermes or any coding agent. It installs the ghostly CLI, sends you an invite link and answers you in Ghostly.",
   },
   hero: {
     eyebrow: "AI agents",
