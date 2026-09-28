@@ -162,13 +162,21 @@ test("the connected moment is heard once on each side, together with the scene g
   for (const { page } of [alice, bob]) await expect(page.getByTestId("pairing-scene")).toHaveCount(0, { timeout: 15_000 });
   for (const { page } of [alice, bob]) {
     const { heard, liveAt } = await sounds(page);
-    expect(heard, JSON.stringify(heard)).toHaveLength(1);
+    // The inviter first hears the contact arrive with the invite (knock.mp3, 0.48 s, the connection cue of #310),
+    // before the live scene; the joiner has nothing to be told before it.
+    const knocks = page === alice.page ? 1 : 0;
+    expect(heard, JSON.stringify(heard)).toHaveLength(knocks + 1);
+    const [connected] = heard.slice(-1);
+    if (knocks) {
+      expect(heard[0].duration).toBeLessThan(0.5);
+      expect(heard[0].at).toBeLessThan(liveAt!);
+    }
     // connected.mp3 (0.88 s), decoded and played: the synthesized fallback has no buffer.
-    expect(heard[0].duration).toBeGreaterThan(0.8);
-    expect(heard[0].duration).toBeLessThan(1);
+    expect(connected.duration).toBeGreaterThan(0.8);
+    expect(connected.duration).toBeLessThan(1);
     // Asked for in the same change that starts the connected moment: within a few frames of the live scene.
     expect(liveAt).not.toBeNull();
-    expect(Math.abs(heard[0].at - liveAt!)).toBeLessThan(100);
+    expect(Math.abs(connected.at - liveAt!)).toBeLessThan(100);
   }
 });
 
