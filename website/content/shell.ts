@@ -46,7 +46,7 @@ export const shell = {
     levelHelp: {
       available: "In the app today.",
       planned: "Designed or proposed. No working version yet.",
-      research: "An open question we are investigating.",
+      research: "Being considered, not planned.",
     } satisfies Record<Level, string>,
     draft: "Draft",
     englishOnly: "This page is in English.",

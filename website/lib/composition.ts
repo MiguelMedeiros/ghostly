@@ -65,13 +65,17 @@ export const BLOCKS: Block[] = [
   b("qrinvite", "base", "QR invitations", ["801-invitation-profiles"], "The invitation as a QR code to scan: the same code as the one you copy."),
   b("ghostly1", "base", "ghostly1 invite", ["800-invite-join", "801-invitation-profiles"], "One invite code, ghostly1…, checked for typos, and a ghostly.tools link that opens the app."),
   b("caps", "base", "Capabilities", ["03-capabilities"], "Both sides offer versioned abilities (chat/1, files/2, payments-cashu/1, hold/1 …) and use only the ones they share."),
+  b("pq", "base", "Post-quantum keys", [], "A hybrid key exchange, so what is recorded today stays sealed against a future quantum computer. Being considered, not planned.", ["adapter-roadmap"], "candidate-post-quantum-key-exchange"),
 
   // Transports
   b("webrtc", "transport", "WebRTC", ["100-transports", "101-webrtc"], "A data channel in the browser, the extension and the desktop app, except on Linux, whose webview has no WebRTC."),
   b("iroh", "transport", "Iroh", ["100-transports", "102-iroh"], "QUIC bound to Ghostly authentication: direct between desktop apps, and relay only in the web app, extension and CLI, through n0's public relays unless you set others. A web chat reaches a desktop app this way."),
   b("hyperdht", "transport", "HyperDHT", ["100-transports", "103-hyperdht"], "An authenticated Noise stream found through HyperDHT, between desktop apps and the CLI. The web app and extension reach it only through a relay you set: none runs by default."),
   b("dhttext", "transport", "DHT text", ["403-dht-text"], "The floor of every chat: very short text in DHT records when no live link is up. Bounded, not a mailbox."),
-  b("tor", "transport", "Tor", [], "Reaching peers over Tor. An open question, not a plan yet.", ["adapter-roadmap"], "candidate-tor"),
+  b("tor", "transport", "Tor", [], "Reaching peers over Tor. Being considered, not planned.", ["adapter-roadmap"], "candidate-tor"),
+  b("libp2p", "transport", "libp2p", [], "Reaching peers through a libp2p profile, with its relays and multiplexing. Being considered, not planned.", ["adapter-roadmap"], "candidate-libp2p-connectivity-profile"),
+  b("pear", "transport", `Pear${D}Holepunch`, [], "Holepunch's Hypercore and Autobase for data that several peers write and keep. Being considered, not planned.", ["adapter-roadmap"], "candidate-pear-holepunch-components"),
+  b("mixnet", "transport", "Mixnet", [], "Traffic through a mixnet like Nym, so the network cannot see who talks to whom, or when. Being considered, not planned.", ["adapter-roadmap"], "candidate-mixnet"),
 
   // Chat, files & media
   b("chat", "talk", "Chat", ["400-chat"], "One kind of chat: messages with storage receipts and retries, over a live link or through the DHT."),
@@ -121,10 +125,12 @@ export const BLOCKS: Block[] = [
   // Groups
   b("groups", "groups", "Groups", ["900-group-sessions", "9xx-group-mesh", "9xx-group-community"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture and payments between members; no files or calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension and desktop."),
   b("gossipsub", "groups", "GossipSub", ["901-gossipsub"], "A candidate distribution layer for larger groups, off the DHT."),
+  b("mls", "groups", "MLS", [], "Group encryption by the MLS standard, for groups larger than the mesh or members who renew their own keys. Being considered, not planned.", ["adapter-roadmap"], "candidate-mls-group-encryption"),
 
   // SDK, apps & catalogs
   b("sdk", "ecosystem", "@ghostly/sdk", [], "Write a wallet source or an identity proof outside the app, test it with the contract suites, and it joins the pickers as a plugin: no registry line. Not on npm yet.", ["sdk"], "candidate-sdk-and-manifests"),
   b("headless", "ecosystem", "Headless CLI", ["11xx-headless"], "`ghostly`: the app's own engine on Node for bots, driven through a daemon, a local socket and a JSON event stream. Spending real money needs --confirm-real. Not on npm yet."),
+  b("sandbox", "ecosystem", "Plugin sandbox", [], "A plugin host that gives each plugin only the permissions you grant it. Being considered, not planned.", ["adapter-roadmap"], "candidate-plugin-sandbox"),
   b("apps", "ecosystem", "Apps & catalogs", [], "Mini-apps, games and independent catalogs, possibly with indexers.", ["adapter-roadmap"], "candidate-mini-apps-and-games"),
   b("os", "ecosystem", "Self-hosted runtime", [], "An always-on personal node, even a Raspberry Pi, running your Ghostly.", ["adapter-roadmap"], "candidate-self-hosted-24h"),
 ];

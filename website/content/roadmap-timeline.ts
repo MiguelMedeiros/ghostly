@@ -39,7 +39,7 @@ type Timeline = {
 
 export const timeline: Timeline = {
   mapTitle: "The map",
-  mapLead: "Every piece of Ghostly, by area. Start from today, then move along the stages to see what comes next.",
+  mapLead: "Every piece of Ghostly, by area. Start from today, then move along the stages to see what comes next. Research is what we are considering, not a plan.",
   timelineTitle: "Stage by stage",
   timelineLead: "Left to right is the order things happen. No dates: a column is a stage, not a quarter.",
   detailsTitle: "Why this order? Dependencies and what \"done\" means",
