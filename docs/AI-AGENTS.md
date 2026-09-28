@@ -43,6 +43,31 @@ that exact payment. Every command, event and socket method: [CLI.md](CLI.md) and
 [package README](../packages/cli/README.md). Examples: an [echo bot](../packages/cli/examples/echo-bot.sh) and a
 [payment bot](../packages/cli/examples/payment-bot.mjs).
 
+## Planned: Ghostly as a channel for agents
+
+On the roadmap, not built yet ([its row](wisps/ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos)). An agent on
+Telegram is woken by its gateway on each message; on Ghostly nothing wakes it until someone writes a `ghostly listen`
+loop. The plan is one generic connector, so any agent framework that takes a webhook or reads a socket gets Ghostly
+messages the way it gets Telegram's. It builds on what the CLI has today and adds no wire format.
+
+The contract:
+
+| Part | What |
+|---|---|
+| In | Each `message.received`, and each `group.message` that mentions the agent, starts one turn. The event arrives on stdin (`listen --exec`), as a POST body to a local bridge (`listen --webhook`) or on the daemon's socket (`events.subscribe`), never in a command's arguments. Dedupe on its `id`; a `--cursor` resumes after a restart. |
+| Allowlist | Per contact and per group, checked before the agent wakes. Anyone else's message is kept in the chat and never reaches the agent. |
+| Data, not instructions | The connector hands the agent a contact's text as quoted data. Nothing a contact writes can change the agent's instructions, reveal a secret or move money: real payments keep `--confirm-real`, given only by the wallet's owner. |
+| Out | `send` (with `--reply`), `typing --kind thinking --status "<text>"` while the agent works, `file send --voice` for a voice note, `file send` for a file, `react`. |
+
+First adapters:
+
+- **Claude Code.** A `ghostly listen --type message.received --exec` loop that wakes the session with the event on stdin.
+- **Hermes Agent** (Nous Research). Its gateway adds a platform as a plugin in `~/.hermes/plugins/`, an adapter that
+  extends `BasePlatformAdapter` with `connect`, `disconnect`, `send` and `send_typing`
+  ([adding a platform adapter](https://hermes-agent.nousresearch.com/docs/developer-guide/adding-platform-adapters)).
+  A Ghostly plugin maps those to the daemon's socket, and its allowlist to the gateway's per-platform allowed users
+  ([messaging gateway](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/)).
+
 ## The older skill
 
 [cli/SKILL.md](../cli/SKILL.md) teaches the legacy `ghostly-cli`, a compatibility client that reads only `ghost://`
