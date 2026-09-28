@@ -912,6 +912,7 @@
     "src/lib/profilePeek.ts": ["profiles.peek","profiles.switcher"],
     "src/lib/profiles.ts": ["*"],
     "src/lib/publicKeyLabel.ts": ["chats.list.key-label","chats.list.unnamed-contact","chats.list.rows","groups.*","services.*","proofs.page"],
+    "src/lib/sameValue.ts": ["*"],
     "src/lib/servicesAvailability.ts": ["services.*"],
     "src/lib/settings.ts": ["*"],
     "src/lib/shareLink.ts": ["groups.link.*"],
