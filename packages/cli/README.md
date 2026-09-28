@@ -14,18 +14,17 @@ is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md). A guided t
 
 ## Install
 
-The package is ready for npm but not published (that is the maintainer's; `"private": true` in package.json keeps it
-from going out by accident). From this repository:
+The package is ready for npm but not published yet. From this repository:
 
 ```bash
 npm install
-npm run build -w @ghostly/cli
-npm pack -w @ghostly/cli              # ghostly-cli-<version>.tgz: the bundle, its WebAssembly, README and SKILL.md
+npm run build -w ghostly-cli
+npm pack -w ghostly-cli              # ghostly-cli-<version>.tgz: the bundle, its WebAssembly, README and SKILL.md
 npm install -g ./ghostly-cli-*.tgz    # the `ghostly` command, with its dependencies from npm
 ghostly --version
 ```
 
-Once published: `npm install -g @ghostly/cli`. Node 22.12 or newer. WebRTC comes from `node-datachannel` (a native
+Once published: `npm install -g ghostly-cli`. Node 22.12 or newer. WebRTC comes from `node-datachannel` (a native
 module with prebuilt binaries for Linux, macOS and Windows); without it the CLI still runs, over HyperDHT, Iroh and
 the DHT, and groups are unavailable.
 
@@ -397,7 +396,7 @@ turns WebRTC off. A daemon offers to be a hub of the private groups past 16 memb
 
 ## Tests
 
-`npm test -w @ghostly/cli` builds the CLI and runs the unit tests and a two-bot end-to-end test on loopback (a Pkarr
+`npm test -w ghostly-cli` builds the CLI and runs the unit tests and a two-bot end-to-end test on loopback (a Pkarr
 relay in the test process and a HyperDHT testnet), a voice call between them included.
 `e2e/web/headless-chat.spec.ts` puts a bot and the web app in one chat; `e2e/web/headless-call.spec.ts` has them
 call each other, with a tone each way.
