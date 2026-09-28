@@ -61,11 +61,14 @@ One per side, per chat ([WISP 03](wisps/03-capabilities.md#layer-0-capability-re
 `paired-chat/1` ([WISP 401](wisps/401-paired-chat.md)) runs on whichever stream connected. The handshake agrees on a version, binds the transport's own handshake (DTLS fingerprint, TLS exporter or Noise hash) and checks the pinned participation key.
 
 - The transcript-bound `pair-offer` lists what the session carries: `chat/1`, `files/2`, `payments/1`, `transport-switch/1`, `hold/1`, proofs, and more.
-- Once ready, each side sends `{"t":"paired-capabilities","c":[...]}` with `calls/1`, `services/1`, `files/3`, `typing/1`, `react/1` and `edit/1`. A capability is on only while both sides list it.
+- Once ready, each side sends `{"t":"paired-capabilities","c":[...]}` with `calls/1`, `services/1`, `files/3`, `typing/1`, `react/1`, `edit/1` and `wake/1`. A capability is on only while both sides list it.
 - Liveness: `paired-ping` / `paired-pong`. Name and picture: `paired-nick`, `paired-avatar`. Typing: `{"t":"paired-typing","s":"start"|"stop"}` under `typing/1`, a `start` optionally with `kind` (`recording`, `thinking`) and a bot's `status` line, never stored and never on the DHT ([WISP 401](wisps/401-paired-chat.md#typing)).
 - Replies: `r` (`{i, s, f}`: the original's id, a cleaned line of it, its author) on `paired-message` and on a file's offer; the DHT envelope carries the id only ([WISP 400](wisps/400-chat.md#replies)).
 - Edits: `paired-edit` (the whole new text of one of the sender's own texts, numbered per message, the highest wins) answered by `paired-edited`, under `edit/1`; on the DHT an edit rides as a text of its own with a twelfth element naming the edited message ([WISP 401](wisps/401-paired-chat.md), [WISP 403](wisps/403-dht-text.md)).
 - Reactions: `paired-reaction` (`{id, e, n}`, one emoji per person per message, the highest `n` wins) answered by `paired-reacted`, under `react/1`; on the DHT they ride in the envelope's thirteenth and fourteenth elements ([WISP 401](wisps/401-paired-chat.md), [WISP 403](wisps/403-dht-text.md)).
+- Forwards: `fw` (1 to 255, how many times the message was forwarded) on `paired-message` and on a file's offer; the forwarder's own new message, never naming the original author; on the DHT the fifteenth element ([WISP 400](wisps/400-chat.md#forwards), [WISP 401](wisps/401-paired-chat.md#forwards)).
+- Wake-up push: `paired-wake` (`{w: {e, p, a, vp, vk, k}}` or `{w: null}`) under `wake/1` gives the contact a push subscription and a token for this chat; a message that cannot go live posts one content-free Web Push to it (RFC 8291, VAPID), at most one per contact every 5 minutes ([WISP 401](wisps/401-paired-chat.md#wake-up-push)).
+- Going away: `paired-bye` on every ready session before an app quits, so the contact closes at once and watches for it to come back ([WISP 401](wisps/401-paired-chat.md#liveness-and-reconnection)).
 - Losing the session is not losing the chat: it moves to the DHT and comes back when a stream does ([WISP 100](wisps/100-transports.md)).
 
 ### Service advertisements and HTTP
