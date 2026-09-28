@@ -9,7 +9,7 @@ import { COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { groupJson, groupMessageJson } from "../src/views";
-// covers: headless.groups, headless.group-admin
+// covers: headless.groups, headless.group-admin, groups.rename
 
 /**
  * What a bot in a group reads: who wrote a message (the roster names mesh and community senders), the id of what it
@@ -36,6 +36,7 @@ function fake(messages: StoredMessage[] = []) {
     groupTaken: vi.fn(() => 0),
     removeGroupMember: vi.fn(async () => undefined),
     rotateGroup: vi.fn(async () => undefined),
+    renameGroup: vi.fn(async () => undefined),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   return { ctx, node };
@@ -87,12 +88,24 @@ describe("group send", () => {
   });
 });
 
+describe("group rename", () => {
+  it("sends one clean line to the engine and refuses a name no member would see", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "group.rename", { group: "Crew", name: " Book\nclub " });
+    expect(node.renameGroup).toHaveBeenCalledWith({ groupId: "g1", name: "Book club" });
+    for (const name of ["", " \n ", "‮", "x".repeat(65)])
+      await expect(callApi(ctx, "group.rename", { group: "Crew", name }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.renameGroup).toHaveBeenCalledTimes(1);
+    expect(COMMANDS["group rename"].params!(parseArgs(["Crew", "Book", "club"], {}), { group: "Crew", name: "Book club" })).toEqual({ group: "Crew", name: "Book club" });
+  });
+});
+
 describe("the entry link is a join secret", () => {
   it("is hidden in show, list and the admin commands unless asked for", async () => {
     const { ctx } = fake();
     expect(groupJson(group, true).link).toBe(LINK);
     expect(groupJson({ ...group, entryLink: undefined }).link).toBeNull();
-    for (const [method, params] of [["group.get", {}], ["group.remove", { member: "Ana" }], ["group.rotate", {}]] as const) {
+    for (const [method, params] of [["group.get", {}], ["group.remove", { member: "Ana" }], ["group.rotate", {}], ["group.rename", { name: "Crew 2" }]] as const) {
       const hidden = await callApi(ctx, method, { group: "Crew", ...params });
       expect(JSON.stringify(hidden), method).not.toContain(LINK);
       expect(hidden, method).toMatchObject({ link: "<hidden>" });
@@ -107,7 +120,7 @@ describe("the entry link is a join secret", () => {
       const spec = COMMANDS[name];
       return spec.params!(parseArgs(argv, spec.options ?? {}), args);
     };
-    for (const name of ["group show", "group list", "group invite", "group remove", "group admin", "group rotate"]) {
+    for (const name of ["group show", "group list", "group invite", "group remove", "group admin", "group rotate", "group rename"]) {
       expect(COMMANDS[name].usage, name).toContain("[--show-secret]");
       expect(params(name, ["x", "--show-secret"], { group: "Crew" }), name).toMatchObject({ showSecret: true });
       expect(params(name, ["x"], { group: "Crew" }), name).not.toHaveProperty("showSecret");

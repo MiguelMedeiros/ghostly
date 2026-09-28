@@ -14,8 +14,8 @@ import { readForwarded } from "./forwards";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
 import { validEditNumber } from "./pairedEdits";
 import {
-  encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
-  type GroupMeta, type GroupMetaFrame,
+  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
 } from "./groupMeta";
 
 /**
@@ -304,8 +304,8 @@ export interface CommunitySessionHooks {
   /** A payload another member sealed to me (see `sendPair`). Payloads to others are carried, never opened. */
   pair?(message: CommunityIncomingPair): Promise<void> | void;
   changed(): void;
-  /** The group's picture changed (set, replaced or removed), by `by`. */
-  metaChanged?(by: string, picture: string | undefined): void;
+  /** The group's name or picture changed (set, replaced or removed), by `by`. */
+  metaChanged?(by: string, change: GroupMetaChange): void;
   /** A frame that waited here (a commit ahead of its parent) and is now placed: a hub passes it on. */
   relay?(frame: CommunityFrame): void;
   /** The engine's clock, for how often a member is asked for what I lack (defaults to Date.now). */
@@ -457,7 +457,8 @@ export class CommunitySession {
   // -- views ---------------------------------------------------------------------------------------
 
   get id(): string { return this.state.id; }
-  get name(): string { return this.state.name; }
+  /** The name the admin gave the group, else the one it had when I got in (WISP 9xx § Metadata). */
+  get name(): string { return groupDisplayName(this.state.meta, this.state.name); }
   get myKey(): string { return this.identity.pubKeyZ32; }
   get top(): CommunityCommit { return this.state.chain[this.state.chain.length - 1]; }
   get topHash(): string { return communityCommitHash(this.top); }
@@ -1285,7 +1286,17 @@ export class CommunitySession {
     return this.serialize(async () => {
       this.requireMember();
       if (!this.isAdmin) throw new Error("Only the admin can change the group's picture");
-      await this.publishMeta(encodeGroupMetaBody({ pic: picture ?? undefined }), now);
+      await this.publishMeta(encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), pic: picture ?? undefined }), now);
+    });
+  }
+
+  /** Renames the group: only the admin, signed under the current commit, beside the picture. */
+  rename(name: string, now = Date.now()): Promise<void> {
+    return this.serialize(async () => {
+      this.requireMember();
+      if (!this.isAdmin) throw new Error("Only the admin can rename the group");
+      const body = encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), name });
+      if (body !== this.state.meta?.body) await this.publishMeta(body, now);
     });
   }
 
@@ -1297,7 +1308,8 @@ export class CommunitySession {
     await this.persist();
     const frame = this.metaFrame();
     if (frame) this.hooks.broadcast(frame);
-    if (before?.d !== meta.d) this.hooks.metaChanged?.(this.myKey, this.picture);
+    const change = groupMetaChange(before, meta);
+    if (change) this.hooks.metaChanged?.(this.myKey, change);
     this.hooks.changed();
   }
 
@@ -1340,12 +1352,13 @@ export class CommunitySession {
     const before = this.state.meta;
     this.state.meta = opened.meta;
     await this.persist();
-    if (before?.d !== opened.meta.d) this.hooks.metaChanged?.(s.by, opened.body.pic);
+    const change = groupMetaChange(before, opened.meta);
+    if (change) this.hooks.metaChanged?.(s.by, change);
     this.hooks.changed();
     return true;
   }
 
-  /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the picture signed again as mine. */
+  /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
   private async metaFollowsChain(): Promise<void> {
     const pending = this.pendingMeta;
     this.pendingMeta = undefined;

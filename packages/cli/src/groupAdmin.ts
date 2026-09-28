@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, sanitizeAvatar } from "@ghostly/core";
+import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_NAME_LENGTH, groupName, sanitizeAvatar } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { bool, chatOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
@@ -61,6 +61,13 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     const role = str(params, "role") ?? "auto";
     if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
     await node(ctx).setGroupHub({ groupId: group.id, key: findMember(group, str(params, "member", true)).key, role: role === "auto" ? null : role as "pin" | "exclude" });
+    return view(ctx, group.id, params);
+  },
+  async "group.rename"(ctx, params) {
+    const group = groupOf(ctx, params);
+    const name = groupName(str(params, "name", true));
+    if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    await node(ctx).renameGroup({ groupId: group.id, name });
     return view(ctx, group.id, params);
   },
   async "group.rotate"(ctx, params) {

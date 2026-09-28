@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { createIdentity, encodeGroupEntryLink, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
-// covers: groups.picture.set, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
+// covers: groups.picture.set, groups.rename, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
 
 /** One peer's database, in memory. */
 function memoryStore(messages: StoredMessage[]): GroupStore {
@@ -318,6 +318,14 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     await alice.setPicture(groupId, null); await world.settle();
     expect([alice, bob, carol].map(g => g.views()[0].picture)).toEqual([undefined, undefined, undefined]);
     expect(world.peers.get("carol")!.messages.filter(m => m.event === "picture").map(m => m.text).at(-1)).toMatch(/removed the group's picture$/);
+
+    // The name, the same way: only the admin, the picture kept, a line for each member.
+    await alice.setPicture(groupId, pic(2)); await world.settle();
+    await expect(bob.rename(groupId, "Bob's")).rejects.toThrow("Only the admin");
+    await alice.rename(groupId, "Book\nclub"); await world.settle();
+    expect([alice, bob, carol].map(g => [g.views()[0].name, g.views()[0].picture])).toEqual([["Book club", pic(2)], ["Book club", pic(2)], ["Book club", pic(2)]]);
+    expect(world.peers.get("alice")!.messages.filter(m => m.event === "renamed").map(m => m.text)).toEqual(["You renamed the group to “Book club”"]);
+    expect(world.peers.get("carol")!.messages.filter(m => m.event === "renamed").map(m => m.member)).toEqual([alice.views()[0].myKey]);
   });
 
   it("tells the joiner how far a join through a link got: knocking, knocked, answered, admitted", async () => {

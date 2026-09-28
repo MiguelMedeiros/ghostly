@@ -1,13 +1,13 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type WireReaction, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
+  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type WireReaction, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
-import { COMMUNITY_TIMINGS, Communities, pictureText, type CommunityTimings } from "./community";
+import { COMMUNITY_TIMINGS, Communities, metaLines, type CommunityTimings } from "./community";
 import { MESH_HUB_TIMINGS, MeshHubs, type MeshHubTimings } from "./meshHubs";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
@@ -482,6 +482,11 @@ export class Groups {
   async setPicture(groupId: string, picture: string | null): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.setPicture(groupId, picture);
     await this.session(groupId).setPicture(picture);
+  }
+  /** The admin renames the group; every member gets the name over the edges, beside the picture (WISP 9xx § Metadata). */
+  async rename(groupId: string, name: string): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.rename(groupId, name);
+    await this.session(groupId).rename(name);
   }
 
   async forget(groupId: string): Promise<void> {
@@ -1092,7 +1097,7 @@ export class Groups {
         if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());
         void this.membershipChanged(state.id);
       },
-      metaChanged: (by, picture) => { void this.pictureChanged(state.id, session, by, picture); },
+      metaChanged: (by, change) => { void this.metaChanged(state.id, session, by, change); },
     });
     this.sessions.set(state.id, session);
     this.lastRoster.set(state.id, session.roster);
@@ -1119,9 +1124,9 @@ export class Groups {
     this.host.emit();
   }
 
-  private async pictureChanged(groupId: string, session: GroupSession, by: string, picture: string | undefined): Promise<void> {
+  private async metaChanged(groupId: string, session: GroupSession, by: string, change: GroupMetaChange): Promise<void> {
     const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
-    await this.event(groupId, "picture", pictureText(name, !!picture), Date.now(), session.epoch, by);
+    for (const line of metaLines(name, change, session.name)) await this.event(groupId, line.event, line.text, Date.now(), session.epoch, by);
     this.host.emit();
   }
 

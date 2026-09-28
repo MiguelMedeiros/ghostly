@@ -71,6 +71,8 @@ function eventText(message: StoredMessage, group: GroupView): string {
   if (message.event === "joined") return `${memberName(member)} joined`;
   if (message.event === "admin") return `${memberName(member)} ${member.me ? "are" : "is"} now the admin`;
   if (message.event === "picture") return `${memberName(member)} ${message.text.endsWith("removed the group's picture") ? "removed" : "changed"} the group's picture`;
+  const renamed = message.event === "renamed" ? message.text.indexOf(" renamed the group to “") : -1;
+  if (renamed >= 0) return `${memberName(member)}${message.text.slice(renamed)}`;
   return message.text;
 }
 

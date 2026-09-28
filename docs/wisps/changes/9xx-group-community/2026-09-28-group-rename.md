@@ -1,0 +1,1 @@
+The admin renames a community: the mesh profile's `name` in the metadata, relayed by hubs and handed on at sync, so a member let in while the admin is away gets it from whoever let it in; the welcome names the group as that member shows it, and a member without the statement shows the name it got in with (#438).
