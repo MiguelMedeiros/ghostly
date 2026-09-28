@@ -43,7 +43,7 @@ const link = () => linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pai
 function openChat(withLink = true) {
   saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: history(), createdAt: 1_700_000_000_000 });
   const utils = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
-  utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("react", () => undefined).on("sendMessage", () => ({ error: null }));
+  utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("react", () => ({ error: null })).on("sendMessage", () => ({ error: null }));
   if (withLink) utils.engine.update({ links: [link()] });
   return utils;
 }
