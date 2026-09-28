@@ -13,6 +13,7 @@
     "sync:references": "node scripts/sync-references.mjs",
     "sync:app-deck": "node scripts/sync-app-deck.mjs",
     "capture": "node scripts/capture/run.mjs",
+    "og-image": "node scripts/og-image.mjs",
     "prebuild": "npm run sync:references",
     "motion:perf": "node scripts/motion/perf.mjs",
     "motion:record": "node scripts/motion/record.mjs",
