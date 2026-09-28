@@ -18,15 +18,13 @@ cargo test --manifest-path cli/Cargo.toml
 
 ## Install
 
-The CLI is not on crates.io, so `cargo install ghostly-cli` does not work. Either:
+The CLI is not on crates.io, so `cargo install ghostly-cli` does not work, and from 1.0 the release no longer ships
+its binaries. Build it from a clone (it lands in `~/.cargo/bin`):
 
-- download the binary for your platform from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest): `ghostly-cli-macos-arm64`, `ghostly-cli-macos-x64`, `ghostly-cli-linux-x64` or `ghostly-cli-windows-x64.exe`, then `chmod +x` it and put it on your `PATH`;
-- or build it from a clone:
-
-  ```bash
-  git clone https://github.com/MiguelMedeiros/ghostly.git
-  cargo install --path ghostly/cli
-  ```
+```bash
+git clone https://github.com/MiguelMedeiros/ghostly.git
+cargo install --path ghostly/cli
+```
 
 ## Quick start
 

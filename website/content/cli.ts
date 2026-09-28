@@ -119,7 +119,7 @@ export const cli = {
   },
   legacy: {
     title: "Looking for ghostly-cli?",
-    body: "The Rust ghostly-cli is the compatibility client for v0.4 chats. It reads only ghost:// invites and cannot pair with the app. It keeps working for bots built on it.",
+    body: "The older Rust ghostly-cli is the compatibility client for v0.4 chats. It reads only ghost:// invites and cannot pair with the app. From 1.0 it is no longer a release download: bots built on it build it from the repository.",
     link: "ghostly-cli",
   },
 };

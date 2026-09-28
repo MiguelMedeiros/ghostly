@@ -38,10 +38,8 @@ Use `ghostly-cli` to send/receive encrypted ephemeral messages via the Ghost pro
 
 ## Install
 
-`ghostly-cli` is not on crates.io. Download the binary for your platform from the
-[latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) (`ghostly-cli-macos-arm64`,
-`ghostly-cli-macos-x64`, `ghostly-cli-linux-x64`, `ghostly-cli-windows-x64.exe`), `chmod +x` it and put it on your
-`PATH`. Or build it from a clone:
+`ghostly-cli` is not on crates.io, and from 1.0 the release no longer ships its binaries. Build it from a clone with
+Rust's stable toolchain (it lands in `~/.cargo/bin`, which must be on your `PATH`):
 
 ```bash
 git clone https://github.com/MiguelMedeiros/ghostly.git

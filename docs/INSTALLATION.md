@@ -57,16 +57,7 @@ npm install -g ./ghostly-cli-*.tgz
 
 ### The Rust `ghostly-cli` (older bots)
 
-`ghostly-cli` is the compatibility client for bots and scripts built on v0.4 chats ([cli/README.md](../cli/README.md)). It talks to other CLIs over the v0.4 record format, not to `ghostly1` app chats. It is not on crates.io.
-
-| Platform | Download |
-|---|---|
-| macOS, Apple silicon | [ghostly-cli-macos-arm64](https://github.com/MiguelMedeiros/ghostly/releases/latest/download/ghostly-cli-macos-arm64) |
-| macOS, Intel | [ghostly-cli-macos-x64](https://github.com/MiguelMedeiros/ghostly/releases/latest/download/ghostly-cli-macos-x64) |
-| Linux x64 | [ghostly-cli-linux-x64](https://github.com/MiguelMedeiros/ghostly/releases/latest/download/ghostly-cli-linux-x64) |
-| Windows x64 | [ghostly-cli-windows-x64.exe](https://github.com/MiguelMedeiros/ghostly/releases/latest/download/ghostly-cli-windows-x64.exe) |
-
-Or build it from a clone:
+The older Rust `ghostly-cli` is the compatibility client for bots and scripts built on v0.4 chats ([cli/README.md](../cli/README.md)). It talks to other CLIs over the v0.4 record format, not to `ghostly1` app chats. From 1.0 the release no longer ships its binaries, and it is not on crates.io. Build it from a clone:
 
 ```bash
 cargo install --path cli
