@@ -87,6 +87,12 @@ function describePair(pair: ReturnType<PeerConnection["getSelectedCandidatePair"
   return `${one(pair.local)} <-> ${one(pair.remote)}`;
 }
 
+/**
+ * For tests (the e2e of a web app calling back a bot): the first this many answers the process applies are refused
+ * as libdatachannel 0.24.5 refuses one in its race (see CallManager's `redial`): the connection closes, and it throws.
+ */
+let refuseAnswers = Number(process.env.GHOSTLY_CALL_REFUSE_ANSWERS) || 0;
+
 /** How long a description waits for its candidates: a server reflexive one and a little after it, or this long. */
 const GATHER_MS = 5000;
 const SETTLE_MS = 400;
@@ -199,6 +205,11 @@ export class CallMedia {
   applyAnswer(answer: CallSignal): void {
     this.log(`contact's candidates: ${(answer.c ?? []).join(" | ") || "none"}`);
     mdnsNote(answer, this.log);
+    if (refuseAnswers > 0) {
+      refuseAnswers--;
+      this.pc.close();
+      throw new Error("libdatachannel error while adding remote description: Got a remote candidate without ICE transport (GHOSTLY_CALL_REFUSE_ANSWERS)");
+    }
     this.pc.setRemoteDescription(buildSdpFromSignal(answer), "answer");
     this.log("answer applied");
   }

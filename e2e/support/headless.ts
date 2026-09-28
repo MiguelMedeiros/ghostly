@@ -26,10 +26,13 @@ export class HeadlessBot {
   private readonly running: ChildProcess[] = [];
   readonly events: Record<string, unknown>[] = [];
 
+  /** `env`: more environment for every command and the daemon (the CLI's test switches). */
+  constructor(private readonly env: NodeJS.ProcessEnv = {}) {}
+
   /** Runs one command to its end; rejects with the CLI's JSON error. */
   run(...args: string[]): Promise<Record<string, unknown>> {
     return new Promise((done, fail) => {
-      const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: headlessEnv(), stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: { ...headlessEnv(), ...this.env }, stdio: ["ignore", "pipe", "pipe"] });
       let out = "", err = "";
       child.stdout.on("data", (d) => (out += d));
       child.stderr.on("data", (d) => (err += d));
@@ -56,7 +59,7 @@ export class HeadlessBot {
   }
 
   private spawn(...args: string[]): ChildProcess {
-    const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: headlessEnv(), stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn(process.execPath, [BIN, "--home", this.home, ...args], { env: { ...headlessEnv(), ...this.env }, stdio: ["ignore", "pipe", "inherit"] });
     this.running.push(child);
     return child;
   }

@@ -2,6 +2,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
+import { RESTART_GRACE_MS } from "../src/useWebRTC";
 
 // covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.screen-share, calls.upgrade
 
@@ -235,6 +236,159 @@ describe("answering a call", () => {
     expect(devices.getUserMedia).toHaveBeenCalledOnce();
     expect(FakePeerConnection.instances).toHaveLength(1);
     expect(call.publishedKinds()).toEqual(["a"]);
+  });
+});
+
+/** Answers an incoming audio call and gets it to "connecting", with the microphone granted. */
+async function answered(call: ReturnType<typeof renderCall>) {
+  call.receive(remote.offer(Date.now()));
+  act(() => { void call.result.current.acceptCall(false); });
+  const stream = devices.userMedia[devices.userMedia.length - 1].grant();
+  await settle();
+  return { stream, pc: FakePeerConnection.instances[FakePeerConnection.instances.length - 1] };
+}
+
+describe("a headless caller starting over on a second offer", () => {
+  it("a newer offer while our answer connects is answered on a new connection with the same microphone", async () => {
+    const call = renderCall();
+    const { stream, pc: first } = await answered(call);
+    expect(call.result.current.callState).toBe("connecting");
+
+    call.receive(remote.offer(Date.now() + 1));
+    await settle();
+
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(FakePeerConnection.instances).toHaveLength(2);
+    const second = FakePeerConnection.instances[1];
+    expect(second.remoteDescription?.type).toBe("offer");
+    expect(second.getTransceivers().find((t) => t.receiver.track.kind === "audio")?.sender.track).toBe(stream.getAudioTracks()[0]);
+    expect(devices.getUserMedia).toHaveBeenCalledOnce();
+    expect(call.publishedKinds()).toEqual(["a", "a"]);
+    expect(call.result.current.callState).toBe("connecting");
+
+    act(() => second.setIceState("connected"));
+    expect(call.result.current.callState).toBe("connected");
+    // The connection it replaced has nothing more to say.
+    act(() => first.setIceState("failed"));
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
+    expect(call.onError).not.toHaveBeenCalled();
+  });
+
+  it("our answered connection failing before it connected waits for the second offer", async () => {
+    const call = renderCall();
+    const { pc: first } = await answered(call);
+
+    // The caller's libdatachannel refused our answer and failed the handshake: our side fails first.
+    act(() => first.setIceState("failed"));
+    expect(call.result.current.callState).toBe("connecting");
+    expect(call.publishedKinds()).toEqual(["a"]);
+
+    act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS - 1000); });
+    call.receive(remote.offer(Date.now()));
+    await settle();
+    const second = FakePeerConnection.instances[1];
+    act(() => second.setIceState("connected"));
+    expect(call.result.current.callState).toBe("connected");
+
+    // The wait was cancelled by the new offer: nothing ends the call later.
+    act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.publishedKinds()).toEqual(["a", "a"]);
+  });
+
+  it("the handshake failing after ICE came up (the caller refused our answer) waits for the second offer too", async () => {
+    const call = renderCall();
+    const { pc: first } = await answered(call);
+    act(() => first.setIceState("connected"));
+    // The caller's DTLS rejected ours: the connection fails while ICE had said connected.
+    act(() => first.setConnectionState("failed"));
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.publishedKinds()).toEqual(["a"]);
+
+    call.receive(remote.offer(Date.now() + 1));
+    await settle();
+    const second = FakePeerConnection.instances[1];
+    act(() => { second.setIceState("connected"); second.setConnectionState("connected"); });
+    act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.publishedKinds()).toEqual(["a", "a"]);
+  });
+
+  it("gives up when no second offer comes, as a failed connection always did", async () => {
+    const call = renderCall();
+    const { stream, pc } = await answered(call);
+    act(() => pc.setIceState("failed"));
+
+    act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.publishedKinds()).toEqual(["a", null]);
+    expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
+    expect(call.fastPoll()).toBe(false);
+  });
+
+  it("a failure after starting over is final", async () => {
+    const call = renderCall();
+    const { pc: first } = await answered(call);
+    act(() => first.setIceState("failed"));
+    call.receive(remote.offer(Date.now() + 1));
+    await settle();
+
+    act(() => FakePeerConnection.instances[1].setIceState("failed"));
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.publishedKinds()).toEqual(["a", "a", null]);
+  });
+
+  it("hanging up while it waits ends the call, and the wait does nothing later", async () => {
+    const call = renderCall();
+    const { pc } = await answered(call);
+    act(() => pc.setIceState("failed"));
+
+    act(() => call.result.current.hangUp());
+    act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.publishedKinds()).toEqual(["a", "h", null]);
+  });
+
+  it("an offer while ICE already says connected, before the connection came up, is a restart too", async () => {
+    const call = renderCall();
+    const { pc: first } = await answered(call);
+    // A headless caller answers our checks before it has our answer: ICE is up, DTLS is not.
+    act(() => first.setIceState("connected"));
+    expect(call.result.current.callState).toBe("connected");
+
+    call.receive(remote.offer(Date.now() + 1));
+    await settle();
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(call.publishedKinds()).toEqual(["a", "a"]);
+
+    const second = FakePeerConnection.instances[1];
+    act(() => { second.setIceState("connected"); second.setConnectionState("connected"); });
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
+  });
+
+  it("an offer is not a restart for a call we placed, nor for one whose connection came up", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    call.receive(remote.offer(Date.now() + 2));
+    await settle();
+    expect(FakePeerConnection.instances).toHaveLength(1);
+    expect(call.result.current.callState).toBe("connecting");
+
+    act(() => pc.setIceState("connected"));
+    const other = renderCall();
+    const { pc: answeredPc } = await answered(other);
+    act(() => { answeredPc.setIceState("connected"); answeredPc.setConnectionState("connected"); });
+    other.receive(remote.offer(Date.now() + 3));
+    await settle();
+    expect(answeredPc.close).not.toHaveBeenCalled();
+    expect(other.result.current.callState).toBe("connected");
   });
 });
 
