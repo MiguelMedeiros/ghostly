@@ -6,7 +6,9 @@
   display: grid;
   gap: 18px;
   justify-items: start;
-  max-width: 980px;
+}
+.ag-hero-inner > .lead {
+  max-width: 760px;
 }
 .ag-title {
   font-size: clamp(40px, 6vw, 72px);
@@ -18,6 +20,7 @@
 /* The prompt: a terminal-like box, its Copy button big and first in reading order. */
 .ag-prompt {
   width: 100%;
+  max-width: 1000px;
   margin-top: 8px;
   border-radius: 14px;
   border: 1px solid var(--line-2);
@@ -65,6 +68,10 @@
 .ag-sub {
   border-top: 0;
   padding-block: 12px 28px;
+}
+/* The five steps in one row on a laptop. */
+.ag-sub .cl-cmds {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 .ag-h3 {
   font-size: 17px;
