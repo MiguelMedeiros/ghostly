@@ -110,6 +110,7 @@ import type {
   MessageDetails,
   MessageDetailsView,
   MessageFile,
+  MessagePage,
   MessageReply,
   ReactionNote,
   MessageSend,
@@ -1245,6 +1246,18 @@ export class GhostlyNode implements EngineImplementation {
 
   getMessages(linkId: string): Promise<StoredMessage[]> {
     return db.getMessages(linkId);
+  }
+
+  async messagePage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("limit: a whole number of messages, at least 1");
+    if (before === undefined) return db.getMessagePage(linkId, { limit });
+    if (typeof before === "number") {
+      if (Number.isNaN(before)) throw new Error("before: a time or a message id");
+      return db.getMessagePage(linkId, { limit, before: { timestamp: before } });
+    }
+    const from = await db.getMessage(linkId, before);
+    if (!from) throw new Error(`No message ${before}`);
+    return db.getMessagePage(linkId, { limit, before: from });
   }
 
   // -- links ---------------------------------------------------------------

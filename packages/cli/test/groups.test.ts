@@ -8,6 +8,7 @@ import { parseArgs } from "../src/args";
 import { COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { pageOf } from "./support/messagePage";
 import { groupJson, groupMessageJson } from "../src/views";
 // covers: headless.groups, headless.group-admin, groups.rename
 
@@ -32,6 +33,7 @@ function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     groupMessages: vi.fn(async () => messages),
+    messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mekey:0:7" })),
     groupTaken: vi.fn(() => 0),
     removeGroupMember: vi.fn(async () => undefined),
