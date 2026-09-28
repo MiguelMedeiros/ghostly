@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, CHAT_RESERVE, DiscoveryBudgetError, REQUESTS_PER_MINUTE, RelayTransport, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DiscoveryBudgetError, FRESH_READ_MS, REQUESTS_PER_MINUTE, RelayTransport, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 // covers: core.relay-client
 
 describe("relay transport", () => {
@@ -13,7 +13,7 @@ describe("relay transport", () => {
       calls.push(host);
       return handlers[host]();
     }) as typeof fetch;
-    return { calls, relay: new RelayTransport({ relays: Object.keys(handlers).map((h) => `https://${h}`), fetch: fetchFn }) };
+    return { calls, relay: new RelayTransport({ freshReadMs: 0, relays: Object.keys(handlers).map((h) => `https://${h}`), fetch: fetchFn }) };
   }
 
   it("spends one request per poll, taking relays in turn, and keeps the newest packet", async () => {
@@ -25,6 +25,43 @@ describe("relay transport", () => {
     // b still serves an older cached copy; the newer one already seen wins
     expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(2000n);
     expect(calls).toEqual(["a.test", "b.test"]);
+  });
+
+  it("answers a read of a key it just read from that answer, until the key is published or the answer ages", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let next = 1000n;
+      const calls: string[] = [];
+      const other = createIdentity();
+      const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const key = new URL(String(input)).pathname.slice(1);
+        calls.push(`${init?.method ?? "GET"} ${key.slice(0, 6)}`);
+        if (init?.method === "PUT") return new Response(null, { status: 204 });
+        return key === id.pubKeyZ32 ? new Response(packet(next) as BodyInit) : new Response(null, { status: 404 });
+      }) as typeof fetch;
+      const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: fetchFn });
+      const get = `GET ${id.pubKeyZ32.slice(0, 6)}`;
+      expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(1000n);
+      // A link's poll right after its capabilities read the same key: the answer of a moment ago, no request.
+      next = 2000n;
+      vi.setSystemTime(Date.now() + FRESH_READ_MS - 1);
+      expect((await relay.resolve(id.pubKeyZ32, { urgent: true }))?.timestampMicros).toBe(1000n);
+      expect(calls).toEqual([get]);
+      // Another key is its own read.
+      await relay.resolve(other.pubKeyZ32);
+      expect(calls).toHaveLength(2);
+      // Once the answer is older, the relays are asked again.
+      vi.setSystemTime(Date.now() + 1);
+      expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(2000n);
+      expect(calls).toHaveLength(3);
+      // A record read, changed and written back is read from the relays the next time, however soon.
+      await relay.publish(id, [{ label: "_ts", value: "3" }]);
+      next = 3000n;
+      expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(3000n);
+      expect(calls.slice(3)).toEqual([`PUT ${id.pubKeyZ32.slice(0, 6)}`, `PUT ${id.pubKeyZ32.slice(0, 6)}`, get]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("backs off from a relay that rate limits and uses the other one", async () => {
@@ -64,7 +101,7 @@ describe("relay transport under pressure", () => {
       if (host === "a.test") throw new TypeError("Failed to fetch"); // a 429 without CORS headers looks like this
       return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 9n) as BodyInit);
     }) as typeof fetch;
-    const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: fetchFn });
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: fetchFn });
     for (let i = 0; i < 4; i++) expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(9n);
     expect(calls.filter((h) => h === "a.test")).toHaveLength(1);
   });
@@ -75,7 +112,7 @@ describe("relay transport under pressure", () => {
       requests++;
       return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
     }) as typeof fetch;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: fetchFn });
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: fetchFn });
     for (let i = 0; i < 100; i++) expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(3n);
     expect(requests).toBe(30);
   });
@@ -86,7 +123,7 @@ describe("relay transport under pressure", () => {
       requests++;
       return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
     }) as typeof fetch;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: fetchFn });
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: fetchFn });
     // A hub's periodic looks run out at the background share, reads and writes alike…
     for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE; i++) await relay.resolve(id.pubKeyZ32, { background: true });
     await expect(relay.publish(id, [{ label: "_ts", value: "2" }], { background: true })).rejects.toThrow("budget");
@@ -107,7 +144,7 @@ describe("relay transport under pressure", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       const writes: number[] = [], reads: number[] = [];
-      const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === "PUT") { writes.push(Date.now()); return new Response(null, { status: 204 }); }
         reads.push(Date.now()); return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
       }) as typeof fetch });
@@ -135,7 +172,7 @@ describe("relay transport under pressure", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       let reads = 0;
-      const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === "PUT") return new Response(null, { status: 204 });
         reads++; return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
       }) as typeof fetch });
@@ -153,7 +190,7 @@ describe("relay transport under pressure", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       const gets: string[] = [];
-      const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === "PUT") return new Response(null, { status: 204 });
         gets.push(new URL(String(input)).host); return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
       }) as typeof fetch });
@@ -176,7 +213,7 @@ describe("relay transport under pressure", () => {
 
   it("does not hold reads back for a background write the budget refused", async () => {
     let reads = 0;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "PUT") return new Response(null, { status: 204 });
       reads++; return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
     }) as typeof fetch });
@@ -188,7 +225,7 @@ describe("relay transport under pressure", () => {
 
   it("counts background requests on their own: a burst of signaling does not hold them back afterwards", async () => {
     let requests = 0;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async () => {
       requests++; return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
     }) as typeof fetch });
     // A link's signaling spent most of the minute…
@@ -202,7 +239,7 @@ describe("relay transport under pressure", () => {
 describe("relay transport publishing in bursts", () => {
   it("does not hammer a relay with publish retries after a CORS/network failure", async () => {
     let requests = 0;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async () => {
       requests++; throw new TypeError("Failed to fetch");
     }) as typeof fetch });
     const id = createIdentity();
@@ -211,7 +248,7 @@ describe("relay transport publishing in bursts", () => {
   });
   it("budgets writes as well as polls", async () => {
     let requests = 0;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async () => {
       requests++; return new Response(null, { status: 204 });
     }) as typeof fetch });
     const id = createIdentity();
@@ -234,7 +271,7 @@ describe("relay transport publishing in bursts", () => {
       return new Response(null, { status: 204 });
     }) as typeof fetch;
 
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: fetchFn });
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: fetchFn });
     await relay.publish(id, [{ label: "_ts", value: "1" }]);
     await relay.publish(id, [{ label: "_ts", value: "2" }]);
     await relay.publish(id, [{ label: "_ts", value: "3" }]);
@@ -252,7 +289,7 @@ describe("relay transport publishing in bursts", () => {
 describe("relay operation backoff", () => {
   it("keeps healthy reads available while backing off failed publications", async () => {
     const calls: string[] = [];
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_url, init) => {
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (_url, init) => {
       calls.push(init?.method ?? "GET");
       if (init?.method === "PUT") throw new TypeError("Failed to fetch");
       return new Response(null, {status:404});
@@ -267,7 +304,7 @@ describe("relay operation backoff", () => {
 
   it.each(["GET", "PUT"])("keeps observed %s rate limits global across operations", async method => {
     let requests = 0;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async () => {
       requests++;
       return new Response(null, {status:429, headers:{"retry-after":"30"}});
     }) as typeof fetch });
@@ -288,7 +325,7 @@ describe("relay transport: the budget holds requests back as a wait", () => {
   it("says a publish waits, and for how long: until the oldest request of the minute ages out on the relay that frees first", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: ok });
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: ok });
       const start = Date.now();
       // 30 reads a second apart, alternating: each relay's minute is full, a.test's oldest request the older one.
       for (let i = 0; i < 2 * REQUESTS_PER_MINUTE; i++) { await relay.resolve(id.pubKeyZ32); vi.setSystemTime(Date.now() + 500); }
@@ -304,7 +341,7 @@ describe("relay transport: the budget holds requests back as a wait", () => {
   });
 
   it("types a relay's own 429 as a wait for its Retry-After", async () => {
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => new Response(null, { status: 429, headers: { "retry-after": "20" } })) as typeof fetch });
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async () => new Response(null, { status: 429, headers: { "retry-after": "20" } })) as typeof fetch });
     const first = await relay.publish(id, []).then(() => null, (error: unknown) => error);
     expect(isDiscoveryBudgetError(first) && first.retryInMs).toBe(20_000);
     const again = await relay.resolve(createIdentity().pubKeyZ32).then(() => null, (error: unknown) => error);
@@ -315,7 +352,7 @@ describe("relay transport: the budget holds requests back as a wait", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       let spent = 0;
-      const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).includes("b.test")) throw new TypeError("Failed to fetch");
         spent++;
         return ok(input, init);
@@ -341,7 +378,7 @@ describe("relay transport: a chat before its groups", () => {
   const id = createIdentity();
   function counting() {
     const log: { method: string; at: number }[] = [];
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
       log.push({ method: init?.method ?? "GET", at: Date.now() });
       return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
     }) as typeof fetch });
@@ -449,6 +486,49 @@ describe("relay transport: a chat before its groups", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("leaves a chat that polls fast its reserve on every relay before anything is refused, for a minute after", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const log: { host: string; at: number }[] = [];
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        log.push({ host: new URL(String(input)).host, at: Date.now() });
+        return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+      }) as typeof fetch });
+      const group = withRequestOptions(relay, { group: true });
+      const start = Date.now();
+      // A contact went away from a chat and from two groups: the chat and the edges all watch fast for it.
+      await relay.resolve(id.pubKeyZ32, { urgent: true });
+      for (let i = 0; i < 2 * REQUESTS_PER_MINUTE; i++) { vi.setSystemTime(start + i * 500); await group.resolve(id.pubKeyZ32, { urgent: true }).catch(() => {}); }
+      // The edges stop short of the reserve on both relays, the one the chat read from (its read counted) and the other.
+      const on = (host: string) => log.filter((r) => r.host === host).length;
+      expect(on("a.test") + on("b.test")).toBe(2 * (REQUESTS_PER_MINUTE - CHAT_RESERVE));
+      // The contact's offer is read at once, on either relay, and what follows too.
+      for (let i = 0; i < 2 * CHAT_RESERVE; i++) await relay.resolve(id.pubKeyZ32, { urgent: true });
+      expect(log).toHaveLength(2 * REQUESTS_PER_MINUTE);
+      // The reserve holds a minute after the chat's last fast read (a watch goes on at the active pace): the edges'
+      // requests aged out, the chat's did not, and the edges fill only up to the reserve…
+      const lastUrgent = Date.now();
+      vi.setSystemTime(lastUrgent + 59_000);
+      for (let i = 0; i < 2 * REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32).catch(() => {});
+      expect(log.filter((r) => r.at === lastUrgent + 59_000)).toHaveLength(2 * (REQUESTS_PER_MINUTE - 2 * CHAT_RESERVE));
+      // …and say how long they wait: until the reserve lifts.
+      const offer = createIdentity();
+      const refused = await group.publish(offer, [{ label: "_ts", value: "1" }]).catch((e: unknown) => e) as DiscoveryBudgetError;
+      expect(refused.retryInMs).toBe(1_000);
+      vi.setSystemTime(lastUrgent + 60_000);
+      await group.publish(offer, [{ label: "_ts", value: "2" }]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not keep a reserve for a chat that is not waiting for anything", async () => {
+    const { relay, log, group } = counting();
+    // Its looks at the active pace and its background ones leave the groups the whole minute.
+    await relay.resolve(id.pubKeyZ32);
+    await relay.resolve(id.pubKeyZ32, { background: true });
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32, { urgent: true }).catch(() => {});
+    expect(log).toHaveLength(REQUESTS_PER_MINUTE);
+  });
+
   it("does not hold a chat's reads back for a group's refused write", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -465,6 +545,52 @@ describe("relay transport: a chat before its groups", () => {
       expect(log).toHaveLength(REQUESTS_PER_MINUTE + 1);
       // …while a group's own read still lets the offer go first.
       await expect(group.resolve(createIdentity().pubKeyZ32)).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("relay transport: background requests yield to a link that signals", () => {
+  const id = createIdentity();
+  function counting() {
+    const log: { background: boolean; at: number }[] = [];
+    let background = false;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async () => {
+      log.push({ background, at: Date.now() });
+      return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+    }) as typeof fetch });
+    const look = (at: number) => { vi.setSystemTime(at); background = true; return relay.resolve(id.pubKeyZ32, { background: true, group: true }); };
+    return { relay, log, look, edge: withRequestOptions(relay, { group: true }), setBackground: (b: boolean) => { background = b; } };
+  }
+
+  it("holds a community's looks to a small share while a new edge polls fast, and lets them go on once it stops", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { log, look, edge, setBackground } = counting();
+      const start = Date.now();
+      // A hub looks at its records all the time, a look every 3 s: its whole share of the minute.
+      for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE; i++) await look(start + i * 3_000);
+      // A new edge starts signaling: it polls fast, and the looks wait until their minute is down to the small share.
+      const signalFrom = start + 60_000;
+      for (let t = 0; t < 30_000; t += 1_000) {
+        vi.setSystemTime(signalFrom + t);
+        if (t % 2_000 === 0) { setBackground(false); await edge.resolve(id.pubKeyZ32, { urgent: true }); }
+        await look(signalFrom + t).catch(() => {});
+      }
+      const inMinute = (at: number, background: boolean) => log.filter((r) => r.background === background && r.at > at - 60_000 && r.at <= at).length;
+      // The hub's minute still holds more looks than the small share: none went while the edge signaled.
+      expect(inMinute(signalFrom + 29_000, true)).toBeGreaterThan(BACKGROUND_WHILE_SIGNALING);
+      expect(log.filter((r) => r.background && r.at >= signalFrom)).toHaveLength(0);
+      // The edge had every poll it asked for: 15 in 30 s, on one relay, next to the hub.
+      expect(inMinute(signalFrom + 29_000, false)).toBe(15);
+      // A look held back says how long: until the edge stops signaling, if that comes before its own minute frees one.
+      vi.setSystemTime(signalFrom + 29_000);
+      const held = await edge.resolve(createIdentity().pubKeyZ32, { background: true }).catch((e: unknown) => e) as DiscoveryBudgetError;
+      expect(held.retryInMs).toBe(SIGNALING_WINDOW_MS - 1_000);
+      // Once the edge is live (no fast polls), the hub's looks take what the minute has left again.
+      const after = signalFrom + 28_000 + SIGNALING_WINDOW_MS;
+      for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE; i++) await look(after).catch(() => {});
+      expect(log.filter((r) => r.background && r.at === after).length).toBeGreaterThan(BACKGROUND_WHILE_SIGNALING);
+      expect(inMinute(after, true) + inMinute(after, false)).toBe(REQUESTS_PER_MINUTE);
     } finally { vi.useRealTimers(); }
   });
 });

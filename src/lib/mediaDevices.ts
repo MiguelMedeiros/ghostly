@@ -59,6 +59,13 @@ export interface DeviceSource {
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   /** Plays the call on this speaker (undefined: the default). The page's own sounds are not the source's. */
   playCallOn(id: string | undefined): void;
+  /**
+   * Settings' meter on the microphone `id` (undefined: the default), where the page cannot hear it: `level` gets
+   * its loudness, 0 to 1. Resolves to what stops it; rejects when the microphone would not open.
+   */
+  meter?(id: string | undefined, level: (level: number) => void): Promise<() => void>;
+  /** Settings' test sound on the speaker `id` (undefined: the default), where the page cannot play there. */
+  testSpeaker?(id: string | undefined): Promise<void>;
 }
 
 let source: DeviceSource | null = null;

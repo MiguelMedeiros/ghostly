@@ -60,7 +60,8 @@ The web app is an installable app (a PWA). Everything below is behind feature de
 - **Badge.** The icon shows the number of unread messages where the system has badges (installed Chromium apps, iOS 16.4 and later with notifications allowed). A muted chat's messages do not count, like its sound and notification; a group counts one while it has something new.
 - **Lock screen controls.** A voice message or an audio file playing shows on the lock screen and in the system's media controls (Media Session), which play, pause and seek it, and go to the next voice message.
 - **Screen on during calls.** A call keeps the screen from dimming (Screen Wake Lock), asked again each time the app comes back to the foreground.
-- **Not here.** Opening files with Ghostly from the file manager (`file_handlers`, desktop Chromium only) is left out: the app has no use for a file it did not receive in a chat. No push either: a message reaches the app only while it is open (the options are in [the pull request that added all this](https://github.com/MiguelMedeiros/ghostly/pull/390)).
+- **Woken while closed.** **Settings → Notifications → Wake me while closed** shares a push subscription with each paired contact, so a message sent while the app is closed shows "New message", nothing more, and a tap opens the chat. The sender's own app posts the push (no server of Ghostly's); muted chats stay quiet. What the push service and contacts learn, and the optional push relay: [WISP 401 § Wake-up push](wisps/401-paired-chat.md#wake-up-push).
+- **Not here.** Opening files with Ghostly from the file manager (`file_handlers`, desktop Chromium only) is left out: the app has no use for a file it did not receive in a chat.
 
 ## What a web page cannot do
 

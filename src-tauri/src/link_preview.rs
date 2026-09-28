@@ -97,7 +97,7 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
 
 /// The system resolver, with every non-public answer refused. A name that
 /// resolves to any private address is refused whole, so a mix cannot win.
-struct PublicOnly;
+pub(crate) struct PublicOnly;
 
 impl Resolve for PublicOnly {
     fn resolve(&self, name: Name) -> Resolving {

@@ -12,8 +12,10 @@ export const memberName = (m: { key: string; me: boolean; nick?: string }) => m.
 export function edgeLabel(member: GroupMemberView, now = Date.now()): string {
   if (member.me) return "You";
   const edge = member.edge;
+  if (edge?.state === "open") return `Connected · ${transportName(edge.transport)}`;
+  // A group past 16 members that runs on hubs: most members are reached through one, not over an edge of mine.
+  if (member.viaHub) return "Through a hub";
   if (!edge) return "No connection yet";
-  if (edge.state === "open") return `Connected · ${transportName(edge.transport)}`;
   if (edge.state === "connecting") return "Connecting…";
   const seen = edge.lastSeenAt ? `last seen ${ago(edge.lastSeenAt / 1000, now / 1000)}` : "not seen yet";
   return `${edge.state === "error" ? "Connection issue" : "Not reachable"} · ${seen}`;
@@ -28,13 +30,15 @@ export function groupTransports(members: GroupMemberView[]): { line: string; tra
   if (!live.length) return undefined;
   const counts = new Map<PairedTransport, number>();
   for (const m of live) { const t = m.edge!.transport ?? "webrtc/1"; counts.set(t, (counts.get(t) ?? 0) + 1); }
-  const head = `${live.length} of ${others.length} live`;
+  // With hubs, the members reached through them count as live; the transports are those of my own edges.
+  const hubbed = others.filter(m => m.viaHub && m.edge?.state !== "open").length;
+  const head = `${live.length + hubbed} of ${others.length} live${hubbed ? ` (${hubbed} through hubs)` : ""}`;
   if (counts.size === 1) { const [transport] = counts.keys(); return { line: `${head} over ${transportName(transport)}`, transport }; }
   return { line: `${head} · ${[...counts].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${n} ${transportName(t)}`).join(", ")}` };
 }
 
 /** The dot beside a member: reachable, on its way, failed, or away. */
-export const edgeDot = (member: GroupMemberView) => member.me || member.edge?.state === "open" ? "bg-accent"
+export const edgeDot = (member: GroupMemberView) => member.me || member.edge?.state === "open" || member.viaHub ? "bg-accent"
   : member.edge?.state === "error" ? "bg-danger" : member.edge?.state === "connecting" ? "bg-text-muted motion-safe:animate-pulse" : "bg-text-muted/50";
 
 /** Where a private group lives in the app: by its id. */

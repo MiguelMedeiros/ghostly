@@ -102,3 +102,35 @@ export function readShare(form: FormData): SharedItem {
   const files = form.getAll("files").filter((value): value is File => typeof value !== "string" && value.size >= 0).slice(0, MAX_SHARED_FILES);
   return { title: text("title"), text: text("text"), url: text("url"), files };
 }
+
+/** Where a profile's push-only worker is registered: its own scope, so each profile has its own subscription. */
+export const PUSH_SCOPE_PREFIX = "/push/";
+
+/** The scope of a profile's push worker (`""` is the default profile). */
+export function pushScope(profile: string): string {
+  return `${PUSH_SCOPE_PREFIX}${encodeURIComponent(profile || "default")}/`;
+}
+
+/** The profile a worker's scope is for, or null for the app's own worker (scope `/`). */
+export function pushScopeProfile(scope: string): string | null {
+  let path: string;
+  try { path = new URL(scope).pathname; } catch { return null; }
+  const match = path.match(/^\/push\/([^/]+)\/$/);
+  if (!match) return null;
+  const profile = decodeURIComponent(match[1]!);
+  return profile === "default" ? "" : profile;
+}
+
+/**
+ * What a wake-up shows (WISP 401 § Wake-up push): "New message" for a chat the token names, or nothing at all
+ * for a token this profile no longer knows (a contact it stopped sharing with), for a muted chat, and while the
+ * app is on screen (it is live, and the message arrives by itself). Never a sender or any text of the message.
+ */
+export function wakeNotice(found: { entry: { path: string; mutedUntil?: number | "forever" }; text: { title: string; body: string } } | undefined, options: { now: number; appVisible: boolean; profile: string }):
+  { title: string; body: string; tag: string; data: { path: string; profile: string } } | null {
+  if (!found || options.appVisible) return null;
+  const { entry, text } = found;
+  if (entry.mutedUntil === "forever" || (typeof entry.mutedUntil === "number" && entry.mutedUntil > options.now)) return null;
+  if (!/^\/(chat|group)\/[^/?#]+$/.test(entry.path)) return null;
+  return { title: text.title, body: text.body, tag: `wake:${options.profile}:${entry.path}`, data: { path: entry.path, profile: options.profile } };
+}

@@ -1,4 +1,12 @@
 {
+  "hubs": {
+    "auto": "Hub si está siempre activo",
+    "badge": "hub",
+    "badgeHint": "Reenvía los mensajes del grupo a los miembros conectados a él. Ve quién habla y cuándo, no lo que se dice.",
+    "choice": "Hub",
+    "exclude": "Nunca hub",
+    "pin": "Siempre hub"
+  },
   "menu": {
     "forget": "Eliminar de este dispositivo",
     "leave": "Salir del grupo",

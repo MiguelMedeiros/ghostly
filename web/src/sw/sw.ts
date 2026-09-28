@@ -9,8 +9,13 @@
  * - Nothing else is stored: `policy.ts` lets only the build's own files into the cache.
  * - What another app shares into Ghostly arrives here as a POST, is held in memory (never in a cache) until
  *   the app's page asks for it, and is dropped after `SHARE_HOLD_MS` if nobody does.
+ * - The same script, registered again at `/push/<profile>/`, is that profile's push worker: it controls no
+ *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
+ *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, classify, readShare, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, classify, pushScopeProfile, readShare, wakeNotice, type SharedItem } from "./policy";
+import { readWakeEntry } from "./wakeStore";
+import { readWakePayload } from "../../../packages/core/src/pairedWake";
 import { SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
 
 declare const __SW_BUILD__: string;
@@ -19,13 +24,23 @@ declare const __SW_PRECACHE__: string[];
 // The few worker APIs used here, typed locally: the web app's tsconfig has the DOM library, not WebWorker's.
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
 interface FetchEvent extends ExtendableEvent { request: Request; respondWith(response: Promise<Response> | Response): void }
-interface WindowClient { id: string; postMessage(message: FromWorker): void }
+interface WindowClient { id: string; url: string; focused?: boolean; visibilityState?: string; postMessage(message: FromWorker): void; focus?(): Promise<WindowClient> }
+interface PushEvent extends ExtendableEvent { data: { text(): string } | null }
+interface Shown { data: unknown; close(): void }
+interface NotificationEvent extends ExtendableEvent { notification: Shown }
 interface MessageEvent_ extends ExtendableEvent { data: unknown; source: WindowClient | null }
 interface WorkerScope {
   location: Location;
   skipWaiting(): Promise<void>;
-  clients: { claim(): Promise<void>; matchAll(options: { type: "window" }): Promise<WindowClient[]> };
+  registration: { scope: string; showNotification(title: string, options: object): Promise<void>; getNotifications(filter?: { tag?: string }): Promise<Shown[]> };
+  clients: {
+    claim(): Promise<void>;
+    matchAll(options: { type: "window"; includeUncontrolled?: boolean }): Promise<WindowClient[]>;
+    openWindow(url: string): Promise<WindowClient | null>;
+  };
   addEventListener(type: "install" | "activate", listener: (event: ExtendableEvent) => void): void;
+  addEventListener(type: "push", listener: (event: PushEvent) => void): void;
+  addEventListener(type: "notificationclick", listener: (event: NotificationEvent) => void): void;
   addEventListener(type: "fetch", listener: (event: FetchEvent) => void): void;
   addEventListener(type: "message", listener: (event: MessageEvent_) => void): void;
 }
@@ -33,8 +48,11 @@ const worker = self as unknown as WorkerScope;
 
 const CACHE = CACHE_PREFIX + __SW_BUILD__;
 const PRECACHED = new Set(__SW_PRECACHE__);
+/** The profile this worker wakes, when it is a push worker (`/push/<profile>/`); null for the app's own. */
+const PUSH_PROFILE = pushScopeProfile(worker.registration.scope);
 
 worker.addEventListener("install", (event) => {
+  if (PUSH_PROFILE !== null) return;
   // `reload`: past the browser's HTTP cache, so the shell is this deploy's and not an older copy.
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(__SW_PRECACHE__.map((path) => new Request(path, { cache: "reload" })))));
 });
@@ -42,6 +60,7 @@ worker.addEventListener("install", (event) => {
 worker.addEventListener("activate", (event) => {
   // Only ever active on a first install, after Reload (the page reloads at once), or with no tab open: taking
   // the open pages swaps nothing under anyone.
+  if (PUSH_PROFILE !== null) return;
   event.waitUntil((async () => {
     const names = await caches.keys();
     await Promise.all(names.filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE).map((name) => caches.delete(name)));
@@ -90,6 +109,11 @@ worker.addEventListener("message", (event) => {
   const message = event.data as ToWorker | null;
   if (!message || typeof message !== "object") return;
   if (message.type === "skip-waiting") { void worker.skipWaiting(); return; }
+  if (message.type === "open-notification") {
+    if (PUSH_PROFILE === null || typeof message.tag !== "string") return;
+    event.waitUntil(worker.registration.getNotifications({ tag: message.tag }).then(([shown]) => (shown ? openFrom(shown) : undefined)));
+    return;
+  }
   const source = event.source;
   if (!source) return;
   if (message.type === "share-ready") {
@@ -116,6 +140,7 @@ worker.addEventListener("message", (event) => {
 // ---------- fetch ----------
 
 worker.addEventListener("fetch", (event) => {
+  if (PUSH_PROFILE !== null) return;
   const { request } = event;
   const route = classify(
     { method: request.method, url: request.url, mode: request.mode, range: request.headers.has("range") },
@@ -128,4 +153,48 @@ worker.addEventListener("fetch", (event) => {
   if (route === "shell") event.respondWith(fromCache("/", request));
   else if (route === "precache") event.respondWith(fromCache(key, request));
   else event.respondWith(asset(key, request));
+});
+
+// ---------- wake-up push ----------
+
+/** The windows showing the app (its page, any screen): they belong to the app's own worker, not to this one. */
+async function appWindows(): Promise<WindowClient[]> {
+  const all = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
+  return all.filter((client) => { try { return ["/", "/index.html"].includes(new URL(client.url).pathname); } catch { return false; } });
+}
+
+worker.addEventListener("push", (event) => {
+  if (PUSH_PROFILE === null) return;
+  const profile = PUSH_PROFILE;
+  event.waitUntil((async () => {
+    const token = readWakePayload(event.data?.text());
+    const found = token ? await readWakeEntry(profile, token).catch(() => undefined) : undefined;
+    const appVisible = (await appWindows()).some((client) => client.focused || client.visibilityState === "visible");
+    const notice = wakeNotice(found, { now: Date.now(), appVisible, profile });
+    if (!notice) return;
+    await worker.registration.showNotification(notice.title, {
+      body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", renotify: false,
+    });
+  })());
+});
+
+/** A tap on a wake-up: the app's window comes forward on that chat, or a new one opens there. */
+async function openFrom(notification: Shown): Promise<void> {
+  notification.close();
+  const data = notification.data as { path?: unknown; profile?: unknown } | null;
+  if (typeof data?.path !== "string" || typeof data.profile !== "string") return;
+  const message: FromWorker = { type: "open-chat", path: data.path, profile: data.profile };
+  const [open] = await appWindows();
+  if (open) {
+    await open.focus?.().catch(() => undefined);
+    open.postMessage(message);
+    return;
+  }
+  // A new window of the app: it takes the chat (and the profile) from this message once it has started.
+  const opened = await worker.clients.openWindow(`/#${data.path}`);
+  opened?.postMessage(message);
+}
+
+worker.addEventListener("notificationclick", (event) => {
+  event.waitUntil(openFrom(event.notification));
 });

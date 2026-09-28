@@ -8,7 +8,7 @@ import { NewGroupDialog } from "../../components/NewGroupDialog";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: groups.create, groups.invite, groups.remove-member, groups.admin-change, groups.link.enable, groups.link.replace
+// covers: groups.create, groups.invite, groups.remove-member, groups.admin-change, groups.link.enable, groups.link.replace, groups.hubs
 
 const ALICE = "alice".padEnd(52, "y"), BOB = "bob".padEnd(52, "y"), ME = "me".padEnd(52, "y");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: false, missing: 0, ...patch });
@@ -55,6 +55,30 @@ describe("GroupMembersDialog", () => {
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
     expect(engine.callsTo("removeGroupMember")).toEqual([{ groupId: "group-1", key: BOB }]);
+  });
+
+  it("past 16 members with hubs, marks the hubs, says who is reached through one, and lets the admin choose", async () => {
+    const many = Array.from({ length: 15 }, (_, i) => member({ key: `m${i}`.padEnd(52, "y"), viaHub: true, online: true }));
+    const hub = member({ key: ALICE, nick: "Alice", online: true, hub: true, hubRole: "pin", edge: { linkId: "e1", state: "open", lastSeenAt: 1 } });
+    const { user, engine } = members_(groupView({ status: "active", isAdmin: true, hubs: { hub: false }, members: [members[0], hub, member({ key: BOB, nick: "Bob", hubRole: "exclude" }), ...many] }));
+    engine.on("setGroupHub", () => undefined);
+    expect(within(row(ALICE)).getByTestId("group-member-hub")).toHaveTextContent("hub");
+    expect(within(row(BOB)).queryByTestId("group-member-hub")).not.toBeInTheDocument();
+    const reached = row(many[0].key);
+    expect(within(reached).getByTestId("group-member-status")).toHaveTextContent("Through a hub");
+    expect(within(reached).getByRole("img", { name: "reachable" })).toHaveClass("bg-accent");
+    expect(within(row(ALICE)).getByTestId("group-member-hub-role")).toHaveTextContent("Always a hub");
+    expect(within(row(BOB)).getByTestId("group-member-hub-role")).toHaveTextContent("Never a hub");
+    await user.click(within(reached).getByTestId("group-member-hub-role"));
+    await user.click(screen.getByRole("option", { name: "Always a hub" }));
+    await user.click(within(row(ALICE)).getByTestId("group-member-hub-role"));
+    await user.click(screen.getByRole("option", { name: "Hub if always on" }));
+    expect(engine.callsTo("setGroupHub")).toEqual([{ groupId: "group-1", key: many[0].key, role: "pin" }, { groupId: "group-1", key: ALICE, role: null }]);
+  });
+
+  it("offers no hub choice in a group of 16 or fewer", () => {
+    members_(groupView({ status: "active", isAdmin: true, members }));
+    expect(screen.queryByTestId("group-member-hub-role")).not.toBeInTheDocument();
   });
 
   it("shows what the engine refused", async () => {

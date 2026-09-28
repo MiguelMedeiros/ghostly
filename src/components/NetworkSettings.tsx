@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { iceServerProblem } from "@ghostly/browser/shared/ice";
 import { hyperdhtRelayProblem } from "@ghostly/browser/shared/hyperdhtRelay";
+import { pushRelayProblem } from "@ghostly/browser/shared/pushRelay";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Block, Field, FieldGrid, Row, Section } from "./layout";
@@ -20,6 +21,7 @@ export function NetworkSettings() {
   const [turn, setTurn] = useState({ urls: "", username: "", credential: "" });
   const [iroh, setIroh] = useState("");
   const [hyperdhtRelay, setHyperdhtRelay] = useState("");
+  const [pushRelay, setPushRelay] = useState("");
   // What was last saved: "Saved" stays up while the form still shows it, instead of flashing past while
   // the engine is busy (a save can take seconds while the wallets start).
   const [savedAs, setSavedAs] = useState<string | null>(null);
@@ -33,12 +35,13 @@ export function NetworkSettings() {
     setTurn({ urls: network.turn?.urls ?? "", username: network.turn?.username ?? "", credential: network.turn?.credential ?? "" });
     setIroh((network.iroh?.relays.length ? network.iroh.relays : network.iroh?.defaultRelays ?? []).join("\n"));
     setHyperdhtRelay(network.hyperdhtRelay);
+    setPushRelay(network.pushRelay ?? "");
     // Load once; afterwards the fields belong to the user until they save.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
   if (!platform || !network) return null;
-  const current = JSON.stringify({ relays, turn, iroh, hyperdhtRelay });
+  const current = JSON.stringify({ relays, turn, iroh, hyperdhtRelay, pushRelay });
   const saved = savedAs === current;
 
   const save = async () => {
@@ -47,13 +50,14 @@ export function NetworkSettings() {
     const server = turn.urls.trim() ? { ...turn, urls: turn.urls.trim() } : null;
     // Checked here as well as in the engine, so the person sees why before anything changes.
     const relay = hyperdhtRelay.trim();
-    const problem = (server ? iceServerProblem(server) : null) ?? (relay ? hyperdhtRelayProblem(relay) : null);
+    const push = pushRelay.trim();
+    const problem = (server ? iceServerProblem(server) : null) ?? (relay ? hyperdhtRelayProblem(relay) : null) ?? (push ? pushRelayProblem(push) : null);
     if (problem) { setError(problem); return; }
     try {
       const irohRelays = iroh.split(/\s+/).filter(Boolean);
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
       const defaults = network.iroh && JSON.stringify(irohRelays) === JSON.stringify(network.iroh.defaultRelays);
-      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), hyperdhtRelay: relay });
+      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), hyperdhtRelay: relay, pushRelay: push });
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
     setSavedAs(current);
   };
@@ -92,6 +96,11 @@ export function NetworkSettings() {
       <Field label={t("network.hyperdht")} htmlFor="network-hyperdht-relay" hint={t("network.hyperdhtHint")} info={t("network.hyperdhtInfo")}>
         <input id="network-hyperdht-relay" value={hyperdhtRelay} onChange={(e) => setHyperdhtRelay(e.target.value)} placeholder="wss://relay.example.org"
           spellCheck={false} data-testid="network-hyperdht-relay" className={`${field} font-mono text-sm`} />
+      </Field>
+
+      <Field label={t("network.pushRelay")} htmlFor="network-push-relay" hint={t("network.pushRelayHint")} info={t("network.pushRelayInfo")}>
+        <input id="network-push-relay" value={pushRelay} onChange={(e) => setPushRelay(e.target.value)} placeholder="https://push-relay.example.org"
+          spellCheck={false} data-testid="network-push-relay" className={`${field} font-mono text-sm`} />
       </Field>
 
       <Field label={t("network.turn")} htmlFor="network-turn-url" hint={t("network.turnHint")} info={t("network.turnInfo")}>

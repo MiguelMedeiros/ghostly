@@ -74,8 +74,11 @@ describe("the side that answers looks fast while an offer is on its way", () => 
     expect(high.lastPoll()).toBe(I.fast);
     expect(high.dials).not.toHaveBeenCalled();
 
-    // Nobody offered (no WebRTC here): after the window it goes back to the background pace.
+    // Nobody offered (no WebRTC here): after the window it slows down step by step (an offer held back by the dialer's
+    // budget may land any time), back to the background pace within one.
     await vi.advanceTimersByTimeAsync(EXPECT_PEER_MS + I.fast);
+    expect(high.lastPoll()).toBe(2 * I.fast);
+    await vi.advanceTimersByTimeAsync(2 * I.background);
     expect(high.lastPoll()).toBe(I.background);
   });
 
@@ -83,7 +86,7 @@ describe("the side that answers looks fast while an offer is on its way", () => 
     const { low, high } = ends();
     low.link.start();
     high.link.start();
-    await vi.advanceTimersByTimeAsync(EXPECT_PEER_MS + 2 * I.fast);
+    await vi.advanceTimersByTimeAsync(EXPECT_PEER_MS + 2 * I.background);
     expect(high.lastPoll()).toBe(I.background);
     // The same packet seen again does not start another window.
     await vi.advanceTimersByTimeAsync(I.background);

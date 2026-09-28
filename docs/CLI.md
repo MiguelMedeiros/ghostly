@@ -228,6 +228,13 @@ group's edges come up, while the relays answer errors. `GHOSTLY_DHT=0` leaves th
 other: it answers other nodes' queries and keeps the small values they store for a while, as the Desktop's Pkarr client
 does.
 
+## Hubs of large private groups
+
+A daemon stays online, so in a private group past 16 members it offers to be a hub, as the Desktop app does: the
+members connect to it and it passes the group's messages on ([WISP 9xx · Group Mesh § Hubs](wisps/9xx-group-mesh.md#hubs)).
+`GHOSTLY_HUB=0` keeps a daemon a plain member (on a laptop that sleeps, say). The admin decides over both with
+`ghostly group hub <group> <member> --pin | --exclude | --auto`.
+
 ## Not there yet
 
 - **Bark and Fedimint wallets.** Their SDKs run only in a browser. `wallet list` shows them as unavailable.

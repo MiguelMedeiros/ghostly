@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-speaker-test"
+description = "Enables the native_speaker_test command without any pre-configured scope."
+commands.allow = ["native_speaker_test"]
+
+[[permission]]
+identifier = "deny-native-speaker-test"
+description = "Denies the native_speaker_test command without any pre-configured scope."
+commands.deny = ["native_speaker_test"]

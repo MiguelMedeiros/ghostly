@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, expect, it, vi } from "vitest";
 import { createLink, createRelayPayload, decodeInviteCode, encodeInviteCode, identityFromSeedB64, isEmptyLinkPacket, parseLinkRecords, parseRelayPayload, fromBase64Url, type SignedPacket } from "@ghostly/core";
-import { GhostlyNode, SPARE_INVITE_MIN_AGE_MS } from "../src/engine/node";
+import { GhostlyNode, SPARE_INVITE_MIN_AGE_MS, SPARE_INVITE_WARM_AFTER_TAKE_MS } from "../src/engine/node";
 import { db } from "../src/engine/db";
 
 // covers: chat.paired.pair-timing, chat.paired.progress
@@ -80,13 +80,25 @@ it("keeps a spare invite warmed, hands it out, and makes the next one", async ()
     // Taken too soon, the spare is left to settle and fresh keys go out instead; a moment later it is the one.
     const early = node.takeInvite();
     expect(publishes.slice(0, 2)).not.toContain(identityFromSeedB64(early.mine.seedB64).pubKeyZ32);
-    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + SPARE_INVITE_MIN_AGE_MS });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], now: Date.now() + SPARE_INVITE_MIN_AGE_MS });
     const taken = node.takeInvite();
     const mine = identityFromSeedB64(taken.mine.seedB64).pubKeyZ32;
     const contact = identityFromSeedB64(decodeInviteCode(taken.inviteCode)!.seedB64).pubKeyZ32;
     expect(publishes.slice(0, 2).sort()).toEqual([mine, contact].sort());
-    // The next spare is warmed the moment this one is taken…
+    // The next spare is made the moment this one is taken, and warmed a while after: not while its chat pairs…
+    vi.advanceTimersByTime(SPARE_INVITE_WARM_AFTER_TAKE_MS - 1);
+    expect(publishes).toHaveLength(2);
+    // …and, not warmed yet, it is fresh keys like any others: handed out, and the one after it warmed later still.
+    const next = node.takeInvite();
+    expect(next.inviteCode).not.toBe(taken.inviteCode);
+    vi.advanceTimersByTime(SPARE_INVITE_WARM_AFTER_TAKE_MS - 1);
+    expect(publishes).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    const now = Date.now();
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date"], now });
     await vi.waitFor(() => expect(publishes).toHaveLength(4));
+    expect(publishes.slice(2)).not.toContain(identityFromSeedB64(next.mine.seedB64).pubKeyZ32);
     expect(publishes.slice(2)).not.toContain(mine);
     // …and the chat made from the taken one publishes its real packet, without warming the contact's key again.
     const { linkId } = await node.ensureLink({ ...taken.mine, inviteCode: taken.inviteCode });

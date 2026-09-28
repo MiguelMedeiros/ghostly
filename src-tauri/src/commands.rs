@@ -254,6 +254,16 @@ pub async fn lnd_request(
     .await
 }
 
+/// Posts a wake-up to a contact's push service (WISP 401 § Wake-up push); see push_send.rs.
+#[tauri::command]
+pub async fn push_send(
+    url: String,
+    headers: Vec<(String, String)>,
+    body: String,
+) -> Result<u16, String> {
+    crate::push_send::send(url, headers, body).await
+}
+
 #[tauri::command]
 pub fn open_service_window<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -308,6 +318,12 @@ fn is_payment_link(url: &str) -> bool {
 
 /// Opens a URL with the system's handler for it. Callers decide what may be opened.
 pub(crate) fn launch(url: &str) -> Result<(), String> {
+    // Under the macOS end-to-end tests, the link is written down for them instead (debug builds with the
+    // `e2e-driver` feature only).
+    #[cfg(feature = "e2e-driver")]
+    if crate::e2e_driver::record_open(url) {
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     let result = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "linux")]

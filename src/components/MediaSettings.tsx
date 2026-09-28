@@ -27,8 +27,10 @@ export function MediaSettings() {
 
   const speaker = canPickSpeaker() && list.audiooutput.length > 0;
   // Where calls capture and play outside the page (Linux Desktop), the page cannot hear that microphone or play on
-  // that speaker: only the camera can be tried here.
-  const tries = !deviceSource();
+  // that speaker: they are tried where the calls run, when that can.
+  const source = deviceSource();
+  const hears = !source || !!source.meter;
+  const plays = !source || !!source.testSpeaker;
   return (
     <Section title={t("settings.media.title")} testId="settings-media">
       {!list.named && (
@@ -37,7 +39,7 @@ export function MediaSettings() {
         </Row>
       )}
       <DeviceRow kind="audioinput" list={list} choices={choices} info={t("settings.media.microphoneInfo")}>
-        {(id, fail) => tries && <MicrophoneTest id={id} fail={fail} />}
+        {(id, fail) => hears && <MicrophoneTest id={id} fail={fail} />}
       </DeviceRow>
       <DeviceRow kind="videoinput" list={list} choices={choices} info={t("settings.media.cameraInfo")}
         below={preview ? (id, fail) => <CameraPreview id={id} fail={(failed) => { fail(failed); if (failed) setPreview(false); }} /> : undefined}>
@@ -49,7 +51,7 @@ export function MediaSettings() {
       </DeviceRow>
       {speaker && (
         <DeviceRow kind="audiooutput" list={list} choices={choices} info={t("settings.media.speakerInfo")}>
-          {(id, fail) => tries && <SpeakerTest id={id} fail={fail} />}
+          {(id, fail) => plays && <SpeakerTest id={id} fail={fail} />}
         </DeviceRow>
       )}
     </Section>
@@ -96,7 +98,32 @@ function DeviceRow({ kind, list, choices, info, children, below }: {
   );
 }
 
-/** A level meter on the chosen microphone, while it is on. */
+/** Listens to the page's own microphone `id`: `level` gets its loudness every 80 ms. Resolves to what stops it. */
+async function pageMeter(id: string | undefined, level: (level: number) => void): Promise<() => void> {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: from(id) });
+  let context: AudioContext | null = null;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  try {
+    context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    context.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Float32Array(analyser.fftSize);
+    timer = setInterval(() => {
+      analyser.getFloatTimeDomainData(samples);
+      level(voiceLevel(samples));
+    }, 80);
+  } catch {
+    // No meter in this engine: the microphone still opened.
+  }
+  return () => {
+    clearInterval(timer);
+    stream.getTracks().forEach((track) => track.stop());
+    void context?.close().catch(() => {});
+  };
+}
+
+/** A level meter on the chosen microphone, while it is on: the page's own, or the device source's. */
 function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failed: boolean) => void }) {
   const { t } = useI18n();
   const [on, setOn] = useState(false);
@@ -105,32 +132,17 @@ function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failed: b
   useEffect(() => {
     if (!on) return;
     let live = true;
-    let stream: MediaStream | null = null;
-    let context: AudioContext | null = null;
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let stop: (() => void) | undefined;
     fail(false);
-    navigator.mediaDevices.getUserMedia({ audio: from(id) }).then((s) => {
-      if (!live) { s.getTracks().forEach((track) => track.stop()); return; }
-      stream = s;
-      try {
-        context = new AudioContext();
-        const analyser = context.createAnalyser();
-        analyser.fftSize = 1024;
-        context.createMediaStreamSource(s).connect(analyser);
-        const samples = new Float32Array(analyser.fftSize);
-        timer = setInterval(() => {
-          analyser.getFloatTimeDomainData(samples);
-          setLevel(voiceLevel(samples));
-        }, 80);
-      } catch {
-        // No meter in this engine: the microphone still opened.
-      }
+    const source = deviceSource();
+    const listen = source?.meter ? source.meter.bind(source) : pageMeter;
+    listen(id, (next) => { if (live) setLevel(next); }).then((stopping) => {
+      if (live) stop = stopping;
+      else stopping();
     }, () => { if (live) { fail(true); setOn(false); } });
     return () => {
       live = false;
-      clearInterval(timer);
-      stream?.getTracks().forEach((track) => track.stop());
-      void context?.close().catch(() => {});
+      stop?.();
       setLevel(0);
     };
   }, [on, id, fail]);
@@ -177,10 +189,20 @@ function CameraPreview({ id, fail }: { id: string | undefined; fail: (failed: bo
   );
 }
 
-/** A short sound on the chosen speaker. */
+/** A short sound on the chosen speaker: the page's own, or the device source's. */
 function SpeakerTest({ id, fail }: { id: string | undefined; fail: (failed: boolean) => void }) {
   const { t } = useI18n();
   const play = async () => {
+    const source = deviceSource();
+    if (source?.testSpeaker) {
+      try {
+        await source.testSpeaker(id);
+        fail(false);
+      } catch {
+        fail(true);
+      }
+      return;
+    }
     const url = soundUrl("connected");
     if (!url) return;
     const audio = new Audio(url);
