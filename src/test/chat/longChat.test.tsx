@@ -45,8 +45,8 @@ function history(): ChatMessage[] {
 
 const link = () => linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" } } as never);
 
-function openChat(withLink = true) {
-  saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: history(), createdAt: 1_700_000_000_000 });
+function openChat(withLink = true, messages = history()) {
+  saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages, createdAt: 1_700_000_000_000 });
   const utils = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
   utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("react", () => ({ error: null })).on("sendMessage", () => ({ error: null }));
   if (withLink) utils.engine.update({ links: [link()] });
@@ -80,10 +80,7 @@ describe("a long chat", () => {
     const messages = history().map((m, i): ChatMessage => i % 30 === 0
       ? { ...m, text: "", file: { id: `voice-${i}`, name: `voice-${i}.webm`, size: 40_000, mime: "audio/webm", voice: { duration: 4_000, peaks: [1, 2, 3] } } }
       : m);
-    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages, createdAt: 1_700_000_000_000 });
-    const { engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
-    engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined);
-    act(() => engine.update({ links: [link()] }));
+    const { engine } = openChat(true, messages);
     await screen.findByText(`Message ${COUNT - 1}`);
     await settle();
     expect(new Set(draws.files).size).toBe(COUNT / 30);
