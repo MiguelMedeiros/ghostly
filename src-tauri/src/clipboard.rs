@@ -227,29 +227,6 @@ pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
         .collect()
 }
 
-/// Files copied as text, one `file://` URI a line (as some Linux desktops hand them over when
-/// asked for text): their paths, or None when the text is anything else.
-pub fn paths_from_uri_list(text: &str) -> Option<Vec<PathBuf>> {
-    let lines: Vec<&str> = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .collect();
-    if lines.is_empty() {
-        return None;
-    }
-    lines
-        .into_iter()
-        .map(|line| {
-            url::Url::parse(line)
-                .ok()
-                .filter(|u| u.scheme() == "file")?
-                .to_file_path()
-                .ok()
-        })
-        .collect()
-}
-
 /// What a paste brought that the page could not see itself: files copied in a file manager,
 /// or a picture (made a PNG here). Called only from a paste in the composer that carried
 /// neither files nor text (WebKit on macOS hands the page both itself), from the main window.
@@ -266,19 +243,10 @@ pub async fn read_clipboard_files<R: tauri::Runtime>(
         .ok_or("Clipboard unavailable")?
         .inner()
         .clone();
-    let text = window
-        .try_state::<ClipboardSource>()
-        .map(|s| s.inner().clone());
+    // Files only from the clipboard's file list, never from its text: text is anyone's to write (the page itself
+    // can), so `file://` lines in it would let the page name any file on disk.
     let pasted = tauri::async_runtime::spawn_blocking(move || -> Result<_, String> {
-        let pasted = match (source.0)()? {
-            // Nothing else: a file list some desktops only give as text.
-            Pasted::Nothing => match text.map(|t| (t.0)()) {
-                Some(Ok(text)) => paths_from_uri_list(&text).map_or(Pasted::Nothing, Pasted::Files),
-                _ => Pasted::Nothing,
-            },
-            other => other,
-        };
-        Ok(match pasted {
+        Ok(match (source.0)()? {
             Pasted::Files(paths) => Ready::Files(pasted_files(paths)),
             Pasted::Image {
                 width,
@@ -520,27 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn file_uris_are_paths_and_anything_else_is_not() {
-        let text = "# copied\r\nfile:///tmp/haunted%20house.pdf\r\nfile:///tmp/notes.txt\n";
-        #[cfg(unix)]
-        assert_eq!(
-            paths_from_uri_list(text),
-            Some(vec![
-                PathBuf::from("/tmp/haunted house.pdf"),
-                PathBuf::from("/tmp/notes.txt")
-            ])
-        );
-        #[cfg(not(unix))]
-        let _ = text;
-        assert_eq!(
-            paths_from_uri_list("file:///tmp/a.txt\nhttps://ghostly.tools/"),
-            None
-        );
-        assert_eq!(paths_from_uri_list("just words"), None);
-        assert_eq!(paths_from_uri_list(" \n"), None);
-    }
-
-    #[test]
     fn only_regular_files_each_once_and_at_most_a_bounded_number() {
         let dir = scratch();
         std::fs::write(dir.join("a.txt"), b"boo").unwrap();
@@ -619,10 +566,10 @@ mod tests {
     }
 
     #[test]
-    fn nothing_but_file_uris_as_text_is_files_too() {
+    fn file_uris_in_the_clipboards_text_are_never_files() {
         let dir = scratch();
-        std::fs::write(dir.join("route.csv"), b"a,b").unwrap();
-        let uri = url::Url::from_file_path(dir.join("route.csv"))
+        std::fs::write(dir.join("id_ed25519"), b"secret").unwrap();
+        let uri = url::Url::from_file_path(dir.join("id_ed25519"))
             .unwrap()
             .to_string();
         let app = mock_builder()
@@ -631,14 +578,9 @@ mod tests {
             .manage(PasteShelf::default())
             .build(tauri::generate_context!(test = true))
             .unwrap();
-        let items = files(&main_window(&app)).unwrap();
-        assert_eq!(
-            items
-                .iter()
-                .map(|i| i.name.clone().unwrap())
-                .collect::<Vec<_>>(),
-            vec!["route.csv"]
-        );
+        let main = main_window(&app);
+        assert_eq!(files(&main).unwrap(), Vec::new());
+        assert!(bytes(&main, "paste-1", 10).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
