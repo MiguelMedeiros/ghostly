@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CONNECT_TIMEOUT_MS } from "@ghostly/core";
+import { RACE_DIRECT_MS } from "@ghostly/core";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
@@ -139,23 +139,21 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await bothWays("after a stop");
 
     // Killed: nothing said. Alice still holds the dead session; Bob's app, back, offers at once. Here over WebRTC, whose
-    // Node build never says a connection went `disconnected`, Alice reads that offer at a live chat's pace, or her
-    // liveness gives up first, where a native knock takes over in about a second. Most runs are live in seconds. When
-    // the relays' request budget holds Alice's answer back until her answering attempt is over, Bob's offer runs to its
-    // own attempt timeout (CONNECT_TIMEOUT_MS, 90 s) and the HyperDHT dial goes live after it, in about a second, up to
-    // 14 s on a loaded machine. So the bound is one attempt timeout and one redial, counted from Bob's daemon being up,
-    // when that offer starts, not from the kill: the daemon's own start is not part of it (with it, that path measured
-    // 90.7 to 91.4 s against a 90 s bound). Two attempts in a row would still fail it.
+    // Node build never says a connection went `disconnected`: Alice reads that offer at a live chat's pace, or the
+    // relays' request budget holds her answer back until her answering attempt is over. Most runs are live in seconds.
+    // With no answer after RACE_DIRECT_MS (8 s), Bob also dials the HyperDHT ranked after WebRTC, which takes over
+    // Alice's held session: about a second, up to 14 s on a loaded machine. Before, the offer ran to its own attempt
+    // timeout first (90 s, CONNECT_TIMEOUT_MS). Counted from Bob's daemon being up, when that offer starts.
     const killed = running.pop()!;
     await new Promise((r) => { killed.child.once("exit", r); killed.child.kill("SIGKILL"); });
     started = await restartBob();
-    const redial = 30_000;
-    await live(bob, "alice", (CONNECT_TIMEOUT_MS + redial) / 1000 + 10);
+    const dial = 20_000;
+    await live(bob, "alice", (RACE_DIRECT_MS + dial) / 1000 + 10);
     const afterKill = Date.now() - started;
     await bothWays("after a kill");
     console.log(`[restart] live again after a stop in ${afterStop} ms, after a kill in ${afterKill} ms`);
     expect(afterStop).toBeLessThan(10_000);
-    expect(afterKill).toBeLessThan(CONNECT_TIMEOUT_MS + redial);
+    expect(afterKill).toBeLessThan(RACE_DIRECT_MS + dial);
   }, 240_000);
 
   it("move a chat to native HyperDHT when asked", async () => {
