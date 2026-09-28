@@ -65,6 +65,29 @@ export async function setWake(on: boolean): Promise<void> {
   await engine.call("setWakeSubscription", { subscription: { ...keys, vapid } });
 }
 
+let rotating: Promise<void> | null = null;
+
+/**
+ * Replaces this profile's subscription after a contact that held it was deleted or muted (the engine's `wakeRotate`).
+ * Without notifications allowed any more, wake-ups are turned off instead. One at a time.
+ */
+export function rotateWake(): Promise<void> {
+  rotating ??= (async () => {
+    const push = pushPlatform();
+    if (!push || !engine.state?.settings.wake) return;
+    const profile = activeProfileId();
+    if (typeof Notification !== "undefined" && Notification.permission !== "granted") {
+      await engine.call("setWakeSubscription", { subscription: null });
+      await push.unsubscribe(profile);
+      return;
+    }
+    const vapid = generateVapidKeys();
+    const keys = await push.subscribe(profile, vapid);
+    await engine.call("setWakeSubscription", { subscription: { ...keys, vapid } });
+  })().catch(() => {}).finally(() => { rotating = null; });
+  return rotating;
+}
+
 /**
  * The table the push worker reads, kept in step with the chats: a token for each chat that shared one, its route
  * and its mute (#250: a muted chat is never shown). Also puts right a subscription the browser dropped while the
@@ -104,6 +127,13 @@ export function useWakeTableSync(text: { title: string; body: string; call?: str
       window.removeEventListener("session-updated", write);
     };
   }, [wake, links, title, body, call]);
+
+  // A contact that held the subscription was deleted or muted: a new one (new endpoint, new key pair, new tokens for
+  // the others), and the old one ends at the push service, so that contact can no longer wake this app.
+  const rotate = !!state?.settings.wakeRotate && !!wake;
+  useEffect(() => {
+    if (rotate) void rotateWake();
+  }, [rotate]);
 
   const endpoint = wake?.endpoint;
   useEffect(() => {

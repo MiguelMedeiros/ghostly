@@ -981,6 +981,12 @@ export interface Settings {
    */
   wake?: WakeSubscription;
   /**
+   * A contact who held `wake` can no longer be told to forget it (its chat was deleted, or muted: a contact may ignore
+   * `w: null`). The app replaces the subscription (a new endpoint and VAPID key pair, new tokens for the others) and
+   * `setWakeSubscription` clears this. Set by the engine only.
+   */
+  wakeRotate?: boolean;
+  /**
    * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
    */

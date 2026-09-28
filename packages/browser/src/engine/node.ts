@@ -1473,6 +1473,8 @@ export class GhostlyNode implements EngineImplementation {
     const before = this.settings.wake;
     this.settings = { ...this.settings, wake: subscription ?? undefined };
     if (!subscription) delete this.settings.wake;
+    // Replaced or turned off: whoever held the old subscription can no longer post to it.
+    delete this.settings.wakeRotate;
     await db.putSettings(this.settings);
     for (const live of this.links.values()) {
       if (!live.stored.profile || live.stored.group) continue;
@@ -1493,11 +1495,20 @@ export class GhostlyNode implements EngineImplementation {
   async setWakeMuted({ linkId, muted }: { linkId: string; muted: boolean }): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group || !!live.stored.wakeMuted === muted) return;
+    // A contact told to forget the subscription may keep it anyway: the app replaces it.
+    if (muted && live.stored.wakeToken) await this.rotateWake();
     live.stored = { ...live.stored, wakeMuted: muted || undefined, ...(muted && { wakeToken: undefined }) };
     await db.patchLink(linkId, { wakeMuted: muted || undefined, ...(muted && { wakeToken: undefined }) });
     // Muted: the contact forgets it now if live, else on the next session; unmuted: a new token goes to it.
     await this.shareWake(linkId);
     this.emitState();
+  }
+
+  /** A contact that held this profile's subscription is gone or muted: the app is to replace it (`wakeRotate`). */
+  private async rotateWake(): Promise<void> {
+    if (!this.settings.wake || this.settings.wakeRotate) return;
+    this.settings = { ...this.settings, wakeRotate: true };
+    await db.putSettings(this.settings);
   }
 
   /**
@@ -1584,9 +1595,11 @@ export class GhostlyNode implements EngineImplementation {
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
     this.fileDesk.drop(linkId);
-    // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken.
+    // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken. The
+    // contact still has the subscription, so the app replaces it.
     this.wakeLimiter.reset(linkId);
     this.callWakeLimiter.reset(linkId);
+    if (live.stored.wakeToken) void this.rotateWake().then(() => this.emitState());
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
     this.emitState();
@@ -3353,6 +3366,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     // Only through setWakeSubscription, which checks it and gives every chat a new token.
     delete (settings as Partial<Settings>).wake;
+    delete (settings as Partial<Settings>).wakeRotate;
     const relayBefore = this.hyperdhtRelay;
     // Of the Nostr settings, only what the patch names changes; the rest stays as stored (or the defaults).
     if (nostr) {

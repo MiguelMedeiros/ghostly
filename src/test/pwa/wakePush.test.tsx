@@ -4,7 +4,7 @@ import { generateVapidKeys } from "@ghostly/core";
 import { setChatMute } from "../../lib/chatMute";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
-import { pushPlatform, setPushPlatform, setWake, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
+import { pushPlatform, rotateWake, setPushPlatform, setWake, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
 import { engineState, fakeEngine, linkView } from "../fakeEngine";
 
 // covers: push.wake.notify, push.wake.mute
@@ -94,6 +94,27 @@ describe("the push worker's table", () => {
     await waitFor(() => expect(platform.syncTable.mock.lastCall![1]).toEqual([
       { token: "tokenaaaaaaaaaaaaaaaaa", path: "/chat/chata" }, { token: "tokenbbbbbbbbbbbbbbbbb", path: "/chat/chatb" },
     ]));
+  });
+
+  it("a contact that held it was deleted or muted: a new subscription with a new key pair, or off without notifications", async () => {
+    const old = generateVapidKeys();
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    vi.stubGlobal("Notification", { permission: "granted" });
+    fakeEngine.on("setWakeSubscription", () => undefined);
+    fakeEngine.setState(engineState({ settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: old }, wakeRotate: true } }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(fakeEngine.callsTo("setWakeSubscription")).toHaveLength(1));
+    const subscription = fakeEngine.callsTo("setWakeSubscription")[0]!.subscription!;
+    expect(subscription.vapid.publicKey).not.toBe(old.publicKey);
+    expect(platform.subscribe).toHaveBeenCalledWith("", subscription.vapid);
+
+    vi.stubGlobal("Notification", { permission: "denied" });
+    await rotateWake();
+    const calls = fakeEngine.callsTo("setWakeSubscription");
+    expect(calls[calls.length - 1]).toEqual({ subscription: null });
+    expect(platform.unsubscribe).toHaveBeenCalledWith("");
+    vi.unstubAllGlobals();
   });
 
   it("a subscription the browser dropped while closed is made again with the same key pair", async () => {
