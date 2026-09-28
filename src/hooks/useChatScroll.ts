@@ -30,6 +30,11 @@ function remember(chat: string, state: Left) {
   left.set(chat, state);
   if (left.size > LEFT_MAX) left.delete(left.keys().next().value!);
 }
+/** Whether the chat was left scrolled up, on a message: it opens on that message, so the message must be in the page. */
+export function leftScrolledUp(chat: string): boolean {
+  const was = left.get(chat);
+  return !!was && !was.atBottom && !!was.anchor;
+}
 /** Forgets where every chat was left (for tests). */
 export function forgetChatScroll() {
   left.clear();
