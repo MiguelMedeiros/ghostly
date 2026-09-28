@@ -40,8 +40,13 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   const bytes = b64url(body)
   if (bytes.length > bodyBytes) return { error: 'Too large' }
   const forwarded = {}
+  const seen = new Set()
   for (const [name, value] of Object.entries(headers && typeof headers === 'object' ? headers : {})) {
-    if (HEADERS.includes(name.toLowerCase()) && typeof value === 'string' && value.length < 2048 && !/[\r\n]/.test(value)) forwarded[name] = value
+    const lower = name.toLowerCase()
+    // A header named twice (in two spellings) is refused: the check below reads one, the push service would get both.
+    if (seen.has(lower)) return { error: `${name} twice` }
+    seen.add(lower)
+    if (HEADERS.includes(lower) && typeof value === 'string' && value.length < 2048 && !/[\r\n]/.test(value)) forwarded[name] = value
   }
   const authorization = Object.entries(forwarded).find(([name]) => name.toLowerCase() === 'authorization')?.[1]
   if (!authorization || !VAPID.test(authorization)) return { error: 'No VAPID authorization' }
