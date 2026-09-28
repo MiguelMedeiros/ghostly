@@ -235,8 +235,8 @@ does.
 - **An npm release.** Install from source until the package is published.
 - Also open: link previews made by the sender, and holding messages for an away contact. OpenID Connect proofs
   need a browser: make them in the app. Calls are voice only (no video).
-- **A connector for agent frameworks.** Planned: one connector that wakes any agent on a message, with a per-contact
-  allowlist ([AI-AGENTS.md](AI-AGENTS.md#planned-ghostly-as-a-channel-for-agents)).
+- **A connector for agent frameworks.** Partly built: `listen --turns` with `--from` and `--group` wakes an agent
+  (Claude Code has an example); the Hermes Agent plugin is open ([AI-AGENTS.md](AI-AGENTS.md#ghostly-as-a-channel-for-agents)).
 
 ## The older `ghostly-cli`
 
