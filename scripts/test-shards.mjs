@@ -114,7 +114,10 @@ function main(argv) {
     for (const file of rest) {
       for (const result of JSON.parse(readFileSync(file, "utf8")).testResults) {
         if (result.status !== "passed" || !result.endTime) continue;
-        recorded[relative(root, result.name)] = Math.round((result.endTime - result.startTime) / 100) / 10;
+        // A report from CI names the runner's checkout: the file is the longest end of its path that is here.
+        const parts = result.name.split("/");
+        const path = parts.map((_, i) => parts.slice(i).join("/")).find((p) => p && existsSync(join(root, p)));
+        if (path) recorded[path] = Math.round((result.endTime - result.startTime) / 100) / 10;
       }
     }
     // Files recorded now replace their old times; a file no longer there is dropped.
