@@ -115,6 +115,14 @@ export class MacDriver implements DesktopApp {
     return (await this.request("GET", "/windows")) as string[];
   }
 
+  /**
+   * Every link the app handed to the system so far, in order, exactly as `open` would have received it. The app under
+   * the driver writes them down instead of opening them (`launch` in src-tauri/src/commands.rs), so no browser starts.
+   */
+  async opened(): Promise<string[]> {
+    return (await this.request("GET", "/opened")) as string[];
+  }
+
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
     const response = await fetch(`${this.endpoint}${path}`, {
       method,

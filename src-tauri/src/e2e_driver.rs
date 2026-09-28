@@ -6,6 +6,10 @@
 //! compile), and only listens when the app is started with `GHOSTLY_E2E_DRIVER=<port>`. Every request
 //! carries `GHOSTLY_E2E_DRIVER_TOKEN` in `x-ghostly-e2e`. The app it is built into also reads an empty
 //! clipboard, so a test never sees what is on the clipboard of the machine running it.
+//!
+//! While it listens, a link the app would hand to the system (`commands::launch`) is written down instead of
+//! opened, and `GET /opened` answers with every one so far: a test sees what a click opened, and no browser
+//! starts on the machine running it.
 
 #[cfg(all(feature = "e2e-driver", not(debug_assertions)))]
 compile_error!(
@@ -14,7 +18,8 @@ compile_error!(
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -24,6 +29,28 @@ use tauri::{AppHandle, Manager, Runtime};
 const MAX_BODY: usize = 4 * 1024 * 1024;
 /// How long a script may take to answer. Scripts are synchronous; the tests poll for what takes longer.
 const EVAL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Whether the driver listens, so links are written down rather than opened.
+static RECORDING: AtomicBool = AtomicBool::new(false);
+/// The links the app would have opened, in order.
+static OPENED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Writes down a link the app is about to open, when the driver listens. True when it did: the caller opens
+/// nothing. The link has passed its command's checks already.
+pub fn record_open(url: &str) -> bool {
+    if !RECORDING.load(Ordering::SeqCst) {
+        return false;
+    }
+    OPENED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(url.to_string());
+    true
+}
+
+fn opened() -> Vec<String> {
+    OPENED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
 
 /// One request, as the tests send it.
 #[derive(Debug, PartialEq)]
@@ -61,6 +88,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
             return;
         }
     };
+    RECORDING.store(true, Ordering::SeqCst);
     let app = app.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
@@ -98,6 +126,7 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             let labels: Vec<String> = app.webview_windows().into_keys().collect();
             (200, serde_json::to_string(&labels).unwrap_or_default())
         }
+        ("GET", "/opened") => (200, serde_json::to_string(&opened()).unwrap_or_default()),
         ("POST", "/eval") => {
             let eval: Eval = match serde_json::from_slice(&request.body) {
                 Ok(eval) => eval,
@@ -199,6 +228,23 @@ mod tests {
     fn a_request_without_a_token_or_body_reads_as_such() {
         let request = read_request(&b"GET /windows HTTP/1.1\r\n\r\n"[..]).unwrap();
         assert_eq!((request.token, request.body.len()), (None, 0));
+    }
+
+    #[test]
+    fn links_are_written_down_only_while_the_driver_listens() {
+        // covers: app.external-links
+        assert!(!record_open("https://example.com/before"));
+        assert!(opened().is_empty(), "nothing is written down before the driver listens");
+        RECORDING.store(true, Ordering::SeqCst);
+        assert!(record_open("https://pt.wikipedia.org/wiki/S%C3%A3o_Paulo"));
+        assert!(record_open("https://github.com/MiguelMedeiros/ghostly"));
+        assert_eq!(
+            opened(),
+            [
+                "https://pt.wikipedia.org/wiki/S%C3%A3o_Paulo",
+                "https://github.com/MiguelMedeiros/ghostly"
+            ]
+        );
     }
 
     #[test]
