@@ -1,10 +1,12 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fromBase64Url, setLinkTraceSink } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { nodeLocalFetch } from "../services";
+import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import type { ProfilePaths } from "../profiles";
@@ -134,6 +136,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
     // No wallet starts by itself: a bot has the wallets it made (WISP 11xx § Wallet SDKs on Node).
     automaticWallets: false,
+    // Fedimint's client databases are files of the profile, each in a worker thread (./fedimint.ts).
+    fedimintSdk: nodeFedimintSdk(join(paths.dir, "fedimint")),
     // Local web apps may be shared with a contact, reached on loopback only (src/services.ts).
     servicesSupport: true,
     // A daemon stays online: a hub of the large private groups it is in (WISP 9xx · Group Mesh § Hubs), unless GHOSTLY_HUB=0.

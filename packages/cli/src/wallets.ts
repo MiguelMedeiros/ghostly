@@ -23,7 +23,6 @@ const CHAT_METHODS = ["cashu", "lightning", ...METHODS.filter((m) => m !== "cash
  */
 export const NODE_GAPS: Partial<Record<WalletType, string>> = {
   bark: "Bark's SDK ships a browser build only: its WebAssembly needs a browser window. Use it from the app.",
-  fedimint: "The Fedimint client needs the origin-private file system and a module worker, which Node lacks. Use it from the app.",
 };
 
 const network = (params: Params, fallback: WalletNetwork = "testnet") => oneOf(params, "network", NETWORKS, fallback);
