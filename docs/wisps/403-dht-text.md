@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 403; editorial family allocation |
 | Status | Draft |
-| Revision | 0.8 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
 | Implementation | The floor and first contact of every new chat (web, extension, desktop); DHT only per chat; pinned mailboxes. Native clients read the Mainline DHT directly; browsers go through Pkarr relays. |
@@ -147,11 +145,4 @@ DHT only avoids stream discovery/dialing. Native clients read the Mainline DHT d
 
 ## Revision log
 
-- 0.8 (2026-09-27): forwards: a forwarded text's hop count as the fifteenth element, left out when it does not fit.
-- 0.7 (2026-09-27): one TTL (300 s) and one packet size (padded to 992 bytes) for every envelope, so a read of a mailbox does not tell a text from a keep-alive; what a mailbox shows.
-- 0.6 (2026-09-27): edits ride as a text of their own id with a twelfth element naming the edited message and its number, only to a contact whose record lists `edit/1`.
-- 0.5 (2026-09-27): reactions ride as the thirteenth element (the author's, not yet confirmed, as many as fit) with the fourteenth saying which of the reader's were taken; the twelfth is kept for edits.
-- 0.4 (2026-09-27): a text's reply rides as the eleventh element, its id only, left out when the packet has no room for it.
-- 0.3 (2026-09-26): another key on the invite mailbox after the pin is ignored, not a stop; pinned mailboxes, told by the envelope's tenth element, so a copy of the invite cannot overwrite the contact's texts.
-- 0.2 (2026-09-25): the floor and first contact of every chat; states instead of invite modes; queueing, expiry per state, poll pace, DHT only as a per-chat choice.
-- 0.1 (2026-09-22): bounded DHT text profile.
+One file per change in [changes/403-dht-text/](changes/403-dht-text/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

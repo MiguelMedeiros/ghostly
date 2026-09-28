@@ -5,8 +5,6 @@
 | Number | 202 |
 | Status | Draft |
 | Kind | Adapter |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Capabilities 03](03-capabilities.md), authenticated live data transport |
 | Implementation | Experimental browser adapter, Arkade SDK 0.4.74; regtest evidence below. New makes a Mainnet wallet on `arkade.computer` or a Testnet one on Mutinynet, in one click. |
 | Summary | Review and approve an exact Ark payment through a pinned operator. |
@@ -83,3 +81,7 @@ The Ark integration test runs against arkd in the end-to-end environment (`npm r
 ## References
 
 [Arkade TypeScript SDK](https://arkade-os.github.io/ts-sdk/), [official local regtest](https://github.com/ArkLabsHQ/arkade-regtest), [Arkade security model](https://docs.arkadeos.com/learn/core-concepts/security-and-trust-model), [Bark alternative](https://second.tech/docs/bark-sdk/index.md), [shared payment contract](200-payments.md), [Cashu adapter](201-cashu.md).
+
+## Revision log
+
+One file per change in [changes/202-arkade/](changes/202-arkade/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

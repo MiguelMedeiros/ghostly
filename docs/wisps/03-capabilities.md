@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 03; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [403](403-dht-text.md) |
 | Implementation | Existing advertisements and the paired `pair-offer`; the layer-0 capability record in every new chat |
@@ -92,6 +90,4 @@ Choose identifier registry, exact version rules, canonical offer/selection encod
 
 ## Revision log
 
-- 0.3 (2026-09-25): the optional trailing `choice`; the record is published again when a native descriptor changes, and a record just read replaces the relay the reader knew; a loopback test relay may be plain HTTP, as in the relay settings. Apps from before ignore the element, as trailing elements are ignored.
-- 0.2 (2026-09-25): capabilities on two layers; the layer-0 capability record (sketch), with `dht-text/1`, `hold/1`, minimal native descriptors and the shared name.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/03-capabilities/](changes/03-capabilities/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

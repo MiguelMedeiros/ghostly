@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 501; editorial family allocation |
 | Status | Draft |
-| Revision | 0.4.4 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
 | Implementation | Every chat session: `files/3` (any size, consent, resume) and `files/2` for older apps; WebRTC and supported native adapters |
@@ -70,13 +68,4 @@ For `files/2`: the common contract's 100 MiB file bound, three concurrent incomi
 
 ## Revision log
 
-- 0.4.4 (2026-09-27): optional `image {width, height}` on an offer, `pf-start` and a held file's meta: a picture's size as shown; no change for apps that ignore it.
-- 0.4.3 (2026-09-27): forwarded files carry `fw` on `pf-offer` and `pf-start`.
-- 0.4.2 (2026-09-27): a transfer its sender stopped (`pf-abort`) is taken again from the start when offered again; one the receiver cancelled stays refused (#352).
-- 0.4.1 (2026-09-27): optional `video` description on an offer (length, size, poster); no change for apps that ignore it.
-- 0.4 (2026-09-27): `r` on `pf-offer` and `pf-start`: a file that answers a message. A reply that does not check out is dropped; the file is taken all the same. Older apps ignore it.
-- 0.3.2 (2026-09-27): stuck transfers (no move for 60 s) offer Send again and Ask again; a receiver with no data for 30 s accepts again by itself; a sender writes only while the session has room (#348). No wire change.
-- 0.3.1 (2026-09-26): an offer that expired unanswered is refused when offered again, never taken without consent.
-- 0.3 (2026-09-25): `files/3`: offer and consent, advertised room, 1 MiB window, resume from the stored offset after a drop, a switch or a restart, SHA-256 checked on what was stored, pause and cancel from either side. `files/2` kept for older apps.
-- 0.2 (2026-09-25): renamed Chat Files; place in the one chat; behaviour on a drop to the DHT.
-- 0.1 (2026-09-22): paired files profile.
+One file per change in [changes/501-paired-files/](changes/501-paired-files/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

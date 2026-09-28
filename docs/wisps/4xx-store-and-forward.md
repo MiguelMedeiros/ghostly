@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 4xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.3.3 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [03](03-capabilities.md), [1000](1000-storage.md), [1002](1002-s3-storage.md), [200](200-payments.md) |
@@ -108,9 +106,4 @@ A WebDAV or Blossom adapter with the same `presign` contract; whether a reader s
 
 ## Revision log
 
-- 0.3.3 (2026-09-27): a held file's `meta` names `video` (sent since [501](501-paired-files.md) 0.4.1) and `image`, a picture's size as shown.
-- 0.3.2 (2026-09-27): a forwarded text or file carries `fw`, its hop count, in its `meta`.
-- 0.3.1 (2026-09-27): a held file that replies carries `r` in its `meta`, as a text does.
-- 0.3 (2026-09-27): a held text that replies carries `r` in its `meta`; readers from before ignore a text's `meta`.
-- 0.2 (2026-09-25): place in the one chat; consent also in the layer-0 capability record; holding continues while DHT only is chosen.
-- 0.1 (2026-09-24): `hold/1` profile.
+One file per change in [changes/4xx-store-and-forward/](changes/4xx-store-and-forward/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

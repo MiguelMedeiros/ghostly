@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 100; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.7 |
-| Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [403](403-dht-text.md) |
 | Implementation | Experimental: rank-sum negotiation, the DHT floor, background retry and upgrade in every new chat; relayed transports; a choice made while not live travels in the capability record |
@@ -197,11 +195,4 @@ Reverse offer arrival order and still choose the same result; exercise disjoint 
 
 ## Revision log
 
-- 0.7 (2026-09-27): an unanswered WebRTC offer has the transports ranked after it dialled meanwhile (direct after 8 s, relayed after 40 s), and those whose endpoint starts meanwhile; the first live session wins and ends the other attempt.
-- 0.6 (2026-09-27): back after a restart: goodbye and watch, a dial in from the pinned contact takes over a held session, resume dials by either side, crossed dials settled by key.
-- 0.5 (2026-09-25): a choice made while not live travels in the capability record, is told once on the contact, is dialled first, and begins the next session as a switch intent; each side keeps and shows why its last attempt to go live did not.
-- 0.4 (2026-09-25): a chosen transport not reached yet is waited for, never failed: why it waits, when it is retried, where the chat is meanwhile (live on a fallback, or on the DHT with Fallback off), and no timeline rows for it.
-- 0.3 (2026-09-25): relayed transports: rank after direct ones, fallback after a failed WebRTC attempt, shown as relayed.
-- 0.3 (2026-09-25, later): a browser's HyperDHT through a HyperDHT relay is relayed too ([103](103-hyperdht.md)).
-- 0.2 (2026-09-25): the DHT as the floor under every transport, never a candidate; inputs from the layer-0 capability record; upgrade, downgrade and background retry rules; DHT only as a per-chat choice; after a drop, the redial and the agreement that follows it.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/100-transports/](changes/100-transports/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.
