@@ -160,6 +160,25 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect(world.events("bob")).toContain("removed");
   });
 
+  it("a pin by a member who is removed goes with them; the others' pins stay", async () => {
+    const { world, alice, others: [bob, carol], groupId, key } = await groupOf(["bob", "carol"]);
+    const pinBy = (by: string) => ({ id: `${key(bob)}:1:1`, n: Date.now(), by, at: Date.now(), k: by, sig: "s" });
+    await alice.setPin(groupId, pinBy(key(carol)));
+    await carol.setPin(groupId, { ...pinBy(key(carol)), by: "me" });
+    await bob.setPin(groupId, pinBy(key(carol)));
+    await alice.remove(groupId, key(carol)); await world.settle();
+    expect(alice.pinOf(groupId)).toBeUndefined();
+    expect(bob.pinOf(groupId)).toBeUndefined();
+    expect(world.peers.get("alice")!.store.groups.get(groupId)!.pin).toBeUndefined();
+
+    // Mine, or a member's still in the group, stays.
+    await alice.setPin(groupId, { ...pinBy(key(bob)), n: Date.now() + 1 });
+    await bob.setPin(groupId, { ...pinBy(key(alice)), by: key(alice), k: key(alice), n: Date.now() + 1 });
+    await alice.rotate(groupId); await world.settle();
+    expect(alice.pinOf(groupId)?.by).toBe(key(bob));
+    expect(bob.pinOf(groupId)?.by).toBe(key(alice));
+  });
+
   it("only the admin removes, rotates, hands over the role or invites; nobody removes a stranger", async () => {
     const { alice, others: [bob], groupId, key } = await groupOf(["bob"]);
     await expect(bob.remove(groupId, key(alice))).rejects.toThrow(/Only the admin/);

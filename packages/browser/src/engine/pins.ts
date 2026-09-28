@@ -22,6 +22,14 @@ export function pinView(pin: StoredPin | undefined): PinView | undefined {
   return pin && { id: pin.id, by: pin.by, at: pin.at, ...(pin.messageId && { messageId: pin.messageId }) };
 }
 
+/**
+ * Whether a private group's pin was made by someone no longer in its roster (`inRoster`): it goes when they do, so a
+ * member removed leaves nothing of theirs at the top of the chat.
+ */
+export function pinOfFormerMember(pin: StoredPin | undefined, inRoster: (key: string) => boolean): boolean {
+  return !!pin && pin.by !== "me" && !inRoster(pin.by);
+}
+
 /** Whether I may pin in this group now: the rule (`mayPin`) with my key and its admin's. */
 export function mayPinIn(group: GroupView | undefined): boolean {
   return !!group?.myKey && group.status === "active" && mayPin(group.profile, group.myKey, group.members.find(m => m.role === "admin")?.key);

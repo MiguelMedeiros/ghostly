@@ -5,7 +5,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { pinView } from "./pins";
+import { pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, metaLines, type CommunityTimings } from "./community";
@@ -1207,6 +1207,12 @@ export class Groups {
       for (const key of gone) await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
       if (top.k === "role") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === session.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
+    }
+    // A pin by someone no longer a member goes with them (WISP 9xx · Group Mesh § Pinned message).
+    const group = this.stored.get(groupId);
+    if (session.status === "active" && group && pinOfFormerMember(group.pin, key => rosterHas(after, key))) {
+      group.pin = undefined;
+      await this.store.putGroup(group);
     }
     this.reconcileEdges(groupId);
     this.host.membersChanged?.(groupId);
