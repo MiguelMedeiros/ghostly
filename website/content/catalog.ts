@@ -1,15 +1,15 @@
 
 export const catalog = {
   meta: {
-    title: "WISP catalog",
+    title: "WISPs",
     description: "Every Ghostly WISP draft: searchable, grouped by family, with specification status kept apart from what actually runs.",
   },
-  eyebrow: "WISP catalog",
+  eyebrow: "WISPs",
   title: "Every contract, in one place.",
   lead: "Each WISP is an open contract that any app can implement. Here are all of them, by family. Tap one to read it.",
   axes: "Two separate questions: every document is a Draft specification; the badge says whether what it describes runs in the app.",
   search: "Search by number, name or what it does",
-  searchLabel: "Search the catalog",
+  searchLabel: "Search the WISPs",
   family: "Family",
   kind: "Kind",
   level: "Availability",

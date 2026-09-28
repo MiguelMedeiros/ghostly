@@ -7,7 +7,7 @@
   position: relative;
 }
 .dv-sec--compose {
-  padding-block: clamp(56px, 10vh, 110px);
+  padding-block: clamp(72px, 12vh, 128px);
 }
 .dv-sec--negotiate {
   padding-block: clamp(80px, 16vh, 170px);
