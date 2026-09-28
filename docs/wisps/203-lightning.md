@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 203; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md) |
 | Implementation | Several Lightning cards per network, each on its own source (Cashu mints, Fedimint, Breez, NWC, Core Lightning, LND, WebLN) |
@@ -84,3 +82,7 @@ Wrong network, expired/amountless/mismatched invoice, duplicate request, fee ref
 ## References
 
 [Invoice parser](../../packages/core/src/bolt11.ts), [payment coordinator](../../packages/browser/src/engine/payments.ts), [Lightning contract](../../packages/browser/src/engine/paymentAdapters/providers/lightning.ts), [payment negotiation](200-payments.md).
+
+## Revision log
+
+One file per change in [changes/203-lightning/](changes/203-lightning/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

@@ -585,6 +585,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const swipe = useSwipeReply(onReply);
   const [imgError, setImgError] = useState(false);
   const [revealed, setRevealed] = useState(false);
+  /** The picture link whose picture has loaded: until it has, its box keeps a placeholder's height. */
+  const [pictureLoaded, setPictureLoaded] = useState<string | null>(null);
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
@@ -809,12 +811,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : contentType === "image" ? (
           <div className="relative">
+            {/* A link says nothing of its picture's size: a placeholder 120 px high (as high as most GIFs and photos are
+                at least, shown here) until it loads, so it grows less when it does. */}
             <img
               src={message.text.trim()}
               alt=""
-              className="rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block"
+              data-testid="picture-link"
+              className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
               style={WAYBACK_GIF_RE.test(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
               loading="lazy"
+              onLoad={() => setPictureLoaded(message.text.trim())}
               onError={() => setImgError(true)}
             />
             <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">

@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 201; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md) |
 | Implementation | Cashu wallet per network (Mainnet and Testnet); shared reviewed-payment coordinator |
@@ -52,3 +50,7 @@ The browser app also implements Cashu through the shared [payment intent coordin
 The opt-in [test-mint integration test](../../packages/browser/test/cashuAdapter.integration.test.ts) exercised 32 worthless sats redeemed by a second SDK wallet, and a deliberately lost swap response followed by NUT-09 recovery and redemption of 16 sats without another swap. Mint support for restore is a dependency: failure retains an unknown outcome and reserved inputs. Older application payment paths remain documented above; this does not claim universal NUT support or independent WISP conformance.
 
 The reviewed fee includes both the mint swap fee and the prepaid recipient redemption fee, derived from prepared input value minus change minus the requested amount. The SDK 4.x `preview.fees` field alone omits the recipient top-up. Integration tests assert exact balance reduction and reject a fee cap below the full cost before spending.
+
+## Revision log
+
+One file per change in [changes/201-cashu/](changes/201-cashu/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

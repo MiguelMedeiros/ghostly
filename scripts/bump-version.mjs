@@ -9,12 +9,13 @@
  * - both crates and Cargo.lock
  * - the website's release constant (download links are built from it)
  * - the download tables in docs/INSTALLATION.md
- * - CHANGELOG.md: "## Unreleased" becomes "## <version>"
+ * - CHANGELOG.md: the files in changes/ go into "## Unreleased" (and are deleted), which becomes "## <version>"
  *
  * See docs/RELEASING.md for the rest of a release.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { assembleChangelog, readFragments } from "./changes.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,7 +66,15 @@ edit("docs/INSTALLATION.md", (text) =>
     .replace(/Ghostly_\d+\.\d+\.\d+_/g, `Ghostly_${next}_`)
     .replace(/ghostly-browser-extension-\d+\.\d+\.\d+\.zip/g, `ghostly-browser-extension-${next}.zip`),
 );
-edit("CHANGELOG.md", (text) => text.replace(/^## Unreleased$/m, `## ${next}`));
+const fragments = readFragments(root);
+const broken = fragments.flatMap((f) => f.problems);
+if (broken.length) {
+  console.error(`✗ changes/: ${broken.join("; ")}`);
+  process.exit(1);
+}
+edit("CHANGELOG.md", (text) => assembleChangelog(text, fragments).replace(/^## Unreleased$/m, `## ${next}`));
+for (const { name } of fragments) rmSync(join(root, name));
+if (fragments.length) console.log(`✓ changes/: ${fragments.length} entries moved into CHANGELOG.md`);
 
 execFileSync("npm", ["install", "--package-lock-only", "--ignore-scripts"], { cwd: root, stdio: "inherit" });
 console.log(`✓ package-lock.json\n\n${previous} → ${next}. Next: docs/RELEASING.md`);

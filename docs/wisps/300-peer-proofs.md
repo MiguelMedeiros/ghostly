@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 300; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md) |
 | Implementation | Identity proofs with a provider contract: Nostr, Pubky, domain, OpenPGP, Bitcoin address, SSH, DID, AT Protocol (Bluesky); OpenID Connect built but not offered (no client ID). See [2026-09-23](#implementation-2026-09-23-identity-proofs) |
@@ -98,3 +96,7 @@ An [OpenPGP proof](3xx-openpgp.md) is drafted: the participant signs, once, the 
 ## Implementation follow-up (2026-09-23): provider-attested accounts (OpenID Connect)
 
 Provider `oidc` ([draft 3xx](3xx-oidc-proofs.md)): the person signs in with Google, Microsoft, Apple, GitLab or Twitch using the statement id as the OpenID Connect `nonce`; the provider's signed ID token is the evidence, checked by each contact against the provider's published keys, issuer, Ghostly's client ID, the nonce and the sign-in time, with no Ghostly server. It is **attested** by the provider (the contact trusts that company), not a key the person holds, and it is shown that way. Facebook, X/Twitter, LinkedIn and GitHub issue no ID token a browser can verify without a Ghostly server and are out. Clients are registered by the maintainer ([checklist](../OIDC-PROVIDERS.md)); until then the provider is neither offered nor accepted.
+
+## Revision log
+
+One file per change in [changes/300-peer-proofs/](changes/300-peer-proofs/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

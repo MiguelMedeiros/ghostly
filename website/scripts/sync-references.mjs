@@ -10,6 +10,7 @@ import { resolve, basename } from "node:path";
 import { roadmapCandidates } from "./roadmap-candidates.mjs";
 import { roadmapTracks } from "./roadmap-tracks.mjs";
 import { siteFields } from "./wisp-header.mjs";
+import { readChanges, withRevisions } from "./wisp-changes.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "docs/wisps");
 const destination = resolve(root, "website/public/reference");
@@ -116,10 +117,20 @@ function describe(body, file) {
     ...siteFields(body, file),
   };
 }
+// Each WISP's revision log is a folder of change files (wisp-changes.mjs); a folder must name a WISP.
+const wispStems = new Set(numbering.map((entry) => entry.file.replace(/\.md$/, "")));
+for (const stem of readdirSync(resolve(source, "changes"))) {
+  if (!wispStems.has(stem)) throw new Error(`docs/wisps/changes/${stem}/: no WISP ${stem}.md in numbering.json`);
+}
 const entries = paths.map((sourcePath) => {
   const file = basename(sourcePath);
-  copyFileSync(resolve(root, sourcePath), resolve(destination, file));
-  const body = readFileSync(resolve(root, sourcePath), "utf8");
+  const stem = file.replace(/\.md$/, "");
+  const text = readFileSync(resolve(root, sourcePath), "utf8");
+  // The published copy carries the Revision and Updated rows and the log, from docs/wisps/changes/<stem>/.
+  const changes = wispStems.has(stem) ? readChanges(source, stem) : [];
+  if (wispStems.has(stem) && !changes.length) throw new Error(`docs/wisps/${stem}.md: no change file in docs/wisps/changes/${stem}/ (see 00-process.md, "Revisions")`);
+  const body = changes.length ? withRevisions(text, stem, changes) : text;
+  writeFileSync(resolve(destination, file), body);
   return {
     file,
     sourcePath,

@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 4xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.3.2 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [03](03-capabilities.md), [1000](1000-storage.md), [1002](1002-s3-storage.md), [200](200-payments.md) |
@@ -59,7 +57,7 @@ One held item is one object: `"GHLD" || 0x01 || nonce(24) || XSalsa20-Poly1305(s
 | `kind` | `body` | `meta` | Limit |
 |---|---|---|---|
 | `text` | UTF-8 text | None, or `{ "r"?: { "i", "s", "f" }, "fw"? }`: `r` for a reply ([401](401-paired-chat.md#replies), revision 0.3), `fw` for a forwarded text, its hop count 1 to 255 ([401](401-paired-chat.md#forwards), revision 0.3.2) | 16 KiB |
-| `file` | the bytes | `{ "name", "size", "mime", "voice"?, "r"?, "fw"? }`, `size` = body length; `r` for a reply (revision 0.3.1), `fw` for a forwarded file (revision 0.3.2) | 8 MiB per bundle |
+| `file` | the bytes | `{ "name", "size", "mime", "voice"?, "video"?, "image"?, "r"?, "fw"? }`, `size` = body length; `video` and `image` as in [501](501-paired-files.md#rules) (revision 0.3.3); `r` for a reply (revision 0.3.1), `fw` for a forwarded file (revision 0.3.2) | 8 MiB per bundle |
 | `pay-req` | JSON of the [`pay-req`](../PROTOCOL.md#63-payments) frame without `t` | None | 64 KiB; Cashu and Lightning endpoints only |
 | `manifest` | empty | `{ "entries": [[seq, id, kind, bytes, url, expires], …] }` | 64 KiB, at most 64 entries, sequences strictly increasing |
 
@@ -108,8 +106,4 @@ A WebDAV or Blossom adapter with the same `presign` contract; whether a reader s
 
 ## Revision log
 
-- 0.3.2 (2026-09-27): a forwarded text or file carries `fw`, its hop count, in its `meta`.
-- 0.3.1 (2026-09-27): a held file that replies carries `r` in its `meta`, as a text does.
-- 0.3 (2026-09-27): a held text that replies carries `r` in its `meta`; readers from before ignore a text's `meta`.
-- 0.2 (2026-09-25): place in the one chat; consent also in the layer-0 capability record; holding continues while DHT only is chosen.
-- 0.1 (2026-09-24): `hold/1` profile.
+One file per change in [changes/4xx-store-and-forward/](changes/4xx-store-and-forward/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

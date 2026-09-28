@@ -1,0 +1,19 @@
+{
+  "anonymous": "مجهول",
+  "back": "رجوع",
+  "cancel": "إلغاء",
+  "chatCreated": "تم إنشاء المحادثة في {{date}}",
+  "close": "إغلاق",
+  "confirm": "تأكيد",
+  "copied": "تم النسخ!",
+  "copy": "نسخ",
+  "delete": "حذف",
+  "deleteChatLocal": "سيتم حذف المحادثة وسجلها من هذا الجهاز فقط، وليس نسخة جهة الاتصال.",
+  "deleteChatTitle": "حذف المحادثة؟",
+  "error": "خطأ",
+  "loading": "جاري التحميل...",
+  "moreInfo": "مزيد من المعلومات",
+  "save": "حفظ",
+  "success": "نجاح",
+  "unnamedContact": "جهة اتصال · {{key}}"
+}

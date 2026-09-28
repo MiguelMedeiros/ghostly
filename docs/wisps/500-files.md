@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 500; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
 | Implementation | 1:1 transfer in every chat: `files/3` (any size) and `files/2` on the chat session ([501](501-paired-files.md)), held files while not live ([4xx](4xx-store-and-forward.md)), [502](502-legacy-files.md) frames in compatibility chats |
@@ -50,6 +48,4 @@ Exact size, excess/truncated body, duplicate ID, malicious filename, disk quota,
 
 ## Revision log
 
-- 0.3 (2026-09-25): consent before large files, advertised storage instead of a fixed size limit, streaming to storage; resume and integrity in 501 `files/3`.
-- 0.2 (2026-09-25): files in the one chat: layer 1 or a hold, never DHT records; queued while on the DHT; 502 for compatibility chats only.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/500-files/](changes/500-files/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

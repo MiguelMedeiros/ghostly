@@ -9,6 +9,7 @@ import { engine } from '@ghostly/browser/platform/engine';
 import type { LinkView } from '@ghostly/browser/shared/types';
 import { importLocalSigner, disposableImportSecret, type LocalProofSigner } from '@ghostly/browser/proofs/imported';
 import { extensionSigner, withNostrSigner } from '@ghostly/browser/proofs/nostr';
+import { externalLinkProps } from '../lib/externalLink';
 
 export function PeerProofsDialog({ link }: { link: LinkView }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -119,7 +120,7 @@ export function PeerProofsDialog({ link }: { link: LinkView }) {
             <p className="text-xs leading-5 text-text-muted">Sharing the same identity elsewhere can link your conversations.</p>
             {!supported && <p role="status" className="rounded-lg bg-text-muted/10 p-2 text-xs text-text-muted">Connect to this contact to share this identity.</p>}
             <div className="flex gap-2"><button className="min-h-10 flex-1 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header" disabled={busy || !supported || (adapter === 'nostr' ? signer === 'bunker' && !bunker : !hasSecret)} onClick={() => void share()}>{busy ? 'Waiting for approval…' : 'Share with this contact'}</button>{busy && <button className={action} onClick={() => { abort.current?.abort(); clearSecret(); setMessage('Cancelled. Nothing else will be sent.'); }}>Cancel</button>}</div>
-            {auth && <a href={auth} target="_blank" rel="noreferrer" className="block rounded text-xs text-accent underline">Open signer approval</a>}
+            {auth && <a {...externalLinkProps(auth)} className="block rounded text-xs text-accent underline">Open signer approval</a>}
             <details className="text-xs text-text-muted"><summary className="cursor-pointer rounded py-1 focus-visible:ring-2 focus-visible:ring-accent">How it works</summary><div className="mt-2 space-y-3 leading-5"><p>Extra identities are optional and bound to this conversation. They do not verify a person’s identity.</p><p>{adapter === 'nostr' ? 'Supports NIP-07 browser extensions and NIP-46 remote signers. Use a connection link supplied by your signer.' : 'Accepts a 24-word English mnemonic without an extra passphrase. It does not connect to the Keet app.'}</p>{adapter === 'keet-import' && <><p>The field and signing buffers are cleared after use or cancellation. JavaScript and SDK memory cannot guarantee perfect erasure.</p><button className={action} disabled={busy} onClick={async () => {
               const controller = new AbortController(); abort.current = controller; setBusy(true); setMessage('');
               try { const value = await disposableImportSecret(adapter); if (!controller.signal.aborted && secret.current) { secret.current.value = value; setHasSecret(true); setMessage('Test key ready. Nothing shared yet.'); } }

@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 402; editorial family allocation |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-25 |
 | Document kind | Profile |
 | Disposition | Retained for compatibility: existing chats and v0.4 codes only; no new chat is created with it |
 | Dependencies | [400](400-chat.md) |
@@ -57,5 +55,4 @@ Keep legacy parsing separate from [the chat session 401](401-paired-chat.md) and
 
 ## Revision log
 
-- 0.2 (2026-09-25): renamed Compatibility Chat; retained, not withdrawn; scope narrowed to existing chats and v0.4 codes; layer mapping; the move to the one chat.
-- 0.1 (2026-09-22): legacy timestamp chat profile.
+One file per change in [changes/402-legacy-chat/](changes/402-legacy-chat/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

@@ -77,7 +77,8 @@ ghostly/
    ```bash
    git checkout -b feat/spooky-feature origin/dev
    ```
-2. Make your change, **with its tests** (below).
+2. Make your change, **with its tests** (below). A change people will notice gets a changelog entry: one file in
+   [`changes/`](changes/README.md), not a line in `CHANGELOG.md`.
 3. Before pushing, run what your change can break:
    ```bash
    npm run test:affected -- --port 50310   # unit, lint, typecheck, Rust, and the e2e tagged with the features you touched
@@ -90,12 +91,17 @@ CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop ch
 
 - **Unit tests** for the logic (Vitest; Rust `#[cfg(test)]` for `src-tauri` and `cli`).
 - **An e2e test** for what a person does or sees (Playwright, `e2e/`).
-- **One line in `e2e/features.json`** for a new feature, and each test says what it covers: `{ tag: ["@feature:<id>"] }` in Playwright, `// covers: <id>` in Vitest and Rust. `npm run test:map` fails in CI on a feature with no test that is not on `e2e/allow-untested.json`.
+- **One line in `e2e/features.json`** for a new feature, in its alphabetical place by id (`npm run test:map -- --fix` sorts the file), and each test says what it covers: `{ tag: ["@feature:<id>"] }` in Playwright, `// covers: <id>` in Vitest and Rust. `npm run test:map` fails in CI on a feature with no test that is not on `e2e/allow-untested.json`.
 
 Details: [docs/TESTING.md](docs/TESTING.md).
 
+### Text in the app
+
+Every string the app shows goes through `t("area.key")`. Each language is a folder of one file per area of the app, `src/locales/<language>/<area>.json`: add a key to its area's file in all eight languages (English in `en/`, the source). A new area is a new file in every folder, plus its two lines in `src/locales/en/index.ts`, which gives `t()` its types. Keys are sorted in every file: `npm run locales:sort` puts them in order, and the i18n tests fail on a file out of order, on a key missing from a language, and on a placeholder a translation drops.
+
 ### Writing docs and site copy
 
+- A change to a WISP (`docs/wisps/`) adds one file to its folder in `docs/wisps/changes/` saying what changed; do not edit a Revision row or a log line. See [WISP 00](docs/wisps/00-process.md#revisions).
 - Keep the README short; details go in `docs/`. A new topic gets its own page there and one link from the README.
 - No em dashes or en dashes (U+2014, U+2013) in `docs/`, `website/`, this file or `SECURITY.md`: use a period, a comma, a colon or parentheses, and a hyphen or "to" in a range. `npm run lint` in `website/` checks the files the site renders (`scripts/check-dashes.mjs`).
 - Short sentences, plain words. Prefer a table or a list to a long paragraph.

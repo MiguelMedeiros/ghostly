@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Built, not offered: `packages/browser/src/proofs/oidc/`, provider `oidc`. Every client ID in `oidc/providers.ts` is empty, so no provider is offered or accepted until the maintainer registers them ([checklist](../OIDC-PROVIDERS.md)) |
@@ -77,3 +75,7 @@ Unit tests (`packages/browser/test/oidcVerify.test.ts`, `oidcFlow.test.ts`, `oid
 ## Open decisions
 
 Whether contacts should be able to require a provider proof by policy; how to show a Microsoft tenant name (the token carries only its ID); registration of the provider clients (maintainer).
+
+## Revision log
+
+One file per change in [changes/3xx-oidc-proofs/](changes/3xx-oidc-proofs/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

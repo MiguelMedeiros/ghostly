@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 1002; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [1000](1000-storage.md), [05](05-backups.md) |
 | Implementation | Experimental: web and desktop clients; exercised against a local S3-compatible server |
@@ -47,3 +45,7 @@ Every request is signed with AWS Signature Version 4 in the client (`x-amz-conte
 - The provider sees object sizes, timing and the client's IP address, not content.
 - A contact picking up held items reads presigned addresses from its own client, so the bucket's CORS rules must allow `GET` from that client's origin; `*` for `GET` is fine (the address is the authorization, and the object is ciphertext). Writes stay the person's own.
 - Names never leave the app's folders: a client MUST refuse object names other than `<space>/backups/<file>` and `<space>/hold/<mailbox>/<file>` (no empty, `.` or `..` segments, in the prefix either), MUST ignore listed keys outside the folder it asked for, and SHOULD bound listing pages (this client: 100) and object size (the bundle limit of [05](05-backups.md)). Someone else with write access to the bucket, or the provider, can then at most offer a bundle that fails to open.
+
+## Revision log
+
+One file per change in [changes/1002-s3-storage/](changes/1002-s3-storage/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

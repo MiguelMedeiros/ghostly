@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 900; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-24 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
 | Implementation | Two profiles: [`group-mesh/1`](9xx-group-mesh.md) (private, up to 32) and [`group-community/1`](9xx-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members |
@@ -84,3 +82,7 @@ The core test suite creates a group, admits two members, has everyone read every
 ## References
 
 [Group mesh profile](9xx-group-mesh.md), [group community profile](9xx-group-community.md), [invite/admission](800-invite-join.md), [keys](02-peer-keys.md), [chat](400-chat.md), [GossipSub candidate](901-gossipsub.md), [interoperability gates](INTEROP.md).
+
+## Revision log
+
+One file per change in [changes/900-group-sessions/](changes/900-group-sessions/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.12 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
 | Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts) and, for the group's link (`group-entry/1`), [`groupEntry.ts`](../../packages/core/src/groupEntry.ts); engine, UI and four-browser e2e in [`packages/browser`](../../packages/browser/src/engine/groups.ts) and [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts); web, extension and desktop share it |
@@ -295,15 +293,4 @@ Private payments in a group (no note, or amounts hidden); more metadata (renamin
 
 ## Revision log
 
-- 0.12 (2026-09-27): forwards: `f`, a forwarded text's hop count, on `group-msg`, covered by `xs`.
-- 0.11 (2026-09-27): a note that checking other profiles for new messages does not cover mesh groups, and why.
-- 0.10 (2026-09-27): edits handed on like messages: every member keeps the latest edit per message and hands an asked-for author's on; an edit handed on is taken with the author's signature, while both members are in the roster.
-- 0.9 (2026-09-27): up to 32 members (past eight only when every member's app announces `paired-groups` version 3); any member hands on what another missed (`ask`, `miss`, `xs`), removed members neither handed on nor taken from a third member; a large mesh paces its edges and announces who is back (`group-here`) (#373).
-- 0.8 (2026-09-27): edits of sent messages, `group-edit` (#378).
-- 0.7 (2026-09-27): reactions: a frame of their own on each of the reactor's edges, one emoji per member per message, not in the message log (#354).
-- 0.6 (2026-09-27): replies: a sealed `r` box beside the mentions' `m` on `group-msg` (#347).
-- 0.5 (2026-09-25): @mentions bound to member keys, in a sealed `m` box (#279).
-- 0.4 (2026-09-24): a group picture set by the admin, outside the commit chain (#154).
-- 0.3 (2026-09-24): payments between two members over their own edge, and a request to the whole group (#145).
-- 0.2 (2026-09-24): the group's link, `group-entry/1`, anyone with it can ask to join while the admin's app is open (#109).
-- 0.1 (2026-09-23): `group-mesh/1`: one admin, signed commit chain, epoch secrets sealed per member, a mesh of pairwise edges (#102, #106).
+One file per change in [changes/9xx-group-mesh/](changes/9xx-group-mesh/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

@@ -9,6 +9,7 @@ import {
   type ResetFrame,
 } from "./frames";
 import type { WireReply } from "./replies";
+import type { ImageMeta } from "./image";
 import { PLAYABLE_VIDEO, type VideoMeta } from "./video";
 import { PLAYABLE_AUDIO, type VoiceMeta } from "./voice";
 
@@ -29,6 +30,8 @@ export interface FileInfo {
   voice?: VoiceMeta;
   /** A video: its length, size and a small first frame (optional; old apps ignore it). */
   video?: VideoMeta;
+  /** A picture: its size as it is shown, so its box is laid out before it arrives (optional; old apps ignore it). */
+  image?: ImageMeta;
   /** The message this file answers (`r`, WISP 401 § Replies): files/2, files/3 and held items; older apps ignore it. */
   reply?: WireReply;
   /** How many times it has been forwarded (`fw`, WISP 401 § Forwards): files/2, files/3 and held items; older apps ignore it. */

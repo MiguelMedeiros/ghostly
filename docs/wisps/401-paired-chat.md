@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.13 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
 | Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`), reactions (`react/1`) and edits (`edit/1`) on the live session; replies on texts and files; forwarded texts and files with their hop count. |
@@ -152,18 +150,4 @@ First contact runs on the DHT and on a stream in parallel, and native transports
 
 ## Revision log
 
-- 0.13 (2026-09-27): forwards: `fw`, the hop count of a forwarded text (and of a file's announcement), 1 to 255.
-- 0.12 (2026-09-27): `paired-bye`, the goodbye an app sends on its way out.
-- 0.11 (2026-09-27): what a typing `start` says: `kind` (typing, recording, thinking) and a bot's `status` line (40 characters, plain text); older apps show typing.
-- 0.10 (2026-09-27): edits, `edit/1` with `paired-edit` and `paired-edited` on the live session: the whole new text numbered per message, only the contact's own messages, a receive limit, an edit before its message waits a minute.
-- 0.9 (2026-09-27): a file (a voice message included) can be a reply: `r` on its announcement, as on a text.
-- 0.8 (2026-09-27): reactions, `react/1` with `paired-reaction` and `paired-reacted`, confirmed by number, capped per window.
-- 0.7 (2026-09-27): replies (`r` on `paired-message`): the original's id, a cleaned line and its author, checked by the reader against this chat.
-- 0.6 (2026-09-27): the typing indicator, `typing/1` and `paired-typing` on the live session only, 1:1 chats.
-- 0.5.1 (2026-09-27): Desktop on Linux offers `calls/1` too, with its own call media (#331).
-- 0.5 (2026-09-25): link previews (`pv` on `paired-message`), made by the sender and never fetched by the reader.
-- 0.4 (2026-09-25): `files/3` announced in `paired-capabilities` too ([501](501-paired-files.md) 0.3).
-- 0.3 (2026-09-25): `calls/1` and `services/1` announced after the handshake in `paired-capabilities`; both need a live session. Shared apps now need `services/1` on both sides.
-- 0.2.1 (2026-09-25): hosted local services already run on this session (`ph` frames); only calls are the gap. Implementation status updated.
-- 0.2 (2026-09-25): renamed Chat Session; the layer-1 session of the one chat; first contact may complete on the DHT; the `no-dht-payload` transcript constant explained; capabilities list; calls and hosted services named as gaps.
-- 0.1 (2026-09-22): paired chat profile.
+One file per change in [changes/401-paired-chat/](changes/401-paired-chat/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

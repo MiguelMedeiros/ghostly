@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 501; editorial family allocation |
 | Status | Draft |
-| Revision | 0.4.3 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
 | Implementation | Every chat session: `files/3` (any size, consent, resume) and `files/2` for older apps; WebRTC and supported native adapters |
@@ -28,7 +26,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 
 | Frame | From | Meaning |
 |---|---|---|
-| `pf-offer {id, name, mime, size, ts, voice?, video?, r?, fw?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)), `fw` when it was forwarded (its hop count, [401](401-paired-chat.md#forwards)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
+| `pf-offer {id, name, mime, size, ts, voice?, video?, image?, r?, fw?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)), `fw` when it was forwarded (its hop count, [401](401-paired-chat.md#forwards)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
 | `pf-accept {id, offset}` | receiver | Send from `offset` (0, or where the stored part ends) |
 | `pf-wait {id, why}` | receiver | Not now: `consent` (its person has not decided), `paused`, `busy` (other files arrive first) |
 | `pf-data {id, offset, data}` | sender | base64url bytes at `offset`, at most 16 KiB |
@@ -47,6 +45,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 - **Stuck transfers (0.3.2, no wire change).** An unfinished transfer that has not moved for 60 s, or not since the app started, and is not waiting for a person (an answer, a pause) offers its person **Send again** (sender: the offer goes again now, under its id) or **Ask again** (receiver: `accept` at what it has). Either goes on from the bytes the receiver holds, and the chat keeps one message on each side. With no live session the action waits for the next one, and the app tries to connect. A failed transfer keeps its own **Retry**.
 - **Backpressure.** A sender puts a data frame on the session only when the session has room: channels with a small send budget (the native and Iroh ones refuse frames past 120 KiB queued) give files a quarter of it, so pings and messages still fit. Sending again into a full channel at once never let it drain, and froze the app (0.3.2).
 - **Video description (0.4.1).** A `video/*` file's offer (and a `files/2` `pf-start`, and a held file's meta in [4xx](4xx-store-and-forward.md)) may carry `video {duration, width, height, poster?}`: milliseconds, pixels as it plays, and a JPEG of an early frame in base64url, at most 12 KiB, so the receiver shows a picture and a length before a byte has arrived (and before its person accepts a large one). Optional and advisory: an app that does not know it ignores it, and a malformed one is dropped without refusing the file (a bad poster alone drops only the poster). The receiver may make its own poster from the first frame once the file is in. Received video of a playable type (MP4, WebM, QuickTime, Ogg, M4V) is handed to a player with its type; anything else stays opaque bytes.
+- **Picture size (0.4.4).** An `image/*` file's offer (and a `files/2` `pf-start`, and a held file's meta in [4xx](4xx-store-and-forward.md)) may carry `image {width, height}`: whole pixels from 1 to 65535, as the picture is shown (a JPEG's EXIF orientation applied), so the receiver lays out the picture's box before a byte has arrived and the chat does not move when it loads. The sender reads it from the file's first 256 KiB (the PNG, GIF and WebP headers, a JPEG's frame header) without decoding the picture, and sends none when they do not say. Optional and advisory: an app that does not know it ignores it, a malformed one is dropped without refusing the file, and a receiver shows a picture that loads as another shape as it loaded. A receiver without one may read the size from the bytes once they are in.
 - **Integrity.** The receiver computes the SHA-256 of what it stored (read back, not what passed through memory) and compares it with `pf-sum`. A mismatch deletes the file and is refused with `damaged`; the sender may offer it again under the same id, and the receiver takes it from the start without asking again.
 - **Pause and cancel.** The sender pauses by offering with `paused` and resumes by offering without it; the receiver pauses with `pf-wait` `paused` and resumes with `pf-accept`. Either side cancels: the sender with `pf-abort`, the receiver with `pf-refuse` `cancelled`; the receiver removes what it stored.
 - **Offered again after a stop (0.4.2, no wire change).** A transfer its sender stopped with `pf-abort` (a read failure, for example) is taken again from the start when the sender offers it again under the same id. One the receiver's person cancelled stays refused with `cancelled`. An older receiver refuses both, as before.
@@ -69,12 +68,4 @@ For `files/2`: the common contract's 100 MiB file bound, three concurrent incomi
 
 ## Revision log
 
-- 0.4.3 (2026-09-27): forwarded files carry `fw` on `pf-offer` and `pf-start`.
-- 0.4.2 (2026-09-27): a transfer its sender stopped (`pf-abort`) is taken again from the start when offered again; one the receiver cancelled stays refused (#352).
-- 0.4.1 (2026-09-27): optional `video` description on an offer (length, size, poster); no change for apps that ignore it.
-- 0.4 (2026-09-27): `r` on `pf-offer` and `pf-start`: a file that answers a message. A reply that does not check out is dropped; the file is taken all the same. Older apps ignore it.
-- 0.3.2 (2026-09-27): stuck transfers (no move for 60 s) offer Send again and Ask again; a receiver with no data for 30 s accepts again by itself; a sender writes only while the session has room (#348). No wire change.
-- 0.3.1 (2026-09-26): an offer that expired unanswered is refused when offered again, never taken without consent.
-- 0.3 (2026-09-25): `files/3`: offer and consent, advertised room, 1 MiB window, resume from the stored offset after a drop, a switch or a restart, SHA-256 checked on what was stored, pause and cancel from either side. `files/2` kept for older apps.
-- 0.2 (2026-09-25): renamed Chat Files; place in the one chat; behaviour on a drop to the DHT.
-- 0.1 (2026-09-22): paired files profile.
+One file per change in [changes/501-paired-files/](changes/501-paired-files/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

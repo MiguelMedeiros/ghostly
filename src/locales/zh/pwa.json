@@ -1,0 +1,17 @@
+{
+  "install": "安装",
+  "installHint": "独立窗口，并在主屏幕或程序坞上有图标。",
+  "installLabel": "安装 Ghostly",
+  "installTitle": "安装",
+  "iosHint": "在 Safari 中点按分享，然后点按添加到主屏幕。",
+  "iosLabel": "添加到主屏幕",
+  "offline": "离线",
+  "offlineHint": "你的聊天都在这里。恢复联网前不会发出任何内容。",
+  "shareFiles": "{{count}} 个文件",
+  "shareHint": "选择一个聊天。在那里检查后发送。",
+  "shareNoChats": "还没有聊天。先开始一个，再重新分享。",
+  "shareNone": "没有分享任何内容，或已被接收。",
+  "shareOneFile": "1 个文件",
+  "shareTitle": "分享到…",
+  "shareWaiting": "正在接收分享的内容..."
+}

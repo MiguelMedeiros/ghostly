@@ -1,0 +1,127 @@
+{
+  "compat": {
+    "continued": "You invited your contact to a new chat.",
+    "hint": "This chat was made with a Ghostly 0.4 code. Text and calls keep working both ways; a chat made with a current invite adds files, payments and held messages.",
+    "label": "Compatibility chat · older Ghostly",
+    "open": "Open the new chat"
+  },
+  "connecting": "connecting",
+  "deleteMessage": "Delete message",
+  "deleteMessageHint": "Deleted only here. Your contact keeps their copy.",
+  "delivery": {
+    "delivered": "Delivered",
+    "failed": "Not sent",
+    "hint": {
+      "delivered": "Your contact's app received it.",
+      "failed": "Not sent. Tap to send again.",
+      "held": "Kept for your contact until they are online.",
+      "queued": "No receipt yet. Sends again by itself.",
+      "sending": "On its way.",
+      "sent": "Sent. No receipt yet.",
+      "waiting": "Sends by itself when your contact is online."
+    },
+    "retry": "Not sent. Send again",
+    "sending": "Sending",
+    "sent": "Sent",
+    "waiting": "Waiting for your contact to be online"
+  },
+  "edit": {
+    "cancel": "Cancel edit",
+    "editing": "Editing"
+  },
+  "forward": {
+    "filesHint": "Groups take text only",
+    "forward": "Forward",
+    "forwarded": "Forwarded",
+    "many": "Forwarded many times",
+    "messages": "{{count}} messages",
+    "noChats": "No chats yet",
+    "noMatch": "No chat by that name",
+    "pick": "Pick up to {{count}}",
+    "search": "Search chats",
+    "select": "Select",
+    "selected": "{{count}} selected",
+    "send": "Send",
+    "title": "Forward to…"
+  },
+  "jump": {
+    "bottom": "Scroll to bottom",
+    "count": "{{count}} new",
+    "new": "{{count}} new messages, scroll to bottom",
+    "newOne": "1 new message, scroll to bottom"
+  },
+  "lastSeen": "Last seen {{time}}",
+  "menu": {
+    "continueNew": "Continue in a new chat",
+    "hold": "Hold messages…",
+    "pin": "Pin chat",
+    "refresh": "Refresh",
+    "techInfo": "Tech Info",
+    "unpin": "Unpin chat"
+  },
+  "message": {
+    "cancelSending": "Cancel sending",
+    "copied": "Copied",
+    "copyHint": "Click to copy",
+    "copyJson": "Copy all as JSON",
+    "details": "Details",
+    "detailsClose": "Close",
+    "detailsTitle": "Message details",
+    "download": "Download",
+    "downloadArriving": "Not received yet",
+    "downloadConverting": "Converting…",
+    "downloadFailed": "Did not arrive",
+    "downloadMissing": "Not on this device",
+    "downloadMp3": "Download as MP3",
+    "downloadPreparing": "Still being prepared",
+    "downloadUnconverted": "Could not convert",
+    "edit": "Edit",
+    "editPending": "Not shown to your contact yet",
+    "editPendingGroup": "Not sent to the group yet",
+    "edited": "edited",
+    "editedAt": "Edited {{time}}",
+    "keysHint": "Keys are never shown here.",
+    "options": "Message options",
+    "reply": "Reply",
+    "retry": "Send again"
+  },
+  "offline": "offline",
+  "online": "online",
+  "options": "Options",
+  "reactions": {
+    "chipLabel": "{{emoji}}: {{names}}",
+    "more": "More emoji",
+    "note": "{{name}} reacted {{emoji}} to \"{{snippet}}\"",
+    "noteMine": "You reacted {{emoji}} to \"{{snippet}}\"",
+    "notice": "Someone reacted to your message",
+    "react": "React"
+  },
+  "reply": {
+    "cancel": "Cancel reply",
+    "deleted": "Original message deleted",
+    "jump": "Go to the original message",
+    "notHere": "The original is not in this chat",
+    "replyingTo": "Replying to {{name}}",
+    "unavailable": "Original message not available",
+    "unverified": "Not found in this chat",
+    "you": "You"
+  },
+  "rich": {
+    "code": "Code",
+    "copied": "Copied",
+    "copy": "Copy",
+    "copyCode": "Copy code",
+    "localTime": "{{time}} your time",
+    "showAll": "Show all",
+    "showLess": "Show less",
+    "spoiler": "Hidden text. Tap to show it",
+    "unshowable": "This message could not be shown."
+  },
+  "send": "Send",
+  "today": "Today",
+  "typeMessage": "Type a message...",
+  "typing": "typing…",
+  "typingRecording": "recording audio…",
+  "typingThinking": "thinking…",
+  "yesterday": "Yesterday"
+}

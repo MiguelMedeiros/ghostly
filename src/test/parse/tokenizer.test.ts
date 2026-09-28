@@ -124,7 +124,43 @@ describe("links", () => {
     expect(inline("javascript:alert(1) data:text/html,x ftp://x.example")).toBe("javascript:alert(1) data:text/html,x ftp://x.example");
     expect(inline("https://")).toBe("https://");
   });
+
+  it("keeps an encoded query whole", () => {
+    const url = "https://github.com/MiguelMedeiros/ghostly/pulls?q=is%3Apr+is%3Aopen+base%3Adev";
+    expect(inline(`${url} and ${url}.`)).toBe(`[link:${url}] and [link:${url}].`);
+  });
+
+  it("links an address after a label ending in a colon", () => {
+    expect(inline("PRs abertos no dev: https://x.example/a")).toBe("PRs abertos no dev: [link:https://x.example/a]");
+    expect(inline("dev:https://x.example/a")).toBe("dev:[link:https://x.example/a]");
+  });
+
+  it("links an address in a bullet item", () => {
+    const [list] = parseMessage("• A regra do dev: https://x.example/rules/24090296");
+    expect(list.type === "list" && short(list.items[0].segments)).toBe("A regra do dev: [link:https://x.example/rules/24090296]");
+  });
+
+  // Miguel's report (2026-09-27): a CLI message whose links did not open in the macOS app. They were found here all
+  // along; the Desktop WebView opened no new tab (src/test/chat/messageLinks.test.tsx).
+  it("links both addresses of a bulleted message with an indented line", () => {
+    const blocks = parseMessage(REPORTED);
+    expect(blocks.map((b) => b.type)).toEqual(["paragraph", "list", "paragraph"]);
+    const list = blocks[1];
+    if (list.type !== "list") throw new Error("not a list");
+    expect(list.items.map((item) => short(item.segments))).toEqual([
+      "PRs abertos no dev: [link:https://github.com/MiguelMedeiros/ghostly/pulls?q=is%3Apr+is%3Aopen+base%3Adev]\n"
+        + "Os armados mostram \"Auto-merge enabled\" na página do PR, e o merge box diz o que falta (CI ou atualizar).",
+      "A regra do dev: [link:https://github.com/MiguelMedeiros/ghostly/settings/rules/24090296]",
+    ]);
+  });
 });
+
+/** A message that reached the macOS app with links that did not open, as `ghostly send --stdin` sent it. */
+const REPORTED = `O GitHub não tem página de fila pra repo de usuário (só pra org). O que dá pra ver:
+• PRs abertos no dev: https://github.com/MiguelMedeiros/ghostly/pulls?q=is%3Apr+is%3Aopen+base%3Adev
+  Os armados mostram "Auto-merge enabled" na página do PR, e o merge box diz o que falta (CI ou atualizar).
+• A regra do dev: https://github.com/MiguelMedeiros/ghostly/settings/rules/24090296
+A ordem mesmo fica no meu loop aqui. Agora: #408 (CI rodando) → #405 → #411. #394 e #402 esperando rebase.`;
 
 describe("long blobs", () => {
   const key = "A1b2".repeat(25);

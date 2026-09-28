@@ -51,88 +51,89 @@ fn only_main<R: tauri::Runtime>(
 }
 
 /// Every command the app registers: the same list for the app and for the
-/// tests that check who may call them. `build.rs` declares the same names.
+/// tests that check who may call them. `build.rs` declares the same names. Alphabetical, one per line
+/// (a test checks), here, in `build.rs` and in `capabilities/default.json`.
 macro_rules! commands {
     () => {
         tauri::generate_handler![
-            notifications::native_notification_permission,
-            notifications::native_private_notification,
-            notifications::open_notification_settings,
-            paired_transport::paired_iroh_start,
-            paired_transport::paired_iroh_address,
-            paired_transport::paired_iroh_connect,
-            paired_transport::paired_native_send,
-            paired_transport::paired_native_close,
-            paired_transport::paired_iroh_stop,
-            hyperdht::paired_hyperdht_start,
-            hyperdht::paired_hyperdht_address,
-            hyperdht::paired_hyperdht_connect,
-            hyperdht::paired_hyperdht_send,
-            hyperdht::paired_hyperdht_close,
-            hyperdht::paired_hyperdht_stop,
-            commands::get_profile,
+            clipboard::read_clipboard_files,
+            clipboard::read_clipboard_text,
+            clipboard::read_pasted_bytes,
+            commands::bitcoind_rpc,
             commands::create_keypair,
-            commands::get_public_key,
-            commands::generate_enc_key,
-            commands::encrypt_text,
             commands::decrypt_text,
+            commands::diagnostic_log,
+            commands::encrypt_text,
+            commands::generate_enc_key,
+            commands::get_profile,
+            commands::get_public_key,
+            commands::link_preview_fetch,
+            commands::lnd_request,
+            commands::local_fetch,
+            commands::open_payment_link,
+            commands::open_project_link,
+            commands::open_pubky_passport,
+            commands::open_service_window,
+            commands::open_web_link,
+            commands::pkarr_network_changed,
+            commands::pkarr_status,
+            commands::pubky_session_close,
+            commands::pubky_session_fetch,
             commands::publish_messages,
-            commands::resolve_messages,
             commands::publish_records,
             commands::publish_signed_packet,
+            commands::resolve_messages,
             commands::resolve_records,
-            commands::set_pkarr_relays,
-            commands::pkarr_status,
-            commands::pkarr_network_changed,
-            commands::diagnostic_log,
-            commands::local_fetch,
-            commands::bitcoind_rpc,
-            commands::lnd_request,
-            commands::open_service_window,
             commands::service_respond,
+            commands::set_pkarr_relays,
             commands::updater_can_install,
-            commands::open_project_link,
-            commands::open_payment_link,
-            commands::open_pubky_passport,
-            commands::pubky_session_fetch,
-            commands::pubky_session_close,
-            commands::link_preview_fetch,
-            commands::open_web_link,
-            share::share_text,
-            clipboard::read_clipboard_text,
-            clipboard::read_clipboard_files,
-            clipboard::read_pasted_bytes,
-            oidc::oidc_loopback_start,
-            oidc::oidc_loopback_wait,
-            oidc::oidc_loopback_cancel,
             file_store::file_bytes_append,
-            file_store::file_bytes_flush,
             file_store::file_bytes_close,
-            file_store::file_bytes_size,
-            file_store::file_bytes_truncate,
-            file_store::file_bytes_read,
             file_store::file_bytes_digest,
+            file_store::file_bytes_flush,
+            file_store::file_bytes_read,
             file_store::file_bytes_remove,
             file_store::file_bytes_remove_where,
             file_store::file_bytes_room,
             file_store::file_bytes_save,
-            file_stream::file_bytes_stream_open,
+            file_store::file_bytes_size,
+            file_store::file_bytes_truncate,
             file_stream::file_bytes_stream_close,
-            native_call::native_call_support,
+            file_stream::file_bytes_stream_open,
+            hyperdht::paired_hyperdht_address,
+            hyperdht::paired_hyperdht_close,
+            hyperdht::paired_hyperdht_connect,
+            hyperdht::paired_hyperdht_send,
+            hyperdht::paired_hyperdht_start,
+            hyperdht::paired_hyperdht_stop,
+            native_call::native_call_accept,
+            native_call::native_call_answer,
+            native_call::native_call_camera,
+            native_call::native_call_close,
             native_call::native_call_devices,
             native_call::native_call_devices_watch,
-            native_call::native_camera_open,
-            native_call::native_camera_close,
-            native_call::native_call_open,
-            native_call::native_call_offer,
-            native_call::native_call_answer,
-            native_call::native_call_accept,
-            native_call::native_call_mute,
             native_call::native_call_microphone,
+            native_call::native_call_mute,
+            native_call::native_call_offer,
+            native_call::native_call_open,
             native_call::native_call_speaker,
-            native_call::native_call_camera,
             native_call::native_call_stats,
-            native_call::native_call_close,
+            native_call::native_call_support,
+            native_call::native_camera_close,
+            native_call::native_camera_open,
+            notifications::native_notification_permission,
+            notifications::native_private_notification,
+            notifications::open_notification_settings,
+            oidc::oidc_loopback_cancel,
+            oidc::oidc_loopback_start,
+            oidc::oidc_loopback_wait,
+            paired_transport::paired_iroh_address,
+            paired_transport::paired_iroh_connect,
+            paired_transport::paired_iroh_start,
+            paired_transport::paired_iroh_stop,
+            paired_transport::paired_native_close,
+            paired_transport::paired_native_send,
+            share::share_text,
         ]
     };
 }
@@ -400,7 +401,6 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 78, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()
@@ -415,6 +415,38 @@ mod tests {
                 env!("CARGO_MANIFEST_DIR")
             );
             assert!(std::path::Path::new(&file).exists(), "{file}");
+        }
+    }
+
+    /// Each list is in alphabetical order, one entry per line, so two pull requests that add commands add
+    /// lines in different places and do not conflict.
+    #[test]
+    fn the_command_lists_are_in_alphabetical_order() {
+        let source = include_str!("main.rs");
+        let list = &source[source.find("tauri::generate_handler![").unwrap()..];
+        let list = &list[list.find('[').unwrap() + 1..list.find(']').unwrap()];
+        let paths: Vec<String> = list
+            .split(',')
+            .map(|path| path.trim().to_string())
+            .filter(|path| !path.is_empty())
+            .collect();
+        let granted: Vec<String> = capability()["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p.as_str())
+            .filter(|p| p.starts_with("allow-"))
+            .map(str::to_string)
+            .collect();
+        let lists: [(&str, Vec<String>); 3] = [
+            ("main.rs commands!", paths),
+            ("build.rs COMMANDS", declared()),
+            ("capabilities/default.json allow-*", granted),
+        ];
+        for (name, list) in lists {
+            let mut sorted = list.clone();
+            sorted.sort();
+            assert_eq!(list, sorted, "{name} is not in alphabetical order");
         }
     }
 

@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 01; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [00](00-process.md) |
 | Implementation | Rendezvous and DHT text in every client; the DHT as rendezvous and floor of every chat; native clients (Desktop, CLI) read the Mainline DHT directly; a circuit breaker per Pkarr relay in every client |
@@ -66,6 +64,4 @@ Exchange current TypeScript/Rust fixtures; reject wrong signatures and tampered 
 
 ## Revision log
 
-- 0.3 (2026-09-26): native clients read the Mainline DHT directly and publish to the DHT and the relays; a circuit breaker per relay.
-- 0.2 (2026-09-25): the DHT as rendezvous and floor of every chat; what records a chat may carry; small DHT text as a declared rule rather than legacy behavior; read budget.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/01-ghost-core/](changes/01-ghost-core/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.
