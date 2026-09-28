@@ -14,6 +14,7 @@ import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core"
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
 import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
+import type { MessageChanges } from "./messageChanges";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
@@ -366,4 +367,6 @@ export type EngineEvent =
   | { kind: "attention"; event: AttentionEvent }
   | { kind: "state"; state: EngineState }
   | { kind: "messages"; linkId: string; messages: StoredMessage[] }
+  /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
+  | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string };
