@@ -3,6 +3,7 @@
 Put your AI agent on Ghostly: [packages/cli/SKILL.md](../packages/cli/SKILL.md) teaches an agent to use `ghostly`,
 the app's engine without a screen, for [OpenClaw](https://openclaw.dev) and other coding agents. People message the
 agent from the Ghostly app; the agent reads JSON events and answers, in chats and groups, and can pay and get paid.
+The short version, with what works and what is planned: [AI agents on Ghostly](https://ghostly.tools/developers/agents).
 
 ## 1. Install the CLI
 
@@ -53,7 +54,8 @@ by its gateway on each message. On Ghostly, `ghostly listen --turns` with an all
 connector, so any agent framework that takes a webhook or reads a socket gets Ghostly messages the way it gets
 Telegram's. It builds on what the CLI has and adds no wire format. Built: the allowlist (`--from`, `--group`), the
 turn event (`agent.turn`, [its contract](CLI.md#agent-turns)) and the Claude Code adapter. Still to build: the Hermes
-Agent plugin, and turns on the daemon's socket (`events.subscribe` gives every event today).
+Agent plugin, turns on the daemon's socket (`events.subscribe` gives every event today), and `wake/1` for agents: until
+then an agent is woken only while a `ghostly listen` process runs.
 
 The contract:
 

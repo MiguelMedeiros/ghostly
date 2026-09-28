@@ -16,6 +16,7 @@ COPY --from=deps /app/website/node_modules ./node_modules
 COPY website/ ./
 COPY docs /app/docs
 COPY packages/core/src /app/packages/core/src
+COPY packages/cli/SKILL.md /app/packages/cli/SKILL.md
 COPY CONTRIBUTING.md SECURITY.md /app/
 
 ENV NEXT_TELEMETRY_DISABLED=1

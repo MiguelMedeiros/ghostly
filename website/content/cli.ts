@@ -37,7 +37,6 @@ export const COMMANDS = [
 export const LINKS = {
   guide: `${DOCS}/docs/CLI.md`,
   reference: `${DOCS}/packages/cli/README.md`,
-  agents: `${DOCS}/docs/AI-AGENTS.md`,
   paymentBot: `${DOCS}/packages/cli/examples/payment-bot.mjs`,
   echoBot: `${DOCS}/packages/cli/examples/echo-bot.sh`,
   legacy: `${DOCS}/cli/README.md`,
@@ -115,7 +114,7 @@ export const cli = {
     title: "Read more",
     guide: "Guide",
     reference: "Every command and event",
-    agents: "Skill for AI agents",
+    agents: "AI agents",
     wisp: "WISP 11xx: the contract",
   },
   legacy: {

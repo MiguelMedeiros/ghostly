@@ -3,11 +3,14 @@
 !website
 !docs
 !packages/core/src
+!packages/cli/SKILL.md
 !CONTRIBUTING.md
 !SECURITY.md
 website/node_modules
 website/.next
 website/public/reference
+website/public/llms.txt
+website/public/llms-full.txt
 website/Dockerfile
 website/docker-compose.yml
 **/.DS_Store
