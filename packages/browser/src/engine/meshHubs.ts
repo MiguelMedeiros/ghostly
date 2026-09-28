@@ -95,6 +95,8 @@ interface HubLive {
   gone: Map<string, number>;
   /** As a hub: the signed reactions I passed on, the latest per member and message, said again to a member back. */
   reactions: Map<string, GroupReactedFrame>;
+  /** As a hub: the edges it keeps (every other member), held for it in the budget of connections while they open. */
+  need: number;
 }
 
 /**
@@ -125,11 +127,46 @@ export class MeshHubs {
     let live = this.live.get(groupId);
     if (!live) this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], firstRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
-      seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map() }));
+      seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0 }));
     return live;
   }
 
   forget(groupId: string): void { this.live.delete(groupId); }
+
+  /**
+   * The edges this app may keep in a group, within its budget of connections (WISP 9xx · Group Mesh § Hubs, Budget):
+   * what the other groups' links do not hold, less what the groups I am a hub of still have to open. Undefined for an
+   * app without a budget. What this group holds itself does not count: a hub that stepped down would fit again at once.
+   */
+  room(groupId: string): number | undefined {
+    const room = this.host.peerRoom?.(groupId);
+    if (room === undefined) return undefined;
+    let held = 0;
+    for (const [g, live] of this.live) if (g !== groupId && live.hub) held += Math.max(0, live.need - this.host.edges(g).size);
+    return Math.max(0, room - held);
+  }
+
+  /** Being a hub of this group, an edge with every other member, fits in this app's budget. Always, without one. */
+  fits(groupId: string, session: GroupSession): boolean {
+    const room = this.room(groupId);
+    return room === undefined || session.others.length <= room;
+  }
+
+  /**
+   * The edges to keep in a group: what the hubs ask for (every member, in a full mesh), within the budget. Past it, the
+   * most useful first, and the rest are not opened (or close): the hubs I count on, the admin, members met a moment
+   * ago, edges already up, then the others in a fixed order. A 1:1 chat or a call opened later still finds room.
+   */
+  edgesWanted(groupId: string, session: GroupSession, group: StoredGroup, now: number): Set<string> {
+    const wanted = this.wanted(groupId, session, group, now) ?? new Set(session.others);
+    const room = this.room(groupId);
+    if (room === undefined || wanted.size <= room) return wanted;
+    const live = this.live.get(groupId), edges = this.host.edges(groupId);
+    const hubs = new Set([...live?.myHubs ?? [], ...this.large(session) ? this.hubs(groupId, session, now) : []]);
+    const rank = (key: string) => hubs.has(key) ? 0 : key === session.admin ? 1 : (live?.met.get(key) ?? 0) > now ? 2
+      : edges.has(key) && this.host.linkReady(edges.get(key)!) ? 3 : 4;
+    return new Set([...wanted].sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0)).slice(0, room));
+  }
 
   /** Large enough for hubs: past the threshold, and this app takes part. */
   large(session: GroupSession): boolean { return this.enabled && session.roster.length > MESH_HUBS.threshold; }
@@ -243,10 +280,14 @@ export class MeshHubs {
     const readEvery = live.hub || may ? this.timings.beaconEveryMs : this.timings.beaconReadMs;
     if (!live.lastRead || now - live.lastRead >= readEvery) await this.read(groupId, session, live, now);
     const others = meshHubs(live.beacon, me, policy, inRoster, now);
-    if (!live.hub && may && (policy.pin.includes(me) || others.length < MESH_HUBS.maxHubs)) {
-      live.hub = true; live.hubSince = now; live.myHubs = [];
+    // A hub keeps an edge with every member: on an app with a budget of connections (a Mac's WKWebView opens about 46
+    // in all), only while that fits beside its other groups. Pinned or not: past the budget, a call would not connect.
+    const fits = this.fits(groupId, session);
+    if (live.hub) live.need = session.others.length;
+    if (!live.hub && may && fits && (policy.pin.includes(me) || others.length < MESH_HUBS.maxHubs)) {
+      live.hub = true; live.hubSince = now; live.myHubs = []; live.need = session.others.length;
       await this.publish(groupId, session, live, now, true).catch(() => {});
-    } else if (live.hub && !may) {
+    } else if (live.hub && (!may || !fits)) {
       live.hub = false; live.members.clear();
       await this.publish(groupId, session, live, now, false).catch(() => {});
     } else if (live.hub && now - live.lastTry >= 5_000 && (now - live.lastWrite >= this.timings.beaconEveryMs || !live.beacon.some(h => h.key === me))) {

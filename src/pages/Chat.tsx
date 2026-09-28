@@ -61,6 +61,7 @@ import type { WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
+import { useWakeCall } from "../hooks/useWakeCall";
 import { useChatLink } from "../hooks/useChatLink";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
@@ -433,6 +434,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     if (visible) markSessionAsRead(sessionId);
   }, [visible, sessionId, messages.length]);
 
+  // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
+  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop;
+  const placeCall = webrtc.startCall;
+  const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
+
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
     return visible ? <Navigate to="/" replace /> : null;
@@ -476,6 +482,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     <div className="chat-pane flex-1 h-full">
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className="chat-column relative flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
+      {(wakeCall.waking || wakeCall.gaveUp) && (
+        <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
+          <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
+          {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
+        </div>
+      )}
       {/* Chat Header */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
@@ -560,7 +573,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" }) : undefined } : undefined} />
-          <CallButtons blocked={callsBlocked} busy={webrtc.callState !== "idle"} onCall={(withVideo) => webrtc.startCall(withVideo)} />
+          <CallButtons blocked={canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
+            onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button

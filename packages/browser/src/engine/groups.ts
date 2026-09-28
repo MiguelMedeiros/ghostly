@@ -71,6 +71,11 @@ export interface GroupsHost {
   staysOnline?(): boolean;
   /** False: this app takes no part in hubs and keeps every private group a full mesh (tests of older apps). */
   meshHubs?(): boolean;
+  /**
+   * The WebRTC connections this app may still open for `groupId`: its budget (`NodeOptions.peerBudget`) less what the
+   * links of every other group hold. Undefined when the app has no budget (WISP 9xx · Group Mesh § Hubs, Budget).
+   */
+  peerRoom?(groupId: string): number | undefined;
 }
 
 /** The key an edit of message `id` goes by in `FramesTaken`. */
@@ -626,7 +631,7 @@ export class Groups {
       if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) continue;
       await this.hubs.tick(groupId, session, group, now).catch(() => false);
       if (this.hubReconcile.has(groupId)) continue;
-      const wanted = this.hubs.wanted(groupId, session, group, now) ?? new Set(session.others);
+      const wanted = this.hubs.edgesWanted(groupId, session, group, now);
       const edges = this.host.edges(groupId);
       if ([...wanted].some(key => !edges.has(key)) || [...edges.keys()].some(key => !wanted.has(key))) {
         this.hubReconcile.add(groupId);
@@ -1135,7 +1140,7 @@ export class Groups {
       const existing = this.host.edges(groupId);
       const left = group?.left;
       const removed = this.removedAt.get(groupId);
-      const wanted = session?.status === "active" && group ? this.hubs.wanted(groupId, session, group, this.now()) ?? new Set(session.others)
+      const wanted = session?.status === "active" && group ? this.hubs.edgesWanted(groupId, session, group, this.now())
         : left ? new Set([left.admin, ...left.hubs ?? []])
         : removed !== undefined && this.now() - removed < REMOVED_LINGER_MS ? new Set(existing.keys()) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);

@@ -159,7 +159,7 @@ export function App() {
   useProfilePeek();
   const { t } = useI18n();
   // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
-  useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice") });
+  useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall") });
   const chats = useLoadedChats();
 
   const inChat = pathname.startsWith("/chat");

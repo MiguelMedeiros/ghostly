@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MESH_HUBS, beaconKeys, lobbyKeys, lobbyRecords, meshRendezvous, readBeacon, fromBase64Url, type GroupState } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
-// covers: groups.hubs, groups.send, groups.catch-up, groups.remove-member, groups.leave
+// covers: groups.hubs, groups.hubs.budget, groups.send, groups.catch-up, groups.remove-member, groups.leave
 
 /**
  * Hubs in a private group past 16 members (WISP 9xx · Group Mesh § Hubs), on headless engines (the real `Groups`,
@@ -15,9 +15,9 @@ interface Built { world: CommunityWorld; id: string; admin: Peer; peers: Peer[] 
 /** Reactions each peer took, as the app's reactions store would: who, on what, which emoji. */
 const reactions = new Map<Peer, { member: string; id: string; e: string; n: number }[]>();
 
-async function build(n: number, opts: { hubs?: number[]; legacy?: number[] } = {}): Promise<Built> {
+async function build(n: number, opts: { hubs?: number[]; legacy?: number[]; budgets?: Record<number, { peerBudget: number; heldElsewhere: number }> } = {}): Promise<Built> {
   const world = new CommunityWorld();
-  const app = (i: number) => ({ staysOnline: opts.hubs?.includes(i), legacy: opts.legacy?.includes(i) });
+  const app = (i: number) => ({ staysOnline: opts.hubs?.includes(i), legacy: opts.legacy?.includes(i), ...opts.budgets?.[i] });
   const hooks = (p: Peer) => ({ groupReaction: (_g: string, member: string, r: { id: string; e: string; n: number }) => { reactions.set(p, [...reactions.get(p) ?? [], { member, ...r }]); } });
   const admin = world.add("admin", hooks, app(0));
   const id = await admin.groups.create("Hubs", "mesh");
@@ -247,5 +247,91 @@ describe("hubs in a private group past 16 members", () => {
     // The admin's commit came back through a hub: the tombstone is gone.
     for (let i = 0; i < 600 && (await leaver.store.getGroups()).some(g => g.id === id); i++) await world.run(500, 500);
     expect((await leaver.store.getGroups()).some(g => g.id === id)).toBe(false);
+  }, 300_000);
+});
+
+/**
+ * A Mac's budget of connections (WISP 9xx · Group Mesh § Hubs, Budget): WKWebView opens only about 46 in one page, and
+ * past that a call does not connect, so the Desktop app on a Mac gives its groups 40 (`peerBudget`). Being a hub of a
+ * group of 20 takes 19 edges; `heldElsewhere` stands for groups outside this world (31: the hub of a group of 32).
+ */
+describe("a Mac's budget of connections", () => {
+  const onMac = (heldElsewhere: number, peerBudget = 40) => ({ peerBudget, heldElsewhere });
+  const isHub = (b: Built, p: Peer) => view(b, p).hubs?.hub === true;
+  /** Whether each of `ps` is a hub, every 30 s for `ms`: how the hubs stand over several beacon cycles. */
+  const watch = async (b: Built, ps: Peer[], ms: number) => {
+    const seen: string[] = [];
+    for (let t = 0; t < ms; t += 30_000) { await b.world.run(30_000); seen.push(ps.map(p => isHub(b, p) ? "H" : "-").join("")); }
+    return seen;
+  };
+
+  it("a hub steps down when another group takes its room, its members move to the other hub, and it is one again when the room is back", async () => {
+    const b = await build(20, { hubs: [2, 5], budgets: { 2: onMac(0) } });
+    const { world, id, peers } = b;
+    const mac = peers[2];
+    // Within its budget, a Mac is a hub as any app that stays online.
+    await world.until(() => isHub(b, mac) && isHub(b, peers[5]) && onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    // Another group of 32 it is a hub of: 31 connections there, 9 left, and this group's hub needs 19.
+    mac.heldElsewhere = 31;
+    await world.until(() => !isHub(b, mac), 60_000, 1000);
+    const others = peers.filter(p => p !== peers[5]);
+    await world.until(() => others.every(p => edgesOf(b, p).length <= MESH_HUBS.hubsPerMember + (p === b.admin ? 1 : 0)) && allReach(b), 10 * 60_000, 1000,
+      () => others.filter(p => edgesOf(b, p).length > MESH_HUBS.hubsPerMember).map(p => `${p.name}:${edgesOf(b, p).length}`).join(" "));
+    expect(await watch(b, [mac], 5 * 60_000)).not.toContain("H");
+    await peers[9].groups.send(id, "after the Mac stepped down");
+    await world.run(2_000);
+    for (const p of peers) expect(world.texts(p, id)).toContain("after the Mac stepped down");
+    // The other group gone: room again, and a hub again.
+    mac.heldElsewhere = 0;
+    await world.until(() => isHub(b, mac), 5 * 60_000, 1000);
+  }, 300_000);
+
+  it("over its budget, the only member that could be a hub is none: the group is a full mesh, the Mac keeps the edges it has room for, and messages still reach it", async () => {
+    const b = await build(20, { hubs: [2], budgets: { 2: onMac(31) } });
+    const { world, id, peers } = b;
+    const mac = peers[2];
+    await world.until(() => peers.every(p => view(b, p).members.length === 20) && edgesOf(b, mac).length > 0, 10 * 60_000, 1000);
+    expect(await watch(b, [mac], 5 * 60_000)).not.toContain("H");
+    for (const p of peers) expect(view(b, p).hubs).toBeUndefined();
+    // 40 less 31: nine edges, the admin's among them.
+    expect(edgesOf(b, mac).length).toBeLessThanOrEqual(9);
+    expect(edgesOf(b, mac).some(e => e.peer === keyOf(b, b.admin))).toBe(true);
+    await peers[15].groups.send(id, "to a Mac with nine edges");
+    await mac.groups.send(id, "from a Mac with nine edges");
+    await world.until(() => world.texts(mac, id).includes("to a Mac with nine edges") && peers.every(p => world.texts(p, id).includes("from a Mac with nine edges")), 5 * 60_000, 1000);
+  }, 300_000);
+
+  it("a Mac in two large groups is the hub of the one it has room for, and stays so", async () => {
+    // A budget of 30: a hub of a group of 20 (19 edges) leaves 11, too few for a second hub.
+    const a = await build(20, { hubs: [2, 5], budgets: { 2: onMac(0, 30) } });
+    const { world, peers } = a;
+    const mac = peers[2];
+    await world.until(() => isHub(a, mac) && onHubs(a) && allReach(a), 10 * 60_000, 1000);
+    // A second group, of the same members, another admin.
+    const admin = peers[1], id = await admin.groups.create("Second", "mesh");
+    const link = await admin.groups.enableLink(id);
+    for (const p of peers.filter(p => p !== admin)) { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 5 * 60_000, 500); }
+    const b: Built = { world, id, admin, peers: [admin, ...peers.filter(p => p !== admin)] };
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    const seen = await watch(a, [mac], 10 * 60_000), seenB = await watch(b, [mac], 5 * 60_000);
+    expect(seen).not.toContain("-");
+    expect(seenB).not.toContain("H");
+    expect(mac.links.size).toBeLessThanOrEqual(30);
+    expect(edgesOf(b, mac).length).toBeLessThanOrEqual(MESH_HUBS.hubsPerMember);
+  }, 300_000);
+
+  it("in a full mesh of 12, a Mac with room for five keeps five edges, the admin's first", async () => {
+    const b = await build(12, { budgets: { 4: onMac(35) } });
+    const { world, id, peers } = b;
+    const mac = peers[4];
+    await world.until(() => edgesOf(b, mac).length === 5 && peers.every(p => view(b, p).members.length === 12), 10 * 60_000, 1000);
+    await world.run(5 * 60_000);
+    expect(edgesOf(b, mac).length).toBe(5);
+    expect(edgesOf(b, mac).some(e => e.peer === keyOf(b, b.admin))).toBe(true);
+    await peers[9].groups.send(id, "five edges are enough");
+    await world.until(() => world.texts(mac, id).includes("five edges are enough"), 5 * 60_000, 1000);
+    // Room again: every edge.
+    mac.heldElsewhere = 0;
+    await world.until(() => edgesOf(b, mac).length === 11, 5 * 60_000, 1000);
   }, 300_000);
 });

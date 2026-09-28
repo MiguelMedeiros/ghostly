@@ -41,7 +41,7 @@ import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNe
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, parseCommunityEdit } from "@ghostly/core";
-import { WakeLimiter, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest } from "@ghostly/core";
+import { WAKE_CALL_INTERVAL_MS, WakeLimiter, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, wireReaction, type WireReaction } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
@@ -312,6 +312,12 @@ export interface NodeOptions {
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
   staysOnline?: boolean;
+  /**
+   * The most WebRTC connections this app's groups and 1:1 chats hold at once (WISP 9xx · Group Mesh § Hubs, Budget):
+   * within it, the app is a hub of a private group only while that fits, and a group opens only the edges that fit.
+   * Default: none. The Desktop app on a Mac says 40: WKWebView opens about 46 in one page, and the rest stay for calls.
+   */
+  peerBudget?: number;
   /** The Lightning and on-chain providers on offer. Default: the registry (tests pass their own). */
   providers?: ProviderRegistry;
   /** Desktop: the Tauri commands the providers that need them call (see `ProviderHost.invoke`). */
@@ -426,6 +432,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly editBuffer = new EditBuffer();
   /** At most one wake-up per contact per `WAKE_INTERVAL_MS` (WISP 401 § Wake-up push). */
   private readonly wakeLimiter = new WakeLimiter();
+  /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
+  private readonly callWakeLimiter = new WakeLimiter(WAKE_CALL_INTERVAL_MS);
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
   /** files/3 in every chat: offers, resumable transfers, checked by digest (WISP 501 rev 0.3). */
@@ -797,6 +805,17 @@ export class GhostlyNode implements EngineImplementation {
   private readonly reactionsSent = new Map<string, Map<number, number>>();
   private readonly reactionPace = new Map<string, ReactionWindow>();
   private readonly reactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The WebRTC connections of 1:1 chats, kept (with a budget only) until closed: they count against `peerBudget`. */
+  private readonly chatPeers = new Set<RTCPeerConnection>();
+  private chatPeer(pc: RTCPeerConnection): RTCPeerConnection {
+    if (this.options.peerBudget !== undefined) this.chatPeers.add(pc);
+    return pc;
+  }
+  /** The 1:1 chats' connections not closed yet (`close()` fires no event, so this looks at each). */
+  private openChatPeers(): number {
+    for (const pc of this.chatPeers) if (pc.connectionState === "closed") this.chatPeers.delete(pc);
+    return this.chatPeers.size;
+  }
   private readonly reactions = new Reactions({
     messages: chat => db.getMessages(chat),
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
@@ -819,6 +838,15 @@ export class GhostlyNode implements EngineImplementation {
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     myNick: () => this.sharedNick,
     staysOnline: () => this.options.staysOnline ?? this.options.platform === "desktop",
+    peerRoom: groupId => {
+      const budget = this.options.peerBudget;
+      if (budget === undefined) return undefined;
+      // Every other group's edges and entry sessions that run, one connection each, and the 1:1 chats' on WebRTC: a
+      // call finds room only in what is left, so chats count in full here, not in the room kept for calls.
+      let held = this.openChatPeers();
+      for (const live of this.links.values()) if (live.stored.group && live.stored.group !== groupId && live.link) held++;
+      return budget - held;
+    },
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
     edges: groupId => this.groupEdges(groupId),
     entries: groupId => {
@@ -1493,12 +1521,12 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** The contact is away: one wake-up, if it shared how and none went to it lately. Never waits, never fails a send. */
-  private wakePeer(live: LiveLink): void {
+  private wakePeer(live: LiveLink, kind: WakeKind = "message"): void {
     const target = live.stored.peerWake, linkId = live.stored.id;
     if (!target || !live.stored.profile || live.stored.group || !this.settings.online) return;
-    if (!this.wakeLimiter.take(linkId)) return;
+    if (!(kind === "call" ? this.callWakeLimiter : this.wakeLimiter).take(linkId)) return;
     let request: PushRequest;
-    try { request = wakeRequest(target); } catch { return; }
+    try { request = wakeRequest(target, Date.now(), kind); } catch { return; }
     void this.postPush(request).then((status) => {
       // The subscription is gone (the contact turned it off, or its browser dropped it): forget it until it shares a new one.
       if ((status === 404 || status === 410) && this.links.get(linkId)?.stored.peerWake?.endpoint === target.endpoint) {
@@ -1508,6 +1536,20 @@ export class GhostlyNode implements EngineImplementation {
         this.emitState();
       }
     }).catch(() => { /* no network, or refused and no relay: the message still waits for the contact */ });
+  }
+
+  /**
+   * A call to a contact whose app is closed (WISP 401 § Wake-up push, calls): one "call" wake-up, so its app shows
+   * "Incoming call"; the caller waits for the chat to go live and calls then. True when the contact can be woken
+   * this way (it shared a target and the chat is not live), whether or not a push went just now (one per 30 s).
+   */
+  async wakeForCall({ linkId }: { linkId: string }): Promise<boolean> {
+    const live = this.links.get(linkId);
+    if (!live?.stored.peerWake || !live.stored.profile || live.stored.group || live.link?.isDataLinkOpen || !this.settings.online) return false;
+    this.wakePeer(live, "call");
+    // It is looked for at once too: the woken app answers on the DHT first.
+    live.link?.session.pollNow();
+    return true;
   }
 
   /** Posts a wake-up: the host's way, or `fetch`, then the push relay when a page may not post it itself. */
@@ -1544,6 +1586,7 @@ export class GhostlyNode implements EngineImplementation {
     this.fileDesk.drop(linkId);
     // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken.
     this.wakeLimiter.reset(linkId);
+    this.callWakeLimiter.reset(linkId);
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
     this.emitState();
@@ -3682,8 +3725,8 @@ export class GhostlyNode implements EngineImplementation {
       lastSeenTimestamp,
       pollIntervals: this.pollIntervals,
       autoConnect: true,
-      createPeerConnection: () =>
-        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] }),
+      createPeerConnection: () => this.chatPeer(
+        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] })),
       localFetch: this.localFetch,
       getServices: () => stored.profile ? [{ id: "chat", type: "chat" }] : this.advertisedServices(stored.peerPubKeyZ32),
       // A paired contact learns only the apps granted to it, on the open session; nothing is published.
