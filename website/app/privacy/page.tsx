@@ -252,7 +252,8 @@ export default function PrivacyPage() {
       <Section title="No selling, no ads">
         <p>
           We do not sell, rent or share data about you, and there are no ads in Ghostly or on our sites. We have no
-          such data to begin with.
+          such data to begin
+          with, apart from the server log described above.
         </p>
       </Section>
 
