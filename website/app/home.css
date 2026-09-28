@@ -151,15 +151,23 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   .hero-lead {
     font-size: 17px;
   }
-  .hero-actions .btn--primary {
+  /* The two ways in, one under the other, the whole column wide. */
+  .hero-actions {
+    display: grid;
+    width: 100%;
+    gap: 10px;
+  }
+  .hero-actions .btn {
     width: 100%;
   }
   .hero-actions .btn:not(.btn--primary) {
-    border: 0;
-    min-height: 40px;
-    padding-inline: 0;
-    color: var(--muted);
-    font-size: 14px;
+    min-height: 52px;
+  }
+  .hero-micro {
+    gap: 2px 14px;
+  }
+  .hero-skip {
+    display: none;
   }
   .hero-still {
     right: auto;
@@ -211,6 +219,14 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   background: var(--room-open);
 }
 @media (max-width: 860px) {
+  .open-after .open-actions {
+    display: grid;
+    width: 100%;
+    gap: 10px;
+  }
+  .open-after .btn {
+    width: 100%;
+  }
   .open-sheet-only,
   .scene-static-extra:has(> .open-sheet-only:only-child) {
     display: none;
@@ -255,4 +271,101 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   transition:
     opacity var(--dur-slow) var(--ease-enter),
     transform var(--dur-slow) var(--ease-enter);
+}
+
+/* ── Phones: a story chapter (story/SceneFrame.tsx PhoneChapter) ──
+   The chapter's room runs full-bleed behind it, so chapters part by tone and space, not by frames: the eyebrow, the
+   steps as captions taking turns in one place (as tall as the longest, so nothing moves), the step bars, then one
+   picture, open at the edges. Reduced motion lists every caption over the finished still. */
+@media (max-width: 860px) {
+  .scene--phone {
+    background: var(--chapter-bg);
+    padding-block: 72px 48px;
+  }
+  .scene--phone .scene-static {
+    gap: 0;
+  }
+  .scene--phone .scene-static > .eyebrow {
+    margin-bottom: 18px;
+  }
+  .scene--phone .scene-static-steps {
+    gap: 0;
+  }
+  .scene--phone .scene-static-copy {
+    gap: 10px;
+  }
+  .scene--phone .scene-static-copy .h-scene {
+    font-size: clamp(28px, 7.6vw, 34px);
+  }
+  .scene--phone .scene-static-copy .body {
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  /* The aside under a step waits for the wider page. */
+  .scene--phone .scene-static-copy .note {
+    display: none;
+  }
+  .scene--phone:not([data-calm="true"]) .scene-static-step {
+    grid-area: 1 / 1;
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition:
+      opacity var(--dur-fast) var(--ease-exit),
+      transform var(--dur-fast) var(--ease-exit);
+  }
+  .scene--phone:not([data-calm="true"]) .scene-static-step[data-active="true"] {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+    transition:
+      opacity var(--dur-base) var(--dur-fast) var(--ease-enter),
+      transform var(--dur-base) var(--dur-fast) var(--ease-enter);
+  }
+  .scene--phone[data-calm="true"] .scene-static-steps {
+    gap: 28px;
+  }
+  /* (The film's bars are hidden while a chapter reads as an article; a phone chapter keeps its own.) */
+  .scene.scene--phone .scene-progress {
+    display: flex;
+    margin-top: 10px;
+  }
+  /* Even bars: the one showing is lit, the ones read are dimmer, the rest wait. */
+  .scene--phone .scene-progress button[aria-current="step"]::before {
+    transform: none;
+  }
+  .scene--phone .scene-progress button[data-on="true"]:not([aria-current="step"])::before {
+    opacity: 0.45;
+  }
+  .scene--phone .scene-static-figure {
+    margin-top: 12px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 88%, transparent);
+  }
+  .scene--phone .scene-static-extra {
+    padding-top: 4px;
+  }
+  /* Until the page runs, a phone gets the server's film folded into an article: dress it like the chapter it
+     becomes (the room behind it, the first caption over an open picture) so hydrating it changes little. */
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) {
+    background: var(--chapter-bg);
+  }
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) .scene-copy {
+    order: -1;
+  }
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) .scene-step:not(:first-child),
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) .scene-step .note {
+    display: none;
+  }
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) .scene-visual {
+    border: 0;
+    border-radius: 0;
+  }
+}
+@media (min-width: 641px) and (max-width: 860px) {
+  .scene--phone .scene-static {
+    max-width: 560px;
+  }
 }

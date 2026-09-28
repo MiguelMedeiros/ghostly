@@ -591,8 +591,17 @@ html.js:not(.calm) .psx {
     overflow: hidden;
     clip: rect(0 0 0 0);
   }
+  /* The dots sit centred in their 40px row, and the row comes up under the hero's buttons, so the space above
+     the dots matches the space between them and the picture. */
   .psx-dot {
     min-height: 40px;
+    padding-block: 13px;
+  }
+  .psx-steps li + li::before {
+    top: 19px;
+  }
+  .psx-steps {
+    margin-top: -36px;
   }
 }
 

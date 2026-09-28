@@ -170,6 +170,15 @@ export function SceneFrame({
   const room = ROOMS[chapter];
   const style = { "--chapter-bg": room, "--chapter-rgb": hexToRgb(room) } as React.CSSProperties;
 
+  if (article && portrait) {
+    // Phones: one picture per chapter, its steps as captions that take turns (PhoneChapter).
+    return (
+      <PhoneChapter id={id} chapter={chapter} eyebrow={eyebrow} label={label} steps={steps} stills={stills} calm={calm} state={state} style={style} visual={visual}>
+        {children}
+      </PhoneChapter>
+    );
+  }
+
   if (article) {
     // An illustrated article: each paragraph with its own frame (a still, or a beat that plays once in view).
     return (
@@ -275,6 +284,125 @@ function StaticFigure({ state, at, from, play, chapter, portrait, children }: { 
       <figure ref={ref} className="scene-static-figure" aria-hidden="true">
         {children}
       </figure>
+    </SceneContext.Provider>
+  );
+}
+
+/** How long a phone caption stays once its beat has played: time to read it (about four words a second), at least 3 s. */
+function holdFor(s: SceneStep): number {
+  const words = `${s.title} ${s.body}`.split(/\s+/).length;
+  return Math.max(3000, words * 240);
+}
+
+/**
+ * A chapter on a phone: the eyebrow, the steps as captions that take turns in
+ * one place, the step bars, and one picture. Nothing is pinned: while the
+ * picture is on screen it plays the chapter's beats one after the other, each
+ * caption held long enough to read, and stops on the last. A tap on a bar
+ * shows that step (and stops the turns). With reduced motion every caption
+ * reads in order beside the chapter's finished still.
+ */
+function PhoneChapter({
+  id,
+  chapter,
+  eyebrow,
+  label,
+  steps,
+  stills,
+  calm,
+  state,
+  style,
+  visual,
+  children,
+}: {
+  id: string;
+  chapter: Chapter;
+  eyebrow: string;
+  label?: string;
+  steps: SceneStep[];
+  stills: number[];
+  calm: boolean;
+  state: SceneState;
+  style: React.CSSProperties;
+  visual: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  const n = steps.length;
+  const last = n - 1;
+  const figRef = useRef<HTMLElement>(null);
+  const p = useMotionValue(calm ? stills[last] : stepAt(0, 0, n));
+  const [step, setStep] = useState(calm ? last : 0);
+  // The turns run by themselves until the reader picks a step; `take` replays the step already showing.
+  const [auto, setAuto] = useState(true);
+  const [take, setTake] = useState(0);
+  const inView = useInView(figRef, { amount: 0.5 });
+
+  useEffect(() => {
+    if (!calm) return;
+    p.set(stills[last]);
+    setStep(last);
+  }, [calm, last, p, stills]);
+
+  // Play the step's beat while the picture is on screen, then hand over to the next step once its caption is read.
+  useEffect(() => {
+    if (calm || !inView) return;
+    const controls = tween(p, stills[step] ?? stills[last], { duration: DUR.beat, ease: EASE.move });
+    const timer = auto && step < last ? window.setTimeout(() => setStep((s) => Math.min(last, s + 1)), DUR.beat * 1000 + holdFor(steps[step])) : 0;
+    return () => {
+      controls.stop();
+      window.clearTimeout(timer);
+    };
+  }, [calm, inView, step, auto, take, last, p, stills, steps]);
+
+  const pick = (i: number) => {
+    setAuto(false);
+    // The next step plays on from the picture as it is; any other starts from its own beginning.
+    if (i !== step + 1) p.set(stepAt(i, 0, n));
+    setStep(i);
+    setTake((t) => t + 1);
+  };
+
+  const b = BLOCKING.portrait[chapter];
+  const scale = useTransform(p, (): number => 1);
+  const fx = useTransform(p, (v): number => valueAt(b.focus, v)[0]);
+  const fy = useTransform(p, (v): number => valueAt(b.focus, v)[1]);
+  const value = useMemo<SceneState>(() => ({ ...state, p, step, n, still: true, portrait: true, camera: { scale, fx, fy }, focus: { x: fx, y: fy } }), [state, p, step, n, scale, fx, fy]);
+
+  return (
+    <SceneContext.Provider value={value}>
+      <section id={id} className="scene scene--static scene--phone" data-chapter={chapter} data-calm={calm} aria-label={label} style={style}>
+        <div className="wrap scene-static">
+          <h2 className="eyebrow" id={`${id}-eyebrow`}>
+            {eyebrow}
+          </h2>
+          <ol className="scene-static-steps">
+            {steps.map((s, i) => (
+              <li key={i} className="scene-static-step" data-active={i === step} aria-current={!calm && i === step ? "step" : undefined}>
+                <div className="scene-static-copy">
+                  <h3 className="h-scene">{s.title}</h3>
+                  <p className="body">{s.body}</p>
+                  {s.note && <p className="note">{s.note}</p>}
+                </div>
+              </li>
+            ))}
+          </ol>
+          {!calm && n > 1 && (
+            <div className="scene-progress" role="group" aria-labelledby={`${id}-eyebrow`}>
+              {steps.map((s, i) => (
+                <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => pick(i)}>
+                  <span className="sr-only">
+                    {i + 1}: {s.title}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <figure ref={figRef} className="scene-static-figure" aria-hidden="true">
+            {visual}
+          </figure>
+          {children && <div className="scene-static-extra">{children}</div>}
+        </div>
+      </section>
     </SceneContext.Provider>
   );
 }
