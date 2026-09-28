@@ -117,6 +117,16 @@
     "spoiler": "隐藏的文字。点按显示",
     "unshowable": "无法显示此消息。"
   },
+  "search": {
+    "close": "关闭搜索",
+    "count": "第 {{current}} 个，共 {{total}} 个",
+    "info": "搜索保存在此设备上的消息和文件名。不会向外发送任何内容。",
+    "newer": "较新的结果 (Shift+Enter)",
+    "none": "无结果",
+    "older": "较早的结果 (Enter)",
+    "open": "搜索",
+    "placeholder": "在此聊天中搜索"
+  },
   "send": "发送",
   "today": "今天",
   "typeMessage": "输入消息...",

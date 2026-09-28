@@ -34,6 +34,8 @@ import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { replySnippet, type GroupMention } from "@ghostly/core";
 import { quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { useForwarding } from "../hooks/useForwarding";
+import { useChatSearch } from "../hooks/useChatSearch";
+import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { canEditInGroup } from "@ghostly/browser/shared/edits";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -193,6 +195,7 @@ export function GroupChat() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
   const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId });
+  const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink });
   useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
@@ -295,6 +298,7 @@ export function GroupChat() {
             <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
               <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>
               <MuteMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
+              {!joiningByLink && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
               {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
               <MenuSeparator />
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
@@ -305,7 +309,9 @@ export function GroupChat() {
         </div>
       </div>
 
-      {connecting && !error && <div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
+      {!joiningByLink && <ChatSearchBar search={search} />}
+
+      {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? "You are in. Connecting to the group: messages go out as soon as a member's app is reached." : "You are in. Connecting to the members: messages go out as soon as one of them is reached."}
       </div>}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
@@ -346,7 +352,7 @@ export function GroupChat() {
               {/* Said once, under the request (or the payment) itself: not again under a payment that answers it. */}
               {noteIdOf(state, m.paymentId) === m.paymentId && notes.get(m.paymentId) && <GroupPaymentCaption note={notes.get(m.paymentId)!} group={group} />}
             </div>
-            : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))}
+            : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)}
               onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
               onEdit={canEditInGroup(m) && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
               onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName} />)}

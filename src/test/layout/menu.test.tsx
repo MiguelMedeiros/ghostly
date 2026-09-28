@@ -163,6 +163,6 @@ describe("Menu: the group's options speak the app's language", () => {
     const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     await user.click(screen.getByTitle("Opções"));
     const menu = screen.getByTestId("group-options-menu");
-    expect(within(menu).getAllByRole("button").map(b => b.textContent)).toEqual(["Membros…", "Silenciar notificações…", "Renovar chaves", "Sair do grupo", "Apagar deste dispositivo"]);
+    expect(within(menu).getAllByRole("button").map(b => b.textContent)).toEqual(["Membros…", "Silenciar notificações…", "Buscar", "Renovar chaves", "Sair do grupo", "Apagar deste dispositivo"]);
   });
 });

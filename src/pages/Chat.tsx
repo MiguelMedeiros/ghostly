@@ -72,6 +72,8 @@ import { mergeTimeline } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
 import { cardOn } from "../lib/chatPayments";
 import { useForwarding } from "../hooks/useForwarding";
+import { useChatSearch } from "../hooks/useChatSearch";
+import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -430,6 +432,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
   const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
   const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible });
+  const search = useChatSearch({ messages, chat: sessionId, active: visible });
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
   const sceneOn = pairing.scene;
@@ -615,6 +618,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
               <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
+              <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
               {/* Until the contact's session is ready, not just while the card is up: the card goes as soon as the
                   contact arrives, and this stays the way to copy the invite again until the chat is live. */}
               {inviteCode && !pairedReady && (
@@ -660,6 +664,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           </div>
         </div>
       </div>
+
+      <ChatSearchBar search={search} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
 
@@ -725,6 +731,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               // The same: a compatibility chat has no room for a reaction.
               onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
               reactionName={reactionName}
+              highlight={search.highlight(row.message.id)}
               {...forwarding.rowProps(row.message)}
             />
           ))}

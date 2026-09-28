@@ -64,6 +64,8 @@ interface MessageBubbleProps {
    * menus, gestures and controls wait until the choice is over.
    */
   selection?: { selected: boolean; onToggle?: () => void };
+  /** A chat search's words, marked in the text or the file's name: given only to the messages that hold them. */
+  highlight?: string;
 }
 
 /** How long a finger holds a message before its quick bar (or, where it takes no reaction, its details) opens. */
@@ -584,7 +586,7 @@ export function MessageBubble(props: MessageBubbleProps) {
       peerPubKey={props.peerPubKey} peerNick={props.peerNick} linkId={props.linkId} quote={props.quote} names={names}
       onDelete={props.onDelete && stable.onDelete} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
-      reactionName={stable.reactionName}
+      reactionName={stable.reactionName} highlight={props.highlight}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
   );
@@ -594,7 +596,7 @@ const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onS
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.message, b.message);
@@ -609,7 +611,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, selection, names }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, selection, names, highlight }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onDelete = choosing ? undefined : deleteIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
@@ -837,12 +839,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.file && isPlayableAudioType(message.file.mime) ? (
           <div className="clearfix">
-            <AudioBubble file={message.file} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} />
+            <AudioBubble file={message.file} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} highlight={highlight} />
             {timestampEl}
           </div>
         ) : message.file ? (
           <div className="clearfix">
-            <FileBubble file={message.file} peerName={message.nick || peerNick || undefined} />
+            <FileBubble file={message.file} peerName={message.nick || peerNick || undefined} highlight={highlight} />
             {timestampEl}
           </div>
         ) : money ? (
@@ -890,7 +892,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : (
           <div className="clearfix">
-            <RichText testId="message-text" text={message.text} sentAt={message.timestamp} mentions={message.mentions} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            <RichText testId="message-text" text={message.text} sentAt={message.timestamp} mentions={message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
             <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
             <MessageLinkCards text={message.text} preview={message.preview} />
             {timestampEl}

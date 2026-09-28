@@ -2,6 +2,7 @@ import { act, fireEvent, screen } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpToLatest } from "../../components/chat/JumpToLatest";
 import { forgetChatScroll, useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
+import { jumpToMessage } from "../../lib/replies";
 import { renderApp } from "../render";
 
 // covers: chat.scroll
@@ -384,6 +385,29 @@ describe("the chat timeline's scrolling", () => {
     scrollTo(0);
     fireEvent.keyDown(document.body, { key: "ArrowDown", ctrlKey: true });
     expect(list().scrollTop).toBe(1200);
+  });
+
+  it("a jump to a message (a quote's, a search's) from the bottom lands on it, not back at the bottom", () => {
+    const { rerender } = renderApp(<Timeline rows={theirs(0, 40)} />);
+    expect(list().scrollTop).toBe(1700);
+    // A smooth scroll, a frame at a time, a picture laying out on the way; anyone else setting the scroll cancels it.
+    let frames: number[] = [];
+    const into = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => { frames = [1690, 1600, 900, 125]; });
+    act(() => { jumpToMessage("peer_5", list()); });
+    let at = list().scrollTop;
+    for (const frame of frames) {
+      if (list().scrollTop !== at) break;
+      scrollTo(frame);
+      at = frame;
+      resized();
+    }
+    into.mockRestore();
+    // In the middle of the view: (300 - 50) / 2.
+    expect(topOf("peer_5")).toBe(125);
+    // It stays there: the contact's next message is counted, not followed.
+    rerender(<Timeline rows={[...theirs(0, 40), ...theirs(40, 1)]} />);
+    expect(topOf("peer_5")).toBe(125);
+    expect(pill()).toHaveAttribute("data-count", "1");
   });
 
   it("the pill is a button reached with Tab", async () => {
