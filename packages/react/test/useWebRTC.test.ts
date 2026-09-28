@@ -297,6 +297,24 @@ describe("a headless caller starting over on a second offer", () => {
     expect(call.publishedKinds()).toEqual(["a", "a"]);
   });
 
+  it("the handshake failing after ICE came up (the caller refused our answer) waits for the second offer too", async () => {
+    const call = renderCall();
+    const { pc: first } = await answered(call);
+    act(() => first.setIceState("connected"));
+    // The caller's DTLS rejected ours: the connection fails while ICE had said connected.
+    act(() => first.setConnectionState("failed"));
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.publishedKinds()).toEqual(["a"]);
+
+    call.receive(remote.offer(Date.now() + 1));
+    await settle();
+    const second = FakePeerConnection.instances[1];
+    act(() => { second.setIceState("connected"); second.setConnectionState("connected"); });
+    act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.publishedKinds()).toEqual(["a", "a"]);
+  });
+
   it("gives up when no second offer comes, as a failed connection always did", async () => {
     const call = renderCall();
     const { stream, pc } = await answered(call);
@@ -335,7 +353,25 @@ describe("a headless caller starting over on a second offer", () => {
     expect(call.publishedKinds()).toEqual(["a", "h", null]);
   });
 
-  it("an offer is not a restart for a call we placed, nor for one that connected", async () => {
+  it("an offer while ICE already says connected, before the connection came up, is a restart too", async () => {
+    const call = renderCall();
+    const { pc: first } = await answered(call);
+    // A headless caller answers our checks before it has our answer: ICE is up, DTLS is not.
+    act(() => first.setIceState("connected"));
+    expect(call.result.current.callState).toBe("connected");
+
+    call.receive(remote.offer(Date.now() + 1));
+    await settle();
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(call.publishedKinds()).toEqual(["a", "a"]);
+
+    const second = FakePeerConnection.instances[1];
+    act(() => { second.setIceState("connected"); second.setConnectionState("connected"); });
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
+  });
+
+  it("an offer is not a restart for a call we placed, nor for one whose connection came up", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
     call.receive(remote.answer(Date.now() + 1));
@@ -348,7 +384,7 @@ describe("a headless caller starting over on a second offer", () => {
     act(() => pc.setIceState("connected"));
     const other = renderCall();
     const { pc: answeredPc } = await answered(other);
-    act(() => answeredPc.setIceState("connected"));
+    act(() => { answeredPc.setIceState("connected"); answeredPc.setConnectionState("connected"); });
     other.receive(remote.offer(Date.now() + 3));
     await settle();
     expect(answeredPc.close).not.toHaveBeenCalled();

@@ -155,8 +155,13 @@ export function useWebRTC({
   /** A share is being started or stopped: the picker may be open. */
   const shareBusyRef = useRef(false);
   const screenShareErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** The offer we answered and whether we answered with the camera, while the call has not connected. */
+  /** The offer we answered and whether we answered with the camera. */
   const answeredRef = useRef<{ offer: CallSignal; withVideo: boolean } | null>(null);
+  /**
+   * Whether the connection itself (ICE and DTLS) came up. ICE alone is what the call window calls connected, and a
+   * headless caller answers our ICE checks before it even has our answer; only this says the media really flows.
+   */
+  const mediaUpRef = useRef(false);
   /** Whether this call already started over on a caller's second offer: a second failure is final. */
   const restartedRef = useRef(false);
   /** The wait for a second offer after the answered call's connection failed (`RESTART_GRACE_MS`). */
@@ -184,6 +189,12 @@ export function useWebRTC({
    * sends nothing, instead of ringing someone for a call that no longer exists.
    */
   const attemptRef = useRef(0);
+
+  /** Our answered call's media never came up, and it has not started over yet: a caller's second offer restarts it. */
+  const restartable = useCallback(
+    () => !!answeredRef.current && !mediaUpRef.current && !restartedRef.current && (callStateRef.current === "connecting" || callStateRef.current === "connected"),
+    [],
+  );
 
   const clearRestartGrace = useCallback(() => {
     if (restartGraceRef.current) clearTimeout(restartGraceRef.current);
@@ -244,10 +255,9 @@ export function useWebRTC({
 
   const createPeerConnection = useCallback(() => {
     const pc = mediaRef.current.createPeerConnection(callRtcConfig(iceServersRef.current));
+    mediaUpRef.current = false;
 
     const connectedNow = () => {
-      clearRestartGrace();
-      answeredRef.current = null;
       updateCallState("connected");
       refreshVideoLane();
       setCallStartedAt(Date.now());
@@ -259,8 +269,8 @@ export function useWebRTC({
     };
 
     const failed = () => {
-      // An answered call that never connected waits for the caller's second offer (see RESTART_GRACE_MS), once.
-      if (answeredRef.current && !restartedRef.current && callStateRef.current === "connecting") {
+      // An answered call whose media never came up waits for the caller's second offer (see RESTART_GRACE_MS), once.
+      if (restartable()) {
         if (!restartGraceRef.current) restartGraceRef.current = setTimeout(() => { restartGraceRef.current = null; giveUp(); }, RESTART_GRACE_MS);
         return;
       }
@@ -301,6 +311,8 @@ export function useWebRTC({
       const state = pc.connectionState;
 
       if (state === "connected") {
+        mediaUpRef.current = true;
+        clearRestartGrace();
         if (callStateRef.current === "connecting" || callStateRef.current === "answering") connectedNow();
       } else if (state === "failed") {
         failed();
@@ -311,7 +323,7 @@ export function useWebRTC({
 
     pcRef.current = pc;
     return pc;
-  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace]);
+  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable]);
 
   const stopSharingRef = useRef<() => Promise<void>>(async () => {});
 
@@ -737,6 +749,13 @@ export function useWebRTC({
       return;
     }
 
+    // The caller started over on a new connection (see `restartAnswer`): ICE may already say "connected" here.
+    if (signal.t === "o" && restartable() && signal.ts > answeredRef.current!.offer.ts) {
+      lastProcessedSignalRef.current = signal.ts;
+      void restartAnswer(signal);
+      return;
+    }
+
     if (callStateRef.current === "connected") {
       if (signal.t !== "h" && signal.t !== "v") {
         return;
@@ -752,10 +771,6 @@ export function useWebRTC({
       addCallEventMessage?.("call_received", offerHasVideo);
       updateCallState("incoming");
       setFastPoll(true);
-    } else if (signal.t === "o" && callStateRef.current === "connecting" && answeredRef.current && signal.ts > answeredRef.current.offer.ts) {
-      // The caller started over on a new connection (see `restartAnswer`).
-      lastProcessedSignalRef.current = signal.ts;
-      void restartAnswer(signal);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
       if (signal.ts > myOfferTimestampRef.current) {
         lastProcessedSignalRef.current = signal.ts;
@@ -772,7 +787,7 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable]);
 
   useEffect(() => {
     const attempts = attemptRef;

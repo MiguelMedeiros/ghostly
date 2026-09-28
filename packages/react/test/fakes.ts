@@ -283,6 +283,12 @@ export class FakePeerConnection extends EventTarget {
     this.oniceconnectionstatechange?.();
   }
 
+  /** The whole connection (ICE and DTLS) came up, or failed. */
+  setConnectionState(state: RTCPeerConnectionState) {
+    this.connectionState = state;
+    this.onconnectionstatechange?.();
+  }
+
   private assignMids() {
     this.transceivers.forEach((t, i) => {
       t.mid ??= String(i);
