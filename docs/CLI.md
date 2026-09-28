@@ -111,7 +111,8 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 ```
 
 - `--from` takes a chat (id, prefix or name) or a contact's key (`peer` in `chat show`); a key also matches a chat
-  made after `listen` started. `--group` takes a group (id, prefix or name). Names are turned into ids once, at the
+  made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key, and
+  a chat's label wins over a contact's name). `--group` takes a group (id, prefix or name). Names are turned into ids once, at the
   start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
 - With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
   itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself

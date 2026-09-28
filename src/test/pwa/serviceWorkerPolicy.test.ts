@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_SHARED_FILES, SHARE_TARGET_PATH, classify, precacheList, pushScope, pushScopeProfile, readShare, wakeNotice } from "../../../web/src/sw/policy";
 
-// covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute
+// covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
 
 /**
  * What the web app's service worker answers, and what it keeps: the build's own files only. These are the rules
@@ -132,6 +132,15 @@ describe("what a wake-up shows", () => {
     expect(show({ path: "/chat/abc", mutedUntil: "forever" })).toBeNull();
     expect(show({ path: "/chat/abc", mutedUntil: now + 1000 })).toBeNull();
     expect(show({ path: "/chat/abc", mutedUntil: now - 1000 })).not.toBeNull();
+  });
+
+  it("a group mention: \"New message\" opening the group, one notice per group, never a call, nothing while muted", () => {
+    expect(show({ path: "/group/g1" })).toEqual({ title: "Ghostly", body: "New message", tag: "wake::/group/g1", call: false, data: { path: "/group/g1", profile: "" } });
+    // A member cannot ring anyone through a group: a call wake-up on a group's token is a message one.
+    expect(wakeNotice({ entry: { path: "/group/g1" }, text: { ...text, call: "Incoming call" } }, { now, appVisible: false, profile: "", kind: "call" }))
+      .toMatchObject({ body: "New message", tag: "wake::/group/g1", call: false });
+    expect(show({ path: "/group/g1", mutedUntil: "forever" })).toBeNull();
+    expect(show({ path: "/group/g1", mutedUntil: now + 1000 })).toBeNull();
   });
 
   it("nothing for a token it no longer knows, while the app is on screen, or for a route that is not a chat", () => {

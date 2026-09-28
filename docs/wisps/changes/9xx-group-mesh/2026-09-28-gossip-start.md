@@ -1,0 +1,1 @@
+Catch-up: each member starts its turns of asking at a place of its own, from its key, so members cut off from the same member (a Mac past its budget) no longer ask the same members in step for minutes.

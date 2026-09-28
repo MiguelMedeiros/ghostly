@@ -41,7 +41,7 @@ import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNe
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, parseCommunityEdit } from "@ghostly/core";
-import { WAKE_CALL_INTERVAL_MS, WakeLimiter, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind } from "@ghostly/core";
+import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, wireReaction, type WireReaction } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
@@ -110,6 +110,7 @@ import type {
   MessageDetails,
   MessageDetailsView,
   MessageFile,
+  MessagePage,
   MessageReply,
   ReactionNote,
   MessageSend,
@@ -217,6 +218,8 @@ interface LinkFiles {
   wireIds: Set<string>;
   /** Transfers in flight from the peer, by wire id. */
   incoming: Map<string, { localId: string; size: number }>;
+  /** files/2 message ids taken since the app started, by the wire id of the file whose message it is. */
+  messageIds?: Map<string, string>;
 }
 
 function emptyLinkFiles(): LinkFiles {
@@ -434,6 +437,10 @@ export class GhostlyNode implements EngineImplementation {
   private readonly wakeLimiter = new WakeLimiter();
   /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
   private readonly callWakeLimiter = new WakeLimiter(WAKE_CALL_INTERVAL_MS);
+  /** Mentions in private groups: one per member per 5 minutes, four per group per minute (WISP 9xx · Group Mesh § Wake-up push). */
+  private readonly groupWakeLimiter = new GroupWakeLimiter();
+  /** `group-wake` frames read per edge, a handful a minute. */
+  private readonly groupWakeReceived = new Map<string, RateWindow>();
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
   /** files/3 in every chat: offers, resumable transfers, checked by digest (WISP 501 rev 0.3). */
@@ -443,6 +450,7 @@ export class GhostlyNode implements EngineImplementation {
     receivedBytes: (linkId) => this.links.get(linkId)?.files.receivedBytes ?? 0,
     wireIds: (linkId) => this.links.get(linkId)?.files.wireIds,
     deleted: (linkId, messageId) => !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId),
+    messageExists: (linkId, messageId) => db.hasMessage(linkId, messageId),
     storeMessage: (message) => this.storeMessage(message),
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
@@ -857,7 +865,7 @@ export class GhostlyNode implements EngineImplementation {
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
     linkSeen: linkId => { const live = this.links.get(linkId); return !!live?.presence?.online || (!!live?.dataLink && live.dataLink !== "idle"); },
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
-    resolve: async (pubKeyZ32, background) => (await this.groupTransport.resolve(pubKeyZ32, { background }))?.records ?? null,
+    resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: linkId => this.closeGroupLink(linkId),
@@ -869,6 +877,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeMessage(message),
+    completeMessage: message => this.completeGroupMessage(message),
     emit: () => this.emitState(),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
@@ -1200,11 +1209,18 @@ export class GhostlyNode implements EngineImplementation {
       did: this.did.view(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
-      groups: groups.map(group => ({ ...group, ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), members: group.members.map(member => {
+      groups: groups.map(group => ({ ...group, ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
         const edge = member.me ? undefined : this.edgeView(group.id, member.key);
         return edge ? { ...member, edge } : member;
       }) })),
     };
+  }
+
+  /** A private group's wake-up tokens (the push worker's table) and its mute, as its edges have them. */
+  private groupWakeView(group: GroupView): Pick<GroupView, "wakeTokens" | "wakeMuted"> {
+    if (group.profile !== "mesh") return {};
+    const tokens = this.settings.wake ? [...this.links.values()].filter(live => live.stored.group === group.id && this.meshEdge(live.stored) && live.stored.wakeToken).map(live => live.stored.wakeToken!) : [];
+    return { ...(tokens.length && { wakeTokens: tokens }), ...(this.settings.wakeMutedGroups?.includes(group.id) && { wakeMuted: true }) };
   }
 
   /** Community members payments go to (or came from), as links the payment bubbles and the composer look up by key. */
@@ -1232,6 +1248,18 @@ export class GhostlyNode implements EngineImplementation {
 
   getMessages(linkId: string): Promise<StoredMessage[]> {
     return db.getMessages(linkId);
+  }
+
+  async messagePage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("limit: a whole number of messages, at least 1");
+    if (before === undefined) return db.getMessagePage(linkId, { limit });
+    if (typeof before === "number") {
+      if (Number.isNaN(before)) throw new Error("before: a time or a message id");
+      return db.getMessagePage(linkId, { limit, before: { timestamp: before } });
+    }
+    const from = await db.getMessage(linkId, before);
+    if (!from) throw new Error(`No message ${before}`);
+    return db.getMessagePage(linkId, { limit, before: from });
   }
 
   // -- links ---------------------------------------------------------------
@@ -1473,31 +1501,45 @@ export class GhostlyNode implements EngineImplementation {
     const before = this.settings.wake;
     this.settings = { ...this.settings, wake: subscription ?? undefined };
     if (!subscription) delete this.settings.wake;
+    // Replaced or turned off: whoever held the old subscription can no longer post to it.
+    delete this.settings.wakeRotate;
     await db.putSettings(this.settings);
     for (const live of this.links.values()) {
-      if (!live.stored.profile || live.stored.group) continue;
+      const edge = this.meshEdge(live.stored);
+      if (!edge && (!live.stored.profile || live.stored.group)) continue;
       if (!subscription) {
         // Stopped: every contact told now forgets it; one away still has it, and its push service answers 410.
-        if (before && live.link?.supportsWake) live.link.sendWake(null);
+        if (before && edge) this.sendGroupWake(live, null);
+        else if (before && live.link?.supportsWake) live.link.sendWake(null);
         if (live.stored.wakeToken) { live.stored = { ...live.stored, wakeToken: undefined }; void db.patchLink(live.stored.id, { wakeToken: undefined }); }
         continue;
       }
       // A new subscription is a new token everywhere: what anyone kept from before names nothing now.
       live.stored = { ...live.stored, wakeToken: undefined };
       void db.patchLink(live.stored.id, { wakeToken: undefined });
-      void this.shareWake(live.stored.id);
+      void (edge ? this.shareGroupWake(live.stored.id) : this.shareWake(live.stored.id));
     }
     this.emitState();
   }
 
   async setWakeMuted({ linkId, muted }: { linkId: string; muted: boolean }): Promise<void> {
+    if (linkId.startsWith("group:")) return this.setGroupWakeMuted(linkId.slice("group:".length), muted);
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group || !!live.stored.wakeMuted === muted) return;
+    // A contact told to forget the subscription may keep it anyway: the app replaces it.
+    if (muted && live.stored.wakeToken) await this.rotateWake();
     live.stored = { ...live.stored, wakeMuted: muted || undefined, ...(muted && { wakeToken: undefined }) };
     await db.patchLink(linkId, { wakeMuted: muted || undefined, ...(muted && { wakeToken: undefined }) });
     // Muted: the contact forgets it now if live, else on the next session; unmuted: a new token goes to it.
     await this.shareWake(linkId);
     this.emitState();
+  }
+
+  /** A contact that held this profile's subscription is gone or muted: the app is to replace it (`wakeRotate`). */
+  private async rotateWake(): Promise<void> {
+    if (!this.settings.wake || this.settings.wakeRotate) return;
+    this.settings = { ...this.settings, wakeRotate: true };
+    await db.putSettings(this.settings);
   }
 
   /**
@@ -1520,11 +1562,96 @@ export class GhostlyNode implements EngineImplementation {
     live.link.sendWake({ ...own, token });
   }
 
+  // ---------- wake-up push in private groups (WISP 9xx · Group Mesh § Wake-up push) ----------
+
+  /** An edge of a private group: where a member shares how to wake it. A community has none between two members. */
+  private meshEdge(stored: StoredLink): boolean {
+    return !!stored.group && !!stored.groupPeer && !stored.groupEntry && !this.groups.isCommunityGroup(stored.group);
+  }
+
+  private async setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
+    const list = this.settings.wakeMutedGroups ?? [];
+    if (list.includes(groupId) === muted) return;
+    // Members told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
+    if (muted && [...this.links.values()].some(live => live.stored.group === groupId && this.meshEdge(live.stored) && live.stored.wakeToken)) await this.rotateWake();
+    const next = muted ? [...list, groupId] : list.filter(id => id !== groupId);
+    this.settings = { ...this.settings, wakeMutedGroups: next.length ? next : undefined };
+    if (!next.length) delete this.settings.wakeMutedGroups;
+    await db.putSettings(this.settings);
+    for (const live of this.links.values()) {
+      if (live.stored.group !== groupId || !this.meshEdge(live.stored)) continue;
+      // Muted: every member forgets it (now, or when its edge opens); unmuted: each gets a new token.
+      if (live.stored.wakeToken) { live.stored = { ...live.stored, wakeToken: undefined }; await db.patchLink(live.stored.id, { wakeToken: undefined }); }
+      await this.shareGroupWake(live.stored.id);
+    }
+    this.emitState();
+  }
+
+  private sendGroupWake(live: LiveLink, target: WakeTarget | null): void {
+    if (!live.link?.groupsSupport) return;
+    // An older member's app drops a frame it does not know.
+    try { live.link.sendGroupFrame(groupWakeFrame(live.stored.group!, target)); } catch { /* the edge closed: said again when it opens */ }
+  }
+
+  /**
+   * Tells the member at the other end of this edge how to wake this app, under this edge's token; in a muted group, to
+   * forget it (said whenever the edge opens: the member may have been away when the group was muted).
+   */
+  private async shareGroupWake(linkId: string): Promise<void> {
+    const live = this.links.get(linkId);
+    const own = this.settings.wake;
+    if (!live?.link?.groupsSupport || !this.meshEdge(live.stored)) return;
+    if (this.settings.wakeMutedGroups?.includes(live.stored.group!)) { this.sendGroupWake(live, null); return; }
+    if (!own) return;
+    let token = live.stored.wakeToken;
+    if (!token) {
+      token = newWakeToken();
+      live.stored = { ...live.stored, wakeToken: token };
+      await db.patchLink(linkId, { wakeToken: token });
+      this.emitState();
+    }
+    this.sendGroupWake(live, { ...own, token });
+  }
+
+  /** A `group-wake` frame on an edge: the member it is pinned to shares how to wake it, or says to forget it. */
+  private receiveGroupWake(linkId: string, frame: Record<string, unknown>): void {
+    const live = this.links.get(linkId);
+    if (!live || !this.meshEdge(live.stored)) return;
+    let window = this.groupWakeReceived.get(linkId);
+    if (!window) this.groupWakeReceived.set(linkId, window = new RateWindow(GROUP_WAKE_RECEIVE_LIMIT, 60_000));
+    if (!window.take()) return;
+    const target = parseGroupWakeFrame(frame, live.stored.group!);
+    if (target === undefined) return;
+    live.stored = { ...live.stored, peerWake: target ?? undefined };
+    void db.patchLink(linkId, { peerWake: target ?? undefined });
+    this.emitState();
+  }
+
+  /**
+   * A message of mine in a private group names members: each one it names by key, that shared how and that I cannot
+   * reach now, is woken, within the limits. Never waits, never fails the send.
+   */
+  private wakeMentioned(groupId: string, text: string, mentions: readonly GroupMention[]): void {
+    if (!mentions.length || !this.settings.online || this.groups.isCommunityGroup(groupId)) return;
+    const edges = this.groupEdges(groupId);
+    const wakes = groupWakes({
+      group: groupId, mentions, text, limiter: this.groupWakeLimiter,
+      target: member => { const id = edges.get(member); return id ? this.links.get(id)?.stored.peerWake && id : undefined; },
+      reachable: member => this.groups.reachable(groupId, member),
+    });
+    for (const { target: linkId } of wakes) this.postWake(linkId, this.links.get(linkId)!.stored.peerWake!, "message");
+  }
+
   /** The contact is away: one wake-up, if it shared how and none went to it lately. Never waits, never fails a send. */
   private wakePeer(live: LiveLink, kind: WakeKind = "message"): void {
     const target = live.stored.peerWake, linkId = live.stored.id;
     if (!target || !live.stored.profile || live.stored.group || !this.settings.online) return;
     if (!(kind === "call" ? this.callWakeLimiter : this.wakeLimiter).take(linkId)) return;
+    this.postWake(linkId, target, kind);
+  }
+
+  /** Posts one wake-up to the target a link holds; a subscription gone (404, 410) is forgotten. */
+  private postWake(linkId: string, target: WakeTarget, kind: WakeKind): void {
     let request: PushRequest;
     try { request = wakeRequest(target, Date.now(), kind); } catch { return; }
     void this.postPush(request).then((status) => {
@@ -1584,9 +1711,11 @@ export class GhostlyNode implements EngineImplementation {
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
     this.fileDesk.drop(linkId);
-    // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken.
+    // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken. The
+    // contact still has the subscription, so the app replaces it.
     this.wakeLimiter.reset(linkId);
     this.callWakeLimiter.reset(linkId);
+    if (live.stored.wakeToken) void this.rotateWake().then(() => this.emitState());
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
     this.emitState();
@@ -1649,8 +1778,13 @@ export class GhostlyNode implements EngineImplementation {
   async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
-    if (!live?.link) return { error: "You are offline" };
     const trimmed = text.trim();
+    // What a compatibility chat's DHT cannot carry is refused before it is kept: it must not show as sent. Whatever
+    // the link's state: one that has not started yet (a chat just added) has no data link either.
+    const bytes = new TextEncoder().encode(trimmed).length;
+    if (live && !live.stored.profile && !(live.link?.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
+      return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
+    if (!live?.link) return { error: "You are offline" };
     if (!trimmed) return { error: null };
 
     const timestamp = params.timestamp ?? Date.now();
@@ -1665,10 +1799,6 @@ export class GhostlyNode implements EngineImplementation {
     // A compatibility chat's records have no room for a reply (WISP 402): said, rather than sent without it.
     if (params.replyTo !== undefined) return { error: "Replies need a current chat; this compatibility chat sends text only.", refused: true };
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
-    // What the DHT cannot carry is refused before it is kept: it must not show as sent.
-    const bytes = new TextEncoder().encode(trimmed).length;
-    if (!(live.link.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
-      return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
     await this.storeMessage({ linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via });
     const at = Date.now(), snapshot = pathSnapshot(live, via);
     const error = await live.link.sendMessage(trimmed, timestamp);
@@ -2256,9 +2386,16 @@ export class GhostlyNode implements EngineImplementation {
     let writing: Promise<void> = appender.then(() => {});
     const discard = () => appender.then((a) => a.bytes.remove(file.id)).catch(() => {});
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
-    const messageStored = this.storeMessage({
+    // files/2 names a file's message by the sender's time, as the sender's reactions, edits and deletes do. Another
+    // file (or a message) already at that time keeps its place, and this one gets an id of its own: its bytes never
+    // land without a message. The same file sent again after its transfer failed lands in the message it had.
+    const first = `peer_${wire.timestamp}`, own = `${first}_${wire.id}`;
+    const messageIds = (files.messageIds ??= new Map());
+    const holder = messageIds.get(first);
+    if (holder === undefined) messageIds.set(first, wire.id);
+    const storeFileMessage = (id: string) => this.storeMessage({
       linkId,
-      id: `peer_${wire.timestamp}`,
+      id,
       // The id both sides know the file by: what a reply to it names (WISP 400 § Replies).
       wireId: wire.id,
       text: fileMessageText(file),
@@ -2269,17 +2406,27 @@ export class GhostlyNode implements EngineImplementation {
       ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
       details: { wire: fileWire("files/2", wire.size) },
     });
+    const messageStored = (async (): Promise<string> => {
+      let id = holder === undefined || holder === wire.id ? first : own;
+      if (id === first && (holder === wire.id || await db.hasMessage(linkId, first))) {
+        const again = await db.patchMessage(linkId, first, (m) => m.sender === "peer" && m.wireId === wire.id && m.file ? { file: { ...m.file, id: file.id } } : null);
+        if (again) { this.events.onMessages(linkId, await db.getMessages(linkId)); return first; }
+        if (holder !== wire.id) id = own;
+      }
+      await storeFileMessage(id);
+      return id;
+    })();
     void messageStored.catch(() => {});
     return {
       write: (chunk) => (writing = writing.then(async () => { if (!cancelled) await (await appender).append(chunk); })),
       // The message keeps the announced type for display; the bytes are served as something inert.
       close: async (digest?: string) => {
-        await messageStored;
+        const messageId = await messageStored;
         await writing;
         if (cancelled) throw new Error("Transfer cancelled");
         const live = this.links.get(linkId);
         // Deleted while it was still arriving: the bytes have nowhere to land, and give their room back.
-        if (live?.stored.deletedIds?.includes(`peer_${wire.timestamp}`)) {
+        if (live?.stored.deletedIds?.includes(messageId)) {
           await discard();
           throw new Error("The receiving message was deleted");
         }
@@ -2493,7 +2640,11 @@ export class GhostlyNode implements EngineImplementation {
     // A reply names a message of this group, by its author's member key (WISP 9xx § Replies).
     const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);
     if (typeof reply === "string") return { error: reply };
-    return this.groups.send(groupId, text, Array.isArray(mentions) ? mentions : [], reply && { i: reply.id, s: reply.snippet, f: reply.member! });
+    const named = Array.isArray(mentions) ? mentions : [];
+    const sent = await this.groups.send(groupId, text, named, reply && { i: reply.id, s: reply.snippet, f: reply.member! });
+    // Members it names whose apps are closed are woken (WISP 9xx · Group Mesh § Wake-up push).
+    if (!sent.error) this.wakeMentioned(groupId, text, named);
+    return sent;
   }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
   /**
@@ -3353,6 +3504,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     // Only through setWakeSubscription, which checks it and gives every chat a new token.
     delete (settings as Partial<Settings>).wake;
+    delete (settings as Partial<Settings>).wakeRotate;
+    delete (settings as Partial<Settings>).wakeMutedGroups;
     const relayBefore = this.hyperdhtRelay;
     // Of the Nostr settings, only what the patch names changes; the rest stays as stored (or the defaults).
     if (nostr) {
@@ -3519,6 +3672,10 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.group) return;
     this.links.delete(linkId);
+    this.groupWakeReceived.delete(linkId);
+    // A member who held the subscription and is no longer in the group (removed, or I left): the app replaces it.
+    // An edge a group on hubs no longer keeps is still a member's: nothing to replace.
+    if (live.stored.wakeToken && this.meshEdge(live.stored) && !this.membership(live.stored.group)?.members.has(live.stored.groupPeer!)) void this.rotateWake().then(() => this.emitState());
     // An entry session is over once the admission is (or was given up): nobody waits on it, so it goes
     // without a last packet saying so, which would only spend two of the relays' requests at a busy moment.
     await live.link?.stop(!live.stored.groupEntry); await live.caps?.stop();
@@ -3607,6 +3764,7 @@ export class GhostlyNode implements EngineImplementation {
         // An entry session carries the admission frames a contact chat would; an edge, the group's own, and what the group sees of payments.
         onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame)
           : (frame as { t?: unknown }).t === "group-pay" ? this.groupPayments.receive(group, peer, frame)
+          : (frame as { t?: unknown }).t === GROUP_WAKE_FRAME ? this.receiveGroupWake(linkId, frame as Record<string, unknown>)
           : this.groups.handleEdgeFrame(group, peer, frame),
         onGroupsSupport: supported => {
           if (supported) traceJoin(group, "link.ready", { role });
@@ -3615,6 +3773,9 @@ export class GhostlyNode implements EngineImplementation {
             else {
               this.groups.edgeReady(group, peer, linkId); void this.groupPayments.edgeReady(group, linkId).catch(() => {});
               if (!this.groups.isCommunityGroup(group)) void this.resendGroupReactions(group, linkId).catch(() => {});
+              // Live again: the next mention while it is away may wake it at once; and it learns how to wake me.
+              this.groupWakeLimiter.reset(peer);
+              void this.shareGroupWake(linkId).catch(() => {});
             }
           }
           this.emitState();
@@ -4118,6 +4279,22 @@ export class GhostlyNode implements EngineImplementation {
     });
     this.nativeQueue = operation.catch(() => {});
     return operation;
+  }
+
+  /**
+   * A group message first stored from a copy a member handed on without its author's whole signature: what the whole
+   * copy adds (mentions, a reply, a hop count) joins the stored row; the text and time stay as they were.
+   */
+  private async completeGroupMessage(message: StoredMessage): Promise<void> {
+    if (!(await db.hasMessage(message.linkId, message.id))) return this.storeMessage(message);
+    const whole = await this.resolveReply(message);
+    const added: Partial<StoredMessage> = { ...(whole.mentions && { mentions: whole.mentions }), ...(whole.mentioned && { mentioned: true }),
+      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }) };
+    if (!Object.keys(added).length) return;
+    const patched = await db.patchMessage(message.linkId, message.id, stored => stored.member === message.member && stored.sender === message.sender ? added : null);
+    if (!patched) return;
+    this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
+    this.emitState();
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> {

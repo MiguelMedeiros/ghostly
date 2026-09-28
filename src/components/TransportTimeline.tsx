@@ -1,8 +1,9 @@
 import { useId, useState } from "react";
 import { transportEventText, transportLineDetails, transportLineText, type TransportEntry, type TransportEvent } from "../lib/transportEvents";
 import { focus } from "../lib/connection";
+import { clockTime } from "../lib/time";
 
-const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const time = clockTime;
 const when = (at: number) => new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
 
 /**

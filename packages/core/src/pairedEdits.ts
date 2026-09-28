@@ -69,6 +69,11 @@ export function validEditNumber(e: unknown): e is number {
   return Number.isSafeInteger(e) && (e as number) >= 1 && (e as number) <= MAX_EDITS_PER_MESSAGE;
 }
 
+/** A message's new text: not empty, no space around it, within a chat message's bytes. The same on a session and on the DHT. */
+export function validEditMessage(m: unknown): m is string {
+  return typeof m === "string" && !!m.trim() && m === m.trim() && utf8Encode(m).length <= LIMITS.maxChatMessageBytes;
+}
+
 /**
  * The edit a `paired-edit` frame says, or null when it is malformed (then it says nothing and is not confirmed). A
  * preview that does not hold is dropped, never the edit.
@@ -78,7 +83,7 @@ export function parseEditFrame(frame: Record<string, unknown>): WireEdit | null 
   const { id, e, ts, m } = frame;
   if (typeof id !== "string" || !ID.test(id) || !validEditNumber(e)) return null;
   if (typeof ts !== "number" || !Number.isSafeInteger(ts) || ts <= 0) return null;
-  if (typeof m !== "string" || !m.trim() || m !== m.trim() || utf8Encode(m).length > LIMITS.maxChatMessageBytes) return null;
+  if (!validEditMessage(m)) return null;
   const pv = frame.pv === undefined ? undefined : parseLinkPreview(frame.pv, m);
   return { id, e, ts, m, ...(pv && { pv }) };
 }

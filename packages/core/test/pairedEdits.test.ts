@@ -5,7 +5,7 @@ import { createIdentity } from "../src/identity";
 import { EDIT_CAPABILITY, SessionCapabilities } from "../src/pairedCapabilities";
 import {
   EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, MAX_EDITS_PER_MESSAGE, RateWindow,
-  dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditNumber, type WireEdit,
+  dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit,
 } from "../src/pairedEdits";
 import { LIMITS } from "../src/frames";
 import { DhtDelivery, emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
@@ -170,6 +170,14 @@ async function live(a: Side, b: Side): Promise<void> {
 
 const editsSent = (side: Side) => side.sent.filter(data => data.includes(`"t":"${EDIT_FRAME}"`));
 const settle = () => new Promise(resolve => setTimeout(resolve, 50));
+
+describe("an edit's text", () => {
+  it("is never blank or padded, on a session or on the DHT", () => {
+    expect(validEditMessage("new text")).toBe(true);
+    for (const m of ["", "   ", " padded", "padded\n", 5, null]) expect(validEditMessage(m)).toBe(false);
+    expect(validEditMessage("x".repeat(LIMITS.maxChatMessageBytes + 1))).toBe(false);
+  });
+});
 
 describe("edits on a paired session (edit/1)", () => {
   it("A edits, B is told the new text, and B's confirmation reaches A", async () => {

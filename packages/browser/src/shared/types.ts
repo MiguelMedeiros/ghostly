@@ -231,6 +231,10 @@ export interface GroupView {
   community?: { hub: boolean; hubs: number; connected: number };
   /** Private groups: the members typing now, in the order they started (WISP 9xx · Group Mesh § Typing). Never stored. */
   typing?: GroupTypingView[];
+  /** Private groups: this side's wake-up tokens, one per member it shared its subscription with (the push worker's table). */
+  wakeTokens?: string[];
+  /** Private groups: its members were told not to wake this side while the group is muted (`setWakeMuted`). */
+  wakeMuted?: boolean;
 }
 
 /** A member typing in a group: `kind` when it is not plain typing, and a bot's status line, sanitized as in a 1:1 chat. */
@@ -685,6 +689,9 @@ export interface StoredMessage {
   forwarded?: number;
 }
 
+/** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
+export interface MessagePage { messages: StoredMessage[]; more: boolean }
+
 /** One person's reaction to a message: the emoji ("" once taken back), their number (the highest wins), when it came. */
 export interface MessageReaction { e: string; n: number; at: number }
 
@@ -980,6 +987,17 @@ export interface Settings {
    * contact whose app offers `wake/1`, so it can wake this app while it is closed. Absent: not woken.
    */
   wake?: WakeSubscription;
+  /**
+   * A contact who held `wake` can no longer be told to forget it (its chat was deleted, or muted: a contact may ignore
+   * `w: null`). The app replaces the subscription (a new endpoint and VAPID key pair, new tokens for the others) and
+   * `setWakeSubscription` clears this. Set by the engine only.
+   */
+  wakeRotate?: boolean;
+  /**
+   * Private groups muted here (WISP 9xx · Group Mesh § Wake-up push): their members are told to forget this profile's
+   * subscription, as a muted chat's contact is. Only through `setWakeMuted` with the group's `group:<id>`.
+   */
+  wakeMutedGroups?: string[];
   /**
    * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.

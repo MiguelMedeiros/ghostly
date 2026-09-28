@@ -4,8 +4,8 @@ import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type Rela
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; write: boolean }
-const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, write });
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean }
+const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
@@ -464,9 +464,10 @@ export class RelayTransport implements PkarrTransport {
     let wait = over(recent, limit);
     if (who.background) {
       wait = Math.max(wait, over(recentBackground, this.backgroundPerMinute));
-      // A link signaling: background takes a smaller share until it stops, or until enough of its own age out.
+      // A link signaling: background takes a smaller share until it stops, or until enough of its own age out. A
+      // community door's bell does not: the links it signals for are often the ones its last admission opened.
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
-      if (signaling > 0) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
+      if (signaling > 0 && !who.door) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
     }
     if (who.group) {
       const reserved = Math.max(this.chatRefused.get(relay) ?? -Infinity, this.chatUrgentAt) + 60_000 - now;

@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
+import { privateFolder } from "../privateFolder";
 import { bytesToMs, type CallRate } from "./pcm";
 
 /**
@@ -14,15 +15,6 @@ export function audioSocketPath(profileDir: string, callId: string): string {
   if (process.platform === "win32") return `\\\\.\\pipe\\ghostly-call-${createHash("sha256").update(inside).digest("hex").slice(0, 24)}`;
   if (Buffer.byteLength(inside) <= 100) return inside;
   return join("/tmp", `ghostly-calls-${createHash("sha256").update(profileDir).digest("hex").slice(0, 24)}`, `${callId}.sock`);
-}
-
-/** The socket's folder: made owner-only, and refused when someone else made it or may enter it. */
-function privateFolder(path: string): void {
-  mkdirSync(path, { recursive: true, mode: 0o700 });
-  const info = statSync(path);
-  if ((process.getuid && info.uid !== process.getuid()) || (info.mode & 0o077) !== 0) {
-    throw new Error(`${path} is not a folder of this user's alone: calls will not put their audio there`);
-  }
 }
 
 /** How far a program may fall behind reading the call's audio before frames are dropped for it. */
@@ -43,7 +35,7 @@ export class AudioSocket {
 
   static async open(path: string, rate: CallRate, handlers: { onAudio(chunk: Buffer): void; onClient?(connected: boolean): void }): Promise<AudioSocket> {
     if (process.platform !== "win32") {
-      privateFolder(join(path, ".."));
+      privateFolder(join(path, ".."), "calls will not put their audio there");
       if (existsSync(path)) rmSync(path, { force: true });
     }
     let self: AudioSocket | null = null;

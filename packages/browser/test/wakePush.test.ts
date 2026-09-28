@@ -7,7 +7,7 @@ import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink, WakeSubscription } from "../src/shared/types";
 
-// covers: push.wake.exchange, push.wake.rate-limit, push.wake.send, push.wake.mute
+// covers: push.wake.exchange, push.wake.rate-limit, push.wake.send, push.wake.mute, push.wake.group
 
 function stubLink(overrides: Record<string, unknown> = {}) {
   const session = { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() };
@@ -116,6 +116,35 @@ describe("sharing this profile's subscription", () => {
     expect(target.token).toBeTruthy();
     expect(target.token).not.toBe(before);
     expect((await saved(chat.id))?.wakeMuted).toBeUndefined();
+  });
+
+  it("a deleted or muted chat's contact still holds the subscription: the app is asked to replace it", async () => {
+    const node = engine();
+    const a = stubLink(), b = stubLink(), c = stubLink();
+    const chatA = await addChat(node, a), chatB = await addChat(node, b);
+    const never = await addChat(node, c, { profile: undefined });
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(b.sendWake).toHaveBeenCalledTimes(1));
+    expect(node.getState().settings.wakeRotate).toBeUndefined();
+    // A chat that never got it changes nothing.
+    node.removeLink({ linkId: never.id });
+    await vi.waitFor(async () => expect(await saved(never.id)).toBeUndefined());
+    expect((await db.getSettings()).wakeRotate).toBeUndefined();
+    node.removeLink({ linkId: chatA.id });
+    await vi.waitFor(async () => expect((await db.getSettings()).wakeRotate).toBe(true));
+    expect(node.getState().settings.wakeRotate).toBe(true);
+    // The new subscription clears it, and the contact left gets a new token.
+    const before = (await saved(chatB.id))?.wakeToken;
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    expect((await db.getSettings()).wakeRotate).toBeUndefined();
+    await vi.waitFor(async () => expect((await saved(chatB.id))?.wakeToken).toBeTruthy());
+    expect((await saved(chatB.id))?.wakeToken).not.toBe(before);
+    await node.setWakeMuted({ linkId: chatB.id, muted: true });
+    expect((await db.getSettings()).wakeRotate).toBe(true);
+    // Only the engine sets it.
+    await node.setWakeSubscription({ subscription: null });
+    await node.updateSettings({ settings: { wakeRotate: true } as never });
+    expect(node["settings"].wakeRotate).toBeUndefined();
   });
 
   it("refuses what is not a subscription, changing nothing", async () => {
@@ -230,5 +259,163 @@ describe("waking a contact whose app is closed", () => {
     const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
     node.removeLink({ linkId: chat.id });
     await vi.waitFor(async () => expect(await saved(chat.id)).toBeUndefined());
+  });
+});
+
+describe("private groups: a mention wakes a member whose app is closed", () => {
+  const memberKey = () => createIdentity().pubKeyZ32;
+  async function addEdge(node: GhostlyNode, group: string, peer: string, link: Stub | null, stored: Partial<StoredLink> = {}) {
+    return addChat(node, link, { profile: undefined, group, groupPeer: peer, ...stored });
+  }
+  const edgeLink = (overrides: Record<string, unknown> = {}) => stubLink({ groupsSupport: true, sendGroupFrame: vi.fn(), ...overrides });
+  type Frame = { t: string; g: string; w: { k: string; e: string } | null };
+  const framesOf = (link: Stub) => (link as unknown as { sendGroupFrame: ReturnType<typeof vi.fn> }).sendGroupFrame.mock.calls.map(([f]) => f as Frame);
+  /** A group message naming these members, as the composer sends it. */
+  function mentioning(...keys: string[]) {
+    let text = "";
+    const mentions = keys.map(k => { const o = Array.from(text).length; text += "@Name "; return { k, o, l: 5 }; });
+    return { text: `${text}are you in?`, mentions };
+  }
+  function sender(node: GhostlyNode, reachable: (key: string) => boolean = () => false) {
+    const groups = node["groups"] as unknown as { send: unknown; reachable: unknown };
+    groups.send = vi.fn(async () => ({ error: null, messageId: "m" }));
+    groups.reachable = vi.fn((_: string, key: string) => reachable(key));
+  }
+
+  it("each member of a private group gets its own token on its edge; a community's members do not get one", async () => {
+    const node = engine();
+    const chat = stubLink(), b = edgeLink(), c = edgeLink(), hub = edgeLink();
+    await addChat(node, chat);
+    const edgeB = await addEdge(node, "g", memberKey(), b);
+    await addEdge(node, "g", memberKey(), c);
+    await addEdge(node, "community", memberKey(), hub);
+    vi.spyOn(node["groups"], "isCommunityGroup").mockImplementation(id => id === "community");
+    const { subscription } = browserSubscription();
+    await node.setWakeSubscription({ subscription });
+    await vi.waitFor(() => expect(framesOf(c)).toHaveLength(1));
+    const [toB] = framesOf(b), [toC] = framesOf(c);
+    expect(toB).toMatchObject({ t: "group-wake", g: "g", w: { e: subscription.endpoint, vp: subscription.vapid.publicKey } });
+    expect(toB!.w!.k).not.toBe(toC!.w!.k);
+    expect((chat.sendWake.mock.calls[0] as unknown as [WakeTarget])[0].token).not.toBe(toB!.w!.k);
+    expect(framesOf(hub)).toHaveLength(0);
+    expect((await saved(edgeB.id))?.wakeToken).toBe(toB!.w!.k);
+    expect(node["groupWakeView"]({ id: "g", profile: "mesh" } as never).wakeTokens?.sort()).toEqual([toB!.w!.k, toC!.w!.k].sort());
+    expect(node["groupWakeView"]({ id: "community", profile: "community" } as never)).toEqual({});
+    await node.setWakeSubscription({ subscription: null });
+    expect(framesOf(b).at(-1)).toEqual({ t: "group-wake", g: "g", w: null });
+    await vi.waitFor(async () => expect((await saved(edgeB.id))?.wakeToken).toBeUndefined());
+  });
+
+  it("a muted group tells every member to forget it (again whenever an edge opens); unmuted, new tokens", async () => {
+    const node = engine();
+    const b = edgeLink();
+    const edge = await addEdge(node, "g", memberKey(), b);
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(framesOf(b)).toHaveLength(1));
+    const before = framesOf(b)[0]!.w!.k;
+    await node.setWakeMuted({ linkId: "group:g", muted: true });
+    expect(framesOf(b).at(-1)).toEqual({ t: "group-wake", g: "g", w: null });
+    expect((await saved(edge.id))?.wakeToken).toBeUndefined();
+    expect((await db.getSettings()).wakeMutedGroups).toEqual(["g"]);
+    // A member may keep it anyway: the app is to replace the subscription, as for a muted chat.
+    expect((await db.getSettings()).wakeRotate).toBe(true);
+    expect(node["groupWakeView"]({ id: "g", profile: "mesh" } as never)).toEqual({ wakeMuted: true });
+    await node["shareGroupWake"](edge.id);
+    expect(framesOf(b).at(-1)!.w).toBeNull();
+    // The settings patch cannot unmute it behind the engine's back.
+    await node.updateSettings({ settings: { wakeMutedGroups: [] } as never });
+    expect(node["settings"].wakeMutedGroups).toEqual(["g"]);
+    await node.setWakeMuted({ linkId: "group:g", muted: false });
+    expect(framesOf(b).at(-1)!.w!.k).toBeTruthy();
+    expect(framesOf(b).at(-1)!.w!.k).not.toBe(before);
+    expect((await db.getSettings()).wakeMutedGroups).toBeUndefined();
+  });
+
+  it("an edge whose member held a token closes: replaced when the member is out of the group, not when a group on hubs only drops the edge", async () => {
+    const node = engine();
+    const [kept, removed] = [memberKey(), memberKey()];
+    const edgeKept = await addEdge(node, "g", kept, edgeLink());
+    const edgeRemoved = await addEdge(node, "g", removed, edgeLink());
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(async () => expect((await saved(edgeRemoved.id))?.wakeToken).toBeTruthy());
+    node["membership"] = vi.fn(() => ({ me: "me", members: new Set([kept]) }));
+    await node["closeGroupLink"](edgeKept.id);
+    expect(node["settings"].wakeRotate).toBeUndefined();
+    await node["closeGroupLink"](edgeRemoved.id);
+    await vi.waitFor(() => expect(node["settings"].wakeRotate).toBe(true));
+  });
+
+  it("keeps what a member shares on its edge, for its group only, a handful a minute; null forgets it", async () => {
+    const node = engine();
+    const edge = await addEdge(node, "g", memberKey(), edgeLink());
+    const { target } = contactTarget();
+    const frame = { t: "group-wake", g: "g", w: { e: target.endpoint, p: target.p256dh, a: target.auth, vp: target.vapid.publicKey, vk: target.vapid.privateKey, k: target.token } };
+    const peerWake = () => node["links"].get(edge.id)!.stored.peerWake;
+    node["receiveGroupWake"](edge.id, { ...frame, g: "other" });
+    expect(peerWake()).toBeUndefined();
+    node["receiveGroupWake"](edge.id, frame);
+    expect(peerWake()).toEqual(target);
+    await vi.waitFor(async () => expect((await saved(edge.id))?.peerWake).toEqual(target));
+    node["receiveGroupWake"](edge.id, { t: "group-wake", g: "g", w: null });
+    expect(peerWake()).toBeUndefined();
+    for (let i = 0; i < 10; i++) node["receiveGroupWake"](edge.id, frame);
+    node["receiveGroupWake"](edge.id, { t: "group-wake", g: "g", w: null });
+    // Past six a minute, frames are dropped: the target said within the window stands.
+    expect(peerWake()).toEqual(target);
+  });
+
+  it("a message naming an away member wakes it with its token and nothing else; no mention, a live member or a muted group wakes nobody", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const [away, live, muted, quiet] = [memberKey(), memberKey(), memberKey(), memberKey()];
+    const { target, secret, auth } = contactTarget();
+    const closed = () => edgeLink({ isDataLinkOpen: false, groupsSupport: false });
+    await addEdge(node, "g", away, closed(), { peerWake: target });
+    await addEdge(node, "g", live, edgeLink(), { peerWake: contactTarget().target });
+    const mutedEdge = await addEdge(node, "g", muted, closed(), { peerWake: contactTarget().target });
+    await addEdge(node, "g", quiet, closed());
+    sender(node, key => key === live);
+    // The muted member's app said to forget it.
+    node["receiveGroupWake"](mutedEdge.id, { t: "group-wake", g: "g", w: null });
+
+    await node.sendGroupMessage({ groupId: "g", text: "nobody named here" });
+    expect(pushSend).not.toHaveBeenCalled();
+    await node.sendGroupMessage({ groupId: "g", ...mentioning(live, muted, quiet) });
+    expect(pushSend).not.toHaveBeenCalled();
+    const named = mentioning(away, "*");
+    await node.sendGroupMessage({ groupId: "g", text: `  ${named.text}  `, mentions: named.mentions });
+    expect(pushSend).toHaveBeenCalledTimes(1);
+    const [request] = pushSend.mock.calls[0]! as unknown as [{ url: string; body: Uint8Array }];
+    expect(request.url).toBe(target.endpoint);
+    const plain = utf8Decode(decryptPushPayload(request.body, secret, auth));
+    expect(JSON.parse(plain)).toEqual({ wake: 1, k: target.token });
+    expect(plain).not.toContain("are you in");
+    // A second mention within 5 minutes is not a second push.
+    await node.sendGroupMessage({ groupId: "g", ...mentioning(away) });
+    expect(pushSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("a message naming sixteen away members wakes four; a failed send, a community or this app offline wakes nobody", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const members = Array.from({ length: 16 }, memberKey);
+    for (const key of members) await addEdge(node, "g", key, edgeLink({ isDataLinkOpen: false, groupsSupport: false }), { peerWake: contactTarget().target });
+    sender(node);
+    await node.sendGroupMessage({ groupId: "g", ...mentioning(...members) });
+    expect(pushSend).toHaveBeenCalledTimes(4);
+
+    const otherSend = vi.fn(async () => 201);
+    const other = engine({ pushSend: otherSend });
+    const key = memberKey();
+    await addEdge(other, "c", key, edgeLink({ isDataLinkOpen: false, groupsSupport: false }), { peerWake: contactTarget().target });
+    sender(other);
+    (other["groups"] as unknown as { send: ReturnType<typeof vi.fn> }).send.mockResolvedValueOnce({ error: "You are not in this group yet" });
+    await other.sendGroupMessage({ groupId: "c", ...mentioning(key) });
+    vi.spyOn(other["groups"], "isCommunityGroup").mockReturnValue(true);
+    await other.sendGroupMessage({ groupId: "c", ...mentioning(key) });
+    vi.spyOn(other["groups"], "isCommunityGroup").mockReturnValue(false);
+    other["settings"] = { ...other["settings"], online: false };
+    await other.sendGroupMessage({ groupId: "c", ...mentioning(key) });
+    expect(otherSend).not.toHaveBeenCalled();
   });
 });

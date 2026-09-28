@@ -727,7 +727,7 @@ export class Communities {
     if (!records.length) return;
     const read = await Promise.all(records.map(async n => {
       const record = knockRecord(link, n);
-      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true).catch(() => null)) ?? []);
+      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true, door === s.myKey && n === KNOCK_BELL).catch(() => null)) ?? []);
     }));
     const bell = records.indexOf(KNOCK_BELL);
     if (bell >= 0 && read[bell].filter(k => now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) live.crowdUntil = now + CROWD_MS;

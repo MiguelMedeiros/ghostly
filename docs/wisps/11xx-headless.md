@@ -53,7 +53,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 ## Local control API
 
-**Transport.** A Unix domain socket at `<profile>/daemon.sock`, created 0600 inside the 0700 profile folder: only the account that owns the profile can connect. When that path is longer than a socket path may be (104 bytes on macOS), the socket is `/tmp/ghostly-<hash of the folder>.sock`, still 0600. There is no TCP listener. On Windows a named pipe takes its place (untested).
+**Transport.** A Unix domain socket at `<profile>/daemon.sock`, created 0600 inside the 0700 profile folder: only the account that owns the profile can connect. When that path is longer than a socket path may be (104 bytes on macOS), the socket is `/tmp/ghostly-<hash of the folder>/daemon.sock`, still 0600, in a 0700 folder the daemon refuses when another user made it or may enter it; a client connects only to a socket its own user owns. There is no TCP listener. On Windows a named pipe takes its place (untested).
 
 **Framing.** Newline-delimited JSON, one object per line, UTF-8, at most 16 MiB per line.
 

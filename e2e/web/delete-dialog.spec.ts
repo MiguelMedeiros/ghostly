@@ -3,8 +3,11 @@ import { expect, openProfilePage, test } from "../support/fixtures";
 test.setTimeout(30000);
 test("delete dialog cancels safely and keeps its target through a reorder",{ tag: ["@feature:chats.list.delete", "@feature:app.popovers"] },async({peer})=>{
   const {page}=await peer("delete-dialog");
-  await page.getByRole("button",{name:"New chat",exact:true}).click();const first=page.url().split('/').at(-1)!;
-  await page.getByRole("button",{name:"New chat",exact:true}).click();const selected=page.url();
+  // New chat opens the chat once its keys are made (#201): read the address after that.
+  await page.getByRole("button",{name:"New chat",exact:true}).click();await expect(page).toHaveURL(/#\/chat\/\w+$/);
+  const first=page.url().split('/').at(-1)!;
+  await page.getByRole("button",{name:"New chat",exact:true}).click();await expect(page).toHaveURL(new RegExp(`#/chat/(?!${first}$)\\w+$`));
+  const selected=page.url();
   const trash=page.getByRole("button",{name:"Delete chat",exact:true}).nth(1);
   await trash.focus();await trash.click();
   const dialog=page.getByRole("dialog",{name:"Delete chat?",exact:true});

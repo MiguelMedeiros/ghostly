@@ -46,13 +46,14 @@ export function profilePaths(home: string, name: string): ProfilePaths {
 
 /**
  * The daemon's socket: in the profile's folder, unless that path is longer than a Unix socket may be (104 bytes on
- * macOS); then in /tmp under a name derived from the folder, still owner-only.
+ * macOS); then in a folder of /tmp named after the profile's, which the daemon makes owner-only and checks before
+ * use (`privateFolder`), and whose socket a client connects to only when it is this user's (`ownSocket`).
  */
 function socketPath(dir: string): string {
   const inside = join(dir, "daemon.sock");
   if (process.platform === "win32") return `\\\\.\\pipe\\ghostly-${createHash("sha256").update(dir).digest("hex").slice(0, 24)}`;
   if (Buffer.byteLength(inside) <= 100) return inside;
-  return join("/tmp", `ghostly-${createHash("sha256").update(dir).digest("hex").slice(0, 24)}.sock`);
+  return join("/tmp", `ghostly-${createHash("sha256").update(dir).digest("hex").slice(0, 24)}`, "daemon.sock");
 }
 
 function ensureFolder(path: string): void {

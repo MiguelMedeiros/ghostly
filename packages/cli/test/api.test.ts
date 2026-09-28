@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
+import { pageOf } from "./support/messagePage";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
@@ -20,6 +21,7 @@ function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" }), link("chat-two", { peerNick: "Bob" })], groups: [group], settings: { online: true, nick: "Bot", relays: ["r"], holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "SK" } }, avatar: "data:x" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
+    messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     sendGroupMessage: vi.fn(async () => ({ error: null })),
     walletCreate: vi.fn(async () => ({ id: "w" })),
@@ -46,6 +48,17 @@ describe("chats", () => {
     expect(findChat(links, "bob").id).toBe("abc2");
     expect(() => findChat(links, "abc")).toThrow(/more than one/);
     expect(() => findChat(links, "zed")).toThrow(/No chat/);
+  });
+
+  it("a contact's own name never stands for someone else: a key finds only its chat, a label wins over a name", () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+    const alice = link("chatAlice", { label: "Alice", peerNick: "Alice", peerPubKeyZ32: KEY });
+    const mallory = link("chatMallory", { peerNick: KEY });
+    const impostor = link("chatImpostor", { peerNick: "alice" });
+    expect(findChat([mallory, alice], KEY).id).toBe("chatAlice");
+    expect(() => findChat([mallory], KEY)).toThrow(/No chat/);
+    expect(findChat([impostor, alice], "Alice").id).toBe("chatAlice");
+    expect(findChat([impostor], "alice").id).toBe("chatImpostor");
   });
 
   it("send refuses a seed or ecash unless forced, and reports the message it kept", async () => {
@@ -207,6 +220,9 @@ describe("settings", () => {
     expect(JSON.stringify(shown)).not.toContain("SK");
     expect(shown).toMatchObject({ avatar: "<set>", holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "<hidden>" } } });
     expect(JSON.stringify(redactSettings({ holdStorage: { s3: { secretAccessKey: "SK" } } } as unknown as Settings, true))).toContain("SK");
+    const capabilities = redactSettings({ wake: { endpoint: "https://fcm.googleapis.com/x", p256dh: "P", auth: "AUTH", vapid: { publicKey: "VP", privateKey: "VK" } }, holdStorage: { s3: {}, space: "SPACE" } } as unknown as Settings);
+    expect(capabilities).toMatchObject({ wake: "<set>", holdStorage: { space: "<hidden>" } });
+    expect(JSON.stringify(capabilities)).not.toMatch(/fcm|AUTH|VK|SPACE/);
     await expect(callApi(ctx, "settings.set", { mints: [] })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
     await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
