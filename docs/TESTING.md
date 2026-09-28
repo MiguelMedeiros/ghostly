@@ -1,4 +1,4 @@
-# Testing map
+# Testing
 
 Every user-visible feature and every protocol capability of Ghostly is listed once in [`e2e/features.json`](../e2e/features.json), with a stable id, the WISP that describes it, the clients it exists in and the infrastructure it needs. Every test says which of those ids it covers. [`scripts/test-map.mjs`](../scripts/test-map.mjs) puts the two together: it runs no test, it reads the declarations, prints the matrix and fails when something is off. CI runs it on every pull request (Frontend lint and types job); it takes well under a second.
 
@@ -102,14 +102,14 @@ It never starts, stops, resets or seeds a stack, here or on one, and never falls
 | Job | What it runs | When |
 |---|---|---|
 | Changed paths | [`scripts/ci-changes.mjs`](../scripts/ci-changes.mjs): which path-gated jobs below this pull request needs | pull requests (pushes run everything) |
-| Frontend lint and types | `npm run lint`, `npm run typecheck`, `npm run test:map` | always |
+| Frontend lint and types | `npm run lint`, `npm run typecheck`, `node scripts/changes.mjs` (the `changes/` entries), `npm run test:map -- --summary` (the check, and the map on the run's summary page) | always |
 | Frontend tests (app) | `npm run test:app` (UI components, matrix, scripts) | always |
 | Frontend tests (packages 1/4 to 4/4) | `npm run test:packages` (core, browser, sdk, extension and the headless CLI, whose tests build it and pair two bots) in 4 shards balanced by time ([`scripts/test-shards.mjs`](../scripts/test-shards.mjs), `scripts/test-durations.json`); the CLI's two-peer story has a shard of its own. The two jobs together are `npm test` | skipped only when every change is under `docs/`, or under `website/` outside the site files the packages' tests read |
 | Frontend builds | `npm run build`, `check:desktop-bundle`, `build:extension`, `build:web`, `test:sdk-example` | always |
 | Tauri Backend, CLI | `cargo fmt --check`, `clippy -D warnings`, `build`, `test` for `src-tauri` (+ `native-transports`) and `cli` | a draft skips them unless it changed `src-tauri/`, `cli/`, `native-transports/`, `Cargo.*` or `ci.yml`; leaving draft runs them |
-| Website, Website browser checks (1/4 to 4/4) | the site's deck check, lint and types; its Playwright checks in 4 shards balanced by time (`website/e2e/shard.mjs`, `website/e2e/durations.json`) | only when something the site reads changed (`WEBSITE_INPUTS` in `ci-changes.mjs`) |
-| Desktop media, Desktop on macOS | voice recordings in WKWebView; two Desktop apps on a Mac call and share an app (`desktop-macos.yml`) | skipped only when every change is under `website/` or `docs/` |
-| CI Success | the required check: fails if any job failed, or was skipped without the gate saying so | always |
+| Website, Website browser checks (1/4 to 4/4) | `npm run sync:references` (the generated files are not committed), the site's deck check, lint (dashes included), `npm test` (WISP content has one source) and types; its Playwright checks in 4 shards balanced by time (`website/e2e/shard.mjs`, `website/e2e/durations.json`) | only when something the site reads changed (`WEBSITE_INPUTS` in `ci-changes.mjs`) |
+| Desktop media, Desktop on macOS | voice recordings in WKWebView; on a Mac, the specs of `e2e/desktop-macos/` (two apps call and share an app, notifications, links, a 100 MB video from the stored file, …) (`desktop-macos.yml`) | skipped only when every change is under `website/` or `docs/` |
+| CI Success | the required check: fails if any job failed, or was skipped without the gate saying so. A pull request into `dev` merges only with it green and the branch up to date with `dev` | always |
 
 The gates are tested in `scripts/test/ci-changes.test.ts`. If the file lookup fails, CI Success fails: nothing is skipped by accident.
 
@@ -122,6 +122,7 @@ Other workflows:
 | E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
 | E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0 | nightly, before every release, by hand |
 | Desktop on macOS (`desktop-macos.yml`) | as in CI | also nightly, and by hand with `repeat` |
+| Desktop media streaming (`desktop-media.yml`) | a 100 MB video plays and seeks from the stored file in WebKitGTK (Linux) and WebView2 (Windows), `e2e/desktop/video-stream.spec.ts` | pull requests that touch the file stream, the file store or the video bubble; nightly; by hand |
 
 The app's e2e suites do not run on pull requests: they would hold up every merge. See [e2e/README.md](../e2e/README.md#when-they-run).
 
