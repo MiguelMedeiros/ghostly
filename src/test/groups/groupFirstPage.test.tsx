@@ -41,9 +41,9 @@ describe("a long group", () => {
     expect(fakeEngine.callsTo("messagePage")).toEqual([{ linkId: "group:group-1" }]);
 
     await act(async () => { whole(history); await vi.advanceTimersByTimeAsync(0); });
-    // The page's rows stay drawn; the older ones come in by steps until every one is there.
+    // The page's rows stay drawn; the older ones come in by steps until every one is there. How many steps have run
+    // by now is not asserted: the clock also moves with real time here, and on a slow machine both steps may be done.
     expect(row(COUNT - PAGE)).not.toBeNull();
-    expect(row(0)).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(200));
     expect(row(0)).not.toBeNull();
     expect(screen.queryByTestId("jump-latest")?.getAttribute("data-count") ?? "0").toBe("0");
