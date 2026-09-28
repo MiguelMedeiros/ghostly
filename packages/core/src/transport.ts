@@ -17,10 +17,32 @@ import type { GhostRecord, SignedPacket } from "./pkarr";
  * ask a second one when the first had nothing new: relays behind one name do not all serve a fresh
  * packet at the same moment.
  */
+/**
+ * `group`: a group's request (its edges' signaling, a knock, a community's shared records). A transport with a
+ * request budget keeps the last part of each minute for a 1:1 chat it had to hold back; one without ignores it.
+ */
 /** What changed in how discovery goes: a relay tripped (left alone), or one answered again. */
 export type DiscoveryChange = "tripped" | "recovered";
 
-export interface PkarrRequestOptions { background?: boolean; urgent?: boolean }
+export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean }
+
+/**
+ * `transport` with `extra` added to every request's options: a group's edges say `group` so. The optional methods
+ * stay optional (a caller reads `configure` as "the DHT is reached directly").
+ */
+export function withRequestOptions(transport: PkarrTransport, extra: PkarrRequestOptions): PkarrTransport {
+  const wrapped: PkarrTransport = {
+    publish: (identity, records, options) => transport.publish(identity, records, { ...options, ...extra }),
+    resolve: (pubKeyZ32, options) => transport.resolve(pubKeyZ32, { ...options, ...extra }),
+    describe: () => transport.describe(),
+  };
+  if (transport.publishPayload) wrapped.publishPayload = (pubKeyZ32, payload, options) => transport.publishPayload!(pubKeyZ32, payload, { ...options, ...extra });
+  if (transport.discovery) wrapped.discovery = () => transport.discovery!();
+  if (transport.subscribe) wrapped.subscribe = (listener) => transport.subscribe!(listener);
+  if (transport.networkChanged) wrapped.networkChanged = () => transport.networkChanged!();
+  if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
+  return wrapped;
+}
 
 /**
  * A request the transport held back to stay within a request budget, its own or a relay's rate limit: nothing went

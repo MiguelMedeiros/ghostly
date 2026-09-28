@@ -9,7 +9,7 @@ import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { resumeHolds } from "./holds";
 import { acquireLock, type ProfilePaths } from "./profiles";
-import { startRuntime } from "./runtime/engine";
+import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 
 /** The longest request line the daemon reads (WISP 11xx § Framing). */
 export const MAX_LINE = 16 * 1024 * 1024;
@@ -21,13 +21,14 @@ export interface Host {
 
 /**
  * Runs a profile in this process: takes its lock, starts the engine, and derives events from it. A daemon then
- * serves the socket (`serve`); a one-shot command calls the API directly and closes.
+ * serves the socket (`serve`); a one-shot command calls the API directly and closes. A one-shot for one chat passes
+ * `deferGroups`: the groups' sessions would spend the relays' budget its message needs.
  */
-export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], version: string): Promise<Host> {
+export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], version: string, options: RuntimeOptions = {}): Promise<Host> {
   const release = acquireLock(paths);
   let runtime;
   try {
-    runtime = await startRuntime(paths);
+    runtime = await startRuntime(paths, options);
   } catch (error) {
     release();
     throw error;

@@ -647,9 +647,13 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(alice, "daemon", "stop"));
     expect(await daemonA.exited()).toBe(0);
     expect(ok(await as(alice, "daemon", "status"))).toMatchObject({ running: false });
-    // A fresh process on one relay, with the two groups above running again: its 30 requests a minute are spent in
-    // seconds, so the message often waits for the next minute (about 65 s on CI, measured). Hence well past 60 s.
-    expect(ok(await as(alice, "send", "bob", "from a one-shot", "--wait", "delivered", "--timeout", "150"))).toMatchObject({ delivery: "delivered" });
+    expect((ok(await as(alice, "group", "list")).groups as unknown[]).length).toBeGreaterThanOrEqual(2);
+    // A fresh process on one relay, in the two groups above: a one-shot for a chat leaves their sessions unstarted.
+    // With them, their edges spent the relay's 30 requests a minute in seconds and the message waited for the next
+    // minute (about 65 s on CI); without, it goes out in a few seconds.
+    const started = Date.now();
+    expect(ok(await as(alice, "send", "bob", "from a one-shot", "--wait", "delivered", "--timeout", "30"))).toMatchObject({ delivery: "delivered" });
+    expect(Date.now() - started).toBeLessThan(15_000);
     const history = ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { text: string }[];
     expect(history.map((m) => m.text)).toEqual(["from a one-shot"]);
   });
