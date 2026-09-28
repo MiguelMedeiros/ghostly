@@ -30,6 +30,8 @@ import { LocalRelay } from "../support/relay";
 // 49740-49749: this test's ports.
 const PORTS = { relay: 49741, dht: 49742, a: 49745 };
 const N = Number(process.env.E2E_MESH_COST_N ?? 32);
+/** How long the app may take to hold its edges in each state. */
+const SETTLE_MS = Number(process.env.E2E_MESH_COST_SETTLE_MS ?? 20 * 60_000);
 const IDLE_MS = Number(process.env.E2E_MESH_COST_IDLE_MS ?? 120_000);
 const BUSY_MS = Number(process.env.E2E_MESH_COST_BUSY_MS ?? 60_000);
 
@@ -41,6 +43,13 @@ const COUNT_PEERS = `
   window.RTCPeerConnection = class extends Native { constructor(...args) { super(...args); window.__meshPeers.push(this); } };
 `;
 const CONNECTED = `return (window.__meshPeers ?? []).filter((pc) => pc.connectionState === "connected").length;`;
+/** What the page's peer connections are doing, and whether the counter is still there (a reload would drop it). */
+const PEERS = `
+  const all = window.__meshPeers;
+  const states = {};
+  for (const pc of all ?? []) states[pc.connectionState] = (states[pc.connectionState] ?? 0) + 1;
+  return { counting: !!all, made: all?.length ?? 0, states, href: location.href };
+`;
 
 interface Sample { at: number; rss: Record<string, number>; cpu: Record<string, number> }
 /** `ps` time (`[[dd-]hh:]mm:ss.cc`) in seconds. */
@@ -130,6 +139,7 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
     const pids = new Map([[desktop!.pid!, "app"], ...[...webkitPids()].filter(([pid]) => !before.has(pid))]);
     report.processes = [...pids.values()];
     report.alone = await measure(pids, 30_000);
+    writeFileSync(testInfo.outputPath("mesh-cost.json"), JSON.stringify(report, null, 2));
 
     await test.step(`the app and ${N - 2} more bots join through the admin's link`, async () => {
       // Pasted into Join, as a person does with a link someone sent them.
@@ -166,10 +176,15 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
       await posting;
       return { ...result, messages: i };
     };
-    const state = async (name: string, wantEdges: number, within = 20 * 60_000, strict = true) => {
+    const state = async (name: string, wantEdges: number, within = SETTLE_MS, strict = true) => {
       const started = Date.now();
       const reached = expect.poll(edges, { timeout: within, intervals: [5_000], message: `${name}: the app's edges` }).toBe(wantEdges);
-      if (strict) await reached; else await reached.catch(() => {});
+      await reached.catch(async (error) => {
+        // What was going on, for the next run: the page's connections, the admin's view, the app's screen and log.
+        writeFileSync(testInfo.outputPath(`${name}-stalled.txt`), JSON.stringify({ peers: await app.app.execute(PEERS), members: await members() }, null, 2)
+          + `\n\n${await app.snapshot()}\n\n${desktop!.log.join("")}`);
+        if (strict) throw error;
+      });
       report[name] = { edges: await edges(), wanted: wantEdges, settledSeconds: Math.round((Date.now() - started) / 1000), idle: await measure(pids, IDLE_MS), busy: await busy() };
       writeFileSync(testInfo.outputPath("mesh-cost.json"), JSON.stringify(report, null, 2));
     };
