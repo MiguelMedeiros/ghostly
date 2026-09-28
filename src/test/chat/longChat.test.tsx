@@ -70,6 +70,22 @@ describe("a long chat", () => {
     expect(draws.text).toBe(0);
   });
 
+  it("draws no message while you type, and does not collapse the field on each keystroke", async () => {
+    const { user } = openChat();
+    await screen.findByText(`Message ${COUNT - 1}`);
+    await settle();
+    const field = screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
+    let styleChanges = 0;
+    new MutationObserver(records => { styleChanges += records.length; }).observe(field, { attributes: true, attributeFilter: ["style"] });
+    draws.text = 0;
+    await user.type(field, "typing in a long chat");
+    await settle();
+    expect(field).toHaveValue("typing in a long chat");
+    expect(draws.text).toBe(0);
+    // Its height is given once: a collapse and a measure on every keystroke laid the whole chat out again.
+    expect(styleChanges).toBeLessThanOrEqual(1);
+  });
+
   it("draws only the new message when one comes", async () => {
     openChat();
     await screen.findByText(`Message ${COUNT - 1}`);
