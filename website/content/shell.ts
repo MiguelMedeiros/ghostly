@@ -30,6 +30,7 @@ export const shell = {
         open: "Open in your browser",
         download: "Download",
         privacy: "Privacy",
+        terms: "Terms",
         overview: "Build with Ghostly",
         catalog: "Protocol",
         cli: "CLI",

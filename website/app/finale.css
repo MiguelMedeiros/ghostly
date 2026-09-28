@@ -362,6 +362,21 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
 .fin-all:hover {
   color: var(--cyan);
 }
+/* One quiet line under the downloads: the license, the terms and the privacy policy. */
+.fin-legal {
+  margin-top: 20px;
+  text-align: center;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+}
+.fin-legal a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fin-legal a:hover {
+  color: var(--cyan);
+}
 
 /* ── The reveals (only with scripts and motion) ─ */
 @media (prefers-reduced-motion: no-preference) {

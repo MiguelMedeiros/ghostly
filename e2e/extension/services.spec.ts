@@ -59,11 +59,14 @@ test("a local web app, shared with a contact and opened over WebRTC", { tag: ["@
 
     await expect(a.page.getByTestId("service-item")).toContainText(/\d+ requests/);
 
-    // Stopped: refused. Shared again: served.
+    // Stopped: refused. Shared again: served. The switch only asks A's engine, so each step waits for A's page to
+    // show the engine's answer before the viewer asks.
     await a.page.getByTestId("service-sharing").click();
+    await expect(a.page.getByTestId("service-item").filter({ hasText: "Stopped" })).toBeVisible();
     await viewer.goto(viewer.url().replace("/page2", "/"));
     await viewer.waitForSelector("text=This peer does not share that service");
     await a.page.getByTestId("service-sharing").click();
+    await expect(a.page.getByTestId("service-item").filter({ hasText: "Shared with 1 contact" })).toBeVisible();
     await viewer.reload();
     await viewer.waitForSelector("body[data-ready='1']");
 
