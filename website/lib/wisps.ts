@@ -107,7 +107,16 @@ export const wisps: Wisp[] = [...all].sort((a, b) => {
   return Number(a.id) - Number(b.id);
 });
 
-export const wispCount = wisps.length;
+/**
+ * What the WISPs page and the reader's sidebar list: the drafts that work in the app today, and the process
+ * document that explains the format. Planned and research drafts are on the roadmap; their pages stay
+ * reachable by their address.
+ */
+export const isListed = (w: Pick<Wisp, "level" | "kind">) => w.level === "available" || w.kind === "Process";
+export const listedWisps = wisps.filter(isListed);
+
+/** How many WISPs the site offers to browse. */
+export const wispCount = listedWisps.length;
 
 export function findWisp(slugOrAlias: string): Wisp | undefined {
   return wisps.find((w) => w.slug === slugOrAlias || w.aliases.includes(slugOrAlias));

@@ -37,6 +37,9 @@
   color: var(--muted);
   font-size: 13.5px;
 }
+.reader-roadmap {
+  margin: 14px 0 0 8px;
+}
 .reader-glossary:hover {
   color: var(--text);
 }
@@ -202,6 +205,10 @@
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+.chip--warn {
+  color: var(--amber);
+  border-color: rgba(251, 191, 36, 0.35);
 }
 .reader-updated {
   font-size: 13px;
