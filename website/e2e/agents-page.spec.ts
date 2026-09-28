@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 /**
  * /developers/agents: the prompt to copy is at the top and its Copy button copies exactly the guide's prompt
  * (docs/AI-AGENTS.md, cut out by scripts/agent-prompt.mjs); the page never scrolls sideways; the Developers page
- * links to it; /llms.txt and /llms-full.txt are served (scripts/llms.mjs) and point AI readers at it.
+ * links to it; its description fits a search result (155 characters); /llms.txt and /llms-full.txt are served (scripts/llms.mjs) and point AI readers at it.
  */
 
 const guide = readFileSync(resolve(__dirname, "../../docs/AI-AGENTS.md"), "utf8");
@@ -16,6 +16,13 @@ const SIZES = [
   { width: 820, height: 1180 },
   { width: 390, height: 844 },
 ];
+
+test("/developers/agents has a description short enough for a search result", async ({ page }) => {
+  await page.goto("/developers/agents");
+  const description = await page.locator('meta[name="description"]').getAttribute("content");
+  expect(description?.length ?? 0).toBeGreaterThan(0);
+  expect(description!.length).toBeLessThanOrEqual(155);
+});
 
 for (const size of SIZES) {
   test(`/developers/agents at ${size.width}px: no sideways scroll, the prompt and its Copy button in the first screen`, async ({ page }) => {
