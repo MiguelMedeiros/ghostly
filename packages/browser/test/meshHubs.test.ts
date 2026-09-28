@@ -45,8 +45,8 @@ describe("hubs in a private group past 16 members", () => {
     const b = await build(24, { hubs: [3, 7] });
     const { world, id, peers } = b;
     await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000, () => `hubs ${peers.filter(p => !view(b, p).hubs).length} off; reach ${peers.filter(p => !view(b, p).members.every(m => m.online)).map(p => p.name).slice(0, 3)}`);
-    // The edges that are not wanted close.
-    await world.run(60_000);
+    // The edges that are not wanted close (the admin's with the last members it let in after two minutes).
+    await world.run(150_000);
     const hubs = [peers[3], peers[7]], others = peers.filter(p => !hubs.includes(p));
     for (const p of others) {
       expect(edgesOf(b, p).length).toBeLessThanOrEqual(MESH_HUBS.hubsPerMember);
@@ -194,7 +194,7 @@ describe("hubs in a private group past 16 members", () => {
     const b = await build(20, { hubs: [2, 5] });
     const { world, id, admin, peers } = b;
     await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
-    await world.run(60_000);
+    await world.run(150_000);
     const leaver = peers[13], leaverKey = keyOf(b, leaver);
     expect(edgesOf(b, leaver).some(e => e.peer === keyOf(b, admin))).toBe(false);
     await leaver.groups.leave(id);

@@ -110,7 +110,7 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
     const [admin] = bots;
     await admin.start(relayUrl, "Admin");
     const group = (await admin.run("group", "create", "Cost", "--mesh")).group as string;
-    const link = (await admin.run("group", "link", group, "--show-secret")).link as string;
+    const link = (await admin.run("group", "link", group)).link as string;
     const members = async () => (await admin.run("group", "show", group)).members as { key: string; name: string | null; me: boolean; online: boolean; hub?: boolean }[];
 
     const before = webkitPids();
@@ -131,8 +131,10 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
     report.alone = await measure(pids, 30_000);
 
     await test.step(`the app and ${N - 2} more bots join through the admin's link`, async () => {
-      await app.go(`#/join/${link}`);
-      await expect.poll(async () => (await members()).length, { timeout: 180_000, message: "the app is let in" }).toBe(2);
+      // Pasted into Join, as a person does with a link someone sent them.
+      await app.join(link);
+      await expect.poll(async () => (await members()).length, { timeout: 180_000, message: "the app is let in" }).toBe(2)
+        .catch(async (error) => { writeFileSync(testInfo.outputPath("app.txt"), `${await app.snapshot()}\n\n${desktop!.log.join("")}`); throw error; });
       for (const [i, bot] of bots.slice(1).entries()) {
         await bot.start(relayUrl, `Bot ${i + 1}`);
         await bot.run("group", "join", link);

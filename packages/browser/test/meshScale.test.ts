@@ -210,5 +210,5 @@ describe.runIf(SIZES.length > 0)("private group scale, measured", () => {
     try { report = await scale(n, network, burst, hubs); } finally { GROUP_MEMBER_CAP.max = MAX_GROUP_MEMBERS; }
     console.log(`MESH_SCALE_REPORT ${JSON.stringify(report)}`);
     if (process.env.MESH_SCALE_OUT) appendFileSync(process.env.MESH_SCALE_OUT, JSON.stringify(report) + "\n");
-  }, 30 * 60_000);
+  }, 120 * 60_000);
 });

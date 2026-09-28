@@ -45,6 +45,8 @@ export const MESH_HUB_TIMINGS: MeshHubTimings = {
   hubWaitMs: 60_000, memberGoneMs: 5 * 60_000, firstReadMs: 30_000, graceMs: 3 * 60_000, keepMetMs: 2 * 60_000, reachEveryMs: 5_000,
 };
 
+/** A hub says whom it reaches this often even when nothing changed: members that cannot read the beacon learn it is one. */
+const REACH_AGAIN_MS = 60_000;
 /** Signed reactions a hub keeps to say again to a member whose edge opens. */
 const REACTIONS_KEPT = 64;
 /** How long the edge to a member a commit took out stays, for that commit to reach it. */
@@ -167,9 +169,9 @@ export class MeshHubs {
 
   /**
    * The members this device keeps edges with, or null for every member (the full mesh: a group of 16 or fewer, no hub
-   * anywhere, or an app without hubs). With hubs, a hub keeps edges with the other hubs, with the members that asked it,
-   * and with members whose apps take no hubs; a member with its hubs. The admin keeps edges with members whose apps take
-   * no hubs too (they would wait for a message to ask for the secret a hub cannot seal for them).
+   * anywhere, or an app without hubs). With hubs, a hub keeps an edge with every member; a member with its hubs. The
+   * admin keeps edges with members whose apps take no hubs too (they would wait for a message to ask for the secret a
+   * hub cannot seal for them).
    */
   wanted(groupId: string, session: GroupSession, group: StoredGroup, now: number): Set<string> | null {
     if (session.status !== "active" || !this.large(session)) return null;
@@ -186,9 +188,10 @@ export class MeshHubs {
       const hubs = this.hubs(groupId, session, now);
       if (!live.hub && !hubs.length) { live.wantedSize = session.others.length; return null; }
       if (live.hub) {
-        for (const key of hubs) out.add(key);
-        for (const key of live.members.keys()) out.add(key);
-        for (const key of legacy) out.add(key);
+        // A hub is there for everyone: an edge with every member, as in a full mesh. A member that has not read the
+        // beacon (its relays' budget spent on the edges of a full mesh) still reaches it, and learns from it that it is
+        // one (`group-reach`). The lobby only makes it look fast for those that asked.
+        for (const key of session.others) out.add(key);
       } else {
         for (const key of live.myHubs) out.add(key);
         // An admin on an app without hubs cannot be reached through them for a leave (it drops `group-bye`).
@@ -370,7 +373,9 @@ export class MeshHubs {
     const edges = this.host.edges(groupId);
     const up = [...edges].filter(([key, id]) => rosterHas(session.roster, key) && this.host.linkReady(id)).map(([key]) => key).sort();
     const said = up.join(",");
-    if (!only && (said === live.sentReach || now - live.lastReach < this.timings.reachEveryMs)) return;
+    // Said when it changed (at most every `reachEveryMs`), and once a minute anyway: it is also how members that could
+    // not read the beacon know I am a hub.
+    if (!only && ((said === live.sentReach && now - live.lastReach < REACH_AGAIN_MS) || now - live.lastReach < this.timings.reachEveryMs)) return;
     if (!only) { live.sentReach = said; live.lastReach = now; }
     const legacy = this.legacyOf(groupId);
     const frame: GroupReachFrame = { t: "group-reach", g: groupId, k: up, ...(legacy.length ? { l: legacy } : {}) };
@@ -425,6 +430,8 @@ export class MeshHubs {
     if (!rosterHas(session.roster, from) || !Array.isArray(frame.k) || frame.k.length > session.roster.length) return false;
     const live = this.get(groupId, now);
     live.reach.set(from, new Set(frame.k.filter((key): key is string => typeof key === "string" && rosterHas(session.roster, key))));
+    // Only hubs say whom they reach: one that does is seen as a hub, as a reading of the beacon would (not one the admin excluded).
+    if (!session.hubPolicy.no.includes(from) && from !== session.myKey) live.seenHubs.set(from, now);
     if (!Array.isArray(frame.l) || frame.l.length > session.roster.length) return false;
     const legacy = new Set(group.legacy ?? []);
     let changed = false;
@@ -434,11 +441,12 @@ export class MeshHubs {
   }
 
   /** A member I have no edge with is reachable through a hub whose edge to me is up and that says it reaches them. */
-  viaHub(groupId: string, key: string): boolean {
+  viaHub(groupId: string, session: GroupSession, key: string, now: number): boolean {
     const live = this.live.get(groupId);
     if (!live) return false;
-    const edges = this.host.edges(groupId);
+    const edges = this.host.edges(groupId), hubs = new Set(this.hubs(groupId, session, now));
     for (const [hub, keys] of live.reach) {
+      if (!hubs.has(hub)) continue;
       const id = edges.get(hub);
       if (keys.has(key) && id && this.host.linkReady(id)) return true;
     }
