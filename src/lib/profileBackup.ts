@@ -71,10 +71,14 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
   await withFileBytes(peer, active);
   const ark: Record<string, ArkDatabaseSnapshot> = {};
   const settingsStore = peer?.stores.find((s) => s.name === "settings");
-  // The peer's copy of the storage credentials (for held messages, WISP 4xx) stays out too, like the page's.
+  // The peer's copy of the storage credentials (for held messages, WISP 4xx) stays out too, like the page's, and so does
+  // the push subscription (WISP 401 § Wake-up push): it belongs to this browser, and its key pair signs wake-ups.
   for (const [i, key] of (settingsStore?.keys ?? []).entries()) {
     const value = settingsStore!.values[i] as Record<string, unknown> | null;
-    if (key === "settings" && value && typeof value === "object" && "holdStorage" in value) { const { holdStorage: _hold, ...rest } = value; settingsStore!.values[i] = rest; }
+    if (key === "settings" && value && typeof value === "object" && ("holdStorage" in value || "wake" in value)) {
+      const { holdStorage: _hold, wake: _wake, ...rest } = value;
+      settingsStore!.values[i] = rest;
+    }
   }
   for (const [i, key] of (settingsStore?.keys ?? []).entries()) {
     if (!isArkRecord(key)) continue;

@@ -84,6 +84,7 @@
     "allow-publish-messages",
     "allow-publish-records",
     "allow-publish-signed-packet",
+    "allow-push-send",
     "allow-read-clipboard-files",
     "allow-read-clipboard-text",
     "allow-read-pasted-bytes",

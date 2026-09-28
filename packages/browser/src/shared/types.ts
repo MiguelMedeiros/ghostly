@@ -7,7 +7,7 @@ import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "../engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
-import type { PaymentReview, PaymentTarget, WalletNetwork } from "@ghostly/core";
+import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
 import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
@@ -21,6 +21,15 @@ import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } 
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
 export interface StoredLink {
+  /**
+   * Paired 1:1 chats: how to wake the contact's closed web app, as it shared it (`wake/1`, WISP 401 § Wake-up push).
+   * Absent until it does, and again once it stops sharing or its push service says the subscription is gone.
+   */
+  peerWake?: WakeTarget;
+  /** Paired 1:1 chats: this side's token for this chat in its own wake-ups; a new one whenever the subscription changes. */
+  wakeToken?: string;
+  /** Paired 1:1 chats: muted here, so the contact is told to forget this side's subscription until it is unmuted. */
+  wakeMuted?: boolean;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
   /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
@@ -941,6 +950,24 @@ export interface Settings {
    * page; never copied into a backup.
    */
   holdStorage?: { s3: S3Config; space: string } | null;
+  /**
+   * This profile's push subscription (the installed web app, WISP 401 § Wake-up push): shared with each paired
+   * contact whose app offers `wake/1`, so it can wake this app while it is closed. Absent: not woken.
+   */
+  wake?: WakeSubscription;
+  /**
+   * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
+   * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
+   */
+  pushRelay?: string;
+}
+
+/** A browser push subscription and the VAPID key pair it was made with. */
+export interface WakeSubscription {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  vapid: VapidKeys;
 }
 
 /**
@@ -1172,6 +1199,12 @@ export interface LinkView {
   callsUnavailable?: string | null;
   /** Paired 1:1 chats: the contact is typing now (`typing/1` on the live session). Absent otherwise. Never stored. */
   peerTyping?: boolean;
+  /** Paired 1:1 chats: this side's wake-up token for this chat (the push worker's table), when it shared its subscription. */
+  wakeToken?: string;
+  /** Paired 1:1 chats: the contact was told not to wake this side while the chat is muted (`setWakeMuted`). */
+  wakeMuted?: boolean;
+  /** Paired 1:1 chats: the contact shared how to wake its closed app, so a message sent while it is away wakes it. */
+  peerWakes?: boolean;
   /** While `peerTyping`: what the contact is doing when it is not plain typing (recording a voice note, thinking). */
   peerTypingKind?: Exclude<TypingKind, "typing">;
   /** While `peerTyping`: the contact's (a bot's) status line, sanitized: one line, at most 40 characters, no links. */

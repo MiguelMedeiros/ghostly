@@ -23,6 +23,7 @@ mod paired_transport;
 mod pkarr_client;
 mod pkarr_network;
 mod pubky_session;
+mod push_send;
 mod records;
 mod share;
 #[cfg(test)]
@@ -82,6 +83,7 @@ macro_rules! commands {
             commands::publish_messages,
             commands::publish_records,
             commands::publish_signed_packet,
+            commands::push_send,
             commands::resolve_messages,
             commands::resolve_records,
             commands::service_respond,
