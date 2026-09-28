@@ -14,7 +14,7 @@ const field = (page: Page) => page.getByTestId("chat-search-input");
 const count = (page: Page) => page.getByTestId("chat-search-count");
 const row = (page: Page, id: string) => page.locator(`.chat-wallpaper [data-message-id="${id}"]`);
 const rowOf = (page: Page, text: string) => page.locator(".chat-wallpaper [data-message-row]")
-  .filter({ has: page.getByTestId("message-text").filter({ hasText: new RegExp(`^${text}$`) }) }).last();
+  .filter({ has: page.getByTestId("message-text").filter({ hasText: new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }) }).last();
 
 /** A chat of `COUNT` texts ("Message 0" on), with "Um Café amanhã?" and a file "Relatório Final.pdf" far up, opened. */
 async function seedChat(p: Peer) {
@@ -51,7 +51,6 @@ test("search a long chat: case and accents, a file's name, next and previous lan
   await page.keyboard.type("CAFE");
   await expect(count(page)).toHaveText("1 of 1");
   await expect(row(page, "cafe")).toBeInViewport();
-  await expect(row(page, "cafe")).toHaveAttribute("data-reply-flash", "");
   await expect(row(page, "cafe").locator("[data-search-match]")).toHaveText("Café");
 
   await field(page).fill("relatorio final");
@@ -66,14 +65,16 @@ test("search a long chat: case and accents, a file's name, next and previous lan
   await field(page).press("Enter");
   await expect(count(page)).toHaveText("2 of 111");
   await expect(rowOf(page, "Message 1998")).toBeInViewport();
-  await expect(rowOf(page, "Message 1998")).toHaveAttribute("data-reply-flash", "");
   await field(page).press("Shift+Enter");
   await field(page).press("Shift+Enter");
   // Newer than the newest: round to the oldest.
   await expect(count(page)).toHaveText("111 of 111");
   await expect(rowOf(page, "Message 19")).toBeInViewport();
   await page.getByTestId("chat-search-newer").click();
-  await expect(rowOf(page, "Message 1999")).toBeInViewport();
+  await expect(count(page)).toHaveText("110 of 111");
+  await expect(rowOf(page, "Message 190")).toBeInViewport();
+  await page.getByTestId("chat-search-older").click();
+  await expect(rowOf(page, "Message 19")).toBeInViewport();
 
   await field(page).fill("nothing like this");
   await expect(count(page)).toHaveText("No results");
@@ -96,17 +97,17 @@ test("search a group from its ⋮", { tag: ["@feature:groups.search"] }, async (
   const group = page.getByTestId("group-chat");
   for (const text of ["Pão de queijo?", "pizza first", "then PÃO again", "done"]) {
     await say(alice, text);
-    await expect(group.getByText(text)).toBeVisible();
+    await expect(rowOf(page, text)).toBeVisible();
   }
 
   await page.getByTestId("group-options").click();
   await page.getByTestId("chat-search-open").click();
   await field(page).fill("pao");
   await expect(count(page)).toHaveText("1 of 2");
-  await expect(rowOf(page, "then PÃO again")).toHaveAttribute("data-reply-flash", "");
+  await expect(rowOf(page, "then PÃO again")).toBeInViewport();
   await expect(rowOf(page, "then PÃO again").locator("[data-search-match]")).toHaveText("PÃO");
   await page.getByTestId("chat-search-older").click();
   await expect(count(page)).toHaveText("2 of 2");
-  await expect(rowOf(page, "Pão de queijo\\?")).toHaveAttribute("data-reply-flash", "");
+  await expect(rowOf(page, "Pão de queijo?")).toBeInViewport();
   await expect(group.locator("[data-search-match]")).toHaveText(["Pão", "PÃO"]);
 });

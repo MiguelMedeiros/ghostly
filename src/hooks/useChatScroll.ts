@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { JUMP_EVENT } from "../lib/replies";
 
 /** A message row of the timeline, in order: its id (the row's `data-message-id`) and whether I sent it. */
 export interface ScrollRow {
@@ -12,6 +13,8 @@ export const NEAR_BOTTOM_PX = 100;
 export const FAR_FROM_BOTTOM_PX = 400;
 /** A hand's wheel, touch or key moves the list for this long after it (smooth scrolling, a trackpad's momentum). */
 export const HAND_MS = 1000;
+/** A jump to a message (a quote's, a search's) is on its way for at most this long, unless a hand takes over first. */
+const JUMP_MS = 2000;
 /** Keys that scroll the list (outside a text field). */
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 
@@ -67,7 +70,7 @@ const editable = (target: EventTarget | null) =>
  * chat opens where it was left (on the same message, or at its bottom) with nothing counted, and one never opened opens
  * at its bottom. When the message it was left on is not among its first rows, it opens at its bottom and goes back on
  * that message once the rows bring it, unless a hand scrolled first. `keys`: End or Ctrl/Cmd+↓ (outside a text field)
- * jumps to the bottom.
+ * jumps to the bottom. A jump to a message (`jumpToMessage`: a quote's, a search's) lands on it, from the bottom too.
  */
 export function useChatScroll({ rows, chat, keys = true }: { rows: readonly ScrollRow[]; chat: string; keys?: boolean }) {
   // Elements, not refs: a list shown later (a group still joining) still gets its listeners.
@@ -97,6 +100,12 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   /** When a hand last touched the list (wheel, touch, a press on it, a scrolling key), and whether it is still pressed. */
   const handAt = useRef(-Infinity);
   const pressed = useRef(false);
+  /**
+   * Until when a jump to a message is on its way (`jumpToMessage`): its row is the anchor, where the jump puts it, and
+   * its own scroll events neither take it back to the bottom nor move the anchor. Over once the row is there, when a
+   * hand takes over, or after `JUMP_MS`.
+   */
+  const jumping = useRef(0);
 
   const distance = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
   /** A list not on screen (a chat kept loaded for a call) has no size: nothing about it says where the view is. */
@@ -144,6 +153,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     pending.current = null;
     atBottom.current = true;
     following.current = true;
+    jumping.current = 0;
     anchor.current = null;
     clear();
     const top = el.scrollHeight;
@@ -170,6 +180,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   useLayoutEffect(() => {
     opened.current = false;
     following.current = false;
+    jumping.current = 0;
     seen.current = new Set();
     atBottom.current = true;
     anchor.current = null;
@@ -250,6 +261,14 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       if (hidden(el)) return;
       // Not moved since it was last set or seen: content grew or shrank under the view, and no hand scrolled it.
       if (Math.abs(el.scrollTop - lastTop.current) < 1) { settle(); return; }
+      if (jumping.current) {
+        const row = anchor.current && rowById(el, anchor.current.id);
+        const landed = !row || Math.abs(row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current!.offset) < 1;
+        if (landed || performance.now() > jumping.current) jumping.current = 0;
+        lastTop.current = el.scrollTop;
+        setFar(distance(el) > FAR_FROM_BOTTOM_PX);
+        return;
+      }
       const d = distance(el);
       // Moved a little short of the bottom with no hand on it: the browser pulled it back while something under it was
       // measured one size and drawn another in the same moment (the composer measuring its text grows the list for an
@@ -266,11 +285,28 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     };
     const takeOver = (e: Event) => {
       following.current = false;
+      jumping.current = 0;
       handAt.current = performance.now();
       if (e.type === "pointerdown") pressed.current = true;
     };
     const release = () => { pressed.current = false; };
-    const onKey = (e: KeyboardEvent) => { if (SCROLL_KEYS.has(e.key) && !editable(e.target)) handAt.current = performance.now(); };
+    const onKey = (e: KeyboardEvent) => { if (SCROLL_KEYS.has(e.key) && !editable(e.target)) { handAt.current = performance.now(); jumping.current = 0; } };
+    // A jump to a message: the list goes where the row will be, in the middle of the view (or as near as it scrolls).
+    const onJump = (e: Event) => {
+      const row = e.target as HTMLElement;
+      if (hidden(el) || !row.dataset?.messageId) return;
+      following.current = false;
+      pending.current = null;
+      const view = el.getBoundingClientRect(), box = row.getBoundingClientRect();
+      const max = el.scrollHeight - el.clientHeight;
+      const target = Math.min(max, Math.max(0, el.scrollTop + box.top - view.top - (el.clientHeight - box.height) / 2));
+      // Near the bottom: it goes to the bottom, as a hand taking it there would.
+      if (max - target <= NEAR_BOTTOM_PX) { handAt.current = performance.now(); return; }
+      atBottom.current = false;
+      anchor.current = { id: row.dataset.messageId, offset: box.top - view.top - (target - el.scrollTop) };
+      jumping.current = performance.now() + JUMP_MS;
+    };
+    el.addEventListener(JUMP_EVENT, onJump);
     el.addEventListener("scroll", onScroll, { passive: true });
     for (const type of ["wheel", "touchstart", "touchmove", "pointerdown"]) el.addEventListener(type, takeOver, { passive: true });
     // A release the page never sees (over another window, a native menu) is let go when the window loses focus.
@@ -281,6 +317,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     observer?.observe(el);
     if (columnEl) observer?.observe(columnEl);
     return () => {
+      el.removeEventListener(JUMP_EVENT, onJump);
       el.removeEventListener("scroll", onScroll);
       for (const type of ["wheel", "touchstart", "touchmove", "pointerdown"]) el.removeEventListener(type, takeOver);
       for (const type of ["pointerup", "pointercancel", "blur"]) window.removeEventListener(type, release);

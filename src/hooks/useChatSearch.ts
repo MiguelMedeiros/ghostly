@@ -62,7 +62,10 @@ export function useChatSearch({ messages, chat, active }: { messages: readonly C
   useEffect(() => {
     const first = latest.current[0] ?? null;
     setCurrent(first);
-    if (first) jump(first);
+    if (!first) return;
+    // Its own task: drawing every row (a long chat still drawing its older ones) cannot happen inside an effect.
+    const timer = setTimeout(() => jump(first), 0);
+    return () => clearTimeout(timer);
   }, [term]);
 
   const index = current ? results.indexOf(current) : -1;

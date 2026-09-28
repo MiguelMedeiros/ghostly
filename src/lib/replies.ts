@@ -76,6 +76,9 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf)
 /** How long a message a quote jumped to stays marked. */
 export const REPLY_FLASH_MS = 1600;
 
+/** Fired on a row just before a jump scrolls to it, for the list to follow it there (useChatScroll). */
+export const JUMP_EVENT = "ghostly:jump-to-message";
+
 /**
  * Scrolls a message into the middle of the chat and marks it for a moment (`data-reply-flash`). False when it is not
  * in the page (a history never holds more than what is loaded, which is all of it).
@@ -83,8 +86,11 @@ export const REPLY_FLASH_MS = 1600;
 export function jumpToMessage(id: string, root: ParentNode = document): boolean {
   const row = [...root.querySelectorAll<HTMLElement>("[data-message-id]")].find(el => el.dataset.messageId === id);
   if (!row) return false;
+  row.dispatchEvent(new Event(JUMP_EVENT, { bubbles: true }));
   const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  row.scrollIntoView?.({ block: "center", behavior: reduce ? "auto" : "smooth" });
+  // Far away (a search's match a thousand messages up), at once: a smooth scroll that long takes seconds.
+  const far = Math.abs(row.getBoundingClientRect().top) > 3 * window.innerHeight;
+  row.scrollIntoView?.({ block: "center", behavior: reduce || far ? "auto" : "smooth" });
   row.removeAttribute("data-reply-flash");
   // A second jump while it is still marked starts the mark again.
   void row.offsetWidth;
