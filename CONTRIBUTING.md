@@ -90,7 +90,7 @@ CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop ch
 
 - **Unit tests** for the logic (Vitest; Rust `#[cfg(test)]` for `src-tauri` and `cli`).
 - **An e2e test** for what a person does or sees (Playwright, `e2e/`).
-- **One line in `e2e/features.json`** for a new feature, and each test says what it covers: `{ tag: ["@feature:<id>"] }` in Playwright, `// covers: <id>` in Vitest and Rust. `npm run test:map` fails in CI on a feature with no test that is not on `e2e/allow-untested.json`.
+- **One line in `e2e/features.json`** for a new feature, in its alphabetical place by id (`npm run test:map -- --fix` sorts the file), and each test says what it covers: `{ tag: ["@feature:<id>"] }` in Playwright, `// covers: <id>` in Vitest and Rust. `npm run test:map` fails in CI on a feature with no test that is not on `e2e/allow-untested.json`.
 
 Details: [docs/TESTING.md](docs/TESTING.md).
 
