@@ -345,6 +345,24 @@
           "markdownDescription": "Enables the native_call_close command without any pre-configured scope."
         },
         {
+          "description": "Enables the native_call_devices command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-devices",
+          "markdownDescription": "Enables the native_call_devices command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_devices_watch command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-devices-watch",
+          "markdownDescription": "Enables the native_call_devices_watch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_microphone command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-microphone",
+          "markdownDescription": "Enables the native_call_microphone command without any pre-configured scope."
+        },
+        {
           "description": "Enables the native_call_mute command without any pre-configured scope.",
           "type": "string",
           "const": "allow-native-call-mute",
@@ -361,6 +379,12 @@
           "type": "string",
           "const": "allow-native-call-open",
           "markdownDescription": "Enables the native_call_open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_call_speaker command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-call-speaker",
+          "markdownDescription": "Enables the native_call_speaker command without any pre-configured scope."
         },
         {
           "description": "Enables the native_call_stats command without any pre-configured scope.",
@@ -789,6 +813,24 @@
           "markdownDescription": "Denies the native_call_close command without any pre-configured scope."
         },
         {
+          "description": "Denies the native_call_devices command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-devices",
+          "markdownDescription": "Denies the native_call_devices command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_devices_watch command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-devices-watch",
+          "markdownDescription": "Denies the native_call_devices_watch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_microphone command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-microphone",
+          "markdownDescription": "Denies the native_call_microphone command without any pre-configured scope."
+        },
+        {
           "description": "Denies the native_call_mute command without any pre-configured scope.",
           "type": "string",
           "const": "deny-native-call-mute",
@@ -805,6 +847,12 @@
           "type": "string",
           "const": "deny-native-call-open",
           "markdownDescription": "Denies the native_call_open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_call_speaker command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-call-speaker",
+          "markdownDescription": "Denies the native_call_speaker command without any pre-configured scope."
         },
         {
           "description": "Denies the native_call_stats command without any pre-configured scope.",
