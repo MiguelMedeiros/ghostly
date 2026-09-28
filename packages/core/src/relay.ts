@@ -383,8 +383,10 @@ export class RelayTransport implements PkarrTransport {
     }
     if (!reachable) {
       const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || this.breaker.blockedFor(r) > 0 || this.heldFor(r, who) > 0);
-      // Holding back is not an outage: report what is already known, this client's own writes included…
-      const known = newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
+      // Holding back is not an outage: report what is already known, this client's own writes included while only the
+      // budget held the read (a relay that failed it says nothing of them: an inviter's placeholder under its contact's
+      // key would hide the outage)…
+      const known = down ? this.newest.get(pubKeyZ32) : newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
       if (resting && known) return known;
       // …or, knowing nothing yet, that the read waits for the budget.
       if (!down && budgetWait < Infinity) throw new DiscoveryBudgetError(budgetWait);

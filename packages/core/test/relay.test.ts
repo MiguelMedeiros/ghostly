@@ -105,6 +105,16 @@ describe("relay transport", () => {
     expect(held?.records.find((r) => r.label === "_ts")?.value).toBe("mine");
   });
 
+  it("a read the relays fail is an outage, even under a key this client published", async () => {
+    // An inviter puts a placeholder under its contact's key before they join: a relay that errs on the read must
+    // surface as "Could not read discovery", not be answered by that placeholder.
+    const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Response(null, { status: init?.method === "PUT" ? 204 : 503 })) as typeof fetch;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: fetchFn });
+    await relay.publish(id, [{ label: "_ts", value: "mine" }]);
+    await expect(relay.resolve(id.pubKeyZ32)).rejects.toThrow("No Pkarr relay reachable");
+  });
+
   it("backs off from a relay that rate limits and uses the other one", async () => {
     const { relay, calls } = transport({
       "a.test": () => new Response(null, { status: 429, headers: { "retry-after": "30" } }),
