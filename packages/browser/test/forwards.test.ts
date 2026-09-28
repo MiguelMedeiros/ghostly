@@ -31,7 +31,7 @@ afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await st
 type Contact = Awaited<ReturnType<typeof contactOf>>;
 
 /** A contact of the app, on its own chat: the texts it got, the files it got (hashed), every files/3 frame it heard. */
-async function contactOf(net: FakeNativeNet, name: string, transport: ConstructorParameters<typeof GhostlyNode>[1]["transport"]) {
+async function contactOf(net: FakeNativeNet, name: string, transport: ConstructorParameters<typeof GhostlyNode>[1]["transport"], { files = true } = {}) {
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
   const id = `forward-${name}-${crypto.randomUUID()}`;
@@ -47,7 +47,7 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
   const records = new Map<string, FileTransferRecord>();
   const sizes = new Map<string, number>();
   const peer: { link?: GhostLink } = {};
-  const files = new ChatFiles({
+  const chatFiles = new ChatFiles({
     send: frame => peer.link?.sendFilesFrame(frame) ?? false,
     decide: async () => "accept",
     openTarget: async (record): Promise<IncomingTarget> => {
@@ -65,41 +65,45 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
     writable: () => peer.link?.filesWritable(),
   });
   const link = new GhostLink({
-    params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: true,
+    // Without files: an app that takes none, neither files/2 (no handler) nor files/3.
+    params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: files,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: `app-${name}:iroh/1` } } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     events: {
       onMessage: message => { got.push(message); },
-      onFilesFrame: frame => { frames.push(frame as Record<string, unknown>); return files.handle(frame); },
-      onFilesSession: open => { if (open) files.attach(); else files.detach(); },
+      onFilesFrame: frame => { frames.push(frame as Record<string, unknown>); return chatFiles.handle(frame); },
+      onFilesSession: open => { if (open) chatFiles.attach(); else chatFiles.detach(); },
     },
   });
   peer.link = link;
   link.registerEndpoint(net.endpoint("iroh/1", name));
   cleanup.push(async () => { await link.stop(false); await db.deleteLink(id); });
   return {
-    id, name, transportSeed, link, files, got, frames, received, records,
+    id, name, transportSeed, link, files: chatFiles, takesFiles: files, got, frames, received, records,
     offer(wireId: string, size: number, extra: { forwarded?: number } = {}) {
       sizes.set(wireId, size);
-      files.offer({ id: wireId, name: `${wireId}.png`, mime: "image/png", size, timestamp: Date.now(), ...extra });
+      chatFiles.offer({ id: wireId, name: `${wireId}.png`, mime: "image/png", size, timestamp: Date.now(), ...extra });
     },
   };
 }
 
-async function setup() {
+async function setup({ withCarol = false } = {}) {
   const net = new FakeNativeNet();
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   const a = await contactOf(net, "alice", transport), b = await contactOf(net, "bob", transport);
+  // Carol's app takes no files.
+  const c = withCarol ? await contactOf(net, "carol", transport, { files: false }) : undefined;
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false,
-    nativeTransports: { "iroh/1": async seed => net.endpoint("iroh/1", `app-${[a, b].find(c => c.transportSeed === seed)?.name ?? "other"}`) } });
+    nativeTransports: { "iroh/1": async seed => net.endpoint("iroh/1", `app-${[a, b, c].find(contact => contact?.transportSeed === seed)?.name ?? "other"}`) } });
   cleanup.push(async () => { await node.shutdown(); });
   await node.start();
-  for (const contact of [a, b]) {
+  for (const contact of [a, b, ...(c ? [c] : [])]) {
     node.setActiveLink({ linkId: contact.id });
     await vi.waitFor(() => expect(node.getState().links.find(l => l.id === contact.id)?.availableTransports).toHaveLength(1));
     void contact.link.connect(5_000).catch(() => {});
+    if (!contact.takesFiles) { await vi.waitFor(() => expect(node.getState().links.find(l => l.id === contact.id)?.pairing?.status).toBe("ready"), { timeout: 20_000 }); continue; }
     await vi.waitFor(() => expect(node.getState().links.find(l => l.id === contact.id)?.capabilities?.largeFiles).toBe(true), { timeout: 20_000 });
     await vi.waitFor(() => expect(contact.files.live).toBe(true), { timeout: 10_000 });
   }
@@ -107,7 +111,7 @@ async function setup() {
     await vi.waitFor(async () => expect((await db.getMessages(contact.id)).find(find)).toBeDefined(), { timeout: 10_000 });
     return (await db.getMessages(contact.id)).find(find)!;
   };
-  return { node, a, b, row };
+  return { node, a, b, c, row };
 }
 
 describe("the hop count", () => {
@@ -193,5 +197,17 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(results[1]).toMatchObject({ to: t.b.id, error: "The file has not arrived yet", messageIds: [expect.any(String)] });
     await vi.waitFor(() => expect(t.b.got.map(m => m.text)).toEqual(["a note"]));
     await expect(t.node.forwardMessages({ linkId: t.a.id, messageIds: ["peer_note"], to: ["a", "b", "c", "d", "e", "f"] })).rejects.toThrow(/at most 5/);
+  });
+
+  it("a file a chat cannot take is said so, never counted as sent, and its copy is not kept", async () => {
+    const t = await setup({ withCarol: true });
+    t.a.offer("doc-000001", 2048);
+    const received = await t.row(t.a, m => m.id === "peer_doc-000001");
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.c!.id, t.b.id] });
+    expect(results[0]).toMatchObject({ to: t.c!.id, messageIds: [], error: expect.stringMatching(/files/) });
+    expect(results[1]).toMatchObject({ to: t.b.id, error: null, messageIds: [expect.any(String)] });
+    expect((await db.getMessages(t.c!.id)).filter(m => m.file)).toEqual([]);
+    expect(await fileStore.listForLink(t.c!.id)).toEqual([]);
   });
 });

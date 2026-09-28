@@ -2369,11 +2369,21 @@ export class GhostlyNode implements EngineImplementation {
             continue;
           }
           if (groupId) { note("Groups take no files yet"); continue; }
+          if (!live!.link) { note("You are offline"); continue; }
           const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
           const file: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
             ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }) };
           await copyForForward(original.id, { linkId: to, wireId, timestamp, file });
           await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
+          // Refused before it could start (the contact's app takes no files, a stopped chat): no message was kept, so
+          // neither is the copy, and the chat says why.
+          const started = this.transfers.get(file.id);
+          if (started?.state === "failed") {
+            note(started.error ?? "The file could not be sent");
+            this.transfers.delete(file.id);
+            await removeStored(file.id).catch(() => {});
+            continue;
+          }
           result.messageIds.push(`me_${timestamp}`);
         } catch (error) {
           note(error instanceof Error ? error.message : String(error));
