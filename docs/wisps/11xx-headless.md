@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.9.1 |
+| Revision | 0.9.2 |
 | Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
@@ -232,6 +232,7 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 
 ## Revision log
 
+- 0.9.2 (2026-09-27): `file send` fails as `refused`, with the reason, when the engine refuses before anything starts (offline, a stopped chat, a contact whose app takes no files); nothing stays staged. `forward --to` takes an id that starts with a dash as it is.
 - 0.9.1 (2026-09-27): forwards: `ghostly forward` (texts, and files from the bytes the profile holds, to up to 5 chats and groups; a group takes texts), the secret guard before a text goes (`--force`), `--wait sent`; `forwarded` on messages (#404).
 - 0.9 (2026-09-27): Pkarr over the Mainline DHT beside the relays (BEP 44, `bittorrent-dht`): a bot keeps finding its contacts and its group's edges while the relays fail; `GHOSTLY_DHT`, `GHOSTLY_DHT_BOOTSTRAP`.
 - 0.8.2 (2026-09-27): `--wait sent` and `edges` on `group send` and `group edit`.

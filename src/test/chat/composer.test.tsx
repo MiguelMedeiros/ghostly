@@ -169,6 +169,16 @@ describe("the + menu", () => {
     await waitFor(() => expect(onSendFile.mock.calls.map(([f]) => f.name)).toEqual(["a.jpg", "b.mp4"]));
   });
 
+  it("a file the chat refuses before it goes (the contact's app takes none, a stopped chat) says why, and the next waits", async () => {
+    onSendFile.mockResolvedValueOnce("Connect to an updated peer to send files");
+    composer();
+    const files = screen.getByTestId<HTMLInputElement>("file-input");
+    fireEvent.change(files, { target: { files: [new File(["a"], "a.pdf", { type: "application/pdf" }), new File(["b"], "b.pdf", { type: "application/pdf" })] } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Connect to an updated peer to send files");
+    // The first that cannot go stops the rest.
+    expect(onSendFile.mock.calls.map(([f]) => f.name)).toEqual(["a.pdf"]);
+  });
+
   it("is a sheet from the bottom on a phone", async () => {
     viewport(390, 844);
     const { user } = composer();

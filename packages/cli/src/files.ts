@@ -4,6 +4,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, sanitizeFileName, sanitizeMime, toBase64Url } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
+import { removeStored } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { LinkView, MessageFile } from "@ghostly/browser/shared/types";
 import { bool, chatOf, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
@@ -100,7 +101,14 @@ export const FILE_METHODS: Record<string, Method> = {
       transfer: { state: "transferring", transferred: 0, size: file.size },
     });
     endTyping(ctx, link.id, true);
-    await node(ctx).sendFile({ linkId: link.id, file, timestamp, ...(replyTo ? { replyTo } : {}) });
+    try {
+      await node(ctx).sendFile({ linkId: link.id, file, timestamp, ...(replyTo ? { replyTo } : {}) });
+    } catch (error) {
+      // Refused before it started (offline, a stopped chat, a contact whose app takes no files): nothing is in the chat,
+      // so the staged copy goes too.
+      await removeStored(file.id).catch(() => {});
+      throw new CliError("refused", error instanceof Error ? error.message : String(error));
+    }
     return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}) }, ...(warning ? { warning } : {}) };
   },
 
