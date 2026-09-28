@@ -73,6 +73,9 @@ export interface Peer {
    * so the relays' budget does not hold them back.
    */
   unmetered?: boolean;
+  /** The most connections its groups hold (a Mac's `peerBudget`), and how many groups not in this world hold now. */
+  peerBudget?: number;
+  heldElsewhere?: number;
 }
 
 function memoryStore(messages: StoredMessage[]): GroupStore {
@@ -131,7 +134,7 @@ export class CommunityWorld {
    * `extra`: more of the host, for what a test runs on top of the groups (payments). `app`: an app that stays online
    * (a hub of large private groups), or one from before hubs.
    */
-  add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean } = {}): Peer {
+  add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean; peerBudget?: number; heldElsewhere?: number } = {}): Peer {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
     const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, ...app };
@@ -188,6 +191,8 @@ export class CommunityWorld {
       myNick: () => peer.nick,
       staysOnline: () => !!peer.staysOnline,
       meshHubs: () => !peer.legacy,
+      // As the engine counts: the links of every other group, and what groups outside this world hold.
+      peerRoom: g => peer.peerBudget === undefined ? undefined : peer.peerBudget - (peer.heldElsewhere ?? 0) - [...links.values()].filter(e => e.g !== g).length,
       ...extra?.(peer),
     };
     peer.groups = new Groups(host, peer.store, undefined, this.timings, this.random);

@@ -312,6 +312,12 @@ export interface NodeOptions {
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
   staysOnline?: boolean;
+  /**
+   * The most WebRTC connections this app's groups hold at once (WISP 9xx · Group Mesh § Hubs, Budget): past it, the
+   * app is a hub of a private group only while no other member can be. Default: none. The Desktop app on a Mac says 40:
+   * WKWebView opens about 46 in one page, and the rest stay for 1:1 chats and calls.
+   */
+  peerBudget?: number;
   /** The Lightning and on-chain providers on offer. Default: the registry (tests pass their own). */
   providers?: ProviderRegistry;
   /** Desktop: the Tauri commands the providers that need them call (see `ProviderHost.invoke`). */
@@ -819,6 +825,14 @@ export class GhostlyNode implements EngineImplementation {
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     myNick: () => this.sharedNick,
     staysOnline: () => this.options.staysOnline ?? this.options.platform === "desktop",
+    peerRoom: groupId => {
+      const budget = this.options.peerBudget;
+      if (budget === undefined) return undefined;
+      // Every other group's edges and entry sessions that run: one connection each.
+      let held = 0;
+      for (const live of this.links.values()) if (live.stored.group && live.stored.group !== groupId && live.link) held++;
+      return budget - held;
+    },
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
     edges: groupId => this.groupEdges(groupId),
     entries: groupId => {
