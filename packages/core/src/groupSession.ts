@@ -142,6 +142,11 @@ export interface GroupState {
   relayEdits?: GroupEditFrame[];
   /** Sender → epoch → highest sequence seen and the ones seen below it. */
   seen: Record<string, Record<string, { high: number; window: number[] }>>;
+  /**
+   * Messages delivered from a copy that was not whole, waiting for a whole copy to complete them, oldest first, at most
+   * `GROUP_LIMITS.provisional`. Absent in states from before they were saved.
+   */
+  provisional?: string[];
   /** Names members announced on their edges. */
   nicks: Record<string, string>;
   /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
@@ -288,13 +293,15 @@ export class GroupSession {
   private syncsAnswered = new Map<string, RateWindow>();
   /**
    * Messages delivered from a copy that was not whole (handed on without its author's whole signature): not seen, so
-   * a sync still asks for them and a whole copy completes them. In memory only, oldest first.
+   * a sync still asks for them and a whole copy completes them. Oldest first, saved as `GroupState.provisional`, so a
+   * restart does not let a stripped copy take the message's place.
    */
-  private provisional = new Set<string>();
+  private provisional: Set<string>;
 
   constructor(state: GroupState, private readonly hooks: GroupSessionHooks) {
     this.state = state;
     this.identity = identityFromSeedB64(state.seedB64);
+    this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
   }
 
   /** A new group: its genesis commit, signed by the creator, who is its admin. */
@@ -748,8 +755,11 @@ export class GroupSession {
     if (!whole) {
       this.provisional.add(id);
       if (this.provisional.size > GROUP_LIMITS.provisional) this.provisional.delete(this.provisional.values().next().value!);
+      this.state.provisional = [...this.provisional];
+      await this.persist();
       return;
     }
+    if (completes) this.state.provisional = [...this.provisional];
     this.markSeen(raw);
     this.keep(clean(raw));
     await this.persist();
