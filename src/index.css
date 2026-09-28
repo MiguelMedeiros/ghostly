@@ -594,6 +594,16 @@ body {
   background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c5c6c8' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
+/*
+ * A chat's message list on a layer of its own. In WebKit (Desktop on the Mac), a long chat left open froze for 300 to
+ * 450 ms every half second or so with no script running (nothing drawn by React, nothing changed in the page), and the
+ * older rows of a long chat coming in cost more with each step; with the list on its own layer both are gone. Not while
+ * a video plays full screen in it: that one is `position: fixed`, and the layer would hold it inside the list.
+ */
+[data-message-list]:not(:has([data-theater])) {
+  will-change: transform;
+}
+
 /* Inline timestamp float (WhatsApp-style) */
 .msg-meta {
   user-select: none;

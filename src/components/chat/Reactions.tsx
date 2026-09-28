@@ -84,7 +84,12 @@ export function ReactAction({ onOpen, anchorRef, open }: { onOpen: () => void; a
  * choosing it again takes it back. `onDetails`: a Details button too (a long press opens the bar on phones, where it
  * used to open the details).
  */
-export function ReactionBar({ open, onClose, anchorRef, current, onReact, align, onDetails, onSelect }: {
+export function ReactionBar(props: ReactionBarProps) {
+  // Closed, it is nothing: every message that takes a reaction has one.
+  return props.open ? <OpenReactionBar {...props} /> : null;
+}
+
+type ReactionBarProps = {
   open: boolean;
   onClose: () => void;
   anchorRef: RefObject<HTMLElement | null>;
@@ -95,7 +100,9 @@ export function ReactionBar({ open, onClose, anchorRef, current, onReact, align,
   onDetails?: () => void;
   /** A Select button under Details: starts choosing messages with this one (to forward several, WISP 400 § Forwards). */
   onSelect?: () => void;
-}) {
+};
+
+function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, onDetails, onSelect }: ReactionBarProps) {
   const { t } = useI18n();
   const [more, setMore] = useState(false);
   useEffect(() => { if (!open) setMore(false); }, [open]);

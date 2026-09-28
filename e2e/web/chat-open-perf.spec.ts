@@ -54,3 +54,16 @@ test("a long chat opens without costing in proportion to its length", { tag: ["@
   // (250 to 350 ms of long tasks every two seconds here before; none after).
   expect(long.idleLong).toBeLessThan(150);
 });
+
+test("the message list is a layer of its own, but not while a video in it plays full screen", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
+  const bob = await peer("layer-bob");
+  await seed(bob.page, [{ label: "Short chat", count: 50 }]);
+  await bob.page.reload();
+  await bob.page.getByTestId("chat-row-name").filter({ hasText: "Short chat" }).click();
+  const list = chat(bob);
+  await expect(list.locator("[data-message-row]").first()).toBeAttached();
+  await expect.poll(() => list.evaluate(el => getComputedStyle(el).willChange)).toBe("transform");
+  // Full screen, a video is `position: fixed`: a layer would hold it inside the list.
+  await list.evaluate(el => el.querySelector("[data-message-row]")!.setAttribute("data-theater", "true"));
+  await expect.poll(() => list.evaluate(el => getComputedStyle(el).willChange)).toBe("auto");
+});
