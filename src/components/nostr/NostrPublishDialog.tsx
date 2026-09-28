@@ -5,6 +5,7 @@ import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { nostrSignerChoices, signNostrDraft, type NostrSignerChoice } from "../../lib/nostr";
 import { Button, Notice, input } from "../wallet/ui";
 import { Select } from "../ui/Select";
+import { externalLinkProps } from "../../lib/externalLink";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -81,7 +82,7 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
               <input data-testid="nostr-publish-bunker" type="password" autoComplete="off" value={bunker} onChange={e => setBunker(e.target.value)} placeholder="bunker://…" className={`${input} mt-1`} />
             </label>
           )}
-          {authUrl && <p className="text-xs text-text-muted">Approve it in your signer: <a href={authUrl} target="_blank" rel="noopener noreferrer" className="text-accent underline break-all">{authUrl}</a></p>}
+          {authUrl && <p className="text-xs text-text-muted">Approve it in your signer: <a {...externalLinkProps(authUrl)} className="text-accent underline break-all">{authUrl}</a></p>}
           {progress && <p className="text-xs text-text-muted" aria-live="polite">{progress}</p>}
           <div className="flex flex-wrap gap-2 justify-end">
             <Button onClick={close} disabled={busy}>Cancel</Button>

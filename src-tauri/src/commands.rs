@@ -432,6 +432,25 @@ mod project_link_tests {
     }
 
     #[test]
+    fn opens_non_ascii_links_only_as_the_app_encodes_them() {
+        // covers: app.external-links
+        // The page sends `new URL(href).href` (src/lib/externalLink.ts): the path, query and fragment
+        // percent-encoded, the host in punycode. What `open` receives stays plain ASCII.
+        for url in [
+            "https://pt.wikipedia.org/wiki/São_Paulo",
+            "https://münchen.de/",
+        ] {
+            assert!(!super::is_web_link(url), "{url}");
+        }
+        for url in [
+            "https://pt.wikipedia.org/wiki/S%C3%A3o_Paulo",
+            "https://xn--mnchen-3ya.de/stra%C3%9Fe?q=%C3%A7%C3%A3o#a%C3%A7a%C3%AD",
+        ] {
+            assert!(super::is_web_link(url), "{url}");
+        }
+    }
+
+    #[test]
     fn rejects_payment_links_that_are_not_lightning_or_bitcoin_uris() {
         for url in [
             "https://example.com",

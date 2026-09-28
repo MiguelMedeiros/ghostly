@@ -1,5 +1,6 @@
 import { useI18n } from "../contexts/I18nContext";
 import { useUpdate } from "../contexts/UpdateContext";
+import { externalLinkProps } from "../lib/externalLink";
 
 /**
  * A new version exists. Nothing happens until the user says so: applying one
@@ -37,9 +38,7 @@ export function UpdateBanner() {
 
       {update.apply === "manual" ? (
         <a
-          href={downloadUrl}
-          target="_blank"
-          rel="noopener noreferrer"
+          {...externalLinkProps(downloadUrl)}
           className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors"
         >
           {t("updates.download")}
