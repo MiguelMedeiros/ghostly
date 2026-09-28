@@ -27,11 +27,11 @@ type Shot = {
 const SHOTS: Record<string, Shot> = {
   chat: {
     src: "/screenshots/current/chat.webp",
-    alt: "Boo's chat with Casper: text, a voice message and delivery receipts under each message",
+    alt: "Boo's chat with Casper: text, a voice message and delivery marks beside the time",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The conversation column: Casper's bubbles and voice message on the left, ours with "Received by peer" on the right.
+    // The conversation column: Casper's bubbles and voice message on the left, ours with their delivery marks on the right.
     crop: { x: 0.345, y: 0.27, w: 0.655 },
     mobile: "/screenshots/current/chat-mobile.webp",
   },
@@ -72,7 +72,7 @@ const SHOTS: Record<string, Shot> = {
     from: "dev",
     width: 2560,
     height: 1640,
-    // The payment deck open over the chat (Cashu, 44,100 test sats), the thank-you and the paid request beside it.
+    // The payment deck open over the chat (Cashu, 42,100 test sats, on the Testnet tab), the thank-you and the paid request beside it.
     crop: { x: 0.33, y: 0.3, w: 0.67 },
     mobile: "/screenshots/current/sats-mobile.webp",
   },
@@ -102,8 +102,8 @@ const SHOTS: Record<string, Shot> = {
     from: "dev",
     width: 2560,
     height: 1640,
-    // The "Identities with Boo" panel: Boo's verified cards, with a little of the chat beside it.
-    crop: { x: 0.44, y: 0, w: 0.56 },
+    // The "Identities with Boo" panel: Boo's verified cards and the Nostr card's posts box, with a little of the chat beside it.
+    crop: { x: 0.38, y: 0, w: 0.62 },
     mobile: "/screenshots/current/identities-chat-mobile.webp",
   },
 };
