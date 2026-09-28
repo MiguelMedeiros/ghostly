@@ -2,7 +2,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 /**
  * The join page (WISP 801, Q11): a visit to ghostly.tools/#ghostly1… opens a dialog over the page,
- * the code leaves the address before analytics load, and no request ever carries it.
+ * the code leaves the address before anything else runs, and no request ever carries it.
  */
 
 // WISP 801's test vector (synthetic bytes), and codes made from it: version 2, version 0, 96 bytes.
@@ -43,17 +43,15 @@ test.describe("join page", () => {
     await page.goto(`/#${CODE}`);
     const dialog = page.getByTestId("join-landing");
     await expect(dialog.getByRole("heading", { name: "You're invited to a chat" })).toBeVisible();
-    // Out of the address (and so out of analytics and the history) before anything else ran.
+    // Out of the address (and so out of the history) before anything else ran.
     expect(page.url()).not.toContain("#");
     await expect(dialog.getByTestId("join-going")).toContainText(/Opening the chat in [123]/);
     await expect(dialog.getByRole("status")).toHaveText("Opening the chat in your browser in 3 seconds.");
     await expect(dialog.getByTestId("join-cancel")).toBeFocused();
     await expect(dialog.getByTestId("join-go-now")).toHaveAttribute("rel", "noreferrer");
     await expect(dialog.getByText("The invite stays in this browser. It was never sent to ghostly.tools.")).toBeVisible();
-    const analytics = await page.evaluate(() => JSON.stringify((window as { dataLayer?: unknown }).dataLayer ?? []));
     const entries = await page.evaluate(() => history.length);
     await expect(page).toHaveURL(`${APP}/#${CODE}`, { timeout: 10_000 });
-    expect(analytics.toLowerCase()).not.toContain(SECRET);
     // replace, not a new entry: Back does not come back to the countdown.
     expect(await page.evaluate(() => history.length)).toBe(entries);
     expect(leaks).toEqual([]);

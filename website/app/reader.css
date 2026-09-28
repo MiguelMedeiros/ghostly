@@ -370,9 +370,6 @@
 .reader-prose > * + * {
   margin-top: 1em;
 }
-.reader-prose h1 {
-  display: none;
-}
 .reader-prose h2,
 .reader-prose h3,
 .reader-prose h4 {
