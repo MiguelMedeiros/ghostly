@@ -238,9 +238,15 @@ function linkFilesFrom(linkId: string, files: StoredFile[], messages: StoredMess
   return result;
 }
 
-interface SpareInvite { mine: LinkParams; inviteKey: ReturnType<typeof identityFromSeedB64>; inviteCode: string; madeAt: number }
+interface SpareInvite { mine: LinkParams; inviteKey: ReturnType<typeof identityFromSeedB64>; inviteCode: string; madeAt: number; warmedAt?: number }
 /** A spare invite is warmed again this often while it waits, and handed out only between these ages. */
 const SPARE_INVITE_WARM_EVERY_MS = 4 * 60_000;
+/**
+ * The spare that replaces one handed out is warmed this long after, not in the second the new chat is made: its two
+ * packets spent a pairing's requests while it signals, and in a burst of invites the next chat came too soon to take
+ * it anyway. Three pairings in a minute are the whole of a page's relay budget (2026-09-27).
+ */
+export const SPARE_INVITE_WARM_AFTER_TAKE_MS = 30_000;
 export const SPARE_INVITE_MIN_AGE_MS = 6_000;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 
@@ -1212,14 +1218,16 @@ export class GhostlyNode implements EngineImplementation {
    * takes the network seconds (the DHT's iterative lookup before the store, on the relays' side too, and
    * a relay refuses to replace a packet it is still putting); a packet under a key it knows lands in
    * under a second. So the engine keeps one invite ready with both its keys warmed with empty packets
-   * (`emptyLinkRecords`), and makes the next one the moment this one is taken.
+   * (`emptyLinkRecords`), and makes the next one the moment this one is taken (warmed a little later,
+   * `SPARE_INVITE_WARM_AFTER_TAKE_MS`).
    */
   takeInvite(): { mine: LinkParams; inviteCode: string } {
     // A spare warmed seconds ago is worse than fresh keys: the network is still putting its first packet,
-    // and a second one under the key meanwhile is refused by relays and DHT alike (for ~4 s).
-    const age = this.spare ? Date.now() - this.spare.madeAt : 0;
-    const spare = this.spare && age >= SPARE_INVITE_MIN_AGE_MS && age < SPARE_INVITE_MAX_AGE_MS ? this.spare : this.makeSpare();
-    if (spare === this.spare) { this.spare = null; this.prepareSpare(); }
+    // and a second one under the key meanwhile is refused by relays and DHT alike (for ~4 s). One not warmed yet is
+    // fresh keys like any others.
+    const now = Date.now(), warmedAt = this.spare?.warmedAt;
+    const spare = this.spare && (warmedAt === undefined || (now - warmedAt >= SPARE_INVITE_MIN_AGE_MS && now - this.spare.madeAt < SPARE_INVITE_MAX_AGE_MS)) ? this.spare : this.makeSpare();
+    if (spare === this.spare) { this.spare = null; this.prepareSpare(SPARE_INVITE_WARM_AFTER_TAKE_MS); }
     return { mine: spare.mine, inviteCode: spare.inviteCode };
   }
 
@@ -1229,16 +1237,21 @@ export class GhostlyNode implements EngineImplementation {
     return { mine, inviteKey: identityFromSeedB64(invite.seedB64), inviteCode, madeAt: Date.now() };
   }
 
-  /** One invite warmed and waiting, warmed again every so often while it waits (the relays forget). */
-  private prepareSpare(): void {
+  /** One invite warmed and waiting (`after` ms from now), warmed again every so often while it waits (the relays forget). */
+  private prepareSpare(after = 0): void {
     if (this.shuttingDown || !this.settings.online) return;
     if (!this.spare) this.spare = this.makeSpare();
     const spare = this.spare;
+    if (this.spareTimer) clearTimeout(this.spareTimer);
+    if (after > 0) {
+      this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, after);
+      return;
+    }
+    spare.warmedAt ??= Date.now();
     for (const identity of [identityFromSeedB64(spare.mine.seedB64), spare.inviteKey]) {
       this.warmedKeys.set(identity.pubKeyZ32, Date.now());
       void this.transport.publish(identity, emptyLinkRecords()).catch(() => {});
     }
-    if (this.spareTimer) clearTimeout(this.spareTimer);
     this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, SPARE_INVITE_WARM_EVERY_MS);
   }
 
