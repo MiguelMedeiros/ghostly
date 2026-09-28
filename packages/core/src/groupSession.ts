@@ -10,7 +10,7 @@ import {
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
 import {
-  encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaFrame,
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
@@ -18,6 +18,8 @@ import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } 
 import { readForwarded } from "./forwards";
 import { GROUP_EDIT_FRAME, meshMessageRef, validEditText, type GroupIncomingEdit } from "./groupEdits";
 import { validEditNumber } from "./pairedEdits";
+import { MESH_HUBS, meshRendezvous, NO_HUB_POLICY, type MeshHubPolicy } from "./groupHubs";
+import { readReaction, type WireReaction } from "./reactions";
 
 /**
  * One member's view of a `group-mesh/1` group: the membership chain, the epoch
@@ -98,7 +100,12 @@ export interface GroupDeclineFrame { t: "group-decline"; g: string }
 export interface GroupChainFrame { t: "group-chain"; g: string; commits: GroupCommit[] }
 export interface GroupWelcomeFrame { t: "group-welcome"; g: string; name: string; commits: GroupCommit[]; secrets: { e: number; s: SealedSecret }[] }
 export interface GroupRemovedFrame { t: "group-removed"; g: string }
-export type GroupEdgeFrame = GroupMessageFrame | GroupEditFrame | GroupCommitFrame | GroupSyncFrame | GroupSecretsFrame | GroupLeaveFrame | GroupMetaFrame;
+/**
+ * A member's leave, signed by its member key (WISP 9xx · Group Mesh § Hubs): unlike `group-leave`, which the admin
+ * believes from the edge it comes on, hubs can carry it to an admin the member has no edge with. Apps from before drop it.
+ */
+export interface GroupByeFrame { t: "group-bye"; g: string; k: string; e: number; ts: number; sig: string }
+export type GroupEdgeFrame = GroupMessageFrame | GroupEditFrame | GroupCommitFrame | GroupSyncFrame | GroupSecretsFrame | GroupLeaveFrame | GroupMetaFrame | GroupByeFrame;
 export type GroupAdmissionFrame = GroupInviteFrame | GroupAcceptFrame | GroupDeclineFrame | GroupChainFrame | GroupWelcomeFrame | GroupRemovedFrame;
 
 export type GroupStatus = "active" | "left" | "removed" | "forked";
@@ -175,6 +182,15 @@ export const groupMessageId = (sender: string, epoch: number, seq: number) => `$
 const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + 64;
 const MAX_EDIT_BOX = Math.ceil((MAX_EDIT_PLAIN + 16) * 4 / 3) + 4;
 const editAad = (f: Pick<GroupEditFrame, "g" | "e" | "s" | "n" | "v" | "ts">) => JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts]);
+/** What a member signs of its reaction, so that a hub can pass it on (WISP 9xx · Group Mesh § Hubs). */
+const reactionSigned = (g: string, r: WireReaction) => utf8Encode(JSON.stringify(["ghostly-group/1 react", g, r.id, r.e, r.n]));
+/**
+ * A member's reaction as a hub passes it on: signed by the member (`k`), unlike `group-react`, which the edge it comes
+ * on vouches for. A frame of its own, which apps from before hubs drop: they would take it as the hub's reaction.
+ */
+export const GROUP_REACTED_FRAME = "group-reacted";
+export interface GroupReactedFrame extends WireReaction { t: typeof GROUP_REACTED_FRAME; g: string; k: string; sig: string }
+const byeSigned = (f: Omit<GroupByeFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 bye", f.g, f.k, f.e, f.ts]));
 const editSigned = (f: Omit<GroupEditFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts, f.nn, f.c]));
 function isEditFrame(v: unknown): v is GroupEditFrame {
   if (!v || typeof v !== "object") return false;
@@ -251,6 +267,8 @@ export class GroupSession {
   private queue = Promise.resolve();
   /** One metadata frame that names a commit or an epoch I do not have yet: tried again when the chain moves. */
   private pendingMeta: { from: string; frame: unknown } | undefined;
+  /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
+  private passOn: GroupEdgeFrame[] | null = null;
 
   constructor(state: GroupState, private readonly hooks: GroupSessionHooks) {
     this.state = state;
@@ -319,6 +337,19 @@ export class GroupSession {
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
   get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
+  /** Whom the admin pinned as hubs and excluded (WISP 9xx · Group Mesh § Hubs), from the group's metadata. */
+  get hubPolicy(): MeshHubPolicy {
+    // Parsed once per statement: the body may hold a picture of 40,000 characters, and views ask for this per member.
+    const meta = this.state.meta;
+    if (!this.policyOf || this.policyOf.sig !== meta?.sig) this.policyOf = { sig: meta?.sig, policy: (meta && parseGroupMetaBody(meta.body)?.hubs) || NO_HUB_POLICY };
+    return this.policyOf.policy;
+  }
+  private policyOf: { sig: string | undefined; policy: MeshHubPolicy } | undefined;
+  /** The current epoch's rendezvous secret (its beacon and lobbies), once its secret is here. */
+  get rendezvous(): string | undefined {
+    const secret = this.secret(this.epoch);
+    return secret && meshRendezvous(secret, this.id, this.epoch);
+  }
   /** Epochs whose messages this member can still read. */
   get readableEpochs(): number[] { return Object.keys(this.state.secrets).map(Number).sort((a, b) => a - b); }
   /** How many messages, per sender, are known to be missing in the current epoch. */
@@ -584,22 +615,74 @@ export class GroupSession {
     });
   }
 
-  /** A frame from an authenticated member over the pairwise edge. Anything malformed or unauthorized is dropped. */
-  handle(from: string, raw: unknown): Promise<void> {
+  /**
+   * A frame from an authenticated member over the pairwise edge. Anything malformed or unauthorized is dropped.
+   * Resolves to what it took that a hub passes on to its other edges (WISP 9xx · Group Mesh § Hubs): each message,
+   * edit, commit (without the secret sealed for me), metadata statement and signed leave, the first time only, so a
+   * flood among hubs stops at every member that already has it. Only what its author still in the roster signed.
+   */
+  handle(from: string, raw: unknown): Promise<GroupEdgeFrame[]> {
     return this.serialize(async () => {
-      if (this.state.status !== "active" || !raw || typeof raw !== "object") return;
+      if (this.state.status !== "active" || !raw || typeof raw !== "object") return [];
       const frame = raw as Record<string, unknown>;
-      if (frame.g !== this.id) return;
-      switch (frame.t) {
-        case "group-msg": return this.receiveMessage(from, raw);
-        case GROUP_EDIT_FRAME: return this.receiveEdit(from, raw);
-        case "group-commit": return this.receiveCommit(from, raw as GroupCommitFrame);
-        case "group-sync": return this.receiveSync(from, raw as GroupSyncFrame);
-        case "group-secrets": return this.receiveSecrets(raw as GroupSecretsFrame);
-        case "group-meta": return this.receiveMeta(from, raw);
-        case "group-leave": if (this.isAdmin && rosterHas(this.roster, from) && from !== this.myKey) await this.commit("remove", from, Date.now()); return;
-      }
+      if (frame.g !== this.id) return [];
+      this.passOn = [];
+      try {
+        switch (frame.t) {
+          case "group-msg": await this.receiveMessage(from, raw); break;
+          case GROUP_EDIT_FRAME: await this.receiveEdit(from, raw); break;
+          case "group-commit": await this.receiveCommit(from, raw as GroupCommitFrame); break;
+          case "group-sync": await this.receiveSync(from, raw as GroupSyncFrame); break;
+          case "group-secrets": await this.receiveSecrets(raw as GroupSecretsFrame); break;
+          case "group-meta": await this.receiveMeta(from, raw); break;
+          case "group-bye": await this.receiveBye(from, raw); break;
+          case "group-leave": if (this.isAdmin && rosterHas(this.roster, from) && from !== this.myKey) await this.commit("remove", from, Date.now()); break;
+        }
+        // Removed, the last thing a hub passes on is the commit that says so: it may be the only way the others hear it.
+        return this.state.status === "active" ? this.passOn : this.state.status === "removed" ? this.passOn.filter(f => f.t === "group-commit") : [];
+      } finally { this.passOn = null; }
     });
+  }
+
+  /** Taken for the first time: a hub passes it on (see `handle`). */
+  private took(frame: GroupEdgeFrame): void { this.passOn?.push(frame); }
+
+  /**
+   * My leave, signed, for hubs to carry to the admin (see `GroupByeFrame`). Made while I am still a member: `leave`
+   * forgets everything but my key.
+   */
+  byeFrame(now = Date.now()): GroupByeFrame {
+    const unsigned = { g: this.id, k: this.myKey, e: this.epoch, ts: now };
+    return { t: "group-bye", ...unsigned, sig: toBase64Url(sign(byeSigned(unsigned), this.identity.seed)) };
+  }
+
+  /** My signature on a reaction of mine, beside its wire fields (older apps read only those). */
+  signReaction(reaction: WireReaction): { k: string; sig: string } {
+    return { k: this.myKey, sig: toBase64Url(sign(reactionSigned(this.id, reaction), this.identity.seed)) };
+  }
+
+  /**
+   * A reaction signed by a member still in the roster (not me), with the member and the reaction, or null: what a hub
+   * passes on, and what a member takes from a hub.
+   */
+  signedReaction(raw: unknown): { member: string; reaction: WireReaction; frame: GroupReactedFrame } | null {
+    if (this.state.status !== "active" || !raw || typeof raw !== "object") return null;
+    const f = raw as Record<string, unknown>, reaction = readReaction(f);
+    if (!reaction || f.g !== this.id || typeof f.k !== "string" || !MEMBER_KEY.test(f.k) || f.k === this.myKey || !rosterHas(this.roster, f.k)) return null;
+    if (typeof f.sig !== "string" || f.sig.length !== 86 || !B64.test(f.sig)) return null;
+    try { if (!verify(fromBase64Url(f.sig), reactionSigned(this.id, reaction), publicKeyFromZ32(f.k))) return null; } catch { return null; }
+    return { member: f.k, reaction, frame: { t: GROUP_REACTED_FRAME, g: this.id, k: f.k, ...reaction, sig: f.sig } };
+  }
+
+  /** A signed leave: the admin removes its member; anyone else passes it on while that member is in the roster. */
+  private async receiveBye(from: string, raw: unknown): Promise<void> {
+    const f = raw as Record<string, unknown>;
+    if (typeof f.k !== "string" || !MEMBER_KEY.test(f.k) || f.k === this.myKey || !rosterHas(this.roster, f.k) || !rosterHas(this.roster, from) ||
+      !Number.isSafeInteger(f.e) || (f.e as number) < 0 || !Number.isSafeInteger(f.ts) || (f.ts as number) <= 0 || typeof f.sig !== "string" || f.sig.length !== 86 || !B64.test(f.sig)) return;
+    const bye = { t: "group-bye" as const, g: this.id, k: f.k, e: f.e as number, ts: f.ts as number, sig: f.sig };
+    try { if (!verify(fromBase64Url(bye.sig), byeSigned(bye), publicKeyFromZ32(bye.k))) return; } catch { return; }
+    if (this.isAdmin) { await this.commit("remove", bye.k, Date.now()); return; }
+    this.took(bye);
   }
 
   /**
@@ -632,6 +715,8 @@ export class GroupSession {
     this.markSeen(raw);
     this.keep(clean(raw));
     await this.persist();
+    // Passed on only while its author is a member: someone removed is not carried for, even for epochs it was in.
+    if (rosterHas(this.roster, raw.s)) this.took(clean(raw));
   }
 
   /**
@@ -655,7 +740,7 @@ export class GroupSession {
     if (!body || typeof body !== "object" || !validEditText(body.text)) return;
     const k = validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s);
     await this.hooks.edit?.({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}) });
-    if (this.keepEdit(raw)) await this.persist();
+    if (this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
   }
 
   private parkEdit(from: string, frame: GroupEditFrame): void {
@@ -758,6 +843,9 @@ export class GroupSession {
       return;
     }
     await this.apply(result.commit, frame.secret);
+    this.took({ t: "group-commit", g: this.id, commit: result.commit });
+    // Handed on by a hub, the commit carries no secret sealed for me: whoever handed it on holds it, and seals it to me.
+    if (this.state.status === "active" && !this.state.secrets[this.epoch]) this.ask(from);
     const next = this.pendingCommits.get(this.epoch + 1);
     if (next) { this.pendingCommits.delete(this.epoch + 1); await this.receiveCommit(from, next); }
   }
@@ -843,7 +931,25 @@ export class GroupSession {
     return this.serialize(async () => {
       if (this.state.status !== "active") throw new Error("You are no longer in this group");
       if (!this.isAdmin) throw new Error("Only the admin can change the group's picture");
-      await this.publishMeta(encodeGroupMetaBody({ pic: picture ?? undefined }), now);
+      await this.publishMeta(encodeGroupMetaBody({ pic: picture ?? undefined, hubs: this.hubPolicy }), now);
+    });
+  }
+
+  /**
+   * Pins a member as a hub, excludes one from being a hub, or leaves it to the member's app (`null`): only the admin,
+   * in the group's metadata beside the picture (WISP 9xx · Group Mesh § Hubs).
+   */
+  setHub(key: string, role: "pin" | "exclude" | null, now = Date.now()): Promise<void> {
+    return this.serialize(async () => {
+      if (this.state.status !== "active") throw new Error("You are no longer in this group");
+      if (!this.isAdmin) throw new Error("Only the admin can choose the group's hubs");
+      if (!rosterHas(this.roster, key)) throw new Error("Not a member");
+      const current = this.hubPolicy;
+      const policy = { pin: current.pin.filter(k => k !== key && rosterHas(this.roster, k)), no: current.no.filter(k => k !== key && rosterHas(this.roster, k)) };
+      if (role === "pin") policy.pin.push(key);
+      if (role === "exclude") policy.no.push(key);
+      if (policy.pin.length > MESH_HUBS.pinned) throw new Error(`At most ${MESH_HUBS.pinned} members can be pinned as hubs`);
+      await this.publishMeta(encodeGroupMetaBody({ pic: this.picture, hubs: policy }), now);
     });
   }
 
@@ -858,7 +964,7 @@ export class GroupSession {
       const frame = wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message);
       for (const key of this.others) this.hooks.send(key, frame);
     }
-    if (before?.d !== meta.d) this.hooks.metaChanged?.(this.myKey, this.picture);
+    if (groupMetaPicture(before) !== this.picture) this.hooks.metaChanged?.(this.myKey, this.picture);
     this.hooks.changed();
   }
 
@@ -890,8 +996,10 @@ export class GroupSession {
     const before = this.state.meta;
     this.state.meta = opened.meta;
     await this.persist();
-    if (before?.d !== opened.meta.d) this.hooks.metaChanged?.(s.by, opened.body.pic);
+    // A change of hubs alone is no line in the history.
+    if (groupMetaPicture(before) !== opened.body.pic) this.hooks.metaChanged?.(s.by, opened.body.pic);
     this.hooks.changed();
+    this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });
   }
 
   /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the picture signed again as mine. */

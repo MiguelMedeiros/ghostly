@@ -128,7 +128,7 @@ describe("group-edit frames (a private group)", () => {
     await mesh.settle();
     expect(bob.status).toBe("removed");
     // Bob, from what it kept, still seals and signs for the epoch it was in.
-    const handled: Promise<void>[] = [];
+    const handled: Promise<unknown>[] = [];
     const ghost = new GroupSession(snapshot, { save: async () => {}, send: (to, frame) => { handled.push(mesh.sessions.get(to)!.handle(bob.myKey, clone(frame))); }, message: () => {}, changed: () => {} });
     expect(await ghost.sendEdit(id, { v: 1, ts: 1, text: "rewritten after I left" })).toEqual({ sent: 2 });
     await Promise.all(handled);

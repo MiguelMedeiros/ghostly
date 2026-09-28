@@ -301,6 +301,11 @@ export interface NodeOptions {
   automaticWallets?: boolean;
   /** Where this engine runs, for the wallet providers that only work on some platforms. Default: web. */
   platform?: ProviderPlatform;
+  /**
+   * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 9xx · Group
+   * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
+   */
+  staysOnline?: boolean;
   /** The Lightning and on-chain providers on offer. Default: the registry (tests pass their own). */
   providers?: ProviderRegistry;
   /** Desktop: the Tauri commands the providers that need them call (see `ProviderHost.invoke`). */
@@ -807,6 +812,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     myNick: () => this.sharedNick,
+    staysOnline: () => this.options.staysOnline ?? this.options.platform === "desktop",
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
     edges: groupId => this.groupEdges(groupId),
     entries: groupId => {
@@ -834,6 +840,7 @@ export class GhostlyNode implements EngineImplementation {
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
       : this.communityPay.receiveApp(groupId, sender, frame),
     groupEdit: async (groupId, { sender, ...edit }) => { await this.groupEdits.receive(groupId, sender, edit); },
+    groupReaction: (groupId, member, reaction) => this.receiveGroupReaction(groupId, member, reaction),
     // My latest edits, again, to a member whose edge opened: a private group has no catch-up for them.
     edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
@@ -2579,7 +2586,8 @@ export class GhostlyNode implements EngineImplementation {
       try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_REACTION_FRAME, ...wireReaction(reaction) }); return { error: null }; }
       catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
     }
-    const frame = { t: GROUP_REACTION_FRAME, g: groupId, ...wireReaction(reaction) };
+    // Signed, so that hubs pass it on to members I have no edge with (older apps read the wire fields only).
+    const frame = { t: GROUP_REACTION_FRAME, g: groupId, ...wireReaction(reaction), ...this.groups.signReaction(groupId, wireReaction(reaction)) };
     // An edge that is down hears it when it opens (`resendGroupReactions`).
     for (const edge of this.groupEdges(groupId).values()) { try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ } }
     return { error: null };
@@ -2591,20 +2599,24 @@ export class GhostlyNode implements EngineImplementation {
       const r = m.reactions?.me, id = replyRef(m, true);
       return r && id ? [{ id, e: r.e, n: r.n }] : [];
     }).sort((a, b) => b.n - a.n).slice(0, REACTION_LIMITS.pending).reverse();
-    for (const reaction of mine) { try { this.links.get(linkId)?.link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction }); } catch { return; } }
+    for (const reaction of mine) { try { this.links.get(linkId)?.link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }
   }
 
-  /** A reaction from a member of a group: over the edge pinned to them (private), or signed by them (community). */
-  private async receiveGroupReaction(groupId: string, member: string, raw: Record<string, unknown>): Promise<void> {
+  /**
+   * A reaction from a member of a group: over the edge pinned to them or signed and passed on by a hub (private, read by
+   * `Groups`), or signed by them (community).
+   */
+  private async receiveGroupReaction(groupId: string, member: string, raw: Record<string, unknown> | WireReaction): Promise<void> {
     const membership = this.membership(groupId);
     if (!membership?.members.has(member) || member === membership.me) return;
-    if (raw.t === GROUP_REACTION_FRAME && raw.g !== groupId) return;
     const reaction = readReaction(raw);
     if (reaction) await this.reactions.receive(`group:${groupId}`, member, reaction);
   }
   leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
   removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
+  /** The admin of a private group pins a member as a hub, excludes one, or leaves it to the member's app (`role` null). */
+  setGroupHub({ groupId, key, role }: { groupId: string; key: string; role: "pin" | "exclude" | null }): Promise<void> { return this.groups.setHub(groupId, key, role); }
   rotateGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.rotate(groupId); }
   setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { this.groupEdits.forget(groupId); return this.groups.forget(groupId); }
@@ -3531,7 +3543,6 @@ export class GhostlyNode implements EngineImplementation {
         // An entry session carries the admission frames a contact chat would; an edge, the group's own, and what the group sees of payments.
         onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame)
           : (frame as { t?: unknown }).t === "group-pay" ? this.groupPayments.receive(group, peer, frame)
-          : (frame as { t?: unknown }).t === GROUP_REACTION_FRAME ? this.receiveGroupReaction(group, peer, frame as Record<string, unknown>)
           : this.groups.handleEdgeFrame(group, peer, frame),
         onGroupsSupport: supported => {
           if (supported) traceJoin(group, "link.ready", { role });

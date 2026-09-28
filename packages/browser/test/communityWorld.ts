@@ -64,6 +64,15 @@ export interface Peer {
   refused: number;
   /** When a link write of this app was last refused, while it waits for the budget. */
   writeWaiting?: number;
+  /** An app from before hubs (`paired-groups` 3): it keeps every private group a full mesh and does not announce version 4. */
+  legacy?: boolean;
+  /** An app that stays online (Desktop, CLI): a hub of private groups past 16 members. */
+  staysOnline?: boolean;
+  /**
+   * Its Pkarr requests are counted, never refused: the Desktop app and the CLI read the Mainline DHT, not the relays,
+   * so the relays' budget does not hold them back.
+   */
+  unmetered?: boolean;
 }
 
 function memoryStore(messages: StoredMessage[]): GroupStore {
@@ -108,6 +117,7 @@ export class CommunityWorld {
     peer.spent = peer.spent.filter(at => this.now - at < 60_000);
     peer.spentBackground = peer.spentBackground.filter(at => this.now - at < 60_000);
     const linkWrite = write && !background;
+    if (peer.unmetered) { for (let i = 0; i < cost; i++) peer.spent.push(this.now); return true; }
     if ((!linkWrite && this.now - (peer.writeWaiting ?? -Infinity) < this.network.writeFirstMs) || peer.spent.length + cost > this.network.budgetPerMinute || (background && peer.spentBackground.length + cost > this.network.backgroundPerMinute)) { peer.refused++; if (linkWrite) peer.writeWaiting = this.now; return false; }
     if (linkWrite) peer.writeWaiting = undefined;
     for (let i = 0; i < cost; i++) { peer.spent.push(this.now); if (background) peer.spentBackground.push(this.now); }
@@ -117,11 +127,14 @@ export class CommunityWorld {
     return { g, me, peer: other, kind, announced: false, openedAt: this.now, fastUntil: expect ? this.now + (this.network?.expectMs ?? 0) : 0, lastPoll: -Infinity, polls: 0 };
   }
 
-  /** `extra`: more of the host, for what a test runs on top of the groups (payments). */
-  add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>): Peer {
+  /**
+   * `extra`: more of the host, for what a test runs on top of the groups (payments). `app`: an app that stays online
+   * (a hub of large private groups), or one from before hubs.
+   */
+  add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean } = {}): Peer {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
-    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0 };
+    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, ...app };
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
         const edge = links.get(linkId), there = edge && this.counterpart(edge);
@@ -129,10 +142,13 @@ export class CommunityWorld {
         const data = JSON.stringify(frame);
         peer.sent.frames++; peer.sent.bytes += data.length;
         const copy = JSON.parse(data) as Record<string, unknown>;
+        // An app from before hubs drops the frames it does not know (its session has no case for them).
+        if (there.peer.legacy && (copy.t === "group-bye" || copy.t === "group-reach" || copy.t === "group-reacted")) return;
         if (this.drop?.(peer, there.peer, copy)) return;
         this.pending.push(edge.kind === "edge" ? there.peer.groups.handleEdgeFrame(edge.g, edge.me, copy) : there.peer.groups.handleContactFrame(there.linkId, copy));
       },
-      linkReady: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer); },
+      // Version 4 (hubs) only between two apps that announce it.
+      linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
       linkSeen: linkId => { const edge = links.get(linkId); return !!edge && !!this.counterpart(edge) && (!this.network || edge.polls > 0); },
       contactName: () => undefined,
       edges: g => new Map([...links].filter(([, e]) => e.g === g && e.kind === "edge").map(([id, e]) => [e.peer, id])),
@@ -170,6 +186,8 @@ export class CommunityWorld {
       storeMessage: async message => { if (!messages.some(m => m.id === message.id)) messages.push(message); },
       emit: () => {},
       myNick: () => peer.nick,
+      staysOnline: () => !!peer.staysOnline,
+      meshHubs: () => !peer.legacy,
       ...extra?.(peer),
     };
     peer.groups = new Groups(host, peer.store, undefined, this.timings, this.random);

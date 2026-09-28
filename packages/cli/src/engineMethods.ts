@@ -28,7 +28,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "payRequest", "reclaimPayment", "disconnect", "addService", "removeService", "setServiceEnabled",
   "setServiceShared", "updateSettings", "setCallSignal", "setTyping", "setWakeSubscription", "setWakeMuted", "setFastPoll", "createGroup", "inviteToGroup",
   "acceptGroupInvitation", "declineGroupInvitation", "enableGroupLink", "disableGroupLink", "joinGroupByLink",
-  "sendGroupMessage", "groupMessages", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "rotateGroup",
+  "sendGroupMessage", "groupMessages", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
   "setGroupPicture", "forgetGroup",
 ];
 

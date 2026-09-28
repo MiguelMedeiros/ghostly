@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH } from "@ghostly/core";
+import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
@@ -10,15 +10,23 @@ import { GroupLinkPanel } from "./GroupLinkPanel";
 import { GroupAvatar } from "./GroupAvatar";
 import { avatarFromFile } from "../lib/avatarImage";
 import { ContactMarks } from "./identities/ContactMarks";
+import { Select } from "./ui/Select";
+import { useI18n } from "../contexts/I18nContext";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
+
+/** What the admin says about a member as a hub (WISP 9xx · Group Mesh § Hubs): up to their app, always, or never. */
+const HUB_ROLES = ["auto", "pin", "exclude"] as const;
 
 const contactName = (link: LinkView) => link.label || link.peerNick || `Contact · ${contactTag(link.peerPubKeyZ32)}`;
 
 /** Who is in a group, with what role; what the admin can do about it; whom to invite; and who can read what. */
 export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClose(): void }) {
   const id = useId();
+  const { t } = useI18n();
+  const hubLabels = { auto: t("group.hubs.auto"), pin: t("group.hubs.pin"), exclude: t("group.hubs.exclude") };
+  const hubRoles = HUB_ROLES.map(value => ({ value, label: hubLabels[value] }));
   const state = useSyncExternalStore(subscribe, snapshot);
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
@@ -71,8 +79,12 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
           {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{edgeLabel(m)}</span>}
         </span>
         {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">admin</span>}
+        {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
         {m.missing > 0 && <span title="Messages of this epoch that nobody could recover" className="text-[10px] text-amber-500">{m.missing} missing</span>}
         {live.isAdmin && !m.me && <>
+          {live.profile === "mesh" && live.members.length > MESH_HUBS.threshold && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy !== null}
+            value={m.hubRole ?? "auto"} options={hubRoles}
+            onChange={role => void run(m.key, () => engine.call("setGroupHub", { groupId: live.id, key: m.key, role: role === "auto" ? null : role }))} />}
           <button disabled={busy !== null} onClick={() => void run(m.key, () => engine.call("makeGroupAdmin", { groupId: live.id, key: m.key }))} data-testid="group-make-admin"
             className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">Make admin</button>
           <button disabled={busy !== null} onClick={() => void run(m.key, () => engine.call("removeGroupMember", { groupId: live.id, key: m.key }))} data-testid="group-remove-member"
