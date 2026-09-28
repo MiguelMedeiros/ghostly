@@ -17,6 +17,24 @@ interface Anchor {
   offset: number;
 }
 
+/** Where a chat was left: at its bottom, or on a message. Kept while the app runs, so a chat opened again is where it was. */
+interface Left {
+  atBottom: boolean;
+  anchor: Anchor | null;
+}
+const left = new Map<string, Left>();
+/** Chats remembered at most; the oldest left goes first. */
+const LEFT_MAX = 200;
+function remember(chat: string, state: Left) {
+  left.delete(chat);
+  left.set(chat, state);
+  if (left.size > LEFT_MAX) left.delete(left.keys().next().value!);
+}
+/** Forgets where every chat was left (for tests). */
+export function forgetChatScroll() {
+  left.clear();
+}
+
 const rowsOf = (list: HTMLElement) => list.querySelectorAll<HTMLElement>("[data-message-id]");
 const rowById = (list: HTMLElement, id: string) => [...rowsOf(list)].find(row => row.dataset.messageId === id);
 const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -29,8 +47,13 @@ const editable = (target: EventTarget | null) =>
  * or below keeps it in place), and the contact's new messages are counted for the ↓ pill. A message I send goes to the
  * bottom. Reactions and edits keep their message's id, so they are never new.
  *
+ * At the bottom, it stays pinned there until a hand moves it: a picture, a video poster or a long message laying out after
+ * the chat opened (or at any time) keeps the last message in view. A scroll event is a hand's only when the scroll
+ * position moved since this hook last set or saw it; content growing under the view moves nothing, so there is no timer.
+ *
  * Give `listRef` to the scrolling element and `columnRef` to the one that grows with the rows. `chat` starts it over: a
- * chat opens at its bottom with nothing counted. `keys`: End or Ctrl/Cmd+↓ (outside a text field) jumps to the bottom.
+ * chat opens where it was left (on the same message, or at its bottom) with nothing counted, and one never opened opens
+ * at its bottom. `keys`: End or Ctrl/Cmd+↓ (outside a text field) jumps to the bottom.
  */
 export function useChatScroll({ rows, chat, keys = true }: { rows: readonly ScrollRow[]; chat: string; keys?: boolean }) {
   // Elements, not refs: a list shown later (a group still joining) still gets its listeners.
@@ -49,8 +72,12 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   const following = useRef(false);
   const hasRows = useRef(false);
   hasRows.current = rows.length > 0;
+  /** The scroll position as this hook last set or saw it: a scroll event that finds it unchanged is not a hand's. */
+  const lastTop = useRef(0);
 
   const distance = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
+  /** A list not on screen (a chat kept loaded for a call) has no size: nothing about it says where the view is. */
+  const hidden = (el: HTMLElement) => el.clientHeight === 0;
 
   /** The first row not wholly above the view, and where it is. Rows are in order, so it is a binary search. */
   const capture = useCallback((el: HTMLElement) => {
@@ -74,7 +101,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   /** After the rows or their sizes changed: at the bottom, stay there; otherwise put the anchored row back where it was. */
   const settle = useCallback(() => {
     const el = list.current;
-    if (!el || !hasRows.current) return;
+    if (!el || !hasRows.current || hidden(el)) return;
     if (atBottom.current) {
       el.scrollTop = el.scrollHeight;
     } else if (anchor.current) {
@@ -84,6 +111,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
         if (Math.abs(moved) >= 1) el.scrollTop += moved;
       }
     }
+    lastTop.current = el.scrollTop;
     setFar(distance(el) > FAR_FROM_BOTTOM_PX);
   }, []);
 
@@ -97,6 +125,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     const top = el.scrollHeight;
     if (reducedMotion() || typeof el.scrollTo !== "function") el.scrollTop = top;
     else el.scrollTo({ top, behavior: "smooth" });
+    lastTop.current = el.scrollTop;
   }, [clear]);
 
   /** The pill: to the first message not seen yet, or to the bottom when that one is already in reach of it. */
@@ -110,9 +139,10 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     clear();
     if (reducedMotion() || typeof el.scrollTo !== "function") el.scrollTop = top;
     else el.scrollTo({ top, behavior: "smooth" });
+    lastTop.current = el.scrollTop;
   }, [toBottom, clear]);
 
-  // Another chat: it opens at its bottom, with nothing counted.
+  // Another chat: it opens where it was left, with nothing counted. The one left is remembered.
   useLayoutEffect(() => {
     opened.current = false;
     following.current = false;
@@ -122,6 +152,9 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     firstNew.current = null;
     setCount(0);
     setFar(false);
+    return () => {
+      if (opened.current) remember(chat, { atBottom: atBottom.current, anchor: atBottom.current ? null : anchor.current });
+    };
   }, [chat]);
 
   useLayoutEffect(() => {
@@ -130,8 +163,18 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     if (!opened.current) {
       opened.current = true;
       for (const row of rows) seen.current.add(row.id);
+      const was = left.get(chat);
+      if (was && !was.atBottom && was.anchor && rowById(el, was.anchor.id)) {
+        // Left scrolled up: back on the same message, as far from the top of the view as it was.
+        atBottom.current = false;
+        anchor.current = was.anchor;
+        settle();
+        return;
+      }
       atBottom.current = true;
       el.scrollTop = el.scrollHeight;
+      lastTop.current = el.scrollTop;
+      setFar(false);
       return;
     }
     const fresh = rows.filter(row => !seen.current.has(row.id));
@@ -151,12 +194,16 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       }
     }
     settle();
-  }, [rows, listEl, settle, clear]);
+  }, [rows, listEl, chat, settle, clear]);
 
   useEffect(() => {
     const el = listEl;
     if (!el) return;
     const onScroll = () => {
+      if (hidden(el)) return;
+      // Not moved since it was last set or seen: content grew or shrank under the view, and no hand scrolled it.
+      if (Math.abs(el.scrollTop - lastTop.current) < 1) { settle(); return; }
+      lastTop.current = el.scrollTop;
       const d = distance(el);
       if (d <= NEAR_BOTTOM_PX) following.current = false;
       atBottom.current = following.current || d <= NEAR_BOTTOM_PX;
