@@ -1,4 +1,4 @@
-import type { CallEventType, VideoMeta, VoiceMeta } from "@ghostly/core";
+import type { CallEventType, ImageMeta, VideoMeta, VoiceMeta } from "@ghostly/core";
 
 export type { CallEventType, CallSignal, CallState } from "@ghostly/core";
 
@@ -23,6 +23,8 @@ export interface ChatFile {
   voice?: VoiceMeta;
   /** A video: its length, size and a small first frame, when the sender sent them. */
   video?: VideoMeta;
+  /** A picture: its size as it is shown, when the sender sent it, so its box is there before it loads. */
+  image?: ImageMeta;
 }
 
 export interface ChatMessage {

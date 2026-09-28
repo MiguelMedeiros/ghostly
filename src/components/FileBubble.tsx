@@ -1,9 +1,10 @@
 import { useEffect, useId, useState } from "react";
-import { PREVIEWABLE_IMAGE, sanitizeFileName } from "@ghostly/core";
+import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../lib/fileStatus";
+import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import type { FileAction } from "../lib/platform";
 import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import type { ChatFile } from "../lib/types";
@@ -17,6 +18,11 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
   const blobUrl = preview?.id === file.id ? preview.url : null;
+  const picture = PREVIEWABLE_IMAGE.test(file.mime);
+  /** A picture's size found here (its first bytes, or as it loaded), when its sender said none or said wrong. */
+  const [found, setFound] = useState<{ id: string; size: ImageMeta } | null>(null);
+  /** The preview as it loaded, or that it could not be shown, for this URL. */
+  const [loaded, setLoaded] = useState<{ url: string; ok: boolean } | null>(null);
   const [actionError, setActionError] = useState("");
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
@@ -39,7 +45,7 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
   useEffect(() => {
     if (!platform || !readable || blobUrl) return;
     let cancelled = false;
-    void platform.getFile(file.id).then((blob) => {
+    void platform.getFile(file.id).then(async (blob) => {
       if (cancelled) return;
       if (!blob) {
         if (!settled) return;
@@ -47,12 +53,16 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
         setMissing(!platform.saveFile || transfer?.state !== "done");
         return;
       }
+      // Its sender said nothing of its size: read here from its first bytes, so the box is right before it shows.
+      const size = picture && !file.image && !knownPictureSize(file.id) ? await readImageMeta(blob, file.mime) : undefined;
+      if (cancelled) return;
+      if (size) { rememberPictureSize(file.id, size); setFound({ id: file.id, size }); }
       setPreview({ id: file.id, url: URL.createObjectURL(blob) });
       setMissing(false);
       setSaveOnly(false);
     });
     return () => { cancelled = true; };
-  }, [platform, file.id, readable, settled, transfer?.state, blobUrl]);
+  }, [platform, file.id, file.mime, file.image, picture, readable, settled, transfer?.state, blobUrl]);
   // Revoked only once nothing shows it: another file in this bubble, or the bubble gone.
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
 
@@ -66,6 +76,24 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setMissing(true); })
       .catch((error: Error) => setActionError(String(error.message ?? error)));
+  };
+
+  // A picture's box is there before it is: from the size its sender said, else from what this device found, else
+  // a placeholder while it looks. Nothing is reserved for a picture that will not show (failed, missing, awaiting
+  // consent), and one that says it is one size but loads as another is shown as it loaded.
+  const failedHere = transfer?.state === "failed" || missing || saveOnly || (loaded?.url === blobUrl && loaded?.ok === false);
+  const awaiting = transfer?.state === "transferring" && transfer.stage === "asking";
+  const size = (found?.id === file.id ? found.size : undefined) ?? file.image ?? knownPictureSize(file.id);
+  const box = !picture || failedHere || awaiting ? null
+    : size && (file.image || readable) ? pictureBox(size)
+    : readable ? PLACEHOLDER_BOX : null;
+  const onPictureLoad = (image: HTMLImageElement, url: string) => {
+    const shown = { width: image.naturalWidth, height: image.naturalHeight };
+    if (shown.width && shown.height && (!size || !sameShape(size, shown))) {
+      rememberPictureSize(file.id, shown);
+      setFound({ id: file.id, size: shown });
+    }
+    setLoaded({ url, ok: true });
   };
 
   const status = fileStatus(file, transfer, peerName, missing);
@@ -88,8 +116,15 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
 
   return (
     <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
-      {blobUrl && PREVIEWABLE_IMAGE.test(file.mime) && (
-        <img src={blobUrl} alt={file.name} className="rounded-[4px] max-w-full max-h-[330px] object-contain block mb-1" />
+      {box && (
+        <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"}
+          className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
+          style={{ width: box.width, maxWidth: "100%", aspectRatio: box.ratio }}>
+          {blobUrl && (
+            <img src={blobUrl} alt={file.name} className="block w-full h-full object-contain"
+              onLoad={(event) => onPictureLoad(event.currentTarget, blobUrl)} onError={() => setLoaded({ url: blobUrl, ok: false })} />
+          )}
+        </div>
       )}
       <div className="flex items-center gap-3 px-2 py-1.5">
         {canRetry ? (
