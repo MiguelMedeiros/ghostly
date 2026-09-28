@@ -6,7 +6,7 @@
 | Status | Draft |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
-| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`), reactions (`react/1`) and edits (`edit/1`), wake-up push (`wake/1`) on the live session; replies on texts and files; forwarded texts and files with their hop count. |
+| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`), reactions (`react/1`), edits (`edit/1`) and a pinned message (`pin/1`), wake-up push (`wake/1`) on the live session; replies on texts and files; forwarded texts and files with their hop count. |
 | Summary | The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT. |
 | Availability | Available |
 | Notes | Every new chat on web, desktop, extension and the CLI, calls included while it is live. The typing indicator goes over the live session only, and each person can turn it off. A closed web app can be woken by its contacts' apps with a content-free push, when its person turns that on. |
@@ -139,6 +139,17 @@ A text can be edited after it was sent (revision 0.10; what an edit is, [400](40
 - **Why the session frame and not the offer.** `edit/1` is in `paired-capabilities`, like `typing/1`, rather than in the offer's `extensions`: it is something this session carries, said after the transcript is signed and bound to the connection, and the offer's lists are full for older apps.
 
 Groups do not carry edits yet: 1:1 chats first. A mesh or community edit needs its own frame inside the group's sealed boxes, and a rule for members who joined after the message.
+
+### Pinned message
+
+A pin ([400](400-chat.md#pinned-message)) goes on this session once both sides list `pin/1` in `paired-capabilities`, and the contact confirms the number it took:
+
+```
+{"t":"paired-pin","id":"<message id or empty>","n":1790000000000}
+{"t":"paired-pinned","n":1790000000000}
+```
+
+`id` is the pinned message's id as both sides know it (a reply's `i`, [above](#replies)), or `""` to unpin; `n` the pinner's number. Either side may pin any message of the chat, its own or the contact's. The reader MUST ignore a frame that breaks these bounds or comes while `pin/1` is not agreed. It keeps the pin when it is newer than the one it shows ([400](400-chat.md#pinned-message): the highest `n` wins) and confirms `n` either way, so the pinner stops saying it. It counts pin frames before it reads them and drops those past 10 in 10 seconds, unconfirmed. The pinner keeps its latest pin not confirmed, says it on each new session and again after 30 seconds without a receipt. A pin does not ride on the DHT floor: it waits for the session. Both frames count only on the authenticated session with the pinned contact. Neither carries a message ID: older apps drop both, and a pinner whose contact never says `pin/1` keeps its pin waiting without showing anything odd. Group edges never offer it: groups carry pins in their own frames ([900](900-group-sessions.md)).
 
 ### Wake-up push
 

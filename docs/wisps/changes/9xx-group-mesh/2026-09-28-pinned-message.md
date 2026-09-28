@@ -1,0 +1,1 @@
+Pinned message: a `group-pin` frame signed by its pinner (any member), passed on as it is by every member that takes a newer one and said again when an edge opens, so members away or on hubs get it; older apps drop it.

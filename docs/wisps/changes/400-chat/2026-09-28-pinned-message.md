@@ -1,0 +1,1 @@
+Pinned message: one per chat or group, shown to everyone in a bar under the header (a click scrolls to it), pinned or unpinned from the message's ⋮; the last pin wins by its number, an unpin stays as an empty pin; in a private group any member pins, in a community only the admin, a rule kept in one place (`mayPin`).
