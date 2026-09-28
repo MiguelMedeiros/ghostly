@@ -14,7 +14,7 @@
 .boo-veil {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
   opacity: 0;
@@ -30,7 +30,7 @@
 }
 .boo-ghost {
   position: relative;
-  width: clamp(92px, 10vw, 128px);
+  width: clamp(96px, 11vw, 152px);
   will-change: transform, opacity;
 }
 .boo-bob,
@@ -55,7 +55,7 @@
   background: rgba(34, 211, 238, 0.16);
   box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.35);
   color: var(--cyan);
-  font-size: clamp(17px, 1.6vw, 21px);
+  font-size: clamp(17px, 1.7vw, 22px);
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;

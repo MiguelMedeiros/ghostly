@@ -204,7 +204,7 @@ the look:
 `components/site/Boo.tsx` + `app/boo.css`: one ghost (Boo, the character,
 cyan) pops up from below to the middle of the screen with the app's hop,
 puffs up and says "boo!" in a small bubble, then floats away up and to the
-right. Behind it a veil (the page colour at 88% and a 6 px blur) comes up in
+right. Behind it a veil (the page colour at 90% and a 6 px blur) comes up in
 180 ms, the change happens once the veil is up, and the veil goes with the
 ghost. A jump takes about 720 ms in all: the ghost leaves 440 ms after the
 start, in 280 ms (`exit`). The durations live in `Boo.tsx` and reach the CSS
