@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 
 /**
@@ -121,6 +123,14 @@ test("the share image is 1200x630 and under 300 KB", async ({ request, page }) =
     return [img.naturalWidth, img.naturalHeight];
   }, local);
   expect(size).toEqual([1200, 630]);
+});
+
+test("the repository's social preview is 1280x640 and under 1 MB", () => {
+  // The same art (scripts/og-image.mjs) for GitHub's Settings, Social preview; a PNG's size is in its IHDR chunk.
+  const png = readFileSync(resolve(__dirname, "../../docs/assets/social-preview.png"));
+  expect(png.subarray(12, 16).toString("latin1")).toBe("IHDR");
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1280, 640]);
+  expect(png.length).toBeLessThan(1024 * 1024);
 });
 
 test("the icons and the manifest answer", async ({ request }) => {
