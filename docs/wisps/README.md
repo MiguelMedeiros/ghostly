@@ -1,12 +1,13 @@
 # WISP working catalogue
 
-> **State on `dev` (2026-09-27).** One chat, one invite (chat family revision 0.2, decided 2026-09-25) is implemented:
+> **State on `dev` (2026-09-28).** One chat, one invite (chat family revision 0.2, decided 2026-09-25) is implemented:
 >
 > - Every new chat starts from one bech32m code, `ghostly1…`, also shared as `https://ghostly.tools/#ghostly1…` ([801](801-invitation-profiles.md), #210).
 > - The DHT is the rendezvous and floor of every 1:1 chat. First contact goes over the DHT and a live link at once; the chat upgrades to WebRTC, Iroh or HyperDHT by itself and falls back to DHT text when none connects ([400](400-chat.md), #209, #229). A person can keep a chat on DHT only.
 > - Calls, shared apps, files of any size and payments run on the live session ([401](401-paired-chat.md), #207, #233). Desktop on Linux calls with its own media ([601](601-webrtc-media.md#desktop-on-linux), #331).
 > - Chats with Ghostly 0.4 contacts keep working as compatibility chats ([402](402-legacy-chat.md)).
-> - Chats carry replies, edits, emoji reactions and a typing indicator; message text shows lists, quotes, headings and links ([400](400-chat.md), [401](401-paired-chat.md), #344, #347, #351, #354, #370).
+> - Chats carry replies, edits, emoji reactions, forwards and a typing indicator; message text shows lists, quotes, headings and links ([400](400-chat.md), [401](401-paired-chat.md), #344, #347, #351, #354, #370, #404).
+> - A contact's own app can wake a closed web app with a push that carries no content (`wake/1`, [401](401-paired-chat.md), #394). Private groups past 16 members run on hubs, members whose apps stay online ([Group Mesh](9xx-group-mesh.md), #402).
 > - Bots run the app's own engine without a screen: the `ghostly` CLI, its daemon and its event stream, voice calls included ([11xx](11xx-headless.md), #323 to #327, #350).
 > - Identity proofs are back, rebuilt (2026-09-23, [WISP 300](300-peer-proofs.md#implementation-2026-09-23-identity-proofs)): made once per profile, shared per contact by choice, through one provider contract ([PROOFS.md](../../packages/browser/src/proofs/PROOFS.md)). Identity cards of a verified Nostr, Pubky or Bluesky identity show its public profile ([PUBLIC-PROFILES.md](PUBLIC-PROFILES.md), #292).
 >
@@ -35,17 +36,17 @@ The implementation column is independent of document status. Existing features c
 
 ## Draft catalogue by family
 
-Implementation evidence below is what is merged on `dev` on 2026-09-27. Pull request numbers point to the change that shipped it.
+Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull request numbers point to the change that shipped it.
 
 | Candidate | Document | Status | Implementation evidence |
 |---|---|---|---|
 | [00](00-process.md) | WISP process and document format | Draft | Process proposal |
-| [01](01-ghost-core.md) | Ghost Core Protocol | Draft | Rendezvous and the DHT floor of every chat; Desktop reads the Mainline DHT directly, browsers through Pkarr relays, a circuit breaker per relay (#289) |
+| [01](01-ghost-core.md) | Ghost Core Protocol | Draft | Rendezvous and the DHT floor of every chat; Desktop reads the Mainline DHT directly, browsers through Pkarr relays, a circuit breaker per relay (#289), asked again every 15 s while all fail (#382, #395); the CLI publishes to the DHT too (#392) |
 | [02](02-peer-keys.md) | Peer Keys | Draft | Participation keys pinned per chat, the inviter's pinned from the invite; lifecycle extensions proposed |
 | [03](03-capabilities.md) | Capability Negotiation | Draft | The paired `pair-offer`, the layer-0 capability record (#209) and the `paired-capabilities` frame; general negotiation proposed |
-| [04](04-profiles.md) | Local Profiles | Draft | Experimental: web, desktop and browser extension (#171); wallets per network and identity proofs per profile |
+| [04](04-profiles.md) | Local Profiles | Draft | Experimental: web, desktop and browser extension (#171); wallets per network and identity proofs per profile; what arrived for another profile, 1:1 chats and communities (#389, #396) |
 | [05](05-backups.md) | Profile Backups | Draft | Experimental: web, desktop and extension; whole-profile encrypted bundles, restore as a new profile |
-| [100](100-transports.md) | Transport Negotiation | Draft | Rank-sum negotiation, the DHT floor, background retry and self-upgrade in every new chat (#209, #229); a per-chat transport choice (#204) |
+| [100](100-transports.md) | Transport Negotiation | Draft | Rank-sum negotiation, the DHT floor, background retry and self-upgrade in every new chat (#209, #229); a per-chat transport choice (#204); live again within seconds after a contact's app restarts (#369), and an unanswered WebRTC offer no longer holds back the transports ranked after it (#408) |
 | [101](101-webrtc.md) | WebRTC | Draft | The only direct transport in browsers; every client except Linux Desktop (no WebRTC in WebKitGTK) |
 | [102](102-iroh.md) | Iroh | Draft | Native on Desktop; relay-only in the web app and extension, on by default (#225); a web chat reaches a Desktop over relayed Iroh (#270) |
 | [103](103-hyperdht.md) | HyperDHT | Draft | Native sidecar on Desktop; web app and extension only through a HyperDHT relay the person sets, none by default (#231) |
@@ -71,27 +72,27 @@ Implementation evidence below is what is merged on `dev` on 2026-09-27. Pull req
 | [AT Protocol · 3xx planned](3xx-atproto.md) | AT Protocol identity (Bluesky) | Draft | Provider `atproto` (#248), e2e against a local PDS; a real server needs its client-metadata file live on ghostly.tools |
 | [DID · 3xx planned](3xx-did.md) | Decentralized identifiers (did:key, did:jwk, did:dht, did:web) | Draft | Experimental provider `did` (#249), under Advanced in the picker |
 | [400](400-chat.md) | Chat Messaging | Draft | One chat on two layers in every new chat: DHT first contact and floor, live link, self-upgrade, DHT only per chat (#209, #229); replies (#347), reactions (#354), edits (#351), lists, quotes, headings and links in the text (#370) |
-| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared apps (`services/1`) while live; typing, recording or a bot's status (`typing/1`, #344, #361), reactions (`react/1`, #354), edits (`edit/1`, #351), replies on texts and files (#347, #359) |
+| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared apps (`services/1`) while live; typing, recording or a bot's status (`typing/1`, #344, #361), reactions (`react/1`, #354), edits (`edit/1`, #351), replies on texts and files (#347, #359), forwards (`fw`, #404), a goodbye on the way out (`paired-bye`, #369), a wake-up push for a closed web app (`wake/1`, #394) |
 | [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 apps and the Rust compatibility CLI; existing chats and v0.4 codes only; "Continue in a new chat" |
-| [403](403-dht-text.md) | DHT Text (formerly Bounded DHT Text) | Draft | First contact and floor of every chat, fallback after a drop, DHT only per chat; pinned mailboxes (#302); a reply's id, an edit and reactions ride in the envelope (#347, #351, #354); one TTL and one packet size for every envelope (#399) |
-| [Store-and-forward · 4xx planned](4xx-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1` (#108), opt-in: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests; held replies (#347, #359) |
+| [403](403-dht-text.md) | DHT Text (formerly Bounded DHT Text) | Draft | First contact and floor of every chat, fallback after a drop, DHT only per chat; pinned mailboxes (#302); a reply's id, an edit, reactions and a forward's hop count ride in the envelope (#347, #351, #354, #404); one TTL and one packet size for every envelope (#399) |
+| [Store-and-forward · 4xx planned](4xx-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1` (#108), opt-in: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests; held replies (#347, #359), forwards (#404) and a picture's size (#420) |
 | [500](500-files.md) | File Transfer | Draft | 1:1 files of any size, with consent, resume and a digest check (#228, #233) |
-| [501](501-paired-files.md) | Chat Files (formerly Paired Files) | Draft | `files/2` (100 MiB) and `files/3` (any size) on every chat's live link; Send again and Ask again for a stuck transfer, backpressure on native links (#348, #352); a file can answer a message (#359); a video's length, size and poster on its offer (#371) |
+| [501](501-paired-files.md) | Chat Files (formerly Paired Files) | Draft | `files/2` (100 MiB) and `files/3` (any size) on every chat's live link; Send again and Ask again for a stuck transfer, backpressure on native links (#348, #352); a file can answer a message (#359); a video's length, size and poster on its offer (#371); a picture's size on its offer (#420); forwarded files carry `fw` (#404) |
 | [502](502-legacy-files.md) | Compatibility File Frames | Draft; retained for compatibility | Compatibility chats only; both peers online |
-| [600](600-media.md) | Voice and Video | Draft | 1:1 calls in every chat while live; screen sharing from inside a call (#253); Linux Desktop with native media, no screen sharing yet |
-| [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); Desktop on Linux with WebRTC in Rust and GStreamer media (#331); signals carry up to eight candidates and calls use the profile's TURN relay (#375) |
+| [600](600-media.md) | Voice and Video | Draft | 1:1 calls in every chat while live; screen sharing from inside a call (#253); Linux Desktop with native media, no screen sharing yet; the microphone, camera and speaker chosen in Settings and during a call (#388, #400, #406, #419) |
+| [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); Desktop on Linux with WebRTC in Rust and GStreamer media (#331); signals carry up to eight candidates and calls use the profile's TURN relay (#375); on Linux, the chosen devices in GStreamer (#406, #419) |
 | [700](700-local-services.md) | Local Services | Draft | HTTP proxy in every chat, hosted from Desktop and the extension; Shared apps from the composer's + (#268) |
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | `ph` frames in the chat session (`services/1`, #207); the web app can neither host nor open one |
 | [800](800-invite-join.md) | Invite and Join | Draft | Bearer `ghostly1` invite that pins the inviter's participation key (#210); a copy cannot stop a paired chat (#302); admission protocol proposed |
 | [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Every new chat makes a `ghostly1…` code (#210); `pair1/`, `pair2d/` and v0.4 codes still read |
 | [900](900-group-sessions.md) | Group Session Negotiation | Draft | Two profiles implemented: text, @mentions (#279), a group picture and payments between members; admin changes final in a community (#300) |
-| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its link `group-entry/1`: up to 32 members; core, engine and UI; unit and four-browser e2e; web, extension and desktop; replies, reactions and edits (#347, #354, #378) |
-| [Group Community · 9xx planned](9xx-group-community.md) | Group Community Distribution Profile | Draft | `group-community/1` (#153): a link anyone can open, admission by any member, elected hubs, up to 256 members; unit, six-browser e2e and a headless load test; replies, reactions and edits (#347, #354, #378) |
+| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its link `group-entry/1`: up to 32 members, any member hands on what another missed (#373), hubs past 16 members (`paired-groups` version 4, #402); core, engine and UI; unit and four-browser e2e; web, extension and desktop; replies, reactions, edits and forwards (#347, #354, #378, #404) |
+| [Group Community · 9xx planned](9xx-group-community.md) | Group Community Distribution Profile | Draft | `group-community/1` (#153): a link anyone can open, admission by any member, elected hubs, up to 256 members; unit, six-browser e2e and a headless load test; replies, reactions, edits and forwards (#347, #354, #378, #404) |
 | [GossipSub · 9xx planned](901-gossipsub.md) | GossipSub Transport | Draft | Proposed; no adapter |
 | [1000](1000-storage.md) | Storage Contract | Draft | Experimental: object contract, naming and adapter rules |
 | [1001](1001-local-storage.md) | Local File Storage | Draft | Experimental adapter |
 | [1002](1002-s3-storage.md) | S3-Compatible Storage | Draft | Experimental adapter; local S3 server end-to-end |
-| [Headless · 11xx planned](11xx-headless.md) | Headless Runtime and Local Control API | Draft | Experimental: the app's engine on Node for bots: a per-profile daemon, the `ghostly` CLI and its event stream; chats, groups, wallets, files, proofs and shared apps (#323 to #327); voice calls with the audio on a Unix socket (#350, #362); typing, replies, edits and reactions (#344, #347, #351, #354); npm package not published |
+| [Headless · 11xx planned](11xx-headless.md) | Headless Runtime and Local Control API | Draft | Experimental: the app's engine on Node for bots: a per-profile daemon, the `ghostly` CLI and its event stream; chats, groups, wallets, files, proofs and shared apps (#323 to #327); voice calls with the audio on a Unix socket (#350, #362); typing, replies, edits, reactions and forwards (#344, #347, #351, #354, #404); Pkarr over the Mainline DHT beside the relays (#392); npm package not published |
 
 Dependencies in headers describe the candidate modular design. Conditional dependencies are stated in the body (for example, existing media requires WebRTC). A document can refer to another without making its entire capability mandatory. In particular, 100 does not require a particular transport, 300 does not require an external identity, and 900 does not require GossipSub; the group mesh (9xx) is the first profile of 900 and 901 an optional later one. Group chat uses 400, group file sharing uses 500, and neither implies group payments or localhost permissions.
 
