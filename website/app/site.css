@@ -439,6 +439,63 @@ body {
   font-size: 14px;
   border-radius: 11px;
 }
+/* The Open app split button: the main part opens the web app, the chevron a menu with the web app and a download. */
+.nav-open {
+  position: relative;
+  display: flex;
+}
+.nav-open .nav-open-main {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+.nav-open .nav-open-more {
+  padding: 8px 10px;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  border-inline-start: 1px solid rgba(3, 16, 24, 0.25);
+  cursor: pointer;
+}
+.nav-open .nav-open-more[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.nav-open .nav-open-more svg {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--dur-fast) var(--ease-exit);
+}
+.nav-open-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 250px;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.7);
+}
+.nav-open-menu a {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  outline: none;
+}
+.nav-open-menu a small {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.nav-open-menu a:hover,
+.nav-open-menu a:focus-visible {
+  background: var(--surface-2);
+  color: var(--cyan);
+}
 .nav-menu {
   display: none;
   position: relative;
@@ -485,9 +542,18 @@ body {
 .nav-sheet a:hover {
   background: var(--surface-2);
 }
+.nav-sheet .nav-sheet-way {
+  color: var(--cyan);
+}
+/* A line between the pages and the two ways to open Ghostly. */
+.nav-sheet-rule {
+  height: 1px;
+  margin: 8px 12px;
+  background: var(--line);
+}
 @media (max-width: 900px) {
   .nav-links,
-  .nav-end .nav-cta {
+  .nav-end .nav-open {
     display: none;
   }
   .nav-menu {

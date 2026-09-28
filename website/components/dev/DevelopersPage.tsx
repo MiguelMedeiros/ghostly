@@ -11,6 +11,14 @@ import { Negotiation } from "./Negotiation";
 import { ProtocolSteps, type WispLink } from "./ProtocolSteps";
 import "@/app/developers.css";
 
+/** Where to go next, at the foot of the page: the WISPs, the roadmap, and the two ways to run Ghostly without a screen. */
+const NEXT = [
+  ["catalog", "/developers/wisps"],
+  ["roadmap", "/roadmap"],
+  ["cli", "/cli"],
+  ["agents", "/developers/agents"],
+] as const;
+
 export function DevelopersPage() {
   const t = developers;
   const wispRefs = wisps.map((w) => ({ slug: w.slug, number: w.number, name: w.name }));
@@ -157,11 +165,11 @@ export function DevelopersPage() {
 
       <section className="dv-sec dv-sec--next">
         <div className="wrap devnext">
-          {(["catalog", "roadmap", "docs"] as const).map((k) => (
+          {NEXT.map(([k, href]) => (
             <Reveal as="article" key={k} className="card devnext-card">
               <h3 className="h-card">{t.next[k].title}</h3>
               <p className="muted">{t.next[k].body}</p>
-              <Link className="link-arrow" href={k === "docs" ? "/docs" : k === "catalog" ? "/developers/wisps" : "/roadmap"}>
+              <Link className="link-arrow" href={href}>
                 {t.next[k].cta} →
               </Link>
             </Reveal>

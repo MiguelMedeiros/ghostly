@@ -297,9 +297,10 @@ export const developers = {
     ],
   },
   next: {
-    catalog: { title: "WISPs", body: "Every WISP, searchable, with its status and implementations.", cta: "Browse the WISPs" },
+    catalog: { title: "WISPs", body: "Every contract of the protocol, each with its own page.", cta: "Browse the WISPs" },
     roadmap: { title: "The roadmap", body: "What comes next, in dependency order. No dates.", cta: "See the roadmap" },
-    docs: { title: "Protocol docs", body: "The long-form walkthrough of the protocol.", cta: "Read the docs" },
+    cli: { title: "The CLI", body: "Run Ghostly without a screen: bots, scripts and servers.", cta: "Get the CLI" },
+    agents: { title: "AI agents", body: "Let an AI agent use Ghostly through the CLI, with llms.txt to start.", cta: "Set up an agent" },
   },
 };
 

@@ -60,7 +60,6 @@ ${[
 ${[
   line("How a chat starts", `${SITE}/developers`, "two apps publish signed records, find each other, agree on what both speak and open a direct link, step by step"),
   ...HOW.map(([file, note]) => line(bySlug(file).title, reader(bySlug(file).slug), note)),
-  line("Compatibility record guide", `${SITE}/docs`, "record formats of chats with Ghostly 0.4 contacts (WISP 402)"),
 ].join("\n")}
 
 ## Developers

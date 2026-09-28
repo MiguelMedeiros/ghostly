@@ -14,7 +14,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     entry("/developers/wisps", 0.8),
     entry("/roadmap", 0.8),
     ...references.map((ref) => entry(`/developers/wisps/${ref.slug}`, 0.6)),
-    entry("/docs", 0.7),
     entry("/cli", 0.7),
     entry("/developers/agents", 0.7),
     entry("/privacy", 0.3, "yearly"),
