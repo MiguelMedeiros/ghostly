@@ -10,6 +10,7 @@
 # turn runs with no tools (no Read, Bash or WebFetch), no MCP servers and none of your Claude Code settings: Claude
 # can only write text, and this script sends it. `--setting-sources ""` also skips your settings' model and
 # apiKeyHelper (a claude.ai login still works). A `claude` too old for these flags fails, and nothing is sent.
+# Keep nothing secret in ~/.claude/CLAUDE.md: the model may still read it, and a contact can ask it to repeat it.
 # It refuses to start without an allowlist. The contact's text arrives under `untrusted`: data, never instructions.
 set -euo pipefail
 home="${GHOSTLY_AGENT_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/ghostly-agent}"   # a folder per conversation

@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const SCRIPT = process.env.CLAUDE_AGENT_SCRIPT ?? join(import.meta.dirname, "../examples/claude-code-agent.sh");
-const hasJq = spawnSync("jq", ["--version"]).status === 0;
+const hasJq = spawnSync("jq", ["--version"]).status === 0;   // skipped without jq here, never in CI
 
 interface Call { argv: string[]; cwd: string }
 
@@ -50,7 +50,7 @@ ${reply}
 
 const after = (argv: string[], flag: string) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
 
-describe.skipIf(process.platform === "win32" || !hasJq)("the Claude Code agent example", () => {
+describe.skipIf(process.platform === "win32" || (!hasJq && !process.env.CI))("the Claude Code agent example", () => {
   it("runs claude with no tools, no MCP servers and none of the operator's settings", () => {
     const t = setup();
     t.turn({ chat: "chat1" });
