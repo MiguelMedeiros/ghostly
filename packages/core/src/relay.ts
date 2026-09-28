@@ -74,6 +74,13 @@ export const SIGNALING_WINDOW_MS = 10_000;
  * other's fast windows (2026-09-27). Not none: fast windows can follow one another, and a hub still reads its knocks.
  */
 export const BACKGROUND_WHILE_SIGNALING = 5;
+/**
+ * A read of a key the relays answered this recently is answered from that answer, with no request. Several parts of
+ * a chat read the contact's keys (the link's poll, its capabilities, DHT delivery), and each tends to read again
+ * within a few dozen milliseconds of its last read, when a pace changes or a signal goes out: nothing new can be there
+ * yet, and a pairing spent a sixth of its requests on those reads (2026-09-27). A publish under the key forgets it.
+ */
+export const FRESH_READ_MS = 500;
 /** A relay that fails at the network level is left alone for this long. */
 const NETWORK_ERROR_COOLDOWN_MS = 20_000;
 /**
@@ -92,6 +99,8 @@ export interface RelayTransportOptions {
    * `Infinity` for relays of one's own, with no limit to stay under (a test's relay in the same process).
    */
   requestsPerMinute?: number;
+  /** How long a read answers the next ones of the same key (`FRESH_READ_MS`); 0 makes every read a request. */
+  freshReadMs?: number;
   /** The circuit breaker's settings (tests shorten its waits); trips are logged with `log`. */
   breaker?: RelayBreakerOptions;
   /** Where a relay that trips or recovers is reported; never with a key. `console.info` by default. */
@@ -129,6 +138,9 @@ export class RelayTransport implements PkarrTransport {
   private urgentAt = -Infinity;
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
   private readonly lastPut = new Map<string, bigint>();
+  /** When the relays last answered a read of each key, for `FRESH_READ_MS`. */
+  private readonly readAt = new Map<string, number>();
+  private readonly freshReadMs: number;
   private readonly perMinute: number;
   private readonly backgroundPerMinute: number;
   private readonly backgroundWhileSignaling: number;
@@ -143,6 +155,7 @@ export class RelayTransport implements PkarrTransport {
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
     this.perMinute = options.requestsPerMinute ?? REQUESTS_PER_MINUTE;
+    this.freshReadMs = options.freshReadMs ?? FRESH_READ_MS;
     this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
     this.backgroundWhileSignaling = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_WHILE_SIGNALING : Math.ceil(this.perMinute / 6);
     const log = options.log ?? ((line: string) => console.info(`[ghostly:relay] ${line}`));
@@ -238,6 +251,8 @@ export class RelayTransport implements PkarrTransport {
    * When no relay takes it, this waits for all of them to say why.
    */
   private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions): Promise<void> {
+    // A record read, changed and written back (a lobby, a knock record) is read from the relays the next time.
+    this.readAt.delete(pubKeyZ32);
     const waitingBefore = new Map(this.writeWaiting);
     const writer = firstWriter(asker(options, true));
     // Out on one relay: the link will not try again, so a relay that refused it has no write to wait for.
@@ -298,6 +313,8 @@ export class RelayTransport implements PkarrTransport {
    */
   async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    const readAt = this.readAt.get(pubKeyZ32);
+    if (readAt !== undefined && Date.now() - readAt < this.freshReadMs) return this.newest.get(pubKeyZ32) ?? null;
 
     const start = this.cursor++;
     let reachable = false;
@@ -340,6 +357,7 @@ export class RelayTransport implements PkarrTransport {
         }
         this.answered(relay, undefined, "GET");
         this.lastRelay = relay;
+        this.answeredRead(pubKeyZ32);
         reachable = true;
         break;
       } catch {
@@ -360,6 +378,15 @@ export class RelayTransport implements PkarrTransport {
       throw new Error("No Pkarr relay reachable");
     }
     return this.newest.get(pubKeyZ32) ?? null;
+  }
+
+  /** The relays answered a read of this key now; answers older than `FRESH_READ_MS` are dropped as the list grows. */
+  private answeredRead(pubKeyZ32: string): void {
+    const now = Date.now();
+    this.readAt.delete(pubKeyZ32);
+    this.readAt.set(pubKeyZ32, now);
+    // Oldest first: drop the stale ones from the front.
+    if (this.readAt.size > 64) for (const [key, at] of this.readAt) { if (now - at < this.freshReadMs) break; this.readAt.delete(key); }
   }
 
   private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces: bigint | undefined, who: Asker, probe = false): Promise<Response> {

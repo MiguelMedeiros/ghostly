@@ -167,7 +167,7 @@ describe("resolving", () => {
 
   it("never replaces a newer packet with an older one", async () => {
     let next = 9n;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => packet(next)) as typeof fetch });
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async () => packet(next)) as typeof fetch });
     expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(9n);
     next = 3n;
     expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(9n);
@@ -190,7 +190,7 @@ describe("resolving", () => {
   it("recovers a relay once its budget window has passed", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     let requests = 0;
-    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => { requests++; return packet(1n); }) as typeof fetch });
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async () => { requests++; return packet(1n); }) as typeof fetch });
     for (let i = 0; i < 31; i++) await relay.resolve(id.pubKeyZ32);
     expect(requests).toBe(30);
     vi.setSystemTime(Date.now() + 60_000);
