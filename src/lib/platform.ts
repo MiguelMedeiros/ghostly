@@ -439,9 +439,10 @@ export interface ServicesPlatform {
   maxFileBytes: number;
   /**
    * Starts sending and returns what to show in the chat. Progress comes through `getTransfer`.
-   * `voice` makes it a voice message: the file then plays in the chat instead of being saved.
+   * `voice` makes it a voice message: the file then plays in the chat instead of being saved. `replyTo`: the id of the
+   * message of this chat it answers, as a text reply names it (WISP 400 § Replies).
    */
-  sendFile(peerPubKeyZ32: string, file: File, options?: { voice?: ChatFile["voice"]; video?: ChatFile["video"] }): Promise<{ timestamp: number; file: ChatFile }>;
+  sendFile(peerPubKeyZ32: string, file: File, options?: { voice?: ChatFile["voice"]; video?: ChatFile["video"]; replyTo?: string }): Promise<{ timestamp: number; file: ChatFile }>;
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   retryFile?(fileId: string): Promise<void>;
   getTransfer(fileId: string): FileTransferState | null;

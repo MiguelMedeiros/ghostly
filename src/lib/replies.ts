@@ -1,5 +1,5 @@
 import { replySnippet } from "@ghostly/core";
-import { replyRef, type ReplyTarget } from "@ghostly/browser/shared/replies";
+import { replyRef, replyTo, type ReplyTarget } from "@ghostly/browser/shared/replies";
 import type { MessageReply } from "@ghostly/browser/shared/types";
 import type { ChatMessage } from "./types";
 
@@ -47,6 +47,15 @@ export function replyIndex(messages: readonly Quotable[], group = false): ReplyI
 export function replyTarget(message: Quotable & Pick<ChatMessage, "systemEvent" | "callEvent">, group = false): string | undefined {
   if (message.sender === "system" || message.systemEvent || message.callEvent) return undefined;
   return replyRef(message, group);
+}
+
+/**
+ * A reply to `original` as the sender's own copy of a file keeps it, the way the engine keeps a reply sent here
+ * (`replyTo` in shared/replies): found, since it is here. None when it cannot be replied to.
+ */
+export function sentReply(original: Quotable, group = false): MessageReply | undefined {
+  const ref = replyRef(original, group);
+  return ref ? replyTo(original, ref) : undefined;
 }
 
 /** Who wrote a message or an original, as the page names people: me, the contact, a member. */

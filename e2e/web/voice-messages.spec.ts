@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
-import { chat, expect, test, type Peer } from "../support/fixtures";
+import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
@@ -138,6 +138,53 @@ test("voice messages: hold to record, the contact plays it", { tag: ["@feature:f
   const again = voices(bob).last();
   await expect(again).toHaveAttribute("data-played", "true", { timeout: 30_000 });
   expect(await shapes(again)).toBeGreaterThan(3);
+});
+
+/** The chat's row holding the newest bubble of this kind (a voice message, a file). */
+const rowWith = (peer: Peer, testId: string) => chat(peer).locator("[data-message-row]").filter({ has: peer.page.getByTestId(testId) }).last();
+
+test("voice messages: recorded while replying, it goes as a reply, and so does a file", { tag: ["@feature:files.voice.record", "@feature:chat.replies", "@feature:chat.replies.wire", "@feature:files.paired.send"] }, async ({ peer }) => {
+  // Miguel's voice notes sent while replying arrived with no quote: the recorder sent them without the reply.
+  const [alice, bob] = await Promise.all([peer("voice-reply-alice"), peer("voice-reply-bob")]);
+  await pair(alice, bob);
+  await say(bob, "lunch at noon?");
+  // Its own text, not a quote of it: the replies below hold its words too.
+  const original = chat(alice).locator("[data-message-row]").filter({ has: alice.page.getByTestId("message-text").filter({ hasText: /^lunch at noon\?$/ }) }).last();
+  await expect(original).toBeVisible({ timeout: 30_000 });
+
+  // Alice answers it with a voice message: the bar goes once it is sent.
+  await original.hover();
+  await original.getByTestId("message-reply-action").click();
+  await expect(alice.page.getByTestId("composer-reply").getByTestId("reply-quote-snippet")).toHaveText("lunch at noon?");
+  await expect(mic(alice.page)).not.toHaveAttribute("aria-disabled");
+  await hold(alice.page, 1_600);
+  await expect(alice.page.getByTestId("composer-reply")).toHaveCount(0);
+
+  // Both bubbles quote Bob's message, checked against each side's history.
+  const sent = rowWith(alice, "voice-bubble");
+  await expect(sent.getByTestId("message-quote")).toHaveAttribute("data-state", "found");
+  await expect(sent.getByTestId("reply-quote-snippet")).toHaveText("lunch at noon?");
+  const received = rowWith(bob, "voice-bubble");
+  await expect(received.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
+  await expect(received.getByTestId("message-quote")).toHaveAttribute("data-state", "found");
+  await expect(received.getByTestId("reply-quote-name")).toHaveText("You");
+  await expect(received.getByTestId("reply-quote-snippet")).toHaveText("lunch at noon?");
+
+  // A file from + → Document while replying goes as a reply too.
+  await original.hover();
+  await original.getByTestId("message-reply-action").click();
+  await alice.page.getByTestId("file-input").setInputFiles({ name: "menu.txt", mimeType: "text/plain", buffer: Buffer.from("soup, bread\n") });
+  await expect(alice.page.getByTestId("composer-reply")).toHaveCount(0);
+  await expect(rowWith(alice, "file-bubble").getByTestId("message-quote")).toHaveAttribute("data-state", "found");
+  const file = rowWith(bob, "file-bubble");
+  await expect(file).toContainText("menu.txt", { timeout: 30_000 });
+  await expect(file.getByTestId("message-quote")).toHaveAttribute("data-state", "found");
+  await expect(file.getByTestId("reply-quote-snippet")).toHaveText("lunch at noon?");
+
+  // The next voice message answers nothing.
+  await hold(alice.page, 1_200);
+  await expect(voices(bob)).toHaveCount(2, { timeout: 30_000 });
+  await expect(rowWith(bob, "voice-bubble").getByTestId("message-quote")).toHaveCount(0);
 });
 
 test("voice messages: locked, one click on send sends one message (click to lock, or slide up)", { tag: ["@feature:files.voice.record", "@feature:files.paired.send"] }, async ({ peer }) => {
