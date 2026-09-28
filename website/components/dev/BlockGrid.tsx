@@ -174,7 +174,8 @@ export function BlockGrid({
 
       <div className="bgrid-rows">
         {DIMS.map((d) => {
-          const blocks = BLOCKS.filter((bl) => bl.dim === d.id);
+          // Available first, then planned, then research: each row reads from today towards what is only being considered.
+          const blocks = BLOCKS.filter((bl) => bl.dim === d.id).sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
           const open = blocks.find((bl) => bl.id === selected);
           return (
             <div className="bgrid-row" key={d.id} style={{ "--c": d.color } as React.CSSProperties}>
