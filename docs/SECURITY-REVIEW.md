@@ -59,7 +59,7 @@ This repository is public, so anything written here or in an issue or pull reque
 | S14 | Med | Protocol | Plaintext `_ts`/`_ack` let relays/DHT pair a link's two keys and time messages | open (needs a protocol change) |
 | S15 | Low | Privacy | Google STUN always on, no relay-only mode; Google Analytics on the site | open for STUN. The site's analytics are gone (#535): no page calls another site or sets a cookie, checked by `website/e2e/launch-checklist.spec.ts` |
 | S16 | Low | Invite | Invite is a long-lived bearer secret, creator keeps the peer's seed, no forward secrecy | open |
-| S17 | Low | CLI | `--seed`/`--key` on the command line (visible in `ps`, shell history) | open |
+| S17 | Low | CLI | `--seed`/`--key` on the command line (visible in `ps`, shell history) | resolved: no longer shipped from 1.0. The Rust `ghostly-cli` binaries left the release assets; its source stays in `cli/` and builds in CI. Bots use `ghostly` (`packages/cli`) |
 | S18 | Low | Storage | Seeds, messages and proofs are plaintext in localStorage/IndexedDB | open |
 | S20 | Low | HTTP host | Browser hosts follow redirects and check the final URL afterwards: one blind request elsewhere on the machine via an open redirect in the shared app | open |
 | S21 | Low | App | "Clear all data" keeps the wallet on purpose (ecash is money); a browser's global history may still list an invite URL opened once | accepted |

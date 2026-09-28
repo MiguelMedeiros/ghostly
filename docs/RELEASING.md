@@ -58,7 +58,6 @@ git tag v1.0.0 && git push origin v1.0.0
 The `Release` workflow (`.github/workflows/release.yml`) runs the `E2E` workflow from the tag first: the web app and the extension, the Desktop app on Linux, and compatibility with v0.4.0. If it fails, nothing is released: no draft, no web image. Then it builds:
 
 - the desktop apps (macOS arm64 and x64, Windows, Linux);
-- the CLI binaries (`ghostly-cli-macos-arm64`, `-macos-x64`, `-linux-x64`, `-windows-x64.exe`);
 - the extension zip;
 - the web image (`ghcr.io/miguelmedeiros/ghostly-web`, tagged with the version and `latest`);
 - a **draft** release with `SHA256SUMS.txt`, its GPG signature and `latest.json`.
@@ -71,7 +70,7 @@ If a build fails, fix it (on `dev`, then merge into `main` again), move the tag 
 
 A release is not finished while it is a draft: GitHub keeps showing the previous version as **Latest**, and no installed app sees the update. Once it checks out, publish it, always.
 
-1. The Release workflow is green and the draft has all its assets (sixteen at v0.4.0), `latest.json` among them.
+1. The Release workflow is green and the draft has all its assets (twelve from 1.0; v0.4.0 had sixteen, with the Rust CLI binaries), `latest.json` among them.
 2. Download a few and check them: `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` and `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`.
 3. Publish it as the latest release, with the changelog section as notes:
 

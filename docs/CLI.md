@@ -252,5 +252,5 @@ members connect to it and it passes the group's messages on ([WISP 9xx · Group 
 `ghostly-cli` (Rust, in [`cli/`](../cli)) came first. It is now the **compatibility client**: it speaks only the
 v0.4 record format ([WISP 402](wisps/402-legacy-chat.md)) with its own `ghost://` invites, and it cannot pair with the
 app. An app invite (`ghostly1…`) is refused with a message saying to open it in the Ghostly app. It stays, unchanged,
-for the bots already built on it, and the release still ships its binaries. Removing it is a separate decision, to be
-announced first. New bots use `ghostly`. Its commands: [cli/README.md](../cli/README.md).
+for the bots already built on it. From 1.0 the release no longer ships its binaries: build it from [`cli/`](../cli).
+Removing it is a separate decision, to be announced first. New bots use `ghostly`. Its commands: [cli/README.md](../cli/README.md).
