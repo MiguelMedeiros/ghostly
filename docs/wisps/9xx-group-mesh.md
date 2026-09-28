@@ -173,6 +173,16 @@ A member reacts to a group message ([400](400-chat.md#reactions), revision 0.7) 
 
 It is believed only from the member the edge is pinned to, and only while that member is in the roster: the edge authenticates it, so it needs no signature of its own. Reactions are not in the message log and not handed on in a catch-up: a member hears again the reactor's latest reactions (up to 32) when their edge opens. They are not sealed under the epoch key: an edge is already a session between exactly those two members. In a group on hubs, a reaction also carries the reactor's signature, and hubs pass it on as `group-reacted` (§ Hubs).
 
+## Pinned message
+
+Any member may pin a message of the group, or unpin it ([400](400-chat.md#pinned-message): one per group, the last pin wins). The pin is signed by its pinner, so that any member can pass it on as it is:
+
+```
+{ "t": "group-pin", "g": <group id>, "id": <message id or "">, "n": <number>, "k": <pinner's member key>, "sig": <Ed25519 over ["ghostly-group/1 pin", g, id, n]> }
+```
+
+A member takes it when `k` is in the roster, the signature holds and the rule allows `k` (any member here), whichever edge it came over. When it is newer than the pin it shows, it keeps it (with `k` and `sig`) and sends it on over its other edges, so a member with no edge to the pinner (a group on hubs) gets it too; an older pin is dropped there, which ends the passing on. Every member says the group's pin again over an edge when it opens, so a member who was away gets it then. Pins are not in the message log. Apps from before drop the frame: its `t` is one they do not know.
+
 ## Edits
 
 The author of a text can edit it ([400](400-chat.md#edits), revision 0.8): the whole new text, with an edit number of its own per message (1 for the first, at most 100; the highest wins, whatever order edits arrive in). It goes over each of the author's edges as a frame of its own:

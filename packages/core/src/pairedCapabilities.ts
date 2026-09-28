@@ -34,10 +34,13 @@ export const EDIT_CAPABILITY = "edit/1";
 /** Wake-up push: `paired-wake` frames on this session, 1:1 chats only (WISP 401 § Wake-up push, `pairedWake.ts`). */
 export const WAKE_SESSION_CAPABILITY = "wake/1";
 
-export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY;
+/** A pinned message: `paired-pin` frames on this session, 1:1 chats only (WISP 401 § Pinned message, `pins.ts`). */
+export const PIN_CAPABILITY = "pin/1";
+
+export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY;
 
 /** Every capability this app knows on a session: what `receive` reports changes of. */
-export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY];
+export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY];
 
 export const SESSION_CAPABILITIES_FRAME = "paired-capabilities";
 

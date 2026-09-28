@@ -170,6 +170,16 @@ A reaction ([400](400-chat.md#reactions), revision 0.8) is an application frame 
 
 It is filed under the payload's author, and only while they are a member. Apps from before read `x` frames they know (payments) and drop the rest; as hubs they relay the frame unchanged.
 
+## Pinned message
+
+Only the community's admin pins a message, or unpins it ([400](400-chat.md#pinned-message): one per group, the last pin wins). The pin is an application frame of the group, sealed and signed like any payload, so every member (and every hub) carries it and a member who was away gets it with the catch-up:
+
+```
+{ "x": { "t": "pin", "id": <message id or "">, "n": <number> }, "nick"? }
+```
+
+A member takes it only when the payload's author is the admin at that moment; a pin from anyone else is dropped. Apps from before drop the frame as they drop reactions.
+
 ## Edits
 
 The author of a text can edit it ([400](400-chat.md#edits), revision 0.9) with an application frame of the group, sealed and signed like any payload, so every member (and every hub) carries it and a member who was away gets it with the catch-up:

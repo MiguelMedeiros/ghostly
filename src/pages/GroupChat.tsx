@@ -31,11 +31,12 @@ import { useGroupTypingSender } from "../hooks/useTyping";
 import { GroupTypingText, type GroupTyper } from "../components/TypingIndicator";
 import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
-import { replySnippet, type GroupMention } from "@ghostly/core";
+import { mayPin, replySnippet, type GroupMention } from "@ghostly/core";
 import { quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
+import { PinnedBar } from "../components/chat/PinnedBar";
 import { canEditInGroup } from "@ghostly/browser/shared/edits";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -225,6 +226,9 @@ export function GroupChat() {
   // Reactions (WISP 9xx § Reactions): one per member per message, named by the roster.
   const react = (messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); };
   const reactionName = (by: string) => nameOf("peer", by) ?? by.slice(0, 8);
+  // The pinned message (WISP 400 § Pinned message): any member of a private group pins, only the admin of a community.
+  const canPin = group.canSend && !!group.myKey && mayPin(group.profile, group.myKey, group.members.find(m => m.role === "admin")?.key);
+  const pinMessage = (messageId: string | undefined, remove = false) => { void engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }).catch(() => {}); };
 
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
@@ -310,6 +314,7 @@ export function GroupChat() {
       </div>
 
       {!joiningByLink && <ChatSearchBar search={search} />}
+      {!joiningByLink && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} />}
 
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? "You are in. Connecting to the group: messages go out as soon as a member's app is reached." : "You are in. Connecting to the members: messages go out as soon as one of them is reached."}
@@ -355,7 +360,8 @@ export function GroupChat() {
             : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)}
               onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
               onEdit={canEditInGroup(m) && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
-              onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName} />)}
+              onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
+              onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />)}
         </div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />

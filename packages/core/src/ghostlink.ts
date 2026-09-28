@@ -40,9 +40,10 @@ import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, type LinkStatus, type PeerP
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
+import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES } from "./chatFiles";
@@ -294,6 +295,15 @@ export interface GhostLinkEvents {
   /** Both sides offer `edit/1` on the open session (true), or no longer (false). */
   onEditSupport?(supported: boolean): void;
   /**
+   * The contact pinned a message, or unpinned (`pin/1`, WISP 401 § Pinned message), already checked. True: confirm it
+   * (taken, or older than the pin shown); false: not now, it comes again.
+   */
+  onPin?(pin: WirePin): boolean | Promise<boolean>;
+  /** The contact confirmed this side's pin numbered `n`. */
+  onPinReceipt?(n: number): void | Promise<void>;
+  /** Both sides offer `pin/1` on the open session (true), or no longer (false). */
+  onPinSupport?(supported: boolean): void;
+  /**
    * The contact shared how to wake its closed web app (`wake/1`, WISP 401 § Wake-up push), already checked; null:
    * it stopped sharing (forget it). Kept by the caller: it is what makes a wake-up possible while the contact is away.
    */
@@ -375,6 +385,8 @@ export interface GhostLinkOptions {
   reactionsSupport?: boolean;
   /** Offer `edit/1` on paired sessions: sent texts can be edited (1:1 chats, not group edges). */
   editSupport?: boolean;
+  /** Offer `pin/1` on paired sessions: a pinned message (1:1 chats, not group edges). */
+  pinSupport?: boolean;
   /** Offer `wake/1` on paired sessions: this app wakes a contact's closed web app with a push (1:1 chats, not group edges). */
   wakeSupport?: boolean;
   dht?: {
@@ -522,6 +534,8 @@ export class GhostLink {
   private readonly typingReceiver = new TypingReceiver((typing, activity) => this.options.events?.onPeerTyping?.(typing, activity));
   /** Reaction frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly reactionsReceived = new ReactionWindow(REACTION_LIMITS.receive);
+  /** Pin frames the contact may send per window; the rest go unconfirmed and come again. */
+  private readonly pinsReceived = new ReactionWindow(PIN_LIMITS.receive, PIN_LIMITS.windowMs);
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
   private readonly wakeReceived = new RateWindow(6, 60_000);
@@ -1977,6 +1991,7 @@ export class GhostLink {
     if (this.options.reactionsSupport) offered.push(REACTIONS_CAPABILITY);
     if (this.options.editSupport) offered.push(EDIT_CAPABILITY);
     if (this.options.wakeSupport) offered.push(WAKE_SESSION_CAPABILITY);
+    if (this.options.pinSupport) offered.push(PIN_CAPABILITY);
     return offered;
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
@@ -2017,6 +2032,18 @@ export class GhostLink {
   sendWake(target: WakeTarget | null): boolean {
     if (!this.channel || !this.supportsWake) return false;
     try { this.channel.send(JSON.stringify(wakeFrame(target))); return true; } catch { return false; }
+  }
+  /** Both sides offer `pin/1` on the open session: a pin can be said and confirmed. */
+  get supportsPins(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(PIN_CAPABILITY); }
+  /**
+   * Says this side's pin (WISP 401 § Pinned message) on the live session, once both sides offer `pin/1`. An error when
+   * it could not go now: the caller keeps it, and it goes on the next session.
+   */
+  sendPin(pin: WirePin): string | null {
+    if (!this.options.params.profile) return "Pins need a current chat";
+    if (!this.channel || !this.isDataLinkOpen) return "A pin goes when you are live";
+    if (!this.supportsPins) return "Your contact's app does not show pins yet";
+    try { this.channel.send(pinFrame(pin)); return null; } catch { return "The connection closed before sending"; }
   }
   /** Both sides offer `edit/1` on the open session: edits can be said and confirmed. */
   get supportsEdits(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(EDIT_CAPABILITY); }
@@ -2113,6 +2140,7 @@ export class GhostLink {
     if (changed.includes(TYPING_CAPABILITY) && !this.supportsTyping) { this.typingSender.reset(); this.typingReceiver.clear(); }
     if (changed.includes(REACTIONS_CAPABILITY)) this.options.events?.onReactionsSupport?.(this.supportsReactions);
     if (changed.includes(EDIT_CAPABILITY)) this.options.events?.onEditSupport?.(this.supportsEdits);
+    if (changed.includes(PIN_CAPABILITY)) this.options.events?.onPinSupport?.(this.supportsPins);
     if (changed.includes(WAKE_SESSION_CAPABILITY)) this.options.events?.onWakeSupport?.(this.supportsWake);
     this.emitPairingState();
   }
@@ -2507,6 +2535,20 @@ export class GhostLink {
           if (frame?.t === REACTED_FRAME) {
             const n = parseReactedFrame(frame);
             if (n !== null) await this.options.events?.onReactionReceipt?.(n);
+            return;
+          }
+          if (frame?.t === PIN_FRAME) {
+            // Counted before it is read, as reactions are.
+            if (!this.supportsPins || !this.pinsReceived.take()) return;
+            const pin = parsePinFrame(frame);
+            if (!pin) return;
+            if (await this.options.events?.onPin?.(pin) && this.channel === channel && this.isDataLinkOpen)
+              try { channel.send(pinnedFrame(pin.n)); } catch { /* it comes again */ }
+            return;
+          }
+          if (frame?.t === PINNED_FRAME) {
+            const n = parsePinnedFrame(frame);
+            if (n !== null) await this.options.events?.onPinReceipt?.(n);
             return;
           }
           if (frame?.t === EDIT_FRAME) {

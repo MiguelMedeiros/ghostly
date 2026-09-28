@@ -125,6 +125,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `message retry\|delete\|details <chat> <message>` | One message |
 | `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
 | `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
+| `pin <chat\|group> <message> [--remove]` | Pin a message at the top of a chat or group, for everyone in it: one per chat, a new pin replaces it, `--remove` unpins. In a community only the admin pins. A 1:1 pin reaches the contact on the next live session; the other side hears `chat.pinned` or `group.pinned` |
 | `profile backup --out <file>`, `profile restore <file> <new profile>` | An encrypted backup (WISP 05 envelope); the passphrase from `--passphrase-file` or `GHOSTLY_BACKUP_PASSPHRASE` |
 | `profile create <name> [--use] [--name <shown>]`, `profile list`, `profile use <name>` | Profiles |
 | `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
@@ -265,6 +266,9 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
 - Reactions (WISP 400 § Reactions): `message.reaction` (a chat) and `group.reaction` (a group) say each change once:
   `{messageId, by, emoji, removed, mine}`, with `by` `me`, `peer` or a member key, `emoji` "" when taken back, `mine`
   when the message is this profile's. `chat history` lists each message's `reactions`: `[{by, emoji, at}]`.
+- Pins (WISP 400 § Pinned message): `chat.pinned` (with `chat`) and `group.pinned` (with `group`) when someone else pins
+  or unpins: `{messageId, ref, by, removed}`, with `messageId` the message's id here (null when it is not here, or
+  unpinned), `ref` the id both sides know it by, and `by` `peer` or a member key.
 - `--type message.received` keeps one type; `--type message.` (or `message.*`) a family.
 - `--from <chat|key>` and `--group <group>` (again for more): an allowlist. Only the chats (id, prefix, name, or the
   contact's `peer` key, which also matches a chat made later) and groups named get through; any other chat's or
@@ -297,7 +301,7 @@ folder of the user's alone, when the folder's path is too long for a socket). On
 ```
 
 Methods: `status`, `profile.get|set`, `settings.get|set`, `invite.create|join`, `chat.list|get|history|send|retry|
-delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|request|payRequest|accept|edit|react|forward|typing`,
+delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|request|payRequest|accept|edit|react|pin|forward|typing`,
 `group.create|join|list|get|history|send|edit|react|leave|forget|accept|decline`, `wallet.list|create|remove|faucet|history|
 receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `payment.list|check|reclaim`,
 `file.send|list|action|wait|save`, `group.invite|remove|admin|rotate|link|picture|hub`, `profile.picture|backup`,

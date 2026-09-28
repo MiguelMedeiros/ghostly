@@ -88,6 +88,13 @@
   "offline": "离线",
   "online": "在线",
   "options": "选项",
+  "pinned": {
+    "bar": "置顶消息",
+    "info": "每个聊天只有一条置顶消息，所有成员可见。新的置顶会替换旧的。在社区中，只有管理员可以置顶。",
+    "notHere": "不在此设备上",
+    "pin": "置顶",
+    "unpin": "取消置顶"
+  },
   "reactions": {
     "chipLabel": "{{emoji}}：{{names}}",
     "more": "更多表情",

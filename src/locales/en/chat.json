@@ -88,6 +88,13 @@
   "offline": "offline",
   "online": "online",
   "options": "Options",
+  "pinned": {
+    "bar": "Pinned message",
+    "info": "One pinned message per chat, seen by everyone in it. A new pin replaces it. In a community, only the admin pins.",
+    "notHere": "Not on this device",
+    "pin": "Pin",
+    "unpin": "Unpin"
+  },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",
     "more": "More emoji",

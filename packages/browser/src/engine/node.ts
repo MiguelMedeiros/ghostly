@@ -43,6 +43,7 @@ import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, parseCommunityEdit } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, wireReaction, type WireReaction } from "@ghostly/core";
+import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
@@ -119,6 +120,7 @@ import type {
   SettingsPatch,
   StoredLink,
   StoredMessage,
+  StoredPin,
   StoredService,
   NetworkWalletsView,
   WalletAwaitingView,
@@ -151,6 +153,7 @@ import { Groups, meshEdgeIntervals } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
 import { Reactions, latestReaction } from "./reactions";
+import { mayPinIn, myPin, pinView, pinnedRow } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
@@ -819,6 +822,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly reactionsSent = new Map<string, Map<number, number>>();
   private readonly reactionPace = new Map<string, ReactionWindow>();
   private readonly reactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** A pin said on the live session and not confirmed yet is said again when this fires, per link. */
+  private readonly pinTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** The WebRTC connections of 1:1 chats, kept (with a budget only) until closed: they count against `peerBudget`. */
   private readonly chatPeers = new Set<RTCPeerConnection>();
   private chatPeer(pc: RTCPeerConnection): RTCPeerConnection {
@@ -889,11 +894,13 @@ export class GhostlyNode implements EngineImplementation {
     emit: () => this.emitState(),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
+      : frame.t === COMMUNITY_PIN_FRAME ? this.receiveGroupPin(groupId, sender, readPin(frame))
       : this.communityPay.receiveApp(groupId, sender, frame),
     groupEdit: async (groupId, { sender, ...edit }) => { await this.groupEdits.receive(groupId, sender, edit); },
     groupReaction: (groupId, member, reaction) => this.receiveGroupReaction(groupId, member, reaction),
-    // My latest edits, again, to a member whose edge opened: a private group has no catch-up for them.
-    edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); },
+    groupPin: (groupId, from, { member, pin, frame }) => this.receiveGroupPin(groupId, member, pin, { from, frame }),
+    // My latest edits, again, to a member whose edge opened: a private group has no catch-up for them. The group's pin too.
+    edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); this.sendGroupPinFrame(groupId, peer); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
   });
 
@@ -1174,6 +1181,8 @@ export class GhostlyNode implements EngineImplementation {
     if (this.spareTimer) clearTimeout(this.spareTimer);
     for (const timer of this.reactionTimers.values()) clearTimeout(timer);
     this.reactionTimers.clear();
+    for (const timer of this.pinTimers.values()) clearTimeout(timer);
+    this.pinTimers.clear();
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
     this.identities.stop();
@@ -2839,6 +2848,99 @@ export class GhostlyNode implements EngineImplementation {
     const reaction = readReaction(raw);
     if (reaction) await this.reactions.receive(`group:${groupId}`, member, reaction);
   }
+
+  /**
+   * Pins a message of a chat or a group, or unpins (WISP 400 § Pinned message): one per chat, the last pin winning. A
+   * 1:1 chat keeps it until the contact confirms it on a live session; a group sends it to its members, where the rule
+   * (`mayPin`) allows it.
+   */
+  async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null }> {
+    if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
+    const host = { messages: (chat: string) => db.getMessages(chat), message: (chat: string, id: string) => db.getMessage(chat, id) };
+    if (linkId.startsWith("group:")) {
+      const groupId = linkId.slice("group:".length), view = this.groups.views().find(g => g.id === groupId);
+      if (!view || view.status !== "active") return { error: "You are not in this group" };
+      if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
+      const pin = await myPin(host, linkId, messageId, !!remove, this.groups.pinOf(groupId));
+      if ("error" in pin) return pin;
+      if (this.groups.isCommunityGroup(groupId)) {
+        try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_PIN_FRAME, id: pin.id, n: pin.n }); } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+        await this.groups.setPin(groupId, pin);
+        return { error: null };
+      }
+      const frame = this.groups.pinFrame(groupId, pin);
+      if (!frame) return { error: "You are not in this group" };
+      await this.groups.setPin(groupId, { ...pin, k: frame.k, sig: frame.sig });
+      // An edge that is down hears it when it opens (`edgeUp`).
+      for (const member of this.groupEdges(groupId).keys()) this.sendGroupPinFrame(groupId, member);
+      return { error: null };
+    }
+    const live = this.links.get(linkId);
+    if (!live || live.stored.group) return { error: "No such chat" };
+    if (!live.stored.profile) return { error: "Pins need a current chat; this compatibility chat sends text only." };
+    const pin = await myPin(host, linkId, messageId, !!remove, live.stored.pin);
+    if ("error" in pin) return pin;
+    await this.keepLinkPin(linkId, pin, { id: pin.id, n: pin.n });
+    this.flushPin(linkId);
+    return { error: null };
+  }
+
+  /** Keeps a pin of a 1:1 chat when it is newer than the chat's; `out`: mine, to say until the contact confirms it. */
+  private async keepLinkPin(linkId: string, pin: StoredPin, out?: WirePin): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live || !pinIsNewer(live.stored.pin, pin)) return;
+    const patch = { pin, ...(out && { pinOut: out }) };
+    live.stored = { ...live.stored, ...patch };
+    await db.patchLink(linkId, patch);
+    this.emitState();
+  }
+
+  /** Says my pin the contact has not confirmed, once both sides offer `pin/1`; again after a while with no receipt. */
+  private flushPin(linkId: string): void {
+    const live = this.links.get(linkId), pin = live?.stored.pinOut;
+    clearTimeout(this.pinTimers.get(linkId));
+    this.pinTimers.delete(linkId);
+    if (!pin || !live.link?.supportsPins || live.link.sendPin(pin)) return;
+    this.pinTimers.set(linkId, setTimeout(() => this.flushPin(linkId), PIN_LIMITS.resendMs));
+  }
+
+  /** The contact confirmed my pin `n`: it is not said again. */
+  private async pinReceipt(linkId: string, n: number): Promise<void> {
+    const live = this.links.get(linkId);
+    if (live?.stored.pinOut?.n !== n) return;
+    clearTimeout(this.pinTimers.get(linkId));
+    this.pinTimers.delete(linkId);
+    live.stored = { ...live.stored, pinOut: undefined };
+    await db.patchLink(linkId, { pinOut: undefined });
+  }
+
+  /** A pin that came, as it is kept: who pinned, and its row when it is here. */
+  private async pinCame(chat: string, by: string, pin: WirePin): Promise<StoredPin> {
+    const row = await pinnedRow({ messages: c => db.getMessages(c), message: (c, id) => db.getMessage(c, id) }, chat, pin.id);
+    return { id: pin.id, n: pin.n, by, at: Date.now(), ...(row && { messageId: row.id }) };
+  }
+
+  /**
+   * A pin in a group: signed by `member` and passed on over the edge to `via.from` (private), or sealed by them to the
+   * group (community). Kept when the rule allows that member and it is newer; a private group's goes on to the
+   * other edges, so members with no edge to the pinner get it.
+   */
+  private async receiveGroupPin(groupId: string, member: string, pin: WirePin | null, via?: { from: string; frame: GroupPinFrame }): Promise<void> {
+    const view = this.groups.views().find(g => g.id === groupId);
+    if (!pin || !view?.myKey || view.status !== "active" || !view.members.some(m => m.key === member)) return;
+    if (!mayPin(view.profile, member, view.members.find(m => m.role === "admin")?.key)) return;
+    const kept = await this.pinCame(`group:${groupId}`, member === view.myKey ? "me" : member, pin);
+    if (!await this.groups.setPin(groupId, { ...kept, ...(via && { k: via.frame.k, sig: via.frame.sig }) }) || !via) return;
+    for (const key of this.groupEdges(groupId).keys()) if (key !== via.from && key !== member) this.sendGroupPinFrame(groupId, key);
+  }
+
+  /** A private group's pin, as its pinner signed it, over the edge to `member`; nothing when it is down (said when it opens). */
+  private sendGroupPinFrame(groupId: string, member: string): void {
+    const pin = this.groups.pinOf(groupId), edge = this.groupEdges(groupId).get(member);
+    if (!pin?.k || !pin.sig || !edge || this.groups.isCommunityGroup(groupId)) return;
+    const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
+    try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ }
+  }
   leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
   removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
@@ -3899,6 +4001,8 @@ export class GhostlyNode implements EngineImplementation {
       reactionsSupport: this.options.reactions !== false,
       // 1:1 chats only, as typing. `ghostly-test-no-edit` makes this app an older one for the e2e.
       editSupport: !GhostlyNode.testNoEdit(),
+      // 1:1 chats only: a group's pin goes in its own frames.
+      pinSupport: true,
       // 1:1 chats only, as typing: a wake-up names a chat, and a group edge is none.
       wakeSupport: true,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
@@ -4117,6 +4221,10 @@ export class GhostlyNode implements EngineImplementation {
         onReactionsTaken: n => this.reactionReceipt(linkId, n, true),
         // A new session: everything not confirmed is said again on it.
         onReactionsSupport: supported => { this.reactionsSent.delete(linkId); if (supported) this.flushReactions(linkId); },
+        // A pin is always taken (shown, or older than the one shown), so always confirmed.
+        onPin: async pin => { await this.keepLinkPin(linkId, await this.pinCame(linkId, "peer", pin)); return true; },
+        onPinReceipt: n => this.pinReceipt(linkId, n),
+        onPinSupport: supported => { if (supported) this.flushPin(linkId); },
         // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
         onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
         onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),
@@ -4430,6 +4538,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(stored.profile && !stored.group && live.link?.peerTyping ? typingView(live.link.peerTypingActivity) : {}),
       ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
+      ...(stored.pin && { pin: pinView(stored.pin) }),
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,

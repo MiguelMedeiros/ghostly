@@ -1,10 +1,11 @@
 import {
-  GroupSession, GROUP_EDIT_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  knockIdentity, knockRecords, mentionsMember, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type WireReaction, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
+  GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
+  knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
+  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
-import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import { groupReply } from "../shared/replies";
+import { pinView } from "./pins";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, metaLines, type CommunityTimings } from "./community";
@@ -73,6 +74,8 @@ export interface GroupsHost {
   edgeUp?(groupId: string, peerKey: string): void;
   /** A member's reaction in a private group: over its own edge, or signed and passed on by a hub. */
   groupReaction?(groupId: string, member: string, reaction: WireReaction): Promise<void> | void;
+  /** A pin in a private group, signed by `member` (still in the roster), that came over the edge to `from`. */
+  groupPin?(groupId: string, from: string, pin: { member: string; pin: WirePin; frame: GroupPinFrame }): Promise<void> | void;
   /**
    * This app stays online (the Desktop app, the CLI): in a private group past 16 members it offers to be a hub
    * (WISP 9xx · Group Mesh § Hubs). A browser tab does not, unless the admin pins it.
@@ -274,8 +277,26 @@ export class Groups {
     }
   }
 
+  /** A group's pin now (WISP 400 § Pinned message), the latest one taken, unpinned or not. */
+  pinOf(groupId: string): StoredPin | undefined { return this.record(groupId)?.pin; }
+
+  /** Keeps a pin when it is newer than the group's (the last pin wins): true when it was. */
+  async setPin(groupId: string, pin: StoredPin): Promise<boolean> {
+    const group = this.record(groupId);
+    if (!group || !pinIsNewer(group.pin, pin)) return false;
+    group.pin = pin;
+    await this.store.putGroup(group);
+    this.host.emit();
+    return true;
+  }
+
+  private record(groupId: string): StoredGroup | undefined { return this.isCommunity(groupId) ? this.communities.record(groupId) : this.stored.get(groupId); }
+
   views(): GroupView[] {
-    return [...this.meshViews(), ...this.communities.views()].sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
+    return [...this.meshViews(), ...this.communities.views()].map(view => {
+      const pin = pinView(this.record(view.id)?.pin);
+      return pin ? { ...view, pin } : view;
+    }).sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
   }
 
   private meshViews(): GroupView[] {
@@ -896,6 +917,11 @@ export class Groups {
     const t = frame && typeof frame === "object" ? (frame as { t?: unknown }).t : undefined;
     if (t === GROUP_REACTION_FRAME || t === GROUP_REACTED_FRAME) { await this.reaction(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (t === GROUP_TYPING_FRAME) { this.typings.heard(session, peerKey, frame); return; }
+    if (t === GROUP_PIN_FRAME) {
+      const signed = session.signedPin(frame);
+      if (signed && rosterHas(session.roster, peerKey)) await this.host.groupPin?.(groupId, peerKey, signed);
+      return;
+    }
     const taken = await session.handle(peerKey, frame);
     // As a hub, what was new here goes on to the other edges (WISP 9xx · Group Mesh § Hubs).
     if (taken.length) this.hubs.passOn(groupId, session, peerKey, taken);
@@ -921,6 +947,12 @@ export class Groups {
       this.hubs.passReaction(groupId, session, from, signed.frame);
     }
     await this.host.groupReaction?.(groupId, member, reaction);
+  }
+
+  /** My pin in a private group, signed for every edge; null when I am not an active member. */
+  pinFrame(groupId: string, pin: WirePin): GroupPinFrame | null {
+    const session = this.sessions.get(groupId);
+    return session?.status === "active" ? session.pinFrame(pin) : null;
   }
 
   /** My signature on a reaction of mine in a private group, for hubs to pass it on; nothing for a community. */

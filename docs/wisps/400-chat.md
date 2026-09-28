@@ -255,6 +255,25 @@ A person can send a message they have on to other chats and groups (revision 0.2
 
 A person can search inside a chat or a group: what this device keeps of it, the texts (their current version) and the names of files, whatever the case and the accents. Nothing about a search leaves the device, and nothing is fetched for it: a message not stored here is not found. Notices, call lines and payments are not searched. The matches are counted newest first and marked in their bubbles; each is scrolled to and marked like a quote's original ([Replies](#replies)). No wire change.
 
+## Pinned message
+
+A chat or a group has at most **one pinned message**, shown to everyone in it. Pinning another replaces it; unpinning leaves none. Several pins per chat are left for a later revision: one covers what a pin is mostly for (the plan, the address, the rules) and keeps the rule simple.
+
+A pin names the message by the same id a reply does ([above](#replies)), or `""` to unpin, and carries a number: the pinner's clock in milliseconds, or one past the number of the pin it replaces, whichever is higher. **The last pin wins**: every side keeps the pin with the highest number, whatever order pins arrive in; two with the same number are settled by the higher id, so every side ends on the same one. A late or repeated pin changes nothing, and an unpin stays as an empty pin, so an older pin arriving late does not come back. The message need not be here: a pin of one not here yet is kept, and shows once it arrives.
+
+| Field | Meaning |
+|---|---|
+| `id` | The message's id in this chat as both sides know it (as a reply's `i`), or `""` to unpin. |
+| `n` | The pinner's number: a positive safe integer. |
+
+**Who pins.** In a 1:1 chat, either side. In a private group ([mesh](9xx-group-mesh.md#pinned-message)), any member; in a community ([community](9xx-group-community.md#pinned-message)), only its admin. A receiver MUST drop a pin from anyone else, and one whose `id` or `n` does not hold. Ghostly keeps this rule in one place (`mayPin`, `packages/core/src/pins.ts`).
+
+**How it shows.** A bar under the chat's header with a line of the message; a click scrolls to it and marks it, like a quote's original ([Replies](#replies)). The bar's ✕ unpins, where this side may pin; its ⓘ says what a pin is. The message's ⋮ says Pin, or Unpin for the pinned one. A pin is not a message: no unread count, no sound. A message not on this device shows as "Not on this device".
+
+**How it travels.** A 1:1 chat on its live session once both sides say `pin/1` ([401](401-paired-chat.md#pinned-message)); the pinner keeps its pin until the contact confirms it and says it again on each session, so a contact who was away gets it when the chat is next live. A pin does not go on the DHT floor: one frame that waits for the session is enough for a pin, which is not urgent. A private group over the edges, signed by the pinner and passed on by every member ([mesh](9xx-group-mesh.md#pinned-message)); a community inside a sealed frame of the group, caught up like text ([community](9xx-group-community.md#pinned-message)). A compatibility chat ([402](402-legacy-chat.md)) has no room for one: it is refused.
+
+**Older apps.** An app from before this revision does not say `pin/1`, so no pin is sent to it; the pinner still sees its own bar. In a group, an older member's app drops the frame and shows no bar.
+
 ## Candidate semantics
 
 Future messages need a stable sender-scoped message ID, authenticated channel/participation context, sequence within a sender generation, content type and bounded body. Distinguish locally queued, sent, received, durably stored and read; only advertise receipts actually implemented. Retries reuse IDs. Deduplication retention must cover the declared retry window and survive restart where durable delivery is promised.

@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
-import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import { chatJson, groupJson, groupMessageJson, messageJson } from "./views";
 import { paymentJson } from "./wallets";
 
@@ -25,8 +25,8 @@ export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
-interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null }
-interface GroupShape { status: string | null; members: string[]; typing: Record<string, { kind: string; status?: string }> }
+interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null; pin: PinView | null }
+interface GroupShape { status: string | null; members: string[]; typing: Record<string, { kind: string; status?: string }>; pin: PinView | null }
 
 /**
  * Turns the engine's events into the stream, keeps the journal, and remembers which messages it already reported
@@ -180,6 +180,7 @@ export class EventHub {
         this.emit("chat.connection", `chat.connection:${id}:${shape.live ? shape.transport : "down"}:${at}`, { chat: id, live: shape.live, transport: shape.transport, text: link.textDelivery ?? null });
       }
       if (shape.name !== before.name) this.emit("chat.renamed", `chat.renamed:${id}:${this.now()}`, { chat: id, name: shape.name });
+      this.pinned("chat", id, before.pin, shape.pin);
       // The contact started or stopped writing (WISP 401 § Typing): it stops by itself 6 s after its last word. What
       // it is doing (typing, recording, thinking, a bot's status) goes with the start, and a change while it lasts
       // is a start again (its id then carries the sequence, so two changes in one millisecond stay apart).
@@ -204,6 +205,7 @@ export class EventHub {
       const joined = shape.members.filter((key) => !before.members.includes(key));
       const left = before.members.filter((key) => !shape.members.includes(key));
       if (joined.length || left.length) this.emit("group.members", `group.members:${id}:${this.now()}`, { group: id, joined, left });
+      this.pinned("group", id, before.pin, shape.pin);
       // A member started or stopped writing in a private group (WISP 9xx · Group Mesh § Typing), as `typing.*` in a chat.
       for (const [member, word] of Object.entries(shape.typing)) {
         const was = before.typing[member];
@@ -257,6 +259,17 @@ export class EventHub {
     for (const listener of this.stateListeners) {
       try { listener(state); } catch { /* its own */ }
     }
+  }
+
+  /**
+   * Someone else pinned a message, or unpinned it (WISP 400 § Pinned message): `chat.pinned` or `group.pinned`, with
+   * `messageId` (the row here; null when it is not here, or unpinned), `ref` (the id both sides know), `by` (`peer` or a
+   * member key) and `removed`. What this profile pins itself says nothing: its command answered already.
+   */
+  private pinned(kind: "chat" | "group", id: string, before: PinView | null, now: PinView | null): void {
+    if (!now || now.by === "me" || (before?.id === now.id && before.at === now.at)) return;
+    const fields = { [kind]: id, messageId: now.messageId ?? null, ref: now.id || null, by: now.by, removed: !now.id };
+    this.emit(`${kind}.pinned`, `${kind}.pinned:${id}:${now.id || "off"}:${now.at}`, fields);
   }
 
   /**
@@ -395,7 +408,7 @@ function chatShape(link: LinkView): ChatShape {
   const view = chatJson(link);
   return {
     stage: view.stage, live: view.live, transport: view.transport, name: view.name, typing: !!link.peerTyping,
-    typingKind: link.peerTyping ? link.peerTypingKind ?? "typing" : "typing", typingStatus: link.peerTyping ? link.peerTypingStatus ?? null : null,
+    typingKind: link.peerTyping ? link.peerTypingKind ?? "typing" : "typing", typingStatus: link.peerTyping ? link.peerTypingStatus ?? null : null, pin: link.pin ?? null,
   };
 }
 
@@ -406,5 +419,5 @@ function typingFields(shape: ChatShape): { kind: string; status?: string } {
 
 function groupShape(group: GroupView): GroupShape {
   return { status: group.status ?? (group.invitation ? "invited" : null), members: group.members.map((m) => m.key).sort(),
-    typing: Object.fromEntries((group.typing ?? []).map((t) => [t.key, { kind: t.kind ?? "typing", ...(t.status ? { status: t.status } : {}) }])) };
+    typing: Object.fromEntries((group.typing ?? []).map((t) => [t.key, { kind: t.kind ?? "typing", ...(t.status ? { status: t.status } : {}) }])), pin: group.pin ?? null };
 }
