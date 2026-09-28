@@ -966,7 +966,7 @@
     "{src/components/chat/Reactions.tsx,src/lib/reactions.ts}": ["chat.reactions","groups.reactions"],
     "{src/components/composer/LinkPreviewDraft.tsx,src/hooks/useLinkPreviewDraft.ts,src/lib/linkPreviewFetch.ts,src/lib/parse/linkPreview.ts}": ["chat.link-preview.compose"],
     "{src/hooks/useCallDevices.ts,src/hooks/useMediaDevices.ts,src/hooks/useChosenSpeaker.ts,src/lib/mediaDevices.ts}": ["calls.*","settings.media","files.voice.record"],
-    "{src/hooks/useChatScroll.ts,src/components/chat/JumpToLatest.tsx}": ["chat.scroll"],
+    "{src/hooks/useChatScroll.ts,src/hooks/useTailFirst.ts,src/components/chat/JumpToLatest.tsx}": ["chat.scroll"],
     "{src/lib/forward.ts,src/components/chat/ForwardDialog.tsx,src/hooks/useForwarding.tsx,packages/browser/src/engine/forwards.ts}": ["chat.forward","chat.forward.files"],
     "{src/lib/navigation.ts,src/hooks/useAppNavigation.ts}": ["*"],
     "{src/lib/replies.ts,src/components/chat/ReplyQuote.tsx,packages/browser/src/shared/replies.ts}": ["chat.replies","groups.replies"],
