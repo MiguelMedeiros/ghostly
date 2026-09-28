@@ -243,6 +243,7 @@ export const developers = {
         body: "The headless ghostly CLI joins the same chats as the apps: groups, files, payments, typing, replies, edits, reactions and voice calls. Every event is a JSON line.",
         links: [
           { label: "CLI guide", href: "/cli" },
+          { label: "AI agents", href: "/developers/agents" },
           { label: "WISP 11xx · Headless", href: "/developers/wisps/11xx-headless" },
           { label: "packages/cli", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/cli" },
         ],

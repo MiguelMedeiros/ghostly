@@ -113,9 +113,9 @@ export function CliPage() {
             </a>
           </li>
           <li>
-            <a className="link-arrow" href={LINKS.agents}>
-              {t.links.agents} ↗
-            </a>
+            <Link className="link-arrow" href="/developers/agents">
+              {t.links.agents} →
+            </Link>
           </li>
           <li>
             <Link className="link-arrow" href="/developers/wisps/11xx-headless">
