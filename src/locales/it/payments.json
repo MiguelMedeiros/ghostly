@@ -1,0 +1,34 @@
+{
+  "accept": {
+    "card": "Accetta {{card}} da {{name}}",
+    "contactOff": "Contatto: l'ha spento",
+    "contactOn": "Contatto: lo accetta",
+    "deck": "Modi di pagamento che questa chat accetta da {{name}}",
+    "hint": {
+      "both": "{{card}} è attivo per entrambi: ognuno può pagare l'altro con esso qui.",
+      "off": "{{card}} è spento qui: nessuno dei due può pagare l'altro con esso in questa chat.",
+      "onceSaved": "{{card}} sarà attivo quando salvi. Funziona quando anche {{name}} lo attiva.",
+      "theyOff": "{{card}} è attivo qui, ma {{name}} l'ha spento: funziona quando lo attivate entrambi.",
+      "unknown": "{{card}} è attivo qui. Funziona quando anche {{name}} lo attiva."
+    },
+    "off": "Spento qui",
+    "on": "Attivo qui",
+    "save": "Salva",
+    "saving": "Salvataggio…",
+    "status": {
+      "changed": "Non ancora salvato: {{name}} lo saprà quando salvi.",
+      "idle": "Un modo funziona solo quando lo attivate entrambi.",
+      "savedLater": "Salvato: {{name}} lo saprà alla prossima connessione.",
+      "savedLive": "Salvato: {{name}} lo sa già."
+    }
+  },
+  "mode": {
+    "accept": "Accetta",
+    "label": "Pagamenti con {{name}}",
+    "pay": "Paga o richiedi"
+  },
+  "none": {
+    "action": "Scegli cosa accetta questa chat",
+    "text": "Nessun modo di pagamento è attivo in questa chat."
+  }
+}

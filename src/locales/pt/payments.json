@@ -1,0 +1,34 @@
+{
+  "accept": {
+    "card": "Aceitar {{card}} de {{name}}",
+    "contactOff": "Contato: desligou",
+    "contactOn": "Contato: aceita",
+    "deck": "Formas de pagamento que esta conversa aceita de {{name}}",
+    "hint": {
+      "both": "{{card}} está ativo para vocês dois: qualquer um pode pagar o outro com ele aqui.",
+      "off": "{{card}} está desligado aqui: nenhum de vocês pode pagar o outro com ele nesta conversa.",
+      "onceSaved": "{{card}} fica ativo quando você salvar. Funciona quando {{name}} também ativar.",
+      "theyOff": "{{card}} está ativo aqui, mas {{name}} desligou: funciona quando os dois ativarem.",
+      "unknown": "{{card}} está ativo aqui. Funciona quando {{name}} também ativar."
+    },
+    "off": "Desligado aqui",
+    "on": "Ativo aqui",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "status": {
+      "changed": "Ainda não salvo: {{name}} fica sabendo quando você salvar.",
+      "idle": "Uma forma só funciona quando os dois a ativam.",
+      "savedLater": "Salvo: {{name}} fica sabendo na próxima conexão.",
+      "savedLive": "Salvo: {{name}} já sabe."
+    }
+  },
+  "mode": {
+    "accept": "Aceitar",
+    "label": "Pagamentos com {{name}}",
+    "pay": "Pagar ou pedir"
+  },
+  "none": {
+    "action": "Escolher o que esta conversa aceita",
+    "text": "Nenhuma forma de pagamento está ativa nesta conversa."
+  }
+}

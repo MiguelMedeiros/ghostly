@@ -238,6 +238,8 @@ describe("the devices, which are GStreamer's and known by name", () => {
     const [camera] = stream.getVideoTracks();
     expect(camera.getSettings().deviceId).toBe("Test bars");
     expect(microphone.getSettings().deviceId).toBe("USB Microphone");
+    // Named as a browser's track is: the call's notices say which device went.
+    expect(microphone.label).toBe("USB Microphone");
 
     const pc = new NativePeerConnection({});
     pc.addTrack(microphone);
@@ -245,6 +247,7 @@ describe("the devices, which are GStreamer's and known by name", () => {
     await pc.createOffer();
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_offer", { id: pc.id, camera: 7, microphone: "USB Microphone", speaker: "Headphones" });
     expect(microphone.getSettings().deviceId).toBe("default");
+    expect(microphone.label).toBe("");
   });
 
   it("switches the microphone in Rust when the call's audio sender gets another one, muted if it was", async () => {

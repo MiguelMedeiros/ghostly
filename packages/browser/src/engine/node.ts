@@ -621,7 +621,7 @@ export class GhostlyNode implements EngineImplementation {
       const stored = await fileStore.get(fileId);
       if (!stored?.metadata) return null;
       // A held file is at most 8 MiB: whole in memory while it is sealed.
-      return { bytes: await readStored(stored, 0, storedSize(stored)), name: stored.metadata.name, size: stored.metadata.size, mime: stored.metadata.mime, voice: stored.metadata.voice, video: stored.metadata.video };
+      return { bytes: await readStored(stored, 0, storedSize(stored)), name: stored.metadata.name, size: stored.metadata.size, mime: stored.metadata.mime, voice: stored.metadata.voice, video: stored.metadata.video, image: stored.metadata.image };
     },
     paymentRequest: (paymentId): PaymentRequest | null => this.desk.requestFor(paymentId),
     receiveText: (linkId, message, held) => this.storeMessage({ linkId, id: `peer_${message.id}`, text: message.text, sender: "peer", timestamp: message.timestamp, via: "hold",
@@ -632,13 +632,13 @@ export class GhostlyNode implements EngineImplementation {
       if (!live) return "unknown chat";
       if (live.files.wireIds.has(wire.wireId)) return "duplicate file id";
       if (live.files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
-      const file: MessageFile = { id: `${linkId}-in-${toBase64Url(randomBytes(12))}`, name: wire.name, size: wire.size, mime: wire.mime, ...(wire.voice && { voice: wire.voice }), ...(wire.video && { video: wire.video }) };
+      const file: MessageFile = { id: `${linkId}-in-${toBase64Url(randomBytes(12))}`, name: wire.name, size: wire.size, mime: wire.mime, ...(wire.voice && { voice: wire.voice }), ...(wire.video && { video: wire.video }), ...(wire.image && { image: wire.image }) };
       if (live.stored.deletedIds?.includes(`peer_${wire.wireId}`)) return null;
       live.files.wireIds.add(wire.wireId);
       live.files.receivedBytes += wire.size;
       // The bytes first, then the message that shows them: a message never points at a file that is not there.
       await fileStore.put({ id: file.id, linkId, blob: new Blob([bytes as BlobPart], { type: safeBlobType(file.mime) }), createdAt: Date.now(), direction: "in", wireId: wire.wireId, digest,
-        metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
+        metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video, image: wire.image }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
       this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
       await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file,
         ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
@@ -1912,6 +1912,8 @@ export class GhostlyNode implements EngineImplementation {
    * as a text reply does; sent again, the file keeps the reply its message has (`transferFile`). Without a reply, it
    * does what it does before any wait, so a second call for the same file finds it already transferring. `forwarded`:
    * the hop count of a forwarded file (WISP 400 § Forwards), kept with its message and sent with it every time.
+   * Refused before anything could start (offline, a stopped chat, a contact whose app takes no files): the transfer
+   * says failed, no message is kept, and the call rejects with the reason, so whoever asked can say it.
    */
   async sendFile({ linkId, file, timestamp, replyTo, forwarded: hops }: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string; forwarded?: number }): Promise<void> {
     let reply: MessageReply | undefined;
@@ -1930,10 +1932,11 @@ export class GhostlyNode implements EngineImplementation {
       void fileStore.updateTransfer(file.id, transfer).catch(() => {});
       this.emitState();
     };
-    if (!live?.link) return fail("You are offline");
+    const refuse = (error: string): never => { fail(error); throw new Error(error); };
+    if (!live?.link) return refuse("You are offline");
     if (this.transfers.get(file.id)?.state === "transferring") return;
     const wireId = file.id.slice(`${linkId}-out-`.length);
-    if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return fail("Invalid file id");
+    if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return refuse("Invalid file id");
     // A file too large to hold waits for the chat to be live instead, like one sent where nothing holds it.
     const holdable = file.size <= HOLD_LIMITS.maxBundleBytes - 4096;
     if (!GhostlyNode.takesFiles(live.link) && this.holdingFor(live) && holdable) {
@@ -1946,13 +1949,13 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (!GhostlyNode.takesFiles(live.link) && live.stored.profile && !live.link.isDataLinkOpen) {
       // Not live and nothing holds it: it waits here, with a cancel, and goes when the chat is live (WISP 500).
-      if (this.chatStopped(live)) return fail(this.chatStopped(live)!);
+      if (this.chatStopped(live)) return refuse(this.chatStopped(live)!);
       live.files.wireIds.add(wireId);
       void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "datalink", file,
         delivery: "waiting", deliveryError: "Sent when you are live.", ...answers });
       return;
     }
-    if (!GhostlyNode.takesFiles(live.link)) return fail("Connect to an updated peer to send files");
+    if (!GhostlyNode.takesFiles(live.link)) return refuse("Connect to an updated peer to send files");
     live.files.wireIds.add(wireId);
     void this.storeMessage({
       linkId,
@@ -1998,7 +2001,7 @@ export class GhostlyNode implements EngineImplementation {
       // Read a step at a time, wherever the bytes are: never the whole file at once.
       const source = streamStored(stored);
       await link.sendFile(
-        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(reply && { reply }), ...(forwarded && { forwarded }) },
+        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }), ...(reply && { reply }), ...(forwarded && { forwarded }) },
         source,
       );
     })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
@@ -2060,7 +2063,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private receiveFile(
     linkId: string,
-    wire: { id: string; name: string; size: number; mime: string; timestamp: number; voice?: MessageFile["voice"]; video?: MessageFile["video"]; reply?: WireReply; forwarded?: number },
+    wire: { id: string; name: string; size: number; mime: string; timestamp: number; voice?: MessageFile["voice"]; video?: MessageFile["video"]; image?: MessageFile["image"]; reply?: WireReply; forwarded?: number },
   ): FileSink | string {
     const files = this.links.get(linkId)?.files;
     if (!files) return "refused";
@@ -2089,7 +2092,7 @@ export class GhostlyNode implements EngineImplementation {
       sender: "peer",
       timestamp: wire.timestamp,
       via: "datalink",
-      file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }) },
+      file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }) },
       ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
       details: { wire: fileWire("files/2", wire.size) },
     });
@@ -2117,7 +2120,7 @@ export class GhostlyNode implements EngineImplementation {
           direction: "in",
           wireId: wire.id,
           digest,
-          metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video },
+          metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video, image: wire.image },
         });
         if (cancelled) { await removeStored(file.id); throw new Error("Transfer cancelled"); }
       },
@@ -2372,17 +2375,16 @@ export class GhostlyNode implements EngineImplementation {
           if (!live!.link) { note("You are offline"); continue; }
           const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
           const file: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
-            ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }) };
+            ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
           await copyForForward(original.id, { linkId: to, wireId, timestamp, file });
-          await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
-          // Refused before it could start (the contact's app takes no files, a stopped chat): no message was kept, so
-          // neither is the copy, and the chat says why.
-          const started = this.transfers.get(file.id);
-          if (started?.state === "failed") {
-            note(started.error ?? "The file could not be sent");
+          try {
+            await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
+          } catch (error) {
+            // Refused before it could start (the contact's app takes no files, a stopped chat): no message was kept, so
+            // neither is the copy, and the chat says why.
             this.transfers.delete(file.id);
             await removeStored(file.id).catch(() => {});
-            continue;
+            throw error;
           }
           result.messageIds.push(`me_${timestamp}`);
         } catch (error) {

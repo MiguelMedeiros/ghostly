@@ -1,4 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+// @ts-expect-error: a plain script, no types
+import { formatLocale } from "../../../scripts/locales-sort.mjs";
+import english from "../../locales/en";
 import { LANGUAGES, LOCALES, appSources, flatten, literalKeys, lookup } from "./locales";
 
 // covers: app.i18n
@@ -11,6 +17,29 @@ import { LANGUAGES, LOCALES, appSources, flatten, literalKeys, lookup } from "./
 const en = flatten(LOCALES.en);
 const others = LANGUAGES.filter((l) => l !== "en");
 const placeholders = (text: string) => [...new Set(text.match(/\{\{\w+\}\}/g) ?? [])];
+
+const LOCALE_DIR = join(fileURLToPath(import.meta.url), "../../../locales");
+const areaFiles = (language: string) => readdirSync(join(LOCALE_DIR, language)).filter((f) => f.endsWith(".json")).sort();
+
+describe("the locale files", () => {
+  it("English imports every area file in en/index.ts, for the types", () => {
+    expect(Object.keys(english).sort()).toEqual(areaFiles("en").map((f) => f.slice(0, -".json".length)));
+  });
+
+  it.each(LANGUAGES)("%s has the same area files as English", (language) => {
+    expect(areaFiles(language)).toEqual(areaFiles("en"));
+  });
+
+  it.each(LANGUAGES)("%s: every file's keys are sorted (npm run locales:sort)", (language) => {
+    // Sorted keys spread the keys pull requests add over the file: two of them adding keys to one area at the
+    // same time touch different lines, where appending made both touch the last one.
+    const unsorted = areaFiles(language).filter((file) => {
+      const text = readFileSync(join(LOCALE_DIR, language, file), "utf8");
+      return formatLocale(text) !== text;
+    });
+    expect(unsorted).toEqual([]);
+  });
+});
 
 describe("every locale has the same keys as English", () => {
   it("English itself is only strings", () => {

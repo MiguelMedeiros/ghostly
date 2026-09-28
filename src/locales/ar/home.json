@@ -1,0 +1,13 @@
+{
+  "createChat": "إنشاء محادثة جديدة",
+  "description": "رسائل خاصة ومؤقتة.",
+  "features": {
+    "decentralized": "بدون خادم مركزي",
+    "encrypted": "تشفير من طرف إلى طرف",
+    "ephemeral": "الرسائل تختفي"
+  },
+  "linkFailed": "تعذر فتح الرابط.",
+  "unpublishedVersion": "إصدار محلي — عرض الإصدارات المنشورة",
+  "viewRelease": "عرض هذا الإصدار",
+  "welcome": "مرحباً بك في Ghostly"
+}

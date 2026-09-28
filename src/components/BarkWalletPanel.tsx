@@ -5,6 +5,7 @@ import { PaymentReview } from "./PaymentReview";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Segmented, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { externalLinkProps } from "../lib/externalLink";
 
 type Network = "bitcoin" | "signet" | "regtest";
 /** Second's public servers (Bitcoin, signet), or a local regtest one (e2e/support/bark-regtest). */
@@ -83,7 +84,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
     <Button variant="primary" disabled={busy} onClick={() => void run(async () => { await use(network, { provider, explorer }); setCustom(false); })}>Use this server</Button>
    </Block>}
    <Row label="Automatic renewal" hint="Refreshes coins close to expiry while Ghostly is open"><span className="text-sm text-text-secondary">On</span></Row>
-   {bark.terms && <Row label="Server terms" hint="Second's terms apply to its server"><a className="text-sm text-link underline" href={bark.terms} target="_blank" rel="noreferrer noopener" data-testid="bark-terms">Read</a></Row>}
+   {bark.terms && <Row label="Server terms" hint="Second's terms apply to its server"><a className="text-sm text-link underline" {...externalLinkProps(bark.terms)} data-testid="bark-terms">Read</a></Row>}
    <BackupRows name="Bark" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow && real}
     reveal={async () => (await wallet.barkBackup()).mnemonic} exportBackup={pw => wallet.barkExportBackup(pw)}
     restorePhrase={mnemonic => use(network, { provider: bark.provider, explorer: NETWORKS[network].explorer, mnemonic })} restoreFile={(text, pw) => wallet.barkRestoreBackup(text, pw)} />

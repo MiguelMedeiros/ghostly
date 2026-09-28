@@ -8,7 +8,8 @@ import { dominantHz, level, tone } from "./support/tone";
 
 describe("the playback queue (program to call)", () => {
   it("gives 20 ms frames in order, then silence", () => {
-    const q = new PlaybackQueue(48000);
+    // A still clock: on a busy runner PARTIAL_WAIT_MS could pass before the last next(), which then plays the padded rest.
+    const q = new PlaybackQueue(48000, () => 0);
     expect(frameBytes(48000)).toBe(1920);
     expect(frameBytes(16000)).toBe(640);
     const audio = tone(440, 48000, 50);

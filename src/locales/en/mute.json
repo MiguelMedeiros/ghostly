@@ -1,0 +1,19 @@
+{
+  "bell": "Notifications muted",
+  "bellUntil": "Notifications muted until {{time}}",
+  "choice": {
+    "15m": "15 minutes",
+    "1d": "1 day",
+    "1h": "1 hour",
+    "forever": "Until I unmute"
+  },
+  "mentions": "Still notify me when I'm mentioned",
+  "muted": "Muted",
+  "mutedUntil": "Muted until {{time}}",
+  "noEnd": "No end time",
+  "open": "Mute notifications…",
+  "stillArrive": "Messages still arrive. Calls still ring.",
+  "title": "Mute notifications",
+  "unmute": "Unmute notifications",
+  "until": "Until {{time}}"
+}

@@ -1,0 +1,17 @@
+{
+  "install": "Installer",
+  "installHint": "Sa propre fenêtre, et une icône sur l'écran d'accueil ou le dock.",
+  "installLabel": "Installer Ghostly",
+  "installTitle": "Installer",
+  "iosHint": "Dans Safari, touchez Partager, puis Sur l'écran d'accueil.",
+  "iosLabel": "Sur l'écran d'accueil",
+  "offline": "Hors ligne",
+  "offlineHint": "Vos discussions sont là. Rien ne part avant votre retour en ligne.",
+  "shareFiles": "{{count}} fichiers",
+  "shareHint": "Choisissez une discussion. Vous vérifiez et envoyez là-bas.",
+  "shareNoChats": "Pas encore de discussion. Commencez-en une, puis partagez à nouveau.",
+  "shareNone": "Rien n'a été partagé, ou c'est déjà récupéré.",
+  "shareOneFile": "1 fichier",
+  "shareTitle": "Partager vers…",
+  "shareWaiting": "Réception du partage..."
+}

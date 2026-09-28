@@ -110,9 +110,14 @@ jobs:
       - name: TypeScript check
         run: npm run typecheck
 
-      # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md).
+      # changes/<slug>.md: one file per changelog entry, put into CHANGELOG.md at release (scripts/changes.mjs).
+      - name: Changelog entries are well formed
+        run: node scripts/changes.mjs
+
+      # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md). The map goes to
+      # the run's summary page: it is not committed.
       - name: Test map (every feature has a test)
-        run: npm run test:map
+        run: npm run test:map -- --summary
 
   frontend-tests:
     name: Frontend tests (app)
@@ -404,6 +409,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The route index and the other lib/*.json the site imports are generated from docs/wisps and not committed
+      # (a PR never touches them, so they never conflict). The build makes them itself (prebuild); lint, types and
+      # the tests below need them first.
+      - name: Generate the reference files
+        run: npm run sync:references
 
       # The home's wallet deck is the app's own code, copied (scripts/sync-app-deck.mjs).
       - name: App deck copies match the app

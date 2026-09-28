@@ -131,6 +131,14 @@ describe("sending files", () => {
     expect(engine.calls.map(([method]) => method)).toEqual(["sendFile"]);
   });
 
+  it("a file the engine refuses before it starts (a stopped chat, offline) rejects with its reason and leaves nothing stored", async () => {
+    withLinks(chat({ id: "stopped", profile: "paired-chat/1", dataLink: "idle", capabilities: { files: true, payments: false } }));
+    engine.answers = { sendFile: new Error("This chat stopped: your contact's key changed.") };
+    await expect(services.sendFile("peer-1", new File(["x"], "x.txt"))).rejects.toThrow("This chat stopped");
+    expect(engine.calls.map(([method]) => method)).toEqual(["sendFile"]);
+    expect(await fileStore.listForLink("stopped")).toEqual([]);
+  });
+
   it("with files/3 a file is checked against the room the contact said it has; files/2 stops at 100 MB", () => {
     withLinks(chat({ profile: "paired-chat/1", dataLink: "open", capabilities: { files: true, payments: false, largeFiles: true }, peerFileRoom: 2 * 1024 ** 3 }));
     expect(services.fileTooLarge!("peer-1", 3 * 1024 ** 3)).toBe("Not enough space on your contact's device for this file (2.0 GB free).");
