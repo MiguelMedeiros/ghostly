@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { LightningAddressInfo, WalletPlatform } from "../../lib/platform";
 import { CASHU_MINT_SOURCE } from "../walletCardData";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
+import { externalLinkProps } from "../../lib/externalLink";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -41,7 +42,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       <div className="space-y-1.5" data-testid="lnurl-done">
         <p className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0`} data-testid={outcome === "paid" ? "lnurl-paid" : "lnurl-pending"}>{outcome === "paid" ? `Paid ${quote?.amount.toLocaleString()} sats to ${text} ✓` : "The payment is still pending. It is being checked; nothing is paid again."}</p>
         {invoice?.successAction?.tag === "message" && invoice.successAction.message && <p className={muted} data-testid="lnurl-success">{info?.domain} says: {invoice.successAction.message}</p>}
-        {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{invoice.successAction.description || `${info?.domain} left a link`}: <a className="underline" href={invoice.successAction.url} target="_blank" rel="noopener noreferrer">{invoice.successAction.url}</a></p>}
+        {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{invoice.successAction.description || `${info?.domain} left a link`}: <a className="underline" {...externalLinkProps(invoice.successAction.url)}>{invoice.successAction.url}</a></p>}
         {onDone && <button type="button" className={quiet} onClick={onDone}>Done</button>}
       </div>
     );
