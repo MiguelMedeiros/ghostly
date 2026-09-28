@@ -101,7 +101,7 @@ Dependencies in headers describe the candidate modular design. Conditional depen
 1. **00-03, 100-101:** review process/Core/key lifecycle, then capability/transport agreement and the WebRTC binding. Exit: exact profiles and two independent implementations with downgrade, invite and reconnect tests.
 2. **102-103:** demonstrate interchangeable data adapters using the same application capability. Exit: measured supported platforms, endpoint authentication and policy-respecting failure/fallback; not just sockets connecting.
 3. **300-302:** demonstrate optional external proofs and no-proof sessions. Exit: independent verification, replay/rotation tests and explicit correlation tradeoffs. Keet remains gated by API feasibility in 303.
-4. **Groups:** 800 and 901 remain review drafts. 900 has two implemented profiles: the [group mesh](9xx-group-mesh.md) (up to 32 members) and the [group community](9xx-group-community.md) (up to 256), each with text, a picture and payments between members. Files and calls in groups, more than one admin and channels need their own scope decision.
+4. **Groups:** 800 and 901 remain review drafts. 900 has two implemented profiles: the [group mesh](9xx-group-mesh.md) (up to 32 members, hubs past 16) and the [group community](9xx-group-community.md) (up to 256), each with text, a picture and payments between members. Files and calls in groups, more than one admin and channels need their own scope decision.
 
 400, 500, 600, 700 and 200/201/203 document existing application capabilities and their modular evolution. These milestones do not promise implementation dates or claim that all adapters exist. Group security, topology and abuse limits must be validated before release claims.
 

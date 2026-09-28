@@ -63,7 +63,7 @@ Every 1:1 chat is the same kind of chat ([WISP 400](wisps/400-chat.md)):
 
 Chats made by Ghostly 0.4 are **compatibility chats** ([WISP 402](wisps/402-legacy-chat.md)): they keep their original record profile and offer "Continue in a new chat".
 
-Groups run on top of 1:1 sessions: private groups up to 8 members ([group mesh](wisps/9xx-group-mesh.md)) and communities up to 256 ([group community](wisps/9xx-group-community.md)).
+Groups run on top of 1:1 sessions: private groups up to 32 members, carried by hubs past 16 ([group mesh](wisps/9xx-group-mesh.md)) and communities up to 256 ([group community](wisps/9xx-group-community.md)).
 
 ## Where state lives
 
