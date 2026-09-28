@@ -364,3 +364,104 @@ describe("the chat timeline's scrolling", () => {
     expect(list().scrollTop).toBe(130);
   });
 });
+
+/**
+ * Where a chat was left, when the rows it opens with are not its own yet. The group page stays mounted from one group to
+ * the next, so for one render the next group opens on the last one's rows; a history can also come in two goes.
+ */
+describe("a chat opened again before its rows are there", () => {
+  const mine = (from: number, n: number): ScrollRow[] => Array.from({ length: n }, (_, i) => ({ id: `me_${from + i}`, mine: true }));
+
+  it("opened on the last chat's rows first, it still goes back on the message it was left on", () => {
+    const one = theirs(0, 20), two = mine(100, 12);
+    const { rerender } = renderApp(<Timeline chat="g1" rows={one} />);
+    scrollTo(130);
+    expect(topOf("peer_2")).toBe(-30);
+    // To g2: one render still with g1's rows, then g2's own.
+    rerender(<Timeline chat="g2" rows={one} />);
+    rerender(<Timeline chat="g2" rows={two} />);
+    expect(list().scrollTop).toBe(300);
+    // Back to g1, the same way.
+    rerender(<Timeline chat="g1" rows={two} />);
+    rerender(<Timeline chat="g1" rows={one} />);
+    expect(topOf("peer_2")).toBe(-30);
+    expect(list().scrollTop).toBe(130);
+    // Nothing counted: its rows were there before it was left.
+    expect(pill()).toHaveAttribute("data-count", "0");
+  });
+
+  it("an empty list in between is not a hand scrolling", () => {
+    const one = theirs(0, 20);
+    const { rerender } = renderApp(<Timeline chat="g1" rows={one} />);
+    scrollTo(130);
+    rerender(<Timeline chat="g2" rows={one} />);
+    rerender(<Timeline chat="g2" rows={[]} />);
+    rerender(<Timeline chat="g2" rows={theirs(100, 12)} />);
+    rerender(<Timeline chat="g1" rows={theirs(100, 12)} />);
+    rerender(<Timeline chat="g1" rows={[]} />);
+    act(() => { fireEvent.scroll(list()); });
+    rerender(<Timeline chat="g1" rows={one} />);
+    expect(topOf("peer_2")).toBe(-30);
+  });
+
+  it("a history that comes in two goes: the first part opens at its bottom, the whole one on the message", () => {
+    const all = theirs(0, 40);
+    renderApp(<Timeline chat="g1" rows={all} />).unmount();
+    // The first render opened at the bottom; the hand scrolls up before the chat is left.
+    const first = renderApp(<Timeline chat="g1" rows={all} />);
+    scrollTo(130);
+    first.unmount();
+    const { rerender } = renderApp(<Timeline chat="g1" rows={all.slice(30)} />);
+    expect(list().scrollTop).toBe(200);
+    // The open's own scroll event, a frame late: nothing moved, so not a hand.
+    act(() => { fireEvent.scroll(list()); });
+    rerender(<Timeline chat="g1" rows={all} />);
+    expect(topOf("peer_2")).toBe(-30);
+    expect(pill()).toHaveAttribute("data-count", "0");
+  });
+
+  it("a hand that scrolls before the rows come keeps its own place", () => {
+    const one = theirs(0, 20), two = theirs(100, 12);
+    const { rerender } = renderApp(<Timeline chat="g1" rows={one} />);
+    scrollTo(130);
+    rerender(<Timeline chat="g2" rows={two} />);
+    rerender(<Timeline chat="g1" rows={two} />);
+    scrollTo(50);
+    rerender(<Timeline chat="g1" rows={one} />);
+    expect(list().scrollTop).toBe(50);
+  });
+
+  it("left again before its rows came, it is still remembered where it was first left", () => {
+    const one = theirs(0, 20), two = theirs(100, 12);
+    const { rerender } = renderApp(<Timeline chat="g1" rows={one} />);
+    scrollTo(130);
+    rerender(<Timeline chat="g2" rows={two} />);
+    // Quickly: g1 opens on g2's rows, and is left for g2 before its own come.
+    rerender(<Timeline chat="g1" rows={two} />);
+    rerender(<Timeline chat="g2" rows={two} />);
+    rerender(<Timeline chat="g1" rows={two} />);
+    rerender(<Timeline chat="g1" rows={one} />);
+    expect(topOf("peer_2")).toBe(-30);
+  });
+
+  it("what I send while it waits goes to the bottom, and the old place is let go", () => {
+    const one = theirs(0, 20), two = theirs(100, 12);
+    const { rerender } = renderApp(<Timeline chat="g1" rows={one} />);
+    scrollTo(130);
+    rerender(<Timeline chat="g2" rows={two} />);
+    rerender(<Timeline chat="g1" rows={two} />);
+    rerender(<Timeline chat="g1" rows={[...two, { id: "me_sent", mine: true }]} />);
+    rerender(<Timeline chat="g1" rows={[...one, { id: "me_sent", mine: true }]} />);
+    expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
+  });
+
+  it("a chat left at its bottom opens at its bottom even when its first rows are another chat's", () => {
+    const one = theirs(0, 20), two = theirs(100, 12);
+    const { rerender } = renderApp(<Timeline chat="g1" rows={one} />);
+    rerender(<Timeline chat="g2" rows={two} />);
+    rerender(<Timeline chat="g1" rows={two} />);
+    rerender(<Timeline chat="g1" rows={[...one, ...theirs(20, 3)]} />);
+    expect(list().scrollTop).toBe(23 * ROW - VIEW);
+    expect(pill()).toBeNull();
+  });
+});

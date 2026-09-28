@@ -1,5 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useNavigate } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
@@ -305,6 +305,28 @@ describe("GroupChat: history and sending", () => {
     expect(screen.getByText("late news")).toBeInTheDocument();
     act(() => engine.messages("group:other", [stored({ id: "m10", text: "elsewhere" })]));
     expect(screen.queryByText("elsewhere")).not.toBeInTheDocument();
+  });
+
+  it("shows only the open group's history, with what came while it was away", async () => {
+    const other = active({ id: "group-2", name: "Others" });
+    fakeEngine.update({ groups: [active(), other] });
+    const first = [stored({ id: "m1", member: ALICE, text: "in the first group" })];
+    // The first group's list comes once; after that, neither group's own list ever does.
+    let asked = 0;
+    fakeEngine.on("groupMessages", ({ groupId }) => groupId === "group-1" && asked++ === 0 ? first : new Promise<StoredMessage[]>(() => {}));
+    function Go() {
+      const navigate = useNavigate();
+      return <><button onClick={() => navigate("/group/group-1")}>one</button><button onClick={() => navigate("/group/group-2")}>two</button></>;
+    }
+    renderApp(<><Go /><Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes></>, { route: "/group/group-1" });
+    expect(await screen.findByText("in the first group")).toBeInTheDocument();
+    await act(async () => screen.getByRole("button", { name: "two" }).click());
+    expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
+    // Never the last group's messages under this one's name.
+    expect(screen.queryByText("in the first group")).not.toBeInTheDocument();
+    act(() => fakeEngine.messages("group:group-1", [...first, stored({ id: "m2", member: ALICE, text: "while you were away" })]));
+    await act(async () => screen.getByRole("button", { name: "one" }).click());
+    expect(screen.getByText("while you were away")).toBeInTheDocument();
   });
 
   it("sends what is typed to the group", async () => {
