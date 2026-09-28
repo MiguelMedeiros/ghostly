@@ -75,7 +75,7 @@ export const BLOCKS: Block[] = [
   b("tor", "transport", "Tor", [], "Reaching peers over Tor. Being considered, not planned.", ["adapter-roadmap"], "candidate-tor"),
   b("libp2p", "transport", "libp2p", [], "Reaching peers through a libp2p profile, with its relays and multiplexing. Being considered, not planned.", ["adapter-roadmap"], "candidate-libp2p-connectivity-profile"),
   b("pear", "transport", `Pear${D}Holepunch`, [], "Holepunch's Hypercore and Autobase for data that several peers write and keep. Being considered, not planned.", ["adapter-roadmap"], "candidate-pear-holepunch-components"),
-  b("mixnet", "transport", "Mixnet", [], "Traffic through a mixnet like Nym, so the network cannot see who talks to whom, or when. Being considered, not planned.", ["adapter-roadmap"], "candidate-mixnet"),
+  b("mixnet", "transport", "Mixnet", [], "Traffic through a mixnet like Nym, to hide who talks to whom, and when. Being considered, not planned.", ["adapter-roadmap"], "candidate-mixnet"),
 
   // Chat, files & media
   b("chat", "talk", "Chat", ["400-chat"], "One kind of chat: messages with storage receipts and retries, over a live link or through the DHT."),
