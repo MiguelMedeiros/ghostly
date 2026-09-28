@@ -30,6 +30,15 @@ async function hub(journal: string) {
 }
 
 describe("the event stream", () => {
+  it("never hands a new chat's invite code to a hook (chat.created)", async () => {
+    const { h, events } = await hub("invite.jsonl");
+    h.baseline(state([]), new Map());
+    h.sink.post({ kind: "state", state: state([link("c9", { inviteCode: "ghostly1secret", pairing: { status: "waiting" } } as never)]) });
+    const created = events.find((e) => e.type === "chat.created") as unknown as { summary: { invite: unknown } };
+    expect(created.summary.invite).toBeNull();
+    expect(JSON.stringify(events)).not.toContain("ghostly1secret");
+  });
+
   it("reports messages, delivery changes, deletions, and chat changes once each", async () => {
     const { h, events } = await hub("a.jsonl");
     h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "old")]]]));
