@@ -2,14 +2,14 @@
 # WISP documents and quotes core source at build time.
 
 # Stage 1: Dependencies
-FROM node:25-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app/website
 
 COPY website/package.json website/package-lock.json ./
 RUN npm ci
 
 # Stage 2: Build
-FROM node:25-alpine AS builder
+FROM node:26-alpine AS builder
 WORKDIR /app/website
 
 COPY --from=deps /app/website/node_modules ./node_modules
@@ -24,7 +24,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # Stage 3: Production
-FROM node:25-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
