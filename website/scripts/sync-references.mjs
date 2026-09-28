@@ -13,7 +13,7 @@ import { siteFields } from "./wisp-header.mjs";
 import { readChanges, withRevisions } from "./wisp-changes.mjs";
 import { writeLlms } from "./llms.mjs";
 import { agentPromptJson } from "./agent-prompt.mjs";
-import { expectedReadme } from "./wisp-index.mjs";
+import { README, expectedReadme } from "./wisp-index.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "docs/wisps");
 const destination = resolve(root, "website/public/reference");
@@ -63,7 +63,7 @@ Old website reader URLs render the current document with a canonical link and a 
 `;
 writeFileSync(resolve(source, "NUMBERING.md"), guide);
 // The index on GitHub (docs/wisps/README.md): its table is read from the WISPs' headers (scripts/wisp-index.mjs).
-writeFileSync(resolve(source, "README.md"), expectedReadme(source));
+writeFileSync(resolve(root, README), expectedReadme(root));
 for (const entry of numbering.filter((entry) => entry.oldFile !== entry.file)) {
   writeFileSync(resolve(source, entry.oldFile), `# WISP ${entry.oldId} moved to ${entry.id}\n\nThis Draft has a new editorial number. Read [WISP ${entry.id}](${entry.file}). Protocol identifiers and implementation status are unchanged. See [the migration map](NUMBERING.md).\n`);
 }
@@ -75,7 +75,7 @@ const internal = (name) => /^(HANDOFF|QA)-CLAUDE/.test(name);
 // README.md is the index on GitHub. On the site the index is /wisps, so the README is not a page of its own
 // (lib/references.ts sends links to it there).
 const paths = readdirSync(source)
-  .filter((name) => name.endsWith(".md") && name !== "README.md" && !legacyFiles.has(name) && !internal(name))
+  .filter((name) => name.endsWith(".md") && name !== basename(README) && !legacyFiles.has(name) && !internal(name))
   .map((name) => `docs/wisps/${name}`);
 paths.push(
   "docs/PROTOCOL.md",

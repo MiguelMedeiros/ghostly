@@ -56,9 +56,12 @@ export function withIndex(readme, table) {
   return `${readme.slice(0, start)}${START}\n\n${table}\n\n${readme.slice(end)}`;
 }
 
-/** The README as it should be, from the WISPs in `source` (docs/wisps). */
-export function expectedReadme(source) {
-  const numbering = JSON.parse(readFileSync(resolve(source, "numbering.json"), "utf8"));
-  const readme = readFileSync(resolve(source, "README.md"), "utf8");
-  return withIndex(readme, wispIndex(numbering, (file) => readFileSync(resolve(source, file), "utf8")));
+/** Where the index lives, from the repository root. */
+export const README = "docs/wisps/README.md";
+
+/** The README as it should be, from the WISPs of the repository at `root`. */
+export function expectedReadme(root) {
+  const numbering = JSON.parse(readFileSync(resolve(root, "docs/wisps/numbering.json"), "utf8"));
+  const readme = readFileSync(resolve(root, README), "utf8");
+  return withIndex(readme, wispIndex(numbering, (file) => readFileSync(resolve(root, "docs/wisps", file), "utf8")));
 }

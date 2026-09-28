@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { END, START, expectedReadme, familyOf, wispIndex, withIndex } from "./wisp-index.mjs";
+import { END, README, START, expectedReadme, familyOf, wispIndex, withIndex } from "./wisp-index.mjs";
 
-const source = fileURLToPath(new URL("../../docs/wisps/", import.meta.url));
+const root = fileURLToPath(new URL("../../", import.meta.url));
+const source = resolve(root, "docs/wisps");
 
 test("the committed WISP index is the one the WISPs' headers give", () => {
-  const committed = readFileSync(resolve(source, "README.md"), "utf8");
-  assert.equal(committed, expectedReadme(source), "docs/wisps/README.md is out of date: run `npm run sync:references` in website/ and commit it");
+  const committed = readFileSync(resolve(root, README), "utf8");
+  assert.equal(committed, expectedReadme(root), `${README} is out of date: run \`npm run sync:references\` in website/ and commit it`);
 });
 
 test("every WISP in numbering.json has one row, in number order", () => {
