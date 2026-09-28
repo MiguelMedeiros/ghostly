@@ -110,6 +110,7 @@ import type {
   MessageDetails,
   MessageDetailsView,
   MessageFile,
+  MessagePage,
   MessageReply,
   ReactionNote,
   MessageSend,
@@ -874,6 +875,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeMessage(message),
+    completeMessage: message => this.completeGroupMessage(message),
     emit: () => this.emitState(),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
@@ -1244,6 +1246,18 @@ export class GhostlyNode implements EngineImplementation {
 
   getMessages(linkId: string): Promise<StoredMessage[]> {
     return db.getMessages(linkId);
+  }
+
+  async messagePage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("limit: a whole number of messages, at least 1");
+    if (before === undefined) return db.getMessagePage(linkId, { limit });
+    if (typeof before === "number") {
+      if (Number.isNaN(before)) throw new Error("before: a time or a message id");
+      return db.getMessagePage(linkId, { limit, before: { timestamp: before } });
+    }
+    const from = await db.getMessage(linkId, before);
+    if (!from) throw new Error(`No message ${before}`);
+    return db.getMessagePage(linkId, { limit, before: from });
   }
 
   // -- links ---------------------------------------------------------------
@@ -4245,6 +4259,22 @@ export class GhostlyNode implements EngineImplementation {
     });
     this.nativeQueue = operation.catch(() => {});
     return operation;
+  }
+
+  /**
+   * A group message first stored from a copy a member handed on without its author's whole signature: what the whole
+   * copy adds (mentions, a reply, a hop count) joins the stored row; the text and time stay as they were.
+   */
+  private async completeGroupMessage(message: StoredMessage): Promise<void> {
+    if (!(await db.hasMessage(message.linkId, message.id))) return this.storeMessage(message);
+    const whole = await this.resolveReply(message);
+    const added: Partial<StoredMessage> = { ...(whole.mentions && { mentions: whole.mentions }), ...(whole.mentioned && { mentioned: true }),
+      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }) };
+    if (!Object.keys(added).length) return;
+    const patched = await db.patchMessage(message.linkId, message.id, stored => stored.member === message.member && stored.sender === message.sender ? added : null);
+    if (!patched) return;
+    this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
+    this.emitState();
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> {

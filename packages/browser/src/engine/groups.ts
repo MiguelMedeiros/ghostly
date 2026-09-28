@@ -53,6 +53,11 @@ export interface GroupsHost {
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
   storeMessage(message: StoredMessage): Promise<void>;
+  /**
+   * A message stored from a copy that was not whole, now whole: its mentions, reply and hop count join the stored one
+   * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
+   */
+  completeMessage?(message: StoredMessage): Promise<void>;
   emit(): void;
   /** My name, for community groups, where it travels (encrypted) with my messages. */
   myNick?(): string | undefined;
@@ -1095,6 +1100,7 @@ export class Groups {
 
   private attach(state: GroupState): void {
     const session: GroupSession = new GroupSession(state, {
+      clock: () => this.now(),
       save: async next => {
         const group = this.stored.get(state.id);
         if (!group) return;
@@ -1116,8 +1122,10 @@ export class Groups {
         const timestamp = receivedTimestamp(m.timestamp);
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, timestamp));
-        await this.host.storeMessage({ linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }) });
+        const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }) };
+        // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
+        await (m.completes && this.host.completeMessage ? this.host.completeMessage(message) : this.host.storeMessage(message));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
