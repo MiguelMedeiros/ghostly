@@ -77,7 +77,8 @@ ghostly/
    ```bash
    git checkout -b feat/spooky-feature origin/dev
    ```
-2. Make your change, **with its tests** (below).
+2. Make your change, **with its tests** (below). A change people will notice gets a changelog entry: one file in
+   [`changes/`](changes/README.md), not a line in `CHANGELOG.md`.
 3. Before pushing, run what your change can break:
    ```bash
    npm run test:affected -- --port 50310   # unit, lint, typecheck, Rust, and the e2e tagged with the features you touched
