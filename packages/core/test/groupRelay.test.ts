@@ -237,6 +237,55 @@ describe("what a member hands on cannot take a message's place", { timeout: 60_0
     await mesh.open(bob, carol);
     expect(mesh.inbox.get(bob.myKey)!.filter(m => m.text === "@Bob whole")).toHaveLength(1);
   });
+
+  it("a copy waiting for its whole message still waits after a restart", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    mesh.setEdge(bob.myKey, carol.myKey, false);
+    await carol.sendText("@Bob look", 1_000, [{ k: bob.myKey, o: 0, l: 4 }]); await mesh.settle();
+    const stripped = clone(carol.state.sent[0]); delete stripped.m; delete stripped.xs;
+    await bob.handle(alice.myKey, clone(stripped));
+    // Bob's app restarts from what it saved.
+    const bob2 = mesh.add(clone(mesh.saved.get(bob.myKey)!));
+    const copies = () => mesh.inbox.get(bob2.myKey)!.filter(m => m.text === "@Bob look");
+    await bob2.handle(alice.myKey, clone(stripped));
+    expect(copies()).toHaveLength(0);
+    await mesh.open(bob2, carol);
+    expect(copies()).toHaveLength(1);
+    expect(copies()[0]).toMatchObject({ completes: true, mentions: [{ k: bob.myKey, o: 0, l: 4 }] });
+    expect(mesh.saved.get(bob.myKey)!.provisional ?? []).toEqual([]);
+  });
+
+  it("remembers a bounded number of copies waiting, the oldest going first", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    mesh.setEdge(bob.myKey, carol.myKey, false);
+    const count = GROUP_LIMITS.provisional + 3;
+    mesh.sentFrames.length = 0;
+    for (let i = 0; i < count; i++) await carol.sendText(`c${i}`);
+    await mesh.settle();
+    // Carol's own log keeps only her newest: her frames as they went to Alice.
+    const frames = mesh.sentFrames.filter(f => f.from === carol.myKey && f.to === alice.myKey && f.frame.t === "group-msg").map(f => f.frame as GroupMessageFrame);
+    expect(frames).toHaveLength(count);
+    for (const frame of frames) { const stripped = clone(frame); delete stripped.xs; await bob.handle(alice.myKey, stripped); }
+    expect(mesh.texts(bob).filter(t => t.startsWith("c"))).toHaveLength(count);
+    const saved = mesh.saved.get(bob.myKey)!.provisional!;
+    expect(saved).toHaveLength(GROUP_LIMITS.provisional);
+    expect(saved[0]).toBe(groupMessageId(carol.myKey, frames[3].e, frames[3].n));
+    expect(saved[saved.length - 1]).toBe(groupMessageId(carol.myKey, frames[count - 1].e, frames[count - 1].n));
+  }, 120_000);
+
+  it("loads a state saved before copies waiting were remembered", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    const old = clone(mesh.saved.get(bob.myKey)!);
+    delete old.provisional;
+    const bob2 = mesh.add(old);
+    mesh.setEdge(bob2.myKey, carol.myKey, false);
+    await carol.sendText("@Bob old", 1_000, [{ k: bob.myKey, o: 0, l: 4 }]); await mesh.settle();
+    const stripped = clone(carol.state.sent[0]); delete stripped.m; delete stripped.xs;
+    await bob2.handle(alice.myKey, stripped);
+    expect(mesh.texts(bob2)).toEqual(["@Bob old"]);
+    await mesh.open(bob2, carol);
+    expect(mesh.inbox.get(bob2.myKey)![1]).toMatchObject({ completes: true, mentions: [{ k: bob.myKey, o: 0, l: 4 }] });
+  });
 });
 
 describe("sync answers", () => {

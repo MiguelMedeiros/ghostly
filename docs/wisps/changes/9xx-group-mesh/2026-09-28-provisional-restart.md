@@ -1,0 +1,1 @@
+a member saves its last 256 provisional messages (copies handed on without an `xs` that verifies) with the group's state, so after a restart a stripped copy still does not take the message's place and a whole copy still completes it.

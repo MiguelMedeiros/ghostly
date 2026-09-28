@@ -149,6 +149,8 @@ export class EventHub {
     switch (message.kind) {
       case "state": this.stateChanged(message.state); break;
       case "messages": this.messages(message.linkId, message.messages); break;
+      // Only what changed: the same events as the whole history would give, and a deletion is named, not missing.
+      case "message-changes": this.messages(message.linkId, message.messages, message.deleted); break;
       // Calls (WISP 11xx § Calls): the call manager reports them (call.incoming, call.connected, call.ended).
       case "call-signal":
         for (const listener of this.callListeners) {
@@ -294,7 +296,8 @@ export class EventHub {
     return map;
   }
 
-  private messages(chat: string, messages: readonly StoredMessage[]): void {
+  /** A chat's or group's whole history, or with `deleted` only what changed in it (then only those ids are gone). */
+  private messages(chat: string, messages: readonly StoredMessage[], deleted?: readonly string[]): void {
     const known = this.seenOf(chat);
     const group = chat.startsWith("group:") ? chat.slice(6) : null;
     const quiet = this.firstRun && !this.baselined;
@@ -332,8 +335,8 @@ export class EventHub {
           this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
       }
     }
-    for (const id of [...known.keys()]) {
-      if (present.has(id)) continue;
+    for (const id of deleted ?? [...known.keys()]) {
+      if (present.has(id) || !known.has(id)) continue;
       known.delete(id);
       changes.push([id, null]);
       if (!quiet) this.emit(group ? "group.deleted" : "message.deleted", `${group ? "group" : "message"}.deleted:${group ?? chat}:${id}`, group ? { group, messageId: id } : { chat, messageId: id });

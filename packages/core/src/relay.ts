@@ -126,6 +126,12 @@ export class RelayTransport implements PkarrTransport {
   private readonly fetchFn: typeof fetch;
   private readonly lastTimestamp = new Map<string, bigint>();
   private readonly newest = new Map<string, SignedPacket>();
+  /**
+   * The last packet this client put under a key that a relay took. A read the budget holds back answers the newer of
+   * it and the last one read: a hub that wrote its own beacon entry since it last read the beacon must not see that
+   * entry as old as the one it replaced (it would stop counting itself at its community's door until its next write).
+   */
+  private readonly written = new Map<string, SignedPacket>();
   private readonly coolingDown = new Map<string, number>();
   private readonly networkCooldown = new Map<string, number>();
   private cursor = 0;
@@ -294,6 +300,7 @@ export class RelayTransport implements PkarrTransport {
           if (accepted) return;
           accepted = true;
           noWriteWaits();
+          try { this.written.set(pubKeyZ32, parseRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
           resolve();
         }, () => { /* read from `settled` */ });
       }
@@ -376,8 +383,9 @@ export class RelayTransport implements PkarrTransport {
     }
     if (!reachable) {
       const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || this.breaker.blockedFor(r) > 0 || this.heldFor(r, who) > 0);
-      // Holding back is not an outage: report what is already known…
-      if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
+      // Holding back is not an outage: report what is already known, this client's own writes included…
+      const known = newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
+      if (resting && known) return known;
       // …or, knowing nothing yet, that the read waits for the budget.
       if (!down && budgetWait < Infinity) throw new DiscoveryBudgetError(budgetWait);
       throw new Error("No Pkarr relay reachable");

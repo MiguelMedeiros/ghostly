@@ -19,10 +19,12 @@ import { RESEND_POLICY } from "./outbox";
 
 export interface GroupEditsHost {
   messages(chat: string): Promise<StoredMessage[]>;
+  /** One row by its id (`db.getMessage`): an edit names its message so, and a long group is not read whole for it. */
+  message?(chat: string, id: string): Promise<StoredMessage | undefined>;
   /** Changes one row in place (`db.patchMessage`); undefined when the row is gone or nothing changed. */
   patch(chat: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage | undefined>;
-  /** The chat's rows changed: the pages hear it. Never a new message: no sound, no unread, no move in the list. */
-  changed(chat: string): Promise<void> | void;
+  /** Row `id` of the chat changed: the pages hear it. Never a new message: no sound, no unread, no move in the list. */
+  changed(chat: string, id: string): Promise<void> | void;
   /** My key in an active group, who is in it now, whether it is a community, and whether I am its admin. */
   membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean; admin?: boolean } | undefined;
   /** Says an edit to the group (a private group's: to member `to` alone, when given). An error when it could not go now. */
@@ -64,7 +66,7 @@ export class GroupEdits {
     if (!membership) return refuse("You are not in this group");
     if (typeof messageId !== "string" || typeof raw !== "string") return refuse("No message to edit");
     const chat = chatOf(groupId);
-    const message = (await this.host.messages(chat)).find(m => m.id === messageId);
+    const message = await this.find(chat, messageId);
     if (!message || !canEditInGroup(message)) return refuse("Only your own text messages can be edited");
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
@@ -79,7 +81,7 @@ export class GroupEdits {
       const next = withEdit(current, { seq, at, text, pending: true });
       return { text: next.text, edit: next.edit, mentions: mentions.length ? mentions : undefined };
     });
-    await this.host.changed(chat);
+    await this.host.changed(chat, messageId);
     // One pass: said now when the pace allows (then it is no longer pending), else a timer says it later.
     await this.flush(groupId).catch(() => {});
     return { error: null, messageId };
@@ -115,13 +117,17 @@ export class GroupEdits {
     if (Number.isFinite(retry) && !this.stopped) this.timers.set(groupId, setTimeout(() => { void this.flush(groupId).catch(() => {}); }, Math.max(50, retry)));
   }
 
+  private async find(chat: string, id: string): Promise<StoredMessage | undefined> {
+    return this.host.message ? this.host.message(chat, id) : (await this.host.messages(chat)).find(m => m.id === id);
+  }
+
   private async settle(chat: string, id: string, seq: number): Promise<void> {
     const updated = await this.host.patch(chat, id, current => {
       if (!current.edit?.pending || current.edit.seq !== seq) return null;
       const { pending: _said, ...edit } = current.edit;
       return { edit };
     });
-    if (updated) await this.host.changed(chat);
+    if (updated) await this.host.changed(chat, id);
   }
 
   /**
@@ -137,7 +143,7 @@ export class GroupEdits {
     if (!pace) this.receivePace.set(key, pace = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS, this.now));
     if (!pace.take()) return "dropped";
     const chat = chatOf(groupId);
-    const message = (await this.host.messages(chat)).find(m => m.id === edit.id);
+    const message = await this.find(chat, edit.id);
     if (!message) { this.buffer.hold(chat, { ...edit, sender }); return "waiting"; }
     return this.apply(chat, membership.me, sender, message, edit);
   }
@@ -161,7 +167,7 @@ export class GroupEdits {
       return { text: next.text, edit: next.edit, mentions: edit.k?.length ? edit.k : undefined, mentioned: mentionsMember(edit.k, me) ? true : undefined };
     });
     if (!updated) return "stale";
-    await this.host.changed(chat);
+    await this.host.changed(chat, message.id);
     return "applied";
   }
 
