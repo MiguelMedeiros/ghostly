@@ -58,7 +58,7 @@ test("a private group of four, desktop and phone", async ({ browser, baseURL }) 
   // Boo asks the group for the firewood; Wendy pays it, once, and everyone sees who did.
   await (await composerRow(boo.page, "payment-button")).click();
   await boo.page.getByTestId("group-pay-everyone").click();
-  await boo.page.getByTestId("payment-card-cashu").click();
+  await boo.page.getByTestId("payment-card-cashu-testnet").click();
   await boo.page.getByTestId("payment-amount").fill("2000");
   await boo.page.getByPlaceholder("What for? (optional)").fill("firewood 🔥");
   await boo.page.getByTestId("payment-request").click();

@@ -28,8 +28,8 @@ export const ENGINE_METHODS: readonly string[] = [
   "payRequest", "reclaimPayment", "disconnect", "addService", "removeService", "setServiceEnabled",
   "setServiceShared", "updateSettings", "setCallSignal", "setTyping", "setWakeSubscription", "setWakeMuted", "wakeForCall", "setFastPoll", "createGroup", "inviteToGroup",
   "acceptGroupInvitation", "declineGroupInvitation", "enableGroupLink", "disableGroupLink", "joinGroupByLink",
-  "sendGroupMessage", "groupMessages", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
-  "setGroupPicture", "renameGroup", "forgetGroup",
+  "sendGroupMessage", "groupMessages", "messagePage", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
+  "setGroupPicture", "renameGroup", "setGroupTyping", "forgetGroup",
 ];
 
 /** Reads the hosts use outside `EngineApi`: the whole state, and one chat's stored messages. */

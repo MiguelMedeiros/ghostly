@@ -1,0 +1,1 @@
+`group typing <group>` (`group.typing`) with the kinds, status, `--for` and `--stop` of `typing`, answering with `reached`; `unavailable` for a community; `group.typing.started` and `group.typing.stopped` events, one per member (#442).

@@ -156,8 +156,11 @@ export type RefuseReason = "declined" | "no-room" | "too-many" | "damaged" | "ca
 export interface ChatFilesHost {
   /** Sends a frame on the open session; false when there is none. */
   send(frame: Record<string, unknown>): boolean;
-  /** A new offer from the contact: take it, ask the person, or refuse it. */
-  decide(file: FileInfo): Promise<OfferDecision>;
+  /**
+   * A new offer from the contact: take it, ask the person, or refuse it. `again`: a file taken here without asking
+   * that ended (failed, or stopped by the sender) and is offered again; it counts against the same limits as a new one.
+   */
+  decide(file: FileInfo, again?: boolean): Promise<OfferDecision>;
   openTarget(record: FileTransferRecord): Promise<IncomingTarget>;
   openSource(record: FileTransferRecord): Promise<OutgoingSource>;
   /**
@@ -509,13 +512,13 @@ export class ChatFiles {
         case "cancelled":
           // Cancelled here stays cancelled; stopped by the sender (it could not read its file), it is taken again.
           if (!record.abortedBySender || (!record.agreed && !record.consented)) { this.send({ t: "pf-refuse", id, why: "cancelled" }); return; }
-          await this.retake(existing);
+          if (!(await this.retakeAgreed(existing))) return;
           break;
         case "failed":
           // Expired here before anyone answered: nothing was agreed, and offered again it would skip the question.
           if (!record.agreed && !record.consented) { this.send({ t: "pf-refuse", id, why: "expired" }); return; }
           // Sent again after it failed here (damaged, not stored): taken again from the start, as it was agreed.
-          await this.retake(existing);
+          if (!(await this.retakeAgreed(existing))) return;
           break;
         case "asking": this.send({ t: "pf-wait", id, why: "consent" }); return;
       }
@@ -542,6 +545,31 @@ export class ChatFiles {
     this.changed(entry);
     if (decision === "ask") this.send({ t: "pf-wait", id, why: "consent" });
     else if (!paused) this.startIncoming(entry);
+  }
+
+  /**
+   * An agreed file that ended here, offered again. One the person consented to is taken again from the start; one taken
+   * without asking is decided again, as a new offer would be (the contact's limit for files taken without asking, and
+   * the room here): taken again, asked about, or refused. True when it is taken again.
+   */
+  private async retakeAgreed(entry: Entry): Promise<boolean> {
+    const { record } = entry;
+    if (!record.consented) {
+      let decision: OfferDecision;
+      try { decision = await this.host.decide(record.file, true); } catch { decision = { refuse: "invalid" }; }
+      if (typeof decision === "object") { this.send({ t: "pf-refuse", id: record.id, why: decision.refuse, ...(decision.room !== undefined && { room: decision.room }) }); return false; }
+      if (decision === "ask") {
+        if (this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers) { this.send({ t: "pf-refuse", id: record.id, why: "too-many" }); return false; }
+        await this.retake(entry);
+        record.state = "asking";
+        record.agreed = undefined;
+        this.changed(entry);
+        this.send({ t: "pf-wait", id: record.id, why: "consent" });
+        return false;
+      }
+    }
+    await this.retake(entry);
+    return true;
   }
 
   /** An agreed file that ended here, offered again: taken again from the start. */

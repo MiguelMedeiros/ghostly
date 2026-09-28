@@ -451,8 +451,15 @@ describe("receiving commits", () => {
     net.setEdge(alice, bob, false);
     const asked = () => net.sent.filter(f => f.from === bob.myKey && f.frame.t === "group-sync").length;
     const before = asked();
+    const pending = () => (bob as unknown as { pendingCommits: Map<number, unknown> }).pendingCommits.size;
+    // Unsigned, or signed by someone not in the group: nothing is kept for them.
     for (let e = 4; e < 4 + GROUP_LIMITS.pendingCommits + 8; e++) await bob.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: { e } });
-    expect((bob as unknown as { pendingCommits: Map<number, unknown> }).pendingCommits.size).toBe(GROUP_LIMITS.pendingCommits);
+    const stranger = createIdentity().seedB64;
+    await bob.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: forgeCommit({ ...alice.top, e: 30 }, stranger, "rotate", alice.roster) });
+    expect(pending()).toBe(0);
+    // Signed by a member, they wait, up to the bound.
+    for (let e = 4; e < 4 + GROUP_LIMITS.pendingCommits + 8; e++) await bob.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: forgeCommit({ ...alice.top, e: e - 1 }, alice.state.seedB64, "rotate", alice.roster) });
+    expect(pending()).toBe(GROUP_LIMITS.pendingCommits);
     expect(asked() - before).toBe(1);
     // After the throttle, the next unreadable frame asks again.
     vi.setSystemTime(Date.now() + 10_001);

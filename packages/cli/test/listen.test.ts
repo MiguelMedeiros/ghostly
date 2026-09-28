@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
-import { Allowlist, allowlist, eventHandler, toTurn } from "../src/listen";
+import { Allowlist, allowlist, eventHandler, hookEnv, toTurn } from "../src/listen";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
 
@@ -48,6 +48,13 @@ describe("agent turns", () => {
   });
 });
 
+describe("hooks", () => {
+  it("run without the backup passphrase in their environment", () => {
+    const env = hookEnv({ PATH: "/bin", GHOSTLY_BACKUP_PASSPHRASE: "correct horse", GHOSTLY_PROFILE: "bot" });
+    expect(env).toEqual({ PATH: "/bin", GHOSTLY_PROFILE: "bot" });
+  });
+});
+
 describe("the allowlist", () => {
   it("passes the chats and groups named and the profile's own events; drops everyone else", async () => {
     const list = new Allowlist(new Set(["c1"]), new Set(), new Set(["g1"]), async () => { throw new Error("no lookup without keys"); });
@@ -88,6 +95,19 @@ describe("the allowlist", () => {
     expect(await list.allows(groupMessage("g1", "d", "hi"))).toBe(true);
     await expect(allowlist(["alice"], [], call, async () => null)).rejects.toMatchObject({ code: "not_found" });
     await expect(allowlist([], ["nope"], call, async () => null)).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("a contact key is kept as the key, never resolved through a chat's name (a contact may name itself with it)", async () => {
+    // chat.get would find the chat whose contact calls itself KEY; the allowlist never asks it for a key.
+    const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === "chat.get" && params.chat === KEY) return { id: "chatMallory", peer: OTHER_KEY };
+      throw new CliError("not_found", "no");
+    });
+    const peers: Record<string, string> = { chatAlice: KEY, chatMallory: OTHER_KEY };
+    const list = await allowlist([KEY], [], call, async (chat) => peers[chat] ?? null);
+    expect(call).not.toHaveBeenCalled();
+    expect(await list.allows(received("chatAlice", "a", "hi"))).toBe(true);
+    expect(await list.allows(received("chatMallory", "b", "hi"))).toBe(false);
   });
 });
 

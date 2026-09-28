@@ -1,4 +1,4 @@
-import { REACTION_LIMITS, nextReactionNumber, reactionEmoji, reactionIsNewer, replySnippet, type WireReaction } from "@ghostly/core";
+import { REACTION_LIMITS, ReactionWindow, nextReactionNumber, reactionEmoji, reactionIsNewer, replySnippet, type WireReaction } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
 import type { ReactionNote, StoredMessage } from "../shared/types";
 
@@ -10,10 +10,12 @@ import type { ReactionNote, StoredMessage } from "../shared/types";
 
 export interface ReactionsHost {
   messages(chat: string): Promise<StoredMessage[]>;
+  /** One row by its id (`db.getMessage`): the row a reaction names is found so first, and a long chat is not read whole. */
+  message?(chat: string, id: string): Promise<StoredMessage | undefined>;
   /** Changes one row in place (`db.patchMessage`); undefined when the row is gone. */
   patch(chat: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage | undefined>;
-  /** The chat's rows changed: the pages hear it. `note`: its latest reaction, when this one is it. */
-  changed(chat: string, note?: ReactionNote): Promise<void> | void;
+  /** Row `id` of the chat changed: the pages hear it. `note`: its latest reaction, when this one is it. */
+  changed(chat: string, id: string, note?: ReactionNote): Promise<void> | void;
   /** Someone reacted to a message of mine: a quiet notice (the pages mute it with the chat). */
   notify?(chat: string, key: string): void;
   now?(): number;
@@ -58,6 +60,8 @@ export class Reactions {
   private readonly waiting = new Map<string, { by: string; reaction: WireReaction; until: number }[]>();
   /** One chat's reactions at a time: a burst for one message lands in order. */
   private queue = Promise.resolve();
+  /** A group member's reactions taken per window (chat and member key), as a paired chat's session limits them. */
+  private readonly memberPace = new Map<string, ReactionWindow>();
 
   constructor(private readonly host: ReactionsHost) {}
 
@@ -96,9 +100,14 @@ export class Reactions {
    * yet keeps it for a minute; past the room for that, it is dropped (and, on a 1:1 session, not confirmed).
    */
   receive(chat: string, by: string, reaction: WireReaction): Promise<ReactionOutcome> {
+    if (isGroup(chat)) {
+      const key = `${chat}\n${by}`;
+      let pace = this.memberPace.get(key);
+      if (!pace) this.memberPace.set(key, pace = new ReactionWindow(REACTION_LIMITS.receive, REACTION_LIMITS.windowMs, () => this.now()));
+      if (!pace.take()) return Promise.resolve("dropped");
+    }
     return this.run(async () => {
-      const messages = await this.host.messages(chat);
-      const target = reactionTarget(messages, reaction.id, isGroup(chat));
+      const target = await this.find(chat, reaction.id);
       if (!target) return this.wait(chat, by, reaction);
       if (!reactionIsNewer(target.reactions?.[by], reaction.n)) return "stale";
       await this.write(chat, target, by, reaction);
@@ -121,6 +130,21 @@ export class Reactions {
         if (target && reactionIsNewer(target.reactions?.[by], reaction.n)) await this.write(message.linkId, target, by, reaction);
       }
     });
+  }
+
+  /**
+   * The row a received reaction names. Most often the row of that id (a group's), or of `peer_` or `me_` and that id (a
+   * chat's): those are read alone. Any other (a file's, a payment's, one not here yet) is looked for in the whole chat.
+   */
+  private async find(chat: string, id: string): Promise<StoredMessage | undefined> {
+    const group = isGroup(chat);
+    if (this.host.message) {
+      for (const rowId of group ? [id] : [`peer_${id}`, `me_${id}`]) {
+        const row = await this.host.message(chat, rowId);
+        if (row && replyRef(row, group) === id) return row;
+      }
+    }
+    return reactionTarget(await this.host.messages(chat), id, group);
   }
 
   /** A chat is gone: nothing waits for it any more. */
@@ -146,7 +170,7 @@ export class Reactions {
     if (!written) return undefined;
     const shown = reaction.e ? note(written, by, reaction.e, at) : undefined;
     if (shown && by !== "me" && written.sender === "me") this.host.notify?.(chat, `${written.id}:${by}:${reaction.n}`);
-    await this.host.changed(chat, shown);
+    await this.host.changed(chat, written.id, shown);
     return written;
   }
 }

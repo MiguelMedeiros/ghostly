@@ -24,7 +24,7 @@ export function linkEnd(url: string): string {
 }
 
 /** Direction and other invisible format characters, which can make a link read as another address. */
-export const INVISIBLE = /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
+export const INVISIBLE = /[\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
 
 /**
  * A link as a bubble shows it. Plain ASCII shows as typed. Anything else shows as the browser reads it: the host

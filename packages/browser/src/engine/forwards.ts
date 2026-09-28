@@ -52,7 +52,10 @@ export async function copyForForward(sourceId: string, target: { linkId: string;
   const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video, image: file.image };
   const record = { id: file.id, linkId, createdAt: timestamp, direction: "out" as const, wireId, metadata, transfer: { state: "transferring" as const, transferred: 0, size: file.size } };
   if (size <= SMALL_FILE_BYTES && source.blob) {
-    await fileStore.put({ ...record, blob: source.blob.slice(0, size, source.blob.type), ...(source.digest && { digest: source.digest }) });
+    // Its bytes in a Blob of its own: WebKit keeps a stored Blob as one file, and a slice of the original would share it,
+    // gone for both once either record is deleted (see `fileStore`).
+    const copy = new Blob([await source.blob.slice(0, size).arrayBuffer()], { type: source.blob.type });
+    await fileStore.put({ ...record, blob: copy, ...(source.digest && { digest: source.digest }) });
     return;
   }
   const bytes = await fileBytes();

@@ -1,6 +1,7 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import type { AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
+import { applyMessageChanges } from "../shared/messageChanges";
 
 type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
 
@@ -103,6 +104,15 @@ class EngineClient {
         this.messages.set(message.linkId, message.messages);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
         break;
+      case "message-changes": {
+        // Only what changed, in a history the peer sent whole first: listeners still get the whole list, as it is now.
+        const history = this.messages.get(message.linkId);
+        if (!history) break;
+        const messages = applyMessageChanges(history, message);
+        this.messages.set(message.linkId, messages);
+        for (const listener of this.messageListeners) listener(message.linkId, messages);
+        break;
+      }
       case "call-signal": {
         let kind: unknown;
         try { kind = (JSON.parse(message.signal) as { t?: unknown })?.t; } catch { kind = undefined; }

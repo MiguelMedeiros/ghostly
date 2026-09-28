@@ -77,14 +77,14 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
         <nav className="reader-crumbs" aria-label="Breadcrumb">
           <Link href={"/developers"}>{t.developers}</Link>
           <span aria-hidden="true">/</span>
-          <Link href={"/developers/catalog"}>{t.catalog}</Link>
+          <Link href={"/developers/wisps"}>{t.catalog}</Link>
           <span aria-hidden="true">/</span>
           <span aria-current="page">{w ? `WISP ${w.number}` : t.reference}</span>
         </nav>
 
         <div className="reader-layout">
           <aside className="reader-side">
-            <Link className="reader-glossary" href={`${"/developers/catalog"}#glossary`}>
+            <Link className="reader-glossary" href={`/developers/wisps#glossary`}>
               {t.glossary} →
             </Link>
             {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
@@ -253,7 +253,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
                   </Link>
                 )}
               </nav>
-              <Link className="link-arrow" href={"/developers/catalog"}>
+              <Link className="link-arrow" href={"/developers/wisps"}>
                 {t.back}
               </Link>
             </footer>

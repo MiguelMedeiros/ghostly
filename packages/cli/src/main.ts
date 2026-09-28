@@ -13,6 +13,7 @@ import { openHost, serve, type Host } from "./host";
 import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { restoreProfile } from "./backup";
+import { secretsFromStdin } from "./secretInput";
 import {
   checkProfileName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -280,6 +281,14 @@ function stopper(work: () => Promise<void>): () => void {
   };
 }
 
+/**
+ * Ctrl-C, a service manager's stop, and the terminal or SSH session it ran in closing (SIGHUP, which would otherwise
+ * end it on the spot): each a clean stop.
+ */
+function onStopSignals(stop: () => void): void {
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, stop);
+}
+
 /** The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). */
 function backupPassphrase(file: unknown): string {
   const value = typeof file === "string" ? readFileSync(file, "utf8").replace(/\r?\n$/, "") : process.env.GHOSTLY_BACKUP_PASSPHRASE;
@@ -295,8 +304,7 @@ async function runDaemon(g: Globals): Promise<void> {
   try { served = await serve(host); } catch (error) { await host.close(); throw error; }
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
+  onStopSignals(stop);
   host.ctx.hub.emit("daemon.started", `daemon.started:${process.pid}:${Date.now()}`, { pid: process.pid, version: VERSION });
   print({ daemon: "ready", profile: g.profile, pid: process.pid, socket: g.paths.socket, lastSeq: host.ctx.hub.lastSeq });
 }
@@ -434,8 +442,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
+  onStopSignals(stop);
   for (const event of host.ctx.hub.replay(since ?? host.ctx.hub.lastSeq)) onEvent(event);
   host.ctx.hub.onEvent(onEvent);
   host.ctx.hub.emit("daemon.started", `daemon.started:${process.pid}:${Date.now()}`, { pid: process.pid, version: VERSION, listen: true });
@@ -576,6 +583,8 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
+  const secretWarning = await secretsFromStdin(command.method, params, readStdin);
+  if (secretWarning) process.stderr.write(`ghostly: ${secretWarning}\n`);
   const result = await withSession(g, async (s) => {
     const result = await s.call(command.method, params) as Record<string, unknown>;
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.

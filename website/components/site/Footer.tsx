@@ -20,7 +20,7 @@ export function SiteFooter() {
       title: t.developers,
       links: [
         { label: t.links.overview, href: "/developers" },
-        { label: t.links.catalog, href: "/developers/catalog" },
+        { label: t.links.catalog, href: "/developers/wisps" },
         { label: t.links.protocol, href: "/docs" },
         { label: t.links.cli, href: "/cli" },
         { label: t.links.roadmap, href: "/roadmap" },

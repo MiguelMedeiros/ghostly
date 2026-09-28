@@ -7,7 +7,7 @@ import { expect, test } from "@playwright/test";
 for (const [from, to] of [
   ["/pt-br", "/"],
   ["/pt-br/developers", "/developers"],
-  ["/pt-br/developers/catalog", "/developers/catalog"],
+  ["/pt-br/developers/catalog", "/developers/wisps"],
   ["/pt-br/developers/wisps/100-transports", "/developers/wisps/100-transports"],
   ["/pt-br/roadmap", "/roadmap"],
 ]) {

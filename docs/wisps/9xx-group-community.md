@@ -75,7 +75,7 @@ Why not something cheaper against length:
 - **Checking the confirmation tag when a commit arrives** would not stop it: the member who branches from before its removal holds that epoch's secret and derives the ones after, so its tags are right. A member who lacks the secret (a newcomer, a member away) could not check it either.
 - **A limit on admissions per member** would slow a crowd arriving through the link, and a removed member with accomplices still in the group would share out the work.
 
-A commit on a branch that drops an admin change of the main branch, and that holds none itself, can never win. When its signer is no longer in the main branch's roster (someone removed, or who left), a member does not keep it and a hub does not relay it; one signed by a member still in is kept (it may carry messages worth reading, like any losing branch) and relayed, and never followed. Frames on an edge from a member the main branch took out are dropped before anything reads them.
+A commit on a branch that drops an admin change of the main branch, and that holds none itself, can never win. When its signer is no longer in the main branch's roster (someone removed, or who left), a member does not keep it and a hub does not relay it; one signed by a member still in is kept (it may carry messages worth reading, like any losing branch) and relayed, and never followed. Frames on an edge from a member the main branch took out are dropped before anything reads them. A message frame whose author the main branch took out is dropped too, whoever hands it on and whatever epoch it is for (the removed member still holds that epoch's secret and can sign new frames for it), and the store hands none of that author's frames on. A message frame is checked against its author's signature before it may wait for an epoch or a secret.
 
 ## Topology: hubs elected through a beacon
 
@@ -120,7 +120,7 @@ Any frame counts: a text, an application frame (a reaction, an edit, a payment n
 
 The ciphertext opens to `{ "text", "nick"? }`: a member's name travels encrypted with what it says, since most members never share an edge. Since revision 0.3 it may instead open to an application frame for the group, `{ "x": { … }, "nick"? }`, or to a payload for one member, `{ "p": { "to", "e", "n", "c" }, "nick"? }` (§ Payments); exactly one of `text`, `x` and `p`. Both are frames like any other: same signature, identity, deduplication, relaying, store and catch-up; they are handed to the application instead of the history. The associated data is `[g, e, h, s, n, ts]`; the signature covers `["ghostly-group/2 msg", g, e, h, s, n, ts, nn, c]`.
 
-Every member keeps the last 256 frames of the group, from everyone (at most 1 MiB), and answers a `group-sync` with the commits the other lacks, the secrets of epochs it was in, and the stored frames above the other's high-water marks, for epochs the other was a member of. Frames are signed by their authors, so a relayed or re-sent frame is as authentic as a direct one, and per-sender sequence numbers still reveal gaps. A newcomer is not sent anything from before its admission. A member that lacks the current epoch's secret, or holds frames or commits it cannot place yet, asks its connected members with a `group-sync` every five seconds until it has them: a sealed secret lost on the way is not lost for good. Every member also sends a `group-sync` to whoever it is connected to every thirty seconds, so a commit or a message that went by while an edge was down reaches it without anything left waiting to ask about.
+Every member keeps the last 256 frames of the group, from everyone (at most 1 MiB), and answers a `group-sync` with the commits the other lacks, the secrets of epochs it was in, and the stored frames above the other's high-water marks, for epochs the other was a member of. Frames are signed by their authors, so a relayed or re-sent frame is as authentic as a direct one, and per-sender sequence numbers still reveal gaps. A newcomer is not sent anything from before its admission. A member that lacks the current epoch's secret, or holds frames or commits it cannot place yet, asks its connected members with a `group-sync` every five seconds until it has them: a sealed secret lost on the way is not lost for good. Every member also sends a `group-sync` to whoever it is connected to every thirty seconds, so a commit or a message that went by while an edge was down reaches it without anything left waiting to ask about. Since revision 2026-09-28 a member answers at most 16 syncs from one member a minute, which that pace fits; one past that is dropped unanswered, as an answer may carry the whole store.
 
 ## Mentions
 
@@ -133,6 +133,10 @@ As in [the mesh profile](9xx-group-mesh.md#mentions): the same list of `{ "k", "
 Its JSON counts against the text's 16 KiB (a message with mentions carries that much less text), so the box stays within the bound apps from before mentions check it against. They read `text` and `nick` as ever and ignore `m`.
 
 **No everyone.** A community has no `@everyone`: `*` is never sent and is dropped on receipt. A community is large, anyone with the link may be in it, and every member can let people in. A way for any member, or even the admin, to ring hundreds of devices at once is the notification spam the design avoids. Mentions of one member at a time remain. Notifications, and the muted group's "Still notify me when I'm mentioned", are as in the mesh profile.
+
+## Wake-up push
+
+Not in a community, yet. In a private group a mention wakes a member's closed web app through the subscription that member shared on their own edge ([9xx · Group Mesh § Wake-up push](9xx-group-mesh.md#wake-up-push)). A community has no edge between two members: everything goes through hubs, and a member's subscription (its endpoint and the VAPID key pair that lets anyone holding it post there) would have to travel as a pair payload sealed to each member it is shared with. Whom to share it with is the harder part: the members of a community are whoever opened its link, and handing one's subscription to all of them lets strangers wake one's phone. So a community member is not woken; it reads what it missed from whoever is there when it opens (§ Messages and catch-up). A way to share with a few chosen members (contacts in the community, say) over pair payloads is open.
 
 ## Replies
 
@@ -177,6 +181,10 @@ The author of a text can edit it ([400](400-chat.md#edits), revision 0.9) with a
 A member takes an edit only as the payload's signer's, of that signer's own message (`id` starts with its key), and only while the signer is **a member now**: a removed member's edits are dropped, as are those of a member whose admission lost a race (§ Races and forks). The new text is checked as a message's; its mentions too, never everyone. An edit that names a member is not a new mention and does not notify; one for a message not here yet waits a minute for it; a member takes at most 30 from one author in 10 seconds. There are no receipts: the author says each edit once, at most 10 in 10 seconds per group, and the group's store and catch-up do the rest.
 
 An edit is sealed under the epoch it is made in, like everything sent then. A member admitted after the message but before the edit can therefore read the new text, though not the original (it has no message to put it on and drops it after a minute).
+
+## Typing
+
+A community does not carry typing yet (revision 2026-09-28). Everything this profile carries is a frame of the group's log: numbered, stored by every member, relayed by the hubs and handed on in catch-ups; the only frames routed rather than stored are those of admission. Typing is presence, never stored and never caught up ([401](401-paired-chat.md#typing), [Group Mesh § Typing](9xx-group-mesh.md#typing)), so sending it as an application frame would fill every member's log and every catch-up with words that expire in 6 seconds. It waits for an ephemeral path through the hubs of its own (below). Private groups have it, over their edges.
 
 ## Admission through the link
 
@@ -298,7 +306,7 @@ On public relays each trip through Pkarr (a packet published, then seen by the o
 
 ## Open decisions
 
-Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; files and media; native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members.
+Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; files and media; native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
 
 A hub's connections on a Mac: a hub keeps edges with up to 48 members (`hubCapacity`) and with the other hubs (up to 8 in the beacon, `maxHubs` in `packages/core/src/communityRendezvous.ts`), while the Desktop's WebView on a Mac opened at most 46 connections at once, 1:1 chats and calls included ([9xx Group Mesh, Cost per member](9xx-group-mesh.md#cost-per-member), #402). A Mac Desktop that becomes a busy hub could reach that ceiling; whether it should cap its hub edges, or not stand as a hub, is open.
 

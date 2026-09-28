@@ -6,7 +6,8 @@ import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessag
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
-import { useChatScroll } from "../hooks/useChatScroll";
+import { leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
+import { useTailFirst } from "../hooks/useTailFirst";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
@@ -26,6 +27,8 @@ import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { AvatarViewer } from "../components/AvatarViewer";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useGroupTypingSender } from "../hooks/useTyping";
+import { GroupTypingText, type GroupTyper } from "../components/TypingIndicator";
 import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { replySnippet, type GroupMention } from "@ghostly/core";
@@ -91,6 +94,7 @@ const joinSteps = (community: boolean): { stage: JoinStep; label: string }[] => 
 ];
 /** How long after joining a group with nobody reached yet says it is still connecting (later, they are simply away). */
 const JUST_JOINED_MS = 5 * 60_000;
+const NO_MESSAGES: StoredMessage[] = [];
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
 
 function joiningText(stage: GroupJoinStage, name: string, community: boolean): { title: string; body: string } {
@@ -118,7 +122,11 @@ export function GroupChat() {
     const chats = chatsByPeer();
     return withContactFaces(rosterGroup, state?.links, faceOf, peerKey => chats.get(peerKey)?.label);
   }, [rosterGroup, state?.links, faceOf]);
-  const [messages, setMessages] = useState<StoredMessage[]>([]);
+  // The history of this group only: the page stays mounted from one group to the next, and for the render that changes
+  // groups the last one's messages would still be here (the timeline would open on them, and never find where this
+  // group was left). Until this group's own list comes, what the engine last sent for it.
+  const [loaded, setLoaded] = useState<{ groupId: string; list: StoredMessage[] }>({ groupId: "", list: NO_MESSAGES });
+  const messages = loaded.groupId === groupId ? loaded.list : engine.messages.get(`group:${groupId}`) ?? NO_MESSAGES;
   /** The message the composer answers (WISP 9xx § Replies). */
   const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
   /** The message of mine the composer edits (WISP 9xx § Edits). */
@@ -149,7 +157,9 @@ export function GroupChat() {
   const shown = useMemo(() => group ? messages.filter(m => !m.event && !m.groupPay).map(m => toChatMessage(m, group, settings.defaultNickname)) : [],
     [messages, group, settings.defaultNickname]);
   const forwarding = useForwarding(group ? `group:${groupId}` : undefined, shown);
-  const shownOf = (m: StoredMessage) => shown.find(c => c.id === m.id) ?? toChatMessage(m, group!, settings.defaultNickname);
+  // By id: a row looks its message up once per draw, and a long group has thousands of rows.
+  const shownById = useMemo(() => new Map(shown.map(c => [c.id, c])), [shown]);
+  const shownOf = (m: StoredMessage) => shownById.get(m.id) ?? toChatMessage(m, group!, settings.defaultNickname);
   // Members learn my name on the edges, as a contact does on a chat: the engine must know it here too.
   const engineNick = state?.settings.nick;
   useEffect(() => {
@@ -160,12 +170,28 @@ export function GroupChat() {
 
   useEffect(() => {
     if (!groupId) return;
-    setMessages(engine.messages.get(`group:${groupId}`) ?? []);
-    void engine.call("groupMessages", { groupId }).then(setMessages).catch(() => {});
-    return engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) setMessages(list); });
+    let current = true;
+    let whole = false;
+    const show = (list: StoredMessage[]) => { if (current) { whole = true; setLoaded({ groupId, list }); } };
+    // Its newest page first, straight from the store's index: a long group shows before its whole history is read, and
+    // the rest comes in above it (useTailFirst). Not when the engine already sent this group's history, nor when the
+    // group opens on a message further up, which must be there when it opens.
+    const linkId = `group:${groupId}`;
+    if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
+      void engine.call("messagePage", { linkId }).then(page => { if (current && !whole) setLoaded({ groupId, list: page.messages }); }).catch(() => {});
+    }
+    void engine.call("groupMessages", { groupId }).then(show).catch(() => {});
+    const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
+    // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
+    return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
+  // A long group draws its last rows first, and the older ones in the moment after (useTailFirst).
+  const rowIds = useMemo(() => messages.map(m => m.id), [messages]);
+  const firstRow = useTailFirst(rowIds, groupId ?? "", leftScrolledUp(groupId ?? ""));
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
-  const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
+  // Always every message, drawn yet or not; a new list when older rows come in above (see Chat.tsx).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
+  const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId });
   useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
 
@@ -178,6 +204,13 @@ export function GroupChat() {
     }
     catch (e) { return e instanceof Error ? e.message : "Could not send"; }
   }, [groupId, replyingTo]);
+
+  // Typing (WISP 9xx · Group Mesh § Typing): private groups only; a community does not carry it yet.
+  const onTyping = useGroupTypingSender(rosterGroup?.profile === "mesh" && rosterGroup.status === "active" ? groupId : undefined);
+  const typers = useMemo(() => (group?.typing ?? []).map(({ key, kind, status }): GroupTyper => {
+    const member = group!.members.find(m => m.key === key);
+    return { name: member ? memberName(member) : `Member ${key.slice(0, 8)}`, ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
+  }), [group]);
 
   // "@everyone": a private group's admin only; a community has no everyone (WISP 9xx § Mentions).
   const mentions = useMemo(() => group ? { candidates: mentionCandidates(group), everyone: group.profile === "mesh" && group.isAdmin } : undefined, [group]);
@@ -242,7 +275,10 @@ export function GroupChat() {
             <div className="flex min-w-0 items-center gap-1.5">
               <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || "A group"}</p>
             </div>
-            <button onClick={() => setShowMembers(true)} data-testid="group-members" className="text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer max-w-[60vw]">{subtitle}</button>
+            <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer max-w-[60vw]">
+              {/* Who is typing while it lasts, in place of the member count, as a 1:1 chat's header does. */}
+              <span role="status" aria-live="polite">{typers.length ? <GroupTypingText testId="group-typing" typers={typers} /> : subtitle}</span>
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -299,8 +335,9 @@ export function GroupChat() {
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
       <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
-        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3">
-          {messages.map(m => m.event
+        {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
+        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
+          {messages.slice(firstRow).map(m => m.event
             ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group)}</span></div>
             // A note about a payment this device is part of is shown under its own bubble instead.
             : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
@@ -321,6 +358,7 @@ export function GroupChat() {
       {!joiningByLink && forwarding.bar}
       {forwarding.dialog}
       {!joiningByLink && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
+        onTyping={group.profile === "mesh" ? onTyping : undefined}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: replySnippet(replyingTo.text),
           mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined}
         // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.

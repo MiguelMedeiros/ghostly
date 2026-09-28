@@ -1,7 +1,7 @@
 # ghostly.tools
 
 The Ghostly website: the story for people (`/`), the story for developers
-(`/developers`), the WISP catalog and reader, the roadmap, and the existing CLI,
+(`/developers`), the WISPs (`/developers/wisps`, a searchable catalog) and the reader, the roadmap, and the existing CLI,
 protocol docs and privacy pages. Next.js (see `AGENTS.md`: this version differs
 from older ones), motion for scroll scenes, no WebGL.
 
@@ -102,8 +102,10 @@ It also writes `docs/wisps/NUMBERING.md` and the forwarding stubs,
 `lib/roadmap-tracks.json` (the inventory and the tracks of
 `docs/wisps/ADAPTER-ROADMAP.md`), `lib/levels.json` and `lib/code-snippets.json`, the two excerpts
 `/developers` quotes from `packages/core/src/invite.ts` and
-`packages/core/src/pairedTransports.ts`. None of the `lib/*.json` files it writes, nor
-`public/reference/`, is committed: a pull request never touches them, so two never conflict there.
+`packages/core/src/pairedTransports.ts`. Last, `scripts/llms.mjs` writes `public/llms.txt` (an index for AI
+readers, llmstxt.org: every WISP with its header's Summary row) and `public/llms-full.txt` (the WISPs as published,
+then `docs/CLI.md`, `docs/AI-AGENTS.md` and `packages/cli/SKILL.md`). None of the `lib/*.json` files it writes, nor
+`public/reference/` or the two llms files, is committed: a pull request never touches them, so two never conflict there.
 Run `npm run sync:references` once after a checkout before `npm run lint`, `npx tsc` or `npm test`
 (CI does). Other repository docs (`docs/TESTING.md`,
 `docs/CLI.md`, ...) are not on the site.

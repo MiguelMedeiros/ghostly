@@ -30,6 +30,11 @@ function remember(chat: string, state: Left) {
   left.set(chat, state);
   if (left.size > LEFT_MAX) left.delete(left.keys().next().value!);
 }
+/** Whether the chat was left scrolled up, on a message: it opens on that message, so the message must be in the page. */
+export function leftScrolledUp(chat: string): boolean {
+  const was = left.get(chat);
+  return !!was && !was.atBottom && !!was.anchor;
+}
 /** Forgets where every chat was left (for tests). */
 export function forgetChatScroll() {
   left.clear();
@@ -53,7 +58,9 @@ const editable = (target: EventTarget | null) =>
  *
  * Give `listRef` to the scrolling element and `columnRef` to the one that grows with the rows. `chat` starts it over: a
  * chat opens where it was left (on the same message, or at its bottom) with nothing counted, and one never opened opens
- * at its bottom. `keys`: End or Ctrl/Cmd+↓ (outside a text field) jumps to the bottom.
+ * at its bottom. When the message it was left on is not among its first rows, it opens at its bottom and goes back on
+ * that message once the rows bring it, unless a hand scrolled first. `keys`: End or Ctrl/Cmd+↓ (outside a text field)
+ * jumps to the bottom.
  */
 export function useChatScroll({ rows, chat, keys = true }: { rows: readonly ScrollRow[]; chat: string; keys?: boolean }) {
   // Elements, not refs: a list shown later (a group still joining) still gets its listeners.
@@ -68,6 +75,12 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   const seen = useRef(new Set<string>());
   const opened = useRef(false);
   const firstNew = useRef<string | null>(null);
+  /**
+   * Where the chat was left, while its message is not among the rows yet: the first rows a chat opens with can be another
+   * chat's (a group page kept across groups) or not the whole history. It opens at its bottom meanwhile, and goes back on
+   * the message as soon as a later update brings it, unless a hand has scrolled first.
+   */
+  const pending = useRef<Left | null>(null);
   /** On the way down after ↓ or End: counts as at the bottom until it gets there, or until a hand scrolls it. */
   const following = useRef(false);
   const hasRows = useRef(false);
@@ -118,6 +131,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   const toBottom = useCallback(() => {
     const el = list.current;
     if (!el) return;
+    pending.current = null;
     atBottom.current = true;
     following.current = true;
     anchor.current = null;
@@ -150,39 +164,58 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     atBottom.current = true;
     anchor.current = null;
     firstNew.current = null;
+    pending.current = null;
     setCount(0);
     setFar(false);
     return () => {
-      if (opened.current) remember(chat, { atBottom: atBottom.current, anchor: atBottom.current ? null : anchor.current });
+      // Opened but not back on its message yet, and no hand moved it: it is still where it was left.
+      // Not from the rows on screen: when a page is kept across chats, they are already the next chat's here.
+      if (pending.current) remember(chat, pending.current);
+      else if (opened.current) remember(chat, { atBottom: atBottom.current, anchor: atBottom.current ? null : anchor.current });
     };
   }, [chat]);
 
   useLayoutEffect(() => {
     const el = list.current;
-    if (!el || rows.length === 0) return;
+    if (!el) return;
+    // No rows (yet): the list is as short as it gets, and its scroll event is not a hand's.
+    if (rows.length === 0) { lastTop.current = el.scrollTop; return; }
+    /** Left scrolled up: back on the same message, as far from the top of the view as it was, with nothing counted. */
+    const restore = (was: Left) => {
+      pending.current = null;
+      seen.current = new Set(rows.map(row => row.id));
+      following.current = false;
+      atBottom.current = false;
+      anchor.current = was.anchor;
+      firstNew.current = null;
+      setCount(0);
+      settle();
+    };
     if (!opened.current) {
       opened.current = true;
       for (const row of rows) seen.current.add(row.id);
       const was = left.get(chat);
-      if (was && !was.atBottom && was.anchor && rowById(el, was.anchor.id)) {
-        // Left scrolled up: back on the same message, as far from the top of the view as it was.
-        atBottom.current = false;
-        anchor.current = was.anchor;
-        settle();
-        return;
-      }
+      const back = was && !was.atBottom && was.anchor ? was : null;
+      if (back && rowById(el, back.anchor!.id)) { restore(back); return; }
       atBottom.current = true;
       el.scrollTop = el.scrollHeight;
       lastTop.current = el.scrollTop;
       setFar(false);
+      // Set after the scroll it just made, which is not a hand's.
+      pending.current = back;
       return;
     }
-    const fresh = rows.filter(row => !seen.current.has(row.id));
+    if (pending.current?.anchor && rowById(el, pending.current.anchor.id)) { restore(pending.current); return; }
+    // Older history coming in above every row seen (a group's newest page first, then the rest) is not new.
+    const oldestSeen = rows.findIndex(row => seen.current.has(row.id));
+    const fresh = rows.filter((row, i) => !seen.current.has(row.id) && i > oldestSeen);
+    for (let i = 0; i < oldestSeen; i++) seen.current.add(rows[i].id);
     if (fresh.length === 0) { settle(); return; }
     for (const row of fresh) seen.current.add(row.id);
     const last = rows[rows.length - 1];
     if (last.mine && fresh.includes(last)) {
       // What I send goes to the bottom, wherever I was.
+      pending.current = null;
       atBottom.current = true;
       anchor.current = null;
       clear();
@@ -204,6 +237,8 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       // Not moved since it was last set or seen: content grew or shrank under the view, and no hand scrolled it.
       if (Math.abs(el.scrollTop - lastTop.current) < 1) { settle(); return; }
       lastTop.current = el.scrollTop;
+      // A hand moved it: where the chat was left no longer matters.
+      pending.current = null;
       const d = distance(el);
       if (d <= NEAR_BOTTOM_PX) following.current = false;
       atBottom.current = following.current || d <= NEAR_BOTTOM_PX;

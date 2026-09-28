@@ -1,7 +1,7 @@
 
 export const reader = {
   developers: "Developers",
-  catalog: "WISP catalog",
+  catalog: "WISPs",
   reference: "Reference",
   inShort: "In short",
   implementation: "Implementation, as the document states it",
@@ -22,7 +22,7 @@ export const reader = {
   download: "Download Markdown",
   prev: "Previous",
   next: "Next",
-  back: "Back to the catalog",
+  back: "Back to all WISPs",
   updated: "Updated",
   unassigned: "Planned · number to be defined",
   video: "Video lesson",

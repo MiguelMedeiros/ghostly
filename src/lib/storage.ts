@@ -91,6 +91,15 @@ export function saveSession(session: ChatSession): void {
   }
 }
 
+/** A session as stored, unparsed: to tell cheaply whether it changed. */
+export function storedSession(sessionId: string): string | null {
+  try {
+    return localStorage.getItem(getKey(sessionId));
+  } catch {
+    return null;
+  }
+}
+
 export function loadSession(sessionId: string): ChatSession | null {
   try {
     const raw = localStorage.getItem(getKey(sessionId));
@@ -111,23 +120,36 @@ export function addMessage(
   sessionId: string,
   message: ChatMessage,
 ): ChatSession | null {
+  return addMessages(sessionId, [message]);
+}
+
+/**
+ * `addMessage` for many at once: the session is read and written once, however many there are (a long history
+ * coming in from the peer). Ones it has, or that were deleted here, are skipped.
+ */
+export function addMessages(
+  sessionId: string,
+  messages: readonly ChatMessage[],
+): ChatSession | null {
   const session = loadSession(sessionId);
   if (!session) return null;
 
-  const exists = session.messages.some((m) => m.id === message.id);
-  if (exists) return session;
-  if (session.deletedIds?.includes(message.id)) return session;
+  const known = new Set([...session.messages.map((m) => m.id), ...(session.deletedIds ?? [])]);
+  const fresh = messages.filter((m) => !known.has(m.id) && known.add(m.id));
+  if (!fresh.length) return session;
 
-  session.messages.push(message);
+  session.messages.push(...fresh);
   session.messages.sort((a, b) => a.timestamp - b.timestamp);
   session.lastSyncAt = Date.now();
-  
-  if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
-    const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
-    const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
-    if (nick && session.nickSource !== "profile") session.nick = nick;
+
+  for (const message of fresh) {
+    if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
+      const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
+      const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
+      if (nick && session.nickSource !== "profile") session.nick = nick;
+    }
   }
-  
+
   saveSession(session);
   return session;
 }
@@ -207,8 +229,16 @@ export function setSessionPinned(sessionId: string, pinned: boolean): void {
   window.dispatchEvent(new Event("session-updated"));
 }
 
-export function listSessions(): ChatSession[] {
+/**
+ * Sessions already parsed, by key, with the text each was parsed from (`listSessions`). Whoever keeps one owns its
+ * sessions: one changed in place must be saved, or dropped from the cache.
+ */
+export type SessionCache = Map<string, { raw: string; session: ChatSession }>;
+
+/** Every chat, pinned first, then the latest first. With a cache, only a session whose stored text changed is parsed. */
+export function listSessions(cache?: SessionCache): ChatSession[] {
   const sessions: ChatSession[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i < localStorage.length; i++) {
     try {
       const key = localStorage.key(i);
@@ -216,7 +246,10 @@ export function listSessions(): ChatSession[] {
       if (!key?.startsWith(getPrefix()) || key.slice(getPrefix().length).includes("_")) continue;
       const raw = localStorage.getItem(key);
       if (!raw) continue;
-      const session = JSON.parse(raw) as ChatSession;
+      const hit = cache?.get(key);
+      const session = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
+      if (cache && hit?.session !== session) cache.set(key, { raw, session });
+      seen.add(key);
       if (session.id && session.mySeedB64 && session.peerPubKeyB64 && session.encKeyB64) {
         sessions.push(session);
       }
@@ -224,6 +257,7 @@ export function listSessions(): ChatSession[] {
       continue;
     }
   }
+  if (cache) for (const key of cache.keys()) if (!seen.has(key)) cache.delete(key);
   sessions.sort((a, b) => {
     const pinOrder = Number(isSessionPinned(b.id)) - Number(isSessionPinned(a.id));
     if (pinOrder) return pinOrder;

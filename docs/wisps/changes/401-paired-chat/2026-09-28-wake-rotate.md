@@ -1,0 +1,1 @@
+Wake-up push: the subscription is replaced (a new endpoint, VAPID key pair and tokens) when a chat whose contact held it is deleted or muted, so that contact can no longer wake the app. No wire change.

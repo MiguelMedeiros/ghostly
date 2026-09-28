@@ -9,6 +9,7 @@ import { PaymentCoordinator } from '../src/engine/paymentAdapters/coordinator';
 import { intentRepository } from '../src/engine/paymentAdapters/persistence';
 import {sealSeed} from '../src/engine/paymentAdapters/persistence';
 import {ArkWallet} from '../src/engine/paymentAdapters/arkWallet';
+import {walletKey} from '../src/engine/paymentAdapters/walletNetworks';
 import {STORES,transact} from '../src/shared/idb';
 import { ARK_REGTEST, note as arkNote } from '../../../e2e/support/ark-regtest/regtest.mjs';
 // covers-gated: wallet.ark.send, wallet.ark.backup, payments.chat.reconcile
@@ -67,15 +68,15 @@ test.skipIf(!enabled)('real regtest Ark transfer and read-only receipt reconcili
    await bob.dispose();
    const password='disposable backup password';
    const seed=await sealSeed(bobMnemonic,password);
-   await transact([STORES.settings],stores=>{stores[STORES.settings].put({config:bobConfig,seed},'arkWallet');});
+   await transact([STORES.settings],stores=>{stores[STORES.settings].put({config:bobConfig,seed},walletKey('arkWallet','testnet'));});
    const pending={...saved!,review:{...saved!.review,id:crypto.randomUUID(),state:'pending' as const}};
    await intentRepository.put(pending);
-   const owner=new ArkWallet(()=>{});await owner.start();await owner.setMode('testnet');
+   const owner=new ArkWallet('testnet',()=>{});await owner.start();
    const encrypted=await owner.exportBackup(password);
    expect(encrypted).not.toContain(bobMnemonic);
    // Isolated fake IndexedDB fixture only: simulate a new device's empty profile.
-   await transact([STORES.settings,STORES.intents],stores=>{stores[STORES.settings].delete('arkWallet');stores[STORES.intents].clear();});
-   const restoredOwner=new ArkWallet(()=>{});await restoredOwner.start();await restoredOwner.setMode('testnet');
+   await transact([STORES.settings,STORES.intents],stores=>{stores[STORES.settings].delete(walletKey('arkWallet','testnet'));stores[STORES.intents].clear();});
+   const restoredOwner=new ArkWallet('testnet',()=>{});await restoredOwner.start();
    await expect(restoredOwner.restoreBackup(encrypted,'wrong password')).rejects.toThrow('unlock');
    await restoredOwner.restoreBackup(encrypted,password);
    expect(restoredOwner.view.locked).toBe(true);

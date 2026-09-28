@@ -229,7 +229,16 @@ export interface GroupView {
   hubs?: { hub: boolean };
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
   community?: { hub: boolean; hubs: number; connected: number };
+  /** Private groups: the members typing now, in the order they started (WISP 9xx · Group Mesh § Typing). Never stored. */
+  typing?: GroupTypingView[];
+  /** Private groups: this side's wake-up tokens, one per member it shared its subscription with (the push worker's table). */
+  wakeTokens?: string[];
+  /** Private groups: its members were told not to wake this side while the group is muted (`setWakeMuted`). */
+  wakeMuted?: boolean;
 }
+
+/** A member typing in a group: `kind` when it is not plain typing, and a bot's status line, sanitized as in a 1:1 chat. */
+export interface GroupTypingView { key: string; kind?: Exclude<TypingKind, "typing">; status?: string }
 
 /** One item held in this device's storage for the contact, or on its way there. */
 export interface HeldEntry {
@@ -680,6 +689,9 @@ export interface StoredMessage {
   forwarded?: number;
 }
 
+/** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
+export interface MessagePage { messages: StoredMessage[]; more: boolean }
+
 /** One person's reaction to a message: the emoji ("" once taken back), their number (the highest wins), when it came. */
 export interface MessageReaction { e: string; n: number; at: number }
 
@@ -815,6 +827,8 @@ export interface MessageDetailsView {
     state?: string;
     stage?: string;
     transferred?: number;
+    /** Why a transfer that ended without the file did. */
+    error?: string;
     /** files/3: bytes confirmed durably, where a restart resumes. */
     confirmed?: number;
     /** files/3: when the offer was made. */
@@ -973,6 +987,23 @@ export interface Settings {
    * contact whose app offers `wake/1`, so it can wake this app while it is closed. Absent: not woken.
    */
   wake?: WakeSubscription;
+  /**
+   * A contact who held `wake` can no longer be told to forget it (its chat was deleted, or muted: a contact may ignore
+   * `w: null`). The app replaces the subscription (a new endpoint and VAPID key pair, new tokens for the others) and
+   * `setWakeSubscription` clears this. Set by the engine only.
+   */
+  wakeRotate?: boolean;
+  /**
+   * Private groups muted here (WISP 9xx · Group Mesh § Wake-up push): their members are told to forget this profile's
+   * subscription, as a muted chat's contact is. Only through `setWakeMuted` with the group's `group:<id>`.
+   */
+  wakeMutedGroups?: string[];
+  /**
+   * Private groups → members that were given a token on an edge a group on hubs later dropped: they still hold the
+   * subscription with no edge to close, so their leaving the group (or this profile leaving it, or muting it) replaces
+   * it. Cleared with every new subscription. Set by the engine only.
+   */
+  wakeHeldBy?: Record<string, string[]>;
   /**
    * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.

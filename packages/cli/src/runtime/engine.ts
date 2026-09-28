@@ -8,6 +8,7 @@ import { loadCallStack } from "../calls/media";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
+import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import type { ProfilePaths } from "../profiles";
 
@@ -107,7 +108,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   // `GHOSTLY_LINK_TRACE=<file>`: each step of each chat's way to live, one JSON line (packages/core/src/linkTrace.ts),
   // as the Desktop writes to its log. For measuring, not needed to run.
   const trace = process.env.GHOSTLY_LINK_TRACE;
-  if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n"));
+  if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
   const store = await openPersistentIndexedDb(paths.db);
   const webrtc = await installWebRtc();
   // Voice calls (WISP 11xx § Calls): offered to contacts (calls/1) only where their media can run.
@@ -143,6 +144,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     // A daemon stays online: a hub of the large private groups it is in (WISP 9xx · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
     staysOnline: process.env.GHOSTLY_HUB !== "0",
     localFetch: nodeLocalFetch,
+    // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
+    pushSend: (request) => nodePushSend(request),
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),

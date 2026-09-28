@@ -106,7 +106,9 @@ describe("the Forward to… picker", () => {
     expect(screen.getByTestId("forward-chosen")).toHaveTextContent("Ana");
     await user.click(screen.getByTestId("forward-send"));
     expect(fakeEngine.callsTo("forwardMessages")).toEqual([{ linkId: "link-bo", messageIds: ["m1"], to: ["link-ana"] }]);
-    expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat-ana");
+    // The chat opens once the engine answered, and the router renders a navigation as a transition, which React may
+    // split over several tasks on a busy machine: waited for, not read at once.
+    expect(await screen.findByTestId("where")).toHaveTextContent("/chat/chat-ana");
   });
 
   it("takes at most five, and says what a chat refused", async () => {
