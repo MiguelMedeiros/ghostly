@@ -84,11 +84,12 @@ describe.skipIf(!reachable)("a Fedimint wallet on Node (regtest)", { timeout: 30
     expect(after).toBeLessThanOrEqual(funded - 500);
     expect(after).toBeGreaterThan(funded - 520);
 
-    // A restart opens the same database: the balance is still there.
+    // Without the daemon, a one-shot command opens the same database (it waits for the federation) and reads the
+    // same balance, then exits with the client's worker thread closed.
     await daemon.stop();
-    daemon = new Running(["--home", dir, "daemon"]);
-    await daemon.waitFor((l) => l.daemon === "ready");
-    expect(await eventually(() => sats("fedimint"), (b) => b === after, 30_000)).toBe(after);
+    expect(await sats("fedimint")).toBe(after);
     expect(existsSync(join(dir, "profiles/default/fedimint", files[0]))).toBe(true);
+    // Receiving works one-shot too: an invoice from the card.
+    expect(ok(await as("wallet", "receive", "100", "--card", card.card as string)).invoice).toMatch(/^lnbcrt1u/);
   });
 });

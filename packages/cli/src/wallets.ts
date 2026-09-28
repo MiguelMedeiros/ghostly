@@ -34,6 +34,17 @@ function netView(s: EngineState, n: WalletNetwork): NetworkWalletsView | undefin
   return s.wallet.networks?.[n];
 }
 
+/**
+ * The engine opens the federations joined before in the background as it starts. A daemon has long done so when a call
+ * comes; a one-shot command waits for them (at most 30 s) before its balances are read or money moves through one.
+ */
+async function federationsOpen(ctx: ApiContext, ms = 30_000): Promise<void> {
+  if (ctx.mode !== "one-shot") return;
+  const until = Date.now() + ms;
+  const connecting = () => NETWORKS.some((n) => (netView(state(ctx), n)?.fedimint?.federations ?? []).some((f) => f.status === "connecting"));
+  while (connecting() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 250));
+}
+
 /** One wallet of the deck with its balance, in its own unit. Never a key, a phrase or a token. */
 export function walletJson(instance: WalletInstanceView, s: EngineState) {
   const view = netView(s, instance.network);
@@ -84,6 +95,7 @@ const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.tri
 
 export const WALLET_METHODS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
+    await federationsOpen(ctx);
     const s = state(ctx);
     const only = params.network === undefined ? null : network(params);
     const wallets = (s.wallet.wallets ?? []).filter((w) => !only || w.network === only).map((w) => walletJson(w, s));
@@ -100,6 +112,8 @@ export const WALLET_METHODS: Record<string, Method> = {
     const n = network(params);
     const gap = NODE_GAPS[type];
     if (gap) throw new CliError("unavailable", gap);
+    // A Fedimint Lightning card needs its federation open.
+    await federationsOpen(ctx);
     const values: Record<string, string> = {};
     const raw = params.values ?? {};
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.values(raw).some((v) => typeof v !== "string")) throw new CliError("bad_request", "values must be an object of strings");
@@ -134,6 +148,7 @@ export const WALLET_METHODS: Record<string, Method> = {
   async "wallet.history"(ctx, params) {
     const n = network(params);
     const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+    await federationsOpen(ctx);
     return { network: n, history: (netView(state(ctx), n)?.history ?? []).slice(0, limit) };
   },
 
@@ -141,6 +156,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     const amount = num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
     const n = network(params);
+    await federationsOpen(ctx);
     const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(str(params, "card") ? { card: str(params, "card") } : {}) });
     return { network: n, amount, invoice: invoice.invoice, expiresAt: invoice.expiresAt, paymentHash: invoice.paymentHash ?? null, source: invoice.source };
   },
@@ -194,7 +210,8 @@ export const WALLET_METHODS: Record<string, Method> = {
       invoice = got.invoice; note = got.note;
     } else throw new CliError("bad_request", "Not a Lightning invoice, Lightning address or LNURL");
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
-    const quote = await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
+    await federationsOpen(ctx);
+    const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params) });
@@ -208,6 +225,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     if (!amount) throw new CliError("bad_request", "amount is required");
     const n = network(params);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
+    await federationsOpen(ctx);
     const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: Date.now(), network: n, ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...real(params) });
     return { chat: link.id, paymentId };
   },
@@ -219,6 +237,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     if (!amount) throw new CliError("bad_request", "amount is required");
     const method = params.method === undefined ? undefined : oneOf(params, "method", METHODS, "cashu");
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
+    await federationsOpen(ctx);
     const { paymentId } = await node(ctx).requestPayment({
       linkId: link.id, amount, timestamp: Date.now(), network: network(params),
       ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
@@ -236,6 +255,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     const n = paymentNetwork(request);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This request is for real money (Mainnet): pass --confirm-real to confirm this payment", { network: n });
     const via = params.via === undefined ? undefined : oneOf(params, "via", ["lightning"] as const, "lightning");
+    await federationsOpen(ctx);
     await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}), ...real(params) });
     return paymentJson(state(ctx).payments[paymentId] ?? request);
   },
