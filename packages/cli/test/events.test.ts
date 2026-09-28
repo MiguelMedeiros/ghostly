@@ -59,6 +59,30 @@ describe("the event stream", () => {
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
   });
 
+  it("reports the same events from only what changed as from the whole history, a deletion included", async () => {
+    const run = async (journal: string, changesOnly: boolean) => {
+      const { h, events } = await hub(journal);
+      h.baseline(state([link("c1")], [{ id: "g1", members: [] }]), new Map([["c1", [message("c1", "old")]], ["group:g1", [message("group:g1", "x", { member: "k1" })]]]));
+      const whole = new Map([["c1", [message("c1", "old")]], ["group:g1", [message("group:g1", "x", { member: "k1" })]]]);
+      const change = (chat: string, rows: StoredMessage[], deleted: string[] = []) => {
+        const list = [...whole.get(chat)!.filter((m) => !deleted.includes(m.id) && !rows.some((r) => r.id === m.id)), ...rows];
+        whole.set(chat, list);
+        h.sink.post(changesOnly ? { kind: "message-changes", linkId: chat, messages: rows, deleted } : { kind: "messages", linkId: chat, messages: list });
+      };
+      change("c1", [message("c1", "me_1", { sender: "me", delivery: "sending" })]);
+      change("c1", [message("c1", "me_1", { sender: "me", delivery: "delivered", edit: { seq: 1, at: 2, history: [] } })]);
+      change("c1", [message("c1", "new", { reactions: { peer: { e: "👍", n: 1, at: 3 } } })]);
+      change("c1", [], ["old"]);
+      change("group:g1", [message("group:g1", "x", { member: "k1", text: "x2", edit: { seq: 1, at: 4, history: [] } })]);
+      change("group:g1", [message("group:g1", "y", { member: "k1" })], ["x"]);
+      return events.map((e) => e.id);
+    };
+    const whole = await run("whole.jsonl", false);
+    expect(whole).toContain("message.deleted:c1:old");
+    expect(whole).toContain("group.deleted:g1:x");
+    expect(await run("changes.jsonl", true)).toEqual(whole);
+  });
+
   it("says when a contact starts and stops typing, once per change", async () => {
     const { h, events } = await hub("typing.jsonl");
     h.baseline(state([link("c1")]), new Map());

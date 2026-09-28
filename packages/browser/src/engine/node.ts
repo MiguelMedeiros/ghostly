@@ -137,6 +137,7 @@ import type {
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
 import type { WakeSubscription } from "../shared/types";
+import type { MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
 import { canEdit, takesPeerEdit, withEdit } from "../shared/edits";
 import { EditBuffer, EditQueue } from "./edits";
@@ -355,6 +356,8 @@ export interface NodeEvents {
   onAttention?(event: AttentionEvent): void;
   onState(state: EngineState): void;
   onMessages(linkId: string, messages: StoredMessage[]): void;
+  /** Only what changed in a chat's or group's history; without it, `onMessages` gets the whole history on each change. */
+  onMessageChanges?(linkId: string, changes: MessageChanges): void;
   onCallSignal(linkId: string, signal: string): void;
 }
 
@@ -642,11 +645,10 @@ export class GhostlyNode implements EngineImplementation {
     delivery: async (linkId, messageId, state, error) => {
       await db.updateDelivery(linkId, messageId, state, error);
       await this.noteHold(linkId, messageId, state, error);
-      const messages = await db.getMessages(linkId);
-      const message = messages.find((m) => m.id === messageId);
+      const message = await db.getMessage(linkId, messageId);
       if (message?.file) this.transfers.set(message.file.id, state === "failed" ? { state: "failed", transferred: 0, size: message.file.size, error } : { state: "done", transferred: message.file.size, size: message.file.size });
       if (message && state !== "failed") this.messageFeedback("sent", message);
-      this.events.onMessages(linkId, messages);
+      await this.messagesChanged(linkId, [messageId]);
       this.emitState();
     },
     text: async (linkId, messageId) => (await db.getMessages(linkId)).find((m) => m.id === messageId)?.text ?? null,
@@ -826,10 +828,11 @@ export class GhostlyNode implements EngineImplementation {
   }
   private readonly reactions = new Reactions({
     messages: chat => db.getMessages(chat),
+    message: (chat, id) => db.getMessage(chat, id),
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
-    changed: async (chat, note) => {
+    changed: async (chat, id, note) => {
       if (note) this.reactionNotes.set(chat, note);
-      this.events.onMessages(chat, await db.getMessages(chat));
+      await this.messagesChanged(chat, [id]);
       this.emitState();
     },
     // Someone reacted to a message of mine: a quiet notice, never a message's sound or an unread count.
@@ -913,8 +916,9 @@ export class GhostlyNode implements EngineImplementation {
    */
   private readonly groupEdits = new GroupEdits({
     messages: chat => db.getMessages(chat),
+    message: (chat, id) => db.getMessage(chat, id),
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
-    changed: async chat => { this.events.onMessages(chat, await db.getMessages(chat)); },
+    changed: (chat, id) => this.messagesChanged(chat, [id]),
     membership: groupId => {
       const membership = this.membership(groupId);
       return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!this.groups.views().find(g => g.id === groupId)?.isAdmin };
@@ -961,7 +965,7 @@ export class GhostlyNode implements EngineImplementation {
     messages: groupId => db.getMessages(`group:${groupId}`),
     putMessage: async message => {
       await db.putMessage(message);
-      this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
+      await this.messagesChanged(message.linkId, [message.id]);
       this.emitState();
     },
   });
@@ -1929,8 +1933,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live.stored.profile) return refuse("Editing needs a current chat; this compatibility chat cannot edit.");
     if (live.stored.group) return refuse("No such chat");
     if (typeof params.messageId !== "string" || typeof params.text !== "string") return refuse("No message to edit");
-    const messages = await db.getMessages(linkId);
-    const message = messages.find(m => m.id === params.messageId) ?? messages.find(m => m.sender === "me" && m.wireId === params.messageId);
+    const message = await db.getMessage(linkId, params.messageId) ?? (await db.getMessages(linkId)).find(m => m.sender === "me" && m.wireId === params.messageId);
     if (!message || !canEdit(message)) return refuse("Only your own text messages can be edited");
     const text = params.text.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
@@ -1943,7 +1946,7 @@ export class GhostlyNode implements EngineImplementation {
     if (seq > MAX_EDITS_PER_MESSAGE) return refuse(`This message was edited ${MAX_EDITS_PER_MESSAGE} times, the most one takes.`);
     const edited = withEdit(message, { seq, at: Date.now(), text, preview, pending: true });
     await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview }));
-    this.events.onMessages(linkId, await db.getMessages(linkId));
+    await this.messagesChanged(linkId, [message.id]);
     void this.editsFor(linkId).flush().catch(() => {});
     return { error: null, messageId: message.id };
   }
@@ -1958,7 +1961,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
     if (live.stored.deletedIds?.includes(id)) return true;
-    const message = (await db.getMessages(linkId)).find(m => m.id === id);
+    const message = await db.getMessage(linkId, id);
     if (!message) { this.editBuffer.hold(linkId, edit); return false; }
     await this.applyPeerEdit(linkId, message, edit);
     return true;
@@ -1972,7 +1975,7 @@ export class GhostlyNode implements EngineImplementation {
       const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, preview: edit.pv });
       return { text: next.text, edit: next.edit, preview: next.preview };
     });
-    if (updated) this.events.onMessages(linkId, await db.getMessages(linkId));
+    if (updated) await this.messagesChanged(linkId, [message.id]);
   }
 
   /** The contact's capability record says its app takes edits on the DHT floor too (WISP 403 § Edits). */
@@ -2004,7 +2007,7 @@ export class GhostlyNode implements EngineImplementation {
             const { pending: _done, ...edit } = current.edit;
             return { edit };
           });
-          if (updated) this.events.onMessages(linkId, await db.getMessages(linkId));
+          if (updated) await this.messagesChanged(linkId, [messageId]);
         },
       });
       this.editQueues.set(linkId, queue);
@@ -2021,7 +2024,7 @@ export class GhostlyNode implements EngineImplementation {
       if (await this.hold.retry(linkId, messageId)) return;
       if (!this.holdingFor(live)) throw new Error("Held messages need S3 storage (Profile → Backups) and a contact that allows them.");
       await db.updateDelivery(linkId, messageId, "sending");
-      this.events.onMessages(linkId, await db.getMessages(linkId));
+      await this.messagesChanged(linkId, [messageId]);
       const item = message.file ? { kind: "file" as const, id: message.file.id.slice(`${linkId}-out-`.length), ref: message.file.id, bytes: message.file.size }
         : message.paymentId ? { kind: "pay-req" as const, id: message.paymentId, ref: message.paymentId, bytes: 1024 }
         : { kind: "text" as const, id: message.wireId ?? messageId.replace(/^me_/, ""), bytes: new TextEncoder().encode(message.text).length };
@@ -2055,12 +2058,11 @@ export class GhostlyNode implements EngineImplementation {
         update: async (id, delivery, error, extra) => {
           await db.updateDelivery(linkId, id, delivery, error, extra);
           if (delivery === "delivered") await this.noteDetails(linkId, id, details => ({ ...details, receiptAt: Date.now() }));
-          const messages = await db.getMessages(linkId);
           if (delivery === "sent" || delivery === "delivered") {
-            const message = messages.find(item => item.id === id);
+            const message = await db.getMessage(linkId, id);
             if (message) this.messageFeedback("sent", message);
           }
-          this.events.onMessages(linkId, messages);
+          await this.messagesChanged(linkId, [id]);
         },
       }, async message => {
         const live = this.links.get(linkId), link = live?.link;
@@ -2094,7 +2096,7 @@ export class GhostlyNode implements EngineImplementation {
           const live = this.links.get(linkId), bytes = new TextEncoder().encode(message.text).length;
           if (!live || !this.holdingFor(live) || !message.wireId || message.file || message.paymentId || bytes > HOLD_LIMITS.maxTextBytes) return false;
           await db.updateDelivery(linkId, message.id, "sending", undefined, { via: "hold", resendUntil: undefined });
-          this.events.onMessages(linkId, await db.getMessages(linkId));
+          await this.messagesChanged(linkId, [message.id]);
           void this.hold.hold(linkId, { kind: "text", id: message.wireId, messageId: message.id, bytes, timestamp: message.timestamp }).catch(() => {});
           return true;
         },
@@ -2197,7 +2199,7 @@ export class GhostlyNode implements EngineImplementation {
     void this.hold.forget(linkId, messageId).catch(() => {});
 
     void (async () => {
-      const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+      const message = await db.getMessage(linkId, messageId);
       // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
       if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
       if (message?.file) {
@@ -2212,9 +2214,8 @@ export class GhostlyNode implements EngineImplementation {
         this.transfers.delete(message.file.id);
       }
       await db.deleteMessage(linkId, messageId);
-      const messages = await db.getMessages(linkId);
-      live.lastMessageAt = messages[messages.length - 1]?.timestamp ?? 0;
-      this.events.onMessages(linkId, messages);
+      live.lastMessageAt = (await db.getMessagePage(linkId, { limit: 1 })).messages[0]?.timestamp ?? 0;
+      await this.messagesChanged(linkId, [messageId]);
       this.emitState();
     })();
   }
@@ -2376,7 +2377,7 @@ export class GhostlyNode implements EngineImplementation {
         } else await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive payment requests.");
       }
     }
-    if (waiting.length) this.events.onMessages(linkId, await db.getMessages(linkId));
+    if (waiting.length) await this.messagesChanged(linkId, waiting.map(m => m.id));
   }
 
   private receiveFile(
@@ -2425,7 +2426,7 @@ export class GhostlyNode implements EngineImplementation {
       let id = holder === undefined || holder === wire.id ? first : own;
       if (id === first && (holder === wire.id || await db.hasMessage(linkId, first))) {
         const again = await db.patchMessage(linkId, first, (m) => m.sender === "peer" && m.wireId === wire.id && m.file ? { file: { ...m.file, id: file.id } } : null);
-        if (again) { this.events.onMessages(linkId, await db.getMessages(linkId)); return first; }
+        if (again) { await this.messagesChanged(linkId, [first]); return first; }
         if (holder !== wire.id) id = own;
       }
       await storeFileMessage(id);
@@ -4335,8 +4336,21 @@ export class GhostlyNode implements EngineImplementation {
     if (!Object.keys(added).length) return;
     const patched = await db.patchMessage(message.linkId, message.id, stored => stored.member === message.member && stored.sender === message.sender ? added : null);
     if (!patched) return;
-    this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
+    await this.messagesChanged(message.linkId, [message.id]);
     this.emitState();
+  }
+
+  /**
+   * The pages hear what changed in a chat or group: these rows as stored now (one not there any more is deleted), never
+   * the whole history. A host that takes whole histories only (no `onMessageChanges`) gets the whole history, as before.
+   */
+  private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
+    const onChanges = this.events.onMessageChanges;
+    if (!onChanges) return this.events.onMessages(linkId, await db.getMessages(linkId));
+    const unique = [...new Set(ids)];
+    if (!unique.length) return;
+    const rows = await Promise.all(unique.map(id => db.getMessage(linkId, id)));
+    onChanges.call(this.events, linkId, { messages: rows.filter((row): row is StoredMessage => !!row), deleted: unique.filter((_, i) => !rows[i]) });
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> {
@@ -4370,7 +4384,7 @@ export class GhostlyNode implements EngineImplementation {
       await this.applyPeerEdit(message.linkId, message, early);
       live?.link?.confirmEdit(early.id, early.e);
     }
-    this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
+    await this.messagesChanged(message.linkId, [message.id]);
     this.emitState();
     // Reactions that came before it are shown now, and a member's edit.
     await this.reactions.stored(message);
