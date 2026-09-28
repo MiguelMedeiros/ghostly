@@ -12,5 +12,12 @@
     "leave": "Salir del grupo",
     "members": "Miembros…",
     "rotate": "Renovar claves"
+  },
+  "rename": {
+    "action": "Renombrar",
+    "cancel": "Cancelar",
+    "hint": "Todos los miembros ven el nuevo nombre. Las apps antiguas mantienen el nombre con el que entraron.",
+    "label": "Nombre del grupo",
+    "save": "Guardar"
   }
 }

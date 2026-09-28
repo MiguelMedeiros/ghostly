@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS } from "@ghostly/core";
+import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
@@ -38,6 +38,13 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
     setBusy(key); setError("");
     try { await action(); } catch (e) { setError(e instanceof Error ? e.message : "That did not work"); } finally { setBusy(null); }
   };
+  // The name being typed, while the admin renames the group; null otherwise. The engine cleans it and says what it refuses.
+  const [naming, setNaming] = useState<string | null>(null);
+  const rename = async () => {
+    const name = naming ?? "";
+    if (name.trim() === live.name) { setNaming(null); return; }
+    await run("rename", async () => { await engine.call("renameGroup", { groupId: live.id, name }); setNaming(null); });
+  };
   // Contacts: paired chats, minus members and pending invitations. Those without groups are shown, and say why.
   const contacts = (state?.links ?? []).filter(l => l.profile && !live.memberLinks[l.id]);
   const invited = new Set(live.invited);
@@ -52,10 +59,21 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
       <div className="flex min-w-0 items-center gap-3">
         <GroupAvatar picture={live.picture} size={56} testId="group-members-avatar" className="bg-accent/15" />
         <div className="min-w-0">
-          <h2 id={`${id}-title`} className="truncate text-base font-semibold">{live.name}</h2>
+          {naming === null ? <h2 id={`${id}-title`} data-testid="group-members-name" className="truncate text-base font-semibold">{live.name}</h2>
+            : <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void rename(); }}>
+              <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
+              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} value={naming} maxLength={MAX_GROUP_NAME_LENGTH} disabled={busy !== null}
+                onChange={e => setNaming(e.target.value)} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setNaming(null); } }}
+                className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none" />
+              <button type="submit" data-testid="group-rename-save" disabled={busy !== null || !naming.trim()}
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.rename.save")}</button>
+              <button type="button" data-testid="group-rename-cancel" onClick={() => setNaming(null)} className="text-xs text-text-muted hover:text-text-primary">{t("group.rename.cancel")}</button>
+            </form>}
           <p className="text-xs text-text-muted">{live.members.length} member{live.members.length === 1 ? "" : "s"}{live.epoch !== undefined && <> · epoch {live.epoch}</>}{live.status && live.status !== "active" && <> · {live.status}</>}</p>
-          {/* Only the admin changes the picture: cropped square and redrawn small here, before anything leaves the app. */}
+          {/* Only the admin changes the name and the picture: cropped square and redrawn small here, before anything leaves the app. */}
           {live.isAdmin && live.status === "active" && <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {naming === null && <button type="button" data-testid="group-rename" disabled={busy !== null} title={t("group.rename.hint")} onClick={() => setNaming(live.name)}
+              className="text-xs font-medium text-accent hover:underline disabled:opacity-40">{t("group.rename.action")}</button>}
             <label className={`cursor-pointer text-xs font-medium text-accent hover:underline ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
               {live.picture ? "Change picture" : "Add a picture"}
               <input data-testid="group-picture-input" type="file" accept="image/*" className="sr-only" disabled={busy !== null}
