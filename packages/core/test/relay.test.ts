@@ -80,6 +80,31 @@ describe("relay transport", () => {
     }
   });
 
+  it("a read the budget holds back answers what this client published since its last read, not the older packet read", async () => {
+    // A community hub reads its beacon, writes its own entry into it, and reads it again while the budget is spent
+    // (another link signaling): its own entry must not look as old as the one it replaced, or the hub stops
+    // counting itself at the door (doorHubs) until its next write, and a knock waits that long.
+    const stored = new Map<string, Uint8Array>();
+    const calls: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const key = new URL(String(input)).pathname.slice(1);
+      calls.push(init?.method ?? "GET");
+      if (init?.method === "PUT") { stored.set(key, new Uint8Array(await new Response(init.body).arrayBuffer())); return new Response(null, { status: 204 }); }
+      const bytes = stored.get(key);
+      return bytes ? new Response(bytes as BodyInit) : new Response(null, { status: 404 });
+    }) as typeof fetch;
+    stored.set(id.pubKeyZ32, packet(1000n));
+    const relay = new RelayTransport({ freshReadMs: 0, requestsPerMinute: 2, relays: ["https://a.test"], fetch: fetchFn });
+    expect((await relay.resolve(id.pubKeyZ32, { background: true, group: true }))?.timestampMicros).toBe(1000n);
+    await relay.publish(id, [{ label: "_ts", value: "mine" }], { background: true, group: true });
+    const mine = parseRelayPayload(id.pubKeyZ32, stored.get(id.pubKeyZ32)!);
+    // The minute's two requests are spent: no request, and the answer is the packet just published.
+    const held = await relay.resolve(id.pubKeyZ32, { background: true, group: true });
+    expect(calls).toEqual(["GET", "PUT"]);
+    expect(held?.timestampMicros).toBe(mine.timestampMicros);
+    expect(held?.records.find((r) => r.label === "_ts")?.value).toBe("mine");
+  });
+
   it("backs off from a relay that rate limits and uses the other one", async () => {
     const { relay, calls } = transport({
       "a.test": () => new Response(null, { status: 429, headers: { "retry-after": "30" } }),
