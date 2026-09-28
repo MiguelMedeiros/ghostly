@@ -23,7 +23,17 @@ const HEADERS: [&str; 6] = [
     "content-type",
 ];
 
-/// Where a push may go: https, no credentials, a host name that is not local.
+/// The push services a browser subscribes with (Google, Apple, Mozilla, Microsoft): the same list as
+/// `PUSH_SERVICE_HOSTS` in packages/core/src/webPush.ts and the push relay's.
+fn is_push_service(domain: &str) -> bool {
+    let under = |base: &str| domain == base || domain.ends_with(&format!(".{base}"));
+    domain == "fcm.googleapis.com"
+        || under("push.apple.com")
+        || under("push.services.mozilla.com")
+        || under("notify.windows.com")
+}
+
+/// Where a push may go: https, no credentials, the default port, a push service's host name.
 pub fn check_endpoint(url: &reqwest::Url) -> Result<(), String> {
     if url.scheme() != "https" {
         return Err("The push endpoint is not https".into());
@@ -31,19 +41,12 @@ pub fn check_endpoint(url: &reqwest::Url) -> Result<(), String> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err("The push endpoint carries credentials".into());
     }
+    if url.port().is_some() {
+        return Err("The push endpoint names a port".into());
+    }
     match url.host() {
-        Some(url::Host::Domain(domain)) => {
-            let domain = domain.to_ascii_lowercase();
-            if !domain.contains('.')
-                || domain == "localhost"
-                || domain.ends_with(".localhost")
-                || domain.ends_with(".local")
-            {
-                return Err("The push endpoint is not a public host name".into());
-            }
-            Ok(())
-        }
-        _ => Err("The push endpoint is not a public host name".into()),
+        Some(url::Host::Domain(domain)) if is_push_service(&domain.to_ascii_lowercase()) => Ok(()),
+        _ => Err("The push endpoint is not a push service".into()),
     }
 }
 
@@ -116,6 +119,7 @@ mod tests {
             "https://fcm.googleapis.com/fcm/send/x",
             "https://web.push.apple.com/QAB",
             "https://updates.push.services.mozilla.com/wpush/v2/x",
+            "https://wns2-par02p.notify.windows.com/w/x",
         ] {
             assert!(check_endpoint(&url(good)).is_ok(), "{good}");
         }
@@ -127,6 +131,10 @@ mod tests {
             "https://printer.local/x",
             "https://intranet/x",
             "https://u:p@push.example.com/x",
+            "https://push.example.com/x",
+            "https://fcm.googleapis.com.evil.example/x",
+            "https://evilpush.apple.com.example/x",
+            "https://fcm.googleapis.com:8443/x",
         ] {
             assert!(check_endpoint(&url(bad)).is_err(), "{bad}");
         }

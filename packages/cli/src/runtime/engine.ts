@@ -8,6 +8,7 @@ import { loadCallStack } from "../calls/media";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
+import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import type { ProfilePaths } from "../profiles";
 
@@ -143,6 +144,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     // A daemon stays online: a hub of the large private groups it is in (WISP 9xx · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
     staysOnline: process.env.GHOSTLY_HUB !== "0",
     localFetch: nodeLocalFetch,
+    // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
+    pushSend: (request) => nodePushSend(request),
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),

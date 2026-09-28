@@ -67,18 +67,23 @@ export function vapidKeysMatch(keys: VapidKeys): boolean {
 }
 
 /**
- * Only https push services, on a host name (never an address), without credentials. The endpoint came from
- * a contact: it must not turn this app into a way to post to the contact's choice of local or private address.
+ * The push services a browser subscribes with: Google (Chrome, Edge on Android, Brave, Opera), Apple (Safari), Mozilla
+ * (Firefox), Microsoft (Edge on Windows). The same list as the push relay's (native-transports/push-relay/relay.mjs).
+ */
+export const PUSH_SERVICE_HOSTS: readonly RegExp[] = [/^fcm\.googleapis\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)notify\.windows\.com$/];
+
+/**
+ * Only https, on one of the push services' host names and their default port, without credentials. The endpoint came
+ * from a contact: it must not turn this app into a way to post to the contact's choice of address, local or not.
  */
 export function checkPushEndpoint(endpoint: string): URL {
   let url: URL;
   try { url = new URL(endpoint); } catch { throw new WebPushError("The push endpoint is not a URL"); }
   if (url.protocol !== "https:") throw new WebPushError("The push endpoint is not https");
   if (url.username || url.password) throw new WebPushError("The push endpoint carries credentials");
+  if (url.port) throw new WebPushError("The push endpoint names a port");
   const host = url.hostname.toLowerCase();
-  if (!host.includes(".") || /^[\d.]+$/.test(host) || host.startsWith("[") || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
-    throw new WebPushError("The push endpoint is not a public host name");
-  }
+  if (!PUSH_SERVICE_HOSTS.some(pattern => pattern.test(host))) throw new WebPushError("The push endpoint is not a push service");
   if (endpoint.length > 2048) throw new WebPushError("The push endpoint is too long");
   return url;
 }

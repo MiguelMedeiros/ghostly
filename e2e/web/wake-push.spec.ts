@@ -14,7 +14,7 @@ import { chat, connect, expect, link, say, test, type Peer } from "../support/fi
 const deployed = !!process.env.E2E_WEB_URL;
 // Chromium's headless shell refuses notifications outright; the full browser in its headless mode shows them.
 test.use({ channel: "chromium" });
-const ENDPOINT = "https://push.example.com/bo";
+const ENDPOINT = "https://fcm.googleapis.com/fcm/send/bo";
 
 /** Bo's browser subscription: the test keeps its private halves, to read what arrives. */
 function subscriptionKeys() {
@@ -55,7 +55,7 @@ function readPush(request: Request, keys: { secret: Uint8Array; auth: Uint8Array
   const [, token, key] = headers.authorization!.match(/^vapid t=([^,]+), k=(.+)$/)!;
   const [head, claims, signature] = token!.split(".");
   expect(p256.verify(fromBase64Url(signature!), utf8Encode(`${head}.${claims}`), fromBase64Url(key!))).toBe(true);
-  expect(JSON.parse(utf8Decode(fromBase64Url(claims!))).aud).toBe("https://push.example.com");
+  expect(JSON.parse(utf8Decode(fromBase64Url(claims!))).aud).toBe("https://fcm.googleapis.com");
   expect(headers["content-encoding"]).toBe("aes128gcm");
   return utf8Decode(decryptPushPayload(new Uint8Array(request.postDataBuffer()!), keys.secret, keys.auth));
 }
@@ -99,7 +99,7 @@ const anaHasTarget = (page: Page) => page.evaluate(() => new Promise<boolean>((r
   const open = indexedDB.open("ghostly");
   open.onsuccess = () => {
     const all = open.result.transaction("links").objectStore("links").getAll();
-    all.onsuccess = () => { resolve((all.result as { peerWake?: { endpoint: string } }[]).some((l) => l.peerWake?.endpoint === "https://push.example.com/bo")); open.result.close(); };
+    all.onsuccess = () => { resolve((all.result as { peerWake?: { endpoint: string } }[]).some((l) => l.peerWake?.endpoint === "https://fcm.googleapis.com/fcm/send/bo")); open.result.close(); };
   };
   open.onerror = () => resolve(false);
 }));
