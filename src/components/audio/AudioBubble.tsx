@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { formatFileSize, formatVideoDuration, safeBlobType, sanitizeFileName } from "@ghostly/core";
+import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n } from "../../contexts/I18nContext";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
@@ -8,6 +8,7 @@ import { downloadFile } from "../../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
+import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { audioFormat, canPlayAudio } from "../../lib/videoPlayer";
 import { applyVoiceRate, claimPlayback, onVoiceRate, registerVoicePlayer, releasePlayback, voiceRate } from "../../lib/voicePlayback";
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
@@ -47,6 +48,10 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
   useChosenSpeaker(audioRef, src);
   const playRef = useRef<HTMLButtonElement>(null);
   const srcRef = useRef<string | null>(null);
+  /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
+  const sourceRef = useRef<StoredMedia | null>(null);
+  /** A stream the player refused was tried again from the file's bytes, once. */
+  const fellBack = useRef(false);
   const resumeAt = useRef(0);
   /** What the system's media controls call (lock screen, media keys): set on every render, below. */
   const mediaRef = useRef<MediaSessionPlayer | null>(null);
@@ -62,7 +67,8 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
     if (audio) { resumeAt.current = audio.ended ? 0 : audio.currentTime; audio.pause(); }
     releasePlayback(file.id);
     releaseMediaSession(file.id);
-    if (srcRef.current) URL.revokeObjectURL(srcRef.current);
+    sourceRef.current?.release();
+    sourceRef.current = null;
     srcRef.current = null;
     setSrc(null);
     const next: PlayState = resumeAt.current > 0 ? "paused" : "idle";
@@ -80,18 +86,32 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
     }
     setProblem(null);
     setPlayState("loading");
-    const blob = await platform.getFile(file.id).catch(() => null);
-    if (!blob) {
+    // Desktop streams its files from Rust, in ranges (a large one plays too); elsewhere the bytes come as a Blob.
+    const source = await openStoredMedia(platform, file.id, file.mime, { bytes: !ready || fellBack.current });
+    if (!source) {
       releasePlayback(file.id);
       setPlayState("idle");
       setProblem(!ready ? "not-yet" : platform.saveFile ? "too-large" : "missing");
       return;
     }
-    const type = safeBlobType(file.mime);
-    const url = URL.createObjectURL(blob.type === type ? blob : blob.slice(0, blob.size, type));
-    srcRef.current = url;
-    setSrc(url);
+    sourceRef.current = source;
+    srcRef.current = source.url;
+    setSrc(source.url);
   }, [platform, state, file.id, file.mime, ready, setPlayState, setProblem]);
+
+  /** The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. */
+  const refused = () => {
+    const retry = sourceRef.current?.streamed && !fellBack.current;
+    const at = audioRef.current?.currentTime ?? 0;
+    unload();
+    setPlayState("idle");
+    if (!retry) { setProblem("unsupported"); return; }
+    fellBack.current = true;
+    resumeAt.current = at;
+    void play();
+  };
+  const refusedRef = useRef(refused);
+  refusedRef.current = refused;
 
   // The source is set: from where it was, at the shared speed, playing.
   useEffect(() => {
@@ -101,9 +121,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
     applyVoiceRate(audio, voiceRate());
     audio.play().catch((error: Error) => {
       if (error?.name === "NotAllowedError" || error?.name === "AbortError") { setPlayState("paused"); return; }
-      unload();
-      setPlayState("idle");
-      setProblem("unsupported");
+      refusedRef.current();
     });
   }, [src, unload]);
 
@@ -113,7 +131,8 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
   useEffect(() => () => {
     releasePlayback(file.id);
     releaseMediaSession(file.id);
-    if (srcRef.current) URL.revokeObjectURL(srcRef.current);
+    sourceRef.current?.release();
+    sourceRef.current = null;
     srcRef.current = null;
   }, [file.id]);
 
@@ -279,7 +298,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
           }}
           onPause={() => { releasePlayback(file.id); mediaSessionState(file.id, "paused"); setPlayState((was) => (was === "playing" ? "paused" : was)); }}
           onEnded={() => { resumeAt.current = 0; setPosition(0); unload(); setPlayState("idle"); }}
-          onError={() => { unload(); setPlayState("idle"); setProblem("unsupported"); }}
+          onError={() => refusedRef.current()}
         />
       )}
     </div>

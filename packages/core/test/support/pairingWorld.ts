@@ -106,8 +106,12 @@ class FakeChannel extends EventTarget {
 
 /** ICE and DTLS take this long once offer and answer met (fake ms). */
 export const CONNECT_MS = 600;
-/** While true, offer and answer meet but nothing connects: every WebRTC attempt fails (a NAT that lets nothing through). */
-export const rtc = { blocked: false };
+/**
+ * `blocked`: offer and answer meet but nothing connects, every WebRTC attempt fails (a NAT that lets nothing through).
+ * `answerFailsAfterMs`: an answering connection whose answer never reached the offer goes `failed` this long after it
+ * was made, as ICE gives up (31 s with node-datachannel in the CLI's #398 trace); unset, it waits for its attempt timeout.
+ */
+export const rtc: { blocked: boolean; answerFailsAfterMs?: number } = { blocked: false };
 
 class FakePeerConnection extends EventTarget {
   /** The app this connection belongs to, for `killRtc`. */
@@ -123,7 +127,15 @@ class FakePeerConnection extends EventTarget {
   async createOffer() { return { type: "offer" as const, sdp: this.made("actpass") }; }
   async createAnswer() { return { type: "answer" as const, sdp: this.made("active") }; }
   private made(setup: string) { const made = sdp(setup); byFingerprint.set(made.fingerprint, this); return made.sdp; }
-  async setLocalDescription(description: RTCSessionDescriptionInit) { this.localDescription = description; }
+  async setLocalDescription(description: RTCSessionDescriptionInit) {
+    this.localDescription = description;
+    const failAfter = rtc.answerFailsAfterMs;
+    if (description.type === "answer" && failAfter !== undefined) setTimeout(() => {
+      if (this.closed || this.connectionState === "connected") return;
+      this.connectionState = "failed";
+      this.dispatchEvent(new Event("connectionstatechange"));
+    }, failAfter);
+  }
   async setRemoteDescription(description: RTCSessionDescriptionInit) {
     this.remoteDescription = description;
     if (description.type !== "answer") return;
@@ -269,5 +281,6 @@ export async function closeWorld(): Promise<void> {
   byFingerprint.clear();
   peerConnections.clear();
   rtc.blocked = false;
+  rtc.answerFailsAfterMs = undefined;
   vi.useRealTimers();
 }

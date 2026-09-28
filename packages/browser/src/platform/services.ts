@@ -244,6 +244,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     const open = getBrowserHost().openPaymentLink;
     return open ? open(uri) : null;
   },
+  get fullscreenWindow() {
+    const fullscreen = getBrowserHost().fullscreenWindow;
+    return fullscreen ? (on: boolean) => fullscreen(on) : null;
+  },
   shareText(text, anchor) {
     const share = getBrowserHost().shareText;
     return share ? share(text, anchor) : null;
