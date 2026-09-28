@@ -23,7 +23,7 @@ import { SCRUB } from "./motion";
  *   picture. Carrying on in the same direction, the picture holds until the
  *   scroll passes it; turning back reverses it at once.
  * - A scroll that moves more than `SCRUB.jump` viewports at once (a link, the
- *   rail, the swarm, a reload mid-page) is taken at once: nothing rewinds.
+ *   rail, the boo, a reload mid-page) is taken at once: nothing rewinds.
  */
 /**
  * A beat, in page pixels: `from`/`to` where it runs, `seen` the scroll range in which its scene is pinned on

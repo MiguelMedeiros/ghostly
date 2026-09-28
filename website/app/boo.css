@@ -1,0 +1,153 @@
+/* The boo: one ghost says "boo!" while the page changes behind a soft veil. Owned by components/site/Boo.tsx,
+   which sets the --boo-* durations on .boo. Only transforms and opacity move; the overlay is fixed, so nothing
+   under it shifts, and it is unmounted at the end, so it never keeps pointer events. */
+.boo {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow: hidden;
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+}
+/* Dim and blur, just enough that the jump behind reads as one soft change. */
+.boo-veil {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity var(--boo-veil) var(--ease-enter);
+}
+.boo[data-phase="in"] .boo-veil,
+.boo[data-phase="hold"] .boo-veil {
+  opacity: 1;
+}
+.boo[data-phase="out"] .boo-veil {
+  opacity: 0;
+  transition: opacity var(--boo-out) var(--ease-exit);
+}
+.boo-ghost {
+  position: relative;
+  width: clamp(96px, 11vw, 152px);
+  will-change: transform, opacity;
+}
+.boo-bob,
+.boo-body {
+  position: relative;
+}
+.boo-body {
+  transform-origin: 50% 80%;
+}
+.boo-body svg {
+  width: 100%;
+  height: auto;
+}
+/* "boo!": a small bubble at the ghost's shoulder, in Boo's colours (the finale's bubble). */
+.boo-say {
+  position: absolute;
+  left: 78%;
+  bottom: 88%;
+  padding: 6px 14px;
+  border-radius: 16px;
+  border-bottom-left-radius: 5px;
+  background: rgba(34, 211, 238, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.35);
+  color: var(--cyan);
+  font-size: clamp(17px, 1.7vw, 22px);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  transform-origin: 0 100%;
+  opacity: 0;
+}
+
+/* In: up from below, landing with the app's hop; then the puff and "boo!". The same animations run on through
+   "hold" (a page change still loading), so switching phase never restarts them. */
+.boo:is([data-phase="in"], [data-phase="hold"]) .boo-ghost {
+  animation: boo-pop var(--boo-pop) var(--ease-hop) both;
+}
+.boo:is([data-phase="in"], [data-phase="hold"]) .boo-body {
+  animation: boo-puff var(--boo-say) var(--ease-enter) var(--boo-say-at) both;
+}
+.boo:is([data-phase="in"], [data-phase="hold"]) .boo-say {
+  animation: boo-say var(--boo-say) var(--ease-hop) var(--boo-say-at) both;
+}
+/* Hold: a gentle bob while the new page loads, so a slow page never reads as a hang. */
+.boo[data-phase="hold"] .boo-bob {
+  animation: boo-bob 0.9s ease-in-out 0.3s infinite alternate;
+}
+/* Out: up and away to the right, fading; "boo!" goes first. */
+.boo[data-phase="out"] .boo-ghost {
+  animation: boo-away var(--boo-out) var(--ease-exit) both;
+}
+.boo[data-phase="out"] .boo-say {
+  opacity: 1;
+  animation: boo-hush calc(var(--boo-out) * 0.6) var(--ease-exit) both;
+}
+
+@keyframes boo-pop {
+  from {
+    opacity: 0;
+    transform: translateY(34vh) scale(0.6);
+  }
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes boo-puff {
+  from {
+    transform: none;
+  }
+  45% {
+    transform: scale(1.12, 1.08);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes boo-say {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes boo-bob {
+  from {
+    transform: none;
+  }
+  to {
+    transform: translateY(-6px);
+  }
+}
+@keyframes boo-away {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translate(14vw, -28vh) rotate(14deg) scale(0.75);
+  }
+}
+@keyframes boo-hush {
+  to {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boo {
+    display: none;
+  }
+}
