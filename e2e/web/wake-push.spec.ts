@@ -1,7 +1,7 @@
 import type { BrowserContext, CDPSession, Page, Request } from "@playwright/test";
 import { p256 } from "@noble/curves/nist.js";
 import { decryptPushPayload, fromBase64Url, readWakePayload, toBase64Url, utf8Decode, utf8Encode } from "@ghostly/core";
-import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, link, openProfilePage, say, test, type Peer } from "../support/fixtures";
 
 /**
  * Wake-up push (WISP 401 § Wake-up push): Bo's closed web app is woken by a push Ana's own app sends, through the
@@ -251,4 +251,86 @@ test("a call to a closed web app wakes it with \"Incoming call\", and rings once
   await reopen(bo, new URL(chatUrl).hash);
   await expect(bo.page.getByTitle("Accept audio call")).toBeVisible({ timeout: 120_000 });
   await expect(ana.page.getByTestId("wake-call")).toHaveCount(0);
+});
+
+/**
+ * A private group (WISP 9xx · Group Mesh § Wake-up push): Bo shares his subscription with Ana on their edge, and a
+ * message of Ana's that names him wakes his closed app; one that does not name him posts nothing. Muting the group
+ * tells Ana's app to forget it.
+ */
+test("a mention in a private group wakes a member's closed web app; no mention, or a muted group, does not", { tag: ["@feature:push.wake.group"] }, async ({ peer }) => {
+  test.skip(deployed, "the push service stand-in routes the sender's own post");
+  test.setTimeout(8 * 60_000);
+  const keys = subscriptionKeys();
+  const [ana, bo] = await Promise.all([peer("ana"), peer("bo", { serviceWorkers: "allow" })]);
+  await bo.context.grantPermissions(["notifications"], { origin: new URL(bo.page.url()).origin });
+  await standInPushManager(bo.context, { p256dh: keys.p256dh, auth: keys.authB64 });
+  const posts = await pushService(ana.context);
+  await bo.page.reload();
+  await expect(bo.page.getByTitle("New Chat")).toBeVisible();
+  await openProfilePage(bo.page);
+  await bo.page.getByTestId("account-nickname").fill("Bob");
+  await expect(bo.page.getByTestId("account-nickname")).toHaveValue("Bob");
+  await bo.page.goBack();
+
+  // Ana makes a private group and Bo joins it through its link.
+  await ana.page.getByTestId("sidebar-new-more").click();
+  await ana.page.getByTestId("new-group").click();
+  await ana.page.getByTestId("new-group-name").fill("Night shift");
+  await ana.page.getByTestId("new-group-kind-mesh").click();
+  await ana.page.getByTestId("new-group-create").click();
+  const share = ana.page.getByTestId("group-share-dialog");
+  const url = await share.getByTestId("group-link-url").inputValue();
+  await share.getByTestId("group-share-done").click();
+  await bo.page.goto(url);
+  await expect(bo.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 180_000 });
+  const groupHash = new URL(bo.page.url()).hash;
+  const groupPath = groupHash.slice(1);
+  expect(groupPath).toMatch(/^\/group\/[^/]+$/);
+  await expect(ana.page.getByTestId("group-members")).toContainText("1 of 1 reachable", { timeout: 120_000 });
+  await say(bo, "Bob here");
+  await expect(chat(ana).getByText("Bob here")).toBeVisible({ timeout: 120_000 });
+
+  // Bo turns wake-ups on: Ana's app gets his subscription on their edge, and his table names the group.
+  await bo.page.goto("/#/settings");
+  await bo.page.getByTestId("settings-wake").click();
+  await expect(bo.page.getByTestId("settings-wake")).toBeChecked();
+  await expect.poll(() => anaHasTarget(ana.page), { timeout: 60_000 }).toBe(true);
+  await expect.poll(async () => (await wakeTable(bo.page)).length).toBe(1);
+  const [row] = await wakeTable(bo.page);
+  expect(row!.path).toBe(groupPath);
+
+  // Bo's app closes. A message that does not name him posts nothing.
+  await bo.page.close();
+  await expect(ana.page.getByTestId("group-members")).toContainText("0 of 1 reachable", { timeout: 120_000 });
+  await say(ana, "anyone around?");
+  await ana.page.waitForTimeout(3000);
+  expect(posts).toHaveLength(0);
+
+  // One that names him wakes him: his token and nothing else, "New message" opening the group.
+  const box = ana.page.getByPlaceholder("Message…");
+  await box.click();
+  await box.pressSequentially("@Bo");
+  await expect(ana.page.getByTestId("mention-picker").getByRole("option")).toHaveText([/^Bob…/]);
+  await box.press("Enter");
+  await expect(box).toHaveValue("@Bob ");
+  await box.pressSequentially("the night shift starts");
+  await box.press("Enter");
+  await expect.poll(() => posts.length, { timeout: 60_000 }).toBe(1);
+  const pushed = readPush(posts[0]!, keys);
+  expect(JSON.parse(pushed)).toEqual({ wake: 1, k: row!.token });
+  expect(pushed).not.toContain("night shift");
+  const worker = await workerConsole(bo.context);
+  await worker.deliver(pushed);
+  await expect.poll(() => worker.shown()).toEqual([{ body: "New message", tag: expect.stringContaining(groupPath), path: groupPath }]);
+
+  // Bo opens it and mutes the group: Ana's app is told to forget his subscription.
+  await reopen(bo, groupHash);
+  await expect(chat(bo).getByText("the night shift starts")).toBeVisible({ timeout: 150_000 });
+  await bo.page.evaluate((id) => {
+    localStorage.setItem(`ghostly_mute_group:${id}`, "forever");
+    window.dispatchEvent(new Event("chat-mute-updated"));
+  }, decodeURIComponent(groupPath.replace("/group/", "")));
+  await expect.poll(() => anaHasTarget(ana.page), { timeout: 60_000 }).toBe(false);
+  await expect.poll(async () => (await wakeTable(bo.page)).length).toBe(0);
 });

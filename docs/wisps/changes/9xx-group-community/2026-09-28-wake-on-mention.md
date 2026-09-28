@@ -1,0 +1,1 @@
+Wake-up push is not offered in a community: its members share no edge to carry a subscription on, and sharing it with everyone who opened the link would let strangers wake a phone. Written down as open, with the private group's wake on a mention as the model.
