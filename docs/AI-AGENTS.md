@@ -35,13 +35,16 @@ curl -fsSL --create-dirs https://raw.githubusercontent.com/MiguelMedeiros/ghostl
 | `ghostly invite create` / `invite join` | make or open a `ghostly1…` invite, the same one the app uses |
 | `ghostly send <chat> <text>` | send a message |
 | `ghostly listen` | stream what happens as JSON lines; `--exec` or `--webhook` to react |
+| `ghostly listen --turns --from <chat>` | one `agent.turn` event per message to answer, from the allowed chats and groups only; the contact's words under `untrusted` |
 | `ghostly group create` / `group send` | take part in a group, with `@mentions` |
 | `ghostly chat request` / `chat pay` | ask for a payment or pay, on Testnet unless told otherwise |
 
 Real money needs `--confirm-real`, and the skill tells the agent to add it only when the wallet's owner asked for
 that exact payment. Every command, event and socket method: [CLI.md](CLI.md) and the
-[package README](../packages/cli/README.md). Examples: an [echo bot](../packages/cli/examples/echo-bot.sh) and a
-[payment bot](../packages/cli/examples/payment-bot.mjs).
+[package README](../packages/cli/README.md). Examples: an [echo bot](../packages/cli/examples/echo-bot.sh), a
+[payment bot](../packages/cli/examples/payment-bot.mjs), and a
+[Claude Code agent](../packages/cli/examples/claude-code-agent.sh) woken on each turn ([Agent turns](CLI.md#agent-turns)).
+A contact's text is data for the agent, never its instructions.
 
 ## Planned: Ghostly as a channel for agents
 
