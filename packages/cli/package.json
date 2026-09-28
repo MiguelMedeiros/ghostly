@@ -1,5 +1,5 @@
 {
-  "name": "ghostly-cli",
+  "name": "@ghostlytools/cli",
   "version": "0.4.0",
   "type": "module",
   "description": "Ghostly for bots and terminals: the app's own engine, headless on Node, behind a daemon and a `ghostly` command with JSON output.",
@@ -11,6 +11,9 @@
   },
   "homepage": "https://ghostly.tools/cli",
   "bugs": "https://github.com/MiguelMedeiros/ghostly/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "ghostly": "./dist/ghostly.mjs"
   },

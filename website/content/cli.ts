@@ -1,7 +1,7 @@
 import type { Level } from "@/lib/status";
 
 /**
- * /cli: the headless `ghostly` (ghostly-cli, packages/cli, WISP 11xx). Short on
+ * /cli: the headless `ghostly` (@ghostlytools/cli, packages/cli, WISP 11xx). Short on
  * purpose: a pitch, the install line, four commands, a bot and links. The long
  * version is docs/CLI.md. Checked against packages/cli on `dev`.
  */
@@ -10,7 +10,7 @@ const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/dev";
 
 /** One line: builds the package from a clone and installs it (it is not on npm yet). */
 export const INSTALL =
-  "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w ghostly-cli && npm pack -w ghostly-cli && npm install -g ./ghostly-cli-*.tgz";
+  "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli && npm install -g ./ghostlytools-cli-*.tgz";
 
 /** A session, as the terminal in the hero shows it. Output shapes from packages/cli/README.md. */
 export const SESSION = `$ ghostly daemon --detach

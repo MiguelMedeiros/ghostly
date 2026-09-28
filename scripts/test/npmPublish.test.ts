@@ -10,8 +10,10 @@ const json = (file: string) => JSON.parse(read(file));
 describe("the CLI on npm", () => {
   const cli = json("packages/cli/package.json");
 
-  it("is a public package under a name the maintainer can publish", () => {
-    expect(cli.name).toBe("ghostly-cli");
+  it("is a public package in the maintainer's npm organization", () => {
+    expect(cli.name).toBe("@ghostlytools/cli");
+    // A scoped package is private on npm unless it says otherwise.
+    expect(cli.publishConfig).toEqual({ access: "public" });
     expect(cli.private).toBeUndefined();
     expect(cli.bin).toEqual({ ghostly: "./dist/ghostly.mjs" });
   });
@@ -29,7 +31,7 @@ describe("the CLI on npm", () => {
     const workflow = read(".github/workflows/npm-publish.yml");
     expect(workflow).toMatch(/^ {2}release:\n {4}types: \[published\]$/m);
     expect(workflow).toMatch(/^ {6}id-token: write$/m);
-    expect(workflow).toContain("npm publish --workspace ghostly-cli --provenance --access public");
+    expect(workflow).toContain("npm publish --workspace @ghostlytools/cli --provenance --access public");
     // A tag that does not match the package's version never reaches npm.
     expect(workflow).toContain('"v$version" != "$TAG"');
   });

@@ -48,11 +48,11 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 For a bot on today's Ghostly, use `ghostly` ([CLI.md](CLI.md)): the app's engine without a screen, in the same chats as the apps. Node 22.12 or newer. The npm package is not published yet, so install it from a clone:
 
 ```bash
-npm install && npm run build -w ghostly-cli && npm pack -w ghostly-cli
+npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli
 ```
 
 ```bash
-npm install -g ./ghostly-cli-*.tgz
+npm install -g ./ghostlytools-cli-*.tgz
 ```
 
 ### The Rust `ghostly-cli` (older bots)

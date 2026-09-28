@@ -1,6 +1,6 @@
 # The Ghostly CLI
 
-`ghostly` ([`ghostly-cli`](../packages/cli), in `packages/cli`) is the Ghostly app's own engine without a screen. A
+`ghostly` ([`@ghostlytools/cli`](../packages/cli), in `packages/cli`) is the Ghostly app's own engine without a screen. A
 bot or a script gets the same chats as the web app, the extension and the Desktop: `ghostly1` invites, one chat that
 starts on the DHT and goes live, typing (with a bot's status line), replies, edits, reactions and forwards, private and community groups, files and voice notes, wallets and payments,
 identity proofs, shared web apps and voice calls. Every command prints JSON, and `ghostly listen` streams what happens
@@ -18,13 +18,13 @@ Node 22.12 or newer. From a clone of the repository:
 
 ```bash
 npm install
-npm run build -w ghostly-cli
-npm pack -w ghostly-cli
-npm install -g ./ghostly-cli-*.tgz
+npm run build -w @ghostlytools/cli
+npm pack -w @ghostlytools/cli
+npm install -g ./ghostlytools-cli-*.tgz
 ghostly --version
 ```
 
-Once the package is published, `npm install -g ghostly-cli` does the same. WebRTC comes from `node-datachannel`
+Once the package is published, `npm install -g @ghostlytools/cli` does the same. WebRTC comes from `node-datachannel`
 (prebuilt for Linux, macOS and Windows). Without it the CLI still chats over HyperDHT, Iroh and the DHT, but groups
 and voice calls need WebRTC and are unavailable.
 
