@@ -123,6 +123,17 @@ describe("the chat timeline's scrolling", () => {
     expect(screen.getByTestId("jump-latest-label")).toHaveTextContent("3 new");
   });
 
+  it("scrolled up, older history coming in above is not new, and the view stays on its message", () => {
+    const rows = theirs(100, 10);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    scrollTo(60);
+    const before = topOf("peer_102");
+    rerender(<Timeline rows={[...theirs(0, 100), ...rows, ...theirs(110, 1)]} />);
+    resized();
+    expect(topOf("peer_102")).toBe(before);
+    expect(pill()).toHaveAttribute("data-count", "1");
+  });
+
   it("one new message is said in the singular", () => {
     const rows = theirs(0, 10);
     const { rerender } = renderApp(<Timeline rows={rows} />);

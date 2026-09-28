@@ -422,7 +422,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   // A long chat draws its last rows first, and the older ones in the moment after (useTailFirst).
-  const firstRow = useTailFirst(timeline.length, sessionId, leftScrolledUp(sessionId));
+  const rowIds = useMemo(() => timeline.map(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`), [timeline]);
+  const firstRow = useTailFirst(rowIds, sessionId, leftScrolledUp(sessionId));
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
   // A notice (joined, a call) is not a message to count. Always every message, drawn yet or not; a new list when older
   // rows come in above, so the view is put back in the same commit, before a scroll can see the rows moved.
