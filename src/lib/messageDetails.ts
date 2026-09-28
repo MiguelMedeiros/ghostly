@@ -68,6 +68,11 @@ const DELIVERY_WORDS: Record<NonNullable<ChatMessage["delivery"]>, string> = {
   held: "Held for the contact", delivered: "Delivered (receipt received)", failed: "Failed",
 };
 
+/** A file of mine that ended without going, by how its transfer ended. */
+const FILE_NOT_SENT: Record<string, string | undefined> = {
+  failed: "Not sent: the file did not go", declined: "Not sent: the contact declined the file", cancelled: "Not sent: the file was cancelled",
+};
+
 /** What the channel and the session guarantee, by the way the message went. */
 function cryptoRows(path: MessagePath | undefined, view: MessageDetailsView | null | undefined, group: boolean): DetailRow[] {
   const rows: DetailRow[] = [];
@@ -136,6 +141,7 @@ function summarize(message: ChatMessage, view: MessageDetailsView | null | undef
   }
   const last = d?.sends?.[d.sends.length - 1], sends = d?.attempts ?? d?.sends?.length ?? 0;
   const over = last ? pathWords(last) : undefined;
+  if (view?.file?.state && FILE_NOT_SENT[view.file.state]) return `${thing} not sent: its bytes did not go${over ? ` over ${over}` : ""}.`;
   switch (message.delivery) {
     case "waiting": return `${thing} not sent yet: it goes by itself when the chat can carry it.`;
     case "failed": return `${thing} could not be sent${over ? ` over ${over}` : ""}.`;
@@ -217,9 +223,12 @@ export function buildDetails(message: ChatMessage, view: MessageDetailsView | nu
   const path = step?.path ?? (view?.message.via === "hold" ? "hold" : view?.message.via === "pkarr" ? (link?.profile ? "dht" : "legacy-dht") : undefined);
   add("crypto", "Crypto", cryptoRows(path, view, group));
 
+  // A file of mine whose bytes did not go was not sent, whatever became of the message that announced it: the bubble says so too.
+  const fileEnded = mine && view?.file?.state && FILE_NOT_SENT[view.file.state];
   add("delivery", "Delivery", [
-    message.delivery ? { label: "State", value: DELIVERY_WORDS[message.delivery] } : mine && view ? { label: "State", value: "Sent" } : undefined,
-    message.deliveryError && message.delivery !== "waiting" ? { label: "Note", value: message.deliveryError } : undefined,
+    fileEnded ? { label: "State", value: fileEnded } : message.delivery ? { label: "State", value: DELIVERY_WORDS[message.delivery] } : mine && view ? { label: "State", value: "Sent" } : undefined,
+    fileEnded && view?.file?.error ? { label: "Why", value: view.file.error } : undefined,
+    message.deliveryError && message.delivery !== "waiting" && !fileEnded ? { label: "Note", value: message.deliveryError } : undefined,
     message.delivery === "waiting" && message.deliveryError ? { label: "Why it waits", value: message.deliveryError } : undefined,
     mine && view?.message.wireId ? idRow("Receipt id", view.message.wireId) : undefined,
     d?.hold?.seq !== undefined ? { label: "Held item", value: `#${d.hold.seq} in the mailbox${d.hold.bytes ? `, ${formatBytes(d.hold.bytes)} sealed` : ""}` } : undefined,
@@ -238,7 +247,7 @@ export function buildDetails(message: ChatMessage, view: MessageDetailsView | nu
       f.confirmed !== undefined ? { label: "Confirmed", value: `${formatBytes(f.confirmed)} durably stored` } : f.transferred !== undefined && f.state !== "done" ? { label: "Transferred", value: formatBytes(f.transferred) } : undefined,
       f.since ? timeRow("Offered", f.since) : undefined,
       f.consented !== undefined ? { label: "Accepted by", value: f.consented ? "the person" : "the app (within its limits)" } : undefined,
-      f.storage ? { label: "Stored as", value: f.storage === "opfs" ? "a file in the origin's private file system" : f.storage === "native" ? "a file kept by the desktop app" : f.storage === "idb" ? "pieces in IndexedDB" : f.storage } : undefined,
+      f.storage ? { label: "Stored as", value: f.storage === "opfs" ? "a file in the origin's private file system" : f.storage === "native" ? "a file kept by the desktop app" : f.storage === "idb" ? "pieces in IndexedDB" : f.storage === "blob" ? "the whole file in IndexedDB" : f.storage } : undefined,
     ]);
     if (f.voice) add("voice", "Voice", [
       { label: "Codec", value: voiceCodec(f.mime) },

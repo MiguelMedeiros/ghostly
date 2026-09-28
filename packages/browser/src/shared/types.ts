@@ -820,6 +820,8 @@ export interface MessageDetailsView {
     state?: string;
     stage?: string;
     transferred?: number;
+    /** Why a transfer that ended without the file did. */
+    error?: string;
     /** files/3: bytes confirmed durably, where a restart resumes. */
     confirmed?: number;
     /** files/3: when the offer was made. */
