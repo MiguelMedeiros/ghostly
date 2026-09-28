@@ -7,7 +7,7 @@
 | Kind | Adapter |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Lightning 203](203-lightning.md), [Profile Backups 05](05-backups.md), authenticated live data transport |
-| Implementation | Experimental browser adapter on the Fedimint web SDK (`@fedimint/core` canary, pinned). Mainnet and Testnet, each joined by invite code; regtest evidence below (Mainnet not yet exercised with real funds). |
+| Implementation | Experimental browser adapter on the Fedimint web SDK (`@fedimint/core` canary, pinned), which the headless CLI also runs on Node. Mainnet and Testnet, each joined by invite code; regtest evidence below (Mainnet not yet exercised with real funds). |
 | Summary | Ecash from a federation of guardians you choose: in a chat, and Lightning through the federation's gateway. |
 | Availability | Available |
 | Notes | Experimental, on Mainnet and Testnet; not yet tried with real funds. You see a federation's name, guardians and network before joining. Number not yet assigned. |
@@ -23,7 +23,7 @@ Checked on 2026-09-24:
 
 - **Client.** The Fedimint web SDK (`fedimint/fedimint-sdk`): `@fedimint/core` over the WebAssembly client `@fedimint/fedimint-client-wasm-bundler`. It is the one path that serves the web app, the extension's offscreen document and Desktop's WebView alike; the Rust client called from Tauri would leave the web app and the extension without Fedimint. The latest stable release (0.1.x, 2025-10) embeds a client older than fedimint 0.9 that cannot reach current iroh federations, so the adapter pins a **canary** build (`0.0.0-canary-eea6a3c…`, built from fedimint master after 0.12) exactly. The SDK speaks the **v1 modules only** (`mint`, `wallet`, `ln`): a federation of v2 modules is refused at preview ("no ecash module this app can use").
 - **Worker.** The client runs in a dedicated worker. The SDK's own worker imports the WebAssembly as an ES module (a bundler plugin) and posts every request back as a log line, the mnemonic included; Ghostly runs its own small worker instead (`fedimintWorker.ts`), which instantiates the module the page compiled once and speaks the SDK's transport protocol unchanged, logging nothing.
-- **Storage.** The client keeps its database (redb) in one file of the origin-private file system, held with an exclusive synchronous handle by its worker. The SDK binds its services to one client per database (fedimint-sdk#272), so Ghostly opens **one database per joined federation**, `ghostly-fedimint-<uuid>.db`. Nothing runs in Node (no worker, no OPFS): unit tests drive a fake client; the real one is exercised in Chromium.
+- **Storage.** The client keeps its database (redb) in one file of the origin-private file system, held with an exclusive synchronous handle by its worker. The SDK binds its services to one client per database (fedimint-sdk#272), so Ghostly opens **one database per joined federation**, `ghostly-fedimint-<uuid>.db`. Unit tests drive a fake client; the real one is exercised in Chromium, and on Node by the headless CLI, which runs the same SDK and wasm in a `worker_threads` worker with each database a file of the profile ([11xx § Wallet SDKs on Node](11xx-headless.md#wallet-sdks-on-node-phase-2)).
 
 ## Negotiation and transport binding
 
@@ -80,6 +80,7 @@ Checked on 2026-09-24/25 with worthless coins only:
 npm run e2e:infra:up        # the federation, its gateway and the LND peer on the environment's regtest chain (e2e/infra)
 npm test --workspace @ghostly/browser -- test/fedimint.test.ts
 GHOSTLY_FEDIMINT_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/fedimint-wallet.spec.ts
+npm test --workspace @ghostly/cli -- test/fedimint.test.ts   # on Node: preview, join, Lightning in and out, restart (skipped without the federation)
 ```
 
 Not yet exercised: a Mainnet federation with real funds, iroh federations (a public signet or mutinynet federation), a federation of four guardians or one losing guardians, a gateway that refunds a payment, recovery of a real profile backup, peg-in and peg-out, v2 modules, the extension's offscreen document and Desktop's WebView with money (the same engine and build run there; the OPFS lock means one tab of a profile at a time), and the SDK's canary moving under the pin.
