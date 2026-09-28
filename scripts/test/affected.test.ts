@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkPaths, featureGrep, globToRegExp, plan, specsImporting, testsReaching, throughCoreBarrel } from "../affected/select.mjs";
+import { bundleReaches, checkPaths, featureGrep, globToRegExp, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_PROJECTS } from "../affected/select.mjs";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
 const inventory = {
@@ -209,6 +209,76 @@ describe("tests that import across workspaces", () => {
   });
 });
 
+describe("the CLI", () => {
+  // Most CLI tests run the built binary (test/support/cli.ts spawns dist/ghostly.mjs), so no import links them to
+  // what it is built from: packages/cli/src and the parts of @ghostly/browser and @ghostly/core it bundles.
+  const codeFiles: Record<string, string> = {
+    "packages/cli/src/bin.ts": `import { run } from "./main";`,
+    "packages/cli/src/main.ts": `import { chats } from "./commands";\nimport { startEngine } from "@ghostly/browser/engine/node";\nimport { hex } from "@ghostly/core";`,
+    "packages/cli/src/commands/index.ts": `export const chats = 1;`,
+    "packages/cli/src/args.ts": `export const parse = 1;`,
+    "packages/cli/test/args.test.ts": `import { parse } from "../src/args";`,
+    "packages/cli/test/support/cli.ts": `export const BIN = "dist/ghostly.mjs";`,
+    "packages/cli/test/daemon.test.ts": `import { ghostly } from "./support/cli";`,
+    "packages/browser/src/engine/node.ts": `import { community } from "./community.ts";`,
+    "packages/browser/src/engine/community.ts": `export const community = 1;`,
+    "packages/browser/src/components/Picker.tsx": `export const Picker = 1;`,
+    "packages/core/src/index.ts": `export * from "./bytes";`,
+    "packages/core/src/bytes.ts": `export function hex() {}`,
+  };
+  const RUNNER = "packages/cli/test/support/cli.ts";
+  const cli = (files: string[], sources: Record<string, string> | undefined = codeFiles) =>
+    byName(plan({ changed: changed(...files), inventory, e2eFiles, codeFiles: sources }).unit).cli;
+
+  it("reads what the binary is built from, through relative imports and workspace packages", () => {
+    expect([...bundleReaches("packages/cli/src/bin.ts", codeFiles)].sort()).toEqual([
+      "packages/browser/src/engine/community",
+      "packages/browser/src/engine/node",
+      "packages/cli/src/bin",
+      "packages/cli/src/commands/index",
+      "packages/cli/src/main",
+      "packages/core/src/bytes",
+      "packages/core/src/index",
+    ]);
+  });
+
+  it("a change under packages/cli runs the tests that import it, and the binary's when the binary takes it in", () => {
+    expect(cli(["packages/cli/src/commands/index.ts"])).toMatchObject({ mode: "related", files: ["packages/cli/src/commands/index.ts", RUNNER] });
+    expect(cli(["packages/cli/src/args.ts"])).toMatchObject({ mode: "related", files: ["packages/cli/src/args.ts"] });
+    expect(cli(["-packages/cli/src/commands/index.ts"]).files).toContain(RUNNER);
+    expect(cli(["packages/cli/test/args.test.ts"])).toMatchObject({ mode: "related", files: ["packages/cli/test/args.test.ts"] });
+  });
+
+  it("a browser or core change the binary bundles runs the binary's tests too", () => {
+    expect(cli(["packages/browser/src/engine/community.ts"])).toMatchObject({ mode: "related", files: ["packages/browser/src/engine/community.ts", RUNNER] });
+    expect(cli(["packages/browser/src/engine/community.ts"]).reason).toContain("the built CLI");
+    expect(cli(["packages/core/src/bytes.ts"]).files).toContain(RUNNER);
+    expect(cli(["packages/browser/src/components/Picker.tsx"]).files).not.toContain(RUNNER);
+    expect(cli(["src/components/Other.tsx"]).mode).toBe("skip");
+  });
+
+  it("without the sources, a change under what the binary can bundle runs its tests", () => {
+    expect(cli(["packages/browser/src/engine/community.ts"], undefined).files).toEqual(["packages/browser/src/engine/community.ts", RUNNER]);
+  });
+
+  it("its configs and the build before its tests run it whole", () => {
+    for (const file of ["packages/cli/vitest.config.ts", "packages/cli/vite.config.ts", "packages/cli/test/support/build.ts", "packages/cli/package.json"]) {
+      expect(cli([file]).mode, file).toBe("whole");
+    }
+  });
+
+  it("matches the real package: its globalSetup runs it whole, and the runner and entry are where it says", () => {
+    const root = join(import.meta.dirname, "..", "..");
+    const project = UNIT_PROJECTS.find((p) => p.name === "cli")!;
+    const config = readFileSync(join(root, "packages/cli/vitest.config.ts"), "utf8");
+    const setups = [...config.matchAll(/globalSetup:\s*\[([^\]]*)\]/g)].flatMap((m) => [...m[1].matchAll(/["']([^"']+)["']/g)].map((s) => `packages/cli/${s[1]}`));
+    expect(setups.length).toBeGreaterThan(0);
+    for (const setup of setups) expect(project.whole).toContain(setup);
+    expect(readFileSync(join(root, project.bundle!.runner), "utf8")).toContain("dist/ghostly.mjs");
+    expect(readFileSync(join(root, "packages/cli/vite.config.ts"), "utf8")).toContain(`ssr: "${project.bundle!.entry.replace("packages/cli/", "")}"`);
+  });
+});
+
 describe("fallbacks", () => {
   it("a lockfile or root package.json runs everything", () => {
     for (const file of ["package-lock.json", "package.json", "patches/sodium.patch"]) {
@@ -232,7 +302,7 @@ describe("fallbacks", () => {
   it("core's index.ts runs every project that imports core whole, and every spec", () => {
     const p = plan({ changed: changed("packages/core/src/index.ts"), inventory, e2eFiles, codeFiles: {} });
     const unit = byName(p.unit);
-    for (const name of ["core", "browser", "sdk", "extension", "ui"]) expect(unit[name].mode).toBe("whole");
+    for (const name of ["core", "browser", "sdk", "extension", "ui", "cli"]) expect(unit[name].mode).toBe("whole");
     for (const name of ["matrix", "scripts"]) expect(unit[name].mode).toBe("skip");
     expect(p.e2e.mode).toBe("whole");
     expect(p.e2e.specs).not.toContain("e2e/desktop/smoke.spec.ts");
