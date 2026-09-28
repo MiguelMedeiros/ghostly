@@ -22,7 +22,8 @@ import { contactArrived } from "../lib/pairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
-import { useChatScroll } from "../hooks/useChatScroll";
+import { leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
+import { useTailFirst } from "../hooks/useTailFirst";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
@@ -420,9 +421,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const closeMenu = () => setMenuOpen(false);
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
+  // A long chat draws its last rows first, and the older ones in the moment after (useTailFirst).
+  const firstRow = useTailFirst(timeline.length, sessionId, leftScrolledUp(sessionId));
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
-  // A notice (joined, a call) is not a message to count.
-  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
+  // A notice (joined, a call) is not a message to count. Always every message, drawn yet or not; a new list when older
+  // rows come in above, so the view is put back in the same commit, before a scroll can see the rows moved.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
+  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
   const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible });
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
@@ -695,7 +700,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </div>
             </div>
           )}
-          {timeline.map((row) => row.kind === "transport"
+          {timeline.slice(firstRow).map((row) => row.kind === "transport"
             ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
             : row.kind === "identity"
             ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
