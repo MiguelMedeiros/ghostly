@@ -111,23 +111,36 @@ export function addMessage(
   sessionId: string,
   message: ChatMessage,
 ): ChatSession | null {
+  return addMessages(sessionId, [message]);
+}
+
+/**
+ * `addMessage` for many at once: the session is read and written once, however many there are (a long history
+ * coming in from the peer). Ones it has, or that were deleted here, are skipped.
+ */
+export function addMessages(
+  sessionId: string,
+  messages: readonly ChatMessage[],
+): ChatSession | null {
   const session = loadSession(sessionId);
   if (!session) return null;
 
-  const exists = session.messages.some((m) => m.id === message.id);
-  if (exists) return session;
-  if (session.deletedIds?.includes(message.id)) return session;
+  const known = new Set([...session.messages.map((m) => m.id), ...(session.deletedIds ?? [])]);
+  const fresh = messages.filter((m) => !known.has(m.id) && known.add(m.id));
+  if (!fresh.length) return session;
 
-  session.messages.push(message);
+  session.messages.push(...fresh);
   session.messages.sort((a, b) => a.timestamp - b.timestamp);
   session.lastSyncAt = Date.now();
-  
-  if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
-    const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
-    const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
-    if (nick && session.nickSource !== "profile") session.nick = nick;
+
+  for (const message of fresh) {
+    if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
+      const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
+      const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
+      if (nick && session.nickSource !== "profile") session.nick = nick;
+    }
   }
-  
+
   saveSession(session);
   return session;
 }
