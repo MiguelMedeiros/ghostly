@@ -133,7 +133,7 @@ What changes is where the choice is made: not in the invite, but in the chat's C
 
 `on-dht` with the chat open was 4 s in the proposal; 10 s leaves room in the relays' budget for presence reads and hold pointers while layer 1 is redialled.
 
-With every chat running this profile, reads multiply by the number of chats. The relays' per-IP budget (50 requests a minute on pkarr.pubky.org; a browser client keeps its own budget of 30 a minute per relay) is the binding limit, which is why reads slow down while layer 1 carries the chat. A request over the budget waits for it to free; it is never a pairing or delivery error, and a held-back envelope is not one of the eight publication attempts ([400](400-chat.md#compatibility-security-and-decisions), Q7).
+With every chat running this profile, reads multiply by the number of chats. The relays' per-IP budget (50 requests a minute on pkarr.pubky.org; a browser client keeps its own budget of 30 a minute per relay, 60 on pkarr.pubky.app, which allows 1000) is the binding limit, which is why reads slow down while layer 1 carries the chat. A request over the budget waits for it to free; it is never a pairing or delivery error, and a held-back envelope is not one of the eight publication attempts ([400](400-chat.md#compatibility-security-and-decisions), Q7).
 
 ## What never enters this path
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { publishFailure } from "../src/ghostlink";
-import { BREAKER_ALL_DOWN_PROBE_MS, BREAKER_BASE_MS, BREAKER_MAX_MS, BREAKER_THRESHOLD, DEFAULT_RELAYS, PREVIOUS_DEFAULT_RELAYS, RelayBreaker, RelayTransport, createIdentity, createRelayPayload, currentRelays } from "../src";
+import { BREAKER_ALL_DOWN_PROBE_MS, BREAKER_BASE_MS, BREAKER_MAX_MS, BREAKER_THRESHOLD, DEFAULT_RELAYS, PREVIOUS_DEFAULT_RELAYS, RELAY_REQUESTS_PER_MINUTE, REQUESTS_PER_MINUTE, RelayBreaker, RelayTransport, createIdentity, createRelayPayload, currentRelays } from "../src";
 // covers: core.relay-breaker
 
 describe("relay breaker", () => {
@@ -279,6 +279,28 @@ describe("the default relays", () => {
     for (let i = 0; i < 5; i++) await relay.resolve(id.pubKeyZ32);
     await expect(relay.resolve(id.pubKeyZ32)).rejects.toMatchObject({ code: "discovery-budget" });
     expect(calls).toHaveLength(5);
+  });
+
+  it("pkarr.pubky.app, which allows 1000 requests a minute, gets 60 of ours, and pkarr.pubky.org the default 30", async () => {
+    const calls: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${new URL(String(input)).host}`);
+      return new Response(null, { status: init?.method === "PUT" ? 204 : 404 });
+    }) as typeof fetch;
+    const relay = new RelayTransport({ relays: DEFAULT_RELAYS, fetch: fetchFn });
+    // Reads go to a relay with requests left: pkarr.pubky.org's 30, then the rest of pkarr.pubky.app's 60.
+    for (let i = 0; i < REQUESTS_PER_MINUTE + RELAY_REQUESTS_PER_MINUTE["https://pkarr.pubky.app"] - 1; i++) await relay.resolve(createIdentity().pubKeyZ32);
+    expect(calls.filter(c => c === "GET pkarr.pubky.org")).toHaveLength(REQUESTS_PER_MINUTE);
+    expect(calls.filter(c => c === "GET pkarr.pubky.app")).toHaveLength(59);
+    // A write with pkarr.pubky.org's minute spent goes out on pkarr.pubky.app: a pairing's answer does not wait.
+    await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }]);
+    expect(calls.at(-1)).toBe("PUT pkarr.pubky.app");
+    await expect(relay.resolve(createIdentity().pubKeyZ32)).rejects.toMatchObject({ code: "discovery-budget" });
+    // A budget given by hand (a test's, a relay of one's own) still bounds a relay with its own share.
+    const bounded = new RelayTransport({ relays: ["https://pkarr.pubky.app"], fetch: fetchFn, requestsPerMinute: 10 });
+    calls.length = 0;
+    for (let i = 0; i < 11; i++) await bounded.resolve(createIdentity().pubKeyZ32).catch(() => {});
+    expect(calls).toHaveLength(10);
   });
 });
 
