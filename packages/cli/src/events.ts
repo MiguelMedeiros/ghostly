@@ -168,7 +168,7 @@ export class EventHub {
       const shape = chatShape(link), before = this.chats.get(id);
       this.chats.set(id, shape);
       if (quiet) continue;
-      if (!before) { this.emit("chat.created", `chat.created:${id}`, { chat: id, summary: chatJson(link) }); continue; }
+      if (!before) { this.emit("chat.created", `chat.created:${id}`, { chat: id, summary: { ...chatJson(link), invite: null } }); continue; }
       if (shape.stage && shape.stage !== before.stage) {
         const progress = link.pairingProgress;
         this.emit("chat.pairing", `chat.pairing:${id}:${shape.stage}:${progress?.since ?? this.now()}`, {

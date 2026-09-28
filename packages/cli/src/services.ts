@@ -34,6 +34,26 @@ export const nodeLocalFetch: LocalFetch = async (request) => {
 const open = new Map<string, { server: Server; url: string }>();
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
+/**
+ * Cookies are not kept apart by port: a browser sends a service opened on 127.0.0.1 every cookie any other app on
+ * this machine set for 127.0.0.1 or localhost. Only the ones this service set itself (by name, from its own
+ * `Set-Cookie`) go on to the contact; the rest stay here.
+ */
+export function ownCookies(header: string, names: ReadonlySet<string>): string | null {
+  const kept = header.split(";").map((pair) => pair.trim()).filter((pair) => {
+    const at = pair.indexOf("=");
+    return at > 0 && names.has(pair.slice(0, at).trim());
+  });
+  return kept.length ? kept.join("; ") : null;
+}
+
+/** The cookie a `Set-Cookie` sets, by name. */
+export function setCookieName(value: string): string | null {
+  const at = value.indexOf("="), end = value.indexOf(";");
+  if (at <= 0 || (end !== -1 && end < at)) return null;
+  return value.slice(0, at).trim() || null;
+}
+
 /** A request's `Host` names this machine's loopback on `port`, as the URL `service.open` gives does. */
 export function localHost(host: string | undefined, port: number): boolean {
   return !!host && ["127.0.0.1", "localhost", "[::1]"].some((name) => host.toLowerCase() === `${name}:${port}`);
@@ -78,6 +98,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const already = open.get(key);
     if (already) return { chat: link.id, service, url: already.url };
     if (!link.peerServices?.some((s) => s.id === service)) throw new CliError("not_found", `The contact shares no service ${service} (or is not live)`);
+    const cookies = new Set<string>();
     const server = createServer((request, response) => {
       // Only a page on this port asks: a name that merely resolves here (DNS rebinding) is not this service.
       if (!localHost(request.headers.host, (server.address() as AddressInfo).port)) { response.writeHead(421, { "content-type": "text/plain; charset=utf-8" }); response.end("Open this service at 127.0.0.1 or localhost"); return; }
@@ -86,8 +107,17 @@ export const SERVICE_METHODS: Record<string, Method> = {
       request.on("end", () => {
         void (async () => {
           try {
-            const headers = Object.entries(request.headers).flatMap(([name, value]) => (Array.isArray(value) ? value.map((v) => [name, v] as [string, string]) : value === undefined ? [] : [[name, value] as [string, string]]));
+            const headers = Object.entries(request.headers).flatMap(([name, value]) => (Array.isArray(value) ? value.map((v) => [name, v] as [string, string]) : value === undefined ? [] : [[name, value] as [string, string]]))
+              .flatMap(([name, value]): [string, string][] => {
+                if (name.toLowerCase() !== "cookie") return [[name, value]];
+                const own = ownCookies(value, cookies);
+                return own ? [[name, own]] : [];
+              });
             const answer = await node(ctx).request(link.peerPubKeyZ32, service, { method: request.method ?? "GET", path: request.url ?? "/", headers, body: chunks.length ? new Uint8Array(Buffer.concat(chunks)) : null, maxResponseBytes: MAX_RESPONSE_BYTES });
+            for (const [name, value] of answer.headers) {
+              const set = name.toLowerCase() === "set-cookie" ? setCookieName(value) : null;
+              if (set) cookies.add(set);
+            }
             response.writeHead(answer.status, Object.fromEntries(answer.headers.filter(([name]) => !["transfer-encoding", "connection"].includes(name.toLowerCase()))));
             response.end(Buffer.from(await answer.bytes()));
           } catch (error) {
