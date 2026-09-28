@@ -36,16 +36,21 @@ const withLinks = (...links: LinkView[]) => {
 };
 
 let access: string[];
+let asked: string[];
+let forgotten: string[];
 let host: BrowserHost;
 beforeEach(() => {
   engine.state = null;
   engine.calls.length = 0;
   engine.answers = {};
   access = [];
+  asked = [];
+  forgotten = [];
   host = {
     version: "t", features: { shareLocalServices: true, openServices: true },
     connect: async () => ({ send: () => {} }),
-    requestLocalAccess: async (pattern) => { access.push(pattern); return pattern.includes("127.0.0.1"); },
+    requestLocalAccess: async (pattern, origin) => { access.push(pattern); asked.push(origin); return pattern.includes("127.0.0.1"); },
+    forgetLocalAccess: async (origin) => { forgotten.push(origin); },
     openService: vi.fn(async () => {}),
   };
   setBrowserHost(host);
@@ -55,6 +60,8 @@ describe("sharing a local web app", () => {
   it("asks for access to the loopback origin before telling the peer about it", async () => {
     await services.shareService("Notes", "127.0.0.1:3400/app");
     expect(access).toEqual(["http://127.0.0.1/*"]);
+    // The exact address with its port: what the desktop app's native dialog names.
+    expect(asked).toEqual(["http://127.0.0.1:3400"]);
     expect(engine.calls).toEqual([["addService", { name: "Notes", target: "127.0.0.1:3400/app" }]]);
   });
 
@@ -68,6 +75,29 @@ describe("sharing a local web app", () => {
     await expect(services.shareService("Creds", "http://user:pw@localhost:1")).rejects.toThrow("Credentials");
     expect(access).toEqual([]);
     expect(engine.calls).toEqual([]);
+  });
+});
+
+describe("removing a shared app", () => {
+  const stored = (id: string, target: string) => ({ id, name: id, target, enabled: true, createdAt: 0 });
+
+  it("lets the host stop reaching an address once no app of the profile is at it", async () => {
+    engine.state = { services: [stored("notes", "http://localhost:3400/notes"), stored("wiki", "http://localhost:3400/wiki"), stored("db", "http://127.0.0.1:5432")] } as unknown as EngineState;
+    await services.removeService("notes");
+    expect(forgotten).toEqual([]);
+    await services.removeService("db");
+    expect(engine.calls).toEqual([["removeService", { serviceId: "notes" }], ["removeService", { serviceId: "db" }]]);
+    expect(forgotten).toEqual(["http://127.0.0.1:5432"]);
+  });
+
+  it("still removes the app where the host has nothing to forget", async () => {
+    engine.state = { services: [stored("notes", "http://localhost:3400")] } as unknown as EngineState;
+    host.forgetLocalAccess = undefined;
+    await services.removeService("notes");
+    host.forgetLocalAccess = async () => { throw new Error("gone"); };
+    engine.state = { services: [stored("wiki", "http://localhost:8080")] } as unknown as EngineState;
+    await services.removeService("wiki");
+    expect(engine.calls).toEqual([["removeService", { serviceId: "notes" }], ["removeService", { serviceId: "wiki" }]]);
   });
 });
 

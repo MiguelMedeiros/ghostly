@@ -3,7 +3,8 @@
 //! The WebView cannot make them: its content security policy and CORS both say
 //! no. Which service maps to which address is decided by the peer; this side
 //! refuses anything that is not loopback and never follows a redirect, so a
-//! request can only ever reach this machine.
+//! request can only ever reach this machine, and only an address the person
+//! allowed in a native dialog (`local_access`), so not every port on it.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -11,6 +12,9 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde::Serialize;
+use std::future::Future;
+
+use crate::local_access::{origin_of, LocalAccess, Reason};
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(60);
@@ -22,7 +26,7 @@ pub struct LocalResponse {
     pub body_b64: String,
 }
 
-fn is_loopback(url: &reqwest::Url) -> bool {
+pub fn is_loopback(url: &reqwest::Url) -> bool {
     match url.host() {
         Some(url::Host::Domain(domain)) => domain == "localhost",
         Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
@@ -48,6 +52,28 @@ fn client() -> Result<&'static reqwest::Client, String> {
     Ok(CLIENT.get_or_init(|| client))
 }
 
+/// `fetch`, for an address on the profile's list of shared apps only. One that is not on it (an
+/// app shared before the list existed) is asked about once (`ask`, the native dialog); a refused
+/// or unasked one is never connected to.
+pub async fn fetch_shared<F, Fut>(
+    access: &LocalAccess,
+    space: &str,
+    url: String,
+    method: String,
+    headers: Vec<(String, String)>,
+    body_b64: Option<String>,
+    ask: F,
+) -> Result<LocalResponse, String>
+where
+    F: FnOnce(String, Reason) -> Fut,
+    Fut: Future<Output = bool>,
+{
+    let parsed = reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let origin = origin_of(&parsed)?;
+    access.ensure(space, &origin, Reason::FirstUse, ask).await?;
+    fetch(url, method, headers, body_b64).await
+}
+
 pub async fn fetch(
     url: String,
     method: String,
@@ -56,7 +82,7 @@ pub async fn fetch(
 ) -> Result<LocalResponse, String> {
     let url = reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
     if !matches!(url.scheme(), "http" | "https") || !is_loopback(&url) {
-        return Err("Only services on this machine can be shared".into());
+        return Err(crate::local_access::NOT_LOCAL.into());
     }
     let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| "Invalid method")?;
 
@@ -99,6 +125,7 @@ pub async fn fetch(
 mod tests {
     // covers: desktop.local-fetch
     use super::*;
+    use crate::local_access::NOT_LOCAL;
     use crate::test_support::{closed_port, read_request, respond, tokio_listener, Requests};
     use tokio::io::AsyncWriteExt;
 
@@ -118,6 +145,155 @@ mod tests {
             }
         });
         (format!("http://{address}"), seen)
+    }
+
+    fn no_ask(_: String, _: Reason) -> std::future::Ready<bool> {
+        panic!("nobody may be asked here")
+    }
+
+    async fn shared(
+        access: &LocalAccess,
+        url: &str,
+        answer: bool,
+    ) -> Result<LocalResponse, String> {
+        fetch_shared(
+            access,
+            "ghostly_a",
+            url.into(),
+            "GET".into(),
+            vec![],
+            None,
+            |_, _| std::future::ready(answer),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_port_nobody_allowed_is_never_connected_to() {
+        let (url, seen) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec());
+        let access = LocalAccess::default();
+        let error = shared(&access, &format!("{url}/secret"), false)
+            .await
+            .unwrap_err();
+        assert!(error.contains("is not an app you allowed"), "{error}");
+        // Refused once: a contact's next request is not asked about again, nor let through.
+        let error = fetch_shared(
+            &access,
+            "ghostly_a",
+            format!("{url}/secret"),
+            "GET".into(),
+            vec![],
+            None,
+            no_ask,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("is not an app you allowed"), "{error}");
+        assert!(seen.lock().unwrap().is_empty());
+
+        // Not this machine: refused before anyone is asked.
+        for url in [
+            "http://example.com/",
+            "http://10.0.0.1:3400/",
+            "file:///etc/passwd",
+        ] {
+            let error = fetch_shared(
+                &access,
+                "ghostly_a",
+                url.into(),
+                "GET".into(),
+                vec![],
+                None,
+                no_ask,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error, NOT_LOCAL, "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_allowed_port_is_reached_and_its_neighbours_are_not() {
+        let (allowed, reached) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
+        let (other, other_seen) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec());
+        let access = LocalAccess::default();
+        let origin = origin_of(&reqwest::Url::parse(&allowed).unwrap()).unwrap();
+        access
+            .ensure("ghostly_a", &origin, Reason::Share, |_, _| async { true })
+            .await
+            .unwrap();
+
+        let answer = fetch_shared(
+            &access,
+            "ghostly_a",
+            format!("{allowed}/api"),
+            "GET".into(),
+            vec![],
+            None,
+            no_ask,
+        )
+        .await
+        .unwrap();
+        assert_eq!(STANDARD.decode(answer.body_b64).unwrap(), b"ok");
+        assert_eq!(reached.lock().unwrap().len(), 1);
+
+        // Same machine, another port; the same port in another profile.
+        assert!(shared(&access, &other, false).await.is_err());
+        assert!(other_seen.lock().unwrap().is_empty());
+        let error = fetch_shared(
+            &access,
+            "ghostly_b",
+            allowed.clone(),
+            "GET".into(),
+            vec![],
+            None,
+            |_, _| std::future::ready(false),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("is not an app you allowed"), "{error}");
+        assert_eq!(reached.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_app_shared_before_the_list_is_asked_about_once_then_reached() {
+        let (url, seen) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec());
+        let access = LocalAccess::default();
+        let asked = std::sync::Mutex::new(Vec::new());
+        for _ in 0..2 {
+            fetch_shared(
+                &access,
+                "ghostly_a",
+                url.clone(),
+                "GET".into(),
+                vec![],
+                None,
+                |origin, reason| {
+                    asked.lock().unwrap().push((origin, reason));
+                    std::future::ready(true)
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let origin = origin_of(&reqwest::Url::parse(&url).unwrap()).unwrap();
+        assert_eq!(*asked.lock().unwrap(), vec![(origin, Reason::FirstUse)]);
+        assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_allowed_app_cannot_redirect_a_request_to_another_port() {
+        let (target, reached) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec());
+        let (url, _) = server(
+            format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: {target}/secret\r\nContent-Length: 0\r\n\r\n")
+                .into_bytes(),
+        );
+        let access = LocalAccess::default();
+        let answer = shared(&access, &url, true).await.unwrap();
+        assert_eq!(answer.status, 307);
+        assert!(reached.lock().unwrap().is_empty());
+        let target_origin = origin_of(&reqwest::Url::parse(&target).unwrap()).unwrap();
+        assert!(!access.is_allowed("ghostly_a", &target_origin));
     }
 
     #[tokio::test]

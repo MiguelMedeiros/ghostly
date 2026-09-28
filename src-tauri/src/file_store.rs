@@ -14,6 +14,20 @@ use tauri::ipc::{InvokeBody, Request, Response};
 /// The most one call moves: the page reads and writes 1 MiB at a time, this leaves room.
 pub const MAX_STEP: u64 = 16 * 1024 * 1024;
 
+/// A profile space (the page's database name) is a plain name, never a path.
+pub fn check_space(space: &str) -> Result<(), String> {
+    if space.is_empty()
+        || space.len() > 100
+        || space.starts_with('.')
+        || !space
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+    {
+        return Err("Invalid profile space".into());
+    }
+    Ok(())
+}
+
 /// Where the files are: set once the app knows its data folder.
 #[derive(Clone)]
 pub struct FileStore {
@@ -38,15 +52,7 @@ impl FileStore {
     }
 
     fn folder(&self, space: &str) -> Result<PathBuf, String> {
-        if space.is_empty()
-            || space.len() > 100
-            || space.starts_with('.')
-            || !space
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-        {
-            return Err("Invalid profile space".into());
-        }
+        check_space(space)?;
         Ok(self.base.join(space))
     }
 

@@ -15,6 +15,7 @@ mod fullscreen;
 mod hyperdht;
 mod link_preview;
 mod lnd;
+mod local_access;
 mod local_fetch;
 mod native_call;
 mod notifications;
@@ -71,6 +72,8 @@ macro_rules! commands {
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
+            commands::local_service_allow,
+            commands::local_service_forget,
             commands::open_payment_link,
             commands::open_project_link,
             commands::open_pubky_passport,
@@ -185,6 +188,10 @@ fn main() {
             }
             notifications::install(app.handle());
             // Files sent and received in chats, one folder per profile.
+            // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
+            app.manage(local_access::LocalAccess::load(
+                app.path().app_data_dir()?.join("local-services.json"),
+            ));
             let files = file_store::FileStore::new(app.path().app_data_dir()?.join("files"));
             files.keep_private();
             app.manage(files);
@@ -341,6 +348,7 @@ mod tests {
             .manage(paired_transport::TransportState::default())
             .manage(hyperdht::HyperState::default())
             .manage(oidc::OidcState::default())
+            .manage(local_access::LocalAccess::default())
             .invoke_handler(only_main(commands!()))
             .build(tauri::generate_context!(test = true))
             .expect("app")
@@ -400,6 +408,7 @@ mod tests {
         arguments["camera"] = serde_json::json!(null);
         arguments["mime"] = serde_json::json!("video/mp4");
         arguments["token"] = serde_json::json!("x");
+        arguments["origin"] = serde_json::json!("http://127.0.0.1:9");
         arguments
     }
 

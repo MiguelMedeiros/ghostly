@@ -125,6 +125,12 @@ Also in #299: Desktop could not publish the profile's did:dht because `publish_s
 
 Nothing found in: XSS, actions taken without the person, cross-network payments through the UI, file path traversal, SSRF through shared services, extension messaging, pairing pin bypass.
 
+### 2026-09-28: overnight review
+
+| ID | Sev. | Area | Finding | Status |
+|---|---|---|---|---|
+| F2 | Med | Desktop | `local_fetch` reached any port on this machine: only the page decided which, so a Ghostly page that was already compromised could reach every local service, not only the apps the person shares | fixed: Rust keeps each profile's shared addresses (`local_access.rs`, `local-services.json` in the app's data folder) and `local_fetch` refuses any other before connecting. An address is added only by the person's Allow in a native dialog Rust shows naming it (on sharing, or once for an app shared before this version); the page can only remove one. Redirects are still never followed. Proof: `cargo test --manifest-path src-tauri/Cargo.toml` (`local_fetch::tests::a_port_nobody_allowed_is_never_connected_to` and `an_allowed_port_is_reached_and_its_neighbours_are_not`: the old command connected to both ports; `local_access::tests`) |
+
 ## How to prove a fix
 
 Every fix is verified in the client it affects, not only in unit tests.

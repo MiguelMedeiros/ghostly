@@ -27,6 +27,8 @@ const COMMANDS: &[&str] = &[
     "link_preview_fetch",
     "lnd_request",
     "local_fetch",
+    "local_service_allow",
+    "local_service_forget",
     "native_call_accept",
     "native_call_answer",
     "native_call_camera",

@@ -26,7 +26,7 @@ import { desktopAtproto } from "./atproto";
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
 import { engine } from "@ghostly/browser/platform/engine";
-import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
+import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 
 /**
@@ -96,13 +96,15 @@ function createTauriTransport(): PkarrTransport {
 
 /**
  * The WebView may not talk to localhost (CSP, CORS); Rust may, and only to
- * loopback, without following redirects. The Rust request cannot be aborted, so
- * this settles only when it does: the host counts it toward the peer's limit
- * until then.
+ * loopback addresses this profile's person allowed (`local_service_allow`),
+ * without following redirects. The Rust request cannot be aborted, so this
+ * settles only when it does: the host counts it toward the peer's limit until
+ * then.
  */
 const tauriLocalFetch: LocalFetch = async (request) => {
   request.signal.throwIfAborted();
   const response = await invoke<{ status: number; headers: [string, string][]; body_b64: string }>("local_fetch", {
+    space: fileSpace(),
     url: request.url,
     method: request.method,
     headers: request.headers,
@@ -229,8 +231,10 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
         const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
         return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
       } })),
-    // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
-    requestLocalAccess: async () => true,
+    // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
+    // answer per profile: `local_fetch` reaches only an address allowed there.
+    requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin }),
+    forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
     async openService(peerPubKeyZ32, serviceId) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
       await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId });
