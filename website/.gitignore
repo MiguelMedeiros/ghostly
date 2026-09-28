@@ -50,6 +50,7 @@ next-env.d.ts
 /lib/wisp-numbering.json
 /lib/levels.json
 /lib/code-snippets.json
+/lib/agent-prompt.json
 
 # local screenshot helpers used while designing (see README)
 /.shots.mjs
