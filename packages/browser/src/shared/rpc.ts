@@ -271,6 +271,7 @@ export interface EngineApi {
   /**
    * A chat muted here (#250) is not woken: its contact is told to forget this side's subscription until it is unmuted,
    * so no push for it reaches the browser at all (a push that shows nothing counts against the app with some browsers).
+   * A private group's `group:<id>` does the same for every member of it (WISP 9xx · Group Mesh § Wake-up push).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */

@@ -311,6 +311,13 @@ export class Groups {
     const session = this.sessions.get(groupId);
     return session ? this.hubs.edgeLoad(groupId, session) : 0;
   }
+  /** Whether a member of a private group is reachable now: its edge is up, or a hub whose edge is up reaches it. */
+  reachable(groupId: string, key: string): boolean {
+    const session = this.sessions.get(groupId);
+    if (!session || this.isCommunity(groupId)) return false;
+    const edge = this.host.edges(groupId).get(key), now = this.now();
+    return (!!edge && this.host.linkReady(edge)) || (this.hubs.active(groupId, session, now) && this.hubs.viaHub(groupId, session, key, now));
+  }
   /** A community group (`group-community/1`) rather than a private one. */
   isCommunityGroup(groupId: string): boolean { return this.isCommunity(groupId); }
   /** Through a community group: an application frame to everyone, or a payload sealed to one member. */
