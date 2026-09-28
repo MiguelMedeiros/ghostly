@@ -834,7 +834,9 @@ export class GroupSession {
       return;
     }
     if (e > this.epoch + 1) {
-      if (this.pendingCommits.size < GROUP_LIMITS.pendingCommits) this.pendingCommits.set(e, frame);
+      // Kept to wait for the ones before it only when signed, by a member now: its place is not for anyone's junk.
+      const signed = verifyCommitSignature(raw);
+      if (signed && rosterHas(this.roster, signed.by) && this.pendingCommits.size < GROUP_LIMITS.pendingCommits) this.pendingCommits.set(e, frame);
       this.ask(from);
       return;
     }
