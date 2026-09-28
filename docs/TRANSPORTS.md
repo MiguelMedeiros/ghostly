@@ -69,7 +69,7 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 |---|---|---|
 | Web app, extension | Through the Pkarr relays: a page cannot send UDP | Every relay. The publish returns on the first relay that took the packet ([#293](https://github.com/MiguelMedeiros/ghostly/pull/293)) |
 | Desktop | The Mainline DHT directly ([#289](https://github.com/MiguelMedeiros/ghostly/pull/289)). Relay reads only with Settings, Advanced, Network, "Also use Pkarr relays" | The DHT and every relay |
-| Headless CLI (`ghostly`) | Through the Pkarr relays, as the web app: no DHT-direct on Node yet ([11xx](wisps/11xx-headless.md)) | Every relay |
+| Headless CLI (`ghostly`) | The relays first, the Mainline DHT when every relay fails ([#392](https://github.com/MiguelMedeiros/ghostly/pull/392), `RelaysAndDht` in `packages/cli/src/runtime/mainline.ts`). `GHOSTLY_DHT=0` leaves the DHT out ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)) | The DHT and every relay |
 | Rust CLI (`ghostly-cli`) | The DHT directly. Relay reads only with `--read-relays` | The DHT and pkarr's default relays |
 
 - Native apps still write to the relays because a browser contact can only read relays, and a relay keeps serving the copy it holds. Measured on 2026-09-25: after a newer packet went to the DHT alone, `pkarr.pubky.org` still served the older one 30 s later, even with a record TTL of 1 s.
@@ -84,6 +84,7 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
   - After a window that looked fast for a contact's offer, a link slows down step by step (4, 4, 8, 16 s on the relays), not straight to its background pace: an offer held back by the other side's budget can land just after the window.
   - A signal's fast window counts from when the signal went out, not from when it was made.
 - A publish goes to every relay and counts once one took it, and a read goes to a relay with requests left, so the larger share is room for signaling once `pkarr.pubky.org`'s 30 are spent. A web pairing costs about ten requests a relay: with 30 on both, three pairings in a minute were the whole minute, and a fourth waited for it to free (2026-09-28).
+- Fewer requests for the same answer ([#427](https://github.com/MiguelMedeiros/ghostly/pull/427)): a read of a key the relays answered under 500 ms ago is answered from that answer (`FRESH_READ_MS`); a publish under the key clears it. The spare invite that replaces a taken one is warmed 30 s later (`SPARE_INVITE_WARM_AFTER_TAKE_MS` in `packages/browser/src/engine/node.ts`), not in the second a new chat signals on the same budget.
 - A request this budget holds back, or a relay's 429, is a **wait** ([#271](https://github.com/MiguelMedeiros/ghostly/pull/271)). `RelayTransport` throws a typed `DiscoveryBudgetError` with the time until a request frees, and every publisher retries then. It never counts as a failed attempt and the UI shows no error.
 
 ### Circuit breaker per relay
