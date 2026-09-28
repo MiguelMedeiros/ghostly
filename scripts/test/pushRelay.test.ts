@@ -33,6 +33,8 @@ describe("the push relay (native-transports/push-relay)", () => {
     ["a port of its own", { endpoint: "https://fcm.googleapis.com:8443/x" }],
     ["no VAPID authorization", { headers: { TTL: "60" } }],
     ["an authorization that is not VAPID", { headers: { Authorization: "Bearer x" } }],
+    ["a second authorization in another spelling", { headers: { Authorization: "vapid t=a.b.c, k=K", authorization: "Bearer x" } }],
+    ["a header named twice", { headers: { Authorization: "vapid t=a.b.c, k=K", TTL: "60", ttl: "60" } }],
     ["a body that is not base64url", { body: "!!!" }],
     ["a body too large", { body: Buffer.alloc(9000).toString("base64url") }],
   ])("refuses %s", (_what, patch) => {
