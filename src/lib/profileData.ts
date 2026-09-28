@@ -4,6 +4,7 @@ import { activeProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, u
 import { unreadUnder } from "./storage";
 import { peekFresh } from "./profilePeek";
 import { verifyPassword } from "./settings";
+import { pushPlatform } from "./wakePush";
 
 /** What deleting a profile would take away, read from its own storage without starting it. */
 export interface ProfileSummary { chats: number; cashuSats: number; ark: boolean; usdt: boolean; services: number }
@@ -136,5 +137,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   for (const walletId of arkIds) await drop(`ghostly-ark-${walletId}`);
   const prefix = `ghostly_${ns}_`;
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
+  // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
+  await pushPlatform()?.unsubscribe(id).catch(() => {});
   unregisterProfile(id);
 }

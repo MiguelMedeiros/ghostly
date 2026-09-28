@@ -3,7 +3,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { fromBase64Url, toBase64Url, utf8Decode } from "../src/bytes";
 import { KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
 import {
-  WAKE_CAPABILITY, WAKE_INTERVAL_MS, WakeLimiter, newWakeToken, parseWakeFrame, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
+  WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_INTERVAL_MS, WakeLimiter, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
 } from "../src/pairedWake";
 import { decryptPushPayload, generateVapidKeys } from "../src/webPush";
 
@@ -63,6 +63,16 @@ describe("the wake-up itself", () => {
     const text = utf8Decode(decryptPushPayload(request.body, secret, auth));
     expect(JSON.parse(text)).toEqual({ wake: 1, k: target.token });
     expect(readWakePayload(text)).toBe(target.token);
+  });
+
+  it("a call says so (and nothing more), with a short time to live: a late call wake-up is no use", () => {
+    const { target, secret, auth } = subscription();
+    const request = wakeRequest(target, Date.now(), "call");
+    expect(request.headers.TTL).toBe(String(WAKE_CALL_TTL_SECONDS));
+    const text = utf8Decode(decryptPushPayload(request.body, secret, auth));
+    expect(JSON.parse(text)).toEqual({ wake: 1, k: target.token, c: 1 });
+    expect(readWake(text)).toEqual({ token: target.token, kind: "call" });
+    expect(readWake(JSON.stringify({ wake: 1, k: target.token }))).toEqual({ token: target.token, kind: "message" });
   });
 
   it("the receiver reads nothing else as a wake-up", () => {

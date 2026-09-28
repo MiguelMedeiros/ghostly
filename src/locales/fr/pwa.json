@@ -15,6 +15,7 @@
   "shareTitle": "Partager vers…",
   "shareWaiting": "Réception du partage...",
   "wake": "Me réveiller, app fermée",
+  "wakeCall": "Appel entrant",
   "wakeHint": "Les apps de vos contacts peuvent réveiller celle-ci par un push. Rien du message n'y figure.",
   "wakeInfo": "Quand le message d'un contact ne peut pas vous parvenir parce que Ghostly est fermé, son app envoie un réveil vide au service push de votre navigateur (Google, Apple ou Mozilla, selon le navigateur). Il dit seulement qu'il y a un nouveau message : ni texte ni nom. Le service push apprend qu'un push a eu lieu et quand ; vos contacts connaissent votre adresse push. Les discussions en sourdine ne l'affichent jamais. Nouvelle adresse en crée une autre, pour que personne avec qui vous ne parlez plus ne puisse vous réveiller.",
   "wakeNotice": "Nouveau message",

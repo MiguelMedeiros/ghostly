@@ -126,11 +126,16 @@ export function pushScopeProfile(scope: string): string | null {
  * for a token this profile no longer knows (a contact it stopped sharing with), for a muted chat, and while the
  * app is on screen (it is live, and the message arrives by itself). Never a sender or any text of the message.
  */
-export function wakeNotice(found: { entry: { path: string; mutedUntil?: number | "forever" }; text: { title: string; body: string } } | undefined, options: { now: number; appVisible: boolean; profile: string }):
-  { title: string; body: string; tag: string; data: { path: string; profile: string } } | null {
+export function wakeNotice(found: { entry: { path: string; mutedUntil?: number | "forever" }; text: { title: string; body: string; call?: string } } | undefined, options: { now: number; appVisible: boolean; profile: string; kind?: "message" | "call" }):
+  { title: string; body: string; tag: string; call: boolean; data: { path: string; profile: string } } | null {
   if (!found || options.appVisible) return null;
   const { entry, text } = found;
   if (entry.mutedUntil === "forever" || (typeof entry.mutedUntil === "number" && entry.mutedUntil > options.now)) return null;
   if (!/^\/(chat|group)\/[^/?#]+$/.test(entry.path)) return null;
-  return { title: text.title, body: text.body, tag: `wake:${options.profile}:${entry.path}`, data: { path: entry.path, profile: options.profile } };
+  // A call says so ("Incoming call", the app's own words): the caller is waiting for the chat to go live.
+  const call = options.kind === "call";
+  return {
+    title: text.title, body: call ? text.call || "Incoming call" : text.body, tag: `${call ? "wake-call" : "wake"}:${options.profile}:${entry.path}`, call,
+    data: { path: entry.path, profile: options.profile },
+  };
 }

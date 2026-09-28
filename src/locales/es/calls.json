@@ -33,6 +33,8 @@
   "turnCameraOn": "Encender cámara",
   "unmute": "Activar sonido",
   "video": "Videollamada",
+  "wakeGaveUp": "{{name}} no abrió Ghostly.",
+  "waking": "Despertando a {{name}} para la llamada…",
   "window": {
     "chat": "Volver al chat",
     "full": "Volver a pantalla completa",

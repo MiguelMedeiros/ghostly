@@ -15,6 +15,8 @@ export interface WakeEntry {
 export interface WakeText {
   title: string;
   body: string;
+  /** What a call wake-up says ("Incoming call"), in the app's language. */
+  call?: string;
 }
 
 const DB = "ghostly-wake";
