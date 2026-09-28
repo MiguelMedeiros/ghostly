@@ -3,7 +3,7 @@ import { A, Code, ISSUES_URL, LegalPage, Section, Term } from "@/components/site
 import { SECURITY_URL } from "@/content/shell";
 
 const DESCRIPTION =
-  "Ghostly has no accounts and no server that holds your data. This site sets no cookies and runs no analytics. What stays on your device, what travels the network, and who can see it.";
+  "No accounts, no server holding your data, and no cookies or analytics on this site. What stays on your device, what travels the network, and who sees it.";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",

@@ -7,7 +7,7 @@
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
 | Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts) and, for the group's link (`group-entry/1`), [`groupEntry.ts`](../../packages/core/src/groupEntry.ts); engine, UI and four-browser e2e in [`packages/browser`](../../packages/browser/src/engine/groups.ts) and [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts); web, extension, desktop and the headless CLI share it |
-| Summary | Up to 32 people, each pair on its own authenticated link or, past 16, through members whose apps stay online, with a fresh group key whenever someone joins or leaves. |
+| Summary | Up to 32 people, each pair on its own authenticated link or, past 16, via members whose apps stay online. A new group key when anyone joins or leaves. |
 | Availability | Available |
 | Notes | Text, a name and a picture set by the admin, and payments between two members over their own link; files and calls are refused in groups. A member who was away catches up from any member who has what it missed, not only from each author. Past 16 members, members whose apps stay online (the Desktop app, the CLI) or whom the admin pins carry the group as hubs, and the others keep two edges. Number not yet assigned. |
 
