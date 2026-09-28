@@ -27,6 +27,22 @@ function useCurrentProfile() {
   return currentProfile();
 }
 
+/**
+ * Whether a place's name is wider than its place, measured in the page itself: the laid-out text against the
+ * button, both in fractions of a pixel, in the font the page really drew. Hidden labels (`visibility: hidden`) keep
+ * their layout, so this reads the same while they are hidden. The profile's name (`data-name`) is left out.
+ */
+function placeNameCut(nav: HTMLElement): boolean {
+  const range = document.createRange();
+  return [...nav.querySelectorAll<HTMLElement>(".account-label:not([data-name])")].some((label) => {
+    const button = label.closest("button");
+    if (!button) return false;
+    range.selectNodeContents(label);
+    // Half a pixel spare: text that only just fits can still end in "…" once the page rounds it.
+    return range.getBoundingClientRect().width > button.getBoundingClientRect().width - 0.5;
+  });
+}
+
 export function AccountBar() {
   const nav = useAppNavigation();
   const location = useLocation();
@@ -41,25 +57,27 @@ export function AccountBar() {
   // The Profile place wears the profile's name (renamed or switched, it follows); "Profile" only for a profile with none.
   const profile = useCurrentProfile();
   const profileName = profile.name || t("tabs.profile");
-  // Five places in a sidebar that can be 280px wide: when any label would be cut, the labels go (the icons,
-  // their tooltips and names stay), all at once so the row stays even.
+  // Five places in a sidebar that can be 280px wide: when a place's name would be cut, the labels go (the icons,
+  // their tooltips and names stay), all at once so the row stays even. The profile's name is the user's own and can
+  // be long (32 characters is wider than any place), so it never decides this: it ends in "…", whole in its tooltip.
   const navRef = useRef<HTMLElement>(null);
   const [labelsHidden, setLabelsHidden] = useState(false);
+  const placeNames = [t("tabs.wallets"), t("tabs.identities"), t("tabs.services"), t("sidebar.settings")].join("\n");
+  const placeCount = 3 + (wallet ? 1 : 0) + (platform ? 1 : 0);
   useEffect(() => {
     const nav = navRef.current;
-    const context = nav && document.createElement("canvas").getContext("2d");
-    if (!nav || !context) return;
-    const fit = () => {
-      const labels = [...nav.querySelectorAll<HTMLElement>(".account-label")];
-      const button = labels[0]?.closest("button");
-      if (!button) return;
-      context.font = `10px ${getComputedStyle(button).fontFamily}`;
-      const available = button.clientWidth - 2;
-      setLabelsHidden(labels.some((label) => context.measureText(label.textContent ?? "").width > available));
-    };
-    const observer = new ResizeObserver(fit); observer.observe(nav); fit();
-    return () => observer.disconnect();
-  }, [t, profileName]);
+    if (!nav) return;
+    const fit = () => setLabelsHidden(placeNameCut(nav));
+    // The nav, and each place: a place is narrower when another one appears, though the nav keeps its width.
+    const observer = new ResizeObserver(fit);
+    observer.observe(nav);
+    for (const button of nav.querySelectorAll("button")) observer.observe(button);
+    fit();
+    let live = true;
+    // The labels' font drawn at last (a font that arrives later is wider or narrower than the one measured).
+    document.fonts?.ready.then(() => { if (live) fit(); }, () => {});
+    return () => { live = false; observer.disconnect(); };
+  }, [placeNames, placeCount]);
   const identityAttention = useIdentityAttention();
   const onIdentities = location.pathname === "/identities";
   const online = platform?.isOnline() ?? false;
@@ -106,7 +124,7 @@ export function AccountBar() {
             {canSwitch && (glances.othersUnread > 0 || glances.othersFresh > 0) && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
             {canSwitch && glances.othersFresh > 0 && <span data-testid="account-profile-others-new" aria-hidden="true" className="profile-others-new" />}
           </span>
-          <span className="account-label">{profileName}</span>
+          <span className="account-label" data-name="">{profileName}</span>
         </button>
 
         {wallet && (
