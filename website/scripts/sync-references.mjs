@@ -11,6 +11,7 @@ import { roadmapCandidates } from "./roadmap-candidates.mjs";
 import { roadmapTracks } from "./roadmap-tracks.mjs";
 import { siteFields } from "./wisp-header.mjs";
 import { readChanges, withRevisions } from "./wisp-changes.mjs";
+import { writeLlms } from "./llms.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "docs/wisps");
 const destination = resolve(root, "website/public/reference");
@@ -164,6 +165,9 @@ writeFileSync(
 console.log(
   `Synced ${entries.length} reference documents and their route index.`,
 );
+// /llms.txt and /llms-full.txt for AI readers, from the documents just published (scripts/llms.mjs).
+writeLlms(root, entries, numbering);
+console.log("Wrote public/llms.txt and public/llms-full.txt.");
 
 // Code the developer page quotes, cut from the source so it can't drift.
 function excerpt(file, startPattern) {

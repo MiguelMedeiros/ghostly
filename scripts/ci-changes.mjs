@@ -31,6 +31,10 @@ export const WEBSITE_INPUTS = [
   "docs/DHT-DELIVERY.md",
   "CONTRIBUTING.md",
   "SECURITY.md",
+  // Carried in /llms-full.txt by website/scripts/llms.mjs (KEY_DOCS).
+  "docs/CLI.md",
+  "docs/AI-AGENTS.md",
+  "packages/cli/SKILL.md",
   // Quoted on /developers: sync-references.mjs's excerpt().
   "packages/core/src/invite.ts",
   "packages/core/src/pairedTransports.ts",
