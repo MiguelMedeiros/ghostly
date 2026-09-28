@@ -163,8 +163,9 @@ export default function PrivacyPage() {
           <li>
             <Term>The contacts you talk to.</Term> A direct connection means the person on the other end sees your IP
             address. Connect only with people you are willing to show it to. They also see everything you send them.
-            While you write in a one-to-one chat, your app tells that contact you are typing or recording, over the
-            live connection only. You can turn this off in Settings, Security.
+            While you write in a one-to-one chat or a private group, your app tells that contact or the group&apos;s
+            members you are typing or recording, over live connections only. You can turn this off in Settings,
+            Security.
           </li>
           <li>
             <Term>STUN servers.</Term> To set up a direct connection through a router, WebRTC asks public STUN
@@ -184,7 +185,8 @@ export default function PrivacyPage() {
           </li>
           <li>
             <Term>Wake-up push.</Term> If you turn on Settings, Notifications, Wake me while closed, a contact&apos;s
-            app can wake yours through your browser&apos;s push service (Google, Apple or Mozilla). The push carries no
+            app can wake yours through your browser&apos;s push service (Google, Apple, Mozilla or Microsoft), and so
+            can a member of a private group who mentions you. The push carries no
             message, name or chat. The push service learns that your browser got a push, and when. If you set a push relay in Settings, Network,
             the wake-ups you send go through it: it sees your IP address and your contact&apos;s push address, never a
             message.

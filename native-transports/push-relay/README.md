@@ -8,7 +8,9 @@ Push relay**; the app then hands it the finished request, already encrypted and 
 This is that relay: one Node file, no dependencies, nothing stored. It only posts to the big push
 services (Google, Apple, Mozilla, Microsoft) on their default port, only forwards a request signed for Web Push
 (a VAPID `Authorization`) with the Web Push headers, and limits each address (an IPv6 one by its /64) to 30
-requests a minute. It learns that a push to an endpoint happened, when, and the sender's address; it never
+requests a minute. When its table of addresses is full it forgets the one seen longest ago. A client has 15 seconds
+to send its whole request; a request is weighed in bytes and one too large is refused before it is read, and so is
+a header named twice. It learns that a push to an endpoint happened, when, and the sender's address; it never
 sees what the push says (only "wake up"), since that is encrypted to the contact's browser.
 
 ```bash

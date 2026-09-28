@@ -57,7 +57,7 @@ This repository is public, so anything written here or in an issue or pull reque
 | S12 | Med | CI | Actions on movable tags, no dependency scanning, broad default token | fixed: SHA pins, Security workflow, Dependabot, read-only default |
 | S13 | Med | Images | website on node 20 (EOL), web on nginx 1.27 | fixed: node 22, nginx 1.30 |
 | S14 | Med | Protocol | Plaintext `_ts`/`_ack` let relays/DHT pair a link's two keys and time messages | open (needs a protocol change) |
-| S15 | Low | Privacy | Google STUN always on, no relay-only mode; Google Analytics on the site | open |
+| S15 | Low | Privacy | Google STUN always on, no relay-only mode; Google Analytics on the site | open for STUN. The site's analytics are gone (#535): no page calls another site or sets a cookie, checked by `website/e2e/launch-checklist.spec.ts` |
 | S16 | Low | Invite | Invite is a long-lived bearer secret, creator keeps the peer's seed, no forward secrecy | open |
 | S17 | Low | CLI | `--seed`/`--key` on the command line (visible in `ps`, shell history) | open |
 | S18 | Low | Storage | Seeds, messages and proofs are plaintext in localStorage/IndexedDB | open |

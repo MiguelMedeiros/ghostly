@@ -74,6 +74,7 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 
 - Native apps still write to the relays because a browser contact can only read relays, and a relay keeps serving the copy it holds. Measured on 2026-09-25: after a newer packet went to the DHT alone, `pkarr.pubky.org` still served the older one 30 s later, even with a record TTL of 1 s.
 - A Desktop read of an unknown key waits for the lookup's first answer (about 0.7 s), not the whole lookup (about 3.4 s).
+- Between two packets under one key the later one wins, but a packet dated more than 10 minutes ahead of this clock never wins over one dated now or before ([#472](https://github.com/MiguelMedeiros/ghostly/pull/472), `newerPacket` and `PKARR_FUTURE_SKEW_MS` in `packages/core/src/pkarr.ts`). The relay client of the web app, the extension and the headless CLI applies it, and the CLI when it weighs the DHT's answer against the relays'.
 
 ### Relay budget: a wait, not an error
 
@@ -85,6 +86,7 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
   - A signal's fast window counts from when the signal went out, not from when it was made.
 - A publish goes to every relay and counts once one took it, and a read goes to a relay with requests left, so the larger share is room for signaling once `pkarr.pubky.org`'s 30 are spent. A web pairing costs about ten requests a relay: with 30 on both, three pairings in a minute were the whole minute, and a fourth waited for it to free (2026-09-28).
 - Fewer requests for the same answer ([#427](https://github.com/MiguelMedeiros/ghostly/pull/427)): a read of a key the relays answered under 500 ms ago is answered from that answer (`FRESH_READ_MS`); a publish under the key clears it. The spare invite that replaces a taken one is warmed 30 s later (`SPARE_INVITE_WARM_AFTER_TAKE_MS` in `packages/browser/src/engine/node.ts`), not in the second a new chat signals on the same budget.
+- A read this budget holds back answers the newer of the last packet read and the last one this client published under that key ([#501](https://github.com/MiguelMedeiros/ghostly/pull/501)): a community hub never takes its own beacon entry for an older one.
 - A request this budget holds back, or a relay's 429, is a **wait** ([#271](https://github.com/MiguelMedeiros/ghostly/pull/271)). `RelayTransport` throws a typed `DiscoveryBudgetError` with the time until a request frees, and every publisher retries then. It never counts as a failed attempt and the UI shows no error.
 
 ### Circuit breaker per relay

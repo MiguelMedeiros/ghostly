@@ -49,7 +49,9 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 - A profile is a folder: `$GHOSTLY_HOME/profiles/<name>/` (default `~/.ghostly`), mode 0700. Its files are 0600.
 - It holds the engine's store (`db/`), the daemon's socket (`daemon.sock`), its lock (`daemon.lock`), the event journal (`events.jsonl`) and later received files (`files/`).
 - Only one process opens a profile at a time. A command finds the daemon's socket and goes through it; with no daemon it takes the lock, runs the engine for the length of the command and leaves (a **one-shot**). Bots SHOULD run the daemon: a one-shot is offline between commands, so the contact sees it come and go.
-- Secrets (seeds, keys, wallet phrases, ecash tokens, backups, group entry links) are never printed unless the command is given `--show-secret` (`group create` and `group link` print a group's link: asking for it is asking for the secret).
+- A daemon stops cleanly on SIGINT, SIGTERM and SIGHUP (the terminal or SSH session it ran in closing): it tells its contacts it is going, saves its store and removes its socket (#486). `listen` running as the daemon does the same.
+- Secrets (seeds, keys, wallet phrases, ecash tokens, backups, group entry links) are never printed unless the command is given `--show-secret` (`group create` and `group link` print a group's link: asking for it is asking for the secret). `chat.created` carries the chat with `invite: null`: a pending invite code goes only to `invite create` and `chat show`, never to a hook (#479).
+- A secret a command takes comes on stdin, out of `ps` and the shell's history: `wallet redeem` reads the Cashu token there when none is given, and `wallet create --stdin` reads `name=value` lines (`api-key=…` for an API key). On the command line it still works, with a warning on stderr (#483).
 
 ## Local control API
 
@@ -158,7 +160,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Payments | Mainnet spends only with `--confirm-real`; cross-network refusal | Phase 2: every spending command refuses Mainnet without it (exit 5), and `pay` never infers Mainnet from an invoice (test mints issue `lnbc` invoices) |
 | Identities | Add proofs that need no browser (SSH, OpenPGP, Bitcoin address with the tool; domain and DID by a published record; Nostr over NIP-46 and other in-app signers with their fields); list; share and withdraw per contact; a contact's identities, checks and re-checks; public profiles (`settings set publicProfiles`) | Phase 3b |
 | Identities | Proofs that need a browser or an approval app | Phase 3b for in-app signers that wait on a link or a code (reported as `identity.approval` events and printed); OpenID Connect (a browser popup) is app only |
-| Services | Share a loopback web app with a contact; list what a contact shares; open one as a local port | Phase 3b: loopback only, redirects handed back rather than followed (as the Desktop's Rust fetch), granted per contact |
+| Services | Share a loopback web app with a contact; list what a contact shares; open one as a local port | Phase 3b: loopback only, redirects handed back rather than followed (as the Desktop's Rust fetch), granted per contact. An opened service answers only a `Host` of 127.0.0.1, localhost or [::1] on its port, and passes on only the cookies that service set itself (#466, #479) |
 | Calls | Voice: place, answer, decline, hang up, auto-answer; the audio to and from a program | Phase 5 ([#350](https://github.com/MiguelMedeiros/ghostly/pull/350)), see [Calls](#calls) |
 | Calls | Video, screen sharing | Not applicable: a video call is answered as a voice call |
 | Settings | Pkarr relays, Iroh relays, HyperDHT relay, ICE servers, public profiles, sharing the profile's name | Phase 1 through `settings set` and `profile set` |
