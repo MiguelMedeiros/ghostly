@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SHARED_FILES, SHARE_TARGET_PATH, classify, precacheList, readShare } from "../../../web/src/sw/policy";
+import { MAX_SHARED_FILES, SHARE_TARGET_PATH, classify, precacheList, pushScope, pushScopeProfile, readShare, wakeNotice } from "../../../web/src/sw/policy";
 
-// covers: app.pwa.offline, app.pwa.share-target
+// covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute
 
 /**
  * What the web app's service worker answers, and what it keeps: the build's own files only. These are the rules
@@ -95,5 +95,41 @@ describe("a share target's form", () => {
 
   it("an empty form is an empty share", () => {
     expect(readShare(new FormData())).toEqual({ title: "", text: "", url: "", files: [] });
+  });
+});
+
+describe("a profile's push worker", () => {
+  it("has a scope of its own, which names the profile", () => {
+    expect(pushScope("")).toBe("/push/default/");
+    expect(pushScope("k3j9x2m1qa")).toBe("/push/k3j9x2m1qa/");
+    expect(pushScopeProfile("https://app.ghostly.tools/push/default/")).toBe("");
+    expect(pushScopeProfile("https://app.ghostly.tools/push/k3j9x2m1qa/")).toBe("k3j9x2m1qa");
+    // The app's own worker is none.
+    expect(pushScopeProfile("https://app.ghostly.tools/")).toBeNull();
+    expect(pushScopeProfile("https://app.ghostly.tools/push/")).toBeNull();
+  });
+});
+
+describe("what a wake-up shows", () => {
+  const text = { title: "Ghostly", body: "New message" };
+  const now = 1_800_000_000_000;
+  const show = (entry: { path: string; mutedUntil?: number | "forever" } | undefined, appVisible = false) =>
+    wakeNotice(entry && { entry, text }, { now, appVisible, profile: "" });
+
+  it("\"New message\" for a chat it knows, and the chat to open; nothing of the message", () => {
+    expect(show({ path: "/chat/abc" })).toEqual({ title: "Ghostly", body: "New message", tag: "wake::/chat/abc", data: { path: "/chat/abc", profile: "" } });
+  });
+
+  it("nothing for a muted chat, until its mute ends", () => {
+    expect(show({ path: "/chat/abc", mutedUntil: "forever" })).toBeNull();
+    expect(show({ path: "/chat/abc", mutedUntil: now + 1000 })).toBeNull();
+    expect(show({ path: "/chat/abc", mutedUntil: now - 1000 })).not.toBeNull();
+  });
+
+  it("nothing for a token it no longer knows, while the app is on screen, or for a route that is not a chat", () => {
+    expect(show(undefined)).toBeNull();
+    expect(show({ path: "/chat/abc" }, true)).toBeNull();
+    expect(show({ path: "https://evil.example/" })).toBeNull();
+    expect(show({ path: "/settings" })).toBeNull();
   });
 });

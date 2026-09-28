@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
@@ -258,6 +258,16 @@ export interface EngineApi {
    * sanitized, a link or markup dropped). A new kind or status goes at once.
    */
   setTyping(params: { linkId: string; typing: boolean; kind?: TypingKind; status?: string }): void;
+  /**
+   * This profile's push subscription (the installed web app, WISP 401 § Wake-up push), or null to stop being woken:
+   * shared with every paired contact whose app offers `wake/1`, under a new token per chat each time it changes.
+   */
+  setWakeSubscription(params: { subscription: WakeSubscription | null }): Promise<void>;
+  /**
+   * A chat muted here (#250) is not woken: its contact is told to forget this side's subscription until it is unmuted,
+   * so no push for it reaches the browser at all (a push that shows nothing counts against the app with some browsers).
+   */
+  setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
   setFastPoll(params: { linkId: string; fast: boolean }): void;
 
   // Private groups (WISP 900, `group-mesh/1`). Group messages arrive as `messages` events under `group:<id>`.

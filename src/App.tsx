@@ -17,6 +17,8 @@ import { useProfilePeek } from "./hooks/useProfilePeek";
 import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { useAppBadge } from "./lib/appBadge";
+import { useWakeTableSync } from "./lib/wakePush";
+import { useI18n } from "./contexts/I18nContext";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -155,6 +157,9 @@ export function App() {
   useWakeOnReturn();
   useAppBadge();
   useProfilePeek();
+  const { t } = useI18n();
+  // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
+  useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice") });
   const chats = useLoadedChats();
 
   const inChat = pathname.startsWith("/chat");

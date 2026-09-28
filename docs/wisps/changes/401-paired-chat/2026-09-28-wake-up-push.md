@@ -1,0 +1,1 @@
+wake-up push, `wake/1` with `paired-wake` on the live session: a push subscription and a token per chat shared with paired contacts; a message to a closed web app posts a content-free, encrypted push (RFC 8291, VAPID), one per contact per 5 minutes; an optional push relay; a muted chat's contact is told to forget it.
