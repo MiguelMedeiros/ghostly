@@ -161,15 +161,33 @@ html.js .nx-line[data-drawn="true"] path {
 .nx-row-phone {
   display: none;
 }
-/* On a phone, the phone picture is the natural one: it replaces the desktop crop for rows that have it. */
+/* On a phone, the phone picture is the natural one: it replaces the desktop crop for rows that have it. The icon
+   stands bare over the title, and the aside waits for the wider page: a title, a line or two, one screen. */
 @media (max-width: 860px) {
+  .nx-icon {
+    width: auto;
+    height: auto;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .nx-icon .icon {
+    width: 26px;
+    height: 26px;
+  }
+  .nx-copy {
+    gap: 12px;
+  }
+  .nx-note {
+    display: none;
+  }
   .nx-row-media[data-phone="true"] .nx-win {
     display: none;
   }
   .nx-row-media[data-phone="true"] .nx-row-phone {
     display: block;
-    width: 62%;
-    max-width: 300px;
+    width: 58%;
+    max-width: 280px;
     height: auto;
     margin-inline: auto;
     border-radius: 18px;

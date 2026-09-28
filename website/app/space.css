@@ -380,6 +380,20 @@
   .sp-wallet {
     gap: 18px;
   }
+  /* Backup and storage: two short lists side by side, no boxes. */
+  .sp-box {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .sp-flow {
+    gap: 16px;
+  }
+  /* A card's details are its one line; the panel keeps the height of the longest line, not of the longest note. */
+  .sp-desc .note {
+    display: none;
+  }
 }
 
 /* ── Reduced motion: the final frame, at once ─────── */

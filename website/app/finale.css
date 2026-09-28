@@ -423,6 +423,8 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   }
   .fin-title {
     order: 2;
+    /* Two lines, as on a wide screen, down to a 360px phone. */
+    font-size: clamp(40px, 13vw, 56px);
   }
   .fin-lead {
     order: 3;
@@ -456,12 +458,50 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
     display: grid;
     gap: 6px;
   }
+  /* No boxes: each platform is a name over its files, one row per file between hairlines. */
   .fin-cards {
     grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
+    gap: 32px;
   }
-  .fin-card {
-    padding: 18px 16px 16px;
+  .fin-card,
+  .fin-card:hover,
+  .fin-card[data-hot="true"] {
+    padding: 0;
+    gap: 10px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .fin-card-title {
+    font-size: 17px;
+  }
+  .fin-card-body {
+    margin-top: -4px;
+  }
+  .fin-dls {
+    gap: 0;
+  }
+  .fin-dl {
+    min-height: 52px;
+    padding: 12px 2px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: none;
+  }
+  .fin-dls .fin-dl:first-child,
+  .fin-card--wide > .fin-dl {
+    border-top: 1px solid var(--line);
+  }
+  .fin-dl:hover,
+  .fin-dl:focus-visible {
+    transform: none;
+  }
+  .fin-dl[aria-current="true"] {
+    border-color: var(--line);
+    background: none;
+    color: var(--cyan);
   }
   .fin-card--wide > .fin-dl {
     justify-self: stretch;
