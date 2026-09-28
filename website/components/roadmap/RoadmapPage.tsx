@@ -9,7 +9,7 @@ import { LEVELS, type Level } from "@/lib/status";
 import { shell } from "@/content/shell";
 import candidates from "@/lib/roadmap-candidates.json";
 import { timeline } from "@/content/roadmap-timeline";
-import { wisps } from "@/lib/wisps";
+import { isListed, wisps } from "@/lib/wisps";
 import { roadmapTracks } from "@/lib/roadmap";
 import { BlockGrid } from "@/components/dev/BlockGrid";
 import { Timeline } from "./Timeline";
@@ -23,6 +23,7 @@ export function RoadmapPage() {
   const titleOf = (id: string) => roadmapTracks.find((x) => x.id === id);
   const tl = timeline;
   const wispRefs = wisps.map((w) => ({ slug: w.slug, number: w.number, name: w.name }));
+  const ahead = wisps.filter((w) => !isListed(w));
   return (
     <Shell>
       <section className="rm-hero">
@@ -53,6 +54,21 @@ export function RoadmapPage() {
         </h2>
         <p className="muted">{tl.mapLead}</p>
         <BlockGrid mode="stages" t={tl.grid} wisps={wispRefs} />
+        {ahead.length > 0 && (
+          <div className="rm-drafts">
+            <h3>{t.drafts}</h3>
+            <ul>
+              {ahead.map((w) => (
+                <li key={w.id}>
+                  {w.level && <LevelBadge level={w.level} small />}
+                  <Link href={`/developers/wisps/${w.slug}`}>
+                    <span className="mono">{w.number}</span> {w.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section className="wrap rm-block" id="timeline" aria-labelledby="timeline-title">

@@ -1,7 +1,7 @@
 # ghostly.tools
 
 The Ghostly website: the story for people (`/`), the story for developers
-(`/developers`), the WISPs (`/developers/wisps`, a searchable catalog) and the reader, the roadmap, and the existing CLI,
+(`/developers`), the WISPs (`/developers/wisps`, the WISPs that work today drawn as layers) and the reader, the roadmap, and the existing CLI,
 protocol docs and privacy pages. Next.js (see `AGENTS.md`: this version differs
 from older ones), motion for scroll scenes, no WebGL.
 
@@ -29,7 +29,7 @@ After `npm run build`, restart a running dev server: reader routes are static
 | `components/home/` | Homepage: the hero and four story chapters in two acts (invite, DHT; agree, alive), the app screenshots, your space with the wallet deck, the open layer stack and the finale with its download panel. |
 | `components/story/` | The film's machinery. `Act` pins one full-bleed backdrop behind its chapters and keeps one Boo and one Casper in it; `SceneFrame` is a chapter (full-bleed stage, floating copy panel, step mapping); `poses.ts` is the blocking table (actors, camera, focal point per chapter, landscape and portrait); `Statement` is the sentence between the acts. |
 | `components/dev/` | `/developers`: protocol loop, composition board, negotiation demo, path, availability table. |
-| `components/catalog/`, `components/reader/`, `components/roadmap/` | Catalog (with the six-word glossary at `#glossary`, linked from the reader), WISP reader, roadmap. |
+| `components/catalog/`, `components/reader/`, `components/roadmap/` | WISPs page (layers of what works today, the six-word glossary at `#glossary`, linked from the reader), WISP reader, roadmap (lists the drafts written ahead of the app). |
 | `components/ghost/Ghost.tsx` | Boo and Casper. `components/site/GhostPet.tsx` is the original pointer ghost, kept as it was. |
 | `content/*.ts` | The site's own copy, one object per page. No WISP content: see "WISP content has one source". |
 | `lib/wisps.ts` | The catalog model, built from `docs/wisps/numbering.json` and the documents. |
@@ -120,7 +120,7 @@ a WISP or a roadmap item is written in `website/`:
 
 | What the site shows | Where it is written |
 |---|---|
-| A WISP's line on the catalog, its availability, its caveat, its feature link | The `Summary`, `Availability`, `Notes` and `Feature` rows of its header table ([the format](../docs/wisps/00-process.md#header-fields-the-site-reads)) |
+| A WISP's summary on its page, its availability, its caveat, its feature link | The `Summary`, `Availability`, `Notes` and `Feature` rows of its header table ([the format](../docs/wisps/00-process.md#header-fields-the-site-reads)) |
 | Its number, title, status, dependencies, implementation line | `docs/wisps/numbering.json` and the same header |
 | Its family on the catalog | Its number's range (`ranges` in `lib/wisp-groups.ts`) |
 | The roadmap's tracks and timeline | "Tracks" in `docs/wisps/ADAPTER-ROADMAP.md` |
@@ -157,7 +157,8 @@ Edit `docs/wisps/numbering.json` and add the document, with the `Summary` and
 `docs/wisps/changes/<wisp>/` (`docs/wisps/00-process.md`, "Revisions"); `npm run sync:references` copies it,
 adds the Revision and Updated rows and the revision log from those files, parses
 its header table and writes `lib/reference-index.json`. The draft then appears
-in the catalog and the reader with no other change. Counts on the site are
+in the reader with no other change: on the WISPs page once its Availability is
+Available, on the roadmap until then. Counts on the site are
 always computed. `notes-local/` and `HANDOFF-CLAUDE*` / `QA-CLAUDE*` files are
 never published.
 

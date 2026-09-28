@@ -343,6 +343,40 @@
   gap: 12px;
   padding-block: 28px 56px;
 }
+.rm-drafts {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+.rm-drafts h3 {
+  font-size: 13px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 400;
+}
+.rm-drafts ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+}
+.rm-drafts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+}
+.rm-drafts a {
+  color: var(--muted);
+}
+.rm-drafts a:hover {
+  color: var(--cyan);
+}
+.rm-drafts .mono {
+  color: var(--dim);
+  font-size: 0.9em;
+}
 .rm-block > .h-card {
   font-size: clamp(26px, 3vw, 38px);
   font-weight: 700;

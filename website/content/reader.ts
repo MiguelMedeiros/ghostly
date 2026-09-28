@@ -15,6 +15,7 @@ export const reader = {
   expandAll: "Expand all",
   collapseAll: "Collapse all",
   glossary: "Glossary",
+  roadmap: "What comes next: the roadmap",
   moved: "This draft has a new number. You're reading it at its current address; the old link keeps working.",
   draftNote: "A review draft, not a final standard, and not a promise that every client supports it.",
   supportNote: "Supporting documentation. It can include dated proposals and historical evidence.",

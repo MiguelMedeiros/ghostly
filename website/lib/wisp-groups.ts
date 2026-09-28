@@ -18,17 +18,16 @@ export type GroupId =
   | "headless";
 
 /**
- * The catalog's map draws the families as a stack, top to bottom: each layer rests on the ones below it.
- * The core is at the bottom, as in a protocol stack. This is presentation only; the list and the reader
- * keep the order of GROUPS.
+ * The WISPs page draws the families as a stack, top to bottom: the core first, and each layer builds on the
+ * ones above it. This is presentation only; the reader's sidebar keeps the order of GROUPS.
  */
 export const LAYERS: { label: string; groups: GroupId[] }[] = [
-  { label: "Programs", groups: ["headless"] },
-  { label: "Many people", groups: ["together"] },
-  { label: "In a chat", groups: ["pay", "services", "identity"] },
-  { label: "Talk", groups: ["talk", "files", "calls"] },
-  { label: "Link", groups: ["connect"] },
   { label: "Core", groups: ["meet", "keep"] },
+  { label: "Link", groups: ["connect"] },
+  { label: "Talk", groups: ["talk", "files", "calls"] },
+  { label: "In a chat", groups: ["pay", "services", "identity"] },
+  { label: "Many people", groups: ["together"] },
+  { label: "Programs", groups: ["headless"] },
 ];
 
 export const GROUPS: {

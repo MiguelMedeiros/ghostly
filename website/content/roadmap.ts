@@ -22,6 +22,8 @@ export const roadmap = {
   next: "Next",
   gate: "Before it's called done",
   after: "Builds on",
+  /** WISP drafts written ahead of the app: the WISPs page shows only what works today, so they are listed here. */
+  drafts: "Drafts written ahead of the app",
   /** A track with nothing built yet. */
   nothing: "Nothing yet",
   inventory: {

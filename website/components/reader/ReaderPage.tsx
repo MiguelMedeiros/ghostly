@@ -8,7 +8,7 @@ import { reader } from "@/content/reader";
 import { catalog } from "@/content/catalog";
 import numbering from "@/lib/wisp-numbering.json";
 import type { Reference } from "@/lib/references";
-import { GROUPS, wispByFile, wisps, type Wisp } from "@/lib/wisps";
+import { GROUPS, listedWisps, wispByFile, wisps, type Wisp } from "@/lib/wisps";
 import { REPO_URL } from "@/content/shell";
 import { ReferenceMarkdown } from "./Markdown";
 import { WispNav, type WispNavGroup } from "./WispNav";
@@ -45,9 +45,10 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
   const kinds = catalog.kinds;
   const body = await readFile(path.join(process.cwd(), "public/reference", reference.file), "utf8");
   const w = wispByFile(reference.file);
-  const order = wisps.indexOf(w as Wisp);
-  const prev = w && order > 0 ? wisps[order - 1] : undefined;
-  const next = w && order < wisps.length - 1 ? wisps[order + 1] : undefined;
+  // The sidebar and the pager walk what works in the app today; a planned draft is read on its own.
+  const order = listedWisps.indexOf(w as Wisp);
+  const prev = w && order > 0 ? listedWisps[order - 1] : undefined;
+  const next = w && order >= 0 && order < listedWisps.length - 1 ? listedWisps[order + 1] : undefined;
   const toc = outline(body);
   const deps = ((w?.dependencies ?? []).map((file) => wispByFile(file)).filter(Boolean) as Wisp[]).filter((d) => d.id !== w?.parent);
   const usedBy = w ? wisps.filter((x) => x.dependencies.includes(w.file) && x.parent !== w.id) : [];
@@ -65,7 +66,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
   const groups: WispNavGroup[] = GROUPS.map((g) => ({
     id: g.id,
     title: g.title,
-    items: wisps
+    items: listedWisps
       .filter((x) => x.group === g.id)
       .map((x) => ({ id: x.id, slug: x.slug, number: x.number, name: x.name, child: Boolean(x.parent), assigned: x.assigned })),
   })).filter((g) => g.items.length > 0);
@@ -92,6 +93,9 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
               <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
             </noscript>
             <WispNav groups={groups} current={w?.slug} t={{ all: t.all, expandAll: t.expandAll, collapseAll: t.collapseAll }} />
+            <Link className="reader-glossary reader-roadmap" href={"/roadmap"}>
+              {t.roadmap} →
+            </Link>
           </aside>
 
           <article className="reader-main">

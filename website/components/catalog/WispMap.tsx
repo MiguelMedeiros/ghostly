@@ -1,12 +1,18 @@
 import Link from "next/link";
 import { Icon } from "@/components/site/icons";
-import { LEVELS } from "@/lib/status";
-import { GROUPS, wisps } from "@/lib/wisps";
+import { GROUPS, listedWisps, wisps, type Wisp } from "@/lib/wisps";
 import { LAYERS } from "@/lib/wisp-groups";
+import numbering from "@/lib/wisp-numbering.json";
 import { shell } from "@/content/shell";
 import type { CatalogCopy } from "@/content/catalog";
 
-// Short labels for tiles; the full title is on the reader page and in the list.
+/** Old numeric anchors (`#wisp-09`) stay only where no current draft uses the same id. */
+export function legacyIds(w: Pick<Wisp, "id" | "file">) {
+  const old = numbering.find((n) => n.file === w.file)?.oldId;
+  return old && old !== w.id && /^\d+$/.test(old) && !wisps.some((x) => x.id === old) ? [old] : [];
+}
+
+// Short labels for tiles; the full title is on the reader page.
 function short(name: string) {
   return name
     .replace(/^(WISP process and document format)$/i, "Process")
@@ -40,64 +46,43 @@ function short(name: string) {
 }
 
 /**
- * The catalog at a glance, drawn as a stack: one band per family, the core at the bottom and each layer
- * resting on the ones below it. Inside a band the tiles run left to right. The big tile is the family's
- * contract; small tiles are adapters and profiles. The tile's color says whether what it describes runs
- * in the app.
+ * The WISPs at a glance, drawn as a stack: one band per family, the core at the top and each layer building
+ * on the ones above it. Inside a band the tiles run left to right. The big tile is the family's contract;
+ * small tiles are adapters and profiles. Only what works in the app today is drawn; the rest is on the roadmap.
+ * Old links into the page land here: `#list` on the stack, `#family-…` on a band, `#wisp-…` on a tile.
  */
 export function WispMap({ t }: { t: CatalogCopy }) {
   const levels = shell.levels;
-  const counts = LEVELS.map((l) => ({ l, n: wisps.filter((w) => w.level === l).length })).filter((c) => c.n);
   return (
     <div className="wmap">
-      <div className="wmap-stats">
-        <p className="wmap-total">
-          <strong>{wisps.length}</strong> {t.map.drafts}
-        </p>
-        {counts.map(({ l, n }) => (
-          <p key={l} className="wmap-stat" data-level={l}>
-            <strong>{n}</strong> {levels[l].toLowerCase()}
-          </p>
-        ))}
-      </div>
-      <ul className="wmap-how">
-        <li>
-          <span className="wmap-demo wmap-demo--stack" /> {t.map.layers}
-        </li>
-        <li>
-          <span className="wmap-demo wmap-demo--big" /> {t.map.contract}
-        </li>
-        <li>
-          <span className="wmap-demo" /> {t.map.adapter}
-        </li>
-        <li>
-          <span className="wmap-demo wmap-demo--color" /> {t.map.color}
-        </li>
-      </ul>
-      <ol className="wmap-stack" aria-label={t.map.stack}>
+      <p className="wmap-how">
+        <span className="wmap-demo wmap-demo--big" aria-hidden="true" /> {t.map.legend}
+      </p>
+      <ol className="wmap-stack" id="list" aria-label={t.map.stack}>
         {LAYERS.map((layer) => {
-          const families = layer.groups.map((id) => GROUPS.find((g) => g.id === id)!).filter((g) => wisps.some((w) => w.group === g.id));
+          const families = layer.groups.map((id) => GROUPS.find((g) => g.id === id)!).filter((g) => listedWisps.some((w) => w.group === g.id));
           if (!families.length) return null;
           return (
             <li key={layer.label} className="wmap-layer">
               <p className="wmap-layer-label mono">{layer.label}</p>
               <div className="wmap-bands">
                 {families.map((g) => {
-                  const items = wisps.filter((w) => w.group === g.id);
+                  const items = listedWisps.filter((w) => w.group === g.id);
                   // A contract that others implement gets the wide tile; its adapters follow.
                   const isLead = (id: string) => items.some((x) => x.parent === id);
                   return (
-                    <section key={g.id} className="wmap-family" data-group={g.id} aria-labelledby={`wmap-${g.id}`}>
+                    <section key={g.id} id={`family-${g.id}`} className="wmap-family" data-group={g.id} aria-labelledby={`wmap-${g.id}`}>
                       <header>
                         <Icon name={g.icon} />
-                        <h3 id={`wmap-${g.id}`}>
-                          <a href={`#family-${g.id}`}>{g.title}</a>
-                        </h3>
+                        <h2 id={`wmap-${g.id}`}>{g.title}</h2>
                         <span className="wmap-count mono">{items.length}</span>
                       </header>
                       <ul className="wmap-tiles">
                         {items.map((w) => (
-                          <li key={w.id} className={isLead(w.id) ? "wmap-tile-wrap wmap-tile-wrap--lead" : "wmap-tile-wrap"}>
+                          <li key={w.id} id={`wisp-${w.id}`} className={isLead(w.id) ? "wmap-tile-wrap wmap-tile-wrap--lead" : "wmap-tile-wrap"}>
+                            {legacyIds(w).map((old) => (
+                              <span key={old} id={`wisp-${old}`} className="wmap-anchor" />
+                            ))}
                             <Link
                               href={`/developers/wisps/${w.slug}`}
                               className="wmap-tile"
