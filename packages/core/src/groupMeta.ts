@@ -4,15 +4,17 @@ import { decryptText, encryptText, sha256Hex } from "./groupCrypto";
 import { GROUP_ID, MEMBER_KEY } from "./groupCommits";
 import { parseHubPolicy, wireHubPolicy, type MeshHubPolicy } from "./groupHubs";
 import { publicKeyFromZ32, sign, verify } from "./identity";
+import { sanitizeDisplayText } from "./text";
 
 /**
- * A group's metadata (WISP 9xx § Metadata): what the group looks like, beside who is in it. Today
- * that is its picture. It is not in the membership chain, so apps that know nothing of it keep
+ * A group's metadata (WISP 9xx § Metadata): what the group looks like, beside who is in it: its
+ * name and its picture. It is not in the membership chain, so apps that know nothing of it keep
  * verifying the chain as before and drop the frame that carries it.
  *
  * The admin signs a **statement**: the group, a commit of the chain (`e`, `h`) the admin was the
  * admin of, a revision `r`, and the SHA-256 of the **body**, the metadata itself as JSON. The body
- * is the whole metadata: a field left out is unset, so `{}` removes the picture. It travels in a
+ * is the whole metadata: a field left out is unset, so `{}` removes the picture and gives the group
+ * back the name it had when this member got in (`groupDisplayName`). It travels in a
  * `group-meta` frame, encrypted under the message key of an epoch the recipient holds (`k`), so
  * someone taken out of the group cannot read what comes after, and any member can hand it on under
  * a later epoch without the admin: the signature covers the body's hash, not its box.
@@ -27,6 +29,10 @@ import { publicKeyFromZ32, sign, verify } from "./identity";
  * What Ghostly makes (128×128) is a few kilobytes.
  */
 export const MAX_GROUP_PICTURE_LENGTH = 40_000;
+/** Longest name the admin may give a group, in characters (code points), as a nickname (`MAX_NICK_LENGTH`). */
+export const MAX_GROUP_NAME_LENGTH = 64;
+/** And in UTF-8 bytes. */
+export const MAX_GROUP_NAME_BYTES = 256;
 /** Longest body, in UTF-8 bytes: a picture and room for little else. */
 export const MAX_GROUP_META_BODY = 42_000;
 const MAX_META_BOX = Math.ceil((MAX_GROUP_META_BODY + 16) * 4 / 3) + 4;
@@ -36,6 +42,8 @@ const B64 = /^[A-Za-z0-9_-]*$/;
 
 /** What the body may say. Every field is optional; one left out is unset. */
 export interface GroupMetaBody {
+  /** The group's name, as `groupName` accepts it. Left out: the name the group had when this member got in. */
+  name?: string;
   /** The group's picture: a square JPEG data URL, as `sanitizeAvatar` accepts it. */
   pic?: string;
   /** Private groups: members the admin pins as hubs, and excludes (WISP 9xx · Group Mesh § Hubs). Apps from before ignore it. */
@@ -78,9 +86,27 @@ const statementBytes = (s: Omit<GroupMetaStatement, "sig">) =>
   utf8Encode(JSON.stringify(["ghostly-group meta", s.g, s.e, s.h, s.r, s.by, s.ts, s.d]));
 const boxAad = (g: string, k: number | string, d: string) => JSON.stringify(["ghostly-group meta", g, k, d]);
 
-/** The body for a picture (or none). Throws on a picture Ghostly would not show. */
+/**
+ * A group's name as the admin gives it and every member shows it: any run of whitespace (a newline,
+ * a tab) one space, invisible and direction-changing characters dropped, trimmed. Undefined when it
+ * is not a string, nothing visible is left, or it is longer than `MAX_GROUP_NAME_LENGTH` characters
+ * or `MAX_GROUP_NAME_BYTES` bytes: a name that does not hold is refused, never cut into another one.
+ */
+export function groupName(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || raw.length > 4 * MAX_GROUP_NAME_BYTES) return undefined;
+  const clean = sanitizeDisplayText(raw.replace(/\s+/gu, " "), Infinity)?.replace(/ {2,}/g, " ");
+  if (!clean || [...clean].length > MAX_GROUP_NAME_LENGTH || utf8Encode(clean).length > MAX_GROUP_NAME_BYTES) return undefined;
+  return clean;
+}
+
+/** The body for a name and a picture (or neither). Throws on a name or picture Ghostly would not show. */
 export function encodeGroupMetaBody(body: GroupMetaBody): string {
   const out: GroupMetaBody = {};
+  if (body.name !== undefined) {
+    const name = groupName(body.name);
+    if (!name) throw new Error(`A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters`);
+    out.name = name;
+  }
   if (body.pic) {
     if (body.pic.length > MAX_GROUP_PICTURE_LENGTH || typeof sanitizeAvatar(body.pic) !== "string") throw new Error("This picture cannot be used");
     out.pic = body.pic;
@@ -92,13 +118,18 @@ export function encodeGroupMetaBody(body: GroupMetaBody): string {
   return JSON.stringify(out);
 }
 
-/** A body as received: null when it is not JSON, too large, or its picture is not one Ghostly shows. Unknown fields are ignored. */
+/**
+ * A body as received: null when it is not JSON, too large, or its picture is not one Ghostly shows. Unknown fields
+ * are ignored, and so is a name that does not hold (`groupName`): the group keeps its first name, the picture shows.
+ */
 export function parseGroupMetaBody(body: string): GroupMetaBody | null {
   if (utf8Encode(body).length > MAX_GROUP_META_BODY) return null;
   let parsed: unknown;
   try { parsed = JSON.parse(body); } catch { return null; }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const out: GroupMetaBody = {};
+  const name = groupName((parsed as Record<string, unknown>).name);
+  if (name) out.name = name;
   const pic = (parsed as Record<string, unknown>).pic;
   if (pic !== undefined) {
     const clean = sanitizeAvatar(pic);
@@ -175,7 +206,32 @@ export function parseGroupMetaTag(tag: unknown): { e: number; r: number } | unde
   return { e, r };
 }
 
+/** What a kept statement's body says, `{}` for none. */
+export function groupMetaBody(meta: GroupMeta | undefined): GroupMetaBody {
+  return (meta && parseGroupMetaBody(meta.body)) || {};
+}
+
 /** The picture a kept statement's body names, if it is one Ghostly shows. */
 export function groupMetaPicture(meta: GroupMeta | undefined): string | undefined {
-  return meta ? parseGroupMetaBody(meta.body)?.pic : undefined;
+  return groupMetaBody(meta).pic;
+}
+
+/**
+ * The name members see: the one the admin's statement gives, else the name the group had when this member got in
+ * (its creation, or the invitation and welcome that let them in). That first name is also what apps from before
+ * names show, and what a member shows until the statement reaches them.
+ */
+export function groupDisplayName(meta: GroupMeta | undefined, first: string): string {
+  return groupMetaBody(meta).name ?? first;
+}
+
+/** What a new statement changed that members see (a line in the history); `null` for a field now unset. */
+export interface GroupMetaChange { name?: string | null; picture?: string | null }
+
+/** The name and picture that differ between two statements; null when neither does (hubs alone, or the same body signed again). */
+export function groupMetaChange(before: GroupMeta | undefined, after: GroupMeta): GroupMetaChange | null {
+  const a = groupMetaBody(before), b = groupMetaBody(after), change: GroupMetaChange = {};
+  if (a.name !== b.name) change.name = b.name ?? null;
+  if (a.pic !== b.pic) change.picture = b.pic ?? null;
+  return "name" in change || "picture" in change ? change : null;
 }

@@ -10,8 +10,8 @@ import {
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
 import {
-  encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
-  type GroupMeta, type GroupMetaFrame,
+  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } from "./replies";
@@ -151,8 +151,8 @@ export interface GroupSessionHooks {
   edit?(edit: GroupIncomingEdit): Promise<void> | void;
   /** Roster, epoch or status changed. */
   changed(): void;
-  /** The group's picture changed (set, replaced or removed), by `by`. */
-  metaChanged?(by: string, picture: string | undefined): void;
+  /** The group's name or picture changed (set, replaced or removed), by `by`. */
+  metaChanged?(by: string, change: GroupMetaChange): void;
 }
 
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
@@ -324,7 +324,8 @@ export class GroupSession {
   }
 
   get id(): string { return this.state.id; }
-  get name(): string { return this.state.name; }
+  /** The name the admin gave the group, else the one it had when I got in (WISP 9xx § Metadata). */
+  get name(): string { return groupDisplayName(this.state.meta, this.state.name); }
   get myKey(): string { return this.identity.pubKeyZ32; }
   get epoch(): number { return this.state.chain[this.state.chain.length - 1].e; }
   get top(): GroupCommit { return this.state.chain[this.state.chain.length - 1]; }
@@ -931,7 +932,17 @@ export class GroupSession {
     return this.serialize(async () => {
       if (this.state.status !== "active") throw new Error("You are no longer in this group");
       if (!this.isAdmin) throw new Error("Only the admin can change the group's picture");
-      await this.publishMeta(encodeGroupMetaBody({ pic: picture ?? undefined, hubs: this.hubPolicy }), now);
+      await this.publishMeta(encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), pic: picture ?? undefined }), now);
+    });
+  }
+
+  /** Renames the group: only the admin, signed under the current commit, beside the picture and the hubs. */
+  rename(name: string, now = Date.now()): Promise<void> {
+    return this.serialize(async () => {
+      if (this.state.status !== "active") throw new Error("You are no longer in this group");
+      if (!this.isAdmin) throw new Error("Only the admin can rename the group");
+      const body = encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), name });
+      if (body !== this.state.meta?.body) await this.publishMeta(body, now);
     });
   }
 
@@ -949,7 +960,7 @@ export class GroupSession {
       if (role === "pin") policy.pin.push(key);
       if (role === "exclude") policy.no.push(key);
       if (policy.pin.length > MESH_HUBS.pinned) throw new Error(`At most ${MESH_HUBS.pinned} members can be pinned as hubs`);
-      await this.publishMeta(encodeGroupMetaBody({ pic: this.picture, hubs: policy }), now);
+      await this.publishMeta(encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), hubs: policy }), now);
     });
   }
 
@@ -964,7 +975,8 @@ export class GroupSession {
       const frame = wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message);
       for (const key of this.others) this.hooks.send(key, frame);
     }
-    if (groupMetaPicture(before) !== this.picture) this.hooks.metaChanged?.(this.myKey, this.picture);
+    const change = groupMetaChange(before, meta);
+    if (change) this.hooks.metaChanged?.(this.myKey, change);
     this.hooks.changed();
   }
 
@@ -997,12 +1009,13 @@ export class GroupSession {
     this.state.meta = opened.meta;
     await this.persist();
     // A change of hubs alone is no line in the history.
-    if (groupMetaPicture(before) !== opened.body.pic) this.hooks.metaChanged?.(s.by, opened.body.pic);
+    const change = groupMetaChange(before, opened.meta);
+    if (change) this.hooks.metaChanged?.(s.by, change);
     this.hooks.changed();
     this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });
   }
 
-  /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the picture signed again as mine. */
+  /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
   private async metaFollowsChain(): Promise<void> {
     const pending = this.pendingMeta;
     this.pendingMeta = undefined;

@@ -54,6 +54,10 @@ export const commands: Record<string, Command> = {
     method: "group.remove", usage: "group remove <group> <member> [--show-secret]", summary: "Remove a member (admin)", args: ["group", "member"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
   },
+  "group rename": {
+    method: "group.rename", usage: "group rename <group> <name...> [--show-secret]", summary: "Rename the group (admin; the picture stays)", args: ["group", "name..."],
+    options: showSecret, params: ({ options }, a) => ({ group: a.group, name: a.name, ...secret(options) }),
+  },
   "group rotate": {
     method: "group.rotate", usage: "group rotate <group> [--show-secret]", summary: "A fresh group secret, members unchanged (admin)", args: ["group"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, ...secret(options) }),

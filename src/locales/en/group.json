@@ -12,5 +12,12 @@
     "leave": "Leave group",
     "members": "Members…",
     "rotate": "Rotate keys"
+  },
+  "rename": {
+    "action": "Rename",
+    "cancel": "Cancel",
+    "hint": "Every member sees the new name. Older apps keep the name they joined with.",
+    "label": "Group name",
+    "save": "Save"
   }
 }

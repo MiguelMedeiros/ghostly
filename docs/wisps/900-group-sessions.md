@@ -6,7 +6,7 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | Two profiles: [`group-mesh/1`](9xx-group-mesh.md) (private, up to 32, hubs past 16) and [`group-community/1`](9xx-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group picture and payments between members |
+| Implementation | Two profiles: [`group-mesh/1`](9xx-group-mesh.md) (private, up to 32, hubs past 16) and [`group-community/1`](9xx-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group name and picture and payments between members |
 | Summary | How a group agrees on who is in it, locks out whoever left, and moves messages between members, never through the DHT. |
 | Availability | Available |
 | Notes | Two profiles implemented: group-mesh/1 (private, up to 32 members, one admin; past 16, members whose apps stay online carry it; a member who was away is caught up by whoever is there) and group-community/1 (a link anyone can open, up to 256). Text, a picture and payments between members; web, desktop, extension and the CLI. |
@@ -49,7 +49,7 @@ Admission: the admin invites a contact over their authenticated chat; the contac
 
 ## Group metadata
 
-What a group looks like, beside who is in it (today its picture), is **not** part of the membership chain, so no chain rule changes and older apps keep verifying chains they understand. It is a statement signed by the admin and bound to a commit of the chain, sent sealed under an epoch key; members keep the newest one whose signer is the current admin, and hand it on at sync, so late joiners get it without the admin. Both profiles use it: see [9xx · Group Mesh § Metadata](9xx-group-mesh.md#metadata) and [9xx · Group Community § Metadata](9xx-group-community.md#metadata).
+What a group looks like, beside who is in it (its name and its picture), is **not** part of the membership chain, so no chain rule changes and older apps keep verifying chains they understand. It is a statement signed by the admin and bound to a commit of the chain, sent sealed under an epoch key; members keep the newest one whose signer is the current admin, and hand it on at sync, so late joiners get it without the admin. The name a group was created with, or the one a member's invitation said, stays the name that member shows until a statement with a name reaches it, and again whenever the statement it holds names none. Both profiles use it: see [9xx · Group Mesh § Metadata](9xx-group-mesh.md#metadata) and [9xx · Group Community § Metadata](9xx-group-community.md#metadata).
 
 ## Security profile
 
