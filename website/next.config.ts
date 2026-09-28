@@ -1,10 +1,16 @@
 import type { NextConfig } from "next";
 
-/** The security policy and the contributing guide are on GitHub only (content/shell.ts links the same two). */
-const GITHUB = "https://github.com/MiguelMedeiros/ghostly/blob/main";
+/**
+ * Documents on GitHub only: the security policy and the contributing guide (content/shell.ts links the same two), on
+ * the released branch; and the two WISP documents that repeat the list /wisps shows (scripts/sync-references.mjs),
+ * on dev, where they live until the next release.
+ */
+const GITHUB = "https://github.com/MiguelMedeiros/ghostly/blob";
 const ON_GITHUB = [
-  ["security", `${GITHUB}/SECURITY.md`],
-  ["contributing", `${GITHUB}/CONTRIBUTING.md`],
+  ["security", `${GITHUB}/main/SECURITY.md`],
+  ["contributing", `${GITHUB}/main/CONTRIBUTING.md`],
+  ["implementation", `${GITHUB}/dev/docs/wisps/IMPLEMENTATION.md`],
+  ["numbering", `${GITHUB}/dev/docs/wisps/NUMBERING.md`],
 ];
 
 const nextConfig: NextConfig = {
