@@ -215,3 +215,40 @@ test("turning it off tells the contact, and stops the wake-ups", { tag: ["@featu
   await expect.poll(() => anaHasTarget(ana.page), { timeout: 60_000 }).toBe(false);
   await expect.poll(async () => (await wakeTable(bo.page)).length).toBe(0);
 });
+
+test("a call to a closed web app wakes it with \"Incoming call\", and rings once the app is open", { tag: ["@feature:push.wake.call"] }, async ({ peer }) => {
+  test.skip(deployed, "the push service stand-in routes the sender's own post");
+  test.setTimeout(6 * 60_000);
+  const keys = subscriptionKeys();
+  const [ana, bo] = await Promise.all([peer("ana"), peer("bo", { serviceWorkers: "allow" })]);
+  await bo.context.grantPermissions(["notifications"], { origin: new URL(bo.page.url()).origin });
+  await standInPushManager(bo.context, { p256dh: keys.p256dh, auth: keys.authB64 });
+  const posts = await pushService(ana.context);
+  await bo.page.reload();
+  await expect(bo.page.getByTitle("New Chat")).toBeVisible();
+  await link(ana, bo);
+  await connect(ana, bo);
+  for (const p of [ana, bo]) await connected(p);
+  const chatUrl = bo.page.url();
+  await bo.page.goto("/#/settings");
+  await bo.page.getByTestId("settings-wake").click();
+  await expect.poll(() => anaHasTarget(ana.page), { timeout: 60_000 }).toBe(true);
+  const [row] = await wakeTable(bo.page);
+  await bo.page.close();
+  await away(ana);
+
+  // Away, and the call buttons still work: Ana's app wakes Bo's and waits.
+  await ana.page.getByTestId("call-audio").click();
+  await expect(ana.page.getByTestId("wake-call")).toHaveAttribute("data-state", "waking");
+  await expect.poll(() => posts.length, { timeout: 60_000 }).toBe(1);
+  const pushed = readPush(posts[0]!, keys);
+  expect(JSON.parse(pushed)).toEqual({ wake: 1, k: row!.token, c: 1 });
+  const worker = await workerConsole(bo.context);
+  await worker.deliver(pushed);
+  await expect.poll(() => worker.shown(), { intervals: [200] }).toEqual([{ body: "Incoming call", tag: expect.stringContaining("wake-call"), path: row!.path }]);
+
+  // Bo opens the app (the tap): the chat goes live, Ana's call goes out, and Bo's app rings.
+  await reopen(bo, new URL(chatUrl).hash);
+  await expect(bo.page.getByTitle("Accept audio call")).toBeVisible({ timeout: 120_000 });
+  await expect(ana.page.getByTestId("wake-call")).toHaveCount(0);
+});

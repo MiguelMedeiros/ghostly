@@ -202,6 +202,29 @@ describe("waking a contact whose app is closed", () => {
     expect(JSON.parse(utf8Decode(decryptPushPayload(fromBase64Url(relayed.body), secret, auth))).k).toBe(target.token);
   });
 
+  it("a call to a closed app: one call wake-up, limited apart from messages; none while live or without a target", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const { target, secret, auth } = contactTarget();
+    const away = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: target });
+    await node.sendMessage({ linkId: away.id, text: "hi" });
+    expect(pushSend).toHaveBeenCalledTimes(1);
+    // A message wake-up just went: a call still wakes it.
+    await expect(node.wakeForCall({ linkId: away.id })).resolves.toBe(true);
+    expect(pushSend).toHaveBeenCalledTimes(2);
+    const [call] = pushSend.mock.calls[1]! as unknown as [{ headers: Record<string, string>; body: Uint8Array }];
+    expect(JSON.parse(utf8Decode(decryptPushPayload(call.body, secret, auth)))).toEqual({ wake: 1, k: target.token, c: 1 });
+    expect(call.headers.TTL).toBe("60");
+    // Pressed again at once: it still waits (true), but no second push.
+    await expect(node.wakeForCall({ linkId: away.id })).resolves.toBe(true);
+    expect(pushSend).toHaveBeenCalledTimes(2);
+    const live = await addChat(node, stubLink({ isDataLinkOpen: true }), { peerWake: contactTarget().target });
+    const silent = await addChat(node, stubLink({ isDataLinkOpen: false }));
+    await expect(node.wakeForCall({ linkId: live.id })).resolves.toBe(false);
+    await expect(node.wakeForCall({ linkId: silent.id })).resolves.toBe(false);
+    expect(pushSend).toHaveBeenCalledTimes(2);
+  });
+
   it("deleting the chat forgets the contact's subscription with it", async () => {
     const node = engine({ pushSend: vi.fn(async () => 201) });
     const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });

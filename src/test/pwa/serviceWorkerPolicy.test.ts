@@ -117,7 +117,15 @@ describe("what a wake-up shows", () => {
     wakeNotice(entry && { entry, text }, { now, appVisible, profile: "" });
 
   it("\"New message\" for a chat it knows, and the chat to open; nothing of the message", () => {
-    expect(show({ path: "/chat/abc" })).toEqual({ title: "Ghostly", body: "New message", tag: "wake::/chat/abc", data: { path: "/chat/abc", profile: "" } });
+    expect(show({ path: "/chat/abc" })).toEqual({ title: "Ghostly", body: "New message", tag: "wake::/chat/abc", call: false, data: { path: "/chat/abc", profile: "" } });
+  });
+
+  it("\"Incoming call\" for a call, in the app's words, under a tag of its own", () => {
+    const call = (callText?: string) => wakeNotice({ entry: { path: "/chat/abc" }, text: { ...text, ...(callText && { call: callText }) } }, { now, appVisible: false, profile: "", kind: "call" });
+    expect(call("Chamada recebida")).toMatchObject({ body: "Chamada recebida", tag: "wake-call::/chat/abc", call: true, data: { path: "/chat/abc" } });
+    expect(call()).toMatchObject({ body: "Incoming call" });
+    // A muted chat's call wake-up shows nothing either (its contact was told not to send one).
+    expect(wakeNotice({ entry: { path: "/chat/abc", mutedUntil: "forever" }, text }, { now, appVisible: false, profile: "", kind: "call" })).toBeNull();
   });
 
   it("nothing for a muted chat, until its mute ends", () => {
