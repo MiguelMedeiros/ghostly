@@ -19,5 +19,16 @@
     "hint": "すべてのメンバーに新しい名前が表示されます。古いアプリでは参加時の名前のままです。",
     "label": "グループ名",
     "save": "保存"
+  },
+  "typing": {
+    "many": "{{count}}人が入力中…",
+    "one": "{{name}}さんが入力中…",
+    "recordingMany": "{{count}}人が録音中…",
+    "recordingOne": "{{name}}さんが録音中…",
+    "recordingTwo": "{{name}}さんと{{other}}さんが録音中…",
+    "thinkingMany": "{{count}}人が考え中…",
+    "thinkingOne": "{{name}}さんが考え中…",
+    "thinkingTwo": "{{name}}さんと{{other}}さんが考え中…",
+    "two": "{{name}}さんと{{other}}さんが入力中…"
   }
 }

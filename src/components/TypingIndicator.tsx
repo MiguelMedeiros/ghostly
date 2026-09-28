@@ -1,4 +1,4 @@
-import type { TypingActivity } from "@ghostly/core";
+import type { TypingActivity, TypingKind } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { usePeerTypingActivity } from "../hooks/useTyping";
 
@@ -24,6 +24,38 @@ export function TypingText({ testId, activity, className = "" }: { testId: strin
       {activity?.status
         ? <bdi data-testid={`${testId}-status`} className="truncate">{activity.status}</bdi>
         : <span className="truncate">{t(LABELS[kind] ?? LABELS.typing)}</span>}
+    </span>
+  );
+}
+
+const GROUP_LABELS = {
+  typing: { one: "group.typing.one", two: "group.typing.two", many: "group.typing.many" },
+  recording: { one: "group.typing.recordingOne", two: "group.typing.recordingTwo", many: "group.typing.recordingMany" },
+  thinking: { one: "group.typing.thinkingOne", two: "group.typing.thinkingTwo", many: "group.typing.thinkingMany" },
+} as const;
+
+/** A member typing in a group, by the name the group shows them under. */
+export interface GroupTyper { name: string; kind?: TypingKind; status?: string }
+
+/**
+ * Who is typing in a group (WISP 9xx · Group Mesh § Typing): "Ana is typing…", "Ana and Bo are typing…", "3 people are
+ * typing…", and the same for recording and thinking when everyone does the same (plain typing otherwise). One member
+ * with a status line shows it after their name, isolated as in a 1:1 chat.
+ */
+export function GroupTypingText({ testId, typers }: { testId: string; typers: readonly GroupTyper[] }) {
+  const { t } = useI18n();
+  const first = typers[0];
+  const kind = typers.every(x => (x.kind ?? "typing") === (first?.kind ?? "typing")) ? first?.kind ?? "typing" : "typing";
+  const labels = GROUP_LABELS[kind] ?? GROUP_LABELS.typing;
+  const text = typers.length === 1 ? t(labels.one, { name: first.name })
+    : typers.length === 2 ? t(labels.two, { name: first.name, other: typers[1].name })
+      : t(labels.many, { count: typers.length });
+  return (
+    <span data-testid={testId} data-kind={kind} data-count={typers.length} className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-accent">
+      <TypingDots />
+      {typers.length === 1 && first.status
+        ? <span className="truncate"><bdi>{first.name}</bdi>: <bdi data-testid={`${testId}-status`}>{first.status}</bdi></span>
+        : <span className="truncate">{text}</span>}
     </span>
   );
 }

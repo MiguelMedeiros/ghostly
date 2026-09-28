@@ -19,5 +19,16 @@
     "hint": "Every member sees the new name. Older apps keep the name they joined with.",
     "label": "Group name",
     "save": "Save"
+  },
+  "typing": {
+    "many": "{{count}} people are typing…",
+    "one": "{{name}} is typing…",
+    "recordingMany": "{{count}} people are recording audio…",
+    "recordingOne": "{{name}} is recording audio…",
+    "recordingTwo": "{{name}} and {{other}} are recording audio…",
+    "thinkingMany": "{{count}} people are thinking…",
+    "thinkingOne": "{{name}} is thinking…",
+    "thinkingTwo": "{{name}} and {{other}} are thinking…",
+    "two": "{{name}} and {{other}} are typing…"
   }
 }

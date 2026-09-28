@@ -26,6 +26,8 @@ import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { AvatarViewer } from "../components/AvatarViewer";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useGroupTypingSender } from "../hooks/useTyping";
+import { GroupTypingText, type GroupTyper } from "../components/TypingIndicator";
 import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { replySnippet, type GroupMention } from "@ghostly/core";
@@ -179,6 +181,13 @@ export function GroupChat() {
     catch (e) { return e instanceof Error ? e.message : "Could not send"; }
   }, [groupId, replyingTo]);
 
+  // Typing (WISP 9xx · Group Mesh § Typing): private groups only; a community does not carry it yet.
+  const onTyping = useGroupTypingSender(rosterGroup?.profile === "mesh" && rosterGroup.status === "active" ? groupId : undefined);
+  const typers = useMemo(() => (group?.typing ?? []).map(({ key, kind, status }): GroupTyper => {
+    const member = group!.members.find(m => m.key === key);
+    return { name: member ? memberName(member) : `Member ${key.slice(0, 8)}`, ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
+  }), [group]);
+
   // "@everyone": a private group's admin only; a community has no everyone (WISP 9xx § Mentions).
   const mentions = useMemo(() => group ? { candidates: mentionCandidates(group), everyone: group.profile === "mesh" && group.isAdmin } : undefined, [group]);
 
@@ -242,7 +251,10 @@ export function GroupChat() {
             <div className="flex min-w-0 items-center gap-1.5">
               <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || "A group"}</p>
             </div>
-            <button onClick={() => setShowMembers(true)} data-testid="group-members" className="text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer max-w-[60vw]">{subtitle}</button>
+            <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer max-w-[60vw]">
+              {/* Who is typing while it lasts, in place of the member count, as a 1:1 chat's header does. */}
+              <span role="status" aria-live="polite">{typers.length ? <GroupTypingText testId="group-typing" typers={typers} /> : subtitle}</span>
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -321,6 +333,7 @@ export function GroupChat() {
       {!joiningByLink && forwarding.bar}
       {forwarding.dialog}
       {!joiningByLink && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
+        onTyping={group.profile === "mesh" ? onTyping : undefined}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: replySnippet(replyingTo.text),
           mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined}
         // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.
