@@ -23,8 +23,8 @@ import { LocalRelay } from "../support/relay";
  *   npm run test:e2e:desktop-macos -- external-links
  */
 
-// 49740-49749: this test's ports.
-const PORTS = { relay: 49741, dht: 49742, a: 49745 };
+// 49750-49759: this test's ports.
+const PORTS = { relay: 49751, dht: 49752, a: 49755 };
 const LINK = "https://pt.wikipedia.org/wiki/São_Paulo";
 const ENCODED = "https://pt.wikipedia.org/wiki/S%C3%A3o_Paulo";
 const WEBSITE = "https://github.com/MiguelMedeiros/ghostly";
