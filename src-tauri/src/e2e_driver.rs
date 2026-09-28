@@ -234,7 +234,10 @@ mod tests {
     fn links_are_written_down_only_while_the_driver_listens() {
         // covers: app.external-links
         assert!(!record_open("https://example.com/before"));
-        assert!(opened().is_empty(), "nothing is written down before the driver listens");
+        assert!(
+            opened().is_empty(),
+            "nothing is written down before the driver listens"
+        );
         RECORDING.store(true, Ordering::SeqCst);
         assert!(record_open("https://pt.wikipedia.org/wiki/S%C3%A3o_Paulo"));
         assert!(record_open("https://github.com/MiguelMedeiros/ghostly"));
