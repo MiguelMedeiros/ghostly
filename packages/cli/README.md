@@ -133,7 +133,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
 | `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a new kind or status shows at once; a message to the chat or `--stop` ends it |
-| `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `usdt` |
+| `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--invite code] [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `fedimint` (`--invite` is the federation's invite code), `usdt` |
 | `wallet faucet <type>`, `wallet add-mint <url> [--primary]` | Test coins; another Cashu mint |
 | `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
 | `wallet receive <sats>`, `wallet address <type>`, `wallet redeem <token>`, `wallet history` | Receive, and what came and went |
@@ -215,10 +215,12 @@ stderr. OpenID Connect needs a browser window: make that proof in the app.
 
 ### Wallets on Node
 
-Cashu (and Lightning through the mints), Lightning cards (NWC, LND, Core Lightning, Breez, LNURL), Arkade, Spark,
-BDK and USDT run as in the app. Two do not yet: **Bark** (its SDK ships a browser build only) and **Fedimint** (its
-client needs the origin-private file system and a module worker); `wallet list` offers them as unavailable, with
-the reason. No wallet is made by itself: a bot has exactly the wallets it created. A Cashu test mint's invoice (from
+Cashu (and Lightning through the mints), Lightning cards (NWC, LND, Core Lightning, Breez, LNURL, Fedimint), Arkade,
+Spark, BDK, Fedimint and USDT run as in the app. One does not yet: **Bark** (its SDK ships a browser build only);
+`wallet list` offers it as unavailable, with the reason. A Fedimint wallet joins a federation by its invite
+(`wallet create fedimint --invite fed1…`); its Lightning card is `wallet create lightning --provider fedimint --value
+federation=<id>` (`engine fedimintPreview '{"invite":"fed1…"}'` shows the id first). Its client runs in a worker
+thread, with one database file per federation in the profile's `fedimint/` folder. No wallet is made by itself: a bot has exactly the wallets it created. A Cashu test mint's invoice (from
 `wallet receive`) is credited once its payer vouches for it in a chat, as in the app (a test mint says every invoice
 is paid); on a real mint, the mint's answer decides.
 
@@ -381,7 +383,7 @@ turns WebRTC off. A daemon offers to be a hub of the private groups past 16 memb
 
 ## Not yet
 
-- **Bark and Fedimint** wallets (see above), **OpenID Connect** proofs (a browser window), and video in calls
+- **Bark** wallets (see above), **OpenID Connect** proofs (a browser window), and video in calls
   (calls are voice only).
 - **A single binary**: the CLI needs Node.
 - Link previews made by the sender, and holding messages for an away contact.

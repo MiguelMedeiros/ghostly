@@ -36,6 +36,8 @@ function walletSdksOnNode(): Plugin {
       for (const { entry, file } of BESIDE_CHUNKS) {
         this.emitFile({ type: "asset", fileName: `assets/${file}`, source: readFileSync(new URL(file, import.meta.resolve(entry))) });
       }
+      // The Fedimint client's worker thread, plain JavaScript that runs as written (src/runtime/fedimint.ts finds it).
+      this.emitFile({ type: "asset", fileName: "assets/fedimintWorker.mjs", source: readFileSync(new URL("./src/runtime/fedimintWorker.mjs", import.meta.url)) });
     },
     transform(code, id) {
       const rule = ON_NODE.find((r) => r.file.test(id));
