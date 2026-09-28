@@ -69,6 +69,8 @@ describe.skipIf(!process.env.GHOSTLY_BENCH && import.meta.env.MODE !== "bench")(
         for (const listener of fake.engine.stateListeners) listener();
         storage.loadSession(chat);
         opened[chat]!.push(performance.now() - start);
+        // What the state change started (the chat list's reconcile) ends on this run's page.
+        await new Promise((resolve) => setTimeout(resolve, 20));
         vi.unstubAllGlobals();
       }
     }
