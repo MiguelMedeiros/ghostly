@@ -236,8 +236,20 @@ function ReplyAction({ onReply }: { onReply: () => void }) {
 const IMAGE_URL_RE =
   /^https:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
 const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\//i;
-/** GeoCities GIFs from the Wayback Machine (the picker's "Retro" source): tiny pixel art. */
-const WAYBACK_GIF_RE = /^https:\/\/web\.archive\.org\/web\/(\d+[a-z_]*\/)?\S+\.gif$/i;
+/** A Wayback Machine capture of a GIF: `/web/`, an optional timestamp (and `im_`/`id_`), then the archived http(s) URL. */
+const WAYBACK_GIF_PATH_RE = /^\/web\/(?:\d{1,14}(?:im_|id_)?\/)?https?:\/\/[^/?#\s]+\/[^?#\s]*\.gif$/i;
+
+/**
+ * GeoCities GIFs from the Wayback Machine (the picker's "Retro" source): tiny pixel art. Only a capture of a GIF: the
+ * URL must be exactly what it parses to (no `../` or `%2e%2e` resolved away, no query, no fragment, no credentials, no
+ * port), so no other path of web.archive.org loads without "Show picture".
+ */
+function isWaybackGif(input: string): boolean {
+  let url: URL;
+  try { url = new URL(input); } catch { return false; }
+  return url.protocol === "https:" && url.hostname === "web.archive.org" && !url.port && !url.username && !url.password
+    && !url.search && !url.hash && url.href === input && WAYBACK_GIF_PATH_RE.test(url.pathname);
+}
 const DATA_IMAGE_SAFE_RE = /^data:image\/(png|jpe?g|gif|webp);/i;
 
 type ContentType = "text" | "image";
@@ -251,7 +263,7 @@ function detectContentType(text: string): ContentType {
 }
 
 /** Pictures that show by themselves: inline data, and the GIF sources the picker uses. */
-const autoLoads = (url: string) => DATA_IMAGE_SAFE_RE.test(url) || GIPHY_RE.test(url) || WAYBACK_GIF_RE.test(url);
+const autoLoads = (url: string) => DATA_IMAGE_SAFE_RE.test(url) || GIPHY_RE.test(url) || isWaybackGif(url);
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return "picture"; } };
 
 function isOnlyEmojis(text: string): boolean {
@@ -884,7 +896,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               alt=""
               data-testid="picture-link"
               className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
-              style={WAYBACK_GIF_RE.test(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
+              style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
               loading="lazy"
               onLoad={() => setPictureLoaded(message.text.trim())}
               onError={() => setImgError(true)}
