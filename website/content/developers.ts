@@ -6,7 +6,7 @@ export const developers = {
   meta: {
     title: "Build with Ghostly",
     description:
-      "Ghost is a small rendezvous primitive on Pkarr / Mainline DHT. Ghostly composes it with transports, capabilities and local state. Read the WISP contracts, see real code, build your own client or adapter.",
+      "Ghost is a small rendezvous primitive on the Mainline DHT. Read the WISP contracts and real code, then build your own client or adapter for Ghostly.",
   },
   hero: {
     eyebrow: "For developers",

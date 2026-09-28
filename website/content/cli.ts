@@ -62,7 +62,7 @@ export const cli = {
   meta: {
     title: "Ghostly CLI: the app's engine for bots",
     description:
-      "ghostly runs the Ghostly app's own engine without a screen: invites, chats, groups, files, payments and voice calls for scripts, bots and AI agents, with every event as a JSON line.",
+      "The Ghostly app's engine without a screen: invites, chats, groups, files, payments and calls for scripts, bots and AI agents, every event a JSON line.",
   },
   hero: {
     eyebrow: "Command line",
