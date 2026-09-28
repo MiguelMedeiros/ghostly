@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useInView } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 import { Ghost, GhostMark, type GhostMood } from "@/components/ghost/Ghost";
@@ -292,6 +293,10 @@ export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string 
               </a>
             </div>
           </div>
+          <p className="caption fin-legal">
+            {t.legal.lead} <Link href="/terms">{t.legal.terms}</Link> {t.legal.and}{" "}
+            <Link href="/privacy">{t.legal.privacy}</Link>.
+          </p>
         </div>
       </div>
     </section>

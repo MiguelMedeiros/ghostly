@@ -14,6 +14,7 @@ export function SiteFooter() {
         { label: t.links.open, href: APP_URL },
         { label: t.links.download, href: "/#download" },
         { label: t.links.privacy, href: "/privacy" },
+        { label: t.links.terms, href: "/terms" },
       ],
     },
     {
