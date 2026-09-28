@@ -8,7 +8,7 @@
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Blocked on existing-identity signer API; see follow-up |
 | Summary | Investigate an optional relationship with a Keet identity. |
-| Availability | Planned |
+| Availability | Research |
 | Notes | Blocked until Keet offers a supported signing API for existing accounts; the 2026-09-20 compatible import stays off. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
