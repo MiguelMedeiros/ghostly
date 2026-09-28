@@ -144,7 +144,11 @@ test("a long chat with pictures and videos opens again on its last message", { t
 
 interface Frame { sw: number; cw: number; sh: number; ch: number; top: number; rows: number }
 
-/** Seeds a chat of `count` messages straight into storage and opens it. */
+/**
+ * Seeds a chat of `count` messages straight into storage and opens it. A chat this side joined long ago: its "joined"
+ * went out then, so opening it adds no row (one that never said it adds "joined the chat" once its link is up, after
+ * the count below had passed or not).
+ */
 async function seedChat(p: Peer, count: number) {
   const mine = createLink().mine;
   await p.page.evaluate(({ mine, count }) => {
@@ -155,37 +159,44 @@ async function seedChat(p: Peer, count: number) {
       text: i % 4 === 3 ? `Message ${i}\nwith a second line` : `Message ${i}`,
     }));
     localStorage.setItem(`ghostly_${id}`, JSON.stringify({ id, mySeedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, messages, createdAt: start }));
+    localStorage.setItem(`ghostly_join_${id}`, "true");
     window.dispatchEvent(new Event("session-updated"));
     location.hash = `/chat/${id}`;
   }, { mine, count });
   await expect(chat(p).locator("[data-message-id]")).toHaveCount(count);
 }
 
-/** Sends `text` and returns the list's sizes on every frame, from just before it went until its bubble has settled. */
+/**
+ * Sends `text` and returns the list's sizes on every frame, from just before it went until its bubble has settled. The
+ * first frame is sampled before the send starts: a busy page can run its first frame after the send has drawn.
+ */
 async function sendSampled(p: Peer, text: string): Promise<Frame[]> {
-  await p.page.evaluate(() => {
-    const frames: Frame[] = [];
-    (window as unknown as { sampled: Frame[] }).sampled = frames;
-    const started = performance.now();
+  await p.page.evaluate(() => new Promise<void>(sampling => {
+    const sampler = { frames: [] as Frame[], stop: false };
+    (window as unknown as { sampler: typeof sampler }).sampler = sampler;
     const tick = () => {
       const list = document.querySelector<HTMLElement>("[data-message-list]")!;
-      frames.push({ sw: list.scrollWidth, cw: list.clientWidth, sh: list.scrollHeight, ch: list.clientHeight, top: list.scrollTop, rows: list.querySelectorAll("[data-message-id]").length });
-      if (performance.now() - started < 1200) requestAnimationFrame(tick);
+      sampler.frames.push({ sw: list.scrollWidth, cw: list.clientWidth, sh: list.scrollHeight, ch: list.clientHeight, top: list.scrollTop, rows: list.querySelectorAll("[data-message-id]").length });
+      sampling();
+      if (!sampler.stop) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
-  });
+  }));
   const box = p.page.getByPlaceholder("Message…");
   await box.fill(text);
   await box.press("Enter");
   await expect(chat(p).getByText(text, { exact: true })).toBeVisible();
   await p.page.waitForTimeout(1300);
-  return p.page.evaluate(() => (window as unknown as { sampled: Frame[] }).sampled);
+  return p.page.evaluate(() => {
+    const sampler = (window as unknown as { sampler: { frames: Frame[]; stop: boolean } }).sampler;
+    sampler.stop = true;
+    return sampler.frames;
+  });
 }
 
 for (const [where, viewport] of [["a narrow window", { width: 900, height: 800 }], ["a phone", undefined]] as const) {
   test(`sending shows no scrollbar, in ${where}`, { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
     const bob = await peer("send-bob", viewport ? { viewport } : { mobile: true });
-
     // A short chat: nothing overflows, on any frame.
     await seedChat(bob, 3);
     for (const text of ["Short and sweet", "One more"]) {
