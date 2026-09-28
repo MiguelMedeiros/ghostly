@@ -48,5 +48,17 @@ describe("group name on headless community engines", { timeout: 120_000 }, () =>
     const again = new Groups((erin.groups as unknown as { host: GroupsHost }).host, erin.store);
     await again.load();
     expect(again.views().find(v => v.id === id)?.name).toBe("Town square");
+
+    // Dave's app is closed when the admin renames it again, and the admin leaves before Dave is back: another member hands him the name.
+    const dave = others[2];
+    dave.online = false;
+    await world.run(15_000);
+    await alice.groups.rename(id, "Main square");
+    await world.until(() => [...others.slice(0, 2), erin].every(p => world.view(p, id)?.name === "Main square"), 3 * 60_000);
+    expect(world.view(dave, id)?.name).toBe("Town square");
+    alice.online = false;
+    dave.online = true;
+    await world.until(() => world.view(dave, id)?.name === "Main square", 3 * 60_000);
+    expect(renameLines(dave, id)).toHaveLength(2);
   });
 });
