@@ -10,7 +10,7 @@ import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { openHost, serve, type Host } from "./host";
-import { checkWebhook, eventHandler, readCursor } from "./listen";
+import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { restoreProfile } from "./backup";
 import {
@@ -102,9 +102,13 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["daemon status", "Whether a daemon runs the profile, and its version"],
   ["daemon stop", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
-  ["listen [--since seq] [--cursor file] [--type t]... [--exec cmd] [--webhook url]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
+  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
-    type: o("list", "Only events of this type, or starting with it (repeat for more)"), exec: o("string", "Run this command per event, the event as JSON on stdin"),
+    type: o("list", "Only events of this type, or starting with it (repeat for more)"),
+    turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
+    from: o("list", "Only this chat's events (id, prefix, name or the contact's key; again for more)"),
+    group: o("list", "Only this group's events (again for more); with --from or --group, nobody else's event gets through"),
+    exec: o("string", "Run this command per event, the event as JSON on stdin"),
     webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
@@ -369,26 +373,41 @@ async function listenCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {
     since: { type: "number", description: "" }, cursor: { type: "string", description: "" }, type: { type: "list", description: "" },
     exec: { type: "string", description: "" }, webhook: { type: "string", description: "" }, print: { type: "boolean", description: "" },
+    from: { type: "list", description: "" }, group: { type: "list", description: "" }, turns: { type: "boolean", description: "" },
   });
   const g = globals(parsed);
   pretty = false; // one event per line
   if (parsed.options.webhook) checkWebhook(String(parsed.options.webhook));
+  const types = (parsed.options.type as string[] | undefined) ?? [];
+  const turns = parsed.options.turns === true;
+  if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
+  const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
   const cursor = parsed.options.cursor as string | undefined;
   let since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
-  const handle = eventHandler({
-    types: (parsed.options.type as string[] | undefined) ?? [],
-    exec: parsed.options.exec as string | undefined,
-    webhook: parsed.options.webhook as string | undefined,
-    cursor,
-    // With a hook, events go to the hook; --print shows them too.
-    print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
-    write: (line) => process.stdout.write(line + "\n"),
-  });
-  const onEvent = (event: GhostlyEvent) => { since = event.seq; handle(event); };
+  let handle: ((event: GhostlyEvent) => void) | null = null;
+  const start = async (call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>) => {
+    handle = eventHandler({
+      types, turns,
+      exec: parsed.options.exec as string | undefined,
+      webhook: parsed.options.webhook as string | undefined,
+      cursor,
+      // With a hook, events go to the hook; --print shows them too.
+      print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
+      write: (line) => process.stdout.write(line + "\n"),
+      allow: from.length || groups.length ? await allowlist(from, groups, call, peerOf) : undefined,
+    });
+  };
+  const onEvent = (event: GhostlyEvent) => { since = event.seq; handle?.(event); };
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
   if (client) await warnVersion(client);
   if (client) {
+    // The subscription takes the connection: a chat's contact key is asked on a connection of its own.
+    await start((m, p) => client.call(m, p), async (chat) => {
+      const c = await connectDaemon(g.paths.socket, 1000);
+      if (!c) return null;
+      try { return ((await c.call("chat.get", { chat })) as { peer?: string }).peer || null; } finally { c.close(); }
+    }).catch((error) => { client.close(); throw error; });
     // Followed until stopped; a daemon that restarts is picked up again after the last event seen.
     let current: DaemonClient | null = client;
     const follow = async (c: DaemonClient) => {
@@ -410,6 +429,8 @@ async function listenCommand(argv: string[]): Promise<void> {
   }
   // No daemon: this process becomes it (the socket too, so hooks can answer with `ghostly send`).
   const host: Host = await openHost(g.paths, "daemon", VERSION);
+  const call = (m: string, p: Record<string, unknown>) => callApi(host.ctx, m, p);
+  await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;

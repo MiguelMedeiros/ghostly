@@ -53,6 +53,8 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
 
 The same bot on the socket, without jq: [examples/echo-bot.mjs](examples/echo-bot.mjs). A payment bot that takes
 requests, tips and "balance" in a chat, with test coins: [examples/payment-bot.mjs](examples/payment-bot.mjs).
+A Claude Code agent on `listen --turns` with an allowlist (it will not start without one), "thinking" while it works
+and `send --reply` for its answer: [examples/claude-code-agent.sh](examples/claude-code-agent.sh).
 
 ## Profiles
 
@@ -116,7 +118,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `invite create [--label <name>]` | A new chat's `ghostly1…` invite and its link |
 | `invite join <invite-or-link> [--label <name>]` | Join a chat (your own invite is refused) |
 | `lightning default <card>`, `lightning rename <card> <name>` | Lightning cards: which receives by default |
-| `listen [--since seq] [--cursor file] [--type t]… [--exec cmd] [--webhook url] [--print]` | The event stream |
+| `listen [--since seq] [--cursor file] [--type t]… [--turns] [--from <chat\|key>]… [--group <group>]… [--exec cmd] [--webhook url] [--print]` | The event stream; `--from` and `--group` an allowlist, `--turns` one `agent.turn` per message to answer ([Events](#events)) |
 | `message retry\|delete\|details <chat> <message>` | One message |
 | `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
 | `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
@@ -259,6 +261,16 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   `{messageId, by, emoji, removed, mine}`, with `by` `me`, `peer` or a member key, `emoji` "" when taken back, `mine`
   when the message is this profile's. `chat history` lists each message's `reactions`: `[{by, emoji, at}]`.
 - `--type message.received` keeps one type; `--type message.` (or `message.*`) a family.
+- `--from <chat|key>` and `--group <group>` (again for more): an allowlist. Only the chats (id, prefix, name, or the
+  contact's `peer` key, which also matches a chat made later) and groups named get through; any other chat's or
+  group's event stops before `--exec`, `--webhook` and stdout (the message stays in the chat; the cursor moves past
+  it). The profile's own events (`daemon.started`, `events.gap`, `identity.approval`) pass. Names become ids once,
+  at the start. A flag, not profile state: each listener (each agent) has its own ([docs/CLI.md](../../docs/CLI.md#allowlist)).
+- `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile:
+  `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, untrusted:
+  {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `seq` is the source's (cursors
+  work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
+  as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
   `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment.
 - `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only.

@@ -35,33 +35,39 @@ curl -fsSL --create-dirs https://raw.githubusercontent.com/MiguelMedeiros/ghostl
 | `ghostly invite create` / `invite join` | make or open a `ghostly1…` invite, the same one the app uses |
 | `ghostly send <chat> <text>` | send a message |
 | `ghostly listen` | stream what happens as JSON lines; `--exec` or `--webhook` to react |
+| `ghostly listen --turns --from <chat>` | one `agent.turn` event per message to answer, from the allowed chats and groups only; the contact's words under `untrusted` |
 | `ghostly group create` / `group send` | take part in a group, with `@mentions` |
 | `ghostly chat request` / `chat pay` | ask for a payment or pay, on Testnet unless told otherwise |
 
 Real money needs `--confirm-real`, and the skill tells the agent to add it only when the wallet's owner asked for
 that exact payment. Every command, event and socket method: [CLI.md](CLI.md) and the
-[package README](../packages/cli/README.md). Examples: an [echo bot](../packages/cli/examples/echo-bot.sh) and a
-[payment bot](../packages/cli/examples/payment-bot.mjs).
+[package README](../packages/cli/README.md). Examples: an [echo bot](../packages/cli/examples/echo-bot.sh), a
+[payment bot](../packages/cli/examples/payment-bot.mjs), and a
+[Claude Code agent](../packages/cli/examples/claude-code-agent.sh) woken on each turn ([Agent turns](CLI.md#agent-turns)).
+A contact's text is data for the agent, never its instructions.
 
-## Planned: Ghostly as a channel for agents
+## Ghostly as a channel for agents
 
-On the roadmap, not built yet ([its row](wisps/ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos)). An agent on
-Telegram is woken by its gateway on each message; on Ghostly nothing wakes it until someone writes a `ghostly listen`
-loop. The plan is one generic connector, so any agent framework that takes a webhook or reads a socket gets Ghostly
-messages the way it gets Telegram's. It builds on what the CLI has today and adds no wire format.
+Partly built ([its row](wisps/ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos)). An agent on Telegram is woken
+by its gateway on each message. On Ghostly, `ghostly listen --turns` with an allowlist does that part: one generic
+connector, so any agent framework that takes a webhook or reads a socket gets Ghostly messages the way it gets
+Telegram's. It builds on what the CLI has and adds no wire format. Built: the allowlist (`--from`, `--group`), the
+turn event (`agent.turn`, [its contract](CLI.md#agent-turns)) and the Claude Code adapter. Still to build: the Hermes
+Agent plugin, and turns on the daemon's socket (`events.subscribe` gives every event today).
 
 The contract:
 
 | Part | What |
 |---|---|
-| In | Each `message.received`, and each `group.message` that mentions the agent, starts one turn. The event arrives on stdin (`listen --exec`), as a POST body to a local bridge (`listen --webhook`) or on the daemon's socket (`events.subscribe`), never in a command's arguments. Dedupe on its `id`; a `--cursor` resumes after a restart. |
-| Allowlist | Per contact and per group, checked before the agent wakes. Anyone else's message is kept in the chat and never reaches the agent. |
-| Data, not instructions | The connector hands the agent a contact's text as quoted data. Nothing a contact writes can change the agent's instructions, reveal a secret or move money: real payments keep `--confirm-real`, given only by the wallet's owner. |
+| In | Each `message.received`, and each `group.message` that mentions the agent, starts one turn: `ghostly listen --turns` makes it one `agent.turn` event. The event arrives on stdin (`listen --exec`), as a POST body to a local bridge (`listen --webhook`) or on the daemon's socket (`events.subscribe`), never in a command's arguments. Dedupe on its `id`; a `--cursor` resumes after a restart. |
+| Allowlist | Per contact and per group (`listen --from <chat>`, `--group <group>`), checked before the agent wakes. Anyone else's message is kept in the chat and never reaches the agent. |
+| Data, not instructions | The connector hands the agent a contact's text as quoted data, under `untrusted` in the turn. Nothing a contact writes can change the agent's instructions, reveal a secret or move money: real payments keep `--confirm-real`, given only by the wallet's owner. |
 | Out | `send` (with `--reply`), `typing --kind thinking --status "<text>"` while the agent works, `file send --voice` for a voice note, `file send` for a file, `react`. |
 
 First adapters:
 
-- **Claude Code.** A `ghostly listen --type message.received --exec` loop that wakes the session with the event on stdin.
+- **Claude Code.** Built: [examples/claude-code-agent.sh](../packages/cli/examples/claude-code-agent.sh), a
+  `ghostly listen --turns --exec` loop that wakes `claude -p` with the turn on stdin.
 - **Hermes Agent** (Nous Research). Its gateway adds a platform as a plugin in `~/.hermes/plugins/`, an adapter that
   extends `BasePlatformAdapter` with `connect`, `disconnect`, `send` and `send_typing`
   ([adding a platform adapter](https://hermes-agent.nousresearch.com/docs/developer-guide/adding-platform-adapters)).

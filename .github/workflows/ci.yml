@@ -148,12 +148,13 @@ jobs:
       - name: Unit tests (npm run test:app)
         run: npm run test:app
 
-  # The packages' unit tests (npm run test:packages) in four shards of about the same time, each on its own runner
+  # The packages' unit tests (npm run test:packages) in five shards of about the same time, each on its own runner
   # (scripts/test-shards.mjs, by scripts/test-durations.json). One runner took them in 6.5 minutes, package after
-  # package. The CLI's two-peer story (about 3 minutes of designed waits, one test after another) has a shard to
-  # itself and sets the pace.
+  # package. The CLI's two-peer story (about 4 minutes of designed waits, one test after another) is cut in two by
+  # test name, each half on a shard of its own after the same pairing: whole, it set the pace. Five, not four: with
+  # four, browser and core shared a shard of 3.2 minutes, past every other job.
   packages-tests:
-    name: Frontend tests (packages ${{ matrix.shard }}/4)
+    name: Frontend tests (packages ${{ matrix.shard }}/5)
     needs: changes
     if: needs.changes.outputs.packages == 'true'
     runs-on: ubuntu-24.04
@@ -162,8 +163,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The 4 below and in the name must match this list.
-        shard: [1, 2, 3, 4]
+        # The 5 below and in the name must match this list.
+        shard: [1, 2, 3, 4, 5]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -177,8 +178,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Unit tests (shard ${{ matrix.shard }} of 4)
-        run: node scripts/test-shards.mjs ${{ matrix.shard }} 4 --report-dir "$RUNNER_TEMP/test-reports"
+      - name: Unit tests (shard ${{ matrix.shard }} of 5)
+        run: node scripts/test-shards.mjs ${{ matrix.shard }} 5 --report-dir "$RUNNER_TEMP/test-reports"
 
       # Each file's time, for `node scripts/test-shards.mjs --record` after a test file gets slower.
       - name: Keep the test times

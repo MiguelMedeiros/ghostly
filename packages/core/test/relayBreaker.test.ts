@@ -124,7 +124,7 @@ describe("relay transport with a breaker", () => {
       calls.push(`${init?.method ?? "GET"} ${host}`);
       return handlers[host]();
     }) as typeof fetch;
-    const relay = new RelayTransport({ relays: Object.keys(handlers).map((h) => `https://${h}`), fetch: fetchFn, requestsPerMinute: Infinity, log: (line) => log.push(line) });
+    const relay = new RelayTransport({ freshReadMs: 0, relays: Object.keys(handlers).map((h) => `https://${h}`), fetch: fetchFn, requestsPerMinute: Infinity, log: (line) => log.push(line) });
     return { calls, log, relay };
   }
 
@@ -272,6 +272,7 @@ describe("the default relays", () => {
     const calls: string[] = [];
     const id = createIdentity();
     const relay = new RelayTransport({
+      freshReadMs: 0,
       relays: ["https://relay.pkarr.org"],
       fetch: (async (input: RequestInfo | URL) => { calls.push(String(input)); return new Response("", { status: 404 }); }) as typeof fetch,
     });
