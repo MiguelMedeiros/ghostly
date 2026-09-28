@@ -424,14 +424,15 @@ describe("files sent to a contact", () => {
     node["links"].get(away.id)!.link = null;
     const failed = (id: string) => node.getState().transfers[id];
     const file = (id: string) => ({ id, name: "a", size: 1, mime: "" });
-    node.sendFile({ linkId: away.id, file: file(`${away.id}-out-1`), timestamp: 1 });
+    // Refused before anything starts: the transfer says so, and the call rejects with the same reason.
+    await expect(node.sendFile({ linkId: away.id, file: file(`${away.id}-out-1`), timestamp: 1 })).rejects.toThrow("You are offline");
     expect(failed(`${away.id}-out-1`)).toMatchObject({ state: "failed", error: "You are offline" });
-    node.sendFile({ linkId: chat.id, file: file("someone-elses-file"), timestamp: 1 });
+    await expect(node.sendFile({ linkId: chat.id, file: file("someone-elses-file"), timestamp: 1 })).rejects.toThrow("Invalid file id");
     expect(failed("someone-elses-file")).toMatchObject({ state: "failed", error: "Invalid file id" });
     node.sendFile({ linkId: chat.id, file: file(`${chat.id}-out-gone`), timestamp: 2 });
     await vi.waitFor(() => expect(failed(`${chat.id}-out-gone`)).toMatchObject({ state: "failed", error: "The file is gone" }));
     linkOf(chat.id).supportsFiles = false;
-    node.sendFile({ linkId: chat.id, file: file(`${chat.id}-out-2`), timestamp: 3 });
+    await expect(node.sendFile({ linkId: chat.id, file: file(`${chat.id}-out-2`), timestamp: 3 })).rejects.toThrow("updated peer");
     expect(failed(`${chat.id}-out-2`)).toMatchObject({ state: "failed", error: expect.stringContaining("updated peer") });
   });
 });

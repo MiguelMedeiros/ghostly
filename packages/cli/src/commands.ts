@@ -126,7 +126,7 @@ export const COMMANDS: Record<string, Command> = {
     summary: "Forward messages (texts, files from the bytes here) to up to 5 chats and groups, as new messages of yours",
     args: ["chat", "message..."],
     options: {
-      to: { type: "list", description: "A chat or a group to forward to (id, prefix or name; group:<id> for a group); up to 5" },
+      to: { type: "list", description: "A chat or a group to forward to (id, prefix or name; group:<id> for a group; a dash-leading id as it is); up to 5" },
       force: { type: "boolean", description: "Forward even if a text looks like a seed, a key or ecash" },
       wait: { type: "string", description: "none or sent: each text on its way (in a group, taken by an edge), each file's transfer done (default none)" },
       timeout: groupWait.timeout,
