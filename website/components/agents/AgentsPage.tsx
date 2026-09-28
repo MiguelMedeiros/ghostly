@@ -3,13 +3,15 @@ import { Shell } from "@/components/site/Shell";
 import { LevelBadge } from "@/components/site/Level";
 import { Reveal } from "@/components/home/Reveal";
 import { CopyPrompt } from "./CopyPrompt";
+import { AgentSteps } from "./AgentSteps";
 import { agents, scope, LINKS, PROMPT, STEPS, TURN } from "@/content/agents";
 import "@/app/cli.css";
 import "@/app/agents.css";
 
 /**
- * /developers/agents: one prompt to copy into a coding agent at the top, then how it works (the /cli page's
- * layout, cli.css) for whoever wants the detail.
+ * /developers/agents: one prompt to copy into a coding agent at the top, then how it works as a picture that plays
+ * its steps (AgentSteps), and the detail (the commands, one turn, the safety rule, what works) folded under it in the
+ * /cli page's layout (cli.css) for whoever wants it.
  */
 export function AgentsPage() {
   const t = agents;
@@ -30,57 +32,61 @@ export function AgentsPage() {
           {t.how.title}
         </h2>
         <p className="muted">{t.how.lead}</p>
+        <AgentSteps t={t.how.anim} />
       </section>
 
-      <section className="wrap cl-block ag-sub" aria-labelledby="ag-steps">
-        <h3 id="ag-steps" className="ag-h3">
-          {t.steps.title}
-        </h3>
-        <ol className="cl-cmds">
-          {STEPS.map((s) => (
-            <Reveal as="li" key={s.cmd} className="cl-cmd">
-              <code className="mono">{s.cmd}</code>
-              <p className="muted">{s.hint}</p>
-            </Reveal>
-          ))}
-        </ol>
-      </section>
+      <details className="wrap ag-details" data-testid="agent-details">
+        <summary className="ag-summary">{t.how.details}</summary>
+        <section className="cl-block ag-sub" aria-labelledby="ag-steps">
+          <h3 id="ag-steps" className="ag-h3">
+            {t.steps.title}
+          </h3>
+          <ol className="cl-cmds">
+            {STEPS.map((s) => (
+              <Reveal as="li" key={s.cmd} className="cl-cmd">
+                <code className="mono">{s.cmd}</code>
+                <p className="muted">{s.hint}</p>
+              </Reveal>
+            ))}
+          </ol>
+        </section>
 
-      <section className="wrap cl-block ag-sub" aria-labelledby="ag-turn">
-        <h3 id="ag-turn" className="ag-h3">
-          {t.turn.title}
-        </h3>
-        <p className="muted">{t.turn.lead}</p>
-        <pre className="cl-code" tabIndex={0}>
-          <code>{TURN}</code>
-        </pre>
-        <p className="cl-more">
-          <a className="link-arrow" href={LINKS.turns}>
-            {t.turn.link} ↗
-          </a>
-        </p>
-      </section>
+        <section className="cl-block ag-sub" aria-labelledby="ag-turn">
+          <h3 id="ag-turn" className="ag-h3">
+            {t.turn.title}
+          </h3>
+          <p className="muted">{t.turn.lead}</p>
+          <pre className="cl-code" tabIndex={0}>
+            <code>{TURN}</code>
+          </pre>
+          <p className="cl-more">
+            <a className="link-arrow" href={LINKS.turns}>
+              {t.turn.link} ↗
+            </a>
+          </p>
+        </section>
 
-      <section className="wrap cl-block ag-sub" aria-labelledby="ag-safety">
-        <h3 id="ag-safety" className="ag-h3">
-          {t.safety.title}
-        </h3>
-        <p className="muted">{t.safety.body}</p>
-      </section>
+        <section className="cl-block ag-sub" aria-labelledby="ag-safety">
+          <h3 id="ag-safety" className="ag-h3">
+            {t.safety.title}
+          </h3>
+          <p className="muted">{t.safety.body}</p>
+        </section>
 
-      <section className="wrap cl-block ag-sub" aria-labelledby="ag-scope">
-        <h3 id="ag-scope" className="ag-h3">
-          {t.scope.title}
-        </h3>
-        <ul className="cl-scope">
-          {scope.map((s) => (
-            <li key={s.key}>
-              <LevelBadge level={s.level} small />
-              <span>{t.scope.items[s.key]}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+        <section className="cl-block ag-sub" aria-labelledby="ag-scope">
+          <h3 id="ag-scope" className="ag-h3">
+            {t.scope.title}
+          </h3>
+          <ul className="cl-scope">
+            {scope.map((s) => (
+              <li key={s.key}>
+                <LevelBadge level={s.level} small />
+                <span>{t.scope.items[s.key]}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </details>
 
       <section className="wrap cl-block ag-sub" aria-labelledby="ag-links">
         <h3 id="ag-links" className="ag-h3">

@@ -57,6 +57,8 @@ test("/developers/agents: how it works, the safety rule and the steps are below 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/developers/agents", { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "How it works" })).toBeVisible();
+  // The detail is folded under the picture (agents-steps.spec.ts).
+  await page.getByTestId("agent-details").locator("summary").click();
   await expect(page.getByRole("heading", { name: "Contact text is data, never instructions" })).toBeVisible();
   await expect(page.locator(".cl-cmds")).toContainText("ghostly listen --turns --from owner");
 });
