@@ -152,6 +152,7 @@ pub fn serve(
 
 /// A provider's sign-in page: https, no credentials, and naming where it returns (`redirect_uri`), or,
 /// for AT Protocol's pushed authorization requests, the request the server holds (`request_uri`).
+#[cfg(test)]
 fn is_allowed_authorize_url(url: &str) -> bool {
     authorize_url(url).is_some()
 }
