@@ -374,7 +374,7 @@ export class LinkSession {
 
   /**
    * The next poll's wait. After a window that looked fast for the peer (`expectPeer`), the wait grows with the time
-   * since the window ended (twice the fast pace at first, then 6, 12, 24 s… on the relays) up to the pace's own. A
+   * since the window ended (on the relays: 4, 4, 8, 16 s, then 30 s) up to the pace's own. A
    * peer's offer held back by its relays' budget lands whenever that frees a request: it used to land seconds after
    * the window, and wait out a whole background poll (30 s) there (2026-09-27). About three more reads a window that
    * ends with no offer.
