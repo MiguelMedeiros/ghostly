@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, LinkPreview, PairingProgress, PaymentMethodName, TypingKind, VideoMeta, VoiceMeta, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, TypingKind, VideoMeta, VoiceMeta, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -261,6 +261,8 @@ export interface MessageFile {
   voice?: VoiceMeta;
   /** A video: its length, size and a small first frame, when the sender sent them. */
   video?: VideoMeta;
+  /** A picture: its size as it is shown, when the sender sent it. */
+  image?: ImageMeta;
 }
 
 export interface FileTransferView {

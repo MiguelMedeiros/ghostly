@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket, type VideoMeta, type VoiceMeta } from "@ghostly/core";
+import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket, type ImageMeta, type VideoMeta, type VoiceMeta } from "@ghostly/core";
 import { HoldEngine, emptyHoldState, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import type { HoldStore, StoredBackup } from "../src/backup/storage";
 import type { HoldState, StoredLink } from "../src/shared/types";
-// covers: chat.replies.wire, files.voice.meta, files.video.meta, delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
+// covers: chat.replies.wire, files.voice.meta, files.video.meta, files.image.meta, delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
 
 /**
  * A bucket in memory that hands out presigned addresses the way S3 does, and a relay in memory: two
@@ -46,10 +46,10 @@ interface Side {
   engine: HoldEngine;
   stored: StoredLink;
   messages: Map<string, { text?: string; file?: { name: string; size: number; mime: string }; request?: PaymentRequest; timestamp: number }>;
-  received: { kind: string; id: string; text?: string; name?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; video?: VideoMeta; reply?: unknown; timestamp: number }[];
+  received: { kind: string; id: string; text?: string; name?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: unknown; timestamp: number }[];
   replies: Map<string, { i: string; s: string; f: string }>;
   delivery: Map<string, { state: string; error?: string }>;
-  files: Map<string, { bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta; video?: VideoMeta }>;
+  files: Map<string, { bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta }>;
   requests: Map<string, PaymentRequest>;
   open: boolean;
   refuseFiles?: string;
@@ -74,7 +74,7 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       file: async (fileId) => side.files!.get(fileId) ?? null,
       paymentRequest: (paymentId) => side.requests!.get(paymentId) ?? null,
       receiveText: async (_id, m) => { side.received!.push({ kind: "text", id: m.id, text: m.text, timestamp: m.timestamp, ...(m.reply && { reply: m.reply }) }); },
-      receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, bytes, timestamp: f.timestamp, ...(f.voice && { voice: f.voice }), ...(f.video && { video: f.video }) }); return null; },
+      receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, bytes, timestamp: f.timestamp, ...(f.voice && { voice: f.voice }), ...(f.video && { video: f.video }), ...(f.image && { image: f.image }) }); return null; },
       receivePaymentRequest: async (_id, request) => { side.received!.push({ kind: "pay-req", id: request.id, request, timestamp: request.timestamp }); },
       changed: () => {},
       // Bob reads Alice's bucket and Alice reads Bob's: each fetches from wherever the manifest points.
@@ -189,6 +189,25 @@ describe("store-and-forward engine", () => {
     await vi.waitFor(() => expect(b.received).toHaveLength(2));
     expect(b.received[0]).toMatchObject({ kind: "file", id: "wire-video-1", video });
     expect(b.received[1].video).toEqual({ duration: 2000, width: 320, height: 180 });
+  });
+
+  it("holds a picture with its size; one held without a size, or with a bad one, still arrives", async () => {
+    const { a, b } = setup();
+    engines.push(a.engine, b.engine);
+    const image = { width: 1080, height: 1920 };
+    a.files.set("link-a-out-p1", { bytes: new Uint8Array(500).fill(1), name: "a.jpg", size: 500, mime: "image/jpeg", image });
+    a.files.set("link-a-out-p2", { bytes: new Uint8Array(500).fill(2), name: "b.png", size: 500, mime: "image/png" });
+    a.files.set("link-a-out-p3", { bytes: new Uint8Array(500).fill(3), name: "c.png", size: 500, mime: "image/png", image: { width: 1.5, height: 2 } });
+    for (const [n, ts] of [[1, 9000], [2, 9001], [3, 9002]]) {
+      a.messages.set(`me_${ts}`, { file: { name: "p", size: 500, mime: "image/png" }, timestamp: ts });
+      await a.engine.hold("link-a", { kind: "file", id: `wire-picture-${n}`, messageId: `me_${ts}`, ref: `link-a-out-p${n}`, bytes: 500, timestamp: ts });
+    }
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(3));
+    expect(b.received[0]).toMatchObject({ kind: "file", id: "wire-picture-1", image });
+    expect(b.received[1].image).toBeUndefined();
+    expect(b.received[2]).toMatchObject({ kind: "file", id: "wire-picture-3" });
+    expect(b.received[2].image).toBeUndefined();
   });
 
   it("refuses a tampered item, keeps the rest, counts it, and survives a crash between store and acknowledgement", async () => {
