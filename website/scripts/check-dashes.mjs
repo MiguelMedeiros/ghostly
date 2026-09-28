@@ -35,6 +35,7 @@ const generated = new Set([
   "website/lib/roadmap-tracks.json",
   "website/lib/levels.json",
   "website/lib/code-snippets.json",
+  "website/lib/agent-prompt.json",
   "docs/wisps/NUMBERING.md",
 ]);
 const text = new Set([".ts", ".tsx", ".js", ".mjs", ".css", ".md", ".json"]);
