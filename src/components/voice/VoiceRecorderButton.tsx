@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { VOICE_LIMITS, formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
+import { toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, VoiceRecorder, canRecordVoice } from "../../lib/voiceRecorder";
 import { LiveWaveform, Waveform } from "./Waveform";
 import "./voice.css";
@@ -355,6 +356,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       audio.addEventListener("pause", () => setPreview((p) => p && { ...p, playing: false }));
       audio.addEventListener("ended", () => { previewWave.current?.style.setProperty("--voice-progress", "0"); setPreview((p) => p && { ...p, playing: false }); });
       previewAudio.current = { audio, url };
+      await toChosenSpeaker(audio);
     }
     await audio.play().catch(() => onError("Could not play the recording."));
   };

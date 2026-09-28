@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatFileSize, formatVideoDuration, safeBlobType, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n } from "../../contexts/I18nContext";
+import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
@@ -43,6 +44,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
   const whyId = useId();
 
   const audioRef = useRef<HTMLAudioElement>(null);
+  useChosenSpeaker(audioRef, src);
   const playRef = useRef<HTMLButtonElement>(null);
   const srcRef = useRef<string | null>(null);
   const resumeAt = useRef(0);
