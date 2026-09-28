@@ -2694,6 +2694,13 @@ export class GhostlyNode implements EngineImplementation {
     else live.link?.setTyping(false);
   }
 
+  /** WISP 9xx · Group Mesh § Typing: the same word in a private group, on its edges; a community says nothing yet. */
+  setGroupTyping({ groupId, typing, kind, status }: { groupId: string; typing: boolean; kind?: TypingKind; status?: string }): void {
+    if (typeof groupId !== "string") return;
+    if (typing === true && this.settings.sendTyping !== false) this.groups.setTyping(groupId, true, typingActivity(kind, status));
+    else this.groups.setTyping(groupId, false);
+  }
+
   setFastPoll({ linkId, fast }: { linkId: string; fast: boolean }): void {
     this.links.get(linkId)?.link?.session.setFastPoll(fast);
   }
@@ -3380,7 +3387,7 @@ export class GhostlyNode implements EngineImplementation {
       if (settings.sendTyping !== false) delete this.settings.sendTyping;
       else this.settings.sendTyping = false;
       await db.putSettings(this.settings);
-      if (settings.sendTyping === false) for (const live of this.links.values()) live.link?.setTyping(false);
+      if (settings.sendTyping === false) { for (const live of this.links.values()) live.link?.setTyping(false); this.groups.stopTyping(); }
     }
     // Load public profiles: absent means on; turned off, nothing read before is kept.
     if (settings.publicProfiles !== undefined) {

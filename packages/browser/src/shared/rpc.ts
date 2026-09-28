@@ -259,6 +259,11 @@ export interface EngineApi {
    */
   setTyping(params: { linkId: string; typing: boolean; kind?: TypingKind; status?: string }): void;
   /**
+   * The same in a private group: said sealed on its open edges, throttled the same way, nothing while `sendTyping` is
+   * off. Nothing in a community (it does not carry typing yet).
+   */
+  setGroupTyping(params: { groupId: string; typing: boolean; kind?: TypingKind; status?: string }): void;
+  /**
    * This profile's push subscription (the installed web app, WISP 401 § Wake-up push), or null to stop being woken:
    * shared with every paired contact whose app offers `wake/1`, under a new token per chat each time it changes.
    */
