@@ -1,0 +1,34 @@
+{
+  "accept": {
+    "card": "Accepter {{card}} de {{name}}",
+    "contactOff": "Contact : l'a désactivé",
+    "contactOn": "Contact : l'accepte",
+    "deck": "Moyens de paiement que cette conversation accepte de {{name}}",
+    "hint": {
+      "both": "{{card}} est activé pour vous deux : chacun peut payer l'autre avec ici.",
+      "off": "{{card}} est désactivé ici : aucun de vous ne peut payer l'autre avec dans cette conversation.",
+      "onceSaved": "{{card}} sera activé à l'enregistrement. Il fonctionne quand {{name}} l'active aussi.",
+      "theyOff": "{{card}} est activé ici, mais {{name}} l'a désactivé : il fonctionne quand vous l'activez tous les deux.",
+      "unknown": "{{card}} est activé ici. Il fonctionne quand {{name}} l'active aussi."
+    },
+    "off": "Désactivé ici",
+    "on": "Activé ici",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "status": {
+      "changed": "Pas encore enregistré : {{name}} sera prévenu à l'enregistrement.",
+      "idle": "Un moyen ne fonctionne que si vous l'activez tous les deux.",
+      "savedLater": "Enregistré : {{name}} sera prévenu à la prochaine connexion.",
+      "savedLive": "Enregistré : {{name}} le sait déjà."
+    }
+  },
+  "mode": {
+    "accept": "Accepter",
+    "label": "Paiements avec {{name}}",
+    "pay": "Payer ou demander"
+  },
+  "none": {
+    "action": "Choisir ce que cette conversation accepte",
+    "text": "Aucun moyen de paiement n'est activé dans cette conversation."
+  }
+}

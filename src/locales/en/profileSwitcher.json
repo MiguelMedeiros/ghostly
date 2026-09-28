@@ -1,0 +1,16 @@
+{
+  "add": "Add a profile",
+  "current": "current profile",
+  "holdHint": "Or hold Settings in the tab bar",
+  "locked": "locked",
+  "manage": "Manage profiles",
+  "new": "new messages",
+  "newShort": "New",
+  "open": "Open profile",
+  "othersNew": "new messages in another profile",
+  "othersUnread": "unread messages in another profile",
+  "switchTo": "Switch to {{name}}",
+  "switching": "Opening {{name}}…",
+  "title": "Switch profile",
+  "unread": "{{count}} unread"
+}

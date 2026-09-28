@@ -156,7 +156,9 @@ describe("the contact's edits", () => {
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(t.contactReceipts).toEqual([]);
     expect(await t.contact.sendMessage("first text", Date.now(), WIRE("B"))).toBeNull();
-    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("B"), 1]]));
+    // No timer on the way: the message is stored, the edit applied (two IndexedDB writes) and its receipt sent back.
+    // That took over waitFor's default second on a busy CI runner.
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("B"), 1]]), { timeout: 5_000 });
     const row = (await t.messages()).find(m => m.id === `peer_${WIRE("B")}`)!;
     expect(row).toMatchObject({ text: "later text", edit: { seq: 1, history: [{ text: "first text" }] } });
   });

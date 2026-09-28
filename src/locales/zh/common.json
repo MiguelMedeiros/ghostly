@@ -1,0 +1,19 @@
+{
+  "anonymous": "匿名",
+  "back": "返回",
+  "cancel": "取消",
+  "chatCreated": "聊天创建于{{date}}",
+  "close": "关闭",
+  "confirm": "确认",
+  "copied": "已复制！",
+  "copy": "复制",
+  "delete": "删除",
+  "deleteChatLocal": "这将删除此设备上的聊天及其记录，不会删除联系人的副本。",
+  "deleteChatTitle": "删除聊天？",
+  "error": "错误",
+  "loading": "加载中...",
+  "moreInfo": "更多信息",
+  "save": "保存",
+  "success": "成功",
+  "unnamedContact": "联系人 · {{key}}"
+}

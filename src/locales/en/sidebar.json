@@ -1,0 +1,25 @@
+{
+  "chats": "Chats",
+  "copyInvite": "Copy invite code",
+  "deleteAllChats": "Delete all chats",
+  "deleteChat": "Delete chat",
+  "join": "Join",
+  "joinChat": "Join chat",
+  "new": "New",
+  "newChat": "New Chat",
+  "newMenu": {
+    "chat": "Chat",
+    "chatHint": "One person, with an invite",
+    "group": "Group",
+    "groupHint": "A link anyone can open",
+    "label": "Create a group or a chat"
+  },
+  "noChats": "No chats yet",
+  "pinned": "Pinned",
+  "quiet": "It's quiet here...",
+  "quietHint": "Time to haunt someone! 👻",
+  "searchPlaceholder": "Search chats...",
+  "settings": "Settings",
+  "sharedIdentity": "Shared an identity",
+  "startChat": "New chat"
+}

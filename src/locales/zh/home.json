@@ -1,0 +1,13 @@
+{
+  "createChat": "创建新聊天",
+  "description": "私密、短暂的消息。",
+  "features": {
+    "decentralized": "无中心服务器",
+    "encrypted": "端到端加密",
+    "ephemeral": "消息自动消失"
+  },
+  "linkFailed": "无法打开链接。",
+  "unpublishedVersion": "本地版本 — 查看已发布版本",
+  "viewRelease": "查看此版本",
+  "welcome": "欢迎使用 Ghostly"
+}

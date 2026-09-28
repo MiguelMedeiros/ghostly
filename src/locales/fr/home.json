@@ -1,0 +1,13 @@
+{
+  "createChat": "Créer une Discussion",
+  "description": "Des messages privés et éphémères.",
+  "features": {
+    "decentralized": "Pas de serveur central",
+    "encrypted": "Chiffrement de bout en bout",
+    "ephemeral": "Les messages disparaissent"
+  },
+  "linkFailed": "Impossible d’ouvrir le lien.",
+  "unpublishedVersion": "Version locale — voir les versions publiées",
+  "viewRelease": "Voir cette version",
+  "welcome": "Bienvenue sur Ghostly"
+}

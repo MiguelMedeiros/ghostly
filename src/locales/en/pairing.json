@@ -1,0 +1,63 @@
+{
+  "attempt": "attempt {{n}}",
+  "contact": "Your contact",
+  "done": "done",
+  "elapsed": "{{time}} in this step",
+  "indicator": "Pairing · {{stage}}",
+  "newInvite": "Ask your contact for a new invite.",
+  "onDht": {
+    "chosen": "DHT only was chosen for this chat.",
+    "noCommonTransport": "Your apps share no live transport. Short texts go through the DHT.",
+    "transport": "No live link came up yet. It is retried in the background.",
+    "waiting": "A live link is being tried in the background."
+  },
+  "reason": {
+    "expired": "This invite has expired.",
+    "keyMismatch": "This contact's key does not match the saved one. Nothing was accepted.",
+    "offline": "You are offline. Pairing goes on once you are back online.",
+    "publish": "Could not put your invite on the network. Check your connection.",
+    "rejected": "Your contact's app refused the connection.",
+    "resolve": "Could not find the invite on the network. It may be old or mistyped.",
+    "timeout": "Your contact's app did not answer in time.",
+    "transport": "No direct link could be opened between your devices.",
+    "unknown": "Something went wrong while connecting."
+  },
+  "retry": "Try again",
+  "retrying": "Trying again…",
+  "sayHello": "You can chat now. Say hello!",
+  "showProgress": "Show pairing progress",
+  "slow": {
+    "answering": "Still exchanging keys with your contact…",
+    "connecting": "Still opening a direct link. Strict networks can take longer.",
+    "knocking": "Your contact's app has not answered yet. It may be closed or offline.",
+    "publishing": "Still publishing your invite. The network is slow to answer.",
+    "resolving": "Still looking for your contact on the network…",
+    "waiting": "Your contact has not opened the invite yet. It stays valid, so you can share it again."
+  },
+  "stage": {
+    "answeringInviter": "Your contact knocked. Answering…",
+    "answeringJoiner": "Your contact is answering…",
+    "connecting": "Opening a direct, encrypted link…",
+    "failed": "Could not connect",
+    "knocking": "Knocking on your contact's door…",
+    "live": "Connected",
+    "onDht": "On the DHT. You can chat now; a live link is being tried",
+    "publishing": "Putting your invite on the network…",
+    "resolving": "Looking up the invite on the network…",
+    "waiting": "Waiting for your contact to open the invite"
+  },
+  "step": {
+    "answering": "Answer",
+    "connecting": "Connect",
+    "failed": "Failed",
+    "knocking": "Knock",
+    "live": "Live",
+    "onDht": "On DHT · retrying live",
+    "publishing": "Publish",
+    "resolving": "Look up",
+    "waiting": "Wait"
+  },
+  "stepOf": "Step {{n}} of {{total}}",
+  "steps": "Pairing steps",
+  "you": "You"
+}

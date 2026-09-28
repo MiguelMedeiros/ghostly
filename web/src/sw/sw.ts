@@ -101,11 +101,15 @@ worker.addEventListener("message", (event) => {
   }
   if (message.type === "share-forward") {
     const taken = held;
-    held = null;
     if (!taken) { source.postMessage({ type: "share-none" }); return; }
     event.waitUntil(worker.clients.matchAll({ type: "window" }).then((all) => {
-      for (const client of all) if (client.id !== source.id) client.postMessage({ type: "share", item: taken.item });
-    }).finally(taken.done));
+      const others = all.filter((client) => client.id !== source.id);
+      // No other window to give it to: it stays held, for whichever page asks next (this one, once it is the app).
+      if (!others.length || held !== taken) return;
+      held = null;
+      for (const client of others) client.postMessage({ type: "share", item: taken.item });
+      taken.done();
+    }));
   }
 });
 

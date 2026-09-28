@@ -1,4 +1,4 @@
-import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseVideoMeta, parseVoiceMeta, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
+import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
@@ -18,7 +18,7 @@ export interface HoldHost {
   delivery(linkId: string, messageId: string, state: "held" | "delivered" | "failed", error?: string): Promise<void>;
   /** What to seal, by kind. Null when it is gone (deleted). */
   text(linkId: string, messageId: string): Promise<string | null>;
-  file(fileId: string): Promise<{ bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta; video?: VideoMeta } | null>;
+  file(fileId: string): Promise<{ bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta } | null>;
   paymentRequest(paymentId: string): PaymentRequest | null;
   /** The reply a held text carries on the wire (WISP 400 § Replies), if it is one. */
   reply?(linkId: string, messageId: string): Promise<WireReply | undefined>;
@@ -26,7 +26,7 @@ export interface HoldHost {
   forwarded?(linkId: string, messageId: string): Promise<number | undefined>;
   receiveText(linkId: string, message: { id: string; text: string; timestamp: number; reply?: WireReply; forwarded?: number }, held?: HeldFacts): Promise<void>;
   /** Returns why it was not kept (room, a reused id), or null when it was. */
-  receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta; video?: VideoMeta; reply?: WireReply; forwarded?: number }, bytes: Uint8Array, digest: string, held?: HeldFacts): Promise<string | null>;
+  receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: WireReply; forwarded?: number }, bytes: Uint8Array, digest: string, held?: HeldFacts): Promise<string | null>;
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
   changed(): void;
   fetch?: typeof fetch;
@@ -236,7 +236,7 @@ export class HoldEngine {
         // A file's reply rides in the same meta as a text's (older apps ignore it).
         const reply = await this.host.reply?.(linkId, entry.messageId);
         const forwarded = await this.host.forwarded?.(linkId, entry.messageId);
-        body = file.bytes; meta = { name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(reply && { r: reply }), ...(forwarded && { fw: forwarded }) };
+        body = file.bytes; meta = { name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }), ...(reply && { r: reply }), ...(forwarded && { fw: forwarded }) };
       } else {
         const request = this.host.paymentRequest(entry.ref!);
         if (!request) return fail("The payment request is gone");
@@ -427,12 +427,13 @@ export class HoldEngine {
           await this.host.receiveText(linkId, { id: header.id, text: utf8Decode(body), timestamp: header.ts, ...(reply && { reply }), ...(forwarded && { forwarded }) }, held);
         }
         else if (header.kind === "file") {
-          const meta = header.meta as { name: string; size: number; mime: string; voice?: unknown; video?: unknown; r?: unknown; fw?: unknown };
+          const meta = header.meta as { name: string; size: number; mime: string; voice?: unknown; video?: unknown; image?: unknown; r?: unknown; fw?: unknown };
           const voice = parseVoiceMeta(meta.voice, meta.mime);
           const video = parseVideoMeta(meta.video, meta.mime);
+          const image = parseImageMeta(meta.image, meta.mime);
           const reply = readReply(meta.r, pairedReplyAuthor);
           const forwarded = readForwarded(meta.fw);
-          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts, ...(voice && { voice }), ...(video && { video }), ...(reply && { reply }), ...(forwarded && { forwarded }) }, body, hex(fromBase64Url(header.digest)), held);
+          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts, ...(voice && { voice }), ...(video && { video }), ...(image && { image }), ...(reply && { reply }), ...(forwarded && { forwarded }) }, body, hex(fromBase64Url(header.digest)), held);
           if (refused) throw new HoldRefusedError("limits", refused);
         } else if (header.kind === "pay-req") {
           let parsed: unknown;

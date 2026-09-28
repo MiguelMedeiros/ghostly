@@ -41,7 +41,7 @@ import {
 import { deleteAllSessions, listSessions } from "../lib/storage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
-import { isDesktopApp } from "../lib/externalLink";
+import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 
 export function Settings() {
   const nav = useAppNavigation();
@@ -454,7 +454,7 @@ export function Settings() {
             </span>}
             hint={update.lastCheckedAt ? t("updates.lastChecked", { when: new Date(update.lastCheckedAt).toLocaleTimeString() }) : undefined}>
             {update.update && update.update.apply === "manual" ? (
-              <a href={update.downloadUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent hover:bg-accent-hover text-on-accent font-semibold">
+              <a {...externalLinkProps(update.downloadUrl)} className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent hover:bg-accent-hover text-on-accent font-semibold">
                 {t("updates.download")}
               </a>
             ) : update.update ? (
@@ -478,7 +478,7 @@ export function Settings() {
       <Section title={t("settings.about")}>
         <Row label={t("settings.version")} value={<span className="font-mono">{appVersion}</span>} />
         <Row label={t("settings.website")} value={
-          <a href={APP_WEBSITE} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 min-h-10 text-accent hover:text-accent-hover transition-colors">
+          <a {...externalLinkProps(APP_WEBSITE)} className="inline-flex items-center gap-1 min-h-10 text-accent hover:text-accent-hover transition-colors">
             GitHub
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
