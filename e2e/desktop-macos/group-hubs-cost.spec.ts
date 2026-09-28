@@ -61,7 +61,7 @@ const PEERS = `
  */
 const LOOPBACK = `
   const done = arguments[arguments.length - 1];
-  const n = arguments[0];
+  const n = arguments[0], wait = arguments.length > 2 ? arguments[1] : 20000;
   const Peer = window.__nativePeer ?? window.RTCPeerConnection;
   (async () => {
     window.__loop = [];
@@ -76,7 +76,7 @@ const LOOPBACK = `
       await b.setLocalDescription(await b.createAnswer());
       await a.setRemoteDescription(b.localDescription);
       await Promise.race([Promise.all([far, new Promise((resolve) => { if (channel.readyState === "open") resolve(); else channel.onopen = resolve; })]),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("edge " + i + " did not open")), 20000))]);
+        new Promise((_, reject) => setTimeout(() => reject(new Error("edge " + i + " did not open")), wait))]);
       window.__loop.push({ a, b, channel });
     }
     return window.__loop.length;
@@ -191,6 +191,21 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
       await app.app.execute(LOOP_CLOSE);
       writeFileSync(testInfo.outputPath("mesh-cost.json"), JSON.stringify(report, null, 2));
     });
+    // Past about 23 loopback edges (46 connections) WKWebView opened no more, and its next session did not come up
+    // either: `E2E_MESH_COST_LOOPBACK_ONLY=1` stops here, for the per-edge cost below that ceiling.
+    if (process.env.E2E_MESH_COST_LOOPBACK_ONLY) {
+      // How many loopback edges open at all (60 s each), and whether a fresh one opens after they are all closed.
+      const started = Date.now();
+      report.ceiling = { opened: await app.app.executeAsync<number | string>(LOOPBACK, 48, 60_000), seconds: Math.round((Date.now() - started) / 1000),
+        live: await app.app.execute<number>(`return (window.__loop ?? []).length;`) };
+      await app.app.execute(LOOP_CLOSE);
+      await new Promise((r) => setTimeout(r, 15_000));
+      report.afterCeiling = await app.app.executeAsync<number | string>(LOOPBACK, 1, 60_000);
+      await app.app.execute(LOOP_CLOSE);
+      writeFileSync(testInfo.outputPath("mesh-cost.json"), JSON.stringify(report, null, 2));
+      console.log(`MESH_COST ${JSON.stringify(report)}`);
+      return;
+    }
 
     await test.step(`the app and ${N - 2} more bots join through the admin's link`, async () => {
       // Pasted into Join, as a person does with a link someone sent them.
