@@ -49,7 +49,7 @@ export async function copyForForward(sourceId: string, target: { linkId: string;
   if (source.direction === "in" && source.wire3 && source.wire3.state !== "done" || await bytesHere(source) !== size)
     throw new Error("The file has not arrived yet");
   const { file, linkId, wireId, timestamp } = target;
-  const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video };
+  const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video, image: file.image };
   const record = { id: file.id, linkId, createdAt: timestamp, direction: "out" as const, wireId, metadata, transfer: { state: "transferring" as const, transferred: 0, size: file.size } };
   if (size <= SMALL_FILE_BYTES && source.blob) {
     await fileStore.put({ ...record, blob: source.blob.slice(0, size, source.blob.type), ...(source.digest && { digest: source.digest }) });

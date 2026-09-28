@@ -94,7 +94,7 @@ export interface MessageJson {
   mentions?: { key: string; offset: number; length: number }[];
   mentioned?: boolean;
   /** A file or voice message: its id is what `file wait`, `file save` and the `file.*` events name. */
-  file?: { id: string; name: string; size: number; mime: string; voice?: { duration: number; peaks?: number[] } };
+  file?: { id: string; name: string; size: number; mime: string; voice?: { duration: number; peaks?: number[] }; image?: { width: number; height: number } };
   paymentId?: string;
   event?: unknown;
   /**
@@ -139,11 +139,15 @@ export function messageJson(message: StoredMessage): MessageJson {
   };
 }
 
-/** A message's file; a voice note's length (ms) and loudness bars ride along (older releases said only `voice: true`). */
+/**
+ * A message's file; a voice note's length (ms) and loudness bars ride along (older releases said only `voice: true`),
+ * and a picture's size as it is shown when its sender sent it.
+ */
 export function fileJson(file: MessageFile): NonNullable<MessageJson["file"]> {
   return {
     id: file.id, name: file.name, size: file.size, mime: file.mime,
     ...(file.voice ? { voice: { duration: file.voice.duration, ...(file.voice.peaks?.length ? { peaks: [...file.voice.peaks] } : {}) } } : {}),
+    ...(file.image ? { image: { width: file.image.width, height: file.image.height } } : {}),
   };
 }
 
