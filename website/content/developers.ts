@@ -300,7 +300,7 @@ export const developers = {
     ],
   },
   next: {
-    catalog: { title: "The WISP catalog", body: "Every WISP, searchable, with its status and implementations.", cta: "Open the catalog" },
+    catalog: { title: "WISPs", body: "Every WISP, searchable, with its status and implementations.", cta: "Browse the WISPs" },
     roadmap: { title: "The roadmap", body: "What comes next, in dependency order. No dates.", cta: "See the roadmap" },
     docs: { title: "Protocol docs", body: "The long-form walkthrough of the protocol.", cta: "Read the docs" },
   },

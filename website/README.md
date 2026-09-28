@@ -1,7 +1,7 @@
 # ghostly.tools
 
 The Ghostly website: the story for people (`/`), the story for developers
-(`/developers`), the WISP catalog and reader, the roadmap, and the existing CLI,
+(`/developers`), the WISPs (`/developers/wisps`, a searchable catalog) and the reader, the roadmap, and the existing CLI,
 protocol docs and privacy pages. Next.js (see `AGENTS.md`: this version differs
 from older ones), motion for scroll scenes, no WebGL.
 

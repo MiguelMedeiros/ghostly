@@ -34,7 +34,7 @@ export function DevelopersPage() {
                 <Link className="btn btn--primary" href={"/developers/wisps/01-ghost-core"}>
                   {t.hero.ctaCore} →
                 </Link>
-                <Link className="btn dv-btn-sm" href={"/developers/catalog"}>
+                <Link className="btn dv-btn-sm" href={"/developers/wisps"}>
                   {t.hero.ctaCatalog.replace("{n}", String(wispCount))}
                 </Link>
                 <a className="dvx-gh" href={REPO_URL}>
@@ -161,7 +161,7 @@ export function DevelopersPage() {
             <Reveal as="article" key={k} className="card devnext-card">
               <h3 className="h-card">{t.next[k].title}</h3>
               <p className="muted">{t.next[k].body}</p>
-              <Link className="link-arrow" href={k === "docs" ? "/docs" : k === "catalog" ? "/developers/catalog" : "/roadmap"}>
+              <Link className="link-arrow" href={k === "docs" ? "/docs" : k === "catalog" ? "/developers/wisps" : "/roadmap"}>
                 {t.next[k].cta} →
               </Link>
             </Reveal>
