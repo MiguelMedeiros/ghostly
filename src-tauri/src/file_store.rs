@@ -174,13 +174,56 @@ impl FileStore {
         fs4::available_space(dir).map_err(|e| e.to_string())
     }
 
-    /// Copies a stored file to `target`, a step at a time.
+    /// Copies a stored file to `target`, a step at a time, marked as downloaded (`mark_downloaded`).
     pub fn copy_to(&self, space: &str, id: &str, target: &Path) -> Result<(), String> {
         let mut from = File::open(self.path(space, id)?).map_err(|e| e.to_string())?;
         let mut to = File::create(target).map_err(|e| e.to_string())?;
         std::io::copy(&mut from, &mut to).map_err(|e| e.to_string())?;
-        to.sync_all().map_err(|e| e.to_string())
+        to.sync_all().map_err(|e| e.to_string())?;
+        drop(to);
+        mark_downloaded(target);
+        Ok(())
     }
+}
+
+/// The system's "downloaded from the internet" mark on a saved copy: a contact sent it, so opening
+/// or running it goes through Gatekeeper (macOS) or SmartScreen and Office's Protected View
+/// (Windows) first, as it would from a browser. Best effort: a disk that cannot hold the mark (FAT,
+/// some network shares) still gets the copy.
+fn mark_downloaded(target: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(path) = std::ffi::CString::new(target.as_os_str().as_bytes()) else {
+            return;
+        };
+        let seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        // Flags 0x0001 (downloaded) and 0x0080, as browsers write them; then time and agent.
+        let value = format!("0081;{seconds:08x};Ghostly;");
+        // SAFETY: both names are NUL-terminated; the value is passed with its length.
+        unsafe {
+            libc::setxattr(
+                path.as_ptr(),
+                c"com.apple.quarantine".as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            );
+        }
+    }
+    #[cfg(windows)]
+    {
+        // The Mark of the Web: an NTFS stream next to the file's data, zone 3 (internet).
+        let mut stream = target.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        let _ = fs::write(PathBuf::from(stream), "[ZoneTransfer]\r\nZoneId=3\r\n");
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let _ = target;
 }
 
 /// The folder and any missing above it, made the user's alone (0700) on Unix.
@@ -561,6 +604,56 @@ mod tests {
             suggested_name("Ghostly voice 2026-09-27 14.01.30.webm"),
             "Ghostly voice 2026-09-27 14.01.30.webm"
         );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    /// A saved copy came from a contact: it carries the system's "downloaded from the internet"
+    /// mark, so opening it goes through Gatekeeper (macOS) or SmartScreen (Windows) first.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_saved_copy_is_quarantined() {
+        use std::os::unix::ffi::OsStrExt;
+        let (files, dir) = store();
+        files.append("p", "f", 0, b"#!/bin/sh\necho boo\n").unwrap();
+        let target = dir.join("run me.command");
+        files.copy_to("p", "f", &target).unwrap();
+
+        let path = std::ffi::CString::new(target.as_os_str().as_bytes()).unwrap();
+        let mut value = [0u8; 256];
+        // SAFETY: both strings are NUL-terminated and the buffer is as long as the size given.
+        let read = unsafe {
+            libc::getxattr(
+                path.as_ptr(),
+                c"com.apple.quarantine".as_ptr(),
+                value.as_mut_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            )
+        };
+        assert!(read > 0, "no quarantine attribute on the saved copy");
+        let value = std::str::from_utf8(&value[..read as usize]).unwrap();
+        let fields: Vec<&str> = value.split(';').collect();
+        assert_eq!(fields[0], "0081", "{value}");
+        assert!(u64::from_str_radix(fields[1], 16).unwrap() > 0, "{value}");
+        assert_eq!(fields[2], "Ghostly", "{value}");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_saved_copy_is_quarantined() {
+        let (files, dir) = store();
+        files.append("p", "f", 0, b"@echo boo\r\n").unwrap();
+        let target = dir.join("run me.cmd");
+        files.copy_to("p", "f", &target).unwrap();
+        let mut stream = target.clone().into_os_string();
+        stream.push(":Zone.Identifier");
+        assert_eq!(
+            fs::read_to_string(PathBuf::from(stream)).unwrap(),
+            "[ZoneTransfer]\r\nZoneId=3\r\n"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"@echo boo\r\n");
         fs::remove_dir_all(dir).ok();
     }
 }
