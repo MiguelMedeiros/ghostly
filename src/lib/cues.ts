@@ -98,8 +98,24 @@ export function playCue(cue: CueName, { chat, mention = false, key }: { chat?: s
   return true;
 }
 
+/**
+ * Messages in one chat that come together (a catch-up, a bot's answer in pieces) are one sound: after a chat's message
+ * sound, the next one from that chat plays no sooner than this.
+ */
+export const MESSAGE_BURST_MS = 1_500;
+const burstAt = new Map<string, number>();
+
+/** Whether a message sound for `chat` may play now, and if so, marks it played. */
+export function firstOfBurst(chat: string, now = Date.now()): boolean {
+  const last = burstAt.get(chat);
+  if (last !== undefined && now - last < MESSAGE_BURST_MS && now >= last) return false;
+  burstAt.set(chat, now);
+  if (burstAt.size > 256) burstAt.delete(burstAt.keys().next().value as string);
+  return true;
+}
+
 /** Forgets what played (tests). */
-export function resetCues(): void { lastPlayed.clear(); playedKeys.length = 0; }
+export function resetCues(): void { lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); }
 
 /** The chat on screen, as the mute store names it, for cues played from inside its messages (a spoiler, a delete). */
 export const CueChat = createContext<string | undefined>(undefined);
