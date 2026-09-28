@@ -88,7 +88,7 @@ test("every page in the sitemap has its own title, description and share card", 
     const url = path === "/" ? SITE : `${SITE}${path}`;
     expect(h.title, path).not.toBe("");
     expect(h.description, path).toBeTruthy();
-    expect(h.description!.length, `${path} description`).toBeLessThanOrEqual(200);
+    expect(h.description!.length, `${path} description`).toBeLessThanOrEqual(160);
     expect(`${h.title} ${h.description}`, path).not.toContain("—");
     // A canonical, when a page has one, is its own address (never the home page's).
     if (h.canonical !== null) expect(h.canonical.replace(/\/$/, ""), path).toBe(url);

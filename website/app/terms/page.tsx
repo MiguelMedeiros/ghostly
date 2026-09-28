@@ -3,7 +3,7 @@ import { A, Caps, Code, LICENSE_URL, ISSUES_URL, LegalPage, Section, Term } from
 import { SECURITY_URL } from "@/content/shell";
 
 const DESCRIPTION =
-  "Ghostly is free, open-source software you run on your own device. You hold your keys and your money, and you use it at your own risk. The terms for the apps and the sites.";
+  "Ghostly is free, open-source software you run on your own device. You hold your keys and money, and use it at your own risk. Terms for the apps and sites.";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
