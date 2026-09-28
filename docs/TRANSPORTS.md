@@ -77,12 +77,13 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 
 ### Relay budget: a wait, not an error
 
-- A browser allows itself 30 requests a minute per relay (reads and publishes together, shared by every chat; `REQUESTS_PER_MINUTE` in `packages/core/src/relay.ts`). Background reads have a share of 20.
+- A browser allows itself 30 requests a minute per relay (reads and publishes together, shared by every chat; `REQUESTS_PER_MINUTE` in `packages/core/src/relay.ts`), and 60 on `pkarr.pubky.app`, which allows 1000 an address (`RELAY_REQUESTS_PER_MINUTE`). Background reads have a share of 20 on each.
 - Who goes first when links want more than that ([#401](https://github.com/MiguelMedeiros/ghostly/pull/401), [#434](https://github.com/MiguelMedeiros/ghostly/pull/434)):
   - A 1:1 chat that polls fast (a signal from its contact due any moment), or whose request the budget refused, keeps the last 10 requests of each relay's minute for itself. Group requests stop at 20, until a minute after the chat last needed them.
   - While any link polls fast, background reads (a community's lookups, slow mailbox checks) drop to 5 a relay per minute.
   - After a window that looked fast for a contact's offer, a link slows down step by step (4, 4, 8, 16 s on the relays), not straight to its background pace: an offer held back by the other side's budget can land just after the window.
   - A signal's fast window counts from when the signal went out, not from when it was made.
+- A publish goes to every relay and counts once one took it, and a read goes to a relay with requests left, so the larger share is room for signaling once `pkarr.pubky.org`'s 30 are spent. A web pairing costs about ten requests a relay: with 30 on both, three pairings in a minute were the whole minute, and a fourth waited for it to free (2026-09-28).
 - A request this budget holds back, or a relay's 429, is a **wait** ([#271](https://github.com/MiguelMedeiros/ghostly/pull/271)). `RelayTransport` throws a typed `DiscoveryBudgetError` with the time until a request frees, and every publisher retries then. It never counts as a failed attempt and the UI shows no error.
 
 ### Circuit breaker per relay
@@ -122,7 +123,7 @@ Checked on 2026-09-25 with throwaway keys, at most about ten requests per relay:
 | Relay | Operator | Default | Notes |
 |---|---|---|---|
 | `https://pkarr.pubky.org` | Pubky (Synonym) | Yes | Writes through to the DHT. CORS allows `*` and `If-Match`. `x-ratelimit-limit: 50` a minute per address. Same IP as `pkarr.pubky.app` |
-| `https://pkarr.pubky.app` | Pubky (Synonym) | Yes | Writes through to the DHT. CORS as above. `x-ratelimit-limit: 1000`. In the Rust pkarr crate's own defaults |
+| `https://pkarr.pubky.app` | Pubky (Synonym) | Yes | Writes through to the DHT. CORS as above. `x-ratelimit-limit: 1000`. In the Rust pkarr crate's own defaults. The client gives it 60 requests a minute (`RELAY_REQUESTS_PER_MINUTE`) |
 | `https://relay.pkarr.org` | pkarr.org | No | Writes through, CORS ok, enforces `If-Match` (412). Allows 10 requests a minute per address, too few for a default. On 2026-09-25 its PUTs stored the packet but did not answer within 20 s. Add it by hand for a relay run by someone other than Pubky; the client gives it 5 requests a minute (`RELAY_REQUESTS_PER_MINUTE`) |
 | `https://dns.iroh.link/pkarr` | n0 (iroh) | No | Its own namespace: it does not read or write the DHT. Its CORS preflight does not allow `If-Match`, and it accepts stale sequence numbers |
 | `https://staging-dns.iroh.link/pkarr` | n0 (iroh) | No | As above, and marked as a testing server |

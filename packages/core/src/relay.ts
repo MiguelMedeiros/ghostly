@@ -84,11 +84,14 @@ export const FRESH_READ_MS = 500;
 /** A relay that fails at the network level is left alone for this long. */
 const NETWORK_ERROR_COOLDOWN_MS = 20_000;
 /**
- * Relays that allow far fewer requests per address than the others: this client's share of theirs, a minute.
- * relay.pkarr.org (not a default, see docs/RELAYS.md) allows 10 (`x-ratelimit-limit`), which a browser cannot
- * read without CORS exposing it.
+ * Relays whose limit per address is far from the others': this client's share of theirs, a minute, in place of
+ * `REQUESTS_PER_MINUTE`. relay.pkarr.org (not a default, see docs/RELAYS.md) allows 10 (`x-ratelimit-limit`), which a
+ * browser cannot read without CORS exposing it. pkarr.pubky.app allows 1000 (pkarr.pubky.org, on the same address,
+ * 50): 60 of ours leaves room for many peers behind one address, and a page that pairs three contacts in a minute,
+ * about ten requests a relay each, still has requests to spare there (2026-09-28). Writes go to every relay and
+ * count once one took them; reads go to a relay with requests left.
  */
-export const RELAY_REQUESTS_PER_MINUTE: Record<string, number> = { "https://relay.pkarr.org": 5 };
+export const RELAY_REQUESTS_PER_MINUTE: Record<string, number> = { "https://relay.pkarr.org": 5, "https://pkarr.pubky.app": 60 };
 
 export interface RelayTransportOptions {
   relays?: string[];
@@ -142,6 +145,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly readAt = new Map<string, number>();
   private readonly freshReadMs: number;
   private readonly perMinute: number;
+  /** `requestsPerMinute` was given: it bounds every relay, one with its own share (`RELAY_REQUESTS_PER_MINUTE`) too. */
+  private readonly perMinuteGiven: boolean;
   private readonly backgroundPerMinute: number;
   private readonly backgroundWhileSignaling: number;
   private readonly breaker: RelayBreaker;
@@ -156,6 +161,7 @@ export class RelayTransport implements PkarrTransport {
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
     this.perMinute = options.requestsPerMinute ?? REQUESTS_PER_MINUTE;
     this.freshReadMs = options.freshReadMs ?? FRESH_READ_MS;
+    this.perMinuteGiven = options.requestsPerMinute !== undefined;
     this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
     this.backgroundWhileSignaling = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_WHILE_SIGNALING : Math.ceil(this.perMinute / 6);
     const log = options.log ?? ((line: string) => console.info(`[ghostly:relay] ${line}`));
@@ -477,9 +483,11 @@ export class RelayTransport implements PkarrTransport {
     return Math.max(wait, 0);
   }
 
-  /** Requests allowed to this relay a minute: this client's budget, or less for a relay known to allow few. */
+  /** Requests allowed to this relay a minute: this client's budget, or the relay's own share (`RELAY_REQUESTS_PER_MINUTE`). */
   private limitOf(relay: string): number {
-    return Math.min(this.perMinute, RELAY_REQUESTS_PER_MINUTE[relay] ?? Infinity);
+    const share = RELAY_REQUESTS_PER_MINUTE[relay];
+    if (share === undefined) return this.perMinute;
+    return this.perMinuteGiven ? Math.min(this.perMinute, share) : share;
   }
 
   /** What groups leave a chat on this relay: `CHAT_RESERVE`, or a third of a smaller budget. */
