@@ -20,8 +20,9 @@ const HEADERS = ['authorization', 'ttl', 'urgency', 'topic', 'content-encoding',
 /**
  * `tracked`: addresses whose counts are kept at most. Past it, the ones idle for a minute go first, then the oldest:
  * a full table forgets a count rather than turn away every newcomer.
+ * `requestMs`: how long a client has to send a whole request (headers and body) before the connection is closed.
  */
-export const DEFAULT_LIMITS = { bodyBytes: 8 * 1024, perMinute: 30, tracked: 10_000 }
+export const DEFAULT_LIMITS = { bodyBytes: 8 * 1024, perMinute: 30, tracked: 10_000, requestMs: 15_000 }
 /** RFC 8292's `vapid t=<JWT>, k=<key>`: a request without one is not a Web Push the relay would forward. */
 const VAPID = /^vapid t=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+, ?k=[A-Za-z0-9_-]+$/
 
@@ -77,7 +78,9 @@ export function rateKey (address) {
 }
 
 export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts = PUSH_HOSTS, limits = {}, proxies = 0, log = () => {} } = {}) {
-  const { bodyBytes, perMinute, tracked } = { ...DEFAULT_LIMITS, ...limits }
+  const { bodyBytes, perMinute, tracked, requestMs } = { ...DEFAULT_LIMITS, ...limits }
+  // The JSON around a body of `bodyBytes`: base64url is a third longer, and the headers add a few KB.
+  const requestBytes = bodyBytes * 2
   const recent = new Map()
   let pruned = 0
   const prune = now => { pruned = now; for (const [ip, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(ip) }
@@ -85,7 +88,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   pruning.unref?.()
   const allowOrigin = origin => (origins.length === 0 ? '*' : origins.includes(origin) ? origin : null)
 
-  const server = createServer((req, res) => {
+  // A slow client is closed after `requestMs`, checked every second (Node's default waits up to five minutes).
+  const server = createServer({ requestTimeout: requestMs, headersTimeout: requestMs, connectionsCheckingInterval: Math.min(1000, requestMs) }, (req, res) => {
     const origin = allowOrigin(req.headers.origin ?? '')
     const cors = origin ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' } : {}
     const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
@@ -104,12 +108,13 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     recent.delete(ip)
     recent.set(ip, times)
 
-    let text = ''
+    if (Number(req.headers['content-length']) > requestBytes) return answer(413, { error: 'Too large' })
+    const chunks = []
     let size = 0
-    req.setEncoding('utf8')
-    req.on('data', chunk => { size += chunk.length; if (size > bodyBytes * 2) req.destroy(); else text += chunk })
+    // Bytes, not characters: text of many-byte characters counts for what it weighs.
+    req.on('data', chunk => { size += chunk.length; if (size > requestBytes) req.destroy(); else chunks.push(chunk) })
     req.on('end', async () => {
-      const request = readRelayRequest(text, { hosts, bodyBytes })
+      const request = readRelayRequest(Buffer.concat(chunks).toString('utf8'), { hosts, bodyBytes })
       if (request.error) { log('refused', request.error); return answer(400, { error: request.error }) }
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })

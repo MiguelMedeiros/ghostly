@@ -1,6 +1,7 @@
+import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { PUSH_SERVICE_HOSTS } from "../../packages/core/src/webPush";
-import { PUSH_HOSTS, clientAddress, rateKey, readRelayRequest, startRelay } from "../../native-transports/push-relay/relay.mjs";
+import { DEFAULT_LIMITS, PUSH_HOSTS, clientAddress, rateKey, readRelayRequest, startRelay } from "../../native-transports/push-relay/relay.mjs";
 
 // covers: push.wake.send
 
@@ -97,5 +98,27 @@ describe("the push relay (native-transports/push-relay)", () => {
     expect((await post("4.4.4.4")).status).toBe(429);
     expect((await post("3.3.3.3")).status).toBe(429);
     expect((await post("1.1.1.1")).status).toBe(400);
+  });
+
+  it("weighs a request in bytes, not characters", async () => {
+    const relay = await startRelay();
+    close = relay.close;
+    // Fewer characters than the limit, more bytes.
+    const heavy = request({ memo: "é".repeat(9000) });
+    expect(heavy.length).toBeLessThan(DEFAULT_LIMITS.bodyBytes * 2);
+    expect(Buffer.byteLength(heavy)).toBeGreaterThan(DEFAULT_LIMITS.bodyBytes * 2);
+    const answer = await fetch(`http://127.0.0.1:${relay.port}/`, { method: "POST", headers: { Origin: "https://app.ghostly.tools" }, body: heavy });
+    expect(answer.status).toBe(413);
+  });
+
+  it("closes a client that sends its request too slowly", async () => {
+    const relay = await startRelay({ limits: { requestMs: 300 } });
+    close = relay.close;
+    const socket = connect(relay.port, "127.0.0.1");
+    await new Promise((resolve) => socket.once("connect", resolve));
+    socket.write("POST / HTTP/1.1\r\nHost: relay\r\nOrigin: https://app.ghostly.tools\r\nContent-Length: 100\r\n\r\n{");
+    const started = Date.now();
+    await new Promise((resolve) => { socket.once("close", resolve); socket.resume(); });
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
