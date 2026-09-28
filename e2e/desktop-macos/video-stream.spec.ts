@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { makeBigVideo, type BigVideo } from "../support/bigVideo";
 import { forgetSharedData, openMacDesktop, type MacDesktop } from "../support/desktopMac";
-import { playFromStore, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
+import { fullscreenInPage, playFromStore, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
 
 /**
  * A video too large for the page (#381: over 64 MiB, `NATIVE_BLOB_MAX`) plays and seeks in the Desktop app on a Mac,
@@ -79,4 +79,18 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
     report.url,
   );
   expect(after).not.toBe("loaded");
+});
+
+// A video's Full screen button did nothing on the Mac (Picture in Picture worked): WKWebView ships with element full
+// screen off. src-tauri/src/fullscreen.rs turns it on; WebKit shows the element in a full-screen window of its own.
+test("a video goes full screen and comes back", {
+  tag: ["@client:desktop", "@feature:files.video.play"],
+}, async () => {
+  desktop ??= await openMacDesktop({ name: "stream", port: PORTS.app });
+  const report = await fullscreenInPage(desktop.app);
+  test.info().annotations.push({ type: "fullscreen", description: JSON.stringify(report) });
+  expect(report.enabled).toBe(true);
+  expect(report.error).toBeUndefined();
+  expect(report.entered).toBe(true);
+  expect(report.exited).toBe(true);
 });

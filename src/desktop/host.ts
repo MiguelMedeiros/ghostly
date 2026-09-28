@@ -200,6 +200,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     atproto: desktopAtproto,
     // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
+    fullscreenWindow: (on) => invoke("plugin:window|set_fullscreen", { label: "main", value: on }),
     // Passport in the system browser: the SDK's relay brings the approval back either way.
     openPubkyPassport: (url) => invoke("open_pubky_passport", { url }),
     // Ring's cookie session: its homeserver requests through Rust, which keeps the cookie WKWebView drops.

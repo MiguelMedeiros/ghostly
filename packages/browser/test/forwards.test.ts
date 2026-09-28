@@ -8,7 +8,7 @@ import { forwardKind } from "../src/engine/forwards";
 import { fileStore } from "../src/shared/idb";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet } from "./helpers/fakeNative";
-// covers: chat.forward.wire, chat.forward.files
+// covers: chat.forward.wire, chat.forward.files, files.paired.send
 
 /**
  * Forwarding in the engine (WISP 400 § Forwards): a real node with two contacts, A and B, over a stand-in for Iroh,
@@ -199,6 +199,16 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(results[1]).toMatchObject({ to: t.b.id, error: "The file has not arrived yet", messageIds: [expect.any(String)] });
     await vi.waitFor(() => expect(t.b.got.map(m => m.text)).toEqual(["a note"]));
     await expect(t.node.forwardMessages({ linkId: t.a.id, messageIds: ["peer_note"], to: ["a", "b", "c", "d", "e", "f"] })).rejects.toThrow(/at most 5/);
+  });
+
+  it("sending a file to a contact whose app takes none rejects with the reason, says failed, and keeps no message", async () => {
+    const t = await setup({ withCarol: true });
+    const file = { id: `${t.c!.id}-out-carolfile0001`, name: "a.txt", size: 3, mime: "text/plain" };
+    await fileStore.put({ id: file.id, linkId: t.c!.id, blob: new Blob(["abc"]), createdAt: 1, direction: "out", wireId: "carolfile0001", metadata: { ...file, timestamp: 9 } });
+    await expect(t.node.sendFile({ linkId: t.c!.id, file, timestamp: 9 })).rejects.toThrow(/updated peer to send files/);
+    expect(t.node.getState().transfers[file.id]).toMatchObject({ state: "failed", error: expect.stringMatching(/updated peer/) });
+    expect((await db.getMessages(t.c!.id)).filter(m => m.file)).toEqual([]);
+    await expect(t.node.sendFile({ linkId: "no-such-chat", file: { ...file, id: "no-such-chat-out-x" }, timestamp: 9 })).rejects.toThrow("You are offline");
   });
 
   it("a file a chat cannot take is said so, never counted as sent, and its copy is not kept", async () => {

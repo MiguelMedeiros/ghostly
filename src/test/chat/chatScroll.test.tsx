@@ -1,7 +1,7 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpToLatest } from "../../components/chat/JumpToLatest";
-import { useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
+import { forgetChatScroll, useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
 import { renderApp } from "../render";
 
 // covers: chat.scroll
@@ -78,7 +78,7 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-beforeEach(() => { heights.clear(); observed = []; });
+beforeEach(() => { heights.clear(); observed = []; forgetChatScroll(); });
 
 function Timeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
   const jump = useChatScroll({ rows, chat });
@@ -208,6 +208,31 @@ describe("the chat timeline's scrolling", () => {
     expect(list().scrollTop).toBe(450);
   });
 
+  it("opening, pictures that load before the first scroll event still leave it at the last message", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    expect(list().scrollTop).toBe(200);
+    // A browser fires the open's own scroll event a frame later; by then pictures have loaded and the list is taller.
+    heights.set("peer_7", 200);
+    heights.set("peer_9", 300);
+    act(() => { fireEvent.scroll(list()); });
+    resized();
+    expect(list().scrollTop).toBe(600);
+    expect(pill()).toBeNull();
+  });
+
+  it("at the bottom, content that grows keeps it there until a hand scrolls up", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    heights.set("peer_9", 300);
+    act(() => { fireEvent.scroll(list()); });
+    resized();
+    expect(list().scrollTop).toBe(450);
+    scrollTo(100);
+    heights.set("peer_8", 200);
+    act(() => { fireEvent.scroll(list()); });
+    resized();
+    expect(list().scrollTop).toBe(100);
+  });
+
   it("far from the bottom with nothing new, a plain ↓ shows; near it, nothing", async () => {
     const { user } = renderApp(<Timeline rows={theirs(0, 30)} />);
     expect(pill()).toBeNull();
@@ -286,5 +311,56 @@ describe("the chat timeline's scrolling", () => {
     rerender(<Timeline chat="chat-2" rows={theirs(100, 12)} />);
     expect(list().scrollTop).toBe(300);
     expect(pill()).toBeNull();
+  });
+
+  it("a chat left scrolled up opens again on the same message, even with pictures loading above it", () => {
+    const rows = theirs(0, 20);
+    const { rerender, unmount } = renderApp(<Timeline rows={rows} />);
+    scrollTo(130);
+    expect(topOf("peer_2")).toBe(-30);
+    // Another chat, then back: the same component, or a new one (the chat screen mounts again).
+    rerender(<Timeline chat="chat-2" rows={theirs(100, 12)} />);
+    expect(list().scrollTop).toBe(300);
+    rerender(<Timeline rows={[...rows, ...theirs(20, 2)]} />);
+    expect(topOf("peer_2")).toBe(-30);
+    expect(pill()).toHaveAttribute("data-count", "0");
+    unmount();
+    renderApp(<Timeline rows={[...rows, ...theirs(20, 2)]} />);
+    expect(topOf("peer_2")).toBe(-30);
+    heights.set("peer_0", 250);
+    act(() => { fireEvent.scroll(list()); });
+    resized();
+    expect(topOf("peer_2")).toBe(-30);
+  });
+
+  it("a chat left at its bottom opens at its bottom, with what came meanwhile", () => {
+    const rows = theirs(0, 20);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    rerender(<Timeline chat="chat-2" rows={theirs(100, 12)} />);
+    rerender(<Timeline rows={[...rows, ...theirs(20, 5)]} />);
+    expect(list().scrollTop).toBe(950);
+    expect(pill()).toBeNull();
+  });
+
+  it("the message a chat was left on is gone: it opens at its bottom", () => {
+    const rows = theirs(0, 20);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    scrollTo(130);
+    rerender(<Timeline chat="chat-2" rows={theirs(100, 12)} />);
+    rerender(<Timeline rows={rows.slice(3)} />);
+    expect(list().scrollTop).toBe(550);
+  });
+
+  it("a list taken off screen (a chat kept for a call) keeps its place", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    scrollTo(130);
+    // display: none, as a browser does it: no size, and the scroll position back at 0.
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(0);
+    scrollTo(0);
+    resized();
+    height.mockRestore();
+    resized();
+    expect(topOf("peer_2")).toBe(-30);
+    expect(list().scrollTop).toBe(130);
   });
 });

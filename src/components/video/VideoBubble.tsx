@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { formatFileSize, formatVideoDuration, safeBlobType, sanitizeFileName } from "@ghostly/core";
+import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
@@ -7,6 +7,7 @@ import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
+import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/videoPlayer";
 import { localPoster, posterUrl } from "../../lib/videoPoster";
 import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
@@ -34,6 +35,12 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   const [local, setLocal] = useState<{ url: string; width: number; height: number; duration: number } | null>(null);
   /** On screen: true, off it: false, not known yet (no answer from the observer so far): null. */
   const [visible, setVisible] = useState<boolean | null>(() => (typeof IntersectionObserver === "undefined" ? true : null));
+  /**
+   * Full screen where the engine's own is off (Desktop on Linux: WebKitGTK aborts the app entering it): the window
+   * goes full screen and the video fills it. Elsewhere the player's own Full screen button does it.
+   */
+  const [theater, setTheater] = useState(false);
+  const canTheater = typeof document !== "undefined" && !document.fullscreenEnabled && !!platform?.fullscreenWindow;
   const [actionError, setActionError] = useState("");
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
@@ -44,8 +51,10 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   const videoRef = useRef<HTMLVideoElement>(null);
   useChosenSpeaker(videoRef, phase === "playing" ? src : null);
   const srcRef = useRef<string | null>(null);
-  /** Lets go of the source: revokes a blob URL, or stops the platform serving a streamed file. */
-  const releaseRef = useRef<(() => void) | null>(null);
+  /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
+  const sourceRef = useRef<StoredMedia | null>(null);
+  /** A stream the player refused was tried again from the file's bytes, once. */
+  const fellBack = useRef(false);
   const resumeAt = useRef(0);
   /** A play started by a tap: the element gets the keyboard once it is there. */
   const focusOnStart = useRef(false);
@@ -79,12 +88,26 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
     if (video) resumeAt.current = video.ended ? 0 : video.currentTime;
     video?.pause();
     releasePlayback(file.id);
-    releaseRef.current?.();
-    releaseRef.current = null;
+    sourceRef.current?.release();
+    sourceRef.current = null;
     srcRef.current = null;
     setSrc(null);
     setPhase("poster");
+    setTheater(false);
   }, [file.id]);
+
+  // In full screen: the window with it, until Escape, the exit button, or the video stopping for any reason.
+  useEffect(() => {
+    const fullscreen = theater ? platform?.fullscreenWindow : null;
+    if (!fullscreen) return;
+    void fullscreen(true).catch(() => {});
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setTheater(false); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      void fullscreen(false).catch(() => {});
+    };
+  }, [theater, platform]);
 
   const play = useCallback(async () => {
     if (!platform || phase === "loading") return;
@@ -92,29 +115,35 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
     setProblem(null);
     setPhase("loading");
     claimPlayback(file.id);
-    const blob = await platform.getFile(file.id).catch(() => null);
-    if (blob) {
-      const type = safeBlobType(file.mime);
-      const url = URL.createObjectURL(blob.type === type ? blob : blob.slice(0, blob.size, type));
-      srcRef.current = url;
-      releaseRef.current = () => URL.revokeObjectURL(url);
-    } else {
-      // Too large to hand to the page (Desktop, over 64 MiB): the platform serves it in ranges, as a video seeks.
-      const stream = ready ? await platform.streamFile?.(file.id).catch(() => null) : null;
-      if (!stream) {
-        releasePlayback(file.id);
-        setPhase("poster");
-        // Where nothing streams, Desktop hands out large files only through the system (saved, not played); a file
-        // still being sent from here may not be readable yet.
-        setProblem(!ready ? "not-yet" : platform.saveFile ? "too-large" : "missing");
-        return;
-      }
-      srcRef.current = stream.url;
-      releaseRef.current = () => stream.release();
+    // Desktop streams its files from Rust, in ranges, as a video seeks; elsewhere the bytes come as a Blob. One on
+    // its way from here plays from what the page holds.
+    const source = await openStoredMedia(platform, file.id, file.mime, { bytes: !ready || fellBack.current });
+    if (!source) {
+      releasePlayback(file.id);
+      setPhase("poster");
+      // Desktop hands out a file only by saving it when nothing streams it; a file still being sent from here may
+      // not be readable yet.
+      setProblem(!ready ? "not-yet" : platform.saveFile ? "too-large" : "missing");
+      return;
     }
-    setSrc(srcRef.current);
+    sourceRef.current = source;
+    srcRef.current = source.url;
+    setSrc(source.url);
     setPhase("playing");
   }, [platform, phase, file.id, file.mime, ready]);
+
+  /** The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. */
+  const refused = useCallback(() => {
+    const retry = sourceRef.current?.streamed && !fellBack.current;
+    const at = videoRef.current?.currentTime ?? 0;
+    unload();
+    if (!retry) { setProblem("unsupported"); return; }
+    fellBack.current = true;
+    resumeAt.current = at;
+    void play();
+  }, [unload, play]);
+  const refusedRef = useRef(refused);
+  refusedRef.current = refused;
 
   // The element is there: from where it was, and playing.
   useEffect(() => {
@@ -125,21 +154,20 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
     video.play().catch((error: Error) => {
       // Not allowed to start by itself: its controls are there for a tap.
       if (error?.name === "NotAllowedError" || error?.name === "AbortError") return;
-      unload();
-      setProblem("unsupported");
+      refusedRef.current();
     });
-  }, [phase, src, unload]);
+  }, [phase, src]);
 
   // Another video or voice message starts: this one stops and lets go of its bytes, so only one is ever held.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
 
-  // Scrolled away: it stops, and its bytes go (a desktop video up to 64 MiB is held in memory; a larger one stops being served).
+  // Scrolled away: it stops, and its bytes go (a Blob in memory, or the platform stops serving the stream).
   useEffect(() => { if (visible === false && phase === "playing") unload(); }, [visible, phase, unload]);
 
   useEffect(() => () => {
     releasePlayback(file.id);
-    releaseRef.current?.();
-    releaseRef.current = null;
+    sourceRef.current?.release();
+    sourceRef.current = null;
     srcRef.current = null;
   }, [file.id]);
 
@@ -206,26 +234,46 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
         role="group"
         aria-label={`Video, ${durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size)}`}
         onKeyDown={onKeyDown}
-        className="relative rounded-[4px] overflow-hidden bg-black max-w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-        style={{ width: box.width, height: box.height }}
+        className={`${theater ? "fixed inset-0 z-[2147483000] rounded-none" : "relative rounded-[4px] max-w-full"} overflow-hidden bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
+        style={theater ? { width: "100vw", height: "100vh" } : { width: box.width, height: box.height }}
         data-testid="video-frame"
+        data-theater={theater ? "true" : undefined}
       >
         {phase === "playing" && src ? (
-          <video
-            ref={videoRef}
-            src={src}
-            poster={poster}
-            controls
-            playsInline
-            preload="auto"
-            aria-label={file.name}
-            data-testid="video-player"
-            className="w-full h-full object-contain block bg-black"
-            onPlay={() => claimPlayback(file.id)}
-            onPause={() => releasePlayback(file.id)}
-            onEnded={() => { resumeAt.current = 0; unload(); }}
-            onError={() => { unload(); setProblem("unsupported"); }}
-          />
+          <>
+            <video
+              ref={videoRef}
+              src={src}
+              poster={poster}
+              controls
+              playsInline
+              preload="auto"
+              aria-label={file.name}
+              data-testid="video-player"
+              className="w-full h-full object-contain block bg-black"
+              onPlay={() => claimPlayback(file.id)}
+              onPause={() => releasePlayback(file.id)}
+              onEnded={() => { resumeAt.current = 0; unload(); }}
+              onError={refused}
+            />
+            {canTheater && (
+              <button
+                type="button"
+                data-testid="video-fullscreen"
+                aria-label={theater ? "Exit full screen" : "Full screen"}
+                title={theater ? "Exit full screen" : "Full screen"}
+                aria-pressed={theater}
+                onClick={() => setTheater(!theater)}
+                className="absolute top-[6px] end-[6px] w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center border-none cursor-pointer"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {theater
+                    ? <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                    : <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />}
+                </svg>
+              </button>
+            )}
+          </>
         ) : (
           <>
             {poster ? (

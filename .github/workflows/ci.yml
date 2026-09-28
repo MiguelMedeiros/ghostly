@@ -406,6 +406,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The route index and the other lib/*.json the site imports are generated from docs/wisps and not committed
+      # (a PR never touches them, so they never conflict). The build makes them itself (prebuild); lint, types and
+      # the tests below need them first.
+      - name: Generate the reference files
+        run: npm run sync:references
+
       # The home's wallet deck is the app's own code, copied (scripts/sync-app-deck.mjs).
       - name: App deck copies match the app
         run: node scripts/sync-app-deck.mjs --check

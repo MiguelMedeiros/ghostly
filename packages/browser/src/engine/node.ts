@@ -1912,6 +1912,8 @@ export class GhostlyNode implements EngineImplementation {
    * as a text reply does; sent again, the file keeps the reply its message has (`transferFile`). Without a reply, it
    * does what it does before any wait, so a second call for the same file finds it already transferring. `forwarded`:
    * the hop count of a forwarded file (WISP 400 § Forwards), kept with its message and sent with it every time.
+   * Refused before anything could start (offline, a stopped chat, a contact whose app takes no files): the transfer
+   * says failed, no message is kept, and the call rejects with the reason, so whoever asked can say it.
    */
   async sendFile({ linkId, file, timestamp, replyTo, forwarded: hops }: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string; forwarded?: number }): Promise<void> {
     let reply: MessageReply | undefined;
@@ -1930,10 +1932,11 @@ export class GhostlyNode implements EngineImplementation {
       void fileStore.updateTransfer(file.id, transfer).catch(() => {});
       this.emitState();
     };
-    if (!live?.link) return fail("You are offline");
+    const refuse = (error: string): never => { fail(error); throw new Error(error); };
+    if (!live?.link) return refuse("You are offline");
     if (this.transfers.get(file.id)?.state === "transferring") return;
     const wireId = file.id.slice(`${linkId}-out-`.length);
-    if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return fail("Invalid file id");
+    if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return refuse("Invalid file id");
     // A file too large to hold waits for the chat to be live instead, like one sent where nothing holds it.
     const holdable = file.size <= HOLD_LIMITS.maxBundleBytes - 4096;
     if (!GhostlyNode.takesFiles(live.link) && this.holdingFor(live) && holdable) {
@@ -1946,13 +1949,13 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (!GhostlyNode.takesFiles(live.link) && live.stored.profile && !live.link.isDataLinkOpen) {
       // Not live and nothing holds it: it waits here, with a cancel, and goes when the chat is live (WISP 500).
-      if (this.chatStopped(live)) return fail(this.chatStopped(live)!);
+      if (this.chatStopped(live)) return refuse(this.chatStopped(live)!);
       live.files.wireIds.add(wireId);
       void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "datalink", file,
         delivery: "waiting", deliveryError: "Sent when you are live.", ...answers });
       return;
     }
-    if (!GhostlyNode.takesFiles(live.link)) return fail("Connect to an updated peer to send files");
+    if (!GhostlyNode.takesFiles(live.link)) return refuse("Connect to an updated peer to send files");
     live.files.wireIds.add(wireId);
     void this.storeMessage({
       linkId,
@@ -2374,15 +2377,14 @@ export class GhostlyNode implements EngineImplementation {
           const file: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
             ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }) };
           await copyForForward(original.id, { linkId: to, wireId, timestamp, file });
-          await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
-          // Refused before it could start (the contact's app takes no files, a stopped chat): no message was kept, so
-          // neither is the copy, and the chat says why.
-          const started = this.transfers.get(file.id);
-          if (started?.state === "failed") {
-            note(started.error ?? "The file could not be sent");
+          try {
+            await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
+          } catch (error) {
+            // Refused before it could start (the contact's app takes no files, a stopped chat): no message was kept, so
+            // neither is the copy, and the chat says why.
             this.transfers.delete(file.id);
             await removeStored(file.id).catch(() => {});
-            continue;
+            throw error;
           }
           result.messageIds.push(`me_${timestamp}`);
         } catch (error) {
