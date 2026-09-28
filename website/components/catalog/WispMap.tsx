@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Icon } from "@/components/site/icons";
 import { LEVELS } from "@/lib/status";
 import { GROUPS, wisps } from "@/lib/wisps";
+import { LAYERS } from "@/lib/wisp-groups";
 import { shell } from "@/content/shell";
 import type { CatalogCopy } from "@/content/catalog";
 
@@ -20,13 +21,29 @@ function short(name: string) {
     .replace(/^Group Session$/i, "Group sessions")
     .replace(/^S3-Compatible Storage$/i, "S3 storage")
     .replace(/^Local File Storage$/i, "Local file")
-    .replace(/^Headless Runtime and Local Control API$/i, "Headless runtime");
+    .replace(/^Headless Runtime and Local Control API$/i, "Headless runtime")
+    .replace(/^Store-and-Forward for an Away Contact$/i, "Store-and-forward")
+    .replace(/^Ark payments via Bark$/i, "Ark · Bark")
+    .replace(/^Lightning Addresses and LNURL-pay$/i, "Lightning Address")
+    .replace(/^Spark payments$/i, "Spark")
+    .replace(/^Fedimint ecash .*$/i, "Fedimint")
+    .replace(/^Pubky identity .*$/i, "Pubky")
+    .replace(/^Provider-attested identity \(OpenID Connect\)$/i, "OpenID Connect")
+    .replace(/^AT Protocol identity \(Bluesky\)$/i, "Bluesky")
+    .replace(/^Decentralized identifiers \(DIDs\)$/i, "DIDs")
+    .replace(/^Profile DID \(did:dht\)$/i, "Profile DID")
+    .replace(/^Bitcoin Address Proof$/i, "Bitcoin address")
+    .replace(/^Domain Proofs$/i, "Domains")
+    .replace(/^Group Mesh Distribution Profile$/i, "Mesh")
+    .replace(/^Group Community Distribution Profile$/i, "Communities")
+    .replace(/^GossipSub Transport$/i, "GossipSub");
 }
 
 /**
- * The catalog at a glance: one card per family, one tile per draft. The big
- * tile is the family's contract; small tiles are adapters and profiles. The
- * tile's color says whether what it describes runs in the app.
+ * The catalog at a glance, drawn as a stack: one band per family, the core at the bottom and each layer
+ * resting on the ones below it. Inside a band the tiles run left to right. The big tile is the family's
+ * contract; small tiles are adapters and profiles. The tile's color says whether what it describes runs
+ * in the app.
  */
 export function WispMap({ t }: { t: CatalogCopy }) {
   const levels = shell.levels;
@@ -45,6 +62,9 @@ export function WispMap({ t }: { t: CatalogCopy }) {
       </div>
       <ul className="wmap-how">
         <li>
+          <span className="wmap-demo wmap-demo--stack" /> {t.map.layers}
+        </li>
+        <li>
           <span className="wmap-demo wmap-demo--big" /> {t.map.contract}
         </li>
         <li>
@@ -54,39 +74,52 @@ export function WispMap({ t }: { t: CatalogCopy }) {
           <span className="wmap-demo wmap-demo--color" /> {t.map.color}
         </li>
       </ul>
-      <div className="wmap-grid">
-        {GROUPS.map((g) => {
-          const items = wisps.filter((w) => w.group === g.id);
-          if (!items.length) return null;
-          // A contract that others implement gets the wide tile; its adapters follow.
-          const isLead = (id: string) => items.some((x) => x.parent === id);
+      <ol className="wmap-stack" aria-label={t.map.stack}>
+        {LAYERS.map((layer) => {
+          const families = layer.groups.map((id) => GROUPS.find((g) => g.id === id)!).filter((g) => wisps.some((w) => w.group === g.id));
+          if (!families.length) return null;
           return (
-            <section key={g.id} className="wmap-family" aria-labelledby={`wmap-${g.id}`}>
-              <header>
-                <Icon name={g.icon} />
-                <h3 id={`wmap-${g.id}`}>{g.title}</h3>
-              </header>
-              <ul className="wmap-tiles">
-                {items.map((w) => (
-                  <li key={w.id} className={isLead(w.id) ? "wmap-tile-wrap wmap-tile-wrap--lead" : "wmap-tile-wrap"}>
-                    <Link
-                      href={`/developers/wisps/${w.slug}`}
-                      className="wmap-tile"
-                      data-level={w.level ?? "none"}
-                      data-kind={w.kind}
-                      title={`${w.number} · ${w.name}${w.level ? ` · ${levels[w.level]}` : ""}`}
-                    >
-                      <span className="wmap-num mono">{w.number}</span>
-                      <span className="wmap-name">{short(w.name)}</span>
-                      <span className="sr-only">{w.level ? levels[w.level] : t.process}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            <li key={layer.label} className="wmap-layer">
+              <p className="wmap-layer-label mono">{layer.label}</p>
+              <div className="wmap-bands">
+                {families.map((g) => {
+                  const items = wisps.filter((w) => w.group === g.id);
+                  // A contract that others implement gets the wide tile; its adapters follow.
+                  const isLead = (id: string) => items.some((x) => x.parent === id);
+                  return (
+                    <section key={g.id} className="wmap-family" data-group={g.id} aria-labelledby={`wmap-${g.id}`}>
+                      <header>
+                        <Icon name={g.icon} />
+                        <h3 id={`wmap-${g.id}`}>
+                          <a href={`#family-${g.id}`}>{g.title}</a>
+                        </h3>
+                        <span className="wmap-count mono">{items.length}</span>
+                      </header>
+                      <ul className="wmap-tiles">
+                        {items.map((w) => (
+                          <li key={w.id} className={isLead(w.id) ? "wmap-tile-wrap wmap-tile-wrap--lead" : "wmap-tile-wrap"}>
+                            <Link
+                              href={`/developers/wisps/${w.slug}`}
+                              className="wmap-tile"
+                              data-level={w.level ?? "none"}
+                              data-kind={w.kind}
+                              title={`${w.number} · ${w.name}${w.level ? ` · ${levels[w.level]}` : ""}`}
+                            >
+                              <span className="wmap-num mono">{w.number}</span>
+                              <span className="wmap-name">{short(w.name)}</span>
+                              <span className="sr-only">{w.level ? levels[w.level] : t.process}</span>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
+            </li>
           );
         })}
-      </div>
+      </ol>
     </div>
   );
 }

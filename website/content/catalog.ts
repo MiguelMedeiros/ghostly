@@ -8,7 +8,7 @@ export const catalog = {
   title: "Every contract, in one place.",
   lead: "Each WISP is an open contract that any app can implement. Here are all of them, by family. Tap one to read it.",
   axes: "Two separate questions: every document is a Draft specification; the badge says whether what it describes runs in the app.",
-  search: "Search by number, name or what it does",
+  search: "Number, name or word",
   searchLabel: "Search the WISPs",
   family: "Family",
   kind: "Kind",
@@ -32,11 +32,13 @@ export const catalog = {
   sources: "Catalog sources",
   map: {
     drafts: "drafts",
+    stack: "The WISP families as layers, the core at the bottom",
+    layers: "Layers: each one rests on the ones below it",
     contract: "Big tile: the contract, the shared rule of a family",
     adapter: "Small tile: an adapter or profile, one concrete way to follow it",
     color: "Color: whether it already works in the app",
   },
-  listTitle: "Search and full list",
+  listTitle: "All drafts",
   glossary: {
     title: "Glossary",
     hint: "WISP, capability, adapter, profile, provider, plugin",
