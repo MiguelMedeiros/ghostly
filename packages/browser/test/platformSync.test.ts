@@ -284,6 +284,67 @@ describe("mirroring what the peer stores into the chat", () => {
   });
 });
 
+describe("a long chat, on every update", () => {
+  /** A chat with its history mirrored, and a link with a name and an identity share, settled. */
+  async function settledChat() {
+    imported();
+    storage.saveSession(session({ profile: "paired-chat/1" }));
+    const history = Array.from({ length: 300 }, (_, i) => message({ id: `peer_${i}`, timestamp: 1_000 + i, delivery: "delivered" }));
+    engine.messages.set("link-1", history);
+    await start([link({ createdAt: 1, profile: "paired-chat/1", peerNick: "Ana", identitySharedAt: 5 })]);
+    expect(storage.loadSession("s1")!.messages).toHaveLength(300);
+    const parse = vi.spyOn(JSON, "parse");
+    const chatParses = () => parse.mock.calls.filter(([text]) => typeof text === "string" && text.startsWith('{"id":"s1"')).length;
+    return { history, parse, chatParses };
+  }
+  /** The peer reports a new state with the same links. */
+  async function stateChanges() {
+    engine.state = { links: engine.state!.links.map((l) => ({ ...l })) };
+    for (const listener of engine.stateListeners) listener();
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it("reads a stored chat again only when what is stored for it changed", async () => {
+    const { parse, chatParses } = await settledChat();
+    parse.mockClear();
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(15_000);
+    await stateChanges();
+    expect(chatParses()).toBe(0);
+
+    storage.setSessionPinned("s1", true);
+    storage.updateSessionLabel("s1", "Work");
+    parse.mockClear();
+    window.dispatchEvent(new Event("session-updated"));
+    await stateChanges();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(chatParses()).toBe(1);
+    expect(sync.sessionForPeer("peer-1")?.label).toBe("Work");
+  });
+
+  it("still sees a chat changed or deleted elsewhere while nothing else moves", async () => {
+    await settledChat();
+    const stale = storage.loadSession("s1")!;
+    storage.saveSession({ ...stale, deliveryMode: "dht" });
+    window.dispatchEvent(new Event("session-updated"));
+    expect(storage.loadSession("s1")!.deliveryMode).toBe("stream");
+
+    storage.deleteSession("s1");
+    window.dispatchEvent(new Event("session-updated"));
+    expect(engine.calls).toContainEqual(["removeLink", { linkId: "link-1" }]);
+  });
+
+  it("mirrors the same history again when the chat was written over with an older copy", async () => {
+    await settledChat();
+    const stale = storage.loadSession("s1")!;
+    storage.saveSession({ ...stale, messages: stale.messages.slice(0, 100).map((m) => ({ ...m, delivery: "sending" })) });
+    await stateChanges();
+    const stored = storage.loadSession("s1")!;
+    expect(stored.messages).toHaveLength(300);
+    expect(stored.messages.every((m) => m.delivery === "delivered")).toBe(true);
+  });
+});
+
 describe("the contact's own name", () => {
   const view = (peerNick?: string) => link({ createdAt: 1, profile: "paired-chat/1", peerNick });
   async function report(links: LinkView[]) {
