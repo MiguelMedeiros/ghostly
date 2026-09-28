@@ -179,6 +179,16 @@ function serveServiceWindows(server: EngineServer): void {
   });
 }
 
+/**
+ * WKWebView opens about 46 WebRTC connections in one page, and no more (WISP 9xx · Group Mesh § Cost per member): on a
+ * Mac, groups and 1:1 chats over WebRTC hold at most 40, and the rest stay for calls. WebKitGTK (Linux) has no WebRTC in the page,
+ * and WebView2 (Windows) no limit this low.
+ */
+export const MAC_PEER_BUDGET = 40;
+export function macPeerBudget(agent = typeof navigator === "undefined" ? "" : navigator.userAgent): { peerBudget?: number } {
+  return /Macintosh|Mac OS X/.test(agent) && !/iPhone|iPad/.test(agent) ? { peerBudget: MAC_PEER_BUDGET } : {};
+}
+
 /** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
 export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
   const { node: callOptions, callMedia } = nativeCallOptions(calls);
@@ -196,7 +206,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
       // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
       pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
-      ...callOptions },
+      ...macPeerBudget(), ...callOptions },
     callMedia,
     onServer: serveServiceWindows,
     oidc: desktopOidc,

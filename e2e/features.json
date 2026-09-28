@@ -261,6 +261,7 @@
     {"id":"groups.edit","wisp":"900","kind":"feature","clients":["web","extension","desktop","cli"],"infra":[],"title":"Edit your own sent text in a private group or a community (its ⋮, or ↑ in an empty composer; @ names more members): every member sees the new text with an \"edited\" mark and the earlier versions in the details; no sound, no unread"},
     {"id":"groups.forget","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Forget a group locally"},
     {"id":"groups.hubs","wisp":"902","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Past 16 members, members that stay online become hubs; the others keep edges with two and the admin pins or excludes hubs"},
+    {"id":"groups.hubs.budget","wisp":"902","kind":"feature","clients":["desktop"],"infra":[],"title":"On a Mac, groups and 1:1 chats hold at most 40 WebRTC connections (WKWebView opens about 46): past that it is no hub and opens only its most useful group edges, so calls and new chats still connect"},
     {"id":"groups.invite","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Invite contacts; accept or decline an invitation"},
     {"id":"groups.leave","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Leave a group (and it leaves the list)"},
     {"id":"groups.link.enable","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Enable / disable a shareable group link"},
