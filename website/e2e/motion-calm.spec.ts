@@ -3,7 +3,8 @@ import { expect, test } from "@playwright/test";
 /**
  * Reduced motion: the whole home reads as stills and cross-fades. With
  * `prefers-reduced-motion: reduce` every chapter of the story must render each
- * of its steps as a still with both ghosts in it, the hero must show its still
+ * of its steps as a still with both ghosts in it (a phone: one still per
+ * chapter, every step's words listed over it), the hero must show its still
  * Boo with his line, the statement its whole sentence, the finale its finished
  * frame, and nothing on the page may keep moving: no SMIL in the DOM, no
  * animation or transition running longer than a frame once the page has
@@ -36,7 +37,10 @@ for (const { name, use } of VIEWPORTS) {
         await expect(section, `${id} is not an article`).toHaveCount(1);
         const steps = await section.locator(".scene-static-step").count();
         expect(steps, `${id} has no steps`).toBeGreaterThan(0);
-        for (let i = 0; i < steps; i++) {
+        // A phone chapter draws one picture, its finished still, with every step's words over it.
+        const figures = await section.locator(".scene-static-figure").count();
+        expect(figures, `${id}: stills`).toBe(name.startsWith("phone") ? 1 : steps);
+        for (let i = 0; i < figures; i++) {
           const figure = section.locator(".scene-static-figure").nth(i);
           await figure.scrollIntoViewIfNeeded();
           const ghosts = await figure.evaluate((f) =>

@@ -423,6 +423,8 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   }
   .fin-title {
     order: 2;
+    /* Two lines, as on a wide screen, down to a 360px phone. */
+    font-size: clamp(40px, 13vw, 56px);
   }
   .fin-lead {
     order: 3;

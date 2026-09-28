@@ -344,15 +344,18 @@ function PhoneChapter({
   }, [calm, last, p, stills]);
 
   // Play the step's beat while the picture is on screen, then hand over to the next step once its caption is read.
+  // Numbers, not the chapter's arrays: a parent render with equal props must not restart the wait.
+  const to = stills[step] ?? stills[last];
+  const hold = holdFor(steps[step]);
   useEffect(() => {
     if (calm || !inView) return;
-    const controls = tween(p, stills[step] ?? stills[last], { duration: DUR.beat, ease: EASE.move });
-    const timer = auto && step < last ? window.setTimeout(() => setStep((s) => Math.min(last, s + 1)), DUR.beat * 1000 + holdFor(steps[step])) : 0;
+    const controls = tween(p, to, { duration: DUR.beat, ease: EASE.move });
+    const timer = auto && step < last ? window.setTimeout(() => setStep((s) => Math.min(last, s + 1)), DUR.beat * 1000 + hold) : 0;
     return () => {
       controls.stop();
       window.clearTimeout(timer);
     };
-  }, [calm, inView, step, auto, take, last, p, stills, steps]);
+  }, [calm, inView, step, auto, take, last, p, to, hold]);
 
   const pick = (i: number) => {
     setAuto(false);
