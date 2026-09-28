@@ -154,11 +154,54 @@ export function trackDevice(track: MediaStreamTrack | undefined): string | undef
   }
 }
 
+/** What can play on a chosen speaker: a media element, or an `AudioContext` (Chromium 110+). */
+type SinkTarget = { setSinkId?: (id: string) => Promise<void>; sinkId?: unknown };
+
 /** Sends `element`'s sound to the speaker `id` ("" the default). Engines without speaker choice keep the default. */
-export async function applySpeaker(element: HTMLMediaElement | null, id: string | undefined): Promise<void> {
-  const target = element as (HTMLMediaElement & { setSinkId?: (id: string) => Promise<void>; sinkId?: string }) | null;
-  if (!target?.setSinkId) return;
+export async function applySpeaker(element: HTMLMediaElement | AudioContext | null, id: string | undefined): Promise<void> {
+  const target = element as SinkTarget | null;
+  if (typeof target?.setSinkId !== "function") return;
   const next = id ?? "";
-  if ((target.sinkId ?? "") === next) return;
+  if (typeof target.sinkId === "string" ? target.sinkId === next : !target.sinkId && !next) return;
   await target.setSinkId(next);
+}
+
+/**
+ * The speaker this profile chose, as the browser knows it now (a new id is found by its name), or undefined for
+ * the default: nothing chosen, the chosen one unplugged, or an engine that cannot choose.
+ */
+export async function chosenSpeaker(): Promise<string | undefined> {
+  if (!loadDeviceChoices().audiooutput || !canPickSpeaker()) return undefined;
+  return resolveDevice("audiooutput", await listDevices()).id;
+}
+
+/** Sends `target`'s sound to the chosen speaker, once. Never fails: see `followSpeaker`. */
+export function toChosenSpeaker(target: HTMLMediaElement | AudioContext, live: () => boolean = () => true): Promise<void> {
+  return chosenSpeaker()
+    .then((id) => (live() ? applySpeaker(target, id) : undefined))
+    .catch(() => (live() ? applySpeaker(target, undefined).catch(() => {}) : undefined));
+}
+
+const isDeviceChoice = (event: Event) => !(event instanceof StorageEvent) || event.key === null || event.key === key();
+
+/**
+ * Plays `target` on the chosen speaker, now and whenever the choice changes (in Settings, a call's menu or another
+ * page of the app), until `stop`. `ready` settles once the first choice is applied. Never fails: a speaker the
+ * engine refuses (Chromium, before the page may use the microphone) or that is gone leaves the default.
+ */
+export function followSpeaker(target: HTMLMediaElement | AudioContext): { ready: Promise<void>; stop: () => void } {
+  if (typeof (target as SinkTarget).setSinkId !== "function") return { ready: Promise.resolve(), stop: () => {} };
+  let live = true;
+  const apply = () => toChosenSpeaker(target, () => live);
+  const changed = (event: Event) => { if (isDeviceChoice(event)) void apply(); };
+  window.addEventListener(DEVICES_EVENT, changed);
+  window.addEventListener("storage", changed);
+  return {
+    ready: apply(),
+    stop: () => {
+      live = false;
+      window.removeEventListener(DEVICES_EVENT, changed);
+      window.removeEventListener("storage", changed);
+    },
+  };
 }

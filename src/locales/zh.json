@@ -372,7 +372,7 @@
       "camera": "摄像头",
       "cameraInfo": "用于通话和拍照。保存在此设备的此资料中。",
       "speaker": "扬声器",
-      "speakerInfo": "通话声音从这里播放。保存在此设备的此资料中。",
+      "speakerInfo": "通话、语音消息、视频和提示音从这里播放。保存在此设备的此资料中。",
       "systemDefault": "系统默认",
       "missing": "{{name}} 未连接。正在使用默认设备。",
       "failed": "无法打开。请确认 Ghostly 有权限使用。",
@@ -427,6 +427,23 @@
     "unmute": "取消静音",
     "camera": "摄像头",
     "cameraOff": "关闭摄像头",
+    "connecting": "正在连接...",
+    "end": "结束通话",
+    "turnCameraOff": "关闭摄像头",
+    "turnCameraOn": "打开摄像头",
+    "shareScreen": "共享屏幕",
+    "stopSharing": "停止共享",
+    "sharing": {
+      "you": "你正在共享屏幕",
+      "peer": "{{name}} 正在共享屏幕",
+      "both": "你和 {{name}} 正在共享屏幕"
+    },
+    "window": {
+      "small": "将通话保留在小窗口中",
+      "full": "返回全屏",
+      "chat": "返回聊天"
+    },
+    "selfView": "拖动以移动，拉动角落以调整大小，双击以重置",
     "devices": {
       "menu": "设备",
       "lost": "{{name}} 已断开。正在使用默认设备。",

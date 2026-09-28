@@ -19,6 +19,7 @@ import {
   voiceRate,
 } from "../../lib/voicePlayback";
 import { decodeToWav } from "../../lib/voiceDecode";
+import { followSpeaker } from "../../lib/mediaDevices";
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { Waveform } from "./Waveform";
@@ -67,6 +68,8 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
   const playRef = useRef<HTMLButtonElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  /** Stops the player following the speaker chosen in Settings. */
+  const speakerRef = useRef<(() => void) | null>(null);
   const blobRef = useRef<Blob | null>(null);
   const urlsRef = useRef<string[]>([]);
   const frameRef = useRef(0);
@@ -170,6 +173,9 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
         setState("idle");
         giveUp("Could not play this recording.");
       });
+      const speaker = followSpeaker(audio);
+      speakerRef.current = speaker.stop;
+      await speaker.ready;
       audioRef.current = audio;
       return audio;
     })().finally(() => { loadingRef.current = null; });
@@ -251,6 +257,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     releaseMediaSession(file.id);
     audioRef.current?.pause();
     audioRef.current?.removeAttribute("src");
+    speakerRef.current?.();
     for (const url of urlsRef.current) URL.revokeObjectURL(url);
     urlsRef.current = [];
   }, [file.id]);

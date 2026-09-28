@@ -372,7 +372,7 @@
       "camera": "Caméra",
       "cameraInfo": "Utilisée pour les appels et les photos. Gardée sur cet appareil, pour ce profil.",
       "speaker": "Haut-parleur",
-      "speakerInfo": "Où les appels sont joués. Gardé sur cet appareil, pour ce profil.",
+      "speakerInfo": "Où les appels, les messages vocaux, les vidéos et les sons sont joués. Gardé sur cet appareil, pour ce profil.",
       "systemDefault": "Par défaut du système",
       "missing": "{{name}} n’est pas connecté. Appareil par défaut utilisé.",
       "failed": "Impossible de l’ouvrir. Vérifiez que Ghostly y a accès.",
@@ -427,6 +427,23 @@
     "unmute": "Activer le son",
     "camera": "Caméra",
     "cameraOff": "Caméra désactivée",
+    "connecting": "Connexion...",
+    "end": "Terminer l'appel",
+    "turnCameraOff": "Couper la caméra",
+    "turnCameraOn": "Activer la caméra",
+    "shareScreen": "Partager l'écran",
+    "stopSharing": "Arrêter le partage",
+    "sharing": {
+      "you": "Vous partagez votre écran",
+      "peer": "{{name}} partage son écran",
+      "both": "Vous et {{name}} partagez vos écrans"
+    },
+    "window": {
+      "small": "Garder l'appel dans une petite fenêtre",
+      "full": "Revenir en plein écran",
+      "chat": "Revenir à la discussion"
+    },
+    "selfView": "Glissez pour déplacer, tirez un coin pour redimensionner, double-cliquez pour réinitialiser",
     "devices": {
       "menu": "Appareils",
       "lost": "{{name}} débranché. Appareil par défaut utilisé.",

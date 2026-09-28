@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  DEVICES_EVENT,
   EMPTY_DEVICES,
   canPickSpeaker,
   chooseDevice,
@@ -9,6 +10,7 @@ import {
   resolveDevice,
   trackDevice,
   watchDevices,
+  type DeviceChoices,
   type DeviceKind,
   type DeviceList,
 } from "../lib/mediaDevices";
@@ -55,7 +57,8 @@ const followsSystem = (id: string | undefined) => !id || id === "default" || id 
 
 /**
  * The device menu of a call and what keeps it honest: switching the microphone, camera and speaker live (a
- * choice made here is this profile's from then on), and following headsets in and out. When the device a call
+ * choice made here is this profile's from then on, and one made in Settings during the call reaches it too), and
+ * following headsets in and out. When the device a call
  * uses disappears, the call goes on with the default and says so; when the chosen one comes back, it offers
  * to switch back. Null where the call's media cannot switch devices or no call is on.
  */
@@ -80,8 +83,12 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
   const cameraNow = trackDevice(videoTrack);
 
   // What the call is using, read fresh by the device checks below.
-  const state = useRef({ webrtc, micNow, cameraNow, audioTrack, videoTrack, speaker, cameraOn });
-  state.current = { webrtc, micNow, cameraNow, audioTrack, videoTrack, speaker, cameraOn };
+  const state = useRef({ webrtc, micNow, cameraNow, audioTrack, videoTrack, speaker, cameraOn, list });
+  state.current = { webrtc, micNow, cameraNow, audioTrack, videoTrack, speaker, cameraOn, list };
+  /** The choices this call last followed: a change elsewhere (Settings, another page) is what differs from them. */
+  const followed = useRef<DeviceChoices>({});
+  /** A choice made in this call's menu, which switches by itself. */
+  const choosing = useRef(false);
   /** A switch is under way: the device checks wait for it instead of starting another. */
   const busy = useRef(false);
   /** What was told this call (`<kind>:<id>` a device offered back, `<kind>:missing` a loss), so each is told once. */
@@ -195,10 +202,50 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
   useEffect(() => {
     if (active) deviceSource()?.playCallOn(speaker);
   }, [active, speaker]);
+  // A device chosen in Settings (or on another page of the app) while the call is on: the call switches to it, the
+  // same way as from its own menu.
+  useEffect(() => {
+    if (!active) return;
+    followed.current = loadDeviceChoices();
+    const follow = (event: Event) => {
+      if (event instanceof StorageEvent && event.key !== null && !event.key.endsWith("media_devices")) return;
+      const was = followed.current;
+      const next = loadDeviceChoices();
+      followed.current = next;
+      if (choosing.current) return;
+      const changed = (["audioinput", "videoinput", "audiooutput"] as const).filter((kind) => (next[kind]?.id ?? "") !== (was[kind]?.id ?? ""));
+      if (changed.length === 0) return;
+      const { webrtc: call, micNow: mic, cameraNow: camera, cameraOn: showing, list: devices } = state.current;
+      for (const kind of changed) for (const key of [...offered.current]) if (key.startsWith(`${kind}:`)) offered.current.delete(key);
+      setNotice(null);
+      /** The device to use now: the chosen one as this page knows it, or the default (null) when it is not here. */
+      const target = (kind: DeviceKind) => (next[kind] ? resolveDevice(kind, devices, next).id ?? null : null);
+      const using = (id: string | undefined) => (followsSystem(id) ? null : id);
+      if (changed.includes("audiooutput") && canPickSpeaker()) setSpeaker(target("audiooutput") ?? undefined);
+      const micTo = changed.includes("audioinput") ? target("audioinput") : undefined;
+      const cameraTo = changed.includes("videoinput") && showing ? target("videoinput") : undefined;
+      if ((micTo === undefined || micTo === using(mic)) && (cameraTo === undefined || cameraTo === using(camera))) return;
+      void run(async () => {
+        if (micTo !== undefined && micTo !== using(mic)) await call.switchMicrophone(micTo);
+        if (cameraTo !== undefined && cameraTo !== using(camera)) await call.switchCamera(cameraTo);
+      });
+    };
+    window.addEventListener(DEVICES_EVENT, follow);
+    window.addEventListener("storage", follow);
+    return () => {
+      window.removeEventListener(DEVICES_EVENT, follow);
+      window.removeEventListener("storage", follow);
+    };
+  }, [active, run, setNotice]);
 
   const choose = useCallback((kind: DeviceKind, deviceId: string) => {
     const device = list[kind].find((d) => d.id === deviceId);
-    chooseDevice(kind, deviceId ? { id: deviceId, label: device?.label ?? "" } : null);
+    choosing.current = true;
+    try {
+      chooseDevice(kind, deviceId ? { id: deviceId, label: device?.label ?? "" } : null);
+    } finally {
+      choosing.current = false;
+    }
     setNotice(null);
     const { webrtc: call } = state.current;
     if (kind === "audioinput") void run(() => call.switchMicrophone(deviceId || null));
