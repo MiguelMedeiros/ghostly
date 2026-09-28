@@ -102,6 +102,11 @@ export default function PrivacyPage() {
             erased when the web app is redeployed.
           </li>
           <li>
+            <Term>The web app&apos;s code</Term> comes from app.ghostly.tools each time you open it, so whoever
+            controls that server controls the app you run. The code is open source, and you can host your own copy or
+            use the desktop app or the extension instead.
+          </li>
+          <li>
             <Term>What the apps ask our sites.</Term> A web app tab asks app.ghostly.tools for{" "}
             <Code>/version.json</Code> when it opens, every four hours and when it comes back to the foreground, to
             offer a new version. A browser extension installed outside the Chrome Web Store asks ghostly.tools for{" "}
@@ -180,7 +185,9 @@ export default function PrivacyPage() {
           <li>
             <Term>Wake-up push.</Term> If you turn on Settings, Notifications, Wake me while closed, a contact&apos;s
             app can wake yours through your browser&apos;s push service (Google, Apple or Mozilla). The push carries no
-            message, name or chat. The push service learns that your browser got a push, and when.
+            message, name or chat. The push service learns that your browser got a push, and when. If you set a push relay in Settings, Network,
+            the wake-ups you send go through it: it sees your IP address and your contact&apos;s push address, never a
+            message.
           </li>
           <li>
             <Term>Link previews.</Term> When you send a link, your app reads that page to make its preview, so that
