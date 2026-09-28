@@ -17,6 +17,20 @@ export type GroupId =
   | "together"
   | "headless";
 
+/**
+ * The catalog's map draws the families as a stack, top to bottom: each layer rests on the ones below it.
+ * The core is at the bottom, as in a protocol stack. This is presentation only; the list and the reader
+ * keep the order of GROUPS.
+ */
+export const LAYERS: { label: string; groups: GroupId[] }[] = [
+  { label: "Programs", groups: ["headless"] },
+  { label: "Many people", groups: ["together"] },
+  { label: "In a chat", groups: ["pay", "services", "identity"] },
+  { label: "Talk", groups: ["talk", "files", "calls"] },
+  { label: "Link", groups: ["connect"] },
+  { label: "Core", groups: ["meet", "keep"] },
+];
+
 export const GROUPS: {
   id: GroupId;
   ranges: [number, number][];

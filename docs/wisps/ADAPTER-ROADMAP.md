@@ -89,7 +89,7 @@ Nobody needs a public identity to talk. Proofs are optional, several can coexist
 - **Planned**: Bluesky / AT Protocol accounts: built, blocked until the website's OAuth client document is live on ghostly.tools
 - **Planned**: OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch): built, blocked until Ghostly's OAuth clients are registered
 - **Planned**: Hardware wallets as signers, and passkeys
-- **Planned**: Keet, blocked until it offers a supported signing API
+- **Research**: Keet, blocked until it offers a supported signing API
 - **Research**: Pubky profiles and content
 
 Gate: Sessions without any proof still work. Proving a key never implies importing a graph or permission to publish.

@@ -26,7 +26,10 @@ export const roadmap = {
   nothing: "Nothing yet",
   inventory: {
     title: "Every possibility, classified",
-    lead: "From the adapter roadmap in the repository: transports, rails, providers, identities, hardware, storage and apps. Open any entry for the source notes.",
+    lead: "From the adapter roadmap in the repository: transports, rails, providers, identities, hardware, storage and apps. Open a category to see its entries, and an entry for the source notes.",
+    entries: "entries",
+    openAll: "Open all",
+    closeAll: "Close all",
     source: "Read the full adapter roadmap",
     sourceStatus: "as written in the source",
     /** The source's statuses that the three levels don't name; shown before the source's note. */
