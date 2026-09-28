@@ -15,7 +15,12 @@ const GAP = 4;
  * sheet from the bottom with full-width rows. Outside clicks and Escape close it; the arrow keys, Home and End
  * move between the rows that can be used.
  */
-export function Menu({ open, onClose, anchorRef, testId, id, align = "end", prefer = "down", focusFirst, label, portal, within, className = "", children }: {
+export function Menu(props: MenuProps) {
+  // Closed, a menu is nothing: no listeners, no media query, no measuring. Each message of a chat has a few, closed.
+  return props.open ? <OpenMenu {...props} /> : null;
+}
+
+type MenuProps = {
   open: boolean;
   onClose: () => void;
   /** The opener and its positioned wrapper: the menu drops from its end edge, and clicks on it are not "outside". */
@@ -43,7 +48,9 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
   within?: string;
   className?: string;
   children: ReactNode;
-}) {
+};
+
+function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer = "down", focusFirst, label, portal, within, className = "", children }: MenuProps) {
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
