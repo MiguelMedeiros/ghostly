@@ -8,7 +8,7 @@ export const roadmap = {
   meta: {
     title: "Roadmap",
     description:
-      "Where Ghostly goes after 1.0, in order and with dependencies: richer chats, more ways to pay, optional identities, groups, storage, SDKs and plugins, independent apps and a self-hosted runtime. No invented dates.",
+      "Where Ghostly goes after 1.0, in order and with dependencies: richer chats, more ways to pay, identities, groups, storage, SDKs and plugins. No invented dates.",
   },
   eyebrow: "Public roadmap",
   title: "The ghost keeps learning.",

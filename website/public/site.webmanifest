@@ -1,11 +1,11 @@
 {
   "name": "Ghostly",
   "short_name": "Ghostly",
-  "description": "Encrypted Ephemeral Chat over the DHT",
+  "description": "Find each other. Talk peer to peer.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#060a10",
-  "theme_color": "#22d3ee",
+  "theme_color": "#060a10",
   "icons": [
     {
       "src": "/favicon.svg",

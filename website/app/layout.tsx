@@ -3,6 +3,7 @@ import { JetBrains_Mono, Inter } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import "./site.css";
+import { OG_IMAGE, X_HANDLE } from "@/lib/pageMeta";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -18,9 +19,8 @@ const siteConfig = {
   name: "Ghostly",
   title: "Ghostly: Find each other. Talk peer to peer.",
   description:
-    "Meet the people you choose through a private invitation, then chat, send files and sats, peer to peer. No account to create. Free and open source, built on small open contracts anyone can implement.",
+    "Meet the people you choose through a private invitation, then chat, send files and sats, peer to peer. No account to create. Free and open source.",
   url: "https://ghostly.tools",
-  ogImage: "https://ghostly.tools/og-image.png",
   keywords: [
     "encrypted chat",
     "peer-to-peer",
@@ -79,25 +79,15 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     title: siteConfig.title,
     description: siteConfig.description,
-    images: [
-      {
-        url: siteConfig.ogImage,
-        width: 1200,
-        height: 630,
-        alt: "Ghostly: two friendly ghosts, Boo and Casper, talking peer to peer",
-        type: "image/png",
-      },
-    ],
+    images: [OG_IMAGE],
   },
   twitter: {
     card: "summary_large_image",
     title: siteConfig.title,
     description: siteConfig.description,
-    images: [siteConfig.ogImage],
-    creator: "@paborsa",
-  },
-  alternates: {
-    canonical: siteConfig.url,
+    images: [OG_IMAGE.url],
+    site: X_HANDLE,
+    creator: X_HANDLE,
   },
   category: "technology",
 };
@@ -144,23 +134,12 @@ export default function RootLayout({
         <Script id="js-flag" strategy="beforeInteractive">
           {"var d=document.documentElement;d.classList.add('js');try{var q=function(m,f){var l=matchMedia(m);f(l.matches);l.addEventListener('change',function(e){f(e.matches)})};q('(prefers-reduced-motion: reduce)',function(v){d.classList.toggle('calm',v)});q('(max-width: 860px)',function(v){if(v)d.dataset.orient='portrait';else delete d.dataset.orient});q('(pointer: coarse)',function(v){if(v)d.dataset.touch='';else delete d.dataset.touch})}catch(e){}"}
         </Script>
-        {/* An invite link (ghostly.tools/#ghostly1…, WISP 801): its code leaves the address before analytics
-            load (and, pasted later, before their history listeners run), so it is never in a page view, a
-            referrer or the history. components/site/JoinLanding.tsx reads it. */}
+        {/* An invite link (ghostly.tools/#ghostly1…, WISP 801): its code leaves the address before any other
+            script runs (and, pasted later, before any other history listener), so it is never in a referrer or
+            the history. components/site/JoinLanding.tsx reads it. The site loads no analytics and sets no
+            cookies (e2e/launch-checklist.spec.ts). */}
         <Script id="invite-intake" strategy="beforeInteractive">
           {"try{var t=function(){var h=location.hash;if(!/^#ghostly1/i.test(h))return;var v=h.slice(1);try{v=decodeURIComponent(v)}catch(e){}window.__ghostlyInvite=v;history.replaceState(history.state,'',location.pathname+location.search);dispatchEvent(new Event('ghostly-invite'))};t();addEventListener('popstate',t);addEventListener('hashchange',t)}catch(e){}"}
-        </Script>
-        <Script
-          src="https://www.googletagmanager.com/gtag/js?id=G-KXK4ESQ5DZ"
-          strategy="afterInteractive"
-        />
-        <Script id="google-analytics" strategy="afterInteractive">
-          {`
-            window.dataLayer = window.dataLayer || [];
-            function gtag(){dataLayer.push(arguments);}
-            gtag('js', new Date());
-            gtag('config', 'G-KXK4ESQ5DZ');
-          `}
         </Script>
         <script
           type="application/ld+json"

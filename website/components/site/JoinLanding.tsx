@@ -26,7 +26,7 @@ const taken = () => window.__ghostlyInvite ?? null;
 /**
  * The join page (WISP 801, Q11). A link `https://ghostly.tools/#ghostly1…` lands on the site; the code
  * travels in the fragment, which no browser sends to a server. A script in the layout takes it out of
- * the address before analytics load; this dialog reads it and, unless this device chose the Ghostly app
+ * the address before any other script runs; this dialog reads it and, unless this device chose the Ghostly app
  * before, counts down and opens it in the web app (a scanned QR opens the chat with no tap), with Cancel
  * and the other ways to open it.
  */
@@ -84,7 +84,7 @@ function JoinDialog({ check }: { check: InviteCheck }) {
   }, [counting]);
   useEffect(() => {
     if (left === null) return;
-    // replace, not a click on the link: no click for analytics to see, and Back does not return here.
+    // replace, not a click on the link: nothing to record, and Back does not return here.
     // The code is only in the fragment, which no request carries.
     if (left === 0) {
       location.replace(href);
