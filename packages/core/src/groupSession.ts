@@ -20,6 +20,7 @@ import { GROUP_EDIT_FRAME, meshMessageRef, validEditText, type GroupIncomingEdit
 import { validEditNumber } from "./pairedEdits";
 import { MESH_HUBS, meshRendezvous, NO_HUB_POLICY, type MeshHubPolicy } from "./groupHubs";
 import { readReaction, type WireReaction } from "./reactions";
+import { GROUP_PIN_FRAME, readPin, type WirePin } from "./pins";
 import { RateWindow } from "./pairedEdits";
 
 /**
@@ -210,6 +211,9 @@ const reactionSigned = (g: string, r: WireReaction) => utf8Encode(JSON.stringify
  */
 export const GROUP_REACTED_FRAME = "group-reacted";
 export interface GroupReactedFrame extends WireReaction { t: typeof GROUP_REACTED_FRAME; g: string; k: string; sig: string }
+/** What a member signs of its pin: any member passes it on as it is (WISP 9xx · Group Mesh § Pinned message). */
+const pinSigned = (g: string, p: WirePin) => utf8Encode(JSON.stringify(["ghostly-group/1 pin", g, p.id, p.n]));
+export interface GroupPinFrame extends WirePin { t: typeof GROUP_PIN_FRAME; g: string; k: string; sig: string }
 const byeSigned = (f: Omit<GroupByeFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 bye", f.g, f.k, f.e, f.ts]));
 const editSigned = (f: Omit<GroupEditFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts, f.nn, f.c]));
 function isEditFrame(v: unknown): v is GroupEditFrame {
@@ -702,6 +706,21 @@ export class GroupSession {
     if (typeof f.sig !== "string" || f.sig.length !== 86 || !B64.test(f.sig)) return null;
     try { if (!verify(fromBase64Url(f.sig), reactionSigned(this.id, reaction), publicKeyFromZ32(f.k))) return null; } catch { return null; }
     return { member: f.k, reaction, frame: { t: GROUP_REACTED_FRAME, g: this.id, k: f.k, ...reaction, sig: f.sig } };
+  }
+
+  /** My pin, signed, as it goes over every edge. */
+  pinFrame(pin: WirePin): GroupPinFrame {
+    return { t: GROUP_PIN_FRAME, g: this.id, id: pin.id, n: pin.n, k: this.myKey, sig: toBase64Url(sign(pinSigned(this.id, pin), this.identity.seed)) };
+  }
+
+  /** A pin signed by a member still in the roster (me too: it may come back through another member), or null. */
+  signedPin(raw: unknown): { member: string; pin: WirePin; frame: GroupPinFrame } | null {
+    if (this.state.status !== "active" || !raw || typeof raw !== "object") return null;
+    const f = raw as Record<string, unknown>, pin = readPin(f);
+    if (!pin || f.g !== this.id || typeof f.k !== "string" || !MEMBER_KEY.test(f.k) || !rosterHas(this.roster, f.k)) return null;
+    if (typeof f.sig !== "string" || f.sig.length !== 86 || !B64.test(f.sig)) return null;
+    try { if (!verify(fromBase64Url(f.sig), pinSigned(this.id, pin), publicKeyFromZ32(f.k))) return null; } catch { return null; }
+    return { member: f.k, pin, frame: { t: GROUP_PIN_FRAME, g: this.id, id: pin.id, n: pin.n, k: f.k, sig: f.sig } };
   }
 
   /** A signed leave: the admin removes its member; anyone else passes it on while that member is in the roster. */
