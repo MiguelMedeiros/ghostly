@@ -96,6 +96,16 @@ In order, each row when it applies (`src/components/MessageBubble.tsx`):
 
 One mark beside the time, as in WhatsApp (#360, `src/components/chat/DeliveryStatus.tsx`): 🕓 sending or waiting for the contact, ✓ sent, ✓✓ delivered, a red ! not sent. Hover, focus or tap the mark for one line on what happens next; the engine's reason is in ⋮ → Details. The red mark is a button that sends again. A voice message or file that did not go, or stopped moving, shows a round ↻ in place of play or its icon. Group messages keep the tick from receipts.
 
+## Scrolling
+
+(#384, #410, `src/hooks/useChatScroll.ts`)
+
+- At the bottom, a new message keeps the view there. Scrolled up, nothing moves the view: pictures and videos loading above or below keep the message you read in place.
+- A **↓ N new** pill counts the contact's new messages (reactions, edits and notices do not count) and goes to the first one. With nothing new, a plain ↓ shows once you are far from the bottom. **End** or **Ctrl/Cmd+↓** jumps to the bottom.
+- A message you send always goes to the bottom.
+- A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs.
+- 1:1 chats, groups and communities alike.
+
 ## How messages render
 
 The text is sent as typed. Everything below happens on display, and nothing is rendered as HTML ([src/lib/parse/README.md](../src/lib/parse/README.md)).
@@ -113,6 +123,8 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 | Reaction chips | one per emoji under the bubble, with its count; mine marked; the names on hover or a long press | #354 |
 | Reply quotes | the original's author and a line of it above the text; checked against this chat, else marked (not found here, deleted, not available) | #347 |
 
+**Links** open in a new tab on the web and in the extension, and in the system browser on Desktop (#415, #421). Only `http` and `https` addresses open from Desktop.
+
 **Bounds** (#301): JSON at most 4 KiB and 32 levels, URIs past 4 KiB stay text, a peer's timestamp is clamped to now + 5 min, every bubble has its own error boundary (`MessageBoundary`), atoms sit in `<bdi>`, and non-ASCII links show as punycode.
 
 ## Message details
@@ -128,12 +140,16 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 - Bytes stream to storage, never whole in memory: OPFS on web and extension, files on Desktop, IndexedDB as fallback.
 - A transfer that has not moved for 60 s offers **Send again** (sender) or **Ask again** (receiver); both go on from what the receiver already holds. A receiver with no data for 30 s asks again by itself (#348, #352).
 - A file can answer a message, with the same quote a text shows (#359).
-- **Videos** (#371): an MP4, WebM, MOV, Ogg or M4V plays in its bubble, with the sender's poster and length. The bytes are read on tap; one video or voice message plays at a time. A type this device cannot play offers Download. On Desktop, videos over 64 MiB are downloaded, not played in place.
+- **Videos** (#371): an MP4, WebM, MOV, Ogg or M4V plays in its bubble, with the sender's poster and length. The bytes are read on tap; one video, audio file or voice message plays at a time. A type this device cannot play offers Download.
+- **Audio files** (#379): an MP3, M4A/AAC, Ogg/Opus, WebM, WAV or FLAC sent as a file plays in its bubble, with a seek bar, Save and the 1×, 1.5×, 2× pill of voice messages. It keeps playing when scrolled away. MIDI, AIFF and WMA stay files.
+- **On Desktop** (#381, #405), every stored video and audio file plays and seeks from the file on disk, read in ranges, so size is no limit. Videos go full screen on every system; on Linux, where WebKitGTK has no element full screen, the bubble's own **Full screen** button fills the window.
 - Older contacts: files/2, up to 100 MiB ([WISP 500](wisps/500-files.md)).
 
 ## Calls and shared services
 
 - Audio and video calls from the header (`calls/1`, [WISP 600](wisps/600-media.md), [WISP 601](wisps/601-webrtc-media.md), #207). An audio call can turn its camera on.
+- **Devices** (#388, #400, #406): Settings → Audio & video picks the microphone, camera and speaker, per profile on this device, with **Test** (a level meter), **Preview** and **Test sound**. In a call, the device button beside mute and camera switches them live, without a new offer; a muted call stays muted. An unplugged device falls back to the system default, and the call offers **Switch back** when it returns. The chosen speaker also plays voice messages, audio, videos and app sounds (where the engine has `setSinkId`). On Linux the lists come from GStreamer ([INSTALLATION.md](INSTALLATION.md#desktop-app)).
+- **A closed web app** (#440): when the contact shared a wake-up ([WEB.md](WEB.md#install-it)), the call buttons stay on while they are away. A call wakes their app ("Waking … for the call", with Cancel), their device shows **Incoming call**, and the call rings as soon as they open Ghostly and the chat is live. After 60 s it gives up.
 - **Share screen** is a button inside the call (#253), where the screen can be captured.
 - **Shared services** (`services/1`, [WISP 700](wisps/700-local-services.md), [WISP 701](wisps/701-http-services.md)): local web apps shared with one contact over the chat. Chosen from + → Shared services; the contact's apps show in a strip under the header.
 
@@ -164,4 +180,5 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 - New group offers Community (default) or Private (`src/components/NewGroupDialog.tsx`). Negotiation: [WISP 900](wisps/900-group-sessions.md).
 - The group link can be replaced or turned off by the admin. Leaving deletes the group and its history from the device; an admin hands the role on first.
 - Group ⋮: Members…, Mute, Rotate keys (admin), Leave group, Delete from this device.
+- Hubs (private groups past 16 members, #402): the Desktop app and the CLI, which stay online, pass messages on. The admin makes a member a hub, or keeps one from being one, in Members…. A Mac holds at most 40 group connections, and past that stops being a hub (#439).
 - In a community, the admin's changes are final: a member's longer branch cannot undo them (#300).

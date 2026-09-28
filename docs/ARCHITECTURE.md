@@ -15,7 +15,7 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 
 - **Two people meet on the public Mainline DHT** (Pkarr records), then talk directly over WebRTC, Iroh or HyperDHT. If no direct path works, short texts keep flowing over the DHT itself ([the one chat](#the-one-chat)).
 - **Keys:** a fresh key pair per chat, so no key ties your chats together.
-- **Relays are helpers**, not servers that hold your chats. Desktop reads the DHT directly; a browser cannot, so the web app and the extension go through public Pkarr relays. A relay that misbehaves is skipped for a while ([circuit breaker per relay](TRANSPORTS.md#circuit-breaker-per-relay)).
+- **Relays are helpers**, not servers that hold your chats. Desktop and the CLI read the DHT directly (the CLI beside the relays); a browser cannot, so the web app and the extension go through public Pkarr relays. A relay that misbehaves is skipped for a while ([circuit breaker per relay](TRANSPORTS.md#circuit-breaker-per-relay)).
 - **Local first:** history, keys and wallets live on the device, optionally behind a password. There is no Ghostly message server and no account ([where state lives](#where-state-lives)).
 - **End to end:** relays and DHT nodes see ciphertext, timing and IP addresses, never what you say ([security model](#security-model)).
 
@@ -30,11 +30,11 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`packages/cli`](../packages/cli) | `ghostly`, the engine on Node without a screen, for bots: a daemon, a local socket API and a JSON event stream. See [WISP 11xx](wisps/11xx-headless.md) |
 | [`packages/iroh-web`](../packages/iroh-web) | Iroh compiled to wasm (`@ghostly/iroh-web`), built from `native-transports/iroh-web` |
 | [`src`](../src) | The UI every app builds (React). `src/desktop` holds Desktop's host |
-| [`src-tauri`](../src-tauri) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications |
-| [`web`](../web) | The web app: the peer in a tab. See [WEB.md](WEB.md) |
+| [`src-tauri`](../src-tauri) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications, stored media streamed to the player, web push posts, and on Linux the calls' media (webrtc-rs and GStreamer, as WebKitGTK has no WebRTC) |
+| [`web`](../web) | The web app: the peer in a tab, and its service worker (offline shell, share target, wake-up pushes). See [WEB.md](WEB.md) |
 | [`extension`](../extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
 | [`cli`](../cli) | `ghostly-cli`, the older Rust compatibility client for v0.4 chats. See [cli/README.md](../cli/README.md) |
-| [`native-transports`](../native-transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node), the HyperDHT relay for browsers, and the Iroh wasm crate |
+| [`native-transports`](../native-transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node), the HyperDHT relay for browsers, the Iroh wasm crate, and a reference push relay for browsers that cannot post a wake-up themselves |
 | [`website`](../website) | ghostly.tools |
 | [`e2e`](../e2e) | End-to-end tests. See [TESTING.md](TESTING.md) |
 | [`examples/sdk-adapter`](../examples/sdk-adapter) | A complete SDK adapter project |
@@ -73,6 +73,7 @@ Groups run on top of 1:1 sessions: private groups up to 32 members, carried by h
 | Files | Origin-private file system in browsers, real files on Desktop |
 | Presence, signals, capability records, DHT text | Pkarr records, short-lived, republished while the app runs |
 | Held items (optional) | The sender's own S3-compatible storage ([WISP 4xx](wisps/4xx-store-and-forward.md)) |
+| Wake-up push subscription (optional, web app) | The browser's push service; each paired contact keeps a copy to wake the app. Never in a backup ([WISP 401](wisps/401-paired-chat.md#wake-up-push)) |
 
 There is no Ghostly server in the message path. The DHT is not a durable history store.
 

@@ -34,7 +34,8 @@ We ask that you give us up to 90 days before publishing details, and less when t
 In scope:
 
 - the Ghost Protocol as described in [docs/PROTOCOL.md](docs/PROTOCOL.md) and the [WISPs](docs/wisps/README.md), and as implemented in `packages/core`
-- Ghostly Desktop (`src-tauri`, `src`), Ghostly Browser (`extension`), Ghostly on the web (`web`), the headless CLI (`packages/cli`), the Rust CLI (`cli`)
+- Ghostly Desktop (`src-tauri`, `src`), Ghostly Browser (`extension`), Ghostly on the web (`web`, its service worker included), the headless CLI (`packages/cli`), the Rust CLI (`cli`)
+- the native transports and the reference relays we ship (`native-transports`: Iroh, HyperDHT, the HyperDHT relay for browsers, the push relay)
 - the wallets and payments (`packages/browser/src/engine`), on Mainnet and on Testnet
 - identity proofs and public profiles (`packages/browser/src/proofs`)
 - the sites [ghostly.tools](https://ghostly.tools) and [app.ghostly.tools](https://app.ghostly.tools), and this repository's build and release pipeline
@@ -45,7 +46,7 @@ Past findings and their fixes are listed in [docs/SECURITY-REVIEW.md](docs/SECUR
 
 Out of scope:
 
-- the Pkarr relays, Mainline DHT nodes, Iroh relays, STUN/TURN servers, Cashu mints, Ark servers, Fedimint federations, Lightning nodes and identity providers themselves (report those to their operators)
+- the Pkarr relays, Mainline DHT nodes, Iroh relays, STUN/TURN servers, Cashu mints, Ark servers, Fedimint federations, Lightning nodes, push services and identity providers themselves (report those to their operators)
 - attacks that need an already compromised device or browser profile
 - denial of service by flooding public infrastructure
 - missing hardening with no demonstrated impact

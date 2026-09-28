@@ -40,6 +40,7 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 
 - **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings, Updates** allows it, and nothing installs without your OK.
 - **Linux has no WebRTC in its WebView** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT, and calls run in the app itself, with GStreamer: the `.deb` and `.rpm` depend on its base and good plugins, and the AppImage carries them. If a plugin is missing, the call buttons name the package to install. Screen sharing is not available on Linux yet.
+- **Linux microphones, cameras and speakers** are listed by GStreamer, for calls and for Settings → Audio & video (the microphone meter and the test sound run there too). Microphones and speakers come from GStreamer's PulseAudio plugin (`gstreamer1.0-pulseaudio`, which the `.deb` recommends) or PipeWire's (`gstreamer1.0-pipewire`). Without either, none is listed and calls use the system default.
 - **Checksums.** Each release has `SHA256SUMS.txt` and its signature `SHA256SUMS.txt.asc`. Check a download with `shasum -a 256 -c SHA256SUMS.txt --ignore-missing`.
 
 ## CLI
@@ -83,9 +84,9 @@ What a chat can do: [Features](FEATURES.md).
 
 Requirements (what the release workflow uses):
 
-- Node.js 22 and npm
+- Node.js 22.12 or newer, and npm (the CLI workspace needs 22.12)
 - Rust, stable toolchain
-- The [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS. On Debian/Ubuntu: `libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev`
+- The [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS. On Debian/Ubuntu: `libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev`. To call from a Linux build, also `gstreamer1.0-plugins-good` and `gstreamer1.0-pulseaudio` (the call check names what is missing).
 
 ```bash
 git clone https://github.com/MiguelMedeiros/ghostly.git
@@ -113,5 +114,13 @@ Tests and the rest of the workflow: [Contributing](../CONTRIBUTING.md) and [Test
 ```bash
 sudo xattr -cr /Applications/Ghostly.app
 ```
+
+**macOS: no system notifications ("Move Ghostly to Applications").** macOS gives none to an app run from a temporary folder, such as a disk image or a download it moved aside. Drag Ghostly to Applications and open it from there.
+
+**Linux: the call buttons are off and name a package.** Calls need GStreamer's base and good plugins. Install the package the tooltip names (usually `gstreamer1.0-plugins-good`) and restart the app. No microphone or speaker under Settings → Audio & video: install `gstreamer1.0-pulseaudio` (or `gstreamer1.0-pipewire`).
+
+**Web app: no "Wake me while closed" in Settings → Notifications.** It shows only where the browser has Web Push: Chrome, Edge and Firefox, and on iPhone and iPad only the app added to the Home Screen, from iOS 16.4 ([WEB.md](WEB.md#install-it)). The desktop app and the extension run on their own and are never woken.
+
+**Web app: a second tab only waits.** One tab runs the peer at a time: close the other one ([WEB.md](WEB.md#what-a-web-page-cannot-do)).
 
 Something else? [Open an issue](https://github.com/MiguelMedeiros/ghostly/issues). For a vulnerability, never open an issue: follow [SECURITY.md](../SECURITY.md).
