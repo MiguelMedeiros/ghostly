@@ -6,10 +6,10 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [1000](1000-storage.md), [05](05-backups.md) |
-| Implementation | Experimental: web and desktop clients; exercised against a local S3-compatible server |
+| Implementation | Experimental: web, extension and desktop clients, not the headless CLI; exercised against a local S3-compatible server |
 | Summary | Any S3-compatible bucket (AWS, R2, B2, MinIO, Garage) holding only encrypted bundles. |
 | Availability | Available |
-| Notes | Backups and held messages on every client. The bucket's CORS rules must allow the app (and GET from your contacts' apps, to hold). |
+| Notes | Backups and held messages in the web app, the extension and the desktop app; not the CLI. The bucket's CORS rules must allow the app (and GET from your contacts' apps, to hold). |
 
 > This is a review draft. See the [catalogue](README.md) and the [storage contract](1000-storage.md).
 

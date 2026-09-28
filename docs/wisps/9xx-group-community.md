@@ -15,7 +15,7 @@
 
 ## What this profile is for
 
-A group whose **link is the way in**: posted in a large community, anyone who opens it joins, whether or not the admin is online, and the group holds hundreds of members, not eight. [`group-mesh/1`](9xx-group-mesh.md) stays what it is (a small private group of contacts); a group says which of the two it is from its first commit, and never changes.
+A group whose **link is the way in**: posted in a large community, anyone who opens it joins, whether or not the admin is online, and the group holds hundreds of members, not 32. [`group-mesh/1`](9xx-group-mesh.md) stays what it is (a small private group of contacts); a group says which of the two it is from its first commit, and never changes.
 
 Four decisions separate it from the mesh:
 
@@ -299,6 +299,8 @@ On public relays each trip through Pkarr (a packet published, then seen by the o
 ## Open decisions
 
 Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; files and media; native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members.
+
+A hub's connections on a Mac: a hub keeps edges with up to 48 members (`hubCapacity`) and with the other hubs (up to 8 in the beacon, `maxHubs` in `packages/core/src/communityRendezvous.ts`), while the Desktop's WebView on a Mac opened at most 46 connections at once, 1:1 chats and calls included ([9xx Group Mesh, Cost per member](9xx-group-mesh.md#cost-per-member), #402). A Mac Desktop that becomes a busy hub could reach that ceiling; whether it should cap its hub edges, or not stand as a hub, is open.
 
 ## Revision log
 

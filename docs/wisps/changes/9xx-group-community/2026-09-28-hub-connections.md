@@ -1,0 +1,1 @@
+An open decision: a hub keeps edges with up to 48 members and with the other hubs, while the Desktop's WebView on a Mac opened at most 46 connections at once (9xx Group Mesh, Cost per member, #402), so a Mac Desktop that becomes a busy hub could reach that ceiling. The overview compares a community with a private group of 32, not eight.

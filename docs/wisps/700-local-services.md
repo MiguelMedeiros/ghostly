@@ -6,10 +6,10 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
-| Implementation | Existing HTTP proxy, in every chat (desktop and extension hosts) |
+| Implementation | Existing HTTP proxy, in every chat (desktop, extension and headless CLI hosts) |
 | Summary | Let chosen contacts open an app or site running on your computer, while you are online. |
 | Availability | Available |
-| Notes | Desktop app and extension, at both ends; not the web app. You choose which contacts see each app. |
+| Notes | Desktop app, extension and the CLI, at both ends; not the web app. You choose which contacts see each app. |
 | Feature | [Share a local app](https://ghostly.tools/#next) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
