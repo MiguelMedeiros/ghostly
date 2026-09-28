@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-<!-- Draft of the 1.0.0 notes. scripts/bump-version.mjs turns this heading into "## 1.0.0" on release. -->
+<!-- Draft of the 1.0.0 notes. A new entry goes in changes/ (one file per change, see changes/README.md), not here: scripts/bump-version.mjs adds those files below at release and turns this heading into "## 1.0.0". Editing a line already here is fine. -->
 
 Ghostly 1.0. One kind of chat: it finds your contact on the DHT and goes peer to peer by itself. A wallet for every rail, on Mainnet and Testnet side by side. Identities you prove to one contact at a time, groups, and a headless CLI for bots. Chats with 0.4 contacts keep working as compatibility chats.
 

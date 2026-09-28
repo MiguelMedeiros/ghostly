@@ -110,6 +110,10 @@ jobs:
       - name: TypeScript check
         run: npm run typecheck
 
+      # changes/<slug>.md: one file per changelog entry, put into CHANGELOG.md at release (scripts/changes.mjs).
+      - name: Changelog entries are well formed
+        run: node scripts/changes.mjs
+
       # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md). The map goes to
       # the run's summary page: it is not committed.
       - name: Test map (every feature has a test)
