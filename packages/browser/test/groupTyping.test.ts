@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity, GROUP_TYPING_FRAME, typingFrame, sealGroupTyping } from "@ghostly/core";
 import { CommunityWorld } from "./communityWorld";
-// covers: group.typing
+// covers: groups.typing
 
 /**
  * Typing in a private group (WISP 9xx · Group Mesh § Typing) on headless peers running the real group engine: the word

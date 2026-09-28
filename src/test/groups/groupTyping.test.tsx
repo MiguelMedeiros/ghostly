@@ -6,7 +6,7 @@ import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: group.typing
+// covers: groups.typing
 
 const ANA = "ana".padEnd(52, "y"), BO = "bo".padEnd(52, "y"), CY = "cy".padEnd(52, "y"), ME = "me".padEnd(52, "y");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: true, missing: 0, ...patch });

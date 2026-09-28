@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomBytes, toBase64Url } from "../src/bytes";
 import { GROUP_TYPING_FRAME, GroupTypingBoard, groupTypingEpoch, openGroupTyping, sealGroupTyping, type GroupTypingFrame } from "../src/groupTyping";
 import { TYPING_FRAME, TYPING_RATE_LIMIT, TYPING_TIMEOUT_MS, TypingSender, typingFrame } from "../src/pairedTyping";
-// covers: group.typing
+// covers: groups.typing
 
 afterEach(() => { vi.useRealTimers(); });
 
