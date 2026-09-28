@@ -88,8 +88,8 @@ They need the dev server on :4330 and Chrome.
 
 ## Repository docs the site renders
 
-`npm run sync:references` (also run by `npm run build`) copies these into
-`public/reference/` (not committed) and indexes them in `lib/reference-index.json`;
+`npm run sync:references` (also run by `npm run dev` and `npm run build`) copies these into
+`public/reference/` and indexes them in `lib/reference-index.json`;
 the reader shows each one under `/developers/wisps/<slug>`:
 
 - `docs/wisps/*.md`, except the forwarding stubs of renumbered WISPs and the
@@ -102,7 +102,10 @@ It also writes `docs/wisps/NUMBERING.md` and the forwarding stubs,
 `lib/roadmap-tracks.json` (the inventory and the tracks of
 `docs/wisps/ADAPTER-ROADMAP.md`), `lib/levels.json` and `lib/code-snippets.json`, the two excerpts
 `/developers` quotes from `packages/core/src/invite.ts` and
-`packages/core/src/pairedTransports.ts`. Other repository docs (`docs/TESTING.md`,
+`packages/core/src/pairedTransports.ts`. None of the `lib/*.json` files it writes, nor
+`public/reference/`, is committed: a pull request never touches them, so two never conflict there.
+Run `npm run sync:references` once after a checkout before `npm run lint`, `npx tsc` or `npm test`
+(CI does). Other repository docs (`docs/TESTING.md`,
 `docs/CLI.md`, ...) are not on the site.
 
 A pull request that changes any of these inputs runs the Website jobs in CI
