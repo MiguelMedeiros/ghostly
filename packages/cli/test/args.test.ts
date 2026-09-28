@@ -48,7 +48,10 @@ describe("the argument parser", () => {
       slots.forEach((slot, i) => { if (takesId(i)) named.add(slot.replace(/\?$/, "")); });
     }
     // Every kind of generated id a command takes: drafts, proofs, payments, messages, files, groups, calls, …
-    expect([...named].sort()).toEqual(["call...", "card", "chat", "draft", "file", "group", "id", "member", "message", "payment", "service"]);
+    expect([...named].sort()).toEqual(["call...", "card", "chat", "draft", "file", "group", "id", "member", "message", "message...", "payment", "service"]);
+    // forward: several messages, and --to once per chat or group (a dash-leading id as --to=<id>).
+    expect(parseArgs(["alice", HYPHEN_KEY, DOUBLE_DASH_ID, "--to", "bob", `--to=${HYPHEN_KEY}`, "--wait", "sent"], COMMANDS.forward!.options!, idSlot(COMMANDS.forward!)))
+      .toEqual({ positionals: ["alice", HYPHEN_KEY, DOUBLE_DASH_ID], options: { to: ["bob", HYPHEN_KEY], wait: "sent" } });
     expect(parseArgs([HYPHEN_KEY, "--limit", "5"], COMMANDS["chat history"].options!, idSlot(COMMANDS["chat history"]))).toEqual({ positionals: [HYPHEN_KEY], options: { limit: 5 } });
     expect(parseArgs([HYPHEN_KEY, "hi", "--force"], TEXT_COMMANDS.send.options, idSlot(TEXT_COMMANDS.send))).toEqual({ positionals: [HYPHEN_KEY, "hi"], options: { force: true } });
     // An id in a trailing optional one (`call answer [<chat|call>]`).
