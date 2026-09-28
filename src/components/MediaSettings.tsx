@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { voiceLevel } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { useMediaDevices } from "../hooks/useMediaDevices";
-import { applySpeaker, canPickSpeaker, chooseDevice, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
+import { applySpeaker, canPickSpeaker, chooseDevice, deviceSource, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
 import { soundUrl } from "../lib/sounds";
 import { Row, Section } from "./layout";
 import { Select, type SelectOption } from "./ui/Select";
@@ -26,6 +26,9 @@ export function MediaSettings() {
   if (!supported) return null;
 
   const speaker = canPickSpeaker() && list.audiooutput.length > 0;
+  // Where calls capture and play outside the page (Linux Desktop), the page cannot hear that microphone or play on
+  // that speaker: only the camera can be tried here.
+  const tries = !deviceSource();
   return (
     <Section title={t("settings.media.title")} testId="settings-media">
       {!list.named && (
@@ -34,7 +37,7 @@ export function MediaSettings() {
         </Row>
       )}
       <DeviceRow kind="audioinput" list={list} choices={choices} info={t("settings.media.microphoneInfo")}>
-        {(id, fail) => <MicrophoneTest id={id} fail={fail} />}
+        {(id, fail) => tries && <MicrophoneTest id={id} fail={fail} />}
       </DeviceRow>
       <DeviceRow kind="videoinput" list={list} choices={choices} info={t("settings.media.cameraInfo")}
         below={preview ? (id, fail) => <CameraPreview id={id} fail={(failed) => { fail(failed); if (failed) setPreview(false); }} /> : undefined}>
@@ -46,7 +49,7 @@ export function MediaSettings() {
       </DeviceRow>
       {speaker && (
         <DeviceRow kind="audiooutput" list={list} choices={choices} info={t("settings.media.speakerInfo")}>
-          {(id, fail) => <SpeakerTest id={id} fail={fail} />}
+          {(id, fail) => tries && <SpeakerTest id={id} fail={fail} />}
         </DeviceRow>
       )}
     </Section>
@@ -156,7 +159,8 @@ function CameraPreview({ id, fail }: { id: string | undefined; fail: (failed: bo
     let live = true;
     let stream: MediaStream | null = null;
     failRef.current(false);
-    navigator.mediaDevices.getUserMedia({ video: from(id), audio: false }).then((s) => {
+    const capture = deviceSource()?.getUserMedia ?? ((constraints: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(constraints));
+    capture({ video: from(id), audio: false }).then((s) => {
       if (!live) { s.getTracks().forEach((track) => track.stop()); return; }
       stream = s;
       if (video.current) { video.current.srcObject = s; void video.current.play?.()?.catch(() => {}); }

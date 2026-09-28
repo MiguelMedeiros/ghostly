@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { CallMedia } from "@ghostly/core";
+import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, type DeviceSource } from "../lib/mediaDevices";
 
 /**
  * Calls on Ghostly Desktop for Linux. WebKitGTK is built without WebRTC by Ubuntu, Debian and Fedora alike, so
@@ -9,6 +10,10 @@ import type { CallMedia } from "@ghostly/core";
  * arrive as JPEG frames, drawn on canvases whose `captureStream()` tracks go in the call window's <video>s.
  * The sound stays in Rust, from the microphone to the speakers; the page's audio track is a silent stand-in
  * whose `enabled` mutes the microphone.
+ *
+ * Devices are GStreamer's, listed by Rust (`nativeDevices`) and known by name: a device's id is its name, and
+ * the page passes the name of the one chosen. Rust uses the default when there is none by that name, and the
+ * tracks' `getSettings().deviceId` says which one is in use ("default" the default), as a browser's would.
  */
 
 /** What Rust says about calls on this machine. */
@@ -96,24 +101,60 @@ class Picture {
 const cameraOf = new WeakMap<MediaStreamTrack, number>();
 /** The call a microphone track mutes. */
 const callOf = new WeakMap<MediaStreamTrack, NativePeerConnection>();
+/** The device a track was asked to capture from, by name (null: the default). */
+const wantedOf = new WeakMap<MediaStreamTrack, string | null>();
+/** The device a track captures from, by name (null: the default), as Rust said. */
+const usedOf = new WeakMap<MediaStreamTrack, string | null>();
 
 function named(error: unknown, name: string): Error {
   return Object.assign(new Error(error instanceof Error ? error.message : String(error)), { name });
 }
 
-async function openCamera(): Promise<MediaStreamTrack> {
+/**
+ * The name Rust knows a device by, for this id: ids here are names, and a choice kept from before (an id the
+ * WebView gave) is found by the name kept beside it.
+ */
+export function deviceName(kind: DeviceKind, id: string | null | undefined): string | null {
+  if (!id || id === "default") return null;
+  const chosen = loadDeviceChoices()[kind];
+  return chosen?.id === id && chosen.label ? chosen.label : id;
+}
+
+/** The device a `getUserMedia` constraint asks for (`deviceId` as a string, `ideal` or `exact`), if any. */
+export function askedDevice(constraint: boolean | MediaTrackConstraints | undefined): string | null {
+  if (!constraint || constraint === true) return null;
+  const id = constraint.deviceId;
+  if (typeof id === "string") return id;
+  if (Array.isArray(id)) return id[0] ?? null;
+  const asked = id?.exact ?? id?.ideal;
+  return (Array.isArray(asked) ? asked[0] : asked) ?? null;
+}
+
+/** A stand-in track that says which device it captures from, like a browser's. */
+function reporting(track: MediaStreamTrack, wanted: string | null): void {
+  wantedOf.set(track, wanted);
+  usedOf.set(track, wanted);
+  const settings = track.getSettings?.bind(track);
+  // "default", as browsers call the system's default: the call's device menu offers a chosen one back from it.
+  track.getSettings = () => ({ ...(settings?.() ?? {}), deviceId: usedOf.get(track) ?? "default" });
+}
+
+async function openCamera(device: string | null = null): Promise<MediaStreamTrack> {
   const picture = new Picture();
   const frames = new Channel<unknown>();
   frames.onmessage = (message) => picture.show(bytesOf(message));
   let camera: number;
+  let used: string | null;
   try {
-    camera = await invoke<number>("native_camera_open", { frames });
+    ({ camera, device: used } = await invoke<{ camera: number; device: string | null }>("native_camera_open", { frames, device }));
   } catch (error) {
     picture.track.stop();
     throw named(error, "NotFoundError");
   }
   const track = picture.track;
   cameraOf.set(track, camera);
+  reporting(track, device);
+  usedOf.set(track, used);
   const stop = track.stop.bind(track);
   track.stop = () => {
     if (cameraOf.delete(track)) void invoke("native_camera_close", { camera }).catch(() => {});
@@ -122,10 +163,14 @@ async function openCamera(): Promise<MediaStreamTrack> {
   return track;
 }
 
-/** A silent track standing for the microphone, which Rust opens with the call; turning it off mutes it. */
-function microphone(): MediaStreamTrack {
+/**
+ * A silent track standing for the microphone named `device` (null: the default), which Rust opens with the call
+ * (or in its place, `replaceTrack`); turning it off mutes it.
+ */
+function microphone(device: string | null = null): MediaStreamTrack {
   const context = new AudioContext();
   const track = context.createMediaStreamDestination().stream.getAudioTracks()[0];
+  reporting(track, device);
   const enabled = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, "enabled")!;
   Object.defineProperty(track, "enabled", {
     configurable: true,
@@ -188,6 +233,7 @@ export class NativePeerConnection extends EventTarget {
 
   constructor(private readonly config: RTCConfiguration) {
     super();
+    open.add(this);
     const events = new Channel<unknown>();
     events.onmessage = (message) => this.heard(bytesOf(message));
     this.opened = invoke("native_call_open", { id: this.id, events });
@@ -196,7 +242,7 @@ export class NativePeerConnection extends EventTarget {
       direction: "sendrecv",
       currentDirection: null,
       receiver: { track: { kind } },
-      sender: { track: null, replaceTrack: async (track) => { if (kind === "video") await this.send(track); } },
+      sender: { track: null, replaceTrack: (track) => (kind === "video" ? this.send(track) : this.speak(track)) },
     });
     this.audio = lane("audio");
     this.video = lane("video");
@@ -231,6 +277,22 @@ export class NativePeerConnection extends EventTarget {
     return track ? cameraOf.get(track) ?? null : null;
   }
 
+  /** What Rust starts the call with, besides the camera: the microphone and the speaker, by name. */
+  private devices(): { camera: number | null; microphone: string | null; speaker: string | null } {
+    const track = this.audio.sender.track;
+    return {
+      camera: this.camera(),
+      microphone: track ? wantedOf.get(track) ?? null : null,
+      speaker: deviceName("audiooutput", loadDeviceChoices().audiooutput?.id),
+    };
+  }
+
+  /** Rust started the call: which microphone it is. */
+  private using(microphone: string | null): void {
+    const track = this.audio.sender.track;
+    if (track) usedOf.set(track, microphone);
+  }
+
   /**
    * Runs a description call, holding the ICE states heard meanwhile until the caller has seen it resolve. Rust
    * on the same machine connects within a millisecond, and "connected" arrived before the call hook, back from
@@ -256,7 +318,8 @@ export class NativePeerConnection extends EventTarget {
   async createOffer(): Promise<RTCSessionDescriptionInit> {
     await this.opened;
     this.started = true;
-    const sdp = await this.hold(() => invoke<string>("native_call_offer", { id: this.id, camera: this.camera() }));
+    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...this.devices() }));
+    this.using(microphone);
     if (this.muted) await this.mute(true);
     return { type: "offer", sdp };
   }
@@ -266,7 +329,8 @@ export class NativePeerConnection extends EventTarget {
     await this.opened;
     this.started = true;
     const offer = this.offer;
-    const sdp = await this.hold(() => invoke<string>("native_call_answer", { id: this.id, offer, camera: this.camera() }));
+    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...this.devices() }));
+    this.using(microphone);
     if (this.muted) await this.mute(true);
     this.negotiated();
     return { type: "answer", sdp };
@@ -314,6 +378,22 @@ export class NativePeerConnection extends EventTarget {
     if (this.started && !this.closed) await invoke("native_call_camera", { id: this.id, camera: this.camera() });
   }
 
+  /** Sends this microphone in place of the one on (the call's device menu); Rust relaunches the capture. */
+  private async speak(track: MediaStreamTrack | null): Promise<void> {
+    if (!track) return;
+    callOf.set(track, this);
+    this.muted = !track.enabled;
+    this.audio.sender.track = track;
+    if (!this.started || this.closed) return;
+    const used = await invoke<string | null>("native_call_microphone", { id: this.id, device: wantedOf.get(track) ?? null });
+    usedOf.set(track, used);
+  }
+
+  /** Plays the call on the speaker named `device` (null: the default). */
+  async playOn(device: string | null): Promise<void> {
+    if (this.started && !this.closed) await invoke("native_call_speaker", { id: this.id, device });
+  }
+
   async mute(muted: boolean): Promise<void> {
     this.muted = muted;
     if (this.started && !this.closed) await invoke("native_call_mute", { id: this.id, muted }).catch(() => {});
@@ -352,6 +432,7 @@ export class NativePeerConnection extends EventTarget {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    open.delete(this);
     this.iceConnectionState = "closed";
     this.connectionState = "closed";
     this.signalingState = "closed";
@@ -360,24 +441,72 @@ export class NativePeerConnection extends EventTarget {
   }
 }
 
+/** What Rust gives back for a description: it, and the microphone the call sends (null: the default). */
+interface Described { sdp: string; microphone: string | null }
+
+/** The calls on now (one at a time): where a new speaker goes. */
+const open = new Set<NativePeerConnection>();
+
+/** Captures from the devices asked for, by name; the default for any Rust has no device by that name. */
+async function capture(constraints: MediaStreamConstraints): Promise<MediaStream> {
+  const tracks: MediaStreamTrack[] = [];
+  try {
+    if (constraints.video) tracks.push(await openCamera(deviceName("videoinput", askedDevice(constraints.video))));
+    if (constraints.audio) tracks.push(microphone(deviceName("audioinput", askedDevice(constraints.audio))));
+  } catch (error) {
+    tracks.forEach((t) => t.stop());
+    throw error;
+  }
+  return new MediaStream(tracks);
+}
+
 /** The call media of Ghostly Desktop on Linux. No screen yet: capturing one needs the desktop portal. */
 export function nativeCallMedia(): CallMedia {
   return {
     createPeerConnection: (config) => new NativePeerConnection(config) as unknown as RTCPeerConnection,
-    async getUserMedia(constraints) {
-      const tracks: MediaStreamTrack[] = [];
-      try {
-        if (constraints.video) tracks.push(await openCamera());
-        if (constraints.audio) tracks.push(microphone());
-      } catch (error) {
-        tracks.forEach((t) => t.stop());
-        throw error;
-      }
-      return new MediaStream(tracks);
-    },
+    getUserMedia: capture,
     screenUnavailable: SCREEN_UNAVAILABLE,
+    choosesDevices: true,
   };
 }
+
+/** GStreamer's devices as the pickers list them: each one's id is its name. */
+export function deviceList(listed: readonly { kind: string; label: string }[]): DeviceList {
+  const list: DeviceList = { audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: true };
+  for (const { kind, label } of listed) {
+    if (kind === "audioinput" || kind === "videoinput" || kind === "audiooutput") list[kind].push({ id: label, label });
+  }
+  return list;
+}
+
+const watchers = new Set<() => void>();
+let watching = false;
+
+/** The microphones, cameras and speakers of Ghostly Desktop on Linux, from Rust (src-tauri/src/native_call/devices.rs). */
+export const nativeDevices: DeviceSource = {
+  async list() {
+    try {
+      return deviceList(await invoke<{ kind: string; label: string }[]>("native_call_devices"));
+    } catch {
+      return EMPTY_DEVICES;
+    }
+  },
+  watch(changed) {
+    watchers.add(changed);
+    if (!watching) {
+      watching = true;
+      const events = new Channel<unknown>();
+      events.onmessage = () => watchers.forEach((tell) => tell());
+      void invoke("native_call_devices_watch", { events }).catch(() => { watching = false; });
+    }
+    return () => { watchers.delete(changed); };
+  },
+  getUserMedia: capture,
+  playCallOn(id) {
+    const device = deviceName("audiooutput", id);
+    for (const call of open) void call.playOn(device).catch(() => {});
+  },
+};
 
 /**
  * What the engine and the call hook get from what Rust said. On Linux (`native`) the WebView has no WebRTC and

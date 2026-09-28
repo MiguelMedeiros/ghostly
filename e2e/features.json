@@ -35,6 +35,7 @@
     "image-host": {"title":"A remote https image host (picture links)","fake":"stubbed with context.route"},
     "iroh-relay": {"title":"An Iroh relay (iroh-relay 1.2, dev mode, plain HTTP on loopback)","env":"GHOSTLY_IROH_RELAY_URL"},
     "camera": {"title":"A camera / microphone (fake media devices in Chromium)"},
+    "pulseaudio": {"title":"A PulseAudio server with named test microphones and speakers (null sources and sinks), for the Linux Desktop's GStreamer devices","fake":"e2e/desktop/call-devices.spec.ts"},
     "release-v0.4": {"title":"The v0.4.0 web app, built from its tag","stack":"scripts/build-compat-web.mjs"}
   },
   "features": [
@@ -273,6 +274,7 @@
     {"id":"calls.signal","wisp":"600","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"Call signaling frames (offer/answer/ICE) over the paired link"},
     {"id":"calls.paired","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"A paired chat (every new chat) calls over its live session: start, answer, end (calls/1)"},
     {"id":"calls.linux-native","wisp":"601","kind":"feature","clients":["desktop"],"infra":["camera"],"title":"The Linux Desktop calls with no WebRTC in its WebView: WebRTC in Rust (webrtc-rs), media in GStreamer, with browser and Desktop peers alike; missing GStreamer plugins are named on the call buttons"},
+    {"id":"calls.devices-linux","wisp":"601","kind":"feature","clients":["desktop"],"infra":["camera","pulseaudio"],"title":"The Linux Desktop's native calls use the microphone, camera and speaker chosen in Settings, found by name among GStreamer's devices (the default, logged, when one is gone), and switch them live from the call's device menu"},
     {"id":"calls.devices","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"A call's device menu switches the microphone and camera (replaceTrack, no new offer) and the speaker (setSinkId) live; a device unplugged mid-call falls back to the default with a notice, and one plugged back in offers Switch back"},
     {"id":"calls.paired.live-only","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A paired chat's call buttons are off with a reason when it is not live (on DHT, connecting) or the contact cannot take calls"},
     {"id":"calls.paired.negotiate","wisp":"401","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"calls/1 and services/1 announced in paired-capabilities after the handshake; paired-call frames carry the signals"},

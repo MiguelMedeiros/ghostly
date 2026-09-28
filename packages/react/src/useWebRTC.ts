@@ -34,7 +34,7 @@ interface UseWebRTCParams {
   maxCandidates?: number;
   /**
    * The microphone and camera this profile chose, read each time the call asks for one (a `deviceId` constraint;
-   * `ideal` falls back to the default when the device is gone). Only for the page's own capture: `media` picks its own.
+   * `ideal` falls back to the default when the device is gone). Not for a `media` that does not choose devices.
    */
   devices?: () => { audio?: ConstrainDOMString; video?: ConstrainDOMString };
 }
@@ -117,7 +117,7 @@ export function useWebRTC({
   const mediaRef = useRef<CallMedia>(media ?? browserMedia);
   mediaRef.current = media ?? browserMedia;
   const devicesRef = useRef(devices);
-  devicesRef.current = media ? undefined : devices;
+  devicesRef.current = media && !media.choosesDevices ? undefined : devices;
 
   /** What to capture `kind` from: the chosen device, or whatever the default is. */
   const captureFrom = useCallback((kind: "audio" | "video"): MediaTrackConstraints | true => {
@@ -851,8 +851,8 @@ export function useWebRTC({
     toggleMute,
     toggleVideo,
     toggleScreenShare,
-    /** The microphone and camera can be switched in the call: the page's own capture (not Linux's native media). */
-    canSwitchDevices: !media,
+    /** The microphone and camera can be switched in the call: the page's own capture, or a `media` that chooses devices. */
+    canSwitchDevices: !media || !!media.choosesDevices,
     switchMicrophone,
     switchCamera,
   };

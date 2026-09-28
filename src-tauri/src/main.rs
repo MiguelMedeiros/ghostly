@@ -118,6 +118,8 @@ macro_rules! commands {
             file_stream::file_bytes_stream_open,
             file_stream::file_bytes_stream_close,
             native_call::native_call_support,
+            native_call::native_call_devices,
+            native_call::native_call_devices_watch,
             native_call::native_camera_open,
             native_call::native_camera_close,
             native_call::native_call_open,
@@ -125,6 +127,8 @@ macro_rules! commands {
             native_call::native_call_answer,
             native_call::native_call_accept,
             native_call::native_call_mute,
+            native_call::native_call_microphone,
+            native_call::native_call_speaker,
             native_call::native_call_camera,
             native_call::native_call_stats,
             native_call::native_call_close,
@@ -390,7 +394,7 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 74, "{declared:?}");
+        assert_eq!(declared.len(), 78, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

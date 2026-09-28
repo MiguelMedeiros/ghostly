@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-call-speaker"
+description = "Enables the native_call_speaker command without any pre-configured scope."
+commands.allow = ["native_call_speaker"]
+
+[[permission]]
+identifier = "deny-native-call-speaker"
+description = "Denies the native_call_speaker command without any pre-configured scope."
+commands.deny = ["native_call_speaker"]

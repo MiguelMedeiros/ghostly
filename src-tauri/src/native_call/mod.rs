@@ -2,6 +2,9 @@
 //! distribution (Ubuntu, Debian, Fedora). The media runs in GStreamer ([`engine`]); the page drives it through
 //! these commands and hears back on a channel per camera and per call (`src/desktop/nativeCalls.ts`).
 //!
+//! Which microphone, camera and speaker is the page's choice, passed here by name ([`devices`]): the list the
+//! page shows is this one (`native_call_devices`), and a call switches them live.
+//!
 //! Elsewhere (macOS, Windows) the WebView has WebRTC, `native_call_support` says `native: false`, and the other
 //! commands refuse: they exist on every platform so the app registers the same commands everywhere.
 
@@ -12,6 +15,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::ipc::{Channel, InvokeResponseBody};
 
+#[cfg(target_os = "linux")]
+pub mod devices;
 #[cfg(target_os = "linux")]
 pub mod engine;
 
@@ -92,22 +97,70 @@ fn sink(channel: Channel<InvokeResponseBody>) -> impl Fn(Vec<u8>) + Send + Sync 
     }
 }
 
-/// Opens the camera; its preview frames (JPEG) arrive on `frames`. Returns its id.
+/// The microphones, cameras and speakers there are, as `[{ kind, label }]` (`kind` as `MediaDeviceInfo` says
+/// it). The label is how the other commands name a device.
 #[tauri::command]
-pub async fn native_camera_open(frames: Channel<InvokeResponseBody>) -> Result<u32, String> {
+pub async fn native_call_devices() -> Result<serde_json::Value, String> {
     #[cfg(target_os = "linux")]
     {
-        let open = move || engine::Camera::open(engine::fake_media(), Arc::new(sink(frames)));
+        let list = blocking(|| Ok(devices::list(engine::fake_media()))).await?;
+        serde_json::to_value(list).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(ELSEWHERE.into())
+    }
+}
+
+/// Tells `events` each time a microphone, camera or speaker comes or goes.
+#[tauri::command]
+pub fn native_call_devices_watch(events: Channel<InvokeResponseBody>) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        devices::watch(Arc::new(sink(events)));
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = sink(events);
+        Err(ELSEWHERE.into())
+    }
+}
+
+/// A camera open: its id, and the name of the one it is (null: the default one).
+#[derive(Serialize)]
+pub struct OpenCamera {
+    camera: u32,
+    device: Option<String>,
+}
+
+/// Opens the camera named `device`, or the default one when there is none by that name (or `device` is null);
+/// its preview frames (JPEG) arrive on `frames`.
+#[tauri::command]
+pub async fn native_camera_open(
+    frames: Channel<InvokeResponseBody>,
+    device: Option<String>,
+) -> Result<OpenCamera, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let open = move || {
+            engine::Camera::open(
+                engine::fake_media(),
+                device.as_deref(),
+                Arc::new(sink(frames)),
+            )
+        };
         let camera = logged("the camera", blocking(open).await)?;
+        let device = camera.device.clone();
         let mut calls = calls().lock().unwrap();
         calls.next_camera += 1;
         let id = calls.next_camera;
         calls.cameras.insert(id, Arc::new(camera));
-        Ok(id)
+        Ok(OpenCamera { camera: id, device })
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = sink(frames);
+        let _ = (sink(frames), device);
         Err(ELSEWHERE.into())
     }
 }
@@ -165,12 +218,28 @@ pub fn native_call_open(id: String, events: Channel<InvokeResponseBody>) -> Resu
     }
 }
 
-/// Starts the call's media with these payload types and this camera, once.
+/// A description for the page, and the microphone the call sends (null: the default).
+#[derive(Serialize)]
+pub struct Described {
+    sdp: String,
+    microphone: Option<String>,
+}
+
+#[cfg(target_os = "linux")]
+fn described(call: &engine::Call, sdp: String) -> Described {
+    Described {
+        sdp,
+        microphone: call.stats().microphone,
+    }
+}
+
+/// Starts the call's media with these payload types, this camera and these devices, once.
 #[cfg(target_os = "linux")]
 async fn media(
     id: &str,
     payload_types: (u8, u8),
     camera: Option<u32>,
+    devices: engine::Devices,
 ) -> Result<Arc<engine::Call>, String> {
     let events = {
         let calls = calls().lock().unwrap();
@@ -186,6 +255,7 @@ async fn media(
             payload_types.0,
             payload_types.1,
             engine::fake_media(),
+            devices,
             events,
         )
         .await?,
@@ -224,42 +294,99 @@ fn call(id: &str) -> Result<Arc<engine::Call>, String> {
         .ok_or_else(|| "No such call".into())
 }
 
-/// Our offer, its candidates gathered.
+/// Our offer, its candidates gathered. `microphone` and `speaker`: the devices by name (null: the default).
 #[tauri::command]
-pub async fn native_call_offer(id: String, camera: Option<u32>) -> Result<String, String> {
+pub async fn native_call_offer(
+    id: String,
+    camera: Option<u32>,
+    microphone: Option<String>,
+    speaker: Option<String>,
+) -> Result<Described, String> {
     #[cfg(target_os = "linux")]
     {
+        let devices = engine::Devices {
+            microphone,
+            speaker,
+        };
         let call = logged(
             "starting",
-            media(&id, (engine::OPUS_PT, engine::VP8_PT), camera).await,
+            media(&id, (engine::OPUS_PT, engine::VP8_PT), camera, devices).await,
         )?;
-        logged("the offer", call.offer().await)
+        let sdp = logged("the offer", call.offer().await)?;
+        Ok(described(&call, sdp))
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (id, camera);
+        let _ = (id, camera, microphone, speaker);
         Err(ELSEWHERE.into())
     }
 }
 
-/// Our answer to the peer's offer, its candidates gathered.
+/// Our answer to the peer's offer, its candidates gathered. The devices as for the offer.
 #[tauri::command]
 pub async fn native_call_answer(
     id: String,
     offer: String,
     camera: Option<u32>,
-) -> Result<String, String> {
+    microphone: Option<String>,
+    speaker: Option<String>,
+) -> Result<Described, String> {
     #[cfg(target_os = "linux")]
     {
+        let devices = engine::Devices {
+            microphone,
+            speaker,
+        };
         let call = logged(
             "starting",
-            media(&id, engine::offered_payload_types(&offer), camera).await,
+            media(&id, engine::offered_payload_types(&offer), camera, devices).await,
         )?;
-        logged("the answer", call.answer(&offer).await)
+        let sdp = logged("the answer", call.answer(&offer).await)?;
+        Ok(described(&call, sdp))
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (id, offer, camera);
+        let _ = (id, offer, camera, microphone, speaker);
+        Err(ELSEWHERE.into())
+    }
+}
+
+/// Sends the microphone named `device` in place of the one on (null: the default); the default too when there
+/// is none by that name. Returns the name of the one sent now (null: the default).
+#[tauri::command]
+pub async fn native_call_microphone(
+    id: String,
+    device: Option<String>,
+) -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let call = call(&id)?;
+        logged(
+            "switching the microphone",
+            blocking(move || call.set_microphone(device.as_deref())).await,
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (id, device);
+        Err(ELSEWHERE.into())
+    }
+}
+
+/// Plays the call on the speaker named `device` (null: the default), from now on.
+#[tauri::command]
+pub async fn native_call_speaker(id: String, device: Option<String>) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let call = call(&id)?;
+        logged(
+            "switching the speaker",
+            blocking(move || call.set_speaker(device)).await,
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (id, device);
         Err(ELSEWHERE.into())
     }
 }
@@ -316,23 +443,34 @@ pub fn native_call_camera(id: String, camera: Option<u32>) -> Result<(), String>
     }
 }
 
-/// What went each way so far: frames and audio buffers sent and received, the ICE state, and whether the
-/// microphone is muted. Without an id, the call in progress (there is one at a time), or null.
+/// What went each way so far: frames and audio buffers sent and received, the ICE state, whether the
+/// microphone is muted, and the microphone, speaker and camera in use by name (null: the default, or none).
+/// Without an id, the call in progress (there is one at a time), or null.
 #[tauri::command]
 pub fn native_call_stats(id: Option<String>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "linux")]
     {
-        let call = match id {
-            Some(id) => Some(call(&id)?),
-            None => calls()
-                .lock()
-                .unwrap()
-                .calls
-                .values()
-                .find_map(|l| l.call.clone()),
+        let (call, camera) = {
+            let calls = calls().lock().unwrap();
+            let live = match &id {
+                Some(id) => calls.calls.get(id).filter(|l| l.call.is_some()),
+                None => calls.calls.values().find(|l| l.call.is_some()),
+            };
+            if id.is_some() && live.is_none() {
+                return Err("No such call".into());
+            }
+            let camera = live
+                .and_then(|l| l.camera)
+                .and_then(|c| calls.cameras.get(&c))
+                .and_then(|c| c.device.clone());
+            (live.and_then(|l| l.call.clone()), camera)
         };
         match call {
-            Some(call) => serde_json::to_value(call.stats()).map_err(|e| e.to_string()),
+            Some(call) => {
+                let mut stats = serde_json::to_value(call.stats()).map_err(|e| e.to_string())?;
+                stats["camera"] = camera.into();
+                Ok(stats)
+            }
             None => Ok(serde_json::Value::Null),
         }
     }

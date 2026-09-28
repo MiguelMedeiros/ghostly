@@ -3,10 +3,12 @@ import {
   EMPTY_DEVICES,
   canPickSpeaker,
   chooseDevice,
+  deviceSource,
   listDevices,
   loadDeviceChoices,
   resolveDevice,
   trackDevice,
+  watchDevices,
   type DeviceKind,
   type DeviceList,
 } from "../lib/mediaDevices";
@@ -55,7 +57,7 @@ const followsSystem = (id: string | undefined) => !id || id === "default" || id 
  * The device menu of a call and what keeps it honest: switching the microphone, camera and speaker live (a
  * choice made here is this profile's from then on), and following headsets in and out. When the device a call
  * uses disappears, the call goes on with the default and says so; when the chosen one comes back, it offers
- * to switch back. Null where the call's media cannot switch (Linux Desktop's native calls) or no call is on.
+ * to switch back. Null where the call's media cannot switch devices or no call is on.
  */
 export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
   const active = webrtc.callState !== "idle" && webrtc.callState !== "incoming" && webrtc.canSwitchDevices;
@@ -162,11 +164,10 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       });
     };
     update();
-    const media = navigator.mediaDevices;
-    media?.addEventListener?.("devicechange", update);
+    const stop = watchDevices(update);
     return () => {
       live = false;
-      media?.removeEventListener?.("devicechange", update);
+      stop();
     };
   }, [active, check]);
 
@@ -189,6 +190,11 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
     }
     if (canPickSpeaker()) setSpeaker(loadDeviceChoices().audiooutput?.id);
   }, [active, setNotice]);
+
+  // Where the call's sound plays outside the page (Linux Desktop's native calls), the speaker goes there too.
+  useEffect(() => {
+    if (active) deviceSource()?.playCallOn(speaker);
+  }, [active, speaker]);
 
   const choose = useCallback((kind: DeviceKind, deviceId: string) => {
     const device = list[kind].find((d) => d.id === deviceId);

@@ -23,7 +23,8 @@ import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
 import { desktopAtproto } from "./atproto";
-import { nativeCallOptions, type NativeCallSupport } from "./nativeCalls";
+import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
+import { setDeviceSource } from "../lib/mediaDevices";
 import { engine } from "@ghostly/browser/platform/engine";
 import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
@@ -181,6 +182,8 @@ function serveServiceWindows(server: EngineServer): void {
 /** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
 export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
   const { node: callOptions, callMedia } = nativeCallOptions(calls);
+  // Native calls capture and play in Rust: the microphones, cameras and speakers to choose from are GStreamer's.
+  if (callMedia) setDeviceSource(nativeDevices);
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));

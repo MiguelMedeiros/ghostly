@@ -47,10 +47,40 @@ export function chooseDevice(kind: DeviceKind, device: ChosenDevice | null): voi
 /** The ids browsers give their own "follow the system" entries, which the default option already is. */
 const PSEUDO = new Set(["default", "communications"]);
 
-export const hasMediaDevices = () => typeof navigator !== "undefined" && typeof navigator.mediaDevices?.enumerateDevices === "function";
+/**
+ * Where the devices come from when not the page's own `navigator.mediaDevices`: Ghostly Desktop on Linux, whose
+ * calls capture and play in Rust (src/desktop/nativeCalls.ts). A device's id there is its name.
+ */
+export interface DeviceSource {
+  list(): Promise<DeviceList>;
+  /** Calls `changed` at each plug and unplug; returns what stops it. */
+  watch(changed: () => void): () => void;
+  /** Captures as `getUserMedia` does, from these devices (the camera's preview in Settings). */
+  getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
+  /** Plays the call on this speaker (undefined: the default). The page's own sounds are not the source's. */
+  playCallOn(id: string | undefined): void;
+}
+
+let source: DeviceSource | null = null;
+
+export function setDeviceSource(next: DeviceSource | null): void {
+  source = next;
+}
+
+export const deviceSource = (): DeviceSource | null => source;
+
+export const hasMediaDevices = () => !!source || (typeof navigator !== "undefined" && typeof navigator.mediaDevices?.enumerateDevices === "function");
 
 /** Whether this engine can send sound to a chosen speaker (Chromium does; Safari and older WebKit may not). */
-export const canPickSpeaker = () => typeof HTMLMediaElement !== "undefined" && typeof (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId === "function";
+export const canPickSpeaker = () => !!source || (typeof HTMLMediaElement !== "undefined" && typeof (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId === "function");
+
+/** Calls `changed` whenever a device is plugged in or out; returns what stops it. */
+export function watchDevices(changed: () => void): () => void {
+  if (source) return source.watch(changed);
+  const media = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+  media?.addEventListener?.("devicechange", changed);
+  return () => media?.removeEventListener?.("devicechange", changed);
+}
 
 export interface DeviceList {
   audioinput: Device[];
@@ -84,7 +114,7 @@ export function groupDevices(infos: readonly MediaDeviceInfo[]): DeviceList {
 export async function listDevices(): Promise<DeviceList> {
   if (!hasMediaDevices()) return EMPTY_DEVICES;
   try {
-    return groupDevices(await navigator.mediaDevices.enumerateDevices());
+    return source ? await source.list() : groupDevices(await navigator.mediaDevices.enumerateDevices());
   } catch {
     return EMPTY_DEVICES;
   }

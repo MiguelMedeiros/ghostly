@@ -10,8 +10,9 @@
 //! (through gupnp-igd), and loading libsoup 2 into a WebKitGTK 4.1 process (libsoup 3) aborts it.
 //!
 //! The page drives this through `src/desktop/nativeCalls.ts`, which looks like an `RTCPeerConnection` to the
-//! call hook.
+//! call hook. Which microphone, camera and speaker: [`devices`](super::devices), by name.
 
+use super::devices::{self, Kind, FAKE_CAMERAS};
 use bytes::Bytes;
 use gst::prelude::*;
 use gstreamer as gst;
@@ -58,6 +59,9 @@ const KEYFRAME_UNTIL_PICTURE: Duration = Duration::from_secs(1);
 
 /// A JPEG frame for the page, or an event: whatever the page is told.
 pub type Sink = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
+
+/// The test tone that stands for the microphone ([`fake_media`]).
+const TONE: &str = "audiotestsrc is-live=true wave=sine freq=440 volume=0.2";
 
 /// Test pictures and a test tone in place of the camera and the microphone: the end-to-end tests set
 /// `GHOSTLY_FAKE_MEDIA`, like Chromium's fake devices. Debug builds only.
@@ -169,30 +173,122 @@ fn stop(pipeline: gst::Pipeline) {
     let _ = pipeline.set_state(gst::State::Null);
 }
 
+/// `description` with the device named `name` where `{device}` is: GStreamer makes its element from the device
+/// (`pulsesrc device=…`, `v4l2src device=…`, `pipewiresrc path=…`), so it is linked in by hand, after a queue
+/// standing in its place.
+fn with_device(description: &str, kind: Kind, name: &str) -> Result<gst::Pipeline, String> {
+    let device = devices::element(kind, name).ok_or("there is none by that name")?;
+    let pipeline = launch(&description.replace("{device}", "queue name=device"))?;
+    let slot: gst::Element = element(&pipeline, "device")?;
+    pipeline.add(&device).map_err(|e| e.to_string())?;
+    let linked = if kind == Kind::Speaker {
+        slot.link(&device)
+    } else {
+        device.link(&slot)
+    };
+    linked.map_err(|e| e.to_string())?;
+    Ok(pipeline)
+}
+
+/// Plays `description` with the `kind` named `wanted` where `{device}` is, or with `default` when there is no
+/// such device or it will not start (said in the log; the page sees it in what is used). `ready` sets the
+/// pipeline up before it plays. Returns it and the name of the device it uses, None for the default.
+fn start_with(
+    what: &str,
+    description: &str,
+    kind: Kind,
+    wanted: Option<&str>,
+    default: &str,
+    ready: impl Fn(&gst::Pipeline) -> Result<(), String>,
+) -> Result<(gst::Pipeline, Option<String>), String> {
+    if let Some(name) = wanted {
+        let chosen = with_device(description, kind, name).and_then(|pipeline| {
+            ready(&pipeline)?;
+            start(&pipeline, what)?;
+            Ok(pipeline)
+        });
+        match chosen {
+            Ok(pipeline) => return Ok((pipeline, Some(name.to_string()))),
+            Err(error) => crate::diagnostics::log(&format!(
+                "native call: the {} \"{name}\": {error}; the default instead",
+                kind.noun()
+            )),
+        }
+    }
+    let pipeline = launch(&description.replace("{device}", default))?;
+    ready(&pipeline)?;
+    start(&pipeline, what)?;
+    Ok((pipeline, None))
+}
+
 /// A camera, open until dropped; its frames go to the call it is attached to, if any.
 pub struct Camera {
     pipeline: gst::Pipeline,
     target: Arc<Mutex<Option<gst_app::AppSrc>>>,
+    /// The camera's name, None for the default one.
+    pub device: Option<String>,
 }
 
 impl Camera {
-    /// `fake`: a test picture instead of the camera ([`fake_media`]). `preview` gets each frame as a JPEG.
-    pub fn open(fake: bool, preview: Sink) -> Result<Camera, String> {
-        let source = if fake {
-            "videotestsrc is-live=true pattern=ball"
-        } else {
-            "v4l2src"
-        };
-        let pipeline = launch(&format!(
-            "{source} ! videoconvert ! videoscale ! videorate \
+    /// The camera named `wanted`, or the default one. `fake`: a test picture instead of the default
+    /// ([`fake_media`]), and the test cameras by name. `preview` gets each frame as a JPEG.
+    pub fn open(fake: bool, wanted: Option<&str>, preview: Sink) -> Result<Camera, String> {
+        let description = format!(
+            "{{device}} ! videoconvert ! videoscale ! videorate \
              ! video/x-raw,format=I420,width={WIDTH},pixel-aspect-ratio=1/1,framerate={FPS}/1 ! tee name=t \
              t. ! queue leaky=downstream max-size-buffers=2 ! appsink name=out sync=false async=false max-buffers=2 drop=true \
              t. ! queue leaky=downstream max-size-buffers=2 ! jpegenc quality=70 \
              ! appsink name=preview sync=false async=false max-buffers=2 drop=true"
-        ))?;
+        );
+        let test = |pattern: &str| format!("videotestsrc is-live=true pattern={pattern}");
+        let pretend = wanted
+            .filter(|_| fake)
+            .and_then(|name| FAKE_CAMERAS.iter().find(|(n, _)| *n == name));
         let target: Arc<Mutex<Option<gst_app::AppSrc>>> = Arc::default();
+        let ready = |pipeline: &gst::Pipeline| Camera::wire(pipeline, &target, &preview);
+        let (pipeline, device) = match pretend {
+            Some((name, pattern)) => {
+                let (pipeline, _) = start_with(
+                    "The camera",
+                    &description,
+                    Kind::Camera,
+                    None,
+                    &test(pattern),
+                    ready,
+                )?;
+                (pipeline, Some(name.to_string()))
+            }
+            None => {
+                let default = if fake {
+                    test(FAKE_CAMERAS[0].1)
+                } else {
+                    "v4l2src".to_string()
+                };
+                start_with(
+                    "The camera",
+                    &description,
+                    Kind::Camera,
+                    wanted,
+                    &default,
+                    ready,
+                )?
+            }
+        };
+        Ok(Camera {
+            pipeline,
+            target,
+            device,
+        })
+    }
+
+    /// The camera's frames to `target`'s call, and to `preview`.
+    fn wire(
+        pipeline: &gst::Pipeline,
+        target: &Arc<Mutex<Option<gst_app::AppSrc>>>,
+        preview: &Sink,
+    ) -> Result<(), String> {
         let to = target.clone();
-        element::<gst_app::AppSink>(&pipeline, "out")?.set_callbacks(
+        element::<gst_app::AppSink>(pipeline, "out")?.set_callbacks(
             gst_app::AppSinkCallbacks::builder()
                 .new_sample(move |appsink| {
                     let sample = appsink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
@@ -217,13 +313,13 @@ impl Camera {
                 })
                 .build(),
         );
-        each_buffer(&element(&pipeline, "preview")?, move |buffer| {
+        let preview = preview.clone();
+        each_buffer(&element(pipeline, "preview")?, move |buffer| {
             if let Some(jpeg) = bytes_of(buffer) {
                 preview(jpeg);
             }
         });
-        start(&pipeline, "The camera")?;
-        Ok(Camera { pipeline, target })
+        Ok(())
     }
 
     /// Sends the frames to this call's video input, or nowhere.
@@ -257,6 +353,17 @@ pub struct Stats {
     pub video_received: u64,
     pub ice: String,
     pub muted: bool,
+    /// The devices in use, by name; None is the default (or, for the speaker, no sound yet).
+    pub microphone: Option<String>,
+    pub speaker: Option<String>,
+}
+
+/// The peer's sound, playing: where its RTP goes, and on which speaker.
+struct Playing {
+    rtp: gst_app::AppSrc,
+    pipeline: gst::Pipeline,
+    payload_type: u8,
+    device: Option<String>,
 }
 
 /// What the call's handler and its tasks share.
@@ -270,6 +377,10 @@ struct Shared {
     candidates: Mutex<(Vec<String>, bool)>,
     gathered: Notify,
     receiving: Mutex<Vec<gst::Pipeline>>,
+    /// The speaker chosen for the peer's sound, by name (None: the default).
+    speaker: Mutex<Option<String>>,
+    /// The peer's sound, once it arrives; replaced when the speaker changes.
+    sound: Mutex<Option<Playing>>,
     closed: AtomicBool,
 }
 
@@ -340,22 +451,38 @@ async fn receive(shared: Arc<Shared>, track: Arc<dyn TrackRemote>) {
         let TrackRemoteEvent::OnRtpPacket(packet) = event else {
             continue;
         };
+        if !video {
+            // The sound's pipeline changes with the speaker: read each time.
+            let rtp = match playing(&shared, packet.header.payload_type) {
+                Ok(rtp) => rtp,
+                Err(error) => {
+                    crate::diagnostics::log(&format!("native call: no audio receiver: {error}"));
+                    return;
+                }
+            };
+            if let Ok(bytes) = packet.marshal() {
+                let _ = rtp.push_buffer(gst::Buffer::from_slice(bytes));
+            }
+            continue;
+        }
         if input.is_none() {
             match receiver(
                 &shared,
-                video,
+                true,
                 packet.header.payload_type,
                 decoded.clone(),
                 keyframe_tx.clone(),
             ) {
-                Ok(src) => input = Some(src),
+                Ok((src, pipeline, _)) => {
+                    shared.receiving.lock().unwrap().push(pipeline);
+                    input = Some(src);
+                }
                 Err(error) => {
-                    let kind = if video { "video" } else { "audio" };
-                    crate::diagnostics::log(&format!("native call: no {kind} receiver: {error}"));
+                    crate::diagnostics::log(&format!("native call: no video receiver: {error}"));
                     return;
                 }
             }
-            if let (true, Some(mut asked)) = (video, keyframe_rx.take()) {
+            if let Some(mut asked) = keyframe_rx.take() {
                 // Keyframes: asked for until a picture shows, then whenever the depayloader lost one.
                 let (track, decoded, ssrc) = (track.clone(), decoded.clone(), packet.header.ssrc);
                 tokio::spawn(async move {
@@ -381,13 +508,34 @@ async fn receive(shared: Arc<Shared>, track: Arc<dyn TrackRemote>) {
     }
 }
 
+/// Where the peer's sound goes now, started on the chosen speaker with its first packet.
+fn playing(shared: &Arc<Shared>, payload_type: u8) -> Result<gst_app::AppSrc, String> {
+    let mut sound = shared.sound.lock().unwrap();
+    if let Some(playing) = &*sound {
+        return Ok(playing.rtp.clone());
+    }
+    if shared.closed.load(Ordering::Relaxed) {
+        return Err("The call was closed".into());
+    }
+    let (keyframes, _) = mpsc::unbounded_channel();
+    let (rtp, pipeline, device) = receiver(shared, false, payload_type, Arc::default(), keyframes)?;
+    *sound = Some(Playing {
+        rtp: rtp.clone(),
+        pipeline,
+        payload_type,
+        device,
+    });
+    Ok(rtp)
+}
+
+/// A pipeline for one incoming track, playing: its RTP input, and for sound, the speaker it plays on.
 fn receiver(
     shared: &Arc<Shared>,
     video: bool,
     payload_type: u8,
     decoded: Arc<AtomicBool>,
     keyframes: mpsc::UnboundedSender<()>,
-) -> Result<gst_app::AppSrc, String> {
+) -> Result<(gst_app::AppSrc, gst::Pipeline, Option<String>), String> {
     let description = if video {
         format!(
             "appsrc name=rtp is-live=true format=time do-timestamp=true \
@@ -398,22 +546,49 @@ fn receiver(
              ! appsink name=picture sync=false async=false max-buffers=2 drop=true"
         )
     } else {
-        let speakers = if shared.fake {
-            "fakesink sync=true async=false"
-        } else {
-            "autoaudiosink"
-        };
         format!(
             "appsrc name=rtp is-live=true format=time do-timestamp=true \
              caps=\"application/x-rtp,media=(string)audio,clock-rate=(int)48000,encoding-name=(string)OPUS,payload=(int){payload_type}\" \
              ! rtpjitterbuffer latency=60 ! rtpopusdepay ! opusdec plc=true name=decoder \
-             ! audioconvert ! audioresample ! {speakers}"
+             ! audioconvert ! audioresample ! {{device}}"
         )
     };
-    let pipeline = launch(&description)?;
-    let src: gst_app::AppSrc = element(&pipeline, "rtp")?;
+    let ready = |pipeline: &gst::Pipeline| receiving(shared, pipeline, video, &decoded, &keyframes);
+    if video {
+        let pipeline = launch(&description)?;
+        ready(&pipeline)?;
+        start(&pipeline, "The picture")?;
+        return Ok((element(&pipeline, "rtp")?, pipeline, None));
+    }
+    let wanted = shared.speaker.lock().unwrap().clone();
+    let default = if shared.fake {
+        "fakesink sync=true async=false"
+    } else {
+        "autoaudiosink"
+    };
+    let (pipeline, device) = start_with(
+        "The speakers",
+        &description,
+        Kind::Speaker,
+        wanted.as_deref(),
+        default,
+        ready,
+    )?;
+    Ok((element(&pipeline, "rtp")?, pipeline, device))
+}
+
+/// Counts what a receiving pipeline decodes and, for pictures, sends them to the page and asks for keyframes.
+fn receiving(
+    shared: &Arc<Shared>,
+    pipeline: &gst::Pipeline,
+    video: bool,
+    decoded: &Arc<AtomicBool>,
+    keyframes: &mpsc::UnboundedSender<()>,
+) -> Result<(), String> {
+    let src: gst_app::AppSrc = element(pipeline, "rtp")?;
     let counting = shared.clone();
-    let decoder: gst::Element = element(&pipeline, "decoder")?;
+    let decoder: gst::Element = element(pipeline, "decoder")?;
+    let decoded = decoded.clone();
     decoder
         .static_pad("src")
         .ok_or("No decoder output")?
@@ -432,7 +607,7 @@ fn receiver(
     if video {
         // At most SHOWN_FPS pictures a second go to the page (videorate's drop-only asserts on 1.20 here).
         let (events, last) = (shared.events.clone(), Mutex::new(None::<Instant>));
-        each_buffer(&element(&pipeline, "picture")?, move |buffer| {
+        each_buffer(&element(pipeline, "picture")?, move |buffer| {
             let mut last = last.lock().unwrap();
             let now = Instant::now();
             if last.is_some_and(|at| now - at < Duration::from_secs(1) / SHOWN_FPS) {
@@ -444,6 +619,7 @@ fn receiver(
             }
         });
         // The depayloader lost a frame and wants a keyframe: that goes to the sender as a PLI.
+        let keyframes = keyframes.clone();
         src.static_pad("src").ok_or("No RTP output")?.add_probe(
             gst::PadProbeType::EVENT_UPSTREAM,
             move |_, info| {
@@ -459,12 +635,7 @@ fn receiver(
             },
         );
     }
-    start(
-        &pipeline,
-        if video { "The picture" } else { "The speakers" },
-    )?;
-    shared.receiving.lock().unwrap().push(pipeline);
-    Ok(src)
+    Ok(())
 }
 
 /// The payload types an offer gives Opus and VP8, so the answer sends what the offerer will read as such.
@@ -646,25 +817,35 @@ async fn outgoing(
     Ok(Outgoing { track, ssrc })
 }
 
-/// Writes what an encoder makes to a track, from a task: GStreamer's threads only queue it.
-fn write_from(
+/// What an encoder made, on its way to a track.
+type Frames = mpsc::Sender<(Bytes, Duration)>;
+
+/// Queues what an encoder makes for the track's writer, while `live` holds (a microphone being replaced
+/// stops as its successor starts). GStreamer's threads only queue it.
+fn feed(
     appsink: &gst_app::AppSink,
-    out: Outgoing,
-    payload_type: u8,
+    frames: Frames,
     frame: Duration,
-    sent: impl Fn() + Send + 'static,
+    live: impl Fn() -> bool + Send + Sync + 'static,
 ) {
-    let (tx, mut rx) = mpsc::channel::<(Bytes, Duration)>(64);
     each_buffer(appsink, move |buffer| {
+        if !live() {
+            return;
+        }
         let duration = buffer
             .duration()
             .map(|d| Duration::from_nanos(d.nseconds()))
             .unwrap_or(frame);
         if let Some(bytes) = bytes_of(buffer) {
             // Before the call connects, or when writing falls behind, frames are dropped rather than queued.
-            let _ = tx.try_send((Bytes::from(bytes), duration));
+            let _ = frames.try_send((Bytes::from(bytes), duration));
         }
     });
+}
+
+/// Writes what the encoders feed it to a track, from a task, for the whole call.
+fn writer(out: Outgoing, payload_type: u8, sent: impl Fn() + Send + 'static) -> Frames {
+    let (tx, mut rx) = mpsc::channel::<(Bytes, Duration)>(64);
     tokio::spawn(async move {
         let mut failing = false;
         while let Some((data, duration)) = rx.recv().await {
@@ -692,22 +873,92 @@ fn write_from(
             }
         }
     });
+    tx
+}
+
+/// The microphone to Opus, for the audio track's writer.
+const MICROPHONE: &str = "{device} ! queue ! audioconvert ! audioresample ! volume name=mic \
+     ! audio/x-raw,rate=48000,channels=1 ! opusenc bitrate=32000 frame-size=20 \
+     ! appsink name=opus sync=false async=false max-buffers=50 drop=true";
+
+/// The microphone a call sends, playing.
+struct Microphone {
+    pipeline: gst::Pipeline,
+    volume: gst::Element,
+    device: Option<String>,
+}
+
+/// What a call's microphone pipelines share: where they write, which one is current, and whether it is muted.
+struct Voice {
+    fake: bool,
+    frames: Frames,
+    current: Arc<AtomicU64>,
+    muted: AtomicBool,
+}
+
+impl Voice {
+    /// Starts the microphone named `wanted` (or the default), and makes it the one the call sends.
+    fn open(&self, wanted: Option<&str>) -> Result<Microphone, String> {
+        let mine = self.current.load(Ordering::Relaxed) + 1;
+        let muted = self.muted.load(Ordering::Relaxed);
+        let default = if self.fake { TONE } else { "autoaudiosrc" };
+        let (pipeline, device) = start_with(
+            "The microphone",
+            MICROPHONE,
+            Kind::Microphone,
+            wanted,
+            default,
+            |p| {
+                element::<gst::Element>(p, "mic")?.set_property("mute", muted);
+                let current = self.current.clone();
+                feed(
+                    &element(p, "opus")?,
+                    self.frames.clone(),
+                    Duration::from_millis(20),
+                    move || current.load(Ordering::Relaxed) == mine,
+                );
+                Ok(())
+            },
+        )?;
+        self.current.store(mine, Ordering::Relaxed);
+        Ok(Microphone {
+            volume: element(&pipeline, "mic")?,
+            pipeline,
+            device,
+        })
+    }
 }
 
 /// One call: a peer connection, and the pipelines that feed it and play what it brings.
 pub struct Call {
     pc: Arc<dyn PeerConnection>,
     shared: Arc<Shared>,
+    /// Pictures to VP8; cameras come and go at its input.
     send: gst::Pipeline,
     video_in: gst_app::AppSrc,
-    mic: gst::Element,
+    voice: Voice,
+    microphone: Mutex<Microphone>,
     ssrcs: (u32, u32),
+}
+
+/// The microphone and the speaker a call starts with, by name (None: the default).
+#[derive(Default)]
+pub struct Devices {
+    pub microphone: Option<String>,
+    pub speaker: Option<String>,
 }
 
 impl Call {
     /// The pipelines playing and the peer connection ready to offer or answer. `fake`: a test tone and nothing
-    /// played ([`fake_media`]). `events` hears the ICE state (JSON) and each picture that arrives (JPEG).
-    pub async fn new(opus_pt: u8, vp8_pt: u8, fake: bool, events: Sink) -> Result<Call, String> {
+    /// played by default ([`fake_media`]; a device chosen by name is used all the same). `events` hears the ICE
+    /// state (JSON) and each picture that arrives (JPEG).
+    pub async fn new(
+        opus_pt: u8,
+        vp8_pt: u8,
+        fake: bool,
+        devices: Devices,
+        events: Sink,
+    ) -> Result<Call, String> {
         let mut media = MediaEngine::default();
         media
             .register_codec(codec(RtpCodecKind::Audio, opus_pt), RtpCodecKind::Audio)
@@ -726,6 +977,8 @@ impl Call {
             candidates: Mutex::default(),
             gathered: Notify::new(),
             receiving: Mutex::default(),
+            speaker: Mutex::new(devices.speaker),
+            sound: Mutex::default(),
             closed: AtomicBool::new(false),
         });
         let pc: Arc<dyn PeerConnection> = Arc::new(
@@ -750,53 +1003,112 @@ impl Call {
         let video = outgoing(&pc, RtpCodecKind::Video, vp8_pt).await?;
         let ssrcs = (audio.ssrc, video.ssrc);
 
-        let microphone = if fake {
-            "audiotestsrc is-live=true wave=sine freq=440 volume=0.2"
-        } else {
-            "autoaudiosrc"
-        };
-        let send = launch(&format!(
-            "{microphone} ! queue ! audioconvert ! audioresample ! volume name=mic \
-             ! audio/x-raw,rate=48000,channels=1 ! opusenc bitrate=32000 frame-size=20 \
-             ! appsink name=opus sync=false async=false max-buffers=50 drop=true \
-             appsrc name=video is-live=true format=time do-timestamp=true ! queue leaky=downstream max-size-buffers=4 \
-             ! videoconvert ! vp8enc deadline=1 cpu-used=8 threads=2 target-bitrate=600000 end-usage=cbr keyframe-max-dist={FPS} \
-             ! appsink name=vp8 sync=false async=false max-buffers=10 drop=true"
-        ))?;
         let counted = shared.clone();
-        write_from(
-            &element(&send, "opus")?,
-            audio,
-            opus_pt,
-            Duration::from_millis(20),
-            move || {
+        let voice = Voice {
+            fake,
+            frames: writer(audio, opus_pt, move || {
                 counted.counts.audio_sent.fetch_add(1, Ordering::Relaxed);
-            },
-        );
+            }),
+            current: Arc::default(),
+            muted: AtomicBool::new(false),
+        };
         let counted = shared.clone();
-        write_from(
-            &element(&send, "vp8")?,
-            video,
-            vp8_pt,
-            Duration::from_secs(1) / FPS,
-            move || {
-                counted.counts.video_sent.fetch_add(1, Ordering::Relaxed);
-            },
-        );
-        let video_in = element(&send, "video")?;
-        let mic = element(&send, "mic")?;
-        if let Err(error) = start(&send, "The microphone") {
-            let _ = pc.close().await;
-            return Err(error);
-        }
+        let pictures = writer(video, vp8_pt, move || {
+            counted.counts.video_sent.fetch_add(1, Ordering::Relaxed);
+        });
+        let started = (|| {
+            let send = launch(&format!(
+                "appsrc name=video is-live=true format=time do-timestamp=true ! queue leaky=downstream max-size-buffers=4 \
+                 ! videoconvert ! vp8enc deadline=1 cpu-used=8 threads=2 target-bitrate=600000 end-usage=cbr keyframe-max-dist={FPS} \
+                 ! appsink name=vp8 sync=false async=false max-buffers=10 drop=true"
+            ))?;
+            feed(
+                &element(&send, "vp8")?,
+                pictures,
+                Duration::from_secs(1) / FPS,
+                || true,
+            );
+            start(&send, "The video")?;
+            match voice.open(devices.microphone.as_deref()) {
+                Ok(microphone) => Ok((send, microphone)),
+                Err(error) => {
+                    stop(send);
+                    Err(error)
+                }
+            }
+        })();
+        let (send, microphone) = match started {
+            Ok(started) => started,
+            Err(error) => {
+                let _ = pc.close().await;
+                return Err(error);
+            }
+        };
         Ok(Call {
             pc,
             shared,
+            video_in: element(&send, "video")?,
             send,
-            video_in,
-            mic,
+            voice,
+            microphone: Mutex::new(microphone),
             ssrcs,
         })
+    }
+
+    /// Sends the microphone named `wanted` (None: the default) in place of the one on, muted if the call is.
+    /// The old one stops once the new one plays. Returns the name of the one in use (None: the default).
+    /// Blocking: GStreamer starts and stops the pipelines.
+    pub fn set_microphone(&self, wanted: Option<&str>) -> Result<Option<String>, String> {
+        let mut microphone = self.microphone.lock().unwrap();
+        if self.shared.closed.load(Ordering::Relaxed) {
+            return Err("The call was closed".into());
+        }
+        let next = self.voice.open(wanted)?;
+        let previous = std::mem::replace(&mut *microphone, next);
+        stop(previous.pipeline);
+        crate::diagnostics::log(&format!(
+            "native call: microphone {}",
+            microphone.device.as_deref().unwrap_or("(default)")
+        ));
+        Ok(microphone.device.clone())
+    }
+
+    /// Plays the peer's sound on the speaker named `wanted` (None: the default), from now on. Blocking.
+    pub fn set_speaker(&self, wanted: Option<String>) -> Result<(), String> {
+        {
+            let mut speaker = self.shared.speaker.lock().unwrap();
+            if *speaker == wanted {
+                return Ok(());
+            }
+            *speaker = wanted;
+        }
+        // Held while the new one starts: the sound waits for it rather than going to the old one.
+        let mut sound = self.shared.sound.lock().unwrap();
+        let Some(payload_type) = sound.as_ref().map(|s| s.payload_type) else {
+            // No sound yet: it starts on this speaker.
+            return Ok(());
+        };
+        if self.shared.closed.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let (keyframes, _) = mpsc::unbounded_channel();
+        let (rtp, pipeline, device) =
+            receiver(&self.shared, false, payload_type, Arc::default(), keyframes)?;
+        crate::diagnostics::log(&format!(
+            "native call: speaker {}",
+            device.as_deref().unwrap_or("(default)")
+        ));
+        let previous = sound.replace(Playing {
+            rtp,
+            pipeline,
+            payload_type,
+            device,
+        });
+        drop(sound);
+        if let Some(previous) = previous {
+            stop(previous.pipeline);
+        }
+        Ok(())
     }
 
     /// Waits for the candidates worth sending, as `waitForIceGathering` does in a browser.
@@ -883,7 +1195,12 @@ impl Call {
     }
 
     pub fn set_muted(&self, muted: bool) {
-        self.mic.set_property("mute", muted);
+        self.voice.muted.store(muted, Ordering::Relaxed);
+        self.microphone
+            .lock()
+            .unwrap()
+            .volume
+            .set_property("mute", muted);
     }
 
     pub fn video_input(&self) -> gst_app::AppSrc {
@@ -898,7 +1215,15 @@ impl Call {
             audio_received: c.audio_received.load(Ordering::Relaxed),
             video_received: c.video_received.load(Ordering::Relaxed),
             ice: self.shared.ice.lock().unwrap().clone(),
-            muted: self.mic.property::<bool>("mute"),
+            muted: self.voice.muted.load(Ordering::Relaxed),
+            microphone: self.microphone.lock().unwrap().device.clone(),
+            speaker: self
+                .shared
+                .sound
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|s| s.device.clone()),
         }
     }
 
@@ -907,7 +1232,9 @@ impl Call {
         self.shared.closed.store(true, Ordering::Relaxed);
         let _ = self.pc.close().await;
         let mut pipelines = std::mem::take(&mut *self.shared.receiving.lock().unwrap());
+        pipelines.extend(self.shared.sound.lock().unwrap().take().map(|s| s.pipeline));
         pipelines.push(self.send.clone());
+        pipelines.push(self.microphone.lock().unwrap().pipeline.clone());
         let _ = tokio::task::spawn_blocking(move || pipelines.into_iter().for_each(stop)).await;
     }
 }
@@ -977,10 +1304,11 @@ mod tests {
         }
         let frames = Arc::new(AtomicU64::new(0));
         let seen = frames.clone();
-        let a = Call::new(OPUS_PT, VP8_PT, true, Arc::new(|_| {}))
+        let a = Call::new(OPUS_PT, VP8_PT, true, Devices::default(), Arc::new(|_| {}))
             .await
             .unwrap();
-        let a_camera = Camera::open(true, Arc::new(|_| {})).unwrap();
+        let a_camera = Camera::open(true, None, Arc::new(|_| {})).unwrap();
+        assert_eq!(a_camera.device, None);
         a_camera.attach(Some(a.video_input()));
         let offer = a.offer().await.unwrap();
         assert!(
@@ -992,6 +1320,7 @@ mod tests {
             opus,
             vp8,
             true,
+            Devices::default(),
             Arc::new(move |bytes: Vec<u8>| {
                 if bytes.starts_with(&[0xff, 0xd8]) {
                     seen.fetch_add(1, Ordering::Relaxed);
@@ -1030,7 +1359,8 @@ mod tests {
         );
         // The answerer's camera comes on halfway, as it does in a voice call: no new offer.
         assert_eq!(a.stats().video_received, 0, "{}", stats());
-        let b_camera = Camera::open(true, Arc::new(|_| {})).unwrap();
+        let b_camera = Camera::open(true, Some("Test bars"), Arc::new(|_| {})).unwrap();
+        assert_eq!(b_camera.device.as_deref(), Some("Test bars"));
         b_camera.attach(Some(b.video_input()));
         until(
             "the offerer sees",
@@ -1039,6 +1369,39 @@ mod tests {
             stats,
         )
         .await;
+
+        // The microphone and the speaker change mid-call: to devices that are not there, so the defaults again,
+        // relaunched. The sound goes on both ways, and a muted microphone stays muted.
+        a.set_muted(true);
+        let (heard, sent) = (b.stats().audio_received, a.stats().audio_sent);
+        let used = tokio::task::block_in_place(|| a.set_microphone(Some("No such microphone")));
+        assert_eq!(used, Ok(None));
+        assert!(a.stats().muted, "{}", stats());
+        a.set_muted(false);
+        until(
+            "the new microphone is sent",
+            30,
+            || a.stats().audio_sent > sent + 20,
+            stats,
+        )
+        .await;
+        until(
+            "and heard",
+            30,
+            || b.stats().audio_received > heard + 20,
+            stats,
+        )
+        .await;
+        let heard = a.stats().audio_received;
+        tokio::task::block_in_place(|| a.set_speaker(Some("No such speaker".into()))).unwrap();
+        until(
+            "the sound plays on",
+            30,
+            || a.stats().audio_received > heard + 20,
+            stats,
+        )
+        .await;
+        assert_eq!(a.stats().speaker, None, "{}", stats());
         a.close().await;
         b.close().await;
     }
