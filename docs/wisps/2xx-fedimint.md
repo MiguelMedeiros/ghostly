@@ -5,8 +5,6 @@
 | Number assignment | 2xx; planned, number to be defined |
 | Status | Draft |
 | Kind | Adapter |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Lightning 203](203-lightning.md), [Profile Backups 05](05-backups.md), authenticated live data transport |
 | Implementation | Experimental browser adapter on the Fedimint web SDK (`@fedimint/core` canary, pinned). Mainnet and Testnet, each joined by invite code; regtest evidence below (Mainnet not yet exercised with real funds). |
@@ -89,3 +87,7 @@ Not yet exercised: a Mainnet federation with real funds, iroh federations (a pub
 ## References
 
 [Fedimint](https://fedimint.org), [documentation](https://docs.fedimint.org/), [web SDK](https://github.com/fedimint/fedimint-sdk) ([sdk.fedimint.org](https://sdk.fedimint.org)), [fedimint](https://github.com/fedimint/fedimint), [shared payment contract](200-payments.md), [Lightning sources](203-lightning.md), [profile backups](05-backups.md).
+
+## Revision log
+
+One file per change in [changes/2xx-fedimint/](changes/2xx-fedimint/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

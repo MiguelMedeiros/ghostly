@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 701; editorial family allocation |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [700](700-local-services.md) |
 | Implementation | Desktop/extension hosting in every chat: data-link frames in compatibility chats, the same frames inside `ph` frames in the chat session (`services/1`); web viewer where supported. |
@@ -37,6 +35,4 @@ The web app offers nothing here: a tab can neither reach a local address nor ope
 
 ## Revision log
 
-- 0.3 (2026-09-25): paired profile: `paired-services` and `ph` need `services/1` on both sides and a live session.
-- 0.2 (2026-09-25): hosting in the chat session (`ph` frames) recorded; the earlier "not paired hosted HTTP" was wrong.
-- 0.1 (2026-09-22): HTTP local service profile.
+One file per change in [changes/701-http-services/](changes/701-http-services/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

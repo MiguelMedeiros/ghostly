@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Experimental provider `bitcoin` (`packages/browser/src/proofs/providers/bitcoin.ts`); verifier in `@ghostly/core` |
@@ -58,3 +56,7 @@ Hardware wallets' current BIP-322 support and message-length limits per model an
 ## References
 
 [Identity Proofs](300-peer-proofs.md), [BIP-322](https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki), [BIP 137](https://github.com/bitcoin/bips/blob/master/bip-0137.mediawiki), [BIP 143](https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki), [BIP 341](https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki), [adapter roadmap](ADAPTER-ROADMAP.md).
+
+## Revision log
+
+One file per change in [changes/3xx-bitcoin/](changes/3xx-bitcoin/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

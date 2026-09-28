@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [04](04-profiles.md), [05](05-backups.md), [300](300-peer-proofs.md) |
 | Implementation | Experimental, web, desktop and extension: `packages/core/src/didDht.ts`, `packages/browser/src/engine/did.ts`, `src/components/identities/PublicDid.tsx`, Desktop `publish_signed_packet` |
@@ -132,3 +130,7 @@ A client MUST publish a profile's DID only under that profile's DID key, never u
 - [Decentralized Identifiers (DIDs) v1.0](https://www.w3.org/TR/did-core/), W3C.
 - [BEP 44](https://www.bittorrent.org/beps/bep_0044.html), storing arbitrary data in the DHT; [Pkarr](https://pkarr.org).
 - [RFC 1035](https://datatracker.ietf.org/doc/html/rfc1035), [RFC 7638](https://datatracker.ietf.org/doc/html/rfc7638).
+
+## Revision log
+
+One file per change in [changes/3xx-did-dht/](changes/3xx-did-dht/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

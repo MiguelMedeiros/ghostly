@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 1000; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [05](05-backups.md) |
 | Implementation | Experimental: local file ([1001](1001-local-storage.md)) and S3-compatible ([1002](1002-s3-storage.md)) adapters |
@@ -63,3 +61,7 @@ Two folders share a space. `<space>/backups/` holds bundles ([05](05-backups.md)
 ## Open decisions
 
 Retention (keep the last *n* per space), scheduled backups, resumable uploads for large bundles, and whether continuity beyond backups (sync between one person's devices) belongs in this family.
+
+## Revision log
+
+One file per change in [changes/1000-storage/](changes/1000-storage/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

@@ -255,6 +255,8 @@ export interface MacDesktop {
   bundle: string;
   /** What the app printed, for the report when something fails. */
   log: string[];
+  /** The app's own process (its WKWebView runs in WebKit processes of their own). */
+  pid?: number;
   /** Quits the app. `keep` leaves its data, for opening the same copy again with `open`. */
   stop(options?: { keep?: boolean }): Promise<void>;
 }
@@ -309,5 +311,5 @@ export async function openMacDesktop(options: MacDesktopOptions): Promise<MacDes
     await cleanup();
     throw error;
   }
-  return { app, bundleId: copy.bundleId, bundle: copy.app, log, stop: cleanup };
+  return { app, bundleId: copy.bundleId, bundle: copy.app, log, pid: child.pid, stop: cleanup };
 }

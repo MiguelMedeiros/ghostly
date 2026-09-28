@@ -35,6 +35,8 @@ export * from "./pairedSession";
 export * from "./pairedCapabilities";
 export * from "./pairedCalls";
 export * from "./pairedTyping";
+export * from "./webPush";
+export * from "./pairedWake";
 export * from "./pairedEdits";
 
 export * from "./pairedTransports";
@@ -76,6 +78,7 @@ export * from "./reactions";
 export * from "./groupEntry";
 export * from "./groupCommunity";
 export * from "./communityRendezvous";
+export * from "./groupHubs";
 export * from "./groupMeta";
 export * from "./pairingProgress";
 export { setLinkTraceSink } from "./linkTrace";

@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 1001; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [1000](1000-storage.md), [05](05-backups.md) |
 | Implementation | Experimental: web, desktop and browser extension clients |
@@ -28,3 +26,7 @@ The simplest place: a file the person keeps. It needs no account, network or cre
 
 - Where the file goes after saving (a USB stick, a password manager, cloud drive sync) is outside Ghostly, and so is its protection beyond the envelope's encryption.
 - On desktop the file lands in the downloads folder unless the platform asks. Native save dialogs are a planned improvement.
+
+## Revision log
+
+One file per change in [changes/1001-local-storage/](changes/1001-local-storage/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

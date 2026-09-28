@@ -71,67 +71,71 @@ Every command prints one JSON object on stdout. A failure prints `{"error":{"cod
 `1` failed (the engine or the network refused), `2` usage, `3` not found, `4` timed out, `5` needs a confirmation
 (`--force`, `--yes`, `--confirm-real`). A `<chat>` is its id, a unique prefix of it, or its name; a `<group>` too.
 
+The rows are in alphabetical order of their first command, and every command of `ghostly help` has one
+(`test/readme.test.ts` checks both).
+
 | Command | What it does |
 |---|---|
-| `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
-| `profile create <name> [--use] [--name <shown>]`, `profile list`, `profile use <name>` | Profiles |
-| `profile show`, `profile set [--name <name>] [--share-profile \| --no-share-profile]` | The name contacts see |
-| `daemon [--detach]`, `daemon status`, `daemon stop`, `daemon restart` | Keep the profile online; `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)) |
-| `invite create [--label <name>]` | A new chat's `ghostly1…` invite and its link |
-| `invite join <invite-or-link> [--label <name>]` | Join a chat (your own invite is refused) |
-| `chat list`, `chat show <chat>` | Chats, and one chat's connection: transports, last attempt, comparison code |
-| `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
-| `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
-| `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
-| `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
-| `forward <chat\|group> <message>… --to <chat\|group>… [--force] [--wait none\|sent] [--timeout s]` | Forward messages to up to 5 chats and groups (`--to` again for each; `group:<id>` names a group when a chat has the same name; an id that starts with a dash is taken as it is, `--to -Ab…` or `--to=-Ab…`). Each is a new message of yours that says it was forwarded (`forwarded`, the hop count) and nothing of who wrote it. Files go from the bytes this profile holds, never fetched again; a group takes texts only. A text that looks like a seed, a key or ecash needs `--force`. Answers `{from, results: [{to, kind, messageIds, error}]}`; any refusal fails the command (exit 1) with the results in `details`. `--wait sent`: each text on its way (a group's taken by an edge), each file's transfer done |
-| `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a new kind or status shows at once; a message to the chat or `--stop` ends it |
-| `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
-| `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
+| `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
+| `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
+| `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg) |
+| `call start <chat> [--rate 48000]`, `call answer [<chat\|call>] [--rate n]` | Voice calls (daemon): the result names the call's audio socket ([Calls](#calls)) |
+| `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
 | `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
+| `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
+| `chat list`, `chat show <chat>` | Chats, and one chat's connection: transports, last attempt, comparison code |
+| `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact |
 | `chat rename <chat> <name>`, `chat remove <chat> --yes` | Name it here; delete it (keys and history) here |
+| `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
+| `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
-| `message retry\|delete\|details <chat> <message>` | One message |
-| `group create <name> [--mesh]`, `group join <link>` | A community (a link anyone can open), or a private mesh |
-| `group list [--show-secret]`, `group show <group> [--show-secret]`, `group history <group>` | Groups, members, history; a message names its author (`member` key, `nick` from the roster). The entry link prints as `<hidden>` without `--show-secret` |
-| `group send <group> [text…] [--mention <member>]… [--reply <message>] [--wait none\|sent] [--timeout s]` | Send; each mentioned member is written as `@name` in the text. Answers `{group, messageId, sent, edges}`: the id `--reply`, `group react` and `group edit` take, and how many edges took it so far. A group has no receipts: `--wait sent` waits until at least one edge took it (a member's in a private group, one of your hubs' in a community), and exits 4 after `--timeout` (default 30 s) if none did; the message still goes when an edge opens, while the profile is online. Use it for a one-shot send with no daemon |
-| `group edit <group> <message> [text… \| --text <text> \| --stdin] [--mention <member>]… [--force]` | Replace the text of a message you sent to the group (`<message>` is the `messageId` `group send` gave). Every member sees it in place, marked edited; mentions whose `@name` is still in the text stay, `--mention` adds more. Answers `{group, messageId, edits, sent, edges}`; `--wait sent` and `--timeout` as for `group send`. A private group's members whose edge is down get it when it opens, a community's with the catch-up; a member on an older app keeps the old text |
-| `group react <group> <message> <emoji> [--remove]` | React to a group's message |
-| `group leave <group>`, `group forget <group> --yes`, `group accept\|decline <group>` | Membership |
-| `listen [--since seq] [--cursor file] [--type t]… [--exec cmd] [--webhook url] [--print]` | The event stream |
+| `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
+| `daemon [--detach]`, `daemon status`, `daemon stop`, `daemon restart` | Keep the profile online; `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)) |
+| `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
+| `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 | `events [--since seq]` | What the event journal holds, without following |
-| `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
-| `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin (each prints the group; `--show-secret` for its link) |
-| `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link (printed: asking for it is asking for the secret); the picture |
-| `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does |
 | `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3). A file's id names its chat, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
-| `file wait [<chat>] <file> [--timeout s]` | Wait until a transfer ends: exit `0` when the file is all here, `1` with the transfer's error when it failed (`details.retry`: `file resend` can go on), `4` on timeout (default 300 s) |
 | `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk (never over one without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first) |
-| `profile backup --out <file>`, `profile restore <file> <new profile>` | An encrypted backup (WISP 05 envelope); the passphrase from `--passphrase-file` or `GHOSTLY_BACKUP_PASSPHRASE` |
-| `identity providers`, `identity list` | Kinds of proof and their signers; this profile's proofs |
+| `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does |
+| `file wait [<chat>] <file> [--timeout s]` | Wait until a transfer ends: exit `0` when the file is all here, `1` with the transfer's error when it failed (`details.retry`: `file resend` can go on), `4` on timeout (default 300 s) |
+| `forward <chat\|group> <message>… --to <chat\|group>… [--force] [--wait none\|sent] [--timeout s]` | Forward messages to up to 5 chats and groups (`--to` again for each; `group:<id>` names a group when a chat has the same name; an id that starts with a dash is taken as it is, `--to -Ab…` or `--to=-Ab…`). Each is a new message of yours that says it was forwarded (`forwarded`, the hop count) and nothing of who wrote it. Files go from the bytes this profile holds, never fetched again; a group takes texts only. A text that looks like a seed, a key or ecash needs `--force`. Answers `{from, results: [{to, kind, messageIds, error}]}`; any refusal fails the command (exit 1) with the results in `details`. `--wait sent`: each text on its way (a group's taken by an edge), each file's transfer done |
+| `group create <name> [--mesh]`, `group join <link>` | A community (a link anyone can open), or a private mesh |
+| `group edit <group> <message> [text… \| --text <text> \| --stdin] [--mention <member>]… [--force]` | Replace the text of a message you sent to the group (`<message>` is the `messageId` `group send` gave). Every member sees it in place, marked edited; mentions whose `@name` is still in the text stay, `--mention` adds more. Answers `{group, messageId, edits, sent, edges}`; `--wait sent` and `--timeout` as for `group send`. A private group's members whose edge is down get it when it opens, a community's with the catch-up; a member on an older app keeps the old text |
+| `group hub <group> <member> [--pin \| --exclude \| --auto]` | Past 16 members: pin a member as a hub, keep one from being a hub, or leave it to their app (a daemon offers itself) |
+| `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin (each prints the group; `--show-secret` for its link) |
+| `group leave <group>`, `group forget <group> --yes`, `group accept\|decline <group>` | Membership |
+| `group list [--show-secret]`, `group show <group> [--show-secret]`, `group history <group>` | Groups, members, history; a message names its author (`member` key, `nick` from the roster). The entry link prints as `<hidden>` without `--show-secret` |
+| `group react <group> <message> <emoji> [--remove]` | React to a group's message |
+| `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link (printed: asking for it is asking for the secret); the picture |
+| `group send <group> [text…] [--mention <member>]… [--reply <message>] [--wait none\|sent] [--timeout s]` | Send; each mentioned member is written as `@name` in the text. Answers `{group, messageId, sent, edges}`: the id `--reply`, `group react` and `group edit` take, and how many edges took it so far. A group has no receipts: `--wait sent` waits until at least one edge took it (a member's in a private group, one of your hubs' in a community), and exits 4 after `--timeout` (default 30 s) if none did; the message still goes when an edge opens, while the profile is online. Use it for a one-shot send with no daemon |
 | `identity add <provider> [subject] [--signer id] [--field name=value]… [--days n]` | A proof: an in-app signer (NIP-46 and the like) finishes here; a tool or a published record answers with the statement |
-| `identity complete <draft> [--evidence-file f \| --stdin]` | Finish it with the tool's output (or nothing, for a published record); needs the daemon that began it |
+| `identity complete <draft> [--evidence-file f \| --stdin]`, `identity cancel <draft>` | Finish it with the tool's output (or nothing, for a published record); needs the daemon that began it. Cancel drops one not finished |
+| `identity providers`, `identity list` | Kinds of proof and their signers; this profile's proofs |
 | `identity share\|withdraw <chat> <id>`, `identity contact <chat>`, `identity recheck <chat> <id>`, `identity remove <id>` | Show a proof to a contact; what a contact showed, as checked here |
+| `invite create [--label <name>]` | A new chat's `ghostly1…` invite and its link |
+| `invite join <invite-or-link> [--label <name>]` | Join a chat (your own invite is refused) |
+| `lightning default <card>`, `lightning rename <card> <name>` | Lightning cards: which receives by default |
+| `listen [--since seq] [--cursor file] [--type t]… [--exec cmd] [--webhook url] [--print]` | The event stream |
+| `message retry\|delete\|details <chat> <message>` | One message |
+| `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
+| `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
+| `profile backup --out <file>`, `profile restore <file> <new profile>` | An encrypted backup (WISP 05 envelope); the passphrase from `--passphrase-file` or `GHOSTLY_BACKUP_PASSPHRASE` |
+| `profile create <name> [--use] [--name <shown>]`, `profile list`, `profile use <name>` | Profiles |
+| `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
+| `profile show`, `profile set [--name <name>] [--share-profile \| --no-share-profile]` | The name contacts see |
+| `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
+| `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
 | `service add <name> <http://127.0.0.1:port>`, `service share <service> <chat> [--off]`, `service list`, `service remove\|enable` | Share a web app on this machine, per contact |
 | `service peer <chat>`, `service open <chat> <service> [--port p]`, `service close <chat> <service>` | A contact's app on a loopback port here (daemon) |
-| `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
-| `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `usdt` |
-| `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
-| `wallet faucet <type>`, `wallet add-mint <url> [--primary]` | Test coins; another Cashu mint |
-| `wallet receive <sats>`, `wallet address <type>`, `wallet redeem <token>`, `wallet history` | Receive, and what came and went |
-| `lightning default <card>`, `lightning rename <card> <name>` | Lightning cards: which receives by default |
-| `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
-| `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact |
-| `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
-| `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
-| `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
-| `call start <chat> [--rate 48000]`, `call answer [<chat\|call>] [--rate n]` | Voice calls (daemon): the result names the call's audio socket ([Calls](#calls)) |
-| `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
-| `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
-| `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg) |
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
-| `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
+| `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
+| `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a new kind or status shows at once; a message to the chat or `--stop` ends it |
+| `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `usdt` |
+| `wallet faucet <type>`, `wallet add-mint <url> [--primary]` | Test coins; another Cashu mint |
+| `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
+| `wallet receive <sats>`, `wallet address <type>`, `wallet redeem <token>`, `wallet history` | Receive, and what came and went |
+| `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
 
 Help: `ghostly help` lists every command; `ghostly help file` (or `ghostly file --help`) a group; `ghostly help file
 save` (or `ghostly file save --help`) one command, with its options. `-h` works too, except after `--`.
@@ -360,7 +364,8 @@ directly (every packet to both; reads from the DHT when every relay fails). Test
 `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces its bootstrap routers,
 `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` replaces HyperDHT's bootstrap nodes, `settings set relays
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
-turns WebRTC off.
+turns WebRTC off. A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
+`GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it).
 
 ## Not yet
 

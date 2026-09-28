@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 200; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-24 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
 | Implementation | Payment frames with wallets per network (Mainnet and Testnet side by side); experimental rails: Cashu, Lightning cards, Ark (Arkade, Bark), Spark, Fedimint, USDT, on-chain Bitcoin |
@@ -91,3 +89,7 @@ Disjoint methods, malformed decimal amounts, mismatched request/payee, expired r
 ## References
 
 [Payment vocabulary](../../packages/core/src/payments.ts), [frames](../../packages/core/src/frames.ts), [application payment coordinator](../../packages/browser/src/engine/payments.ts), [Cashu](201-cashu.md), [Lightning](203-lightning.md), [Lightning addresses](205-lnurl.md), [Arkade](202-arkade.md), [Bark](204-bark.md), [Spark](2xx-spark.md), [Fedimint](2xx-fedimint.md), [USDT](../USDT-INTEGRATION.md), [payment URIs](../../packages/core/src/paymentUri.ts), [wallet providers](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md).
+
+## Revision log
+
+One file per change in [changes/200-payments/](changes/200-payments/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

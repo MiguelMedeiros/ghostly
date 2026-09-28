@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.9.3 |
-| Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
@@ -232,20 +230,4 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 
 ## Revision log
 
-- 0.9.3 (2026-09-27): `file send` of a picture sends its size ([501](501-paired-files.md) 0.4.4 `image`) and answers with it; `image` on `message.file` and in `file list`.
-- 0.9.2 (2026-09-27): `file send` fails as `refused`, with the reason, when the engine refuses before anything starts (offline, a stopped chat, a contact whose app takes no files); nothing stays staged. `forward --to` takes an id that starts with a dash as it is.
-- 0.9.1 (2026-09-27): forwards: `ghostly forward` (texts, and files from the bytes the profile holds, to up to 5 chats and groups; a group takes texts), the secret guard before a text goes (`--force`), `--wait sent`; `forwarded` on messages (#404).
-- 0.9 (2026-09-27): Pkarr over the Mainline DHT beside the relays (BEP 44, `bittorrent-dht`): a bot keeps finding its contacts and its group's edges while the relays fail; `GHOSTLY_DHT`, `GHOSTLY_DHT_BOOTSTRAP`.
-- 0.8.2 (2026-09-27): `--wait sent` and `edges` on `group send` and `group edit`.
-- 0.8.1 (2026-09-27): group edits: `ghostly group edit`, `group.message.edited`, `edits` and `editedAt` in group history (#378).
-- 0.8 (2026-09-27): groups for bots: messages name their author from the roster, `group send` answers with the message id, the entry link is printed only with `--show-secret` (#372); `file send --reply` (#359); calls log their ICE candidates and state, and `call list` shows the pair (#362); ids that start with a dash are read as ids (#367); calls use the profile's ICE servers, a TURN relay included (#375).
-- 0.7.3 (2026-09-27): `typing --kind recording|thinking --status <text>`, and `typing.started` carries them (#361).
-- 0.7.2 (2026-09-27): edits: `ghostly edit`, `message.edited`, `edits` and `editedAt` in history (#351).
-- 0.7.1 (2026-09-27): reactions: `react`, `group react`, `message.reaction` and `group.reaction` events (#354).
-- 0.7 (2026-09-27): phase 5, voice calls with the audio on a Unix socket per call (#350); for bots: file events name their message, `file wait`, `typing --for`, help per command, `chat disconnect --hold`, `daemon restart` (#358).
-- 0.6.1 (2026-09-27): typing events and `ghostly typing` (#344); voice notes carry a waveform measured from the file (#353).
-- 0.6 (2026-09-26): phase 4, an npm package whose dependencies are what the bundle imports (#327).
-- 0.5 (2026-09-26): phase 3b, identity proofs, shared web apps and profile backups (#326).
-- 0.4 (2026-09-26): phase 3a, files, voice notes, group admin and pictures (#325).
-- 0.3 (2026-09-26): phase 2, wallets and payments, `--confirm-real` on Mainnet (#324).
-- 0.2 (2026-09-26): phase 1, the runtime, the daemon and its socket, profiles, invites, one chat, groups, events and hooks (#323).
+One file per change in [changes/11xx-headless/](changes/11xx-headless/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 502; editorial family allocation |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
 | Disposition | Retained for compatibility chats ([402](402-legacy-chat.md)) only; never negotiated in a new chat |
@@ -31,5 +29,4 @@ Use [frames](../../packages/core/src/frames.ts), [FileTransfers](../../packages/
 
 ## Revision log
 
-- 0.2 (2026-09-25): renamed Compatibility File Frames; retained for compatibility chats only.
-- 0.1 (2026-09-22): legacy file frames profile.
+One file per change in [changes/502-legacy-files/](changes/502-legacy-files/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

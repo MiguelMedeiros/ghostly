@@ -13,5 +13,11 @@
   "shareNone": "Nothing was shared, or it was already picked up.",
   "shareOneFile": "1 file",
   "shareTitle": "Share to…",
-  "shareWaiting": "Getting what was shared..."
+  "shareWaiting": "Getting what was shared...",
+  "wake": "Wake me while closed",
+  "wakeHint": "Contacts' apps can wake this one with a push. Nothing of the message goes in it.",
+  "wakeInfo": "When a contact's message can't reach you because Ghostly is closed, their app sends an empty wake-up to your browser's push service (Google, Apple or Mozilla, depending on the browser). It says only that there is a new message: no text, no name. The push service learns that a push happened and when; your contacts learn your push address. Muted chats never show it. New address makes a fresh one, so nobody you stopped talking to can wake you.",
+  "wakeNotice": "New message",
+  "wakeOnHint": "On. A message sent while Ghostly is closed shows \"New message\".",
+  "wakeRotate": "New address"
 }

@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 601; editorial family allocation |
 | Status | Draft |
-| Revision | 0.7 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
 | Implementation | Compatibility chats (`_call`) and the chat session of every new chat (`calls/1`); capture varies by platform. Desktop on Linux runs WebRTC in Rust and media in GStreamer (#331), with no screen sharing yet. |
@@ -37,6 +35,7 @@ WebKitGTK, the WebView of Ghostly Desktop on Linux, is built without WebRTC by U
 
 - **WebRTC** is `webrtc-rs`. Its host candidates end at `typ host` (browsers add `generation 0`), which a signal must still read as a host candidate; a socket on an unspecified address (`::` where there is no IPv6) gives no candidate.
 - **Media** is GStreamer: the microphone to Opus, the camera to VP8, and back through a jitter buffer to the speakers and to the page, which shows the peer's picture as JPEG frames drawn on a canvas. Only gst-plugins-base and gst-plugins-good are used; WebKitGTK depends on both, so an installed app has them. Not GStreamer's `webrtcbin`: its libnice links libsoup 2 on Ubuntu 22.04 and Debian 12, and loading libsoup 2 into a WebKitGTK 4.1 process (libsoup 3) aborts it.
+- **Devices** are GStreamer's, known to the page by name: Settings lists them and the calls use the chosen ones. The page cannot hear that microphone or play on that speaker, so Settings' level meter reads GStreamer's `level` element on the chosen microphone, and its test sound is a one-second tone GStreamer plays on the chosen speaker.
 - **Missing plugins**: the app checks for every element it uses when it starts. When one is missing it does not offer `calls/1`, and its call buttons name the packages to install.
 - **Screen sharing** is not available on Linux yet (it needs the desktop portal): the share button stays in the call window, turned off, with that reason.
 
@@ -52,13 +51,4 @@ This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of 
 
 ## Revision log
 
-- 0.7 (2026-09-27): a signal on the chat session carries up to eight candidates (local networks first, VPN tunnels last, relay included); calls use the profile's ICE servers (a TURN relay) after the apps' STUN servers. Found by the macOS app calling the headless CLI on a Mac with NordVPN as its default route.
-
-- 0.6 (2026-09-27): the headless CLI calls, voice only (11xx § Calls): audio-only offers, video sections answered and dropped, up to eight candidates in a signal. Tested with the web app both ways (e2e/web/headless-call.spec.ts).
-
-- 0.5 (2026-09-26): Desktop on Linux calls: WebRTC in Rust (webrtc-rs), media in GStreamer, no wire change; a host candidate may end at `typ host`. Tested between two Linux Desktops (e2e/desktop/calls.spec.ts) and against Chromium both ways (e2e/desktop/calls-interop.spec.ts).
-
-- 0.4 (2026-09-25): signals carry the Opus/VP8 payload types when not 111/96 (`ap`, `vp`; PROTOCOL.md §4.2) and accept an IPv6 related address: WebKit's offers rang nowhere or showed one picture. Found by two Desktop apps on a Mac (e2e/desktop-macos/).
-- 0.3 (2026-09-25): paired profile: `paired-call` signals on the live session, media on a WebRTC connection of its own whatever carries the chat.
-- 0.2 (2026-09-25): scope named as compatibility chats; calls in the chat session being implemented.
-- 0.1 (2026-09-22): WebRTC media profile.
+One file per change in [changes/601-webrtc-media/](changes/601-webrtc-media/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

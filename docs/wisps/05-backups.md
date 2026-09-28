@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 05; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [200](200-payments.md), [1000](1000-storage.md) |
 | Implementation | Experimental: web, desktop and browser extension clients |
@@ -90,5 +88,4 @@ Incremental and scheduled backups; including files over 16 MiB by choice; a pass
 
 ## Revision log
 
-- 0.2 (2026-09-25): files kept in file storage travel up to 16 MiB; larger ones stay out.
-- 0.1 (2026-09-23): initial review draft.
+One file per change in [changes/05-backups/](changes/05-backups/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

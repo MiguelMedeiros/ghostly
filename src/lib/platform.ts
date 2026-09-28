@@ -94,6 +94,8 @@ export interface NetworkSettings {
   iroh?: { relays: string[]; defaultRelays: string[] };
   /** The HyperDHT relay (wss://) paired chats reach HyperDHT through; empty for none. */
   hyperdhtRelay: string;
+  /** The push relay (https://) wake-ups go through when this app may not post them itself; empty for none. */
+  pushRelay: string;
   /**
    * Present where the DHT is reached directly (Desktop): whether reads use the relays too, "Also use Pkarr
    * relays". Writes go to the relays either way, so contacts on the web see this app's packets.
@@ -466,7 +468,7 @@ export interface ServicesPlatform {
   deleteMessage(peerPubKeyZ32: string, messageId: string): Promise<void>;
   wallet: WalletPlatform;
   getNetwork(): NetworkSettings | null;
-  setNetwork(settings: Pick<NetworkSettings, "relays" | "turn"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "hyperdhtRelay" | "readRelays">>): Promise<void>;
+  setNetwork(settings: Pick<NetworkSettings, "relays" | "turn"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "hyperdhtRelay" | "readRelays" | "pushRelay">>): Promise<void>;
 }
 
 export const servicesPlatform: ServicesPlatform | null = null;

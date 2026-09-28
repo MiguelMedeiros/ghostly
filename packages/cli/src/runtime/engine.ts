@@ -136,6 +136,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     automaticWallets: false,
     // Local web apps may be shared with a contact, reached on loopback only (src/services.ts).
     servicesSupport: true,
+    // A daemon stays online: a hub of the large private groups it is in (WISP 9xx · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
+    staysOnline: process.env.GHOSTLY_HUB !== "0",
     localFetch: nodeLocalFetch,
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),

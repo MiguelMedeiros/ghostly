@@ -17,6 +17,7 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * device monitor lists as it would a headset. The cameras are the test pictures GHOSTLY_FAKE_MEDIA names ("Test
  * camera", "Test bars"): a container has no V4L2 device. Which device each call uses is read back from Rust
  * (`native_call_stats`) and from PulseAudio itself (who records from which source, who plays on which sink).
+ * Settings tries them where the calls run: Rust meters the microphone and plays a tone on the speaker.
  *
  * Skipped where PulseAudio is not installed.
  */
@@ -40,7 +41,7 @@ const pactl = (...args: string[]) => execFileSync("pactl", args, { encoding: "ut
 const load = (module: string, ...args: string[]) => pactl("load-module", module, ...args).trim();
 
 /** A named null source (a microphone) or null sink (a speaker). */
-const mic = (name: string, description: string) => load("module-null-source", `source_name=${name}`, `source_properties='device.description="${description}"'`);
+const mic = (name: string, description: string) => load("module-null-source", `source_name=${name}`, `description='${description}'`);
 const speaker = (name: string, description: string) => load("module-null-sink", `sink_name=${name}`, `sink_properties='device.description="${description}"'`);
 
 /** The names of the sources something records from, and of the sinks something plays on. */
@@ -117,6 +118,13 @@ const pick = (p: DesktopPerson, kind: MediaDeviceKind, id: string) => expect(asy
   expect(picked).toBe(true);
 }).toPass({ timeout: 30_000 });
 
+/** Clicks the element with this test id. */
+const click = (p: DesktopPerson, testId: string) => p.app.execute(`document.querySelector('[data-testid="' + arguments[0] + '"]').click();`, testId);
+
+/** What Settings' microphone meter shows, 0 to 100 (-1: no meter). */
+const level = (p: DesktopPerson) => p.app.execute<number>(`
+  return Number(document.querySelector('[data-testid="settings-microphone-level"]')?.getAttribute("aria-valuenow") ?? -1);`);
+
 const notice = (p: DesktopPerson) => p.app.execute<{ type: string | null; text: string } | null>(`
   const bar = document.querySelector('[data-testid="call-device-notice"]');
   return bar ? { type: bar.getAttribute("data-type"), text: bar.innerText } : null;`);
@@ -166,10 +174,23 @@ test("a Linux Desktop call uses the devices chosen in Settings, and switches the
     expect(await optionsOf(a, "settings-microphone")).not.toContain("Monitor of Room speaker");
     expect(await optionsOf(a, "settings-camera")).toEqual(expect.arrayContaining(["Test camera", "Test bars"]));
     expect(await optionsOf(a, "settings-speaker")).toEqual(expect.arrayContaining([SPEAKERS.a, SPEAKERS.b]));
-    // The page cannot hear GStreamer's microphone or play on its speaker: only the camera can be tried.
-    expect(await a.app.execute<number>(`return document.querySelectorAll('[data-testid="settings-microphone-test"], [data-testid="settings-speaker-test"]').length;`)).toBe(0);
+    // The page cannot hear GStreamer's microphone or play on its speaker: Rust meters the one and plays a tone on
+    // the other. The default microphone is the test tone (GHOSTLY_FAKE_MEDIA), which the meter hears.
+    await click(a, "settings-microphone-test");
+    await expect.poll(() => level(a), { timeout: 30_000, message: "the meter hears the default microphone" }).toBeGreaterThan(30);
+    await click(a, "settings-microphone-test");
     await choose(a, "settings-microphone", MICS.b);
+    await click(a, "settings-microphone-test");
+    await expect.poll(() => inUse().sources, { timeout: 30_000, message: "the meter records from mic B" }).toEqual(["ghostly_mic_b"]);
+    // A null source is silence.
+    expect(await level(a)).toBe(0);
+    await click(a, "settings-microphone-test");
+    await expect.poll(() => inUse().sources, { message: "and lets it go on Stop" }).toEqual([]);
     await choose(a, "settings-speaker", SPEAKERS.b);
+    await click(a, "settings-speaker-test");
+    await expect.poll(() => inUse().sinks, { timeout: 10_000, intervals: [50], message: "the tone plays on speaker B" }).toContain("ghostly_speaker_b");
+    await expect.poll(() => inUse().sinks, { message: "and ends" }).not.toContain("ghostly_speaker_b");
+    expect(await a.app.execute<number>(`return document.querySelectorAll('[role="alert"]').length;`)).toBe(0);
     await choose(a, "settings-camera", "Test bars");
     await a.press("Preview");
     await expect.poll(() => a.app.execute<number>(`return document.querySelector('[data-testid="settings-camera-video"]')?.videoWidth ?? 0;`), {

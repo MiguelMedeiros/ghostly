@@ -2,6 +2,7 @@ import { fromBase64Url, toBase64Url, utf8Encode } from "./bytes";
 import { sanitizeAvatar } from "./avatar";
 import { decryptText, encryptText, sha256Hex } from "./groupCrypto";
 import { GROUP_ID, MEMBER_KEY } from "./groupCommits";
+import { parseHubPolicy, wireHubPolicy, type MeshHubPolicy } from "./groupHubs";
 import { publicKeyFromZ32, sign, verify } from "./identity";
 
 /**
@@ -37,6 +38,8 @@ const B64 = /^[A-Za-z0-9_-]*$/;
 export interface GroupMetaBody {
   /** The group's picture: a square JPEG data URL, as `sanitizeAvatar` accepts it. */
   pic?: string;
+  /** Private groups: members the admin pins as hubs, and excludes (WISP 9xx · Group Mesh § Hubs). Apps from before ignore it. */
+  hubs?: MeshHubPolicy;
 }
 
 export interface GroupMetaStatement {
@@ -82,6 +85,10 @@ export function encodeGroupMetaBody(body: GroupMetaBody): string {
     if (body.pic.length > MAX_GROUP_PICTURE_LENGTH || typeof sanitizeAvatar(body.pic) !== "string") throw new Error("This picture cannot be used");
     out.pic = body.pic;
   }
+  const hubs = body.hubs && parseHubPolicy(body.hubs);
+  if (body.hubs && !hubs) throw new Error("This hub setting cannot be used");
+  const wire = hubs && wireHubPolicy(hubs);
+  if (wire) out.hubs = wire;
   return JSON.stringify(out);
 }
 
@@ -98,6 +105,9 @@ export function parseGroupMetaBody(body: string): GroupMetaBody | null {
     if (clean === undefined || (clean && clean.length > MAX_GROUP_PICTURE_LENGTH)) return null;
     if (clean) out.pic = clean;
   }
+  // A policy that does not hold is no policy: the picture beside it still shows.
+  const hubs = parseHubPolicy((parsed as Record<string, unknown>).hubs), wire = hubs && wireHubPolicy(hubs);
+  if (wire) out.hubs = wire;
   return out;
 }
 

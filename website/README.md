@@ -151,7 +151,9 @@ the source.
 ## Adding or renumbering a WISP
 
 Edit `docs/wisps/numbering.json` and add the document, with the `Summary` and
-`Availability` rows in its header; `npm run sync:references` copies it, parses
+`Availability` rows in its header, and its first change file in
+`docs/wisps/changes/<wisp>/` (`docs/wisps/00-process.md`, "Revisions"); `npm run sync:references` copies it,
+adds the Revision and Updated rows and the revision log from those files, parses
 its header table and writes `lib/reference-index.json`. The draft then appears
 in the catalog and the reader with no other change. Counts on the site are
 always computed. `notes-local/` and `HANDOFF-CLAUDE*` / `QA-CLAUDE*` files are

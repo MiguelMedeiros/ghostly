@@ -134,6 +134,9 @@ export function askedDevice(constraint: boolean | MediaTrackConstraints | undefi
 function reporting(track: MediaStreamTrack, wanted: string | null): void {
   wantedOf.set(track, wanted);
   usedOf.set(track, wanted);
+  // Its name, as a browser's track has the device's: the call's notices say which one went. (WebKitGTK's own
+  // label on this AudioContext track left the call's "disconnected" notice unshown.)
+  Object.defineProperty(track, "label", { configurable: true, get: () => usedOf.get(track) ?? "" });
   const settings = track.getSettings?.bind(track);
   // "default", as browsers call the system's default: the call's device menu offers a chosen one back from it.
   track.getSettings = () => ({ ...(settings?.() ?? {}), deviceId: usedOf.get(track) ?? "default" });
@@ -505,6 +508,26 @@ export const nativeDevices: DeviceSource = {
   playCallOn(id) {
     const device = deviceName("audiooutput", id);
     for (const call of open) void call.playOn(device).catch(() => {});
+  },
+  async meter(id, level) {
+    let live = true;
+    const levels = new Channel<unknown>();
+    levels.onmessage = (message) => {
+      if (!live) return;
+      try {
+        const reading = (JSON.parse(new TextDecoder().decode(bytesOf(message))) as { level?: unknown }).level;
+        if (typeof reading === "number") level(Math.max(0, Math.min(1, reading)));
+      } catch { /* not a reading */ }
+    };
+    const { meter } = await invoke<{ meter: number; device: string | null }>("native_microphone_meter", { levels, device: deviceName("audioinput", id) });
+    return () => {
+      if (!live) return;
+      live = false;
+      void invoke("native_microphone_meter_close", { meter }).catch(() => {});
+    };
+  },
+  async testSpeaker(id) {
+    await invoke("native_speaker_test", { device: deviceName("audiooutput", id) });
   },
 };
 
