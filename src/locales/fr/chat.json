@@ -117,6 +117,16 @@
     "spoiler": "Texte masqué. Touchez pour l’afficher",
     "unshowable": "Impossible d'afficher ce message."
   },
+  "search": {
+    "close": "Fermer la recherche",
+    "count": "{{current}} sur {{total}}",
+    "info": "Cherche dans les messages et les noms de fichiers gardés sur cet appareil. Rien n'en sort.",
+    "newer": "Résultat plus récent (Maj+Entrée)",
+    "none": "Aucun résultat",
+    "older": "Résultat plus ancien (Entrée)",
+    "open": "Rechercher",
+    "placeholder": "Rechercher dans ce chat"
+  },
   "send": "Envoyer",
   "today": "Aujourd'hui",
   "typeMessage": "Tapez un message...",

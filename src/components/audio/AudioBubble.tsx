@@ -12,6 +12,7 @@ import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { audioFormat, canPlayAudio } from "../../lib/videoPlayer";
 import { applyVoiceRate, claimPlayback, onVoiceRate, registerVoicePlayer, releasePlayback, voiceRate } from "../../lib/voicePlayback";
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
+import { Highlight } from "../chat/ChatSearch";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
 
@@ -27,7 +28,7 @@ const pill = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 b
  * go of its bytes and goes on from where it was. A large one asks first ("Download 40.0 MB"); one this device
  * does not play offers Download.
  */
-export function AudioBubble({ file, sender, peerName = "Your contact" }: { file: ChatFile; sender: "me" | "peer"; peerName?: string }) {
+export function AudioBubble({ file, sender, peerName = "Your contact", highlight }: { file: ChatFile; sender: "me" | "peer"; peerName?: string; highlight?: string }) {
   const platform = useServicesPlatform();
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
   const transfer = platform?.getTransfer(file.id) ?? null;
@@ -212,7 +213,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact" }: { file:
           </span>
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-[13.5px] leading-tight truncate m-0" title={file.name} data-testid="audio-name"><bdi>{file.name}</bdi></p>
+          <p className="text-[13.5px] leading-tight truncate m-0" title={file.name} data-testid="audio-name"><bdi><Highlight text={file.name} term={highlight} /></bdi></p>
           <input
             type="range"
             data-testid="audio-seek"

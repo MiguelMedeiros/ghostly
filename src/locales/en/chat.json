@@ -117,6 +117,16 @@
     "spoiler": "Hidden text. Tap to show it",
     "unshowable": "This message could not be shown."
   },
+  "search": {
+    "close": "Close search",
+    "count": "{{current}} of {{total}}",
+    "info": "Searches the messages and file names kept on this device. Nothing leaves it.",
+    "newer": "Newer match (Shift+Enter)",
+    "none": "No results",
+    "older": "Older match (Enter)",
+    "open": "Search",
+    "placeholder": "Search this chat"
+  },
   "send": "Send",
   "today": "Today",
   "typeMessage": "Type a message...",

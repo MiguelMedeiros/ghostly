@@ -117,6 +117,16 @@
     "spoiler": "非表示のテキスト。タップして表示",
     "unshowable": "このメッセージは表示できませんでした。"
   },
+  "search": {
+    "close": "検索を閉じる",
+    "count": "{{current}} / {{total}}",
+    "info": "このデバイスに保存されたメッセージとファイル名を検索します。外部には何も送信されません。",
+    "newer": "新しい結果 (Shift+Enter)",
+    "none": "結果なし",
+    "older": "古い結果 (Enter)",
+    "open": "検索",
+    "placeholder": "このチャットを検索"
+  },
   "send": "送信",
   "today": "今日",
   "typeMessage": "メッセージを入力...",

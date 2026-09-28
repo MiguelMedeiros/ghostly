@@ -251,6 +251,10 @@ A person can send a message they have on to other chats and groups (revision 0.2
 
 **Older apps.** The hop count is an optional field an app from before this revision ignores: it shows the message as one written there. No "Forwarded:" prefix is copied into the text for it, for the reasons a reply has none ([Replies](#replies)).
 
+## Search
+
+A person can search inside a chat or a group: what this device keeps of it, the texts (their current version) and the names of files, whatever the case and the accents. Nothing about a search leaves the device, and nothing is fetched for it: a message not stored here is not found. Notices, call lines and payments are not searched. The matches are counted newest first and marked in their bubbles; each is scrolled to and marked like a quote's original ([Replies](#replies)). No wire change.
+
 ## Candidate semantics
 
 Future messages need a stable sender-scoped message ID, authenticated channel/participation context, sequence within a sender generation, content type and bounded body. Distinguish locally queued, sent, received, durably stored and read; only advertise receipts actually implemented. Retries reuse IDs. Deduplication retention must cover the declared retry window and survive restart where durable delivery is promised.

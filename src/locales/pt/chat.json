@@ -117,6 +117,16 @@
     "spoiler": "Texto oculto. Toque para mostrar",
     "unshowable": "Não foi possível mostrar esta mensagem."
   },
+  "search": {
+    "close": "Fechar busca",
+    "count": "{{current}} de {{total}}",
+    "info": "Busca nas mensagens e nomes de arquivos guardados neste aparelho. Nada sai dele.",
+    "newer": "Resultado mais novo (Shift+Enter)",
+    "none": "Nenhum resultado",
+    "older": "Resultado mais antigo (Enter)",
+    "open": "Buscar",
+    "placeholder": "Buscar nesta conversa"
+  },
   "send": "Enviar",
   "today": "Hoje",
   "typeMessage": "Digite uma mensagem...",

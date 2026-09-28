@@ -6,13 +6,14 @@ import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import type { FileAction } from "../lib/platform";
+import { Highlight } from "./chat/ChatSearch";
 import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import type { ChatFile } from "../lib/types";
 
 const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
 /** A file in the chat: progress while it travels, then a preview (images) and a way to save it. */
-export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile; peerName?: string }) {
+export function FileBubble({ file, peerName = "Your contact", highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
   const platform = useServicesPlatform();
   const transfer = platform?.getTransfer(file.id) ?? null;
   /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
@@ -143,7 +144,7 @@ export function FileBubble({ file, peerName = "Your contact" }: { file: ChatFile
         )}
         <div className="min-w-0 flex-1">
           <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
-            {file.name}
+            <Highlight text={file.name} term={highlight} />
           </p>
           <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
             <span className="min-w-0 truncate" data-testid="file-status">{status}</span>
