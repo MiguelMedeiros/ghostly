@@ -313,9 +313,9 @@ export interface NodeOptions {
    */
   staysOnline?: boolean;
   /**
-   * The most WebRTC connections this app's groups hold at once (WISP 9xx · Group Mesh § Hubs, Budget): past it, the
-   * app is a hub of a private group only while no other member can be. Default: none. The Desktop app on a Mac says 40:
-   * WKWebView opens about 46 in one page, and the rest stay for 1:1 chats and calls.
+   * The most WebRTC connections this app's groups and 1:1 chats hold at once (WISP 9xx · Group Mesh § Hubs, Budget):
+   * within it, the app is a hub of a private group only while that fits, and a group opens only the edges that fit.
+   * Default: none. The Desktop app on a Mac says 40: WKWebView opens about 46 in one page, and the rest stay for calls.
    */
   peerBudget?: number;
   /** The Lightning and on-chain providers on offer. Default: the registry (tests pass their own). */
@@ -803,6 +803,17 @@ export class GhostlyNode implements EngineImplementation {
   private readonly reactionsSent = new Map<string, Map<number, number>>();
   private readonly reactionPace = new Map<string, ReactionWindow>();
   private readonly reactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The WebRTC connections of 1:1 chats, kept (with a budget only) until closed: they count against `peerBudget`. */
+  private readonly chatPeers = new Set<RTCPeerConnection>();
+  private chatPeer(pc: RTCPeerConnection): RTCPeerConnection {
+    if (this.options.peerBudget !== undefined) this.chatPeers.add(pc);
+    return pc;
+  }
+  /** The 1:1 chats' connections not closed yet (`close()` fires no event, so this looks at each). */
+  private openChatPeers(): number {
+    for (const pc of this.chatPeers) if (pc.connectionState === "closed") this.chatPeers.delete(pc);
+    return this.chatPeers.size;
+  }
   private readonly reactions = new Reactions({
     messages: chat => db.getMessages(chat),
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
@@ -828,8 +839,9 @@ export class GhostlyNode implements EngineImplementation {
     peerRoom: groupId => {
       const budget = this.options.peerBudget;
       if (budget === undefined) return undefined;
-      // Every other group's edges and entry sessions that run: one connection each.
-      let held = 0;
+      // Every other group's edges and entry sessions that run, one connection each, and the 1:1 chats' on WebRTC: a
+      // call finds room only in what is left, so chats count in full here, not in the room kept for calls.
+      let held = this.openChatPeers();
       for (const live of this.links.values()) if (live.stored.group && live.stored.group !== groupId && live.link) held++;
       return budget - held;
     },
@@ -3695,8 +3707,8 @@ export class GhostlyNode implements EngineImplementation {
       lastSeenTimestamp,
       pollIntervals: this.pollIntervals,
       autoConnect: true,
-      createPeerConnection: () =>
-        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] }),
+      createPeerConnection: () => this.chatPeer(
+        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] })),
       localFetch: this.localFetch,
       getServices: () => stored.profile ? [{ id: "chat", type: "chat" }] : this.advertisedServices(stored.peerPubKeyZ32),
       // A paired contact learns only the apps granted to it, on the open session; nothing is published.
