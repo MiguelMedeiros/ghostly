@@ -26,7 +26,7 @@ ghostly --version
 
 Once the package is published, `npm install -g @ghostly/cli` does the same. WebRTC comes from `node-datachannel`
 (prebuilt for Linux, macOS and Windows). Without it the CLI still chats over HyperDHT, Iroh and the DHT, but groups
-need WebRTC and are unavailable.
+and voice calls need WebRTC and are unavailable.
 
 ## A first chat
 
@@ -148,13 +148,13 @@ reactions, typing).
 
 | Area | Commands |
 |---|---|
-| Invites and chats | `invite create\|join`, `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `edit <chat> <message>` (a status updated in place), `message retry\|delete\|details`, `react <chat> <message> <emoji>` (`--remove` takes yours back), `forward <chat> <message>… --to <chat\|group>…` (up to 5; files from the bytes here) |
+| Invites and chats | `invite create\|join`, `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `edit <chat> <message>` (a status updated in place), `message retry\|delete\|details`, `react <chat> <message> <emoji>` (`--remove` takes yours back), `forward <chat> <message>… --to <chat\|group>…` (up to 5; files from the bytes here), `typing <chat> [--kind typing\|recording\|thinking] [--status <text>] [--for s] [--stop]` |
 | Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` |
 | Files and voice | `file send <chat> <path>`, `file send … --voice [ms]` (length and waveform measured from the file), `file send … --reply <message>` (quotes it), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`. `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
-| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join`, `group send … --mention <member> --reply <message>` (answers with the message id), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `--wait sent` on both (until an edge took it); admin: `group invite\|remove\|admin\|rotate\|link\|picture` |
-| Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`), `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history`, `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
+| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join`, `group send … --mention <member> --reply <message>` (answers with the message id), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `--wait sent` on both (until an edge took it); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|hub` |
+| Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`; Spark on Mainnet with `--api-key`, your Breez key), `wallet add-mint`, `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history`, `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
-| Identities | `identity providers\|list\|add\|complete`, `identity share\|withdraw <chat> <id>`, `identity contact <chat>` |
+| Identities | `identity providers\|list\|add\|complete\|cancel\|remove`, `identity share\|withdraw\|recheck <chat> <id>`, `identity contact <chat>` |
 | Shared services | `service add <name> http://127.0.0.1:<port>`, `service share <service> <chat>`, `service peer\|open\|close` |
 | Voice calls | `call start <chat>`, `call answer`, `call auto on [--from <chat>]`, `call hangup\|list\|flush`, `call pipe`: the audio as raw PCM on a Unix socket per call, for a program of yours |
 

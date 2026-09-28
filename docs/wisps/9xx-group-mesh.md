@@ -6,7 +6,7 @@
 | Status | Draft |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
-| Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts) and, for the group's link (`group-entry/1`), [`groupEntry.ts`](../../packages/core/src/groupEntry.ts); engine, UI and four-browser e2e in [`packages/browser`](../../packages/browser/src/engine/groups.ts) and [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts); web, extension and desktop share it |
+| Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts) and, for the group's link (`group-entry/1`), [`groupEntry.ts`](../../packages/core/src/groupEntry.ts); engine, UI and four-browser e2e in [`packages/browser`](../../packages/browser/src/engine/groups.ts) and [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts); web, extension, desktop and the headless CLI share it |
 | Summary | Up to 32 people, each pair on its own authenticated link or, past 16, through members whose apps stay online, with a fresh group key whenever someone joins or leaves. |
 | Availability | Available |
 | Notes | Text, a picture set by the admin, and payments between two members over their own link; files and calls are refused in groups. A member who was away catches up from any member who has what it missed, not only from each author. Past 16 members, members whose apps stay online (the Desktop app, the CLI) or whom the admin pins carry the group as hubs, and the others keep two edges. Number not yet assigned. |
@@ -101,7 +101,7 @@ A message may name members: "@Bob, are you in?" notifies Bob. Names can collide 
 [ { "k": <member key> | "*", "o": <offset>, "l": <length> }, … ]
 ```
 
-`o` and `l` count Unicode code points of the (trimmed) text, `l` includes the `@`, and the text at `o` is `@`. A receiver keeps an entry only if its key is a member key (or `*`, below), its place is inside the text, starts with `@` and is 2 to 65 code points long, and it does not overlap an earlier one; it drops a bad entry on its own, and a list of more than **16** entries whole. The app shows each kept place as `@` and the member's name as it is when shown (the place's own text for someone no longer in the group), a mention of the reader stronger than the others.
+`o` and `l` count Unicode code points of the (trimmed) text, `l` includes the `@`, and the text at `o` is `@`. A receiver keeps an entry only if its key is a member key (or `*`, below), its place is inside the text, starts with `@`, is 2 to 65 code points long and holds no line break, control or direction-changing character (#301), and it does not overlap an earlier one; it drops a bad entry on its own, and a list of more than **16** entries whole. The app shows each kept place as `@` and the member's name as it is when shown (the place's own text for someone no longer in the group), a mention of the reader stronger than the others.
 
 **On the wire.** The list travels as JSON beside the text, in an optional field of `group-msg`:
 

@@ -19,11 +19,11 @@ Every 1:1 chat has two layers ([WISP 400](wisps/400-chat.md), [WISP 100](wisps/1
 
 ## Layer 1: streams
 
-| Transport | Web app, extension | Desktop | Spec |
-|---|---|---|---|
-| WebRTC (`webrtc/1`) | Direct (STUN, optional TURN) | macOS and Windows. Not on Linux: WebKitGTK has no WebRTC | [WISP 101](wisps/101-webrtc.md) |
-| Iroh (`iroh/1`) | Relayed only, Iroh 1.2 compiled to wasm | Native Iroh 1.2, direct or through its home relay | [WISP 102](wisps/102-iroh.md) |
-| HyperDHT (`hyperdht/1`) | Through a HyperDHT relay, **off by default** | Native, one Node sidecar per app | [WISP 103](wisps/103-hyperdht.md) |
+| Transport | Web app, extension | Desktop | Headless CLI | Spec |
+|---|---|---|---|---|
+| WebRTC (`webrtc/1`) | Direct (STUN, optional TURN) | macOS and Windows. Not on Linux: WebKitGTK has no WebRTC | `node-datachannel` (libdatachannel) | [WISP 101](wisps/101-webrtc.md) |
+| Iroh (`iroh/1`) | Relayed only, Iroh 1.2 compiled to wasm | Native Iroh 1.2, direct or through its home relay | Relayed only, the same wasm build | [WISP 102](wisps/102-iroh.md) |
+| HyperDHT (`hyperdht/1`) | Through a HyperDHT relay, **off by default** | Native, one Node sidecar per app | Native, in its own process | [WISP 103](wisps/103-hyperdht.md) |
 
 Every transport runs the same authenticated chat session ([WISP 401](wisps/401-paired-chat.md)). A transport's own handshake (DTLS fingerprint, TLS exporter, Noise hash) is bound into the session, so the contact's pinned key is checked the same way on each.
 
@@ -98,6 +98,7 @@ Every client keeps one per relay (`packages/core/src/relayBreaker.ts`, and the s
 - A link whose connection details could not go out says why and when it tries again: "Retrying in N s", the soonest a relay is asked.
 - A relay that answers again tells the links: each looks at once and publishes what it could not, instead of waiting for its own pace. A relay that answers a kind of request (a read, a write) is no longer kept out of the next one of that kind by an earlier network failure.
 - 404, 409, 412 and 428 are normal answers and never count.
+- A relay's answer is read only up to what a Pkarr packet can be: 1,072 bytes in the TypeScript client (`RELAY_PAYLOAD_MAX_BYTES` in `packages/core/src/pkarr.ts`: signature, timestamp and 1,000 bytes of DNS packet), 4 KiB in the Desktop's Rust client (`MAX_BODY`); anything longer is refused ([#299](https://github.com/MiguelMedeiros/ghostly/pull/299)).
 - Reads rotate among healthy relays. On a Desktop with relay reads on, reads go to the DHT while every relay is tripped.
 - Trips are logged by relay and reason, never with a key.
 
@@ -146,6 +147,7 @@ No broader list of public relays exists: the pkarr repository's `relays.txt` nam
 - **One profile:** Settings, Advanced, Network, Pkarr relays, one URL per line.
 - **Everyone:** append the URL to `DEFAULT_RELAYS`, and put the old list into `PREVIOUS_DEFAULT_RELAYS` so profiles on the old defaults move with it. A relay that allows few requests gets a share in `RELAY_REQUESTS_PER_MINUTE`.
 - **Private network or tests (Desktop):** `GHOSTLY_PKARR_RELAYS` (comma-separated URLs) alone replaces the DHT. With `GHOSTLY_PKARR_DHT_BOOTSTRAP` (`ip:port`, comma-separated), those relays are written to and the DHT is reached through those nodes.
+- **Private network or tests (headless CLI):** `settings set relays '["http://…"]'` sets the relays, `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP` (`host:port`, comma-separated) replaces its bootstrap routers, and `GHOSTLY_HYPERDHT_BOOTSTRAP` HyperDHT's ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)).
 
 ## What observers see
 
