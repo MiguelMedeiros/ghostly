@@ -240,6 +240,23 @@ describe("group name, group-mesh/1", () => {
     expect(mesh.names.filter(n => n.at === carol.myKey).map(n => n.name)).toEqual(["Book club", null, "Admin says", null]);
   });
 
+  it("the name a welcome or an invitation says is cleaned as a rename's: no invisible, direction-changing or line-breaking text", async () => {
+    const alice = new GroupSession(GroupSession.create("Ghosts"), { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} });
+    const join = async (welcomeName: unknown, inviteName: string) => {
+      const seed = createIdentity().seedB64;
+      const welcome = await alice.admit(identityFromSeedB64(seed).pubKeyZ32);
+      const last = { ...(welcome[welcome.length - 1] as Record<string, unknown>), name: welcomeName };
+      const joined = GroupSession.join({ name: inviteName, admin: alice.myKey }, welcome.slice(0, -1), last, seed);
+      if ("error" in joined) throw new Error(joined.error);
+      return joined.state.name;
+    };
+    expect(await join("Pay‮txt.exe​\nnow", "Ghosts")).toBe("Paytxt.exe now");
+    // A welcome name with nothing to show falls back to the invitation's, cleaned too, never as it came.
+    expect(await join("‮​", "Invited⁦\n\nname")).toBe("Invited name");
+    expect(await join(7, "​")).toBe("Group");
+    expect(await join("x".repeat(65), "Ghosts")).toBe("Ghosts");
+  });
+
   it("a member away at the rename, or on an app from before names or metadata, shows the name once back or updated", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Ghosts"));
@@ -404,6 +421,21 @@ describe("group picture, group-community/1", () => {
 });
 
 describe("group name, group-community/1", () => {
+  it("the name a welcome says is cleaned as a rename's", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const seedB64 = createIdentity().seedB64;
+    const frames = await alice.session.admit(identityFromSeedB64(seedB64).pubKeyZ32);
+    const join = (name: unknown) => {
+      const welcome = { ...clone(frames[frames.length - 1]) as Record<string, unknown>, name };
+      const joined = CommunitySession.join({ g: alice.session.id, host: alice.session.entryKey }, clone(frames.slice(0, -1)), welcome, seedB64);
+      if ("error" in joined) throw new Error(joined.error);
+      return joined.state.name;
+    };
+    expect(join("Book‮​\nclub")).toBe("Book club");
+    expect(join("⁧")).toBe("Group");
+  });
+
   it("the admin renames it beside the picture; someone let in while the admin is away gets both; a member's rename is refused", async () => {
     const net = new Net();
     const alice = net.create("alice");

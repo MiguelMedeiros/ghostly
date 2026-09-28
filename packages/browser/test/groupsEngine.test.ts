@@ -298,6 +298,15 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(carol.views()[0].invitation).toMatchObject({ admin: intruder, members: 1 });
   });
 
+  it("an invitation's name shows cleaned: no invisible, direction-changing or line-breaking text", async () => {
+    const world = new World();
+    const bob = world.add("bob");
+    const admin = createIdentity().pubKeyZ32;
+    await bob.handleContactFrame("chat-xb", { t: "group-invite", g: "A".repeat(22), name: "Admin‮​\n\nsays", admin, e: 0, n: 1 });
+    await bob.handleContactFrame("chat-xb", { t: "group-invite", g: "B".repeat(22), name: "⁦​", admin, e: 0, n: 1 });
+    expect(bob.views().map(v => v.name).sort()).toEqual(["Admin says", "Group"]);
+  });
+
   it("an accept from a chat that was not invited, or with a malformed key, admits nobody", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");

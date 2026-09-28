@@ -10,7 +10,7 @@ import {
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
 import {
-  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupName, groupMetaChange, groupMetaNewer, groupMetaPicture, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
@@ -352,7 +352,7 @@ export class GroupSession {
       if (secret && confirmationMatches(epochKeys(secret, w.g, e as number).confirm, commitUntaggedHash(chain[e as number]), chain[e as number].c)) secrets[e as number] = toBase64Url(secret);
     }
     if (!secrets[top.e]) return { error: "The welcome carries no usable secret for the current epoch" };
-    return { state: { id: w.g, name: sanitizeNick(typeof w.name === "string" ? w.name : invite.name) ?? invite.name, profile: GROUP_PROFILE, seedB64, createdAt: now, chain, secrets,
+    return { state: { id: w.g, name: groupName(w.name) ?? groupName(invite.name) ?? "Group", profile: GROUP_PROFILE, seedB64, createdAt: now, chain, secrets,
       status: "active", seq: 0, seqEpoch: top.e, sent: [], seen: {}, nicks: {} } };
   }
 
