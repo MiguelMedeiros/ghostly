@@ -5,13 +5,15 @@ import { Ghost } from "@/components/ghost/Ghost";
 import { Reveal } from "@/components/home/Reveal";
 import { ReferenceMarkdown } from "@/components/reader/Markdown";
 import { roadmap } from "@/content/roadmap";
-import type { Level } from "@/lib/status";
+import { LEVELS, type Level } from "@/lib/status";
+import { shell } from "@/content/shell";
 import candidates from "@/lib/roadmap-candidates.json";
 import { timeline } from "@/content/roadmap-timeline";
 import { wisps } from "@/lib/wisps";
 import { roadmapTracks } from "@/lib/roadmap";
 import { BlockGrid } from "@/components/dev/BlockGrid";
 import { Timeline } from "./Timeline";
+import { InventoryControls } from "./InventoryControls";
 import "@/app/developers.css";
 import "@/app/roadmap.css";
 
@@ -127,41 +129,65 @@ export function RoadmapPage() {
         <h2 id="inventory-title" className="h-section" style={{ fontSize: "clamp(28px,3.4vw,44px)" }}>
           {t.inventory.title}
         </h2>
-        <p className="lead">{t.inventory.lead}</p>
-        {sections.map((section) => (
-          <div key={section} className="rm-section">
-            <h3>{section}</h3>
-            <ul>
-              {candidates
-                .filter((c) => c.section === section)
-                .map((c) => (
-                  <li key={c.id} id={c.id}>
-                    <details>
-                      <summary>
-                        <span className="rm-cand-head">
-                          <span className="rm-cand-title">{c.title}</span>
-                          {c.note && (
-                            <span className="rm-cand-note">
-                              {c.status in t.inventory.states && `${t.inventory.states[c.status as keyof typeof t.inventory.states]}: `}
-                              <span lang="en">{c.note}</span>
-                            </span>
-                          )}
+        <div className="rm-inventory-head">
+          <p className="lead">{t.inventory.lead}</p>
+          <InventoryControls openAll={t.inventory.openAll} closeAll={t.inventory.closeAll} />
+        </div>
+        <div className="rm-cats">
+          {sections.map((section) => {
+            const rows = candidates.filter((c) => c.section === section);
+            return (
+              <details key={section} className="rm-section rm-cat">
+                <summary>
+                  <svg className="rm-cat-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                    <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <h3>{section}</h3>
+                  <span className="rm-cat-sum">
+                    <span className="dim mono rm-cat-count">
+                      {rows.length} {t.inventory.entries}
+                    </span>
+                    {LEVELS.map((level) => {
+                      const n = rows.filter((c) => c.level === level).length;
+                      return n > 0 ? (
+                        <span key={level} className="level level--sm" data-level={level} title={shell.levelHelp[level]}>
+                          {n} {shell.levels[level]}
                         </span>
-                        <span className="dim mono rm-cand-kind">{c.kind}</span>
-                        <LevelBadge level={c.level as Level} small />
-                      </summary>
-                      <div className="rm-cand-body" lang="en">
-                        <p className="dim mono">
-                          {c.note ? `${c.status}: ${c.note}` : c.status} · {t.inventory.sourceStatus}
-                        </p>
-                        <ReferenceMarkdown body={c.body} sourcePath="docs/wisps/ADAPTER-ROADMAP.md" idPrefix={`${c.id}-`} />
-                      </div>
-                    </details>
-                  </li>
-                ))}
-            </ul>
-          </div>
-        ))}
+                      ) : null;
+                    })}
+                  </span>
+                </summary>
+                <ul>
+                  {rows.map((c) => (
+                    <li key={c.id} id={c.id}>
+                      <details>
+                        <summary>
+                          <span className="rm-cand-head">
+                            <span className="rm-cand-title">{c.title}</span>
+                            {c.note && (
+                              <span className="rm-cand-note">
+                                {c.status in t.inventory.states && `${t.inventory.states[c.status as keyof typeof t.inventory.states]}: `}
+                                <span lang="en">{c.note}</span>
+                              </span>
+                            )}
+                          </span>
+                          <span className="dim mono rm-cand-kind">{c.kind}</span>
+                          <LevelBadge level={c.level as Level} small />
+                        </summary>
+                        <div className="rm-cand-body" lang="en">
+                          <p className="dim mono">
+                            {c.note ? `${c.status}: ${c.note}` : c.status} · {t.inventory.sourceStatus}
+                          </p>
+                          <ReferenceMarkdown body={c.body} sourcePath="docs/wisps/ADAPTER-ROADMAP.md" idPrefix={`${c.id}-`} />
+                        </div>
+                      </details>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            );
+          })}
+        </div>
         <p>
           <Link className="link-arrow" href={"/developers/wisps/adapter-roadmap"}>
             {t.inventory.source} →
