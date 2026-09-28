@@ -190,6 +190,9 @@ describe("AttentionFeedback in a muted chat", () => {
     clock.mockReturnValue(start + MESSAGE_BURST_MS - 1);
     expect(await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS - 1 }))).toEqual([]);
     sound.playSound.mockClear();
+    // A mention is heard inside the burst.
+    expect(await send(event({ linkId: "link-a", mention: true, at: start + MESSAGE_BURST_MS - 1 }))).toHaveLength(1);
+    sound.playSound.mockClear();
     clock.mockReturnValue(start + MESSAGE_BURST_MS);
     expect(await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS }))).toEqual(["message"]);
   });

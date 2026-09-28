@@ -46,7 +46,8 @@ export function AttentionFeedback(){
       const notifications=loadSettings().notifications;
       const outcome=attentionOutcome(event.type,muted,notifications,background);
       // A chat's messages that come together are one sound (MESSAGE_BURST_MS); what I send, and the wallet's, are not.
-      if(outcome.sound && event.type!=="reaction" && (event.type!=="message" || firstOfBurst(chat ?? event.linkId ?? ""))) playSound(eventSound({...event,type:event.type},notifications));
+      // A mention is heard even inside a burst, as it is through a mute.
+      if(outcome.sound && event.type!=="reaction" && (event.type!=="message" || event.mention || firstOfBurst(chat ?? event.linkId ?? ""))) playSound(eventSound({...event,type:event.type},notifications));
       if(outcome.notice) await showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat);
     };
     if(navigator.locks) void navigator.locks.request("ghostly-feedback",run);
