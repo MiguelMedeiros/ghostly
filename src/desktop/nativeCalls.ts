@@ -509,6 +509,26 @@ export const nativeDevices: DeviceSource = {
     const device = deviceName("audiooutput", id);
     for (const call of open) void call.playOn(device).catch(() => {});
   },
+  async meter(id, level) {
+    let live = true;
+    const levels = new Channel<unknown>();
+    levels.onmessage = (message) => {
+      if (!live) return;
+      try {
+        const reading = (JSON.parse(new TextDecoder().decode(bytesOf(message))) as { level?: unknown }).level;
+        if (typeof reading === "number") level(Math.max(0, Math.min(1, reading)));
+      } catch { /* not a reading */ }
+    };
+    const { meter } = await invoke<{ meter: number; device: string | null }>("native_microphone_meter", { levels, device: deviceName("audioinput", id) });
+    return () => {
+      if (!live) return;
+      live = false;
+      void invoke("native_microphone_meter_close", { meter }).catch(() => {});
+    };
+  },
+  async testSpeaker(id) {
+    await invoke("native_speaker_test", { device: deviceName("audiooutput", id) });
+  },
 };
 
 /**

@@ -276,6 +276,34 @@ describe("the devices, which are GStreamer's and known by name", () => {
     await vi.waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith("native_call_mute", { id: pc.id, muted: false }));
   });
 
+  it("meters a microphone in Rust for Settings, by name, until stopped", async () => {
+    tauri.invoke.mockImplementation(async (command) => (command === "native_microphone_meter" ? { meter: 7, device: "Mic A" } : undefined));
+    const heard: number[] = [];
+    const stop = await nativeDevices.meter!("Mic A", (level) => heard.push(level));
+    expect(tauri.invoke).toHaveBeenCalledWith("native_microphone_meter", { levels: tauri.channels[0], device: "Mic A" });
+    tauri.channels[0].onmessage(json({ level: 0.5 }));
+    tauri.channels[0].onmessage(json({ level: 3 }));
+    tauri.channels[0].onmessage(json({ ice: "new" }));
+    tauri.channels[0].onmessage(new TextEncoder().encode("not json").buffer);
+    expect(heard).toEqual([0.5, 1]);
+    stop();
+    stop();
+    tauri.channels[0].onmessage(json({ level: 0.2 }));
+    expect(heard).toHaveLength(2);
+    expect(tauri.invoke.mock.calls.filter(([command]) => command === "native_microphone_meter_close")).toEqual([["native_microphone_meter_close", { meter: 7 }]]);
+
+    await nativeDevices.meter!(undefined, () => {});
+    expect(tauri.invoke).toHaveBeenLastCalledWith("native_microphone_meter", expect.objectContaining({ device: null }));
+    tauri.invoke.mockRejectedValueOnce("The microphone could not start");
+    await expect(nativeDevices.meter!("Mic B", () => {})).rejects.toBe("The microphone could not start");
+  });
+
+  it("plays the speakers' test in Rust, on the speaker by name", async () => {
+    await nativeDevices.testSpeaker!("Headphones");
+    await nativeDevices.testSpeaker!(undefined);
+    expect(tauri.invoke.mock.calls).toEqual([["native_speaker_test", { device: "Headphones" }], ["native_speaker_test", { device: null }]]);
+  });
+
   it("plays the call on another speaker, in Rust, once the call has started", async () => {
     const pc = new NativePeerConnection({});
     const told = () => tauri.invoke.mock.calls.filter(([command, args]) => command === "native_call_speaker" && args?.id === pc.id).map(([, args]) => args?.device);

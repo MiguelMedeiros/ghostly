@@ -52,6 +52,9 @@ pub async fn native_call_support() -> CallSupport {
 struct Calls {
     cameras: HashMap<u32, Arc<engine::Camera>>,
     next_camera: u32,
+    /// Microphones open for Settings' meter.
+    meters: HashMap<u32, engine::Meter>,
+    next_meter: u32,
     calls: HashMap<String, Live>,
 }
 
@@ -193,6 +196,79 @@ pub async fn native_camera_close(camera: u32) -> Result<(), String> {
     {
         let _ = camera;
         Ok(())
+    }
+}
+
+/// A microphone open for its meter: its id, and the name of the one it is (null: the default one).
+#[derive(Serialize)]
+pub struct OpenMeter {
+    meter: u32,
+    device: Option<String>,
+}
+
+/// Opens the microphone named `device` (or the default one) for Settings' meter; its loudness, 0 to 1, arrives
+/// on `levels` as JSON (`{"level":0.4}`) until `native_microphone_meter_close`.
+#[tauri::command]
+pub async fn native_microphone_meter(
+    levels: Channel<InvokeResponseBody>,
+    device: Option<String>,
+) -> Result<OpenMeter, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let open = move || {
+            engine::Meter::open(engine::fake_media(), device.as_deref(), Arc::new(sink(levels)))
+        };
+        let meter = logged("the microphone's meter", blocking(open).await)?;
+        let device = meter.device.clone();
+        let mut calls = calls().lock().unwrap();
+        calls.next_meter += 1;
+        let id = calls.next_meter;
+        calls.meters.insert(id, meter);
+        Ok(OpenMeter { meter: id, device })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (sink(levels), device);
+        Err(ELSEWHERE.into())
+    }
+}
+
+#[tauri::command]
+pub async fn native_microphone_meter_close(meter: u32) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let closed = calls().lock().unwrap().meters.remove(&meter);
+        if let Some(closed) = closed {
+            blocking(move || {
+                drop(closed);
+                Ok(())
+            })
+            .await?;
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = meter;
+        Ok(())
+    }
+}
+
+/// Plays a short tone on the speaker named `device` (or the default one), and returns once it has played, with
+/// the name of the speaker it played on (null: the default).
+#[tauri::command]
+pub async fn native_speaker_test(device: Option<String>) -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        logged(
+            "the speakers' test",
+            blocking(move || engine::test_speaker(engine::fake_media(), device.as_deref())).await,
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = device;
+        Err(ELSEWHERE.into())
     }
 }
 
