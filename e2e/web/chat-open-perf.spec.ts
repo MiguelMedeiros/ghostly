@@ -77,6 +77,9 @@ test("scrolled up while a long chat's older messages come in, the view stays on 
   const bob = await peer("perf-scroll-bob");
   await seed(bob.page, [{ label: "Long chat", count: 2_000 }]);
   await bob.page.reload();
+  // A slower processor, so the older rows are still coming in when the wheel turns, however fast the runner.
+  const cdp = await bob.context.newCDPSession(bob.page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
   await bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" }).click();
   // At once, before the older rows are all in: a hand scrolls up a little, and a row in the view is marked.
   const box = (await chat(bob).boundingBox())!;
@@ -92,6 +95,7 @@ test("scrolled up while a long chat's older messages come in, the view stays on 
   });
   expect(marked.rows).toBeLessThan(2_000);
   await expect(chat(bob).locator("[data-message-row]")).toHaveCount(2_000);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
   const row = chat(bob).locator(`[data-message-id="${marked.id}"]`);
   await expect.poll(async () => Math.round((await row.boundingBox())!.y)).toBeCloseTo(marked.y, -1);
   await expect(bob.page.getByTestId("jump-latest")).toHaveAttribute("data-count", "0");
