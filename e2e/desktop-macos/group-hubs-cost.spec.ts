@@ -33,6 +33,8 @@ const N = Number(process.env.E2E_MESH_COST_N ?? 32);
 /** How long the app may take to hold its edges in each state. */
 const SETTLE_MS = Number(process.env.E2E_MESH_COST_SETTLE_MS ?? 20 * 60_000);
 const IDLE_MS = Number(process.env.E2E_MESH_COST_IDLE_MS ?? 120_000);
+/** Loopback edges made in the page: a group of 32's, whatever the size of the real group below. */
+const LOOP_EDGES = Number(process.env.E2E_MESH_COST_LOOPBACK ?? 31);
 const BUSY_MS = Number(process.env.E2E_MESH_COST_BUSY_MS ?? 60_000);
 
 /** Every peer connection the page makes, kept, so the test can count the edges that are up. Idempotent. */
@@ -174,8 +176,8 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
     report.alone = await measure(pids, 30_000);
     writeFileSync(testInfo.outputPath("mesh-cost.json"), JSON.stringify(report, null, 2));
 
-    await test.step(`${N - 1} edges in the page itself (loopback), idle and passing a message on every 2 s`, async () => {
-      const made = await app.app.executeAsync<number | string>(LOOPBACK, N - 1);
+    await test.step(`${LOOP_EDGES} edges in the page itself (loopback), idle and passing a message on every 2 s`, async () => {
+      const made = await app.app.executeAsync<number | string>(LOOPBACK, LOOP_EDGES);
       report.loopbackEdges = made;
       if (typeof made === "number") {
         const idle = await measure(pids, IDLE_MS);
