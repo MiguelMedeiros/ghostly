@@ -77,6 +77,23 @@ fn is_own_origin(host: Option<&str>, peer: &str, service: &str) -> bool {
     }
 }
 
+/// Whether the window, or a frame in it, may go to `url`: its own origin (in either spelling, see
+/// `is_own_origin`, each under its own scheme), an empty frame, or a blob the app made there. Never
+/// the Ghostly window's pages or another website, which would show under the app's
+/// "<title> — Ghostly" window title.
+fn may_navigate(url: &url::Url, peer: &str, service: &str) -> bool {
+    let host = url.host_str().unwrap_or_default();
+    match url.scheme() {
+        SCHEME => host.eq_ignore_ascii_case(&format!("{}.{}", service, peer)),
+        "http" | "https" => host.eq_ignore_ascii_case(&format!("{}.{}.{}", SCHEME, service, peer)),
+        "about" => matches!(url.path(), "blank" | "srcdoc"),
+        "blob" => url::Url::parse(url.path()).is_ok_and(|inner| {
+            !matches!(inner.scheme(), "blob" | "about") && may_navigate(&inner, peer, service)
+        }),
+        _ => false,
+    }
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -100,6 +117,7 @@ pub fn open<R: tauri::Runtime>(
         .map_err(|e| format!("URL: {}", e))?;
     WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url))
         .title(format!("{} — Ghostly", title))
+        .on_navigation(move |to| may_navigate(to, &peer, &service))
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;
@@ -282,6 +300,51 @@ mod tests {
             "atlas"
         ));
         assert!(!is_own_origin(None, PEER, "atlas"));
+    }
+
+    fn may(url: &str) -> bool {
+        may_navigate(&url::Url::parse(url).unwrap(), PEER, "atlas")
+    }
+
+    #[test]
+    fn the_window_stays_on_its_own_origin() {
+        for own in [
+            format!("{SCHEME}://atlas.{PEER}/"),
+            format!("{SCHEME}://atlas.{PEER}/maps/2?x=1#top"),
+            format!("{SCHEME}://ATLAS.{PEER}/"),
+            // How Windows and Android spell it.
+            format!("http://{SCHEME}.atlas.{PEER}/page"),
+            format!("https://{SCHEME}.atlas.{PEER}/page"),
+            // Frames the app makes of its own.
+            "about:blank".into(),
+            "about:srcdoc".into(),
+            format!("blob:{SCHEME}://atlas.{PEER}/1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
+        ] {
+            assert!(may(&own), "{own}");
+        }
+        for elsewhere in [
+            // The Ghostly window's own origin, under a "<title> — Ghostly" title.
+            "tauri://localhost/".to_string(),
+            "http://tauri.localhost/".into(),
+            "https://example.com/login".into(),
+            "http://127.0.0.1:3400/".into(),
+            "file:///etc/passwd".into(),
+            "data:text/html,<h1>Ghostly</h1>".into(),
+            "javascript:alert(1)".into(),
+            "about:config".into(),
+            // Another contact's, or another app of the same contact.
+            format!("{SCHEME}://atlas.{OTHER}/"),
+            format!("{SCHEME}://notes.{PEER}/"),
+            format!("{SCHEME}://atlas.{PEER}.evil.test/"),
+            // The Windows spelling is wry's alone: under the custom scheme it is another host.
+            format!("{SCHEME}://{SCHEME}.atlas.{PEER}/"),
+            // A real website whose name happens to spell the origin.
+            format!("https://atlas.{PEER}/"),
+            "blob:https://example.com/1b4e28ba-2fa1-11d2-883f-0016d3cca427".into(),
+            format!("blob:{SCHEME}://atlas.{OTHER}/1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
+        ] {
+            assert!(!may(&elsewhere), "{elsewhere}");
+        }
     }
 }
 
