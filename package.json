@@ -58,7 +58,7 @@
     "@ghostly/react": "*",
     "@noble/hashes": "2.4.0",
     "@scure/base": "2.4.0",
-    "@scure/bip39": "^2.0.1",
+    "@scure/bip39": "^2.4.0",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-process": "^2.3.1",
@@ -94,8 +94,8 @@
     "solc": "0.8.37",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.70.0",
-    "vite": "^8.3.0",
+    "typescript-eslint": "^8.70.1",
+    "vite": "^8.3.1",
     "vitest": "^5.0.1"
   },
   "workspaces": [
