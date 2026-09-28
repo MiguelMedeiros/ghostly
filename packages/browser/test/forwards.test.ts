@@ -168,6 +168,8 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     t.a.offer("pic-000001", size);
     const received = await t.row(t.a, m => m.id === "peer_pic-000001");
     await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    // Alice's side is done too (the app's pf-done has reached her): from here on, nothing about it should.
+    await vi.waitFor(() => expect(t.a.records.get("out:pic-000001")).toMatchObject({ state: "done" }), { timeout: 15_000 });
     const heardFromA = t.a.frames.length;
     const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
     expect(results[0]).toMatchObject({ error: null, messageIds: [expect.stringMatching(/^me_/)] });
