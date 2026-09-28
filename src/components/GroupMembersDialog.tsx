@@ -2,12 +2,14 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom";
 import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { GroupView, LinkView } from "@ghostly/browser/shared/types";
+import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, memberName } from "../lib/groups";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 import { GroupAvatar } from "./GroupAvatar";
+import { AvatarOpener } from "./AvatarViewer";
+import { useContactFaces } from "./identities/contactFace";
 import { avatarFromFile } from "../lib/avatarImage";
 import { ContactMarks } from "./identities/ContactMarks";
 import { Select } from "./ui/Select";
@@ -30,6 +32,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
   const state = useSyncExternalStore(subscribe, snapshot);
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
+  const faces = useContactFaces();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
@@ -49,15 +52,25 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
   const contacts = (state?.links ?? []).filter(l => l.profile && !live.memberLinks[l.id]);
   const invited = new Set(live.invited);
   // A member who is also a contact: the identities they shared in that chat. Community members are not contacts.
-  const contactKey = (key: string) => {
+  const contactOf = (key: string) => {
     const linkId = Object.keys(live.memberLinks).find(id => live.memberLinks[id] === key);
-    return linkId ? state?.links.find(l => l.id === linkId)?.peerPubKeyZ32 : undefined;
+    return linkId ? state?.links.find(l => l.id === linkId) : undefined;
+  };
+  const contactKey = (key: string) => contactOf(key)?.peerPubKeyZ32;
+  // A member's picture, when this app has one: mine, or what a member who is also a contact sent in our chat (the
+  // identity they are shown as wins, as in the chat). Community members are not contacts: they have none here.
+  const photoOf = (m: GroupMemberView) => {
+    if (m.me) return state?.settings.avatar || undefined;
+    const link = contactOf(m.key);
+    return link ? faces(link.peerPubKeyZ32)?.photo ?? link.peerAvatar : undefined;
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-members-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
-        <GroupAvatar picture={live.picture} size={56} testId="group-members-avatar" className="bg-accent/15" />
+        <AvatarOpener src={live.picture} name={live.name} testId="group-members-avatar-open" className="shrink-0 rounded-full">
+          <GroupAvatar picture={live.picture} size={56} testId="group-members-avatar" className="bg-accent/15" />
+        </AvatarOpener>
         <div className="min-w-0">
           {naming === null ? <h2 id={`${id}-title`} data-testid="group-members-name" className="truncate text-base font-semibold">{live.name}</h2>
             : <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void rename(); }}>
@@ -92,6 +105,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
     <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
       {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-hover">
         <span role="img" aria-label={m.online ? "reachable" : "not reachable"} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />
+        <MemberAvatar src={photoOf(m)} name={m.me ? state?.settings.nick || memberName(m) : memberName(m)} />
         <span className="contact-row min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m)}</span>{!m.me && <ContactMarks peerKey={contactKey(m.key)} testId="group-member-marks" />}<span className="shrink-0 font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span></span>
           {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{edgeLabel(m)}</span>}
@@ -129,4 +143,16 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? GROUP_READ_NOTE_COMMUNITY : GROUP_READ_NOTE}</p>
   </dialog>, document.body);
+}
+
+/** A member's avatar in the list: their picture, which opens large, or their initial (drawn by CSS, so it is not read out). */
+function MemberAvatar({ src, name }: { src?: string; name: string }) {
+  return (
+    <AvatarOpener src={src} name={name} testId="group-member-avatar"
+      className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover text-xs">
+      {src
+        ? <img src={src} alt="" draggable={false} className="h-full w-full object-cover" />
+        : <span aria-hidden="true" data-initial={name.charAt(0).toUpperCase()} className="text-text-muted before:content-[attr(data-initial)]" />}
+    </AvatarOpener>
+  );
 }

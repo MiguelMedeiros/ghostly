@@ -15,5 +15,6 @@
   "moreInfo": "مزيد من المعلومات",
   "save": "حفظ",
   "success": "نجاح",
-  "unnamedContact": "جهة اتصال · {{key}}"
+  "unnamedContact": "جهة اتصال · {{key}}",
+  "viewPhoto": "عرض صورة {{name}}"
 }

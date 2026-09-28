@@ -15,5 +15,6 @@
   "moreInfo": "更多信息",
   "save": "保存",
   "success": "成功",
-  "unnamedContact": "联系人 · {{key}}"
+  "unnamedContact": "联系人 · {{key}}",
+  "viewPhoto": "查看 {{name}} 的照片"
 }
