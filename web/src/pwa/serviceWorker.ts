@@ -105,6 +105,9 @@ export function askForShare(): void {
   void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-ready" })).catch(() => {});
 }
 
+/** How long a tab opened for a share waits for the peer's lock before it hands the share to the tab that holds it. */
+export const SHARE_FORWARD_AFTER_MS = 3000;
+
 /** Another tab holds the peer: the worker hands the share to that one instead. */
 export function forwardShare(): void {
   const workers = container();
