@@ -59,14 +59,14 @@ ghostly/
 │   ├── browser/         # The Ghostly peer: engine, wallets, storage, the platform layer under the UI
 │   ├── react/           # React hooks shared by the clients
 │   ├── sdk/             # @ghostly/sdk: adapter contracts for outside authors
-│   ├── cli/             # ghostly: the engine on Node for bots (daemon, socket API, events)
+│   ├── cli/             # ghostly (@ghostlytools/cli): the engine on Node for bots (daemon, socket API, events)
 │   └── iroh-web/        # Iroh compiled for browsers (relay only)
 ├── src/                 # The shared React UI (Desktop, web app, extension)
 ├── src-tauri/           # Desktop's Rust backend
 ├── native-transports/   # Iroh and HyperDHT for Desktop, the HyperDHT relay for browsers
 ├── extension/           # Ghostly Browser (Chromium extension, Manifest V3)
 ├── web/                 # Ghostly on the web (app.ghostly.tools)
-├── cli/                 # ghostly-cli (Rust), the compatibility client for v0.4 chats
+├── cli/                 # ghostly-cli, the older Rust CLI for v0.4 chats (no longer shipped; not the npm package)
 ├── e2e/                 # Playwright end-to-end suites and their Docker stack
 ├── examples/sdk-adapter # An adapter built outside the app on @ghostly/sdk
 ├── website/             # ghostly.tools (Next.js)

@@ -9,4 +9,4 @@ Read [docs/SDK.md](https://github.com/MiguelMedeiros/ghostly/blob/dev/docs/SDK.m
 money and secrets, the trust model (an adapter runs with the app's privileges), how a plugin gets into
 the app, and how the package is versioned. A complete example lives in `examples/sdk-adapter`.
 
-Not on npm yet: `npm pack --workspace @ghostly/sdk` from a checkout builds and packs it.
+Not on npm (a package named `@ghostly/sdk` there is not this one): `npm pack --workspace @ghostly/sdk` from a checkout builds and packs it.
