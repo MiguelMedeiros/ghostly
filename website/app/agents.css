@@ -1,0 +1,96 @@
+/* /developers/agents: page rules are prefixed ag-; the rest is cli.css (cl-). */
+.ag-hero {
+  padding-block: calc(var(--nav-h) + 56px) 48px;
+}
+.ag-hero-inner {
+  display: grid;
+  gap: 18px;
+  justify-items: start;
+}
+.ag-hero-inner > .lead {
+  max-width: 760px;
+}
+.ag-title {
+  font-size: clamp(40px, 6vw, 72px);
+}
+.ag-note {
+  font-size: 14px;
+}
+
+/* The prompt: a terminal-like box, its Copy button big and first in reading order. */
+.ag-prompt {
+  width: 100%;
+  max-width: 1000px;
+  margin-top: 8px;
+  border-radius: 14px;
+  border: 1px solid var(--line-2);
+  background: #03070c;
+  overflow: hidden;
+  box-shadow:
+    0 50px 110px -44px #000,
+    0 0 90px -34px rgba(34, 211, 238, 0.28);
+}
+.ag-prompt-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 10px 10px 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.ag-prompt-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.btn.ag-copy {
+  min-height: 48px;
+  min-width: 132px;
+  padding: 10px 28px;
+  font-size: 16px;
+  justify-content: center;
+}
+.ag-prompt-text {
+  margin: 0;
+  padding: 20px 24px 24px;
+  max-height: 460px;
+  overflow: auto;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: #cbd5e1;
+  /* Long lines wrap, so the whole prompt reads without scrolling sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* How it works: the detail, quieter than the prompt. */
+.ag-sub {
+  border-top: 0;
+  padding-block: 12px 28px;
+}
+/* The five steps in one row on a laptop. */
+.ag-sub .cl-cmds {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.ag-h3 {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+@media (max-width: 640px) {
+  .ag-hero {
+    padding-block: calc(var(--nav-h) + 32px) 32px;
+  }
+  .ag-prompt-bar {
+    padding-left: 14px;
+  }
+  .btn.ag-copy {
+    min-width: 108px;
+    padding-inline: 20px;
+  }
+  .ag-prompt-text {
+    font-size: 12px;
+    padding: 16px;
+  }
+}

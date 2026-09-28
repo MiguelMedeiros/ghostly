@@ -206,17 +206,6 @@ export const Ghost = memo(function Ghost({
   );
 });
 
-/** A small ghost for a flock (the swarm): the characters' silhouette, hem and eyes in one colour, nothing animated. */
-export function GhostSprite({ className = "" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="6 6 68 68" fill="currentColor" aria-hidden="true">
-      <path d={STILL} />
-      <circle cx="29" cy="36" r="6" fill="var(--pair-eye)" />
-      <circle cx="51" cy="36" r="6" fill="var(--pair-eye)" />
-    </svg>
-  );
-}
-
 /** The original 24px mark (bullets, buttons, tiny particles). */
 export function GhostMark({ className = "", title }: { className?: string; title?: string }) {
   return (

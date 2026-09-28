@@ -102,7 +102,8 @@ It also writes `docs/wisps/NUMBERING.md` and the forwarding stubs,
 `lib/roadmap-tracks.json` (the inventory and the tracks of
 `docs/wisps/ADAPTER-ROADMAP.md`), `lib/levels.json` and `lib/code-snippets.json`, the two excerpts
 `/developers` quotes from `packages/core/src/invite.ts` and
-`packages/core/src/pairedTransports.ts`. Last, `scripts/llms.mjs` writes `public/llms.txt` (an index for AI
+`packages/core/src/pairedTransports.ts`, and `lib/agent-prompt.json`, the prompt `/developers/agents` copies, cut
+from `docs/AI-AGENTS.md` by `scripts/agent-prompt.mjs`. Last, `scripts/llms.mjs` writes `public/llms.txt` (an index for AI
 readers, llmstxt.org: every WISP with its header's Summary row) and `public/llms-full.txt` (the WISPs as published,
 then `docs/CLI.md`, `docs/AI-AGENTS.md` and `packages/cli/SKILL.md`). None of the `lib/*.json` files it writes, nor
 `public/reference/` or the two llms files, is committed: a pull request never touches them, so two never conflict there.

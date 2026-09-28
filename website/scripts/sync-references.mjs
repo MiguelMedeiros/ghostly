@@ -12,6 +12,7 @@ import { roadmapTracks } from "./roadmap-tracks.mjs";
 import { siteFields } from "./wisp-header.mjs";
 import { readChanges, withRevisions } from "./wisp-changes.mjs";
 import { writeLlms } from "./llms.mjs";
+import { agentPromptJson } from "./agent-prompt.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "docs/wisps");
 const destination = resolve(root, "website/public/reference");
@@ -189,3 +190,6 @@ writeFileSync(
     2,
   ) + "\n",
 );
+
+// The prompt /developers/agents copies, cut from docs/AI-AGENTS.md so the page and the guide say the same thing.
+writeFileSync(resolve(root, "website/lib/agent-prompt.json"), JSON.stringify(agentPromptJson(root), null, 2) + "\n");

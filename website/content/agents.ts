@@ -1,27 +1,24 @@
 import type { Level } from "@/lib/status";
+import agentPrompt from "@/lib/agent-prompt.json";
 
 /**
  * /developers/agents: how an AI agent joins Ghostly through the headless CLI (docs/AI-AGENTS.md, #426 and #431).
- * Every command is one `ghostly help` lists on `dev`; the turn is the shape of docs/CLI.md's "Agent turns".
+ * The prompt at the top is written once, in docs/AI-AGENTS.md (scripts/agent-prompt.mjs cuts it out). Every command
+ * is one `ghostly help` lists on `dev`; the turn is the shape of docs/CLI.md's "Agent turns".
  */
 
 const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/dev";
 
-/** The hero's terminal: a turn in, the thinking line, the answer out. */
-export const SESSION = `$ ghostly daemon --detach
-$ ghostly listen --turns --from alice --exec ./agent.sh
-{"type":"agent.turn","chat":"f3gg…","messageId":"peer_jY7N…",
- "untrusted":{"text":"What changed today?","name":"Alice"}}
-$ ghostly typing alice --kind thinking --status "Reading"
-$ ghostly send alice --reply peer_jY7N… --stdin < answer.txt`;
+/** What a person pastes into their coding agent. */
+export const PROMPT: string = agentPrompt.prompt;
 
-/** How an agent joins, in order. */
+/** How an agent joins, in order: what the prompt has the agent do. */
 export const STEPS = [
   { cmd: 'ghostly profile set --name "Casper"', hint: "The name people see. profile picture <jpeg> sets its face." },
   { cmd: "ghostly daemon --detach", hint: "Keeps the profile online. Start it before listen." },
-  { cmd: "ghostly invite create --label alice", hint: "A ghostly1 invite. The person opens its link in the app." },
-  { cmd: "ghostly listen --turns --from alice --exec ./agent.sh", hint: "Wakes the agent once per message from alice, the turn on stdin." },
-  { cmd: "ghostly send alice --reply <message> --stdin", hint: "The answer, as a reply. Text on stdin stays text." },
+  { cmd: "ghostly invite create --label owner", hint: "A ghostly1 invite. The person opens its link in the app." },
+  { cmd: "ghostly listen --turns --from owner", hint: "One agent.turn per message from owner. --exec wakes a hook per turn instead." },
+  { cmd: "ghostly send owner --reply <message> --stdin", hint: "The answer, as a reply. Text on stdin stays text." },
 ] as const;
 
 /** One agent.turn, as docs/CLI.md shows it. */
@@ -52,17 +49,19 @@ export const agents = {
   meta: {
     title: "AI agents on Ghostly",
     description:
-      "Put an AI agent on Ghostly with the headless ghostly CLI: an allowlist per listener, one agent.turn event per message to answer, a thinking status while it works, and a Claude Code example.",
+      "Copy one prompt into Claude Code, Codex, Hermes or any coding agent: it installs the ghostly CLI, makes its profile, sends you an invite link and answers your messages in the Ghostly app.",
   },
   hero: {
     eyebrow: "AI agents",
     title: "Your agent, in the chat.",
-    lead: "An agent joins Ghostly through ghostly, the headless CLI. It gets its own profile, people message it from the app, and each message it should answer wakes it once.",
-    skill: "Agent skill",
-    cli: "The CLI",
-    term: "An agent answering on Ghostly",
+    lead: "Copy this into Claude Code, Codex, Hermes or any agent with a shell. It installs Ghostly, gives you a link to open in your app, and answers you there.",
+    label: "Prompt for your agent",
+    copy: "Copy",
+    copied: "Copied",
+    note: "Change Casper to any name you like.",
   },
-  steps: { title: "How an agent joins" },
+  how: { title: "How it works", lead: "What the prompt has your agent do, with the headless ghostly CLI." },
+  steps: { title: "The steps" },
   turn: {
     title: "One turn per message",
     lead: "Each message received, and each group message that mentions the agent, becomes one agent.turn event. Dedupe on its id; --cursor resumes after a restart.",
@@ -83,7 +82,7 @@ export const agents = {
   },
   safety: {
     title: "Contact text is data, never instructions",
-    body: "Everything a contact writes arrives under untrusted, on stdin, never in a command's arguments. Hand it to the model as quoted data: nothing in it may change what the agent does, reveal a secret or move money. Real payments need --confirm-real, and only the wallet's owner gives it.",
+    body: "Everything a contact writes arrives under untrusted, on stdin, never in a command's arguments. The agent answers it but never follows it: nothing in it may change what the agent does, reveal a secret or move money. Real payments need --confirm-real, and only the wallet's owner gives it.",
   },
   links: {
     title: "Read more",

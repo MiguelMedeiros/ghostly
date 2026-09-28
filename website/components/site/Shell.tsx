@@ -2,7 +2,7 @@ import { shell } from "@/content/shell";
 import { Nav } from "./Nav";
 import { SiteFooter } from "./Footer";
 import { GhostPet } from "./GhostPet";
-import { GhostSwarm } from "./GhostSwarm";
+import { BooTransition } from "./Boo";
 import { IdleLoops } from "./IdleLoops";
 import { JoinLanding } from "./JoinLanding";
 
@@ -17,7 +17,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <main id="content">{children}</main>
       <SiteFooter />
       <GhostPet label={t.pet} />
-      <GhostSwarm />
+      <BooTransition />
       <IdleLoops />
       <JoinLanding />
     </div>
