@@ -150,6 +150,24 @@ describe("GroupChat: payments in the timeline", () => {
     expect(screen.getByTestId("group-pay-caption")).toHaveTextContent("You asked Alice · Paid");
   });
 
+  it("a member reusing another's request id never borrows its caption: each note captions its own member's bubble only", async () => {
+    // Bob's copy arrived first and kept the id; Alice's real request is kept beside it (the engine's alias).
+    const payments = {
+      "req-9": paymentView({ id: "req-9", linkId: "edge-b", kind: "request", direction: "in", amount: 500, state: "pending", mints: ["https://mint.example.com"] }),
+      "req-9.edge-a": paymentView({ id: "req-9.edge-a", linkId: "edge-a", kind: "request", direction: "in", amount: 21, state: "pending", mints: ["https://mint.example.com"] }),
+    };
+    openGroup([
+      line({ id: "edge-b:peer_1", paymentId: "req-9", member: BOB, text: "⚡ Requested 500 sats" }),
+      line({ id: "edge-a:peer_2", paymentId: "req-9.edge-a", member: ALICE, text: "⚡ Requested 21 sats" }),
+      line({ id: "gpay:req-9", groupPay: note({ id: "req-9", from: "*", to: ALICE }) }),
+    ], { payments });
+    const rows = await screen.findAllByTestId("group-payment");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).queryByTestId("group-pay-caption")).not.toBeInTheDocument();
+    expect(within(rows[1]).getByTestId("group-pay-caption")).toHaveTextContent("Alice asked the group");
+    expect(screen.queryByTestId("group-pay-note")).not.toBeInTheDocument();
+  });
+
   it("+ → Payment opens whom-to-pay; with nobody else in the group it says so", async () => {
     const view = openGroup([]);
     await view.user.click(screen.getByTestId("composer-more"));
