@@ -60,19 +60,21 @@ describe("VAPID (RFC 8292)", () => {
 });
 
 describe("where a push may go", () => {
-  it.each(["https://fcm.googleapis.com/fcm/send/x", "https://web.push.apple.com/QAB", "https://updates.push.services.mozilla.com/wpush/v2/x"])("%s", (url) => {
+  it.each(["https://fcm.googleapis.com/fcm/send/x", "https://web.push.apple.com/QAB", "https://updates.push.services.mozilla.com/wpush/v2/x", "https://wns2-par02p.notify.windows.com/w/x"])("%s", (url) => {
     expect(checkPushEndpoint(url).href).toBe(url);
   });
-  it.each(["http://fcm.googleapis.com/x", "https://127.0.0.1/x", "https://[::1]/x", "https://localhost/x", "https://router.local/x", "https://intranet/x", "https://u:p@push.example.com/x", "not a url"])("not %s", (url) => {
+  it.each(["http://fcm.googleapis.com/x", "https://127.0.0.1/x", "https://[::1]/x", "https://localhost/x", "https://router.local/x", "https://intranet/x", "https://u:p@push.example.com/x", "not a url",
+    // A public host name that is not a push service may still resolve to anything, a private address among them.
+    "https://push.example.com/x", "https://127.0.0.1.nip.io/x", "https://fcm.googleapis.com.evil.example/x", "https://fcm.googleapis.com:8443/x"])("not %s", (url) => {
     expect(() => checkPushEndpoint(url)).toThrow(WebPushError);
   });
 
   it("the whole request: encrypted body, authorization, short TTL, high urgency", () => {
     const secret = p256.utils.randomSecretKey();
     const auth = crypto.getRandomValues(new Uint8Array(16));
-    const request = pushRequest({ endpoint: "https://push.example.com/abc", p256dh: toBase64Url(p256.getPublicKey(secret, false)), auth: toBase64Url(auth) },
+    const request = pushRequest({ endpoint: "https://fcm.googleapis.com/fcm/send/abc", p256dh: toBase64Url(p256.getPublicKey(secret, false)), auth: toBase64Url(auth) },
       generateVapidKeys(), utf8Encode("token"), { subject: "https://ghostly.tools" });
-    expect(request.url).toBe("https://push.example.com/abc");
+    expect(request.url).toBe("https://fcm.googleapis.com/fcm/send/abc");
     expect(request.headers).toMatchObject({ "Content-Encoding": "aes128gcm", TTL: "3600", Urgency: "high" });
     expect(request.headers.Authorization).toMatch(/^vapid t=/);
     expect(utf8Decode(decryptPushPayload(request.body, secret, auth))).toBe("token");

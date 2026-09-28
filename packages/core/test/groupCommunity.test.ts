@@ -24,12 +24,17 @@ class Net {
   private pending: Promise<unknown>[] = [];
   partition: ((a: Member, b: Member) => boolean) | null = null;
   delivered = 0;
+  /** Every frame that reached someone: who sent it, to whom, its type. */
+  readonly log: { from: string; to: string; t: string }[] = [];
+  /** The members' clock. */
+  now = () => Date.now();
 
   private hooks(name: string) {
     const deliver = (to: Member | undefined, frame: CommunityFrame) => {
       const me = this.members.get(name)!;
       if (!to || !to.online || !me.online || to === me || (this.partition && !this.partition(me, to))) return;
       this.delivered++;
+      this.log.push({ from: name, to: to.name, t: String((frame as { t?: unknown }).t) });
       this.pending.push(to.session.handle(me.session.myKey, clone(frame)));
     };
     return {
@@ -39,6 +44,7 @@ class Net {
       addressed: (to: string, frame: CommunityFrame) => deliver(this.byKey(to), frame),
       message: (m: CommunityIncomingMessage) => { this.members.get(name)!.messages.push(m); },
       changed: () => {},
+      clock: () => this.now(),
     };
   }
   byKey(key: string): Member | undefined { for (const m of this.members.values()) if (m.session.myKey === key) return m; return undefined; }
@@ -216,6 +222,41 @@ describe("community sessions", { timeout: 60_000 }, () => {
     await expect(bob.session.remove(alice.session.myKey)).rejects.toThrow(/Only the admin/);
   });
 
+  it("a removed member is heard no more, even signing for an epoch it was in, and is not handed on", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    // Carol's app keeps its state from before the removal, secrets and all.
+    const stale = clone(carol.saved);
+    await alice.session.remove(carol.session.myKey);
+    await net.settle();
+    expect(bob.session.wasRemoved(carol.session.myKey)).toBe(true);
+    const captured: CommunityFrame[] = [];
+    const kept = new CommunitySession(stale, { save: async () => {}, broadcast: f => { captured.push(f); }, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} });
+    await kept.sendText("still here", "carol");
+    const frame = captured.find(f => (f as { t?: string }).t === "group-msg")!;
+    expect(frame).toBeTruthy();
+    // Handed on by a member still in (or by carol again, under a new key): not taken, not passed on.
+    expect(await bob.session.handle(alice.session.myKey, clone(frame))).toBe(false);
+    await net.settle();
+    expect(net.texts(bob)).not.toContain("still here");
+  });
+
+  it("a frame its author did not sign never takes a place among those waiting", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const captured: CommunityFrame[] = [];
+    const quiet = new CommunitySession(clone(alice.saved), { save: async () => {}, broadcast: f => { captured.push(f); }, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} });
+    await quiet.sendText("hi", "alice");
+    const frame = captured.find(f => (f as { t?: string }).t === "group-msg") as unknown as Record<string, unknown>;
+    // An epoch bob does not know yet, and a signature that is not alice's.
+    for (let n = 0; n < COMMUNITY_LIMITS.waiting + 4; n++) await bob.session.handle(alice.session.myKey, { ...frame, e: (frame.e as number) + 1, n, sig: toBase64Url(new Uint8Array(64)) });
+    expect((bob.session as unknown as { waiting: unknown[] }).waiting).toHaveLength(0);
+  });
+
   it("a leave is committed by another member on the leaver's request, with a fresh secret", async () => {
     const net = new Net();
     const alice = net.create("alice");
@@ -354,6 +395,29 @@ describe("community sessions", { timeout: 60_000 }, () => {
     await say(net, members[3], "after restart");
     expect(net.texts(alice)).toContain("after restart");
     expect(shortHash(alice.session.topHash)).toHaveLength(16);
+  });
+
+  it("answers one member's syncs a few times a minute, not every one", async () => {
+    const net = new Net();
+    let now = Date.now();
+    net.now = () => now;
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    for (const text of ["a", "b", "c"]) await say(net, alice, text);
+    now += 61_000;
+    const answers = () => net.log.filter(f => f.from === "alice" && f.to === "bob" && f.t === "group-msg").length;
+    const before = answers();
+    // Only Alice's side speaks: Bob's own syncs back would count too.
+    net.partition = (from, to) => !(from === bob && to === alice);
+    // A sync that claims to have nothing: every answer carries Alice's store again.
+    const empty = () => ({ ...clone(bob.session.syncFrame()), have: {} });
+    for (let i = 0; i < 50; i++) await alice.session.handle(bob.session.myKey, empty());
+    await net.settle();
+    expect((answers() - before) / 3).toBe(COMMUNITY_LIMITS.syncAnswers);
+    now += 61_000;
+    await alice.session.handle(bob.session.myKey, empty()); await net.settle();
+    expect((answers() - before) / 3).toBe(COMMUNITY_LIMITS.syncAnswers + 1);
   });
 });
 

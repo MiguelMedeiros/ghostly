@@ -6,7 +6,7 @@ We welcome all ghosts, ghouls, and developers! Here's how to haunt our codebase.
 
 ### Prerequisites
 
-- Node.js 22 (what CI uses)
+- Node.js 22.12 or newer (CI uses 22; the CLI workspace needs 22.12)
 - Rust (stable)
 - The [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system, to build Desktop
 
@@ -39,9 +39,11 @@ Releases: [docs/RELEASING.md](docs/RELEASING.md).
 | `npm run lint` / `npm run lint:fix` | ESLint |
 | `npm run typecheck` | TypeScript, every workspace |
 | `npm run test:affected` | before pushing: only what your change can break (unit, lint, typecheck, Rust; the e2e picked with `--port <n>`) |
-| `npm test` | every unit test: `test:packages` (core, browser, sdk, extension) then `test:app` (UI components, matrix, scripts) |
+| `npm test` | every unit test: `test:packages` (core, browser, sdk, extension, cli) then `test:app` (UI components, matrix, scripts) |
 | `npm run test:ui` | only the UI's component tests ([src/test/README.md](src/test/README.md)) |
-| `npm run test:map` | every feature in `e2e/features.json` has a test |
+| `npm run test:map` | every feature in `e2e/features.json` has a test, and the file is sorted (`-- --fix` sorts it) |
+| `npm run locales:sort` | sorts the keys of every locale file |
+| `node scripts/changes.mjs` | checks the changelog entries in `changes/` (`--preview` prints the release notes they make) |
 | `npm run test:e2e` | end-to-end: real browsers, the web app and the extension ([e2e/README.md](e2e/README.md)) |
 | `npm run e2e:full` | end-to-end with the gated suites, on a local Docker stack of regtest services |
 | `npm run build && npm run check:desktop-bundle` | Desktop got its Desktop wiring, not a browser stand-in (seconds, runs anywhere) |
@@ -83,9 +85,10 @@ ghostly/
    ```bash
    npm run test:affected -- --port 50310   # unit, lint, typecheck, Rust, and the e2e tagged with the features you touched
    ```
-4. Open the pull request against `dev`. A draft early is fine: CI runs on every push.
+4. Open the pull request against `dev`. A draft early is fine: CI runs on every push. A draft skips the Rust jobs unless it changed Rust, so mark it ready when it is done, which runs everything.
+5. **CI Success** is the one required check on `dev`, and the branch must be up to date with `dev` to merge. When `dev` moves, rebase and push again. Pull requests are squash-merged; with auto-merge on (`gh pr merge --squash --auto`), a green, up-to-date branch merges by itself.
 
-CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop checks on every pull request ([What CI runs](docs/TESTING.md#what-ci-runs)). The app's e2e suites run before every release and nightly, not on pull requests. Run the whole suites yourself only to reproduce a CI failure.
+CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop checks on every pull request ([What CI runs](docs/TESTING.md#what-ci-runs)). The app's e2e suites run before every release and nightly, not on pull requests, so run the specs your change touches yourself (`npm run test:affected -- --port <n>` picks them). Run the whole suites only to reproduce a CI failure.
 
 ### Tests expected with a feature
 
@@ -94,6 +97,21 @@ CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop ch
 - **One line in `e2e/features.json`** for a new feature, in its alphabetical place by id (`npm run test:map -- --fix` sorts the file), and each test says what it covers: `{ tag: ["@feature:<id>"] }` in Playwright, `// covers: <id>` in Vitest and Rust. `npm run test:map` fails in CI on a feature with no test that is not on `e2e/allow-untested.json`.
 
 Details: [docs/TESTING.md](docs/TESTING.md).
+
+### Files many pull requests touch
+
+Lists that every feature adds to are kept sorted, one entry per line, so two pull requests open at the same time add lines in different places instead of both at the end. Generated files are not committed.
+
+| What | Where it goes | Check |
+|---|---|---|
+| A feature | its line in `e2e/features.json`, at its place by id; its globs in `paths` by glob | `npm run test:map` (`-- --fix` sorts) |
+| A string | `src/locales/<language>/<area>.json`, below | `npm run locales:sort`, the i18n tests |
+| A release note | a file in `changes/` | `node scripts/changes.mjs` |
+| A WISP change | a file in `docs/wisps/changes/<wisp>/` | `npm run sync:references` in `website/` |
+| A Desktop command | its alphabetical place in `src-tauri/src/main.rs` (`commands!`), `src-tauri/build.rs` (`COMMANDS`) and `src-tauri/capabilities/default.json` (`allow-*`) | `cargo test` in `src-tauri` |
+| A CLI command | its alphabetical place in `packages/cli/src/commands/<area>.ts`, and its row in the command table of `packages/cli/README.md` | the CLI's `commands` and `readme` tests |
+
+Not committed, so regenerate them when you need them: `website/lib/*.json` (`npm run sync:references` in `website/`, once after a checkout; its `dev` and `build` do it themselves), `src-tauri/gen/schemas/` (any Desktop build), and the test map (`npm run test:map:write` writes `docs/test-map.md`).
 
 ### Text in the app
 

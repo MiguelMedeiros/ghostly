@@ -60,6 +60,7 @@ for(const permission of ["denied","unavailable"]){
   await page.addInitScript(value=>{Object.defineProperty(window,"Notification",{value:value==="unavailable"?undefined:class {static permission="denied";static async requestPermission(){return "denied";}}});},permission);
   await page.goto("/#/settings");await page.reload();
   const toggle=page.getByRole("switch",{name:"System notifications",exact:true});await toggle.click();await expect(toggle).not.toBeChecked();
-  await expect(page.getByRole("status")).toContainText(permission==="denied"?/blocked/i:/not available/i);
+  // The row's own status: the wake-up row under it (#394) has one too.
+  await expect(page.getByTestId("settings-system-notifications-row").getByRole("status")).toContainText(permission==="denied"?/blocked/i:/not available/i);
  });
 }

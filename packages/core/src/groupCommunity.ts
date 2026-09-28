@@ -12,7 +12,7 @@ import { mentionsBytes, validMentions, wireMentions, type GroupMention } from ".
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
-import { validEditNumber } from "./pairedEdits";
+import { RateWindow, validEditNumber } from "./pairedEdits";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
@@ -68,6 +68,13 @@ export const COMMUNITY_LIMITS = {
   /** Commits in one welcome or chain piece. */
   chainPiece: 100,
   pendingLeaves: 64,
+  /**
+   * Syncs of one member answered in `syncWindowMs`: each answer may carry the chain's tail, secrets and the whole
+   * store. A member catching up asks every five seconds at most, and every member syncs every thirty; one asking more
+   * waits for the window.
+   */
+  syncAnswers: 16,
+  syncWindowMs: 60_000,
 } as const;
 
 /** What every member should know about who can read what, and what the link does, in the words the apps show. */
@@ -376,6 +383,8 @@ export class CommunitySession {
   private waiting: { from: string; frame: CommunityMessageFrame }[] = [];
   private waitingBytes = 0;
   private asked = new Map<string, number>();
+  /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
+  private syncsAnswered = new Map<string, RateWindow>();
   private queue = Promise.resolve();
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   /** One metadata frame naming a commit or a secret I do not have yet: tried again when the chain or my secrets move. */
@@ -1111,13 +1120,16 @@ export class CommunitySession {
 
   private async receiveMessage(from: string, raw: unknown): Promise<boolean> {
     if (!isMessageFrame(raw) || raw.s === this.myKey) return false;
+    // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
+    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
+    // Someone the chain took out is heard no more, even for an epoch it was in (whose secret it still holds).
+    if (this.wasRemoved(raw.s)) return false;
     const found = this.commitByShort(raw.e, raw.h);
     if (!found) { this.park(from, raw); return false; }
     const roster = this.rosterOf(found.hash)!;
     // Not a member of that epoch, or I was not one: nothing to read, nothing to relay.
     if (!rosterHas(roster, raw.s) || !rosterHas(roster, this.myKey)) return false;
     if (this.isDuplicate(raw)) return false;
-    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     const secret = this.state.secrets[found.hash];
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
@@ -1200,6 +1212,9 @@ export class CommunitySession {
 
   private async receiveSync(from: string, frame: CommunitySyncFrame): Promise<void> {
     if (!this.isRecentMember(from) || !Number.isSafeInteger(frame.e) || typeof frame.h !== "string") return;
+    let answered = this.syncsAnswered.get(from);
+    if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(COMMUNITY_LIMITS.syncAnswers, COMMUNITY_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
+    if (!answered.take()) return;
     const theirs = this.known.get(frame.h);
     let start: number;
     if (theirs && this.mainIndex.has(frame.h)) start = this.mainIndex.get(frame.h)! + 1;
@@ -1230,7 +1245,7 @@ export class CommunitySession {
     // What was said while they were away, by anyone, for epochs they were in.
     const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
     for (const stored of this.state.store) {
-      if (stored.s === from) continue;
+      if (stored.s === from || this.wasRemoved(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found || !rosterHas(this.rosterAt(found.hash) ?? [], from)) continue;
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];

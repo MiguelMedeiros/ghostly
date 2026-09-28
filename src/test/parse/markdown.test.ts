@@ -210,6 +210,9 @@ describe("[text](url) links", () => {
     expect(labelMisleads("paypal.md", "https://evil.example")).toBe(true);
     expect(labelMisleads("secure/paypal.com", "https://evil.example")).toBe(true);
     expect(labelMisleads("//paypal.md", "https://evil.example")).toBe(true);
+    // A soft hyphen shows nothing, and some dots only look like one.
+    expect(labelMisleads("paypal.c\u00adom", "https://evil.example")).toBe(true);
+    for (const dot of ["\u00b7", "\u0701", "\u06d4", "\u2027", "\u2e3c"]) expect(labelMisleads(`paypal${dot}com`, "https://evil.example")).toBe(true);
   });
 
   it("leaves file names alone", () => {

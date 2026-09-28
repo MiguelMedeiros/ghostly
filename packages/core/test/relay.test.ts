@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DiscoveryBudgetError, FRESH_READ_MS, REQUESTS_PER_MINUTE, RelayTransport, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DiscoveryBudgetError, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 // covers: core.relay-client
 
 describe("relay transport", () => {
   const id = createIdentity();
   const packet = (micros: bigint) => createRelayPayload(id, [{ label: "_ts", value: String(micros) }], micros);
+  const parse = async (micros: bigint) => parseRelayPayload(id.pubKeyZ32, packet(micros));
 
   function transport(handlers: Record<string, () => Response>) {
     const calls: string[] = [];
@@ -25,6 +26,21 @@ describe("relay transport", () => {
     // b still serves an older cached copy; the newer one already seen wins
     expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(2000n);
     expect(calls).toEqual(["a.test", "b.test"]);
+  });
+
+  it("a packet dated far ahead never hides one dated now: the next read of a present packet is taken", async () => {
+    const now = BigInt(Date.now()) * 1000n;
+    const ahead = now + BigInt(PKARR_FUTURE_SKEW_MS + 3_600_000) * 1000n;
+    const { relay } = transport({
+      "a.test": () => new Response(packet(ahead) as BodyInit),
+      "b.test": () => new Response(packet(now) as BodyInit),
+    });
+    expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(ahead);
+    expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(now);
+    // Within the skew, a later time still wins as before.
+    const soon = now + 60_000_000n;
+    expect(newerPacket(await parse(now), await parse(soon))?.timestampMicros).toBe(soon);
+    expect(newerPacket(await parse(ahead), await parse(ahead + 1n))?.timestampMicros).toBe(ahead + 1n);
   });
 
   it("answers a read of a key it just read from that answer, until the key is published or the answer ages", async () => {
@@ -62,6 +78,31 @@ describe("relay transport", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("a read the budget holds back answers what this client published since its last read, not the older packet read", async () => {
+    // A community hub reads its beacon, writes its own entry into it, and reads it again while the budget is spent
+    // (another link signaling): its own entry must not look as old as the one it replaced, or the hub stops
+    // counting itself at the door (doorHubs) until its next write, and a knock waits that long.
+    const stored = new Map<string, Uint8Array>();
+    const calls: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const key = new URL(String(input)).pathname.slice(1);
+      calls.push(init?.method ?? "GET");
+      if (init?.method === "PUT") { stored.set(key, new Uint8Array(await new Response(init.body).arrayBuffer())); return new Response(null, { status: 204 }); }
+      const bytes = stored.get(key);
+      return bytes ? new Response(bytes as BodyInit) : new Response(null, { status: 404 });
+    }) as typeof fetch;
+    stored.set(id.pubKeyZ32, packet(1000n));
+    const relay = new RelayTransport({ freshReadMs: 0, requestsPerMinute: 2, relays: ["https://a.test"], fetch: fetchFn });
+    expect((await relay.resolve(id.pubKeyZ32, { background: true, group: true }))?.timestampMicros).toBe(1000n);
+    await relay.publish(id, [{ label: "_ts", value: "mine" }], { background: true, group: true });
+    const mine = parseRelayPayload(id.pubKeyZ32, stored.get(id.pubKeyZ32)!);
+    // The minute's two requests are spent: no request, and the answer is the packet just published.
+    const held = await relay.resolve(id.pubKeyZ32, { background: true, group: true });
+    expect(calls).toEqual(["GET", "PUT"]);
+    expect(held?.timestampMicros).toBe(mine.timestampMicros);
+    expect(held?.records.find((r) => r.label === "_ts")?.value).toBe("mine");
   });
 
   it("backs off from a relay that rate limits and uses the other one", async () => {
@@ -591,6 +632,41 @@ describe("relay transport: background requests yield to a link that signals", ()
       for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE; i++) await look(after).catch(() => {});
       expect(log.filter((r) => r.background && r.at === after).length).toBeGreaterThan(BACKGROUND_WHILE_SIGNALING);
       expect(inMinute(after, true) + inMinute(after, false)).toBe(REQUESTS_PER_MINUTE);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("lets a community door read its knock bell while a link signals, within the background share", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { log, edge, relay, setBackground } = counting();
+      const start = Date.now();
+      // The door has just let someone in: that person's edges signal, polling fast.
+      const bells: number[] = [];
+      for (let t = 0; t < 30_000; t += 1_000) {
+        vi.setSystemTime(start + t);
+        if (t % 2_000 === 0) { setBackground(false); await edge.resolve(id.pubKeyZ32, { urgent: true }); }
+        // The door reads its bell every 4 s (knockPollMs), the next person's knock due any moment.
+        if (t % 4_000 === 0) {
+          setBackground(true);
+          await relay.resolve(id.pubKeyZ32, { background: true, group: true, door: true }).then(() => bells.push(t), () => {});
+        }
+      }
+      // Every look at the bell went: more than the small share a minute's background has while a link signals.
+      expect(bells).toHaveLength(8);
+      expect(log.filter((r) => r.background)).toHaveLength(8);
+      // Other background looks still wait for the signaling to end.
+      vi.setSystemTime(start + 30_000);
+      await expect(relay.resolve(createIdentity().pubKeyZ32, { background: true, group: true })).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps a community door's bell within the background share of the minute", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { log, relay, setBackground } = counting();
+      setBackground(true);
+      for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE + 5; i++) await relay.resolve(id.pubKeyZ32, { background: true, group: true, door: true }).catch(() => {});
+      expect(log).toHaveLength(BACKGROUND_REQUESTS_PER_MINUTE);
     } finally { vi.useRealTimers(); }
   });
 });

@@ -1,5 +1,7 @@
 import { publicKeyLabel } from "../lib/publicKeyLabel";
-import React, { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { sameValue } from "../lib/sameValue";
+import { clockTime } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { Menu, MenuItem } from "./Menu";
@@ -205,7 +207,7 @@ function EditGlyph() {
  */
 function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean }) {
   const { t } = useI18n();
-  const time = new Date(edit.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time = clockTime(edit.at);
   return (
     <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
@@ -547,17 +549,67 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onForward,
   );
 }
 
-/** A message's bubble, behind its own error boundary: one message that fails to draw never takes the chat down. */
+/** What a bubble draws with: `reactionName`'s answers for the reactions it has, so a change of names redraws it. */
+type BubbleViewProps = MessageBubbleProps & { names: string };
+
+/**
+ * A message's bubble, behind its own error boundary: one message that fails to draw never takes the chat down.
+ *
+ * A chat draws every one of its messages again on each change of its page (the engine's state, a delivery tick, a
+ * name), and a long chat has thousands. So a bubble is drawn again only when what it shows changes: its message and
+ * its quote by content (they are read again from storage, as new objects with the same data), the other values as
+ * they are, and each callback only by whether it is there. The callbacks it gets call the latest ones given.
+ */
 export function MessageBubble(props: MessageBubbleProps) {
+  const latest = useRef(props);
+  // Set while drawing: `reactionName` is called while the bubble draws, with this very draw's props.
+  latest.current = props;
+  const stable = useMemo(() => ({
+    onDelete: () => latest.current.onDelete?.(),
+    onReply: () => latest.current.onReply?.(),
+    onEdit: () => latest.current.onEdit?.(),
+    onReact: (emoji: string) => latest.current.onReact?.(emoji),
+    onForward: () => latest.current.onForward?.(),
+    onSelect: () => latest.current.onSelect?.(),
+    onToggle: () => latest.current.selection?.onToggle?.(),
+    reactionName: (by: string) => latest.current.reactionName?.(by) ?? by.slice(0, 8),
+  }), []);
+  const { message, peerAck = 0, selection } = props;
+  // Only a message of mine without its own delivery state reads the contact's acknowledgement: one number per bubble.
+  const acked = message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+  const names = message.reactions ? Object.keys(message.reactions).map(stable.reactionName).join("\n") : "";
+  return (
+    <SameBubble
+      message={message} peerAck={acked ? message.timestamp : message.timestamp - 1}
+      peerPubKey={props.peerPubKey} peerNick={props.peerNick} linkId={props.linkId} quote={props.quote} names={names}
+      onDelete={props.onDelete && stable.onDelete} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
+      onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
+      reactionName={stable.reactionName}
+      selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
+    />
+  );
+}
+
+const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onSelect"] as const;
+
+/** The same bubble to draw: see `MessageBubble`. */
+function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names
+    && CALLBACKS.every(name => !a[name] === !b[name])
+    && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
+    && sameValue(a.quote, b.quote) && sameValue(a.message, b.message);
+}
+
+const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   const { message } = props;
   return (
     <MessageBoundary key={message.id} text={message.text} fromMe={message.sender === "me"}>
       <MessageBubbleView {...props} />
     </MessageBoundary>
   );
-}
+}, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, selection }: MessageBubbleProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, selection, names }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onDelete = choosing ? undefined : deleteIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
@@ -581,7 +633,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const bubbleRef = useRef<HTMLDivElement>(null);
   const reactRef = useRef<HTMLSpanElement>(null);
   const press = useLongPress(onReact ? () => setBar("press") : onSelect ?? openDetails);
-  const chips = useMemo(() => reactionChips(message.reactions, by => reactionName?.(by) ?? by.slice(0, 8), t("chat.reply.you")), [message.reactions, reactionName, t]);
+  // `names`: the names `reactionName` gives now, which can change while the function stays the same.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `names` is what `reactionName` answers
+  const chips = useMemo(() => reactionChips(message.reactions, by => reactionName?.(by) ?? by.slice(0, 8), t("chat.reply.you")), [message.reactions, reactionName, t, names]);
   const swipe = useSwipeReply(onReply);
   const [imgError, setImgError] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -609,10 +663,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
   };
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: retry } : {};
-  const time = new Date(message.timestamp).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const time = clockTime(message.timestamp);
   const contentType = imgError || message.file || message.paymentId ? "text" : detectContentType(message.text);
   const download = message.file && !isSystem
     ? {

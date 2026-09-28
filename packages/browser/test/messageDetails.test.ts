@@ -5,7 +5,7 @@ import { ChatFiles, GhostLink, createIdentity, createLink, identityFromSeedB64, 
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { fileStore } from "../src/shared/idb";
-import { pathSnapshot, trim, withSend } from "../src/engine/messageDetails";
+import { composeDetails, pathSnapshot, trim, withSend } from "../src/engine/messageDetails";
 import { MESSAGE_DETAILS_MAX_BYTES, MESSAGE_DETAILS_MAX_SENDS, type MessageDetails } from "../src/shared/types";
 import { FakeNativeNet } from "./helpers/fakeNative";
 // covers: chat.paired.message-details
@@ -175,5 +175,17 @@ describe("the record's bounds", () => {
     const legacy = { stored: {}, link: { isDataLinkOpen: true } };
     expect(pathSnapshot(legacy, "datalink")).toEqual({ path: "legacy-datalink" });
     expect(pathSnapshot(legacy, "pkarr")).toEqual({ path: "legacy-dht" });
+  });
+});
+
+describe("a file that did not go", () => {
+  it("carries why, beside where its bytes are kept", () => {
+    const error = "Could not read the file: The object can not be found here.";
+    const message = { linkId: "l", id: "me_1", text: "Voice message.webm", sender: "me" as const, timestamp: 1, via: "datalink" as const, file: { id: "l-out-w", name: "Voice message.webm", size: 5, mime: "audio/webm" } };
+    const wire3 = { id: "w", direction: "out", state: "failed", error, confirmed: 0, since: 1, file: { id: "w", name: "Voice message.webm", size: 5, mime: "audio/webm", timestamp: 1 } } as unknown as FileTransferRecord;
+    const stored = { id: "l-out-w", linkId: "l", blob: new Blob(["voice"]), createdAt: 1 };
+    expect(composeDetails(message, { file: { ...stored, wire3 } }).file).toMatchObject({ protocol: "files/3", state: "failed", confirmed: 0, storage: "blob", error });
+    expect(composeDetails(message, { file: { ...stored, wire3: { ...wire3, state: "done" } } }).file?.error).toBeUndefined();
+    expect(composeDetails(message, { file: { ...stored, transfer: { state: "failed", transferred: 0, size: 5, error: "You are offline" } } }).file).toMatchObject({ state: "failed", error: "You are offline" });
   });
 });

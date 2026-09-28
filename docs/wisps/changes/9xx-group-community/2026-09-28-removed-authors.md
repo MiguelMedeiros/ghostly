@@ -1,0 +1,1 @@
+a message frame whose author the main branch took out is dropped whoever hands it on and for any epoch, and catch-up hands none of that author's stored frames on; a frame's signature is checked before it may wait for its epoch or secret.

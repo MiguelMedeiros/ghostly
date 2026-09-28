@@ -12,7 +12,7 @@ import { LocalRelay } from "../../../e2e/support/relay";
 import { testSshKey, type TestSshKey } from "../../../e2e/support/ssh";
 import { addNostrIdentity, injectNostrSigner } from "../../../e2e/support/nostrSigner";
 import { choose } from "../../../e2e/support/select";
-import { closeIdentities, shareIdentity } from "../../../e2e/support/identities";
+import { closeIdentities, openIdentities, shareIdentity } from "../../../e2e/support/identities";
 import { testBitcoinWallet } from "../../../packages/browser/test/helpers/bitcoinSign";
 import { CAST, converse, newProfile, open, pair, person, shot, type Peer } from "./helpers";
 
@@ -51,8 +51,10 @@ function testGpgKey(userId: string) {
 
 const adding = async (p: Peer, kind: string) => {
   await go(p, "#/identities");
-  await p.page.getByTestId("identity-add").click();
+  await p.page.getByTestId("identities-new").click();
   const add = p.page.getByTestId("add-identity");
+  // SSH, OpenPGP and Bitcoin wait under Advanced, so the picker stays simple for newcomers.
+  if (!await add.getByTestId(`add-identity-${kind}`).isVisible()) await add.getByTestId("add-identity-advanced").click();
   await add.getByTestId(`add-identity-${kind}`).click();
   return add;
 };
@@ -85,6 +87,13 @@ async function addBitcoin(p: Peer) {
   await add.getByTestId("add-identity-start").click();
   const statement = (await add.getByTestId("add-identity-copy-0").textContent())!.trim();
   await finish(add, wallet.signBip322(statement).simple!);
+}
+
+/** The chosen card's public posts done loading (a throwaway key has none), so the panel shows no "Loading…". */
+async function settled(p: Peer) {
+  await expect(p.page.getByTestId("contact-activity")).not.toHaveAttribute("data-state", "loading", { timeout: 30_000 })
+    .catch(() => console.log(`  [${p.name}] posts still loading`));
+  await p.page.waitForTimeout(1200);
 }
 
 /** Shared in this chat, one by one, each waited on until the contact's app has verified it. */
@@ -129,12 +138,11 @@ test("identities proved, shared and verified, desktop and phone", async ({ brows
   await closeIdentities(casper);
   await converse([[casper, "all four check out ✅ here's mine"]], [boo, casper]);
   await expect(casper.page.getByTestId("chat-identity-badges")).toBeVisible({ timeout: 60_000 });
-  await casper.page.getByTitle("Options").click();
-  await casper.page.getByTestId("chat-identities-open").click();
+  await openIdentities(casper);
   const received = casper.page.getByTestId("chat-identities-received").getByTestId("chat-identity-received");
   await expect(received).toHaveCount(4, { timeout: 90_000 });
   for (let i = 0; i < 4; i++) await expect(received.nth(i).locator("[data-deck=face]")).toHaveAttribute("data-status", "verified", { timeout: 90_000 });
-  await casper.page.waitForTimeout(1200);
+  await settled(casper);
   await shot(casper, "identities-chat.png");
   await casper.page.getByTestId("chat-identities-close").click();
   await go(boo, "#/identities");
@@ -146,10 +154,9 @@ test("identities proved, shared and verified, desktop and phone", async ({ brows
   const phone = await open(browser, relay, baseURL!, "mCasper", { mobile: true, profile });
   await go(phone, withBoo);
   await expect(phone.page.getByTestId("chat-identity-badges")).toBeVisible({ timeout: 60_000 });
-  await phone.page.getByTitle("Options").click();
-  await phone.page.getByTestId("chat-identities-open").click();
+  await openIdentities(phone);
   await expect(phone.page.getByTestId("chat-identities-received").getByTestId("chat-identity-received")).toHaveCount(4, { timeout: 90_000 });
-  await phone.page.waitForTimeout(1200);
+  await settled(phone);
   await shot(phone, "identities-chat-mobile.png");
   await phone.context.close();
   rmSync(profile, { recursive: true, force: true });

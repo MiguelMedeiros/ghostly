@@ -3,8 +3,9 @@ import type { TypingActivity, TypingKind } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 
 /*
- * The typing indicator of a 1:1 chat (WISP 401 § Typing). The engine says it on the live session only, throttled,
- * and shows the contact's with a timeout; these hooks read it and tell the engine when this side types or records.
+ * The typing indicator of a 1:1 chat (WISP 401 § Typing) and of a private group (WISP 9xx · Group Mesh § Typing). The
+ * engine says it on the live session (a group's edges) only, throttled, and shows the other side's with a timeout;
+ * these hooks read it and tell the engine when this side types or records.
  */
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -44,6 +45,21 @@ export function setSendTyping(on: boolean): Promise<void> {
  * (the chat is left), when the page is hidden (a recording carries on), and on unmount. A new kind is told at once.
  */
 export function useTypingSender(linkId: string | undefined, active = true): (typing: boolean, kind?: TypingKind) => void {
+  const say = useCallback((typing: boolean, kind: TypingKind) => {
+    if (linkId) void engine.call("setTyping", { linkId, typing, ...(typing && kind !== "typing" ? { kind } : {}) }).catch(() => {});
+  }, [linkId]);
+  return useSender(linkId ? say : undefined, active);
+}
+
+/** The same for a private group (WISP 9xx · Group Mesh § Typing): the engine says it on the group's edges. */
+export function useGroupTypingSender(groupId: string | undefined, active = true): (typing: boolean, kind?: TypingKind) => void {
+  const say = useCallback((typing: boolean, kind: TypingKind) => {
+    if (groupId) void engine.call("setGroupTyping", { groupId, typing, ...(typing && kind !== "typing" ? { kind } : {}) }).catch(() => {});
+  }, [groupId]);
+  return useSender(groupId ? say : undefined, active);
+}
+
+function useSender(say: ((typing: boolean, kind: TypingKind) => void) | undefined, active: boolean): (typing: boolean, kind?: TypingKind) => void {
   const state = useRef<{
     typing: boolean; kind: TypingKind; toldAt: number;
     idle: ReturnType<typeof setTimeout> | null; keep: ReturnType<typeof setInterval> | null;
@@ -52,8 +68,8 @@ export function useTypingSender(linkId: string | undefined, active = true): (typ
   const tell = useCallback((kind: TypingKind) => {
     const now = state.current;
     now.typing = true; now.kind = kind; now.toldAt = Date.now();
-    if (linkId) void engine.call("setTyping", { linkId, typing: true, ...(kind !== "typing" ? { kind } : {}) }).catch(() => {});
-  }, [linkId]);
+    say?.(true, kind);
+  }, [say]);
 
   const stop = useCallback(() => {
     const now = state.current;
@@ -61,11 +77,11 @@ export function useTypingSender(linkId: string | undefined, active = true): (typ
     if (now.keep) { clearInterval(now.keep); now.keep = null; }
     if (!now.typing) return;
     now.typing = false; now.toldAt = 0;
-    if (linkId) void engine.call("setTyping", { linkId, typing: false }).catch(() => {});
-  }, [linkId]);
+    say?.(false, "typing");
+  }, [say]);
 
   const typing = useCallback((on: boolean, kind: TypingKind = "typing") => {
-    if (!on || !active || !linkId) return stop();
+    if (!on || !active || !say) return stop();
     const now = state.current, at = Date.now();
     if (now.idle) { clearTimeout(now.idle); now.idle = null; }
     if (kind === "recording") {
@@ -77,7 +93,7 @@ export function useTypingSender(linkId: string | undefined, active = true): (typ
     }
     if (now.typing && now.kind === kind && at - now.toldAt < TELL_EVERY_MS) return;
     tell(kind);
-  }, [active, linkId, stop, tell]);
+  }, [active, say, stop, tell]);
 
   useEffect(() => { if (!active) stop(); }, [active, stop]);
 

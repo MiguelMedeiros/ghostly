@@ -95,11 +95,14 @@ export function composeDetails(message: StoredMessage, around: {
   };
   if (message.file) {
     const record = file?.wire3, transfer = file?.transfer;
+    // Why a transfer that ended without the file did (files/3 keeps it on its record, files/2 on the transfer).
+    const failure = record ? (record.state !== "done" ? record.error : undefined) : transfer?.state === "failed" ? transfer.error : undefined;
     view.file = {
       id: message.file.id, name: message.file.name, size: message.file.size, mime: message.file.mime,
       ...(file?.digest && { digest: file.digest }),
       protocol: message.via === "hold" ? "hold/1" : record ? "files/3" : message.details?.wire?.protocol === "files/3" ? "files/3" : "files/2",
       ...(record ? { state: record.state, confirmed: record.confirmed, since: record.since, ...(record.consented !== undefined && { consented: record.consented }) } : transfer && { state: transfer.state, transferred: transfer.transferred }),
+      ...(failure && { error: failure }),
       ...(file?.bytes ? { storage: file.bytes } : file?.blob ? { storage: "blob" } : {}),
       ...(message.file.voice && { voice: { duration: message.file.voice.duration, peaks: message.file.voice.peaks.length } }),
     };

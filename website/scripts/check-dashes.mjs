@@ -23,6 +23,10 @@ const scanned = [
   "docs/DHT-DELIVERY.md",
   "CONTRIBUTING.md",
   "SECURITY.md",
+  // Carried in /llms-full.txt by llms.mjs.
+  "docs/CLI.md",
+  "docs/AI-AGENTS.md",
+  "packages/cli/SKILL.md",
 ];
 const generated = new Set([
   "website/lib/reference-index.json",

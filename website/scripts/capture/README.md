@@ -41,8 +41,8 @@ funded is reported and shot as the app shows it.
 | `chat.spec.ts` | `chat`, `file` (desktop and `-mobile`) | Home, "Say it your way" and "Send the actual thing": Boo's chats with four friends, the one with Casper open, then a photo |
 | `messages.spec.ts` | `messages`, `messages-mobile` | "Paste it. See it.": Casper's formatted text, a link with the preview his app made (a `.example` page answered inside his browser only), an invite card and a `bitcoin:` request, from Boo's side |
 | `calls.spec.ts` | `call`, `call-mobile` | "Be a little closer": an audio call (a legacy chat, the only kind that rings) |
-| `sats.spec.ts` | `sats`, `sats-mobile` | "A little thank-you": eight wallets funded, 2,100 sats received in the chat, a request paid over Ark, the payment deck open |
-| `services.spec.ts` | `services-chat`, `services-mobile` | "Made here. Open there.": a photo gallery on Boo's computer shared with Casper in the extension; the phone shows what sharing needs |
+| `sats.spec.ts` | `sats`, `sats-mobile` | "A little thank-you": eight Testnet wallets made (USDT made, the rest funded), 2,100 sats received in the chat, a request paid over Ark, the payment deck open |
+| `services.spec.ts` | `services-chat`, `services-mobile` | "Made here. Open there.": a photo gallery on Boo's computer shared with Casper in the extension; the phone's Services tab says what sharing needs |
 | `groups.spec.ts` | `groups`, `groups-mobile` | "Bring the whole group": a private group with a picture and four members, joined by its link |
 | `identities.spec.ts` | `identities-chat`, `identities-chat-mobile` | "Prove who you are": SSH, OpenPGP, Bitcoin (signet) and Nostr proofs, verified on the contact's side |
 | `profiles.spec.ts` | `profiles` | "Your space": the Profile page with three profiles and backups |
@@ -72,8 +72,13 @@ nine at night whenever the capture runs. The clock itself is never faked.
   npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --strict \
     --skipLibCheck --types node --lib ES2022,DOM,DOM.Iterable --allowJs website/scripts/capture/*.ts
   ```
-- Voice messages and the pairing progress animation are not shot yet: add a line to the scene
-  they belong to.
-- `wallet.ts` still switches the old global Testnet mode (`wallet-mode`, `testnet-notice`), which the
-  app no longer has (wallets are made per network since #286). The wallet shots need that step
-  rewritten for Wallets → New → Testnet before the next capture.
+- The pairing progress animation is not shot yet: add a line to the scene it belongs to.
+- `wallet.ts` makes each wallet with Wallets → New → Testnet (`createWallet` from
+  `e2e/support/fixtures.ts`) and funds it with the recipes of `e2e/matrix/rails.ts`. Cashu gets its
+  sats from "Get test coins" (10,000 a press): Receive never fills a Testnet wallet by itself.
+  A rail given 0 is made and left empty.
+- "Requiring @playwright/test second time": `website/node_modules` holds a Playwright of its own.
+  Move `website/node_modules/{playwright,playwright-core,@playwright}` aside for the run.
+- `e2e:infra:use` refuses when any service is silent (an exited Anvil, say), and the ports may
+  already be forwarded by another SSH master for the same machine (`miguel@192.168.0.239` instead
+  of `one`): `npm run e2e:infra:status -- --host one` says which. `CAPTURE_INFRA_HOST` names it.

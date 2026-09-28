@@ -197,6 +197,22 @@ describe("what it says", () => {
     expect(rows("timing")).toMatchObject({ "Transfer completed": "2023-11-14T22:13:24.000Z" });
   });
 
+  it("a file of mine whose bytes did not go says Not sent, with why, as its bubble does", async () => {
+    const error = "Could not read the file: The object can not be found here.";
+    fakeEngine.on("messageDetails", () => textView({
+      message: { id: "me_v", linkId: "link-1", sender: "me", timestamp: 1_700_000_000_000, via: "datalink", kind: "voice", textBytes: 10 },
+      details: { sends: [{ at: 1_700_000_000_100, path: "hyperdht/1", relayed: false, rttMs: 2, result: "failed", error }], attempts: 1, sentAt: 1_700_000_000_100,
+        wire: { frame: "pf-offer + pf-data", protocol: "files/3", plaintextBytes: 44_556, chunks: 3, chunkBytes: 16_384 } },
+      file: { id: "link-1-out-w", name: "Voice message.webm", size: 44_556, mime: "audio/webm", protocol: "files/3", state: "failed", confirmed: 0, since: 1_700_000_000_100, storage: "blob", error, voice: { duration: 8_070, peaks: 64 } },
+    }));
+    const { user, container } = bubble({ id: "me_v", text: "Voice message.webm", delivery: undefined, file: { id: "link-1-out-w", name: "Voice message.webm", size: 44_556, mime: "audio/webm", voice: { duration: 8_070, peaks: new Array(64).fill(10) } } });
+    await user.dblClick(container.querySelector("[data-message-row]")!);
+    await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
+    expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Voice message not sent: its bytes did not go over HyperDHT, direct.");
+    expect(rows("delivery")).toMatchObject({ State: "Not sent: the file did not go", Why: error });
+    expect(rows("file")).toMatchObject({ Transfer: "failed", "Stored as": "the whole file in IndexedDB" });
+  });
+
   it("a voice message: codec, length, bitrate and its waveform", async () => {
     fakeEngine.on("messageDetails", () => textView({
       message: { id: "peer_v", linkId: "link-1", sender: "peer", timestamp: 1_700_000_000_000, via: "datalink", kind: "voice", textBytes: 10 },

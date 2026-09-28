@@ -28,9 +28,11 @@ interface ProfilePayload {
  */
 async function withFileBytes(peer: DatabaseSnapshot | null, active: boolean): Promise<void> {
   const files = peer?.stores.find((store) => store.name === "files");
+  // What changed about a file after it was stored (where its bytes went, say) is kept beside its record.
+  const state = new Map((peer?.stores.find((store) => store.name === "fileState")?.values ?? []).map((value) => [(value as StoredFile).id, value as Partial<StoredFile>]));
   if (files && active) {
     files.values = await Promise.all(files.values.map(async (value) => {
-      const file = value as StoredFile;
+      const file = { ...(value as StoredFile), ...state.get((value as StoredFile)?.id) } as StoredFile;
       if (!file?.bytes || file.blob || storedSize(file) > SMALL_FILE_BYTES) return value;
       const blob = await storedBlob(file, file.metadata?.mime ?? "").catch(() => null);
       return blob ? { ...file, blob: new Blob([await blob.arrayBuffer()], { type: blob.type }) } : value;

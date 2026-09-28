@@ -130,6 +130,17 @@ it("a large file waits for the person, shows the room here, and is stored whole 
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(size));
 }, 90_000);
 
+it("a file under the id of a message the contact sent already is refused, nothing stored for it", async () => {
+  const t = await setup();
+  const id = "sameidsameidsameidsame";
+  expect(await t.contact.sendMessage("hello", Date.now(), id)).toBeNull();
+  await vi.waitFor(async () => expect((await db.getMessages(t.id)).some((m) => m.id === `peer_${id}`)).toBe(true));
+  t.offer(id, 200_000);
+  await vi.waitFor(() => expect(t.records.get(`out:${id}`)?.state).toBe("failed"));
+  expect((await db.getMessages(t.id)).filter((m) => m.id === `peer_${id}`).map((m) => m.text)).toEqual(["hello"]);
+  expect((await fileStore.listForLink(t.id)).some((f) => f.wireId === id)).toBe(false);
+}, 60_000);
+
 it("a small file is taken without asking; a declined one says so to the sender", async () => {
   const t = await setup();
   t.offer("small-0001", 200_000);

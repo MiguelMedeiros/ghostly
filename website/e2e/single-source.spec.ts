@@ -10,7 +10,7 @@ const docs = resolve(__dirname, "../../docs/wisps");
 const row = (file: string, name: string) => readFileSync(resolve(docs, file), "utf8").match(new RegExp(`^\\| ${name} \\| (.+) \\|$`, "m"))?.[1];
 
 test("the catalog shows each WISP's own summary and notes", async ({ page }) => {
-  await page.goto("/developers/catalog");
+  await page.goto("/developers/wisps");
   for (const file of ["202-arkade.md", "3xx-domain.md", "303-keet.md", "11xx-headless.md"]) {
     const summary = row(file, "Summary");
     expect(summary, file).toBeTruthy();

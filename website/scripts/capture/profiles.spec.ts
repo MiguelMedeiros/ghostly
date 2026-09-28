@@ -27,7 +27,7 @@ test("desktop: the Profile page with three profiles", async ({ browser, baseURL 
     await converse([[friend, lines[0]], [boo, lines[1]]], [boo, friend]);
     await friend.context.close();
   }
-  await fund(boo, { cashu: 42_000 });
+  await fund(boo, { cashu: 40_000 });
 
   // Two more profiles; creating one switches to it (the app restarts), then back to Personal.
   await newProfile(boo, "Work");

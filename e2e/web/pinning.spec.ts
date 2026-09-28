@@ -1,10 +1,13 @@
 import {test,expect} from "../support/fixtures";
 test("pin from list does not switch chat, survives reload, and unpins from Options",{tag:["@feature:chats.list.pin"]},async({peer})=>{
   const {page}=await peer("pinning");
+  // New chat opens the chat once its keys are made (#201): read the address after that.
   await page.getByRole("button",{name:"New chat",exact:true}).click();
+  await expect(page).toHaveURL(/#\/chat\/\w+$/);
   const older=page.url();
   await page.getByRole("button",{name:"New chat",exact:true}).click();
   await expect(page).not.toHaveURL(older);
+  await expect(page).toHaveURL(/#\/chat\/\w+$/);
   const current=page.url();
   const pins=page.getByRole("button",{name:"Pin chat",exact:true});
   await pins.nth(1).hover();

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
-import { GhostlyNode } from "../src/engine/node";
+import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
+import { GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { Reactions, latestReaction } from "../src/engine/reactions";
 import type { AttentionEvent } from "../src/shared/rpc";
@@ -20,7 +20,7 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolean } = {}) {
+async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolean; onMessageChanges?: NodeEvents["onMessageChanges"]; onMessages?: NodeEvents["onMessages"] } = {}) {
   const net = new FakeNativeNet();
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
@@ -32,7 +32,8 @@ async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolea
     peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const attention: AttentionEvent[] = [];
-  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: event => { attention.push(event); } },
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: contactOptions.onMessages ?? vi.fn(), onCallSignal: vi.fn(), onAttention: event => { attention.push(event); },
+    ...(contactOptions.onMessageChanges && { onMessageChanges: contactOptions.onMessageChanges }) },
     { transport, automaticWallets: false, nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
   let contactState: PairingState = { status: "connecting" };
   const contactGot: WireReaction[] = [];
@@ -63,6 +64,31 @@ async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolea
   const agreed = () => vi.waitFor(() => expect(contact.supportsReactions).toBe(contactOptions.reactionsSupport ?? true));
   return { node, contact, id, contactGot, receipts, attention, messages, row, view, pending, agreed };
 }
+
+describe("what the pages hear", () => {
+  it("is the row that changed, never the whole history, when the host takes changes; a host that does not gets the whole", async () => {
+    const changes: [string, { messages: StoredMessage[]; deleted: string[] }][] = [];
+    const whole = vi.fn();
+    const t = await setup({ onMessageChanges: (linkId, change) => { changes.push([linkId, change]); }, onMessages: whole });
+    await t.agreed();
+    expect(await t.contact.sendMessage("first")).toBeNull();
+    expect(await t.contact.sendMessage("second")).toBeNull();
+    const second = await t.row("second");
+    await vi.waitFor(() => expect(changes.map(([, c]) => c.messages.map(m => m.text))).toEqual([["first"], ["second"]]));
+    expect(changes.every(([linkId, c]) => linkId === t.id && !c.deleted.length)).toBe(true);
+
+    changes.length = 0;
+    expect(await t.node.react({ linkId: t.id, messageId: second.id, emoji: "👍" })).toEqual({ error: null });
+    expect(changes).toHaveLength(1);
+    expect(changes[0]![1].messages.map(m => [m.id, m.reactions?.me?.e])).toEqual([[second.id, "👍"]]);
+
+    changes.length = 0;
+    t.node.deleteMessage({ linkId: t.id, messageId: second.id });
+    await vi.waitFor(() => expect(changes).toEqual([[t.id, { messages: [], deleted: [second.id] }]]));
+    expect(t.view().lastMessageAt).toBe((await t.row("first")).timestamp);
+    expect(whole).not.toHaveBeenCalled();
+  });
+});
 
 describe("reacting over the live link", () => {
   it("names the contact's message by its wire id, shows it here at once and keeps it until the contact confirms it", async () => {
@@ -187,6 +213,44 @@ describe("the reactions store", () => {
     };
     return { reactions: new Reactions(host), host, changed, tick: (ms: number) => { now += ms; } };
   }
+
+  it("finds the message a reaction names by its row alone when it can, else in the whole chat, and tells which row changed", async () => {
+    const rows = [
+      row({ linkId: "chat", id: "peer_AAAAAAAAAAAAAAAA", text: "theirs" }),
+      row({ linkId: "chat", id: "me_BBBBBBBBBBBBBBBB", sender: "me", text: "mine" }),
+      row({ linkId: "chat", id: "me_1", sender: "me", text: "a file", wireId: "fileWireId01" }),
+      row({ id: "k:0:1", member: "k", text: "in the group" }),
+    ];
+    const { reactions, host } = memory(rows);
+    const whole = vi.spyOn(host, "messages");
+    const changedRows: string[] = [];
+    Object.assign(host, {
+      message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id),
+      changed: (chat: string, id: string) => { changedRows.push(`${chat} ${id}`); },
+    });
+    expect(await reactions.receive("chat", "peer", { id: "AAAAAAAAAAAAAAAA", e: "👍", n: 1 })).toBe("applied");
+    expect(await reactions.receive("chat", "peer", { id: "BBBBBBBBBBBBBBBB", e: "😂", n: 2 })).toBe("applied");
+    expect(await reactions.receive("group:g", "p", { id: "k:0:1", e: "🙏", n: 1 })).toBe("applied");
+    expect(whole).not.toHaveBeenCalled();
+    expect(await reactions.receive("chat", "peer", { id: "fileWireId01", e: "❤️", n: 3 })).toBe("applied");
+    expect(whole).toHaveBeenCalledOnce();
+    expect(changedRows).toEqual(["chat peer_AAAAAAAAAAAAAAAA", "chat me_BBBBBBBBBBBBBBBB", "group:g k:0:1", "chat me_1"]);
+    expect(rows.map(r => Object.values(r.reactions ?? {})[0]?.e)).toEqual(["👍", "😂", "❤️", "🙏"]);
+  });
+
+  it("takes at most REACTION_LIMITS.receive a window from one group member", async () => {
+    const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+    const rows = [row({ id: `${ana}:0:1`, member: ana, text: "hello group" })];
+    const { reactions, tick } = memory(rows);
+    const outcomes: string[] = [];
+    for (let n = 1; n <= REACTION_LIMITS.receive + 5; n++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "👍", n }));
+    expect(outcomes.filter(o => o === "applied")).toHaveLength(REACTION_LIMITS.receive);
+    expect(outcomes.slice(-5)).toEqual(Array(5).fill("dropped"));
+    // Another member has a window of its own, and the window passes.
+    expect(await reactions.receive("group:g", ana, { id: `${ana}:0:1`, e: "😂", n: 1 })).toBe("applied");
+    tick(REACTION_LIMITS.windowMs);
+    expect(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "🙏", n: 100 })).toBe("applied");
+  });
 
   it("keeps one reaction per member per message in a group, by member key", async () => {
     const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];

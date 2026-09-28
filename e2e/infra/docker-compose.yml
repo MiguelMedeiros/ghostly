@@ -316,11 +316,15 @@ services:
     depends_on: { fedimintd: { condition: service_started }, fedimint-lnd: { condition: service_healthy } }
 
   # ── USDT: a local EVM chain (31337) the test token is deployed on ────────────────────────────────────────
+  # A block a second, 86,400 a day: with every block's state kept in memory, a stack left up for days ran into its
+  # memory ceiling and was killed. --prune-history keeps only recent states (the suites read the latest). It keeps
+  # the chain in memory only, so after a restart the usdt seed (infra.mjs, idempotent) deploys the token again.
   anvil:
     image: ghcr.io/foundry-rs/foundry@sha256:043752653d5be351c71709091b3db97c4421c907eb40ea294195e7f532aadf46
     container_name: ghostly-e2e-anvil
+    restart: on-failure
     entrypoint: ["anvil"]
-    command: ["--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1", "--silent"]
+    command: ["--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1", "--prune-history", "--silent"]
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47070:8545"]
 
   # ── S3 (held messages, profile backups) ─────────────────────────────────────────────────────────────────

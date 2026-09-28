@@ -1,5 +1,6 @@
 import { createServer, type Server, type Socket } from "node:net";
 import { chmodSync, existsSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { announceJoins } from "./announce";
@@ -8,6 +9,7 @@ import { CallManager } from "./calls/manager";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { resumeHolds } from "./holds";
+import { privateFolder } from "./privateFolder";
 import { acquireLock, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 
@@ -84,6 +86,7 @@ export interface Served {
 export async function serve(host: Host): Promise<Served> {
   const { ctx } = host;
   const path = ctx.runtime.paths.socket;
+  if (process.platform !== "win32" && dirname(path) !== ctx.runtime.paths.dir) privateFolder(dirname(path), "the daemon will not put its socket there");
   // A socket file left by a daemon that died: the lock says nobody holds the profile, so it is stale.
   if (existsSync(path)) rmSync(path, { force: true });
   const sockets = new Set<Socket>();
@@ -96,7 +99,7 @@ export async function serve(host: Host): Promise<Served> {
     server.once("error", reject);
     server.listen(path, () => { server.off("error", reject); resolve(); });
   });
-  chmodSync(path, 0o600);
+  if (process.platform !== "win32") chmodSync(path, 0o600);
   let closing: Promise<void> | null = null;
   return {
     server,

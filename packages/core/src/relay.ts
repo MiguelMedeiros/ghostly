@@ -1,11 +1,11 @@
 import type { Identity } from "./identity";
-import { createRelayPayload, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; write: boolean }
-const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, write });
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean }
+const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
@@ -126,6 +126,12 @@ export class RelayTransport implements PkarrTransport {
   private readonly fetchFn: typeof fetch;
   private readonly lastTimestamp = new Map<string, bigint>();
   private readonly newest = new Map<string, SignedPacket>();
+  /**
+   * The last packet this client put under a key that a relay took. A read the budget holds back answers the newer of
+   * it and the last one read: a hub that wrote its own beacon entry since it last read the beacon must not see that
+   * entry as old as the one it replaced (it would stop counting itself at its community's door until its next write).
+   */
+  private readonly written = new Map<string, SignedPacket>();
   private readonly coolingDown = new Map<string, number>();
   private readonly networkCooldown = new Map<string, number>();
   private cursor = 0;
@@ -294,6 +300,7 @@ export class RelayTransport implements PkarrTransport {
           if (accepted) return;
           accepted = true;
           noWriteWaits();
+          try { this.written.set(pubKeyZ32, parseRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
           resolve();
         }, () => { /* read from `settled` */ });
       }
@@ -358,8 +365,7 @@ export class RelayTransport implements PkarrTransport {
         if (response.status !== 404) {
           if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
           const packet = parseRelayPayload(pubKeyZ32, payload!);
-          const known = this.newest.get(pubKeyZ32);
-          if (!known || packet.timestampMicros > known.timestampMicros) this.newest.set(pubKeyZ32, packet);
+          this.newest.set(pubKeyZ32, newerPacket(this.newest.get(pubKeyZ32), packet)!);
         }
         this.answered(relay, undefined, "GET");
         this.lastRelay = relay;
@@ -377,8 +383,9 @@ export class RelayTransport implements PkarrTransport {
     }
     if (!reachable) {
       const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || this.breaker.blockedFor(r) > 0 || this.heldFor(r, who) > 0);
-      // Holding back is not an outage: report what is already known…
-      if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
+      // Holding back is not an outage: report what is already known, this client's own writes included…
+      const known = newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
+      if (resting && known) return known;
       // …or, knowing nothing yet, that the read waits for the budget.
       if (!down && budgetWait < Infinity) throw new DiscoveryBudgetError(budgetWait);
       throw new Error("No Pkarr relay reachable");
@@ -465,9 +472,10 @@ export class RelayTransport implements PkarrTransport {
     let wait = over(recent, limit);
     if (who.background) {
       wait = Math.max(wait, over(recentBackground, this.backgroundPerMinute));
-      // A link signaling: background takes a smaller share until it stops, or until enough of its own age out.
+      // A link signaling: background takes a smaller share until it stops, or until enough of its own age out. A
+      // community door's bell does not: the links it signals for are often the ones its last admission opened.
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
-      if (signaling > 0) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
+      if (signaling > 0 && !who.door) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
     }
     if (who.group) {
       const reserved = Math.max(this.chatRefused.get(relay) ?? -Infinity, this.chatUrgentAt) + 60_000 - now;
