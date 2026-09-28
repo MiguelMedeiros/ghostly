@@ -18,6 +18,10 @@ export const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /(^|\.)push\.apple\.com$/, 
 const HEADERS = ['authorization', 'ttl', 'urgency', 'topic', 'content-encoding', 'content-type']
 
 export const DEFAULT_LIMITS = { bodyBytes: 8 * 1024, perMinute: 30 }
+/** Addresses whose counts are kept at most; past it, the ones idle for a minute go first. */
+const MAX_TRACKED = 10_000
+/** RFC 8292's `vapid t=<JWT>, k=<key>`: a request without one is not a Web Push the relay would forward. */
+const VAPID = /^vapid t=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+, ?k=[A-Za-z0-9_-]+$/
 
 const b64url = text => Buffer.from(text.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
 
@@ -28,7 +32,7 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   const { endpoint, headers, body } = request ?? {}
   let url
   try { url = new URL(endpoint) } catch { return { error: 'No endpoint' } }
-  if (url.protocol !== 'https:' || url.username || url.password || !hosts.some(host => host.test(url.hostname))) return { error: 'Not a push service' }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || !hosts.some(host => host.test(url.hostname))) return { error: 'Not a push service' }
   if (typeof body !== 'string' || !/^[A-Za-z0-9_-]*$/.test(body)) return { error: 'No body' }
   const bytes = b64url(body)
   if (bytes.length > bodyBytes) return { error: 'Too large' }
@@ -36,12 +40,30 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   for (const [name, value] of Object.entries(headers && typeof headers === 'object' ? headers : {})) {
     if (HEADERS.includes(name.toLowerCase()) && typeof value === 'string' && value.length < 2048 && !/[\r\n]/.test(value)) forwarded[name] = value
   }
+  const authorization = Object.entries(forwarded).find(([name]) => name.toLowerCase() === 'authorization')?.[1]
+  if (!authorization || !VAPID.test(authorization)) return { error: 'No VAPID authorization' }
   return { endpoint: url.href, headers: forwarded, body: bytes }
 }
 
-export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts = PUSH_HOSTS, limits = {}, log = () => {} } = {}) {
+/**
+ * The address a request counts against. Behind `proxies` reverse proxies (a tunnel, nginx), the socket's address is the
+ * last proxy's, so the client's is the entry that many from the end of `X-Forwarded-For` (the ones before it are the
+ * client's to write). With none configured, the header is ignored.
+ */
+export function clientAddress (req, proxies = 0) {
+  const socket = req.socket.remoteAddress ?? ''
+  if (!proxies) return socket
+  const header = req.headers['x-forwarded-for']
+  const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
+  return hops.length >= proxies ? hops[hops.length - proxies] : socket
+}
+
+export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts = PUSH_HOSTS, limits = {}, proxies = 0, log = () => {} } = {}) {
   const { bodyBytes, perMinute } = { ...DEFAULT_LIMITS, ...limits }
   const recent = new Map()
+  const prune = now => { for (const [ip, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(ip) }
+  const pruning = setInterval(() => prune(Date.now()), 60_000)
+  pruning.unref?.()
   const allowOrigin = origin => (origins.length === 0 ? '*' : origins.includes(origin) ? origin : null)
 
   const server = createServer((req, res) => {
@@ -51,8 +73,10 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     if (req.method === 'OPTIONS') { res.writeHead(origin ? 204 : 403, cors); res.end(); return }
     if (req.method !== 'POST' || !origin) return answer(req.method === 'POST' ? 403 : 405, { error: 'No' })
 
-    const ip = req.socket.remoteAddress ?? ''
+    const ip = clientAddress(req, proxies)
     const now = Date.now()
+    if (recent.size >= MAX_TRACKED && !recent.has(ip)) prune(now)
+    if (recent.size >= MAX_TRACKED && !recent.has(ip)) return answer(429, { error: 'Too many' })
     const times = (recent.get(ip) ?? []).filter(t => now - t < 60_000)
     if (times.length >= perMinute) return answer(429, { error: 'Too many' })
     times.push(now)
@@ -78,6 +102,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
 
   return new Promise(resolve => server.listen(port, host, () => resolve({
     port: server.address().port,
-    close: () => new Promise(done => server.close(() => done())),
+    tracked: () => recent.size,
+    close: () => new Promise(done => { clearInterval(pruning); server.close(() => done()) }),
   })))
 }

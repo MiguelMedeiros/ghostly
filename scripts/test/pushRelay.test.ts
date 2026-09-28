@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { readRelayRequest, startRelay } from "../../native-transports/push-relay/relay.mjs";
+import { PUSH_SERVICE_HOSTS } from "../../packages/core/src/webPush";
+import { PUSH_HOSTS, clientAddress, readRelayRequest, startRelay } from "../../native-transports/push-relay/relay.mjs";
 
 // covers: push.wake.send
 
@@ -19,15 +20,30 @@ describe("the push relay (native-transports/push-relay)", () => {
     }
   });
 
+  it("posts to the same push services the apps post to", () => {
+    expect(PUSH_HOSTS.map(String)).toEqual(PUSH_SERVICE_HOSTS.map(String));
+  });
+
   it.each([
     ["not a push service", { endpoint: "https://example.com/x" }],
     ["plain http", { endpoint: "http://fcm.googleapis.com/x" }],
     ["a look-alike host", { endpoint: "https://fcm.googleapis.com.evil.example/x" }],
     ["credentials", { endpoint: "https://u:p@fcm.googleapis.com/x" }],
+    ["a port of its own", { endpoint: "https://fcm.googleapis.com:8443/x" }],
+    ["no VAPID authorization", { headers: { TTL: "60" } }],
+    ["an authorization that is not VAPID", { headers: { Authorization: "Bearer x" } }],
     ["a body that is not base64url", { body: "!!!" }],
     ["a body too large", { body: Buffer.alloc(9000).toString("base64url") }],
   ])("refuses %s", (_what, patch) => {
     expect(readRelayRequest(request(patch)).error).toBeTruthy();
+  });
+
+  it("counts a request against the socket's address, and X-Forwarded-For only behind configured proxies", () => {
+    const req = (xff?: string) => ({ socket: { remoteAddress: "10.0.0.1" }, headers: xff === undefined ? {} : { "x-forwarded-for": xff } });
+    expect(clientAddress(req("1.2.3.4"))).toBe("10.0.0.1");
+    expect(clientAddress(req("9.9.9.9, 1.2.3.4"), 1)).toBe("1.2.3.4");
+    expect(clientAddress(req("9.9.9.9, 1.2.3.4, 5.6.7.8"), 2)).toBe("1.2.3.4");
+    expect(clientAddress(req(), 1)).toBe("10.0.0.1");
   });
 
   let close: (() => Promise<void>) | undefined;
@@ -45,5 +61,16 @@ describe("the push relay (native-transports/push-relay)", () => {
     expect(bad.status).toBe(400);
     const limited = await fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools" }, body: request({ endpoint: "https://example.com/" }) });
     expect(limited.status).toBe(429);
+  });
+
+  it("limits each client behind a proxy apart, not the proxy as one", async () => {
+    const relay = await startRelay({ limits: { perMinute: 1 }, proxies: 1 });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    const post = (xff: string) => fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools", "X-Forwarded-For": xff }, body: request({ endpoint: "https://example.com/" }) });
+    expect((await post("1.1.1.1")).status).toBe(400);
+    expect((await post("2.2.2.2")).status).toBe(400);
+    expect((await post("1.1.1.1")).status).toBe(429);
+    expect(relay.tracked()).toBe(2);
   });
 });
