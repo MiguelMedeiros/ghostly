@@ -609,4 +609,39 @@ describe("relay transport: background requests yield to a link that signals", ()
       expect(inMinute(after, true) + inMinute(after, false)).toBe(REQUESTS_PER_MINUTE);
     } finally { vi.useRealTimers(); }
   });
+
+  it("lets a community door read its knock bell while a link signals, within the background share", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { log, edge, relay, setBackground } = counting();
+      const start = Date.now();
+      // The door has just let someone in: that person's edges signal, polling fast.
+      const bells: number[] = [];
+      for (let t = 0; t < 30_000; t += 1_000) {
+        vi.setSystemTime(start + t);
+        if (t % 2_000 === 0) { setBackground(false); await edge.resolve(id.pubKeyZ32, { urgent: true }); }
+        // The door reads its bell every 4 s (knockPollMs), the next person's knock due any moment.
+        if (t % 4_000 === 0) {
+          setBackground(true);
+          await relay.resolve(id.pubKeyZ32, { background: true, group: true, door: true }).then(() => bells.push(t), () => {});
+        }
+      }
+      // Every look at the bell went: more than the small share a minute's background has while a link signals.
+      expect(bells).toHaveLength(8);
+      expect(log.filter((r) => r.background)).toHaveLength(8);
+      // Other background looks still wait for the signaling to end.
+      vi.setSystemTime(start + 30_000);
+      await expect(relay.resolve(createIdentity().pubKeyZ32, { background: true, group: true })).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps a community door's bell within the background share of the minute", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { log, relay, setBackground } = counting();
+      setBackground(true);
+      for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE + 5; i++) await relay.resolve(id.pubKeyZ32, { background: true, group: true, door: true }).catch(() => {});
+      expect(log).toHaveLength(BACKGROUND_REQUESTS_PER_MINUTE);
+    } finally { vi.useRealTimers(); }
+  });
 });

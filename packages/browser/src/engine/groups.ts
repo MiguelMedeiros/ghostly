@@ -45,10 +45,11 @@ export interface GroupsHost {
   linkSeen?(linkId: string): boolean;
   /**
    * Pkarr, for the knocks under a link's knock identity (and a community's beacon and lobbies).
-   * `background`: a periodic look that can wait, spending only part of the relays' budget.
+   * `background`: a periodic look that can wait, spending only part of the relays' budget. `door`: the community
+   * door's look at its knock bell (`PkarrRequestOptions.door`).
    */
   publish(identity: Identity, records: GhostRecord[], background?: boolean): Promise<void>;
-  resolve(pubKeyZ32: string, background?: boolean): Promise<GhostRecord[] | null>;
+  resolve(pubKeyZ32: string, background?: boolean, door?: boolean): Promise<GhostRecord[] | null>;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
   storeMessage(message: StoredMessage): Promise<void>;
