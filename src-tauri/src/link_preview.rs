@@ -69,10 +69,16 @@ pub fn is_public(ip: IpAddr) -> bool {
                 // fc00::/7 unique local, fe80::/10 link-local, 2001:db8::/32 documentation
                 || (first & 0xfe00) == 0xfc00
                 || (first & 0xffc0) == 0xfe80
+                // fec0::/10 site-local: deprecated, still routed inside some networks
+                || (first & 0xffc0) == 0xfec0
                 || (first == 0x2001 && v6.segments()[1] == 0x0db8)
-                // ::/96 IPv4-compatible and 64:ff9b::/96 NAT64 can reach IPv4 space: refused whole.
+                // ::/96 IPv4-compatible, 64:ff9b::/32 NAT64 (64:ff9b::/96 and the local-use
+                // 64:ff9b:1::/48), 2002::/16 6to4 and 2001::/32 Teredo all carry an IPv4
+                // address that a gateway may reach: refused whole.
                 || v6.segments()[..6].iter().all(|s| *s == 0)
-                || (first == 0x0064 && v6.segments()[1] == 0xff9b))
+                || (first == 0x0064 && v6.segments()[1] == 0xff9b)
+                || first == 0x2002
+                || (first == 0x2001 && v6.segments()[1] == 0))
         }
     }
 }
@@ -250,6 +256,28 @@ mod tests {
             "2606:4700:4700::1111",
             "::ffff:8.8.8.8",
         ] {
+            assert!(is_public(public.parse().unwrap()), "{public}");
+        }
+    }
+
+    #[test]
+    fn tunnel_translation_and_site_local_ranges_are_not_public() {
+        for private in [
+            // fec0::/10 site-local (deprecated, still routed inside some networks)
+            "fec0::1",
+            "feff:ffff::1",
+            // 2002::/16 6to4: the next 32 bits are an IPv4 address, here 127.0.0.1
+            "2002:7f00:1::1",
+            "2002:c0a8:101::1",
+            // 2001::/32 Teredo: carries an IPv4 server and client address
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+            // 64:ff9b:1::/48 local-use NAT64 (inside 64:ff9b::/32, refused whole)
+            "64:ff9b:1::a00:1",
+        ] {
+            assert!(!is_public(private.parse().unwrap()), "{private}");
+        }
+        // Neighbours of those ranges stay public.
+        for public in ["2001:4860:4860::8888", "2003::1", "2a00:1450::1"] {
             assert!(is_public(public.parse().unwrap()), "{public}");
         }
     }

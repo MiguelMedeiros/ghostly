@@ -1,7 +1,10 @@
 //! Requests to a web app the user shares from this machine.
 //!
-//! The WebView cannot make them: its content security policy and CORS both say
-//! no. Which service maps to which address is decided by the peer; this side
+//! They go through Rust, not the WebView's `fetch`: CORS would stop most of
+//! them, and this is where the list of allowed addresses is kept. (The CSP lets
+//! the WebView reach loopback for the local test servers the wallets and backups
+//! accept, so it is not what keeps a contact's requests off other ports: the
+//! list below is.) Which service maps to which address is decided by the peer; this side
 //! refuses anything that is not loopback and never follows a redirect, so a
 //! request can only ever reach this machine, and only an address the person
 //! allowed in a native dialog (`local_access`), so not every port on it.
@@ -46,6 +49,9 @@ fn client() -> Result<&'static reqwest::Client, String> {
         // Never follow: a redirect could point anywhere, and the peer side
         // decides what to do with an on-target one.
         .redirect(reqwest::redirect::Policy::none())
+        // Straight to this machine: a proxy set on the system would be handed every request to
+        // the shared app, and where it sends them is its own business.
+        .no_proxy()
         .timeout(TIMEOUT)
         .build()
         .map_err(|e| format!("HTTP client: {}", e))?;
@@ -434,6 +440,66 @@ mod tests {
             fetch(url, "GET".into(), vec![], None).await.unwrap_err(),
             "Response too large"
         );
+    }
+
+    /// A proxy set in the environment is never handed a shared app's requests: they go straight
+    /// to this machine. The client reads the proxy settings once per process, so the request is
+    /// made in a child run of this test binary (`requests_skip_the_proxy`), with a proxy set that
+    /// answers 502 to anything it is given.
+    #[test]
+    fn a_proxy_in_the_environment_is_never_used() {
+        let proxy = crate::test_support::listener();
+        let address = format!("http://{}", proxy.local_addr().unwrap());
+        let used = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = used.clone();
+        std::thread::spawn(move || {
+            for stream in proxy.incoming() {
+                let Ok(mut stream) = stream else { return };
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = std::io::Write::write_all(
+                    &mut stream,
+                    b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+        });
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child.args([
+            "--ignored",
+            "--exact",
+            "local_fetch::tests::requests_skip_the_proxy",
+            "--test-threads=1",
+        ]);
+        for name in ["NO_PROXY", "no_proxy"] {
+            child.env_remove(name);
+        }
+        for name in [
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ] {
+            child.env(name, &address);
+        }
+        let output = child.output().unwrap();
+        let log = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            log.contains("1 passed"),
+            "the child run did not pass:\n{log}"
+        );
+        assert_eq!(used.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "run by a_proxy_in_the_environment_is_never_used, with a proxy set"]
+    async fn requests_skip_the_proxy() {
+        let (url, seen) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
+        let answer = fetch(format!("{url}/api"), "GET".into(), vec![], None)
+            .await
+            .unwrap();
+        assert_eq!(answer.status, 200);
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

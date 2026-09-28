@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -91,7 +92,9 @@ fn not_allowed(origin: &str) -> String {
 }
 
 /// Refusals of a contact's request after which, until the app restarts, a contact's request for an
-/// address not on the list is refused without a dialog. Sharing still asks.
+/// address not on the list is refused without a dialog. Sharing still asks, until it too has been
+/// refused this many times: then a share is refused without a dialog until the app restarts, so a
+/// page cannot keep a dialog in front of the person.
 const MAX_REFUSALS: usize = 3;
 
 #[derive(Default, Serialize, Deserialize)]
@@ -107,6 +110,8 @@ pub struct LocalAccess {
     /// Addresses refused since the app started, whatever profile the page named: a contact's next
     /// request does not ask again. Past `MAX_REFUSALS` of them, contacts' requests ask no more at all.
     denied: Mutex<HashSet<String>>,
+    /// Share dialogs refused since the app started; past `MAX_REFUSALS`, sharing asks no more.
+    share_refusals: AtomicUsize,
     /// One dialog at a time; requests for an address being asked about wait for the answer.
     asking: tokio::sync::Mutex<()>,
 }
@@ -151,7 +156,8 @@ impl LocalAccess {
 
     /// Ok once `origin` is on the profile's list, asking the person (`ask`) when it is not. A
     /// contact's request (`FirstUse`) for an address the person refused since the app started, or
-    /// any once they refused `MAX_REFUSALS`, is refused without asking; sharing (`Share`) always asks.
+    /// any once they refused `MAX_REFUSALS`, is refused without asking; sharing (`Share`) asks until the person refused `MAX_REFUSALS`
+    /// shares since the app started.
     pub async fn ensure<F, Fut>(
         &self,
         space: &str,
@@ -177,8 +183,13 @@ impl LocalAccess {
             if denied.contains(origin) || denied.len() >= MAX_REFUSALS {
                 return Err(not_allowed(origin));
             }
+        } else if self.share_refusals.load(Ordering::SeqCst) >= MAX_REFUSALS {
+            return Err(not_allowed(origin));
         }
         if !ask(origin.to_string(), reason).await {
+            if reason == Reason::Share {
+                self.share_refusals.fetch_add(1, Ordering::SeqCst);
+            }
             self.denied.lock().unwrap().insert(origin.to_string());
             return Err(not_allowed(origin));
         }
@@ -372,6 +383,67 @@ mod tests {
         }
         assert_eq!(asked.load(Ordering::SeqCst), MAX_REFUSALS);
         // Sharing is the person's own click: it still asks.
+        access
+            .ensure("p", "http://127.0.0.1:9000", Reason::Share, |_, _| async {
+                true
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn after_a_few_refused_shares_the_page_brings_up_no_more_dialogs() {
+        let access = LocalAccess::default();
+        let asked = AtomicUsize::new(0);
+        for port in 1..=MAX_REFUSALS + 3 {
+            let refused = access
+                .ensure(
+                    "p",
+                    &format!("http://127.0.0.1:{port}"),
+                    Reason::Share,
+                    |_, _| {
+                        asked.fetch_add(1, Ordering::SeqCst);
+                        async { false }
+                    },
+                )
+                .await;
+            assert!(refused.is_err());
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), MAX_REFUSALS);
+        // The same address again, or one nobody refused: still no dialog until the app restarts.
+        for origin in ["http://127.0.0.1:1", "http://localhost:3400"] {
+            assert!(access
+                .ensure("p", origin, Reason::Share, |_, _| async {
+                    panic!("asked after {MAX_REFUSALS} refused shares")
+                })
+                .await
+                .is_err());
+        }
+        assert!(!access.is_allowed("p", "http://localhost:3400"));
+    }
+
+    #[tokio::test]
+    async fn an_allowed_share_does_not_count_toward_the_limit() {
+        let access = LocalAccess::default();
+        for port in 1..=MAX_REFUSALS + 2 {
+            access
+                .ensure(
+                    "p",
+                    &format!("http://127.0.0.1:{port}"),
+                    Reason::Share,
+                    |_, _| async { true },
+                )
+                .await
+                .unwrap();
+        }
+        for _ in 1..MAX_REFUSALS {
+            let _ = access
+                .ensure("p", "http://127.0.0.1:9000", Reason::Share, |_, _| async {
+                    false
+                })
+                .await;
+        }
+        // One refusal short of the limit: the person is still asked.
         access
             .ensure("p", "http://127.0.0.1:9000", Reason::Share, |_, _| async {
                 true
