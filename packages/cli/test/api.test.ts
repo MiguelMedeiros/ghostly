@@ -48,6 +48,17 @@ describe("chats", () => {
     expect(() => findChat(links, "zed")).toThrow(/No chat/);
   });
 
+  it("a contact's own name never stands for someone else: a key finds only its chat, a label wins over a name", () => {
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+    const alice = link("chatAlice", { label: "Alice", peerNick: "Alice", peerPubKeyZ32: KEY });
+    const mallory = link("chatMallory", { peerNick: KEY });
+    const impostor = link("chatImpostor", { peerNick: "alice" });
+    expect(findChat([mallory, alice], KEY).id).toBe("chatAlice");
+    expect(() => findChat([mallory], KEY)).toThrow(/No chat/);
+    expect(findChat([impostor, alice], "Alice").id).toBe("chatAlice");
+    expect(findChat([impostor], "alice").id).toBe("chatImpostor");
+  });
+
   it("send refuses a seed or ecash unless forced, and reports the message it kept", async () => {
     const { ctx, node } = fake([msg("me_1", 5, { sender: "me", delivery: "sending" })]);
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" })).rejects.toMatchObject({ code: "confirm" });
@@ -207,6 +218,9 @@ describe("settings", () => {
     expect(JSON.stringify(shown)).not.toContain("SK");
     expect(shown).toMatchObject({ avatar: "<set>", holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "<hidden>" } } });
     expect(JSON.stringify(redactSettings({ holdStorage: { s3: { secretAccessKey: "SK" } } } as unknown as Settings, true))).toContain("SK");
+    const capabilities = redactSettings({ wake: { endpoint: "https://fcm.googleapis.com/x", p256dh: "P", auth: "AUTH", vapid: { publicKey: "VP", privateKey: "VK" } }, holdStorage: { s3: {}, space: "SPACE" } } as unknown as Settings);
+    expect(capabilities).toMatchObject({ wake: "<set>", holdStorage: { space: "<hidden>" } });
+    expect(JSON.stringify(capabilities)).not.toMatch(/fcm|AUTH|VK|SPACE/);
     await expect(callApi(ctx, "settings.set", { mints: [] })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
     await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
