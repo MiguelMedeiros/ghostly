@@ -1,7 +1,7 @@
 import { openAsBlob } from "node:fs";
 import { open, rm, stat } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
-import { LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, sanitizeFileName, sanitizeMime, toBase64Url } from "@ghostly/core";
+import { LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored } from "@ghostly/browser/shared/storedFiles";
@@ -33,7 +33,7 @@ export function mimeOf(path: string, given?: string): string {
 export function filesOf(messages: { id: string; file?: MessageFile; sender: string; timestamp: number }[], transfers: Record<string, unknown>) {
   return messages.filter((m) => m.file).map((m) => ({
     messageId: m.id, from: m.sender, timestamp: m.timestamp,
-    file: { id: m.file!.id, name: m.file!.name, size: m.file!.size, mime: m.file!.mime, ...(m.file!.voice ? { voice: m.file!.voice } : {}) },
+    file: { id: m.file!.id, name: m.file!.name, size: m.file!.size, mime: m.file!.mime, ...(m.file!.voice ? { voice: m.file!.voice } : {}), ...(m.file!.image ? { image: m.file!.image } : {}) },
     transfer: transfers[m.file!.id] ?? null,
   }));
 }
@@ -90,14 +90,17 @@ export const FILE_METHODS: Record<string, Method> = {
       voice = parseVoiceMeta({ duration, peaks: peaks.length ? peaks : new Array(VOICE_LIMITS.bars).fill(0) }, mime);
       if (!voice) throw new CliError("bad_request", VOICE_ONLY);
     }
+    const source = await openAsBlob(path, { type: mime });
+    // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
+    const image = voice ? undefined : await readImageMeta(source, mime);
     const wireId = toBase64Url(randomBytes(12));
-    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: info.size, mime, ...(voice ? { voice } : {}) };
+    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: info.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
     const timestamp = Date.now();
     const bytes = await fileBytes();
-    const digest = await bytes.stage(file.id, await openAsBlob(path, { type: mime }));
+    const digest = await bytes.stage(file.id, source);
     await fileStore.put({
       id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId,
-      metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, ...(voice ? { voice } : {}) },
+      metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, ...(voice ? { voice } : {}), ...(image ? { image } : {}) },
       transfer: { state: "transferring", transferred: 0, size: file.size },
     });
     endTyping(ctx, link.id, true);
@@ -109,7 +112,7 @@ export const FILE_METHODS: Record<string, Method> = {
       await removeStored(file.id).catch(() => {});
       throw new CliError("refused", error instanceof Error ? error.message : String(error));
     }
-    return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}) }, ...(warning ? { warning } : {}) };
+    return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
   },
 
   async "file.list"(ctx, params) {

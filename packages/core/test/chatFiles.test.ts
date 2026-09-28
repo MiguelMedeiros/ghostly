@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatFiles, FILE_LIMITS, refusalText, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
-// covers: files.video.meta, files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request
+// covers: files.video.meta, files.image.meta, files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request
 
 /** Deterministic bytes for any range: files of any size exist without being held. */
 function pattern(offset: number, length: number): Uint8Array {
@@ -242,6 +242,19 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => state(w.b, "in", "video-01") === "done" && state(w.b, "in", "video-02") === "done");
     expect(w.b.records.get("in:video-01")!.file.video).toEqual({ duration: 3000, width: 320, height: 180, poster });
     expect(w.b.records.get("in:video-02")!.file.video).toEqual({ duration: 3000, width: 320, height: 180 });
+  });
+
+  it("a picture's size goes with its offer; an offer without one, or with a bad one, still brings the file", async () => {
+    const w = wire({ keepBytes: true });
+    w.attach();
+    send(w, file("image-01", 40_000, { mime: "image/jpeg", image: { width: 4032, height: 3024 } }));
+    send(w, file("image-02", 40_000, { mime: "image/png" }));
+    send(w, file("image-03", 40_000, { mime: "image/webp", image: { width: 0, height: 10 } }));
+    // Not a picture: the size is not taken.
+    send(w, file("image-04", 40_000, { image: { width: 10, height: 10 } }));
+    await until(() => ["image-01", "image-02", "image-03", "image-04"].every((id) => state(w.b, "in", id) === "done"));
+    expect(w.b.records.get("in:image-01")!.file.image).toEqual({ width: 4032, height: 3024 });
+    for (const id of ["image-02", "image-03", "image-04"]) expect(w.b.records.get(`in:${id}`)!.file.image).toBeUndefined();
   });
 
   it("a file offered while no session is open waits, then goes on the next one", async () => {

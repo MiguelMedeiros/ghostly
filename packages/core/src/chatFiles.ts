@@ -3,6 +3,7 @@ import { formatFileSize, sanitizeFileName, sanitizeMime, type FileInfo } from ".
 import { pairedReplyAuthor, readReply, wireReply } from "./replies";
 import { readForwarded } from "./forwards";
 import { parseVideoMeta } from "./video";
+import { parseImageMeta } from "./image";
 import { parseVoiceMeta } from "./voice";
 
 /**
@@ -16,7 +17,7 @@ import { parseVoiceMeta } from "./voice";
  *
  * Frames (authenticated JSON on the paired session):
  *
- *   sender → receiver  pf-offer {id,name,mime,size,ts,voice?,video?,r?,paused?}  pf-data {id,offset,data}
+ *   sender → receiver  pf-offer {id,name,mime,size,ts,voice?,video?,image?,r?,paused?}  pf-data {id,offset,data}
  *                      pf-sum {id,size,digest}  pf-abort {id}
  *   receiver → sender  pf-accept {id,offset}  pf-wait {id,why}  pf-got {id,offset}  pf-done {id}
  *                      pf-refuse {id,why,room?}
@@ -337,7 +338,7 @@ export class ChatFiles {
 
   private offerFrame(record: FileTransferRecord, paused: boolean): Record<string, unknown> {
     const { file } = record;
-    return { t: "pf-offer", id: file.id, name: file.name, mime: file.mime, size: file.size, ts: file.timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.reply && { r: wireReply(file.reply) }), ...(readForwarded(file.forwarded) && { fw: file.forwarded }), ...(paused && { paused: true }) };
+    return { t: "pf-offer", id: file.id, name: file.name, mime: file.mime, size: file.size, ts: file.timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }), ...(file.reply && { r: wireReply(file.reply) }), ...(readForwarded(file.forwarded) && { fw: file.forwarded }), ...(paused && { paused: true }) };
   }
 
   private announce(entry: Entry): void {
@@ -491,6 +492,8 @@ export class ChatFiles {
     if (voice) file.voice = voice;
     const video = parseVideoMeta(frame.video, file.mime);
     if (video) file.video = video;
+    const image = parseImageMeta(frame.image, file.mime);
+    if (image) file.image = image;
     const reply = readReply(frame.r, pairedReplyAuthor);
     if (reply) file.reply = reply;
     const forwarded = readForwarded(frame.fw);

@@ -2,17 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Language } from "../../lib/settings";
-import en from "../../locales/en.json";
-import pt from "../../locales/pt.json";
-import es from "../../locales/es.json";
-import fr from "../../locales/fr.json";
-import it from "../../locales/it.json";
-import zh from "../../locales/zh.json";
-import ja from "../../locales/ja.json";
-import ar from "../../locales/ar.json";
+import { locales } from "../../locales";
 
 /** Every locale the app ships, as `I18nContext` loads them. */
-export const LOCALES: Record<Language, unknown> = { en, pt, es, fr, it, zh, ja, ar };
+export const LOCALES: Record<Language, unknown> = locales;
 export const LANGUAGES = Object.keys(LOCALES) as Language[];
 
 /** A locale flattened to `section.key` → value, the way `t()` looks keys up. Values are left as they are, strings or not. */
@@ -38,7 +31,7 @@ export function literalKeys(source: string): string[] {
 }
 
 /** The top-level sections of en.json (`common`, `chat`...): a DOM string starting with one of them looks like a raw key. */
-export const SECTIONS = Object.keys(en);
+export const SECTIONS = Object.keys(locales.en);
 
 const SRC = join(fileURLToPath(import.meta.url), "../../..");
 

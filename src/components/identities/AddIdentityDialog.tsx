@@ -12,6 +12,7 @@ import { ApprovalPanel } from "./ApprovalPanel";
 import { Select } from "../ui/Select";
 import { SubjectPreviewFacts } from "./SubjectPreview";
 import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
+import { externalLinkProps } from "../../lib/externalLink";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const VALIDITY = [7, 30, 90, 180, 365];
@@ -234,7 +235,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         )}
-        {authUrl && <a href={authUrl} target="_blank" rel="noreferrer noopener" className="block text-xs text-accent underline">Open your signer to approve</a>}
+        {authUrl && <a {...externalLinkProps(authUrl)} className="block text-xs text-accent underline">Open your signer to approve</a>}
         {progress && <Notice testId="add-identity-progress">{progress}</Notice>}
         {error && <Notice tone="error" testId="add-identity-error">{error}</Notice>}
       </div>

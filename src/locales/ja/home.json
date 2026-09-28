@@ -1,0 +1,13 @@
+{
+  "createChat": "新規チャットを作成",
+  "description": "プライベートで、一時的なメッセージ。",
+  "features": {
+    "decentralized": "中央サーバーなし",
+    "encrypted": "エンドツーエンド暗号化",
+    "ephemeral": "メッセージは消滅します"
+  },
+  "linkFailed": "リンクを開けませんでした。",
+  "unpublishedVersion": "ローカルバージョン — 公開リリースを見る",
+  "viewRelease": "このリリースを見る",
+  "welcome": "Ghostlyへようこそ"
+}

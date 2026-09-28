@@ -9,27 +9,7 @@ import { useSettings } from "./SettingsContext";
 import type { Language } from "../lib/settings";
 import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
 
-import en from "../locales/en.json";
-import pt from "../locales/pt.json";
-import es from "../locales/es.json";
-import fr from "../locales/fr.json";
-import it from "../locales/it.json";
-import zh from "../locales/zh.json";
-import ja from "../locales/ja.json";
-import ar from "../locales/ar.json";
-
-type TranslationDict = typeof en;
-
-const translations: Record<Language, TranslationDict> = {
-  en,
-  pt,
-  es,
-  fr,
-  it,
-  zh,
-  ja,
-  ar,
-};
+import { locales as translations, type TranslationDict } from "../locales";
 
 type NestedKeyOf<T, K extends string = ""> = T extends object
   ? {

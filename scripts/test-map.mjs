@@ -12,10 +12,15 @@
 //   node scripts/test-map.mjs --matrix   also print every feature's row
 //   node scripts/test-map.mjs --write    also write the map as Markdown to docs/test-map.md (not committed)
 //   node scripts/test-map.mjs --summary  also append it to $GITHUB_STEP_SUMMARY (CI shows it on the run's page)
+//   node scripts/test-map.mjs --fix      first put e2e/features.json in order (see below)
 //
 // It fails when a feature has no test at all and is not in e2e/allow-untested.json, when a tag or
 // a covers comment names a feature that does not exist, and when the allow list names a feature
 // that is tested by now (take it off the list) or does not exist.
+//
+// It also fails when e2e/features.json is out of order: infrastructure, features and paths each sorted by key (id,
+// glob), one entry per line. Parallel pull requests then add lines at different places instead of all appending to
+// the end of an area or of the paths map, and do not conflict. `--fix` sorts it.
 import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,7 +48,38 @@ const json = (path) => {
 };
 
 // ---------- the inventory ----------
+const byKey = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+/** e2e/features.json as it must be written: each list sorted by its key, one entry per line. */
+function formatInventory(inv) {
+  const block = (open, entries, close, last) => [
+    open,
+    ...entries.map((entry, i) => `    ${entry}${i < entries.length - 1 ? "," : ""}`),
+    `  ${close}${last ? "" : ","}`,
+  ];
+  const pairs = (object) => Object.entries(object ?? {}).sort((a, b) => byKey(a[0], b[0])).map(([k, v]) => `${JSON.stringify(k)}: ${JSON.stringify(v)}`);
+  const rest = Object.keys(inv).filter((k) => !["$comment", "clients", "infra", "features", "paths"].includes(k));
+  if (rest.length) throw new Error(`${FEATURES}: unknown top-level keys ${rest.join(", ")}`);
+  return [
+    "{",
+    `  "$comment": ${JSON.stringify(inv.$comment)},`,
+    `  "clients": ${JSON.stringify(inv.clients).replace(/","/g, '", "')},`,
+    ...block('  "infra": {', pairs(inv.infra), "}"),
+    ...block('  "features": [', [...inv.features].sort((a, b) => byKey(a.id, b.id)).map((f) => JSON.stringify(f)), "]"),
+    ...block('  "paths": {', pairs(inv.paths), "}", true),
+    "}",
+    "",
+  ].join("\n");
+}
 const inventory = json(FEATURES) ?? { features: [], infra: {}, clients: [] };
+if (inventory.$comment) {
+  const ordered = formatInventory(inventory);
+  if (read(FEATURES) !== ordered) {
+    if (args.has("--fix")) {
+      writeFileSync(join(ROOT, FEATURES), ordered);
+      console.log(`sorted ${FEATURES}`);
+    } else errors.push(`${FEATURES}: not in order (infra, features and paths each sorted by key, one per line). Run npm run test:map -- --fix`);
+  }
+}
 const allow = existsSync(join(ROOT, ALLOW)) ? json(ALLOW) ?? {} : {};
 const wisps = new Set((json(NUMBERING) ?? []).map((w) => w.id));
 const features = new Map();

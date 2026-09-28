@@ -5,6 +5,7 @@ import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import type { SharedService } from "../lib/platform";
 import { Block, Button, Notice, Row, Section, Switch, input } from "../components/wallet/ui";
 import { ButtonGroup, FieldGrid, Page } from "../components/layout";
+import { externalLinkProps } from "../lib/externalLink";
 
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
@@ -109,7 +110,7 @@ function ServiceCard({ service, online, contacts }: { service: SharedService; on
       <Row leading={<span className={`grid place-items-center w-10 h-10 rounded-xl ${shared ? "bg-accent/15 text-accent" : "bg-surface-alt text-text-muted"}`}>{GLOBE}</span>}
         label={<>
           <p className="font-medium truncate">{service.name}</p>
-          <a href={href} target="_blank" rel="noreferrer" title={service.target} className="block text-xs font-mono text-text-muted hover:text-accent truncate">{service.target.replace(/^https?:\/\//, "")}</a>
+          <a {...externalLinkProps(href)} title={service.target} className="block text-xs font-mono text-text-muted hover:text-accent truncate">{service.target.replace(/^https?:\/\//, "")}</a>
         </>}
         hint={<span className={`flex flex-wrap items-center gap-x-1.5 mt-0.5 ${shared ? "text-accent" : "text-text-muted"}`}>
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${shared ? "bg-accent" : "bg-gray-500"}`} />{status}
