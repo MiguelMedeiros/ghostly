@@ -96,13 +96,13 @@ export function BlockGrid({
             const number = w?.number ?? slug.split("-")[0];
             const name = w?.name ?? REF_NAMES[slug];
             return name ? (
-              <Link key={slug} href={`/developers/wisps/${slug}`}>
+              <Link key={slug} href={`/wisps/${slug}`}>
                 <span className="mono">{number}</span> {name}
               </Link>
             ) : null;
           })}
           {bl.refs?.map((slug) => (
-            <Link key={slug} href={`/developers/wisps/${slug}`}>
+            <Link key={slug} href={`/wisps/${slug}`}>
               {t.docs}: {REF_NAMES[slug] ?? slug}
             </Link>
           ))}

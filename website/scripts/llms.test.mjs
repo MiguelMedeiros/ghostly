@@ -33,7 +33,7 @@ test("every WISP is in llms.txt with its title, page and line, and in llms-full.
   assert.equal(wisps.length, numbering.length);
   for (const wisp of wisps) {
     assert.ok(wisp.benefit, `${wisp.file}: its header's Summary row`);
-    assert.ok(index.includes(`- [${wisp.title}](${SITE}/developers/wisps/${wisp.slug}): ${wisp.benefit}`), `${wisp.file} in llms.txt`);
+    assert.ok(index.includes(`- [${wisp.title}](${SITE}/wisps/${wisp.slug}): ${wisp.benefit}`), `${wisp.file} in llms.txt`);
     assert.ok(full.includes(`<!-- Source: ${SITE}/reference/${wisp.file} -->\n\n# ${wisp.title}\n`), `${wisp.file} in llms-full.txt`);
   }
   for (const path of KEY_DOCS) assert.ok(full.includes(read(path).trim()), `${path} in llms-full.txt`);

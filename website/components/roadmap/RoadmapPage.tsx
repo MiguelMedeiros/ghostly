@@ -61,7 +61,7 @@ export function RoadmapPage() {
               {ahead.map((w) => (
                 <li key={w.id}>
                   {w.level && <LevelBadge level={w.level} small />}
-                  <Link href={`/developers/wisps/${w.slug}`}>
+                  <Link href={`/wisps/${w.slug}`}>
                     <span className="mono">{w.number}</span> {w.name}
                   </Link>
                 </li>
@@ -205,7 +205,7 @@ export function RoadmapPage() {
           })}
         </div>
         <p>
-          <Link className="link-arrow" href={"/developers/wisps/adapter-roadmap"}>
+          <Link className="link-arrow" href={"/wisps/adapter-roadmap"}>
             {t.inventory.source} →
           </Link>
         </p>

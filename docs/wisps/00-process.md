@@ -14,7 +14,7 @@
 
 ## Purpose
 
-Separate Ghost, the small rendezvous primitive, from Ghostly, its reference application, and make independently implementable extensions reviewable. WISP is the working document name; this draft does not decide its expanded acronym.
+Separate Ghost, the small rendezvous primitive, from Ghostly, its reference application, and make independently implementable extensions reviewable. WISP stands for Wire Interoperability Specification Proposal (and a wisp is a little ghost).
 
 ## Process
 
@@ -32,7 +32,7 @@ Headers: number/assignment state, title, status, editors, dependencies and imple
 
 ### Header fields the site reads
 
-WISP content is written in this directory only. The website's catalogue, reader and maps are generated from the documents (`npm run sync:references` in `website/`) and hold no text of their own about a WISP, so a change is written once, here. Besides the fields above, the header table of every WISP carries these rows, in plain text (no Markdown, no links, except where a link is the value):
+WISP content is written in this directory only. The website's catalogue, reader and maps are generated from the documents (`npm run sync:references` in `website/`) and hold no text of their own about a WISP, so a change is written once, here. The same sync writes the index table in [README.md](README.md) from each header's title, Status and Availability; commit it with the change, or CI fails. Besides the fields above, the header table of every WISP carries these rows, in plain text (no Markdown, no links, except where a link is the value):
 
 | Row | Required | Value |
 |---|---|---|

@@ -7,8 +7,10 @@ import { expect, test } from "@playwright/test";
 for (const [from, to] of [
   ["/pt-br", "/"],
   ["/pt-br/developers", "/developers"],
-  ["/pt-br/developers/catalog", "/developers/wisps"],
-  ["/pt-br/developers/wisps/100-transports", "/developers/wisps/100-transports"],
+  ["/pt-br/developers/catalog", "/wisps"],
+  ["/pt-br/docs", "/wisps"],
+  ["/pt-br/developers/wisps", "/wisps"],
+  ["/pt-br/developers/wisps/100-transports", "/wisps/100-transports"],
   ["/pt-br/roadmap", "/roadmap"],
 ]) {
   test(`${from} redirects permanently to ${to}`, async ({ request }) => {

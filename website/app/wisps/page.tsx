@@ -5,7 +5,7 @@ import { catalog } from "@/content/catalog";
 export const metadata: Metadata = {
   title: catalog.meta.title,
   description: catalog.meta.description,
-  alternates: { canonical: "/developers/wisps" },
+  alternates: { canonical: "/wisps" },
 };
 
 export default function Page() {

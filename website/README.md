@@ -1,7 +1,7 @@
 # ghostly.tools
 
 The Ghostly website: the story for people (`/`), the story for developers
-(`/developers`), the WISPs (`/developers/wisps`, the WISPs that work today drawn as layers) and the reader, the roadmap, and the existing CLI,
+(`/developers`), the WISPs (`/wisps`, the WISPs that work today drawn as layers) and the reader, the roadmap, and the existing CLI,
 protocol docs and privacy pages. Next.js (see `AGENTS.md`: this version differs
 from older ones), motion for scroll scenes, no WebGL.
 
@@ -90,7 +90,7 @@ They need the dev server on :4330 and Chrome.
 
 `npm run sync:references` (also run by `npm run dev` and `npm run build`) copies these into
 `public/reference/` and indexes them in `lib/reference-index.json`;
-the reader shows each one under `/developers/wisps/<slug>`:
+the reader shows each one under `/wisps/<slug>`:
 
 - `docs/wisps/*.md`, except the forwarding stubs of renumbered WISPs and the
   `HANDOFF-CLAUDE*` / `QA-CLAUDE*` notes;

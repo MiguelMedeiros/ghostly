@@ -61,7 +61,7 @@ Limits to say: an invitation contains secrets. Share it only with the person you
 
 ## 6. Next step (4:10-4:20)
 
-End card: `ghostly.tools/developers/wisps/800-invite-join` · `packages/core/src/invite.ts` · next: WISP 01 Ghost Core.
+End card: `ghostly.tools/wisps/800-invite-join` · `packages/core/src/invite.ts` · next: WISP 01 Ghost Core.
 
 Narration (EN): "Read WISP 800 and 801 on the site, and the code in packages/core. Next lesson: how the two apps actually find each other on the DHT."
 

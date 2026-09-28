@@ -126,7 +126,7 @@ export function wispByFile(file: string): Wisp | undefined {
   return wisps.find((w) => w.file === file);
 }
 
-export const wispPath = (w: Pick<Wisp, "slug">) => `/developers/wisps/${w.slug}`;
+export const wispPath = (w: Pick<Wisp, "slug">) => `/wisps/${w.slug}`;
 
 export { GROUPS };
 export type { GroupId };

@@ -48,32 +48,3 @@ body {
   background-size: 60px 60px;
   animation: grid-fade 8s ease-in-out infinite;
 }
-
-.text-gradient {
-  background: linear-gradient(135deg, #22d3ee 0%, #00a884 50%, #22d3ee 100%);
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* The protocol docs' phone sidebar (components/ProtocolDocs.tsx). */
-.mobile-menu-open {
-  transform: translateX(0) !important;
-}
-
-/* Boxed layout for docs */
-.docs-container {
-  /* The site's one content width (site.css --wrap), as the nav. */
-  max-width: var(--wrap);
-  margin-left: auto;
-  margin-right: auto;
-  width: 100%;
-  padding-left: var(--gutter);
-  padding-right: var(--gutter);
-}
-
-/* Scroll offset for fixed navbar */
-.docs-container section[id] {
-  scroll-margin-top: 6rem; /* 96px - navbar height (64px) + extra padding */
-}

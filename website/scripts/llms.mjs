@@ -18,7 +18,7 @@ const HOW = [
   ["MAP.md", "how the Ghost core composes with transports, capabilities and local state"],
 ];
 
-const reader = (slug) => `${SITE}/developers/wisps/${slug}`;
+const reader = (slug) => `${SITE}/wisps/${slug}`;
 const number = (entry) => Number(entry.id);
 
 /** The WISPs, in number order, each with its reference entry (title, slug, the header's Summary as `benefit`). */
@@ -42,9 +42,9 @@ export function llmsIndex(entries, numbering) {
   const other = entries.filter((e) => !listed.has(e.file));
   return `# Ghostly
 
-> An end-to-end encrypted, peer-to-peer messenger with a wallet and verifiable identities built in. No Ghostly server, no account. Two apps meet through small signed records on the Mainline DHT, then talk over a direct link. Every wire contract is an open draft called a WISP, and a headless CLI lets bots and AI agents join the same chats as people.
+> An end-to-end encrypted, peer-to-peer messenger with a wallet and verifiable identities built in. No Ghostly server, no account. Two apps meet through small signed records on the Mainline DHT, then talk over a direct link. Every wire contract is an open draft called a WISP (Wire Interoperability Specification Proposal), and a headless CLI lets bots and AI agents join the same chats as people.
 
-Every WISP has the document status Draft; each says what is implemented. A page under ${SITE}/developers/wisps/ has its Markdown source at ${SITE}/reference/<file>.md. The WISPs, the CLI guide and the agent skill are in one file: ${SITE}/llms-full.txt.
+Every WISP has the document status Draft; each says what is implemented. A page under ${SITE}/wisps/ has its Markdown source at ${SITE}/reference/<file>.md. The WISPs, the CLI guide and the agent skill are in one file: ${SITE}/llms-full.txt.
 
 ## Ghostly
 
@@ -60,16 +60,17 @@ ${[
 ${[
   line("How a chat starts", `${SITE}/developers`, "two apps publish signed records, find each other, agree on what both speak and open a direct link, step by step"),
   ...HOW.map(([file, note]) => line(bySlug(file).title, reader(bySlug(file).slug), note)),
-  line("Compatibility record guide", `${SITE}/docs`, "record formats of chats with Ghostly 0.4 contacts (WISP 402)"),
 ].join("\n")}
 
 ## Developers
 
 ${[
   line("Developers", `${SITE}/developers`, "the introduction: how a chat starts, how transports are ranked, and where each feature runs"),
-  line("WISP catalog", `${SITE}/developers/wisps`, "every WISP with its status and implementations"),
+  line("Protocol", `${SITE}/wisps`, "the WISPs (Wire Interoperability Specification Proposals), Ghostly's open specs, drawn as layers; each has its own page"),
   line(bySlug("SDK.md").title, reader(bySlug("SDK.md").slug)),
   line("Source code", REPO, "MIT licensed"),
+  line("Security policy", `${REPO}/blob/main/SECURITY.md`, "how to report a vulnerability privately"),
+  line("Contributing", `${REPO}/blob/main/CONTRIBUTING.md`),
 ].join("\n")}
 
 ## WISPs

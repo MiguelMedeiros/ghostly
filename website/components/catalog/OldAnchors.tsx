@@ -13,7 +13,7 @@ export function OldAnchors({ drafts }: { drafts: Record<string, string> }) {
       const id = decodeURIComponent(window.location.hash.slice(1));
       if (!id || document.getElementById(id)) return;
       const slug = id.startsWith("wisp-") ? drafts[id.slice(5)] : undefined;
-      if (slug) window.location.replace(`/developers/wisps/${slug}`);
+      if (slug) window.location.replace(`/wisps/${slug}`);
       else if (id === "inventory") window.location.replace("/roadmap#inventory-title");
       else if (id.startsWith("candidate-")) window.location.replace(`/roadmap#${id}`);
     };

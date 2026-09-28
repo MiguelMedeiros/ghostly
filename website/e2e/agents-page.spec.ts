@@ -73,7 +73,7 @@ test("/llms.txt and /llms-full.txt are served", async ({ request }) => {
   expect(text).toMatch(/^# Ghostly\n/);
   expect(text).toContain("https://ghostly.tools/developers/agents");
   expect(text).toContain("/packages/cli/SKILL.md");
-  expect(text).toContain("https://ghostly.tools/developers/wisps/01-ghost-core");
+  expect(text).toContain("https://ghostly.tools/wisps/01-ghost-core");
   const full = await request.get("/llms-full.txt");
   expect(full.ok()).toBe(true);
   const fullText = await full.text();
