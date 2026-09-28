@@ -48,6 +48,21 @@
     }
   },
   "chat": {
+    "forward": {
+      "forward": "Inoltra",
+      "select": "Seleziona",
+      "forwarded": "Inoltrato",
+      "many": "Inoltrato molte volte",
+      "title": "Inoltra a…",
+      "search": "Cerca chat",
+      "messages": "{{count}} messaggi",
+      "noMatch": "Nessuna chat con questo nome",
+      "noChats": "Ancora nessuna chat",
+      "filesHint": "I gruppi accettano solo testo",
+      "pick": "Scegline fino a {{count}}",
+      "send": "Invia",
+      "selected": "{{count}} selezionati"
+    },
     "typeMessage": "Scrivi un messaggio...",
     "send": "Invia",
     "online": "online",

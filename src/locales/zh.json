@@ -48,6 +48,21 @@
     }
   },
   "chat": {
+    "forward": {
+      "forward": "转发",
+      "select": "选择",
+      "forwarded": "已转发",
+      "many": "已多次转发",
+      "title": "转发到…",
+      "search": "搜索聊天",
+      "messages": "{{count}} 条消息",
+      "noMatch": "没有这个名字的聊天",
+      "noChats": "还没有聊天",
+      "filesHint": "群组只接收文字",
+      "pick": "最多选择 {{count}} 个",
+      "send": "发送",
+      "selected": "已选择 {{count}} 条"
+    },
     "typeMessage": "输入消息...",
     "send": "发送",
     "online": "在线",

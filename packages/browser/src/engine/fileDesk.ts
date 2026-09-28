@@ -131,7 +131,7 @@ export class FileDesk {
    * Offers a file whose record and bytes are stored under its local id (`outgoingFileId`). Offered before (Retry, a
    * restart): an unfinished transfer is taken over and offered again, a failed one sent again; never a second one.
    */
-  async offer(linkId: string, file: MessageFile, wireId: string, timestamp: number, reply?: WireReply): Promise<void> {
+  async offer(linkId: string, file: MessageFile, wireId: string, timestamp: number, reply?: WireReply, forwarded?: number): Promise<void> {
     const chat = this.chat(linkId);
     const stored = await fileStore.get(file.id);
     if (!stored) throw new Error("The file is gone");
@@ -146,7 +146,7 @@ export class FileDesk {
       this.deps.changed();
       return;
     }
-    chat.files.offer({ id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(reply && { reply }) }, stored.digest);
+    chat.files.offer({ id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(reply && { reply }), ...(forwarded && { forwarded }) }, stored.digest);
   }
 
   /**
@@ -312,7 +312,7 @@ export class FileDesk {
         await fileStore.put({ id, linkId, direction: "in", wireId: record.id, createdAt: Date.now(), bytes: (await fileBytes()).kind,
           metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice, video: file.video }, wire3: record });
         await this.deps.storeMessage({ linkId, id: `peer_${record.id}`, text: fileMessageText(message), sender: "peer", timestamp: file.timestamp, via: "datalink", file: message,
-          ...(file.reply && { replyTo: receivedPairedReply(file.reply) }),
+          ...(file.reply && { replyTo: receivedPairedReply(file.reply) }), ...(file.forwarded && { forwarded: file.forwarded }),
           details: { wire: fileWire("files/3", file.size) } });
       }).catch(() => {});
     }

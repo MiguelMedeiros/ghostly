@@ -33,7 +33,8 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, withRequestOptions, type WireEdit } from "@ghostly/core";
+import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, forwardedAgain, readForwarded, withRequestOptions, type WireEdit } from "@ghostly/core";
+import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
 import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
@@ -615,6 +616,7 @@ export class GhostlyNode implements EngineImplementation {
       const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
       return message && GhostlyNode.wireReply(message);
     },
+    forwarded: async (linkId, messageId) => (await db.getMessages(linkId)).find((m) => m.id === messageId)?.forwarded,
     file: async (fileId) => {
       const stored = await fileStore.get(fileId);
       if (!stored?.metadata) return null;
@@ -623,7 +625,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     paymentRequest: (paymentId): PaymentRequest | null => this.desk.requestFor(paymentId),
     receiveText: (linkId, message, held) => this.storeMessage({ linkId, id: `peer_${message.id}`, text: message.text, sender: "peer", timestamp: message.timestamp, via: "hold",
-      ...(message.reply && { replyTo: receivedPairedReply(message.reply) }),
+      ...(message.reply && { replyTo: receivedPairedReply(message.reply) }), ...(message.forwarded && { forwarded: message.forwarded }),
       details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: utf8Encode(message.text).length, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }) } }),
     receiveFile: async (linkId, wire, bytes, digest, held) => {
       const live = this.links.get(linkId);
@@ -639,7 +641,7 @@ export class GhostlyNode implements EngineImplementation {
         metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
       this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
       await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file,
-        ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }),
+        ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
         details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: wire.size, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }), completedAt: Date.now() } });
       return null;
     },
@@ -1515,7 +1517,7 @@ export class GhostlyNode implements EngineImplementation {
    * both sides allow it; otherwise kept as `waiting` ("Sends when live") and sent by itself, in order, once
    * the chat can carry it. Only what must never wait, or a security stop, is refused.
    */
-  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview, reply?: MessageReply): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview, reply?: MessageReply, forwarded?: number): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { link } = live, linkId = live.stored.id;
     if (!link) return { error: "You are offline" };
     const bytes = new TextEncoder().encode(trimmed).length;
@@ -1524,7 +1526,7 @@ export class GhostlyNode implements EngineImplementation {
     if (stop) return { error: stop };
     const wireId = toBase64Url(randomBytes(16)), id = `me_${wireId}`;
     const delivery = link.isDataLinkOpen ? "stream" : link.textDelivery === "dht" ? "dht" : "unavailable";
-    const answers = reply && { replyTo: reply };
+    const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }) };
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
       if (!validationError) {
@@ -1749,7 +1751,8 @@ export class GhostlyNode implements EngineImplementation {
         // The path as it is when the message goes: the details keep it, whatever the session does after.
         const at = Date.now(), snapshot = pathSnapshot(live, message.via);
         const reply = GhostlyNode.wireReply(message);
-        const error = reply ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply)
+        const error = message.forwarded ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply, message.forwarded)
+          : reply ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply)
           : await link.sendMessage(message.text, message.timestamp, message.wireId, ...(message.preview ? [message.preview] : []));
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
         return error;
@@ -1907,16 +1910,18 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Sends a file, or sends it again (the same `timestamp`). `replyTo` quotes a message of the chat (WISP 401 § Replies),
    * as a text reply does; sent again, the file keeps the reply its message has (`transferFile`). Without a reply, it
-   * does what it does before any wait, so a second call for the same file finds it already transferring.
+   * does what it does before any wait, so a second call for the same file finds it already transferring. `forwarded`:
+   * the hop count of a forwarded file (WISP 400 § Forwards), kept with its message and sent with it every time.
    */
-  async sendFile({ linkId, file, timestamp, replyTo }: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string }): Promise<void> {
+  async sendFile({ linkId, file, timestamp, replyTo, forwarded: hops }: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string; forwarded?: number }): Promise<void> {
     let reply: MessageReply | undefined;
     if (replyTo !== undefined) {
       const found = await this.replyFor(linkId, replyTo);
       if (typeof found === "string") throw new Error(found);
       reply = found;
     }
-    const answers = reply && { replyTo: reply };
+    const forwarded = readForwarded(hops);
+    const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }) };
     const wire = reply && pairedWireReply(reply);
     const live = this.links.get(linkId);
     const fail = (error: string) => {
@@ -1959,28 +1964,29 @@ export class GhostlyNode implements EngineImplementation {
       file,
       ...answers,
     });
-    this.transferFile(live, file, wireId, timestamp, fail, wire);
+    this.transferFile(live, file, wireId, timestamp, fail, wire, forwarded);
   }
 
   /**
    * The file of a stored message goes over the open session: offered with files/3 when both sides agree it,
    * else whole with files/2, which takes up to 100 MB.
    */
-  private transferFile(live: LiveLink, file: MessageFile, wireId: string, timestamp: number, fail: (error: string) => void, reply?: WireReply): void {
+  private transferFile(live: LiveLink, file: MessageFile, wireId: string, timestamp: number, fail: (error: string) => void, reply?: WireReply, forwarded?: number): void {
     const { link } = live;
     if (!link) return fail("You are offline");
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     void (async () => {
-      // Sent again: the reply its message carries goes with it again.
-      if (!reply) {
+      // Sent again: the reply its message carries goes with it again, and so does its hop count.
+      if (!reply || !forwarded) {
         const message = (await db.getMessages(live.stored.id)).find(m => m.id === `me_${timestamp}`);
-        reply = message && GhostlyNode.wireReply(message);
+        reply ??= message && GhostlyNode.wireReply(message);
+        forwarded ??= message?.forwarded;
       }
       const large = await GhostlyNode.largeFilesAgreed(link), at = Date.now();
       await this.noteDetails(live.stored.id, `me_${timestamp}`, details => ({ ...withSend(details, { at, ...pathSnapshot(live, "datalink"), result: "sent" }), sentAt: at, wire: fileWire(large ? "files/3" : "files/2", file.size) }));
       if (large) {
         // A transfer that ended for good (cancelled, declined) keeps saying why, rather than a bare failure with Retry.
-        await this.fileDesk.offer(live.stored.id, file, wireId, timestamp, reply).catch((error) => { if (!this.fileDesk.reshow(live.stored.id, file.id)) throw error; });
+        await this.fileDesk.offer(live.stored.id, file, wireId, timestamp, reply, forwarded).catch((error) => { if (!this.fileDesk.reshow(live.stored.id, file.id)) throw error; });
         return;
       }
       if (file.size > LIMITS.maxFileBytes) {
@@ -1992,7 +1998,7 @@ export class GhostlyNode implements EngineImplementation {
       // Read a step at a time, wherever the bytes are: never the whole file at once.
       const source = streamStored(stored);
       await link.sendFile(
-        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(reply && { reply }) },
+        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(reply && { reply }), ...(forwarded && { forwarded }) },
         source,
       );
     })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
@@ -2054,7 +2060,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private receiveFile(
     linkId: string,
-    wire: { id: string; name: string; size: number; mime: string; timestamp: number; voice?: MessageFile["voice"]; video?: MessageFile["video"]; reply?: WireReply },
+    wire: { id: string; name: string; size: number; mime: string; timestamp: number; voice?: MessageFile["voice"]; video?: MessageFile["video"]; reply?: WireReply; forwarded?: number },
   ): FileSink | string {
     const files = this.links.get(linkId)?.files;
     if (!files) return "refused";
@@ -2084,7 +2090,7 @@ export class GhostlyNode implements EngineImplementation {
       timestamp: wire.timestamp,
       via: "datalink",
       file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }) },
-      ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }),
+      ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
       details: { wire: fileWire("files/2", wire.size) },
     });
     void messageStored.catch(() => {});
@@ -2314,6 +2320,68 @@ export class GhostlyNode implements EngineImplementation {
     return this.groups.send(groupId, text, Array.isArray(mentions) ? mentions : [], reply && { i: reply.id, s: reply.snippet, f: reply.member! });
   }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
+  /**
+   * Forwards messages of a chat or a group (`group:<id>`) to up to `FORWARD_TARGETS` others (WISP 400 § Forwards): each
+   * as a new message of mine, in the order they were written, carrying one more hop than it had and nothing of who wrote
+   * it or where. A text goes as written; a file from the bytes on this device (a copy per chat, nothing fetched again),
+   * through the chat's own path, so a large one still waits for the contact's consent. A group takes texts only. What one
+   * chat refuses does not stop the others: each says what it got.
+   */
+  async forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): Promise<{ results: ForwardResult[] }> {
+    const { linkId } = params;
+    if (typeof linkId !== "string" || !linkId) throw new Error("No chat to forward from");
+    const ids = Array.isArray(params.messageIds) ? [...new Set(params.messageIds.filter((id): id is string => typeof id === "string"))] : [];
+    const targets = Array.isArray(params.to) ? [...new Set(params.to.filter((to): to is string => typeof to === "string" && !!to))] : [];
+    if (!ids.length) throw new Error("No message to forward");
+    if (ids.length > FORWARD_MESSAGES) throw new Error(`Forward at most ${FORWARD_MESSAGES} messages at once`);
+    if (!targets.length) throw new Error("No chat to forward to");
+    if (targets.length > FORWARD_TARGETS) throw new Error(`Forward to at most ${FORWARD_TARGETS} chats at once`);
+    if (linkId.startsWith("group:") ? !this.membership(linkId.slice("group:".length)) : this.links.get(linkId)?.stored.group !== undefined || !this.links.has(linkId))
+      throw new Error("Chat not found");
+    const history = await db.getMessages(linkId);
+    const chosen = ids.map(id => history.find(m => m.id === id));
+    if (chosen.some(m => !m)) throw new Error("That message is not in this chat");
+    const messages = (chosen as StoredMessage[]).sort((a, b) => a.timestamp - b.timestamp);
+    for (const message of messages) {
+      const kind = forwardKind(message);
+      if (typeof kind !== "string") throw new Error(kind.refused);
+    }
+    // Each new message its own time, even within one millisecond: a file's row is named after it.
+    let last = 0;
+    const now = () => (last = Math.max(Date.now(), last + 1));
+    const results: ForwardResult[] = [];
+    for (const to of targets) {
+      const result: ForwardResult = { to, messageIds: [], error: null };
+      results.push(result);
+      const note = (error: string) => { result.error ??= error; };
+      const groupId = to.startsWith("group:") ? to.slice("group:".length) : undefined;
+      const live = groupId ? undefined : this.links.get(to);
+      if (groupId ? !this.membership(groupId) : !live || live.stored.group !== undefined) { note(groupId ? "You are not in this group" : "Chat not found"); continue; }
+      for (const message of messages) {
+        const hops = forwardedAgain(message.forwarded);
+        try {
+          if (forwardKind(message) === "text") {
+            const sent = groupId ? await this.groups.send(groupId, message.text, [], undefined, hops)
+              : !live!.link ? { error: "You are offline" }
+              : live!.stored.profile ? await this.sendChatText(live!, message.text.trim(), now(), message.preview, undefined, hops)
+              : await this.sendMessage({ linkId: to, text: message.text, timestamp: now() });
+            if (sent.error) note(sent.error); else if (sent.messageId) result.messageIds.push(sent.messageId);
+            continue;
+          }
+          if (groupId) { note("Groups take no files yet"); continue; }
+          const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
+          const file: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
+            ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }) };
+          await copyForForward(original.id, { linkId: to, wireId, timestamp, file });
+          await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
+          result.messageIds.push(`me_${timestamp}`);
+        } catch (error) {
+          note(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+    return { results };
+  }
   /** How many edges took my message (or its edit number `edit`) so far: what `group send --wait sent` waits for. */
   groupTaken({ groupId, messageId, edit }: { groupId: string; messageId: string; edit?: number }): number { return this.groups.taken(groupId, messageId, edit); }
 
@@ -3603,6 +3671,7 @@ export class GhostlyNode implements EngineImplementation {
             details: GhostlyNode.receivedTextDetails(!!stored.profile, message),
             ...(message.preview && { preview: message.preview }),
             ...(stored.profile && message.reply && { replyTo: receivedPairedReply(message.reply) }),
+            ...(stored.profile && message.forwarded && { forwarded: message.forwarded }),
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),

@@ -15,6 +15,7 @@ import {
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } from "./replies";
+import { readForwarded } from "./forwards";
 import { GROUP_EDIT_FRAME, meshMessageRef, validEditText, type GroupIncomingEdit } from "./groupEdits";
 import { validEditNumber } from "./pairedEdits";
 
@@ -71,10 +72,12 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
  * carries its frame, so the edge vouches for it. Older apps ignore the field.
  */
 /**
- * `xs`: the author's signature over the whole frame, the boxes of `m` and `r` included (revision 0.9). A frame handed
- * on by another member keeps its boxes only with it: the edge it arrives on is not the author's and vouches for nothing.
+ * `xs`: the author's signature over the whole frame, the boxes of `m` and `r` included (revision 0.9), and `f` when
+ * there is one. A frame handed on by another member keeps its boxes only with it: the edge it arrives on is not the
+ * author's and vouches for nothing.
+ * `f`: a forwarded text's hop count (WISP 9xx § Forwards), in the clear like the header: every member reads it anyway.
  */
-export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; xs?: string }
+export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; xs?: string }
 /**
  * An edit of message `<s>:<e>:<n>` by its author (WISP 9xx § Edits): edit number `v`, the new text (and its mentions)
  * as JSON `{ text, m? }` sealed under the key of the message's epoch `e`, signed by the author.
@@ -129,7 +132,7 @@ export interface GroupState {
   meta?: GroupMeta;
 }
 
-export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply }
+export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number }
 
 export interface GroupSessionHooks {
   save(state: GroupState): Promise<void>;
@@ -161,9 +164,12 @@ const B64 = /^[A-Za-z0-9_-]*$/;
 const secretAad = (g: string, e: number, member: string) => JSON.stringify(["ghostly-group/1 secret", g, e, member]);
 const messageAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify([f.g, f.e, f.s, f.n, f.ts]);
 const messageSigned = (f: Omit<GroupMessageFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 msg", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c]));
-/** What `xs` covers: the frame and both boxes, so a member handing it on cannot swap or forge them. */
+/**
+ * What `xs` covers: the frame and both boxes, so a member handing it on cannot swap or forge them; a hop count after
+ * them, only when there is one, so what an app from before forwards signs and checks stays the same.
+ */
 const messageSignedWhole = (f: Omit<GroupMessageFrame, "sig" | "t" | "xs">) =>
-  utf8Encode(JSON.stringify(["ghostly-group/1 msg+", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c, f.m?.n ?? "", f.m?.c ?? "", f.r?.n ?? "", f.r?.c ?? ""]));
+  utf8Encode(JSON.stringify(["ghostly-group/1 msg+", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c, f.m?.n ?? "", f.m?.c ?? "", f.r?.n ?? "", f.r?.c ?? "", ...(f.f !== undefined ? [f.f] : [])]));
 export const groupMessageId = (sender: string, epoch: number, seq: number) => `${sender}:${epoch}:${seq}`;
 /** An edit's box holds the text and its mentions as JSON: room for a text whose every character JSON escapes. */
 const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + 64;
@@ -189,6 +195,7 @@ const cleanEdit = (f: GroupEditFrame): GroupEditFrame => ({ t: GROUP_EDIT_FRAME,
 function clean(f: GroupMessageFrame): GroupMessageFrame {
   return { t: "group-msg", g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig,
     ...(isMentionsBox(f.m) ? { m: { n: f.m.n, c: f.m.c } } : {}), ...(isReplyBox(f.r) ? { r: { n: f.r.n, c: f.r.c } } : {}),
+    ...(readForwarded(f.f) ? { f: f.f } : {}),
     ...(typeof f.xs === "string" && f.xs.length === 86 && B64.test(f.xs) ? { xs: f.xs } : {}) };
 }
 
@@ -475,9 +482,10 @@ export class GroupSession {
   /**
    * Encrypts and signs a text, keeps it for catch-up and sends it to every other member. `mentions`: places of the
    * text that name members (everyone: the admin only); what does not hold is left out. `reply`: the message it
-   * answers, sealed apart from the text (`r`) like the mentions, so an older app still reads the text.
+   * answers, sealed apart from the text (`r`) like the mentions, so an older app still reads the text. `forwarded`: the
+   * hop count of a forwarded text (`f`, WISP 9xx § Forwards).
    */
-  sendText(text: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply): Promise<{ id: string } | { error: string }> {
+  sendText(text: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (this.state.status !== "active") return { error: this.state.statusReason ?? "You are no longer in this group" };
       const trimmed = text.trim();
@@ -494,14 +502,14 @@ export class GroupSession {
       const named = validMentions(wireMentions(mentions), trimmed, this.isAdmin);
       const answers = reply && readReply(wireReply(reply), groupReplyAuthor);
       const boxes = { ...(named.length ? { m: encryptText(key, mentionsAad(header), JSON.stringify(named)) } : {}),
-        ...(answers ? { r: encryptText(key, replyAad(header), JSON.stringify(answers)) } : {}) };
+        ...(answers ? { r: encryptText(key, replyAad(header), JSON.stringify(answers)) } : {}), ...(readForwarded(forwarded) ? { f: forwarded } : {}) };
       const frame: GroupMessageFrame = { t: "group-msg", ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)), ...boxes,
         xs: toBase64Url(sign(messageSignedWhole({ ...unsigned, ...boxes }), this.identity.seed)) };
       this.state.sent.push(frame);
       let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
       while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
       const id = groupMessageId(this.myKey, epoch, n);
-      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}) });
+      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(boxes.f ? { forwarded: boxes.f } : {}) });
       await this.persist();
       for (const key of this.others) this.hooks.send(key, frame);
       return { id };
@@ -610,7 +618,7 @@ export class GroupSession {
     if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
     if (this.isDuplicate(raw)) return;
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
-    if (relayed && (raw.m || raw.r) && !this.wholeSigned(raw)) { delete raw.m; delete raw.r; delete raw.xs; }
+    if (relayed && (raw.m || raw.r || raw.f !== undefined) && !this.wholeSigned(raw)) { delete raw.m; delete raw.r; delete raw.f; delete raw.xs; }
     const secret = this.secret(raw.e);
     if (!secret) { this.park(from, raw); return; }
     const key = epochKeys(secret, this.id, raw.e).message;
@@ -619,7 +627,8 @@ export class GroupSession {
     // Everyone is named only by the admin of the message's epoch; a box that does not open is no mentions, not no message.
     const mentions = this.openMentions(key, raw, text, rosterAdmin(commit.m) === raw.s);
     const reply = this.openReply(key, raw);
-    await this.hooks.message({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}) });
+    const forwarded = readForwarded(raw.f);
+    await this.hooks.message({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}) });
     this.markSeen(raw);
     this.keep(clean(raw));
     await this.persist();

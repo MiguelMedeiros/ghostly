@@ -65,6 +65,7 @@ ghostly typing alice --stop                        # or just send: the message e
 ghostly send alice --reply peer_jY7N… "Yes, that one"  # quotes a message of the chat (its id from history or an event)
 ghostly react alice peer_jY7N… 👍                   # one reaction per message: a new one replaces it
 ghostly react alice peer_jY7N… --remove            # takes it back
+ghostly forward alice peer_jY7N… --to bob --to crew  # a new message of yours in each (files from the bytes here); up to 5
 id=$(ghostly send alice "Working: 0 of 3" | jq -r .messageId)   # a status message…
 ghostly edit alice "$id" --text "Working: 2 of 3"  # …updated in place: the contact sees one message, marked edited
 echo "Done: 3 of 3" | ghostly edit alice "$id" --stdin
@@ -88,6 +89,8 @@ ghostly listen --type message.received            # one JSON object per line, un
 - Dedupe on `id`. Resume after a restart with `--since <seq>`, or pass `--cursor <file>` and it remembers.
 - A reply carries `message.replyTo`: `{id, snippet, from, found}` (`from`: me, peer or null). Answer in the same
   thread with `ghostly send <chat> --reply "$(jq -r .message.id <<<"$event")" "…"`.
+- A forwarded message carries `message.forwarded`, how many times it has been forwarded (5 or more: "many times").
+  Nothing says who wrote it first.
 - An edited message (the contact's or mine) comes as `message.edited`, once per edit, with `edits` (how many) and
   `message.text` as it is now (in a group: `group.message.edited`, with `group`); `chat history` shows the latest text with `edits` and `editedAt`.
 - Useful types: `message.received`, `message.delivery`, `chat.created`, `chat.joined` (a contact arrived: not a

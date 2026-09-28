@@ -4,11 +4,11 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.12 |
+| Revision | 0.13 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
-| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`), reactions (`react/1`) and edits (`edit/1`) on the live session; replies on texts and files. |
+| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`), reactions (`react/1`) and edits (`edit/1`) on the live session; replies on texts and files; forwarded texts and files with their hop count. |
 | Summary | The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT. |
 | Availability | Available |
 | Notes | Every new chat on web, desktop and extension, calls included while it is live. The typing indicator goes over the live session only, and each person can turn it off. |
@@ -70,6 +70,16 @@ A `paired-message` MAY carry `r`, the message it answers ([400](400-chat.md#repl
 ```
 
 The reader looks for `i` among this chat's own messages only; what it finds there gives the line and the author, and the wire's `s` and `f` are shown only when it finds nothing, marked as unchecked. A reply is a few hundred bytes at most and always goes: when the frame would pass 56 KiB, `pv` is left out, never `r`. Over the DHT only `i` travels ([403](403-dht-text.md#replies)); a held text carries `r` in its header ([4xx](4xx-store-and-forward.md#bundle)). A text sent again after a lost session goes with the same `r`. A file can answer a message too (revision 0.9): the same `r` rides on its announcement (`pf-offer` and `pf-start`, [501](501-paired-files.md)) or in a held file's `meta` ([4xx](4xx-store-and-forward.md#bundle)), and is read the same way. Older apps ignore the field.
+
+### Forwards
+
+A `paired-message` MAY carry `fw`, how many times it has been forwarded ([400](400-chat.md#forwards), revision 0.13): a whole number from 1 to 255. The message is a new one of the forwarder's, with its own `id`; nothing else says where it came from.
+
+```
+{ "t": "paired-message", "id", "ts", "m", "pv"?, "r"?, "fw"?: 1..255 }
+```
+
+A file forwarded carries the same `fw` on its announcement (`pf-offer`, `pf-start`, [501](501-paired-files.md)) and in a held item's `meta` ([4xx](4xx-store-and-forward.md#bundle)); a held text too. The reader drops a `fw` that is not such a number and keeps the message, which then reads as written there. It goes whole whatever else is left out: when the frame would pass 56 KiB, `pv` goes first. Over the DHT it is the fifteenth element ([403](403-dht-text.md#forwards)). A text sent again after a lost session keeps its `fw`. Older apps ignore the field.
 
 ### Liveness and reconnection
 
@@ -142,6 +152,7 @@ First contact runs on the DHT and on a stream in parallel, and native transports
 
 ## Revision log
 
+- 0.13 (2026-09-27): forwards: `fw`, the hop count of a forwarded text (and of a file's announcement), 1 to 255.
 - 0.12 (2026-09-27): `paired-bye`, the goodbye an app sends on its way out.
 - 0.11 (2026-09-27): what a typing `start` says: `kind` (typing, recording, thinking) and a bot's `status` line (40 characters, plain text); older apps show typing.
 - 0.10 (2026-09-27): edits, `edit/1` with `paired-edit` and `paired-edited` on the live session: the whole new text numbered per message, only the contact's own messages, a receive limit, an edit before its message waits a minute.

@@ -68,6 +68,7 @@ import { TransportLine } from "../components/TransportTimeline";
 import { mergeTimeline } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
 import { cardOn } from "../lib/chatPayments";
+import { useForwarding } from "../hooks/useForwarding";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -302,6 +303,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const onTyping = useTypingSender(paired ? chatLink?.id : undefined, visible);
   const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : [], paired ? chatLink?.identityTimeline ?? [] : []),
     [messages, paired, chatLink?.transportLog, chatLink?.identityTimeline]);
+  // Forward, and Select then Forward (WISP 400 § Forwards): texts and files, to other chats and groups.
+  const forwarding = useForwarding(chatLink?.id, messages);
   // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.
   const paymentsOn = walletState?.wallets?.length ? walletCards(walletState).some((c) => cardOn(chatPeer ?? undefined, c.rail, c.network)) : !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showHold, setShowHold] = useState(false);
@@ -680,6 +683,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               // The same: a compatibility chat has no room for a reaction.
               onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
               reactionName={reactionName}
+              {...forwarding.rowProps(row.message)}
             />
           ))}
         </div>
@@ -695,7 +699,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         </div>
       )}
 
-      {/* Input */}
+      {/* Input; while messages are chosen, what to do with them. */}
+      {forwarding.bar}
+      {forwarding.dialog}
+      <div className={forwarding.selecting ? "hidden" : "contents"}>
       <MessageInput draftId={sessionId}
         key={sessionId}
         // Said to the contact on the live session only; stops when the text goes, the chat is left or the page is hidden.
@@ -741,6 +748,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         // The apps this contact and you share, chosen per chat: always reachable here, even before anything is shared.
         services={composerServices(t, platform, params.peerPubKeyB64, shownName, () => setShowServices(true))}
       />
+      </div>
 
       {/* Incoming call notification */}
       {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}

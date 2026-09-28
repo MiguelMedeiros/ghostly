@@ -48,6 +48,21 @@
     }
   },
   "chat": {
+    "forward": {
+      "forward": "Forward",
+      "select": "Select",
+      "forwarded": "Forwarded",
+      "many": "Forwarded many times",
+      "title": "Forward to…",
+      "search": "Search chats",
+      "messages": "{{count}} messages",
+      "noMatch": "No chat by that name",
+      "noChats": "No chats yet",
+      "filesHint": "Groups take text only",
+      "pick": "Pick up to {{count}}",
+      "send": "Send",
+      "selected": "{{count}} selected"
+    },
     "typeMessage": "Type a message...",
     "send": "Send",
     "online": "online",

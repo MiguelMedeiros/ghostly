@@ -84,7 +84,7 @@ export function ReactAction({ onOpen, anchorRef, open }: { onOpen: () => void; a
  * choosing it again takes it back. `onDetails`: a Details button too (a long press opens the bar on phones, where it
  * used to open the details).
  */
-export function ReactionBar({ open, onClose, anchorRef, current, onReact, align, onDetails }: {
+export function ReactionBar({ open, onClose, anchorRef, current, onReact, align, onDetails, onSelect }: {
   open: boolean;
   onClose: () => void;
   anchorRef: RefObject<HTMLElement | null>;
@@ -93,6 +93,8 @@ export function ReactionBar({ open, onClose, anchorRef, current, onReact, align,
   onReact: (emoji: string) => void;
   align: "start" | "end";
   onDetails?: () => void;
+  /** A Select button under Details: starts choosing messages with this one (to forward several, WISP 400 § Forwards). */
+  onSelect?: () => void;
 }) {
   const { t } = useI18n();
   const [more, setMore] = useState(false);
@@ -130,6 +132,12 @@ export function ReactionBar({ open, onClose, anchorRef, current, onReact, align,
         <button type="button" data-testid="reaction-bar-details" onClick={() => { onClose(); onDetails(); }}
           className="mt-1 w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
           {t("chat.message.details")}
+        </button>
+      )}
+      {onSelect && (
+        <button type="button" data-testid="reaction-bar-select" onClick={() => { onClose(); onSelect(); }}
+          className="w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
+          {t("chat.forward.select")}
         </button>
       )}
     </Menu>

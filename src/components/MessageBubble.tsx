@@ -27,6 +27,7 @@ import { SmileIcon } from "./composer/icons";
 import { ReactAction, ReactionBar, ReactionChips } from "./chat/Reactions";
 import { myReaction, reactionChips } from "../lib/reactions";
 import { DeliveryStatus } from "./chat/DeliveryStatus";
+import { forwardedLabel } from "../lib/forward";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -52,6 +53,15 @@ interface MessageBubbleProps {
   reactionName?: (by: string) => string;
   /** Edits this message (WISP 400 § Edits): its ⋮ says Edit. Only a text of mine in a 1:1 chat. */
   onEdit?: () => void;
+  /** Forwards this message (WISP 400 § Forwards): its ⋮ says Forward. Left out for what cannot be forwarded. */
+  onForward?: () => void;
+  /** Starts choosing messages with this one chosen: its ⋮, and the bar a long press opens, say Select. */
+  onSelect?: () => void;
+  /**
+   * The chat is choosing messages: the row is a checkbox (`onToggle`, left out for one that cannot be chosen), and its
+   * menus, gestures and controls wait until the choice is over.
+   */
+  selection?: { selected: boolean; onToggle?: () => void };
 }
 
 /** How long a finger holds a message before its quick bar (or, where it takes no reaction, its details) opens. */
@@ -148,6 +158,36 @@ function ReplyGlyph() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100">
       <path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
     </svg>
+  );
+}
+
+function ForwardGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100">
+      <path d="m15 14 5-5-5-5" /><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" />
+    </svg>
+  );
+}
+
+function SelectGlyph() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" />
+    </svg>
+  );
+}
+
+/** "Forwarded" above a forwarded message (WISP 400 § Forwards), "Forwarded many times" past a few hops. Never from whom. */
+function ForwardedMark({ hops }: { hops?: number }) {
+  const { t } = useI18n();
+  const label = forwardedLabel(hops);
+  if (!label) return null;
+  return (
+    <div data-testid="message-forwarded" data-many={label === "chat.forward.many" || undefined}
+      className="flex items-center gap-1 text-[12px] leading-[18px] italic text-text-primary/65 mb-[2px] px-[3px]">
+      <ForwardGlyph size={13} />
+      <span>{t(label)}</span>
+    </div>
   );
 }
 
@@ -373,12 +413,29 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
 }
 
 /**
+ * Forward, in a message's ⋮: greyed with the reason while its file is still being prepared or arriving, or did not
+ * arrive; the file goes from the bytes on this device, so they must all be here.
+ */
+function ForwardItem({ file, sender, onForward }: { file?: ChatFile; sender: "me" | "peer"; onForward: () => void }) {
+  const { t } = useI18n();
+  const platform = useServicesPlatform();
+  const state = file ? downloadState(platform?.getTransfer(file.id) ?? null, sender) : "ready";
+  const reason = state === "preparing" ? t("chat.message.downloadPreparing") : state === "arriving" ? t("chat.message.downloadArriving")
+    : state === "failed" ? t("chat.message.downloadFailed") : undefined;
+  return (
+    <MenuItem testId="message-forward" onClick={onForward} disabled={!!reason} hint={reason} icon={<ForwardGlyph />}>
+      {t("chat.forward.forward")}
+    </MenuItem>
+  );
+}
+
+/**
  * What can be done to a message, behind its ⋮: answering it, sending it again or not at all, saving the file it carries,
  * its details, and forgetting it here.
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, align, download, onCancelSend, onRetry }: {
+function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
   onDelete?: () => void;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
@@ -387,7 +444,13 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, align, dow
   onEdit?: () => void;
   /** Opens the reactions' quick bar (WISP 400 § Reactions): after Reply. */
   onReact?: () => void;
+  /** Forwards it (WISP 400 § Forwards): after React. */
+  onForward?: () => void;
+  /** Starts choosing messages, with this one: after Forward. */
+  onSelect?: () => void;
   align: "left" | "right";
+  /** Whose message it is: a file of mine is here to forward, one of theirs once it arrived. */
+  sender?: "me" | "peer";
   /** A message carrying a file: the file, the name to save it under and who sent it (and, for a voice message, the MP3's name). */
   download?: { file: ChatFile; name: string; sender: "me" | "peer"; mp3Name?: string };
   /** Drops a message of mine that waits to be sent: in the place of Delete, which would say the contact keeps a copy. */
@@ -430,6 +493,10 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, align, dow
         </MenuItem>}
         {onReact && <MenuItem testId="message-react" onClick={() => { setOpen(false); onReact(); }} icon={<SmileIcon size={16} />}>
           {t("chat.reactions.react")}
+        </MenuItem>}
+        {onForward && <ForwardItem file={download?.file} sender={sender ?? "me"} onForward={() => { setOpen(false); onForward(); }} />}
+        {onSelect && <MenuItem testId="message-select-start" onClick={() => { setOpen(false); onSelect(); }} icon={<SelectGlyph />}>
+          {t("chat.forward.select")}
         </MenuItem>}
         {onRetry && <MenuItem testId="message-retry" onClick={() => { setOpen(false); onRetry(); }} icon={retryIcon}>
           {t("chat.message.retry")}
@@ -490,7 +557,11 @@ export function MessageBubble(props: MessageBubbleProps) {
   );
 }
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId, onReply, quote, onEdit, onReact, reactionName }: MessageBubbleProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, selection }: MessageBubbleProps) {
+  // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
+  const choosing = !!selection;
+  const onDelete = choosing ? undefined : deleteIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
+  const onReact = choosing ? undefined : reactIt, onForward = choosing ? undefined : forwardIt, onSelect = choosing ? undefined : selectIt;
   const { t } = useI18n();
   const chat = useCueChat();
   // Only what arrives while you watch moves; history is just there.
@@ -509,7 +580,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [bar, setBar] = useState<"button" | "press" | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const reactRef = useRef<HTMLSpanElement>(null);
-  const press = useLongPress(onReact ? () => setBar("press") : openDetails);
+  const press = useLongPress(onReact ? () => setBar("press") : onSelect ?? openDetails);
   const chips = useMemo(() => reactionChips(message.reactions, by => reactionName?.(by) ?? by.slice(0, 8), t("chat.reply.you")), [message.reactions, reactionName, t]);
   const swipe = useSwipeReply(onReply);
   const [imgError, setImgError] = useState(false);
@@ -551,11 +622,23 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
       picture={contentType === "image"} onClose={() => setDetails(false)} returnFocus={rowRef.current} />
   );
-  const rowProps = {
+  const rowProps = choosing ? {
+    ref: rowRef, "data-message-id": message.id, "data-selected": selection.selected || undefined,
+    // A click anywhere on the row (a player's button included) chooses it or not; nothing inside it runs.
+    onClickCapture: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); selection.onToggle?.(); },
+  } : {
     ref: rowRef, onDoubleClick: openDetails, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
     // The second click of a double click would select a word of the message under the details.
     onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
   };
+  const selectBox = selection && (
+    <span role="checkbox" aria-checked={selection.selected} aria-disabled={!selection.onToggle || undefined} aria-label={t("chat.forward.select")}
+      data-testid="message-select" tabIndex={selection.onToggle ? 0 : -1}
+      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); selection.onToggle?.(); } }}
+      className={`self-center shrink-0 w-5 h-5 me-2 rounded-full border-2 flex items-center justify-center ${selection.onToggle ? "cursor-pointer" : "invisible"} ${selection.selected ? "bg-accent border-accent text-on-accent" : "border-text-muted"}`}>
+      {selection.selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>}
+    </span>
+  );
 
   if (isSystem && message.systemEvent?.type === "join") {
     const pubKeyShort = message.systemEvent.pubKey
@@ -585,7 +668,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </span>
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>
-        <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />
+        {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
         {detailsPanel}
       </div>
     );
@@ -611,7 +694,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           )}
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>
-        <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />
+        {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
         {detailsPanel}
       </div>
     );
@@ -634,8 +717,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {...rowProps}
       data-message-row
       data-sender={isMe ? "me" : "peer"}
-      className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${onReply ? "touch-pan-y" : ""} ${swipe.dx > 0 ? "overflow-x-clip" : ""} ${enter}`}
+      className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${onReply ? "touch-pan-y" : ""} ${swipe.dx > 0 ? "overflow-x-clip" : ""} ${choosing ? `cursor-pointer ${selection.selected ? "bg-accent/10" : ""}` : ""} ${enter}`}
     >
+      {selectBox}
+      {/* The checkbox at the start, the message at its side of the line. */}
+      {choosing && isMe && <span className="flex-1" aria-hidden="true" />}
       {swipe.dx > 0 && (
         // What letting go does, uncovered as the message moves.
         <span data-testid="swipe-reply-hint" aria-hidden="true" className="self-center shrink-0 text-text-muted" style={{ opacity: Math.min(1, swipe.dx / SWIPE_REPLY_PX) }}>
@@ -644,7 +730,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} align="left" download={download} {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* The bubble, and its reactions under it. */}
       <div className={`flex flex-col min-w-0 max-w-[85%] ${isMe ? "items-end" : "items-start"}`}>
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
@@ -678,6 +764,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         )}
 
+        <ForwardedMark hops={message.forwarded} />
         {quote && <ReplyQuote quote={quote} />}
 
         {message.paymentId ? (
@@ -755,11 +842,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       </div>
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
-      {!isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} align="right" download={download} />}
+      {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
       {!isMe && onReply && <ReplyAction onReply={onReply} />}
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
-        align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} />}
+        align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined} />}
       {detailsPanel}
     </div>
   );

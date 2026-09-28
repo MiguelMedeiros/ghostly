@@ -160,7 +160,12 @@ export interface EngineApi {
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
-  sendFile(params: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string }): Promise<void>;
+  sendFile(params: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string; forwarded?: number }): Promise<void>;
+  /**
+   * Forwards messages of a chat (or `group:<id>`) to up to 5 chats and groups (WISP 400 § Forwards): new messages of
+   * mine with a hop count, files from the bytes here. Each target says which messages it got and its first problem.
+   */
+  forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): { results: { to: string; messageIds: string[]; error: string | null }[] };
   /** files/3: answers an offer (`accept`, `decline`), or pauses, resumes or cancels a transfer, either way. */
   fileAction(params: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void;
   setDeliveryMode(params: { linkId: string; mode: DeliveryMode }): void;
