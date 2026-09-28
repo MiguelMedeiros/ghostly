@@ -153,17 +153,22 @@ pub fn serve(
 /// A provider's sign-in page: https, no credentials, and naming where it returns (`redirect_uri`), or,
 /// for AT Protocol's pushed authorization requests, the request the server holds (`request_uri`).
 fn is_allowed_authorize_url(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else {
-        return false;
-    };
+    authorize_url(url).is_some()
+}
+
+/// The sign-in page as it was checked: the parser drops spaces and control characters the text may carry, so the
+/// browser is handed its normalized form, never the text as given.
+fn authorize_url(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
     let loopback = matches!(parsed.host_str(), Some("127.0.0.1") | Some("localhost"));
-    parsed.username().is_empty()
+    let allowed = parsed.username().is_empty()
         && parsed.password().is_none()
         && parsed
             .query_pairs()
             .any(|(k, _)| k == "redirect_uri" || k == "request_uri")
         && (parsed.scheme() == "https"
-            || (cfg!(debug_assertions) && parsed.scheme() == "http" && loopback))
+            || (cfg!(debug_assertions) && parsed.scheme() == "http" && loopback));
+    allowed.then(|| parsed.to_string())
 }
 
 fn open_in_browser(url: &str) -> Result<(), String> {
@@ -210,9 +215,9 @@ pub async fn oidc_loopback_wait(
     url: String,
     expected_state: String,
 ) -> Result<String, String> {
-    if !is_allowed_authorize_url(&url) {
+    let Some(url) = authorize_url(&url) else {
         return Err("Not a sign-in address".into());
-    }
+    };
     // OpenID Connect states are 43+ characters; AT Protocol's OAuth client makes 22 (128 bits).
     if expected_state.len() < 22 || expected_state.len() > 64 {
         return Err("Invalid sign-in state".into());
@@ -363,6 +368,11 @@ mod tests {
         assert!(!is_allowed_authorize_url(
             "javascript:alert(1)//?redirect_uri=b"
         ));
+        // The browser gets the address as checked, without the spaces and control characters the parser dropped.
+        assert_eq!(
+            authorize_url(" \u{1}https://accounts.example/au\tth?redirect_uri=b\n").as_deref(),
+            Some("https://accounts.example/auth?redirect_uri=b")
+        );
     }
 }
 
