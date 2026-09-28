@@ -163,6 +163,8 @@ export class LinkSession {
   private readonly startedAt = Date.now();
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
+  /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
+  private expectUntil = 0;
   private watchUntil = 0;
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
@@ -267,9 +269,13 @@ export class LinkSession {
     if (fast) this.pollNow();
   }
 
-  /** The peer, or its offer, is due any moment: poll fast for `EXPECT_PEER_MS` (never cutting a longer fast window short). */
+  /**
+   * The peer, or its offer, is due any moment: poll fast for `EXPECT_PEER_MS` (never cutting a longer fast window short),
+   * then slow down step by step (`nextInterval`) rather than at once.
+   */
   expectPeer(): void {
     const until = Date.now() + EXPECT_PEER_MS;
+    this.expectUntil = Math.max(this.expectUntil, until);
     if (until <= this.fastPollUntil) return;
     this.fastPollUntil = until;
     this.pollNow();
@@ -364,8 +370,19 @@ export class LinkSession {
     void this.poll();
   }
 
+  /**
+   * The next poll's wait. After a window that looked fast for the peer (`expectPeer`), the wait grows with the time
+   * since the window ended (twice the fast pace at first, then 6, 12, 24 s… on the relays) up to the pace's own. A
+   * peer's offer held back by its relays' budget lands whenever that frees a request: it used to land seconds after
+   * the window, and wait out a whole background poll (30 s) there (2026-09-27). About three more reads a window that
+   * ends with no offer.
+   */
   private nextInterval(): number {
-    return this.intervals[this.pace()];
+    const pace = this.pace();
+    const interval = this.intervals[pace];
+    const since = Date.now() - this.expectUntil;
+    if (pace === "fast" || pace === "connected" || since < 0) return interval;
+    return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
 
   /** How urgently this link looks right now. */

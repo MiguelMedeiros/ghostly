@@ -4,8 +4,10 @@ import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type Rela
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; write: boolean }
-const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, write });
+interface Asker { background: boolean; group: boolean; urgent: boolean; write: boolean }
+const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, write });
+/** A 1:1 chat's request: neither a group's nor a background one. */
+const isChat = (who: Asker): boolean => !who.background && !who.group;
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
 
@@ -50,13 +52,28 @@ export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
  */
 export const WRITE_FIRST_MS = 5_000;
 /**
- * Once the budget refused a 1:1 chat's request on a relay (its signaling or delivery, neither `background` nor
- * `group`), group requests leave it the last this many of each minute there, for a minute. Groups that spend the whole
- * budget spend it over the minute, so the chat then takes the next request that frees, within seconds, and has room
- * for what follows (the receipt). Until a chat is refused, groups have the whole budget: a community door alone costs
- * about 22 requests a minute, and a reserve kept for a chat with nothing to send starved a new group's edges.
+ * Once a 1:1 chat needs the relays (the budget refused one of its requests there, or it read urgently anywhere: it polls
+ * fast for a signal due any moment), group requests leave it the last this many of each minute, for a minute. Groups
+ * that spend the whole budget spend it over the minute, so the chat then takes the next request that frees, within
+ * seconds, and has room for what follows (the receipt). Waiting for a refusal was too late when a contact went away
+ * from a chat and from groups at once: the chat and the groups' edges all watched fast for it, the edges spent both
+ * relays' minute in 40 s, and the chat read the contact's offer half a minute late (2026-09-27). A chat with nothing
+ * to wait for leaves groups the whole budget: a community door alone costs about 22 requests a minute, and a reserve
+ * kept for any chat starved a new group's edges.
  */
 export const CHAT_RESERVE = 10;
+/**
+ * While a link polls fast (an `urgent` read: its peer, or the peer's offer or answer, is due any moment) within this
+ * long, background requests (a community's periodic looks) are held to `BACKGROUND_WHILE_SIGNALING` a minute on each
+ * relay rather than their usual share. A fast poll reads every 2 s, one relay after the other.
+ */
+export const SIGNALING_WINDOW_MS = 10_000;
+/**
+ * Background requests a minute on each relay while a link signals: one look every 12 s. Next to a community's
+ * lookups (20 a minute), a new group edge on one relay got 10 and read every 6 s, and its offer and answer missed each
+ * other's fast windows (2026-09-27). Not none: fast windows can follow one another, and a hub still reads its knocks.
+ */
+export const BACKGROUND_WHILE_SIGNALING = 5;
 /** A relay that fails at the network level is left alone for this long. */
 const NETWORK_ERROR_COOLDOWN_MS = 20_000;
 /**
@@ -106,10 +123,15 @@ export class RelayTransport implements PkarrTransport {
   private readonly writeWaiting = new Map<string, number>();
   /** When the budget last refused a 1:1 chat's request on each relay: for the next minute, groups leave it `CHAT_RESERVE`. */
   private readonly chatRefused = new Map<string, number>();
+  /** When a 1:1 chat last read urgently (on any relay): for the next minute, groups leave it `CHAT_RESERVE` on every relay. */
+  private chatUrgentAt = -Infinity;
+  /** When a link (a chat's or a group's) last asked urgently: background requests yield for `SIGNALING_WINDOW_MS`. */
+  private urgentAt = -Infinity;
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
   private readonly lastPut = new Map<string, bigint>();
   private readonly perMinute: number;
   private readonly backgroundPerMinute: number;
+  private readonly backgroundWhileSignaling: number;
   private readonly breaker: RelayBreaker;
   /** The relay the last read was answered by. */
   private lastRelay: string | null = null;
@@ -122,6 +144,7 @@ export class RelayTransport implements PkarrTransport {
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
     this.perMinute = options.requestsPerMinute ?? REQUESTS_PER_MINUTE;
     this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
+    this.backgroundWhileSignaling = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_WHILE_SIGNALING : Math.ceil(this.perMinute / 6);
     const log = options.log ?? ((line: string) => console.info(`[ghostly:relay] ${line}`));
     this.breaker = new RelayBreaker({
       ...options.breaker,
@@ -375,8 +398,13 @@ export class RelayTransport implements PkarrTransport {
   private take(relay: string, who: Asker): boolean {
     const now = Date.now();
     const writer = firstWriter(who);
+    // Asked, whether or not it gets a request now: the link is signaling, and a chat's needs its reserve from now on.
+    if (who.urgent && !who.background) {
+      this.urgentAt = now;
+      if (isChat(who)) this.chatUrgentAt = now;
+    }
     if (this.heldFor(relay, who, now) > 0) {
-      if (!who.background && !who.group) this.chatRefused.set(relay, now);
+      if (isChat(who)) this.chatRefused.set(relay, now);
       if (writer) this.writeWaiting.set(`${writer} ${relay}`, now);
       return false;
     }
@@ -391,7 +419,7 @@ export class RelayTransport implements PkarrTransport {
    * a limit ages out, a chat's reserve lapses, or a waiting write has had its turn. Keeps the lists to the minute, oldest first.
    *
    * Who goes first: a chat's refused write holds back everything but chat writes; a group's refused write holds back
-   * group reads and background requests, never a chat's.
+   * group reads and background requests, never a chat's. Background requests yield to a link that signals.
    */
   private heldFor(relay: string, who: Asker, now = Date.now()): number {
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
@@ -402,9 +430,14 @@ export class RelayTransport implements PkarrTransport {
     const over = (list: number[], limit: number) => (list.length >= limit ? list[list.length - limit] + 60_000 - now : 0);
     const limit = this.limitOf(relay);
     let wait = over(recent, limit);
-    if (who.background) wait = Math.max(wait, over(recentBackground, this.backgroundPerMinute));
+    if (who.background) {
+      wait = Math.max(wait, over(recentBackground, this.backgroundPerMinute));
+      // A link signaling: background takes a smaller share until it stops, or until enough of its own age out.
+      const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
+      if (signaling > 0) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
+    }
     if (who.group) {
-      const reserved = (this.chatRefused.get(relay) ?? -Infinity) + 60_000 - now;
+      const reserved = Math.max(this.chatRefused.get(relay) ?? -Infinity, this.chatUrgentAt) + 60_000 - now;
       if (reserved > 0) wait = Math.max(wait, Math.min(reserved, over(recent, limit - this.reserveOf(relay))));
     }
     const writer = firstWriter(who);
