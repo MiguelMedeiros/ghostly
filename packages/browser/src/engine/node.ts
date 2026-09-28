@@ -3832,11 +3832,17 @@ export class GhostlyNode implements EngineImplementation {
           onPaymentAsk: (ask: PaymentAsk) => this.desk.onPaymentAsk(linkId, ask),
           onPayment: (payment: Payment) => this.desk.onPayment(linkId, payment),
           onPaymentResult: (result: PaymentResult) => this.desk.onPaymentResult(linkId, result),
+          // The member says its name on every session over the edge, and an empty one when it removed it.
+          onPeerNick: (nick: string | null) => this.groups.edgeNick(group, peer, nick ?? undefined),
         }),
         onPresence: presence => {
           if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
           if (presence.lastPacketAt !== live.presence.lastPacketAt) traceJoin(group, "link.packet", { role, packetAt: presence.lastPacketAt });
-          live.presence = presence; if (!entry) this.groups.edgeNick(group, peer, presence.nick); this.emitState(); },
+          live.presence = presence;
+          // An open edge's name comes from `onPeerNick`. A closed one keeps the last name: an edge going down says no
+          // name, and taking that would drop the member's name and set it again on every drop and reopen.
+          if (!entry && presence.nick && !live.link?.isDataLinkOpen) this.groups.edgeNick(group, peer, presence.nick);
+          this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
