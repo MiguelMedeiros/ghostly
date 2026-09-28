@@ -173,7 +173,8 @@ export function GroupChat() {
     const show = (list: StoredMessage[]) => { if (current) setLoaded({ groupId, list }); };
     void engine.call("groupMessages", { groupId }).then(show).catch(() => {});
     const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
-    return () => { current = false; off(); };
+    // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
+    return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
   const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
