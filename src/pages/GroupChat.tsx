@@ -24,6 +24,7 @@ import { useContactFaces, withContactFaces } from "../components/identities/cont
 import type { ChatMessage } from "../lib/types";
 import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
+import { AvatarViewer } from "../components/AvatarViewer";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
@@ -125,6 +126,9 @@ export function GroupChat() {
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
   const quoteIndex = useMemo(() => replyIndex(messages, true), [messages]);
   const [showMembers, setShowMembers] = useState(false);
+  /** The group's picture, large (AvatarViewer.tsx), and the header's avatar that opened it. */
+  const [viewingPicture, setViewingPicture] = useState(false);
+  const avatarButton = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
@@ -227,7 +231,10 @@ export function GroupChat() {
           <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title="Back" data-testid="chat-back">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
-          <button onClick={() => setShowMembers(true)} className="relative rounded-full shrink-0" title="Members" aria-label="Members">
+          {/* With a picture, the avatar opens it large; without one, the members, as the line under the name does. */}
+          <button ref={avatarButton} onClick={() => (group.picture ? setViewingPicture(true) : setShowMembers(true))} data-testid="group-avatar-open"
+            className={`relative rounded-full shrink-0 ${group.picture ? "cursor-zoom-in" : ""}`}
+            {...(group.picture ? { "aria-label": t("common.viewPhoto", { name: group.name || "A group" }) } : { title: "Members", "aria-label": "Members" })}>
             <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           </button>
           <div className="min-w-0">
@@ -328,6 +335,7 @@ export function GroupChat() {
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}
 
       {showMembers && <GroupMembersDialog group={group} onClose={() => setShowMembers(false)} />}
+      {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || "A group"} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); setConfirmLeave(false); nav.home(); }} />}

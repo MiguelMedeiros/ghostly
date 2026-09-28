@@ -1,6 +1,7 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import { usePeerNick, useShareProfile } from "../hooks/useAvatars";
+import { usePeerAvatar, usePeerNick, useShareProfile } from "../hooks/useAvatars";
 import { PeerAvatar } from "../components/Avatar";
+import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
@@ -312,6 +313,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const profileNick = usePeerNick(params?.peerPubKeyB64);
   // The identity the contact is shown as, when one was chosen and its proof still stands (identities/contactFace.ts).
   const face = useContactFace(params?.peerPubKeyB64);
+  const peerAvatar = usePeerAvatar(params?.peerPubKeyB64);
   useChosenProfile(params?.peerPubKeyB64);
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState("");
@@ -502,7 +504,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <path d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
+          {/* With a picture, a click opens it large (AvatarViewer.tsx). */}
+          <AvatarOpener src={face?.photo ?? peerAvatar} name={shownName} testId="chat-avatar-open"
+            className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
             <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" />
             {face && <FaceCorner face={face} />}
             {inviteCode && !pairedReady && (
@@ -515,7 +519,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 </span>
               </span>
             )}
-          </div>
+          </AvatarOpener>
           <div className="min-w-0">
             {isEditingLabel ? (
               <input

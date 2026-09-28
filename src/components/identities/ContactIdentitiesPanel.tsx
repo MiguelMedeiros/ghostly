@@ -13,6 +13,10 @@ import { useCopyKey } from "../../hooks/useCopyKey";
 import { hasIdentityActivity } from "./activityNetworks";
 import { contactBadges } from "./contactBadges";
 import { ContactFacePicker } from "./ContactFacePicker";
+import { useContactFace } from "./contactFace";
+import { PeerAvatar } from "../Avatar";
+import { AvatarOpener } from "../AvatarViewer";
+import { usePeerAvatar } from "../../hooks/useAvatars";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
 import { IdentityActivity } from "./IdentityActivity";
 import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, type IdCardContent } from "./idCard";
@@ -45,6 +49,8 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   const ref = useRef<HTMLElement>(null);
   const titleId = useId();
   useDialogFocus(ref, onClose);
+  const face = useContactFace(peerKey), sent = usePeerAvatar(peerKey);
+  const photo = face?.photo ?? sent;
   const now = Math.floor(Date.now() / 1000);
   // Every identity with a mark, in the header's order (contactBadges.ts), then the ones no longer shared.
   const received = link?.identities?.received ?? [];
@@ -59,9 +65,16 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
     <div className="contact-panel-backdrop" aria-hidden="true" onClick={onClose} />
     <aside ref={ref} tabIndex={-1} role="dialog" aria-labelledby={titleId} data-testid="chat-identities" className="contact-panel focus:outline-none">
       <div className="contact-panel-head">
-        <div className="min-w-0">
-          <h2 id={titleId} className="contact-panel-title">Identities with {name}</h2>
-          <p className="contact-panel-lead">Shared in this chat only. Not proof of who they are.</p>
+        <div className="flex min-w-0 items-start gap-3">
+          {/* Their picture as the chat shows it; with one, a click opens it large (AvatarViewer.tsx). */}
+          <AvatarOpener src={photo} name={name} testId="chat-identities-avatar"
+            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-hover text-lg">
+            <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} />
+          </AvatarOpener>
+          <div className="min-w-0">
+            <h2 id={titleId} className="contact-panel-title">Identities with {name}</h2>
+            <p className="contact-panel-lead">Shared in this chat only. Not proof of who they are.</p>
+          </div>
         </div>
         <button type="button" aria-label="Close" data-testid="chat-identities-close" onClick={onClose} className="contact-panel-close">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
