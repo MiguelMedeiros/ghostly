@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { jumpTo } from "@/components/site/GhostSwarm";
+import { jumpTo } from "@/components/site/Boo";
 import "@/app/rail.css";
 
 export type RailMark = { id: string; label: string };
