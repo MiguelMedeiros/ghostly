@@ -118,7 +118,7 @@ export function CliPage() {
             </Link>
           </li>
           <li>
-            <Link className="link-arrow" href="/developers/wisps/11xx-headless">
+            <Link className="link-arrow" href="/wisps/11xx-headless">
               {t.links.wisp} →
             </Link>
           </li>

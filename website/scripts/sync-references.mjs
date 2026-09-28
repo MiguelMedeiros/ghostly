@@ -72,17 +72,19 @@ const legacyFiles = new Set(numbering.filter((entry) => entry.oldFile !== entry.
 mkdirSync(destination, { recursive: true });
 // Working notes between agents (local paths, internal state) live next to the WISPs but are not published.
 const internal = (name) => /^(HANDOFF|QA)-CLAUDE/.test(name);
+// README.md is the index on GitHub. On the site the index is /wisps, so the README is not a page of its own
+// (lib/references.ts sends links to it there).
 const paths = readdirSync(source)
-  .filter((name) => name.endsWith(".md") && !legacyFiles.has(name) && !internal(name))
+  .filter((name) => name.endsWith(".md") && name !== "README.md" && !legacyFiles.has(name) && !internal(name))
   .map((name) => `docs/wisps/${name}`);
 paths.push(
   "docs/PROTOCOL.md",
   "docs/SDK.md",
   "docs/USDT-INTEGRATION.md",
   "docs/DHT-DELIVERY.md",
-  "CONTRIBUTING.md",
-  "SECURITY.md",
 );
+// SECURITY.md and CONTRIBUTING.md stay on GitHub only: the footer links there, and their old reader
+// addresses redirect there (next.config.ts).
 // Plain text of a Markdown fragment: links keep their label, code keeps its text.
 const plain = (text) =>
   text

@@ -467,7 +467,7 @@ body {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  min-width: 250px;
+  min-width: 290px;
   display: grid;
   gap: 2px;
   padding: 6px;

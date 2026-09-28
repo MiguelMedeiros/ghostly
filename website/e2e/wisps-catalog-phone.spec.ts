@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 /** The WISPs page on a phone: the layers fit the screen, with no sideways scroll. */
 test("the WISPs page fits a phone", async ({ page }) => {
-  await page.goto("/developers/wisps");
+  await page.goto("/wisps");
   const width = await page.evaluate(() => document.documentElement.clientWidth);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   for (const group of ["meet", "identity", "headless"]) {

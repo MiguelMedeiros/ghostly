@@ -216,17 +216,17 @@ export const developers = {
         title: "Understand the core",
         body: "Signed Pkarr records: at most 1000 bytes, a 300-second TTL.",
         links: [
-          { label: "WISP 01 · Ghost Core", href: "/developers/wisps/01-ghost-core" },
-          { label: "The Ghost Protocol", href: "/developers/wisps/protocol" },
+          { label: "WISP 01 · Ghost Core", href: "/wisps/01-ghost-core" },
+          { label: "The Ghost Protocol", href: "/wisps/protocol" },
         ],
       },
       {
         title: "Read a contract",
         body: "Pick one family: chat, files or payments.",
         links: [
-          { label: "WISP 400 · Chat", href: "/developers/wisps/400-chat" },
-          { label: "WISP 500 · Files", href: "/developers/wisps/500-files" },
-          { label: "WISP 200 · Payments", href: "/developers/wisps/200-payments" },
+          { label: "WISP 400 · Chat", href: "/wisps/400-chat" },
+          { label: "WISP 500 · Files", href: "/wisps/500-files" },
+          { label: "WISP 200 · Payments", href: "/wisps/200-payments" },
         ],
       },
       {
@@ -244,7 +244,7 @@ export const developers = {
         links: [
           { label: "CLI guide", href: "/cli" },
           { label: "AI agents", href: "/developers/agents" },
-          { label: "WISP 11xx · Headless", href: "/developers/wisps/11xx-headless" },
+          { label: "WISP 11xx · Headless", href: "/wisps/11xx-headless" },
           { label: "packages/cli", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/cli" },
         ],
       },

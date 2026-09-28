@@ -6,7 +6,7 @@ export const catalog = {
   },
   eyebrow: "WISPs",
   title: "Every contract, in one place.",
-  lead: "Open contracts any app can implement. These work in Ghostly today; tap one to read it.",
+  lead: "WISPs (Wire Interoperability Specification Proposals) are Ghostly's open specs, and little ghosts. Like BIPs for Bitcoin, each one is a contract any app can implement. These work in Ghostly today.",
   next: "What comes next is on the",
   roadmap: "roadmap",
   kinds: { Contract: "Contract", Adapter: "Adapter", Profile: "Profile", Process: "Process" } as Record<string, string>,

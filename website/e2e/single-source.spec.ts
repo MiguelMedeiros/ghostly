@@ -13,15 +13,15 @@ test("each WISP's page shows its own summary and notes", async ({ page }) => {
   for (const file of ["202-arkade.md", "3xx-domain.md", "303-keet.md", "11xx-headless.md"]) {
     const summary = row(file, "Summary");
     expect(summary, file).toBeTruthy();
-    await page.goto(`/developers/wisps/${file.replace(/\.md$/, "")}`);
+    await page.goto(`/wisps/${file.replace(/\.md$/, "")}`);
     await expect(page.getByText(summary!, { exact: true }).first()).toBeAttached();
   }
-  await page.goto("/developers/wisps/202-arkade");
+  await page.goto("/wisps/202-arkade");
   await expect(page.getByText(row("202-arkade.md", "Notes")!, { exact: true }).first()).toBeAttached();
 });
 
 test("the reader shows the WISP with its summary", async ({ page }) => {
-  await page.goto("/developers/wisps/202-arkade");
+  await page.goto("/wisps/202-arkade");
   await expect(page.getByRole("heading", { level: 1 }).first()).toContainText("Ark");
   await expect(page.getByText(row("202-arkade.md", "Summary")!, { exact: true }).first()).toBeAttached();
 });

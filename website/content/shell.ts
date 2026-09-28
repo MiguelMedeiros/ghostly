@@ -2,13 +2,16 @@ import type { Level } from "@/lib/status";
 
 export const APP_URL = "https://app.ghostly.tools";
 export const REPO_URL = "https://github.com/MiguelMedeiros/ghostly";
+/** The security policy and the contributing guide live on GitHub only, on the released branch. */
+export const SECURITY_URL = `${REPO_URL}/blob/main/SECURITY.md`;
+export const CONTRIBUTING_URL = `${REPO_URL}/blob/main/CONTRIBUTING.md`;
 
 export const shell = {
     skip: "Skip to content",
     nav: {
       story: "How it works",
       developers: "Developers",
-      wisps: "WISPs",
+      wisps: "Protocol",
       roadmap: "Roadmap",
       cli: "CLI",
       agents: "AI agents",
@@ -28,7 +31,7 @@ export const shell = {
         download: "Download",
         privacy: "Privacy",
         overview: "Build with Ghostly",
-        catalog: "WISPs",
+        catalog: "Protocol",
         cli: "CLI",
         roadmap: "Roadmap",
         github: "GitHub",

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Ghost, GhostMark } from "@/components/ghost/Ghost";
 import { Brand } from "./Brand";
 import { RELEASES_URL } from "@/lib/release";
-import { shell, APP_URL, REPO_URL } from "@/content/shell";
+import { shell, APP_URL, CONTRIBUTING_URL, REPO_URL, SECURITY_URL } from "@/content/shell";
 import { Particles } from "./Particles";
 
 export function SiteFooter() {
@@ -20,7 +20,7 @@ export function SiteFooter() {
       title: t.developers,
       links: [
         { label: t.links.overview, href: "/developers" },
-        { label: t.links.catalog, href: "/developers/wisps" },
+        { label: t.links.catalog, href: "/wisps" },
         { label: t.links.cli, href: "/cli" },
         { label: t.links.roadmap, href: "/roadmap" },
       ],
@@ -30,8 +30,8 @@ export function SiteFooter() {
       links: [
         { label: t.links.github, href: REPO_URL },
         { label: t.links.releases, href: RELEASES_URL },
-        { label: t.links.security, href: "/developers/wisps/security" },
-        { label: t.links.contributing, href: "/developers/wisps/contributing" },
+        { label: t.links.security, href: SECURITY_URL },
+        { label: t.links.contributing, href: CONTRIBUTING_URL },
       ],
     },
   ];

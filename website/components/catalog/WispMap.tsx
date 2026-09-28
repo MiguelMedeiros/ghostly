@@ -89,7 +89,7 @@ export function WispMap({ t }: { t: CatalogCopy }) {
                               <span key={old} id={`wisp-${old}`} className="wmap-anchor" />
                             ))}
                             <Link
-                              href={`/developers/wisps/${w.slug}`}
+                              href={`/wisps/${w.slug}`}
                               className="wmap-tile"
                               data-level={w.level ?? "none"}
                               data-kind={w.kind}

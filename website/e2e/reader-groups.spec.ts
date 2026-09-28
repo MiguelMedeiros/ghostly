@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
  * the page but out of the tab order, and the whole thing works from the keyboard and at phone width.
  */
 
-const DRAFT = "/developers/wisps/203-lightning";
+const DRAFT = "/wisps/203-lightning";
 
 const group = (page: Page, id: string) => page.locator(`.reader-all-group[data-group="${id}"]`);
 const head = (page: Page, id: string) => group(page, id).locator(".reader-group-head");

@@ -110,7 +110,7 @@ export function WispNav({ groups, current, t }: { groups: WispNavGroup[]; curren
                 <ul>
                   {g.items.map((x) => (
                     <li key={x.id} data-child={x.child} data-assigned={x.assigned}>
-                      <Link href={`/developers/wisps/${x.slug}`} aria-current={x.slug === current ? "page" : undefined}>
+                      <Link href={`/wisps/${x.slug}`} aria-current={x.slug === current ? "page" : undefined}>
                         <span className="mono">{x.number}</span>
                         {x.name}
                       </Link>

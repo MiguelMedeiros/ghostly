@@ -137,7 +137,7 @@ test("play all goes through the steps and stops at the end", async ({
 const sample = {
   title: "Rank the transports",
   wire: "3 + 1 = 4, direct: goes first",
-  wisp: "/developers/wisps/100-transports",
+  wisp: "/wisps/100-transports",
 };
 
 test.describe(() => {
@@ -159,7 +159,7 @@ test.describe(() => {
       for (const href of await links.evaluateAll((els) =>
         els.map((e) => e.getAttribute("href") ?? ""),
       )) {
-        expect(href).toMatch(/^\/developers\/wisps\/[\w-]+$/);
+        expect(href).toMatch(/^\/wisps\/[\w-]+$/);
       }
       if (STEP_IDS[i] === "transport") {
         await expect(card.locator(".psx-title")).toHaveText(sample.title);

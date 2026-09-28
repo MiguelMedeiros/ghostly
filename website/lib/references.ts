@@ -20,7 +20,7 @@ export const references = index as Reference[];
 
 export const referencePath = (file: string) => {
   const canonical = numbering.find((entry) => entry.oldFile === file)?.file ?? file;
-  return `/developers/wisps/${canonical.replace(/\.md$/, "").toLowerCase()}`;
+  return `/wisps/${canonical.replace(/\.md$/, "").toLowerCase()}`;
 };
 
 export function findReference(slug: string): Reference | undefined {
@@ -41,6 +41,8 @@ export function resolveReferenceUrl(url: string, sourcePath: string): string {
     else if (segment && segment !== ".") parts.push(segment);
   }
   const normalized = parts.join("/");
+  // The WISP index on GitHub is the WISPs page on the site.
+  if (normalized === "docs/wisps/README.md") return "/wisps";
   const found = references.find((ref) => ref.sourcePath === normalized || ref.aliases.some((slug) => `docs/wisps/${slug}.md` === normalized));
   return found
     ? referencePath(found.file) + hash

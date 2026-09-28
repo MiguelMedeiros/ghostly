@@ -14,7 +14,7 @@
 
 ## Purpose
 
-Separate Ghost, the small rendezvous primitive, from Ghostly, its reference application, and make independently implementable extensions reviewable. WISP is the working document name; this draft does not decide its expanded acronym.
+Separate Ghost, the small rendezvous primitive, from Ghostly, its reference application, and make independently implementable extensions reviewable. WISP stands for Wire Interoperability Specification Proposal (and a wisp is a little ghost).
 
 ## Process
 

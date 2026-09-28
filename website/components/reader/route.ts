@@ -10,7 +10,7 @@ export function readerMetadata(slug: string): Metadata {
   const ref = findReference(slug);
   if (!ref) return { title: "Not found" };
   const w = findWisp(ref.slug);
-  const path = `/developers/wisps/${ref.slug}`;
+  const path = `/wisps/${ref.slug}`;
   return {
     title: w ? `WISP ${w.number} · ${w.name}` : ref.title,
     description: w?.benefit ?? ref.summary ?? `Ghostly reference: ${ref.title}`,

@@ -97,7 +97,7 @@ export function Nav() {
   const links = [
     { href: "/#story", label: t.story, match: null },
     { href: "/developers", label: t.developers, match: /^\/developers$/ },
-    { href: "/developers/wisps", label: t.wisps, match: /^\/developers\/wisps/ },
+    { href: "/wisps", label: t.wisps, match: /^\/wisps/ },
     { href: "/roadmap", label: t.roadmap, match: /^\/roadmap/ },
     { href: "/cli", label: t.cli, match: /^\/cli/ },
     { href: "/developers/agents", label: t.agents, match: /^\/developers\/agents/ },

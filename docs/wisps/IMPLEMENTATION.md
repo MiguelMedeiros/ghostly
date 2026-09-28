@@ -21,7 +21,7 @@ Start at [400](400-chat.md); the invite is in [801](801-invitation-profiles.md).
 
 **All 53 entries remain Draft.** The maintainer approved family-based numbering on 2026-09-22. This editorial migration does not assign new wire identifiers or claim new implementation support. See [numbering and compatibility](NUMBERING.md) for the old-to-new map and independent families. Future adapters need substantive contracts, not empty numbered placeholders.
 
-Ghost is the minimal Pkarr/DHT rendezvous and small-record primitive. Ghostly is the reference application composing that primitive with local state, transports and capabilities. WISPs make those boundaries reviewable; this series does not rename the current wire protocol or expand the WISP acronym by decree.
+Ghost is the minimal Pkarr/DHT rendezvous and small-record primitive. Ghostly is the reference application composing that primitive with local state, transports and capabilities. WISPs (Wire Interoperability Specification Proposals, named on 2026-09-28) make those boundaries reviewable; this series does not rename the current wire protocol.
 
 ## Current matrix (2026-09-27)
 

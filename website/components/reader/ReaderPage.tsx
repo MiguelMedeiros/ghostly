@@ -34,7 +34,7 @@ function outline(body: string) {
 
 function WispLink({ w }: { w: Wisp }) {
   return (
-    <Link href={`/developers/wisps/${w.slug}`}>
+    <Link href={`/wisps/${w.slug}`}>
       <span className="mono">{w.number}</span> {w.name}
     </Link>
   );
@@ -78,14 +78,14 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
         <nav className="reader-crumbs" aria-label="Breadcrumb">
           <Link href={"/developers"}>{t.developers}</Link>
           <span aria-hidden="true">/</span>
-          <Link href={"/developers/wisps"}>{t.catalog}</Link>
+          <Link href={"/wisps"}>{t.catalog}</Link>
           <span aria-hidden="true">/</span>
           <span aria-current="page">{w ? `WISP ${w.number}` : t.reference}</span>
         </nav>
 
         <div className="reader-layout">
           <aside className="reader-side">
-            <Link className="reader-glossary" href={`/developers/wisps#glossary`}>
+            <Link className="reader-glossary" href={`/wisps#glossary`}>
               {t.glossary} →
             </Link>
             {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
@@ -241,7 +241,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
               </div>
               <nav className="reader-pager" aria-label="Continue reading">
                 {prev && (
-                  <Link href={`/developers/wisps/${prev.slug}`} className="reader-pager-prev">
+                  <Link href={`/wisps/${prev.slug}`} className="reader-pager-prev">
                     <small>← {t.prev}</small>
                     <span>
                       <span className="mono">{prev.number}</span> {prev.name}
@@ -249,7 +249,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
                   </Link>
                 )}
                 {next && (
-                  <Link href={`/developers/wisps/${next.slug}`} className="reader-pager-next">
+                  <Link href={`/wisps/${next.slug}`} className="reader-pager-next">
                     <small>{t.next} →</small>
                     <span>
                       <span className="mono">{next.number}</span> {next.name}
@@ -257,7 +257,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
                   </Link>
                 )}
               </nav>
-              <Link className="link-arrow" href={"/developers/wisps"}>
+              <Link className="link-arrow" href={"/wisps"}>
                 {t.back}
               </Link>
             </footer>

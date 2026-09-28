@@ -12,7 +12,7 @@ import { measure, settleKey, type Rect } from "./scene-measure";
 const W = 2560;
 const H = 1440;
 const CHAPTERS = ["invite", "dht", "agree", "alive", "open"] as const;
-const PAGES = ["/", "/developers", "/developers/wisps", "/roadmap", "/cli"];
+const PAGES = ["/", "/developers", "/wisps", "/roadmap", "/cli"];
 /** No story shape comes nearer the window's edge than this share of its width. */
 const EDGE = 0.05;
 

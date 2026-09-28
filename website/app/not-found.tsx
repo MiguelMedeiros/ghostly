@@ -302,7 +302,7 @@ export default function NotFound() {
           </Link>
 
           <Link
-            href="/developers/wisps"
+            href="/wisps"
             className="inline-flex items-center justify-center gap-2 px-6 py-3 border border-cyan-500/30 hover:border-cyan-500/60 text-cyan-400 font-semibold rounded-lg transition-all hover:bg-cyan-500/10"
           >
             <svg
