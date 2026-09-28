@@ -134,3 +134,76 @@ test("a long chat with pictures and videos opens again on its last message", { t
   await expect.poll(async () => Math.round((await row.boundingBox())!.y)).toBeCloseTo(shown.y, -1);
   expect(await distanceToBottom(bob)).toBeGreaterThan(400);
 });
+
+/**
+ * Sending shows no scrollbar. The bubble that arrives slides in from its side, and that slide used to make the list
+ * scroll sideways for a few frames: a horizontal scrollbar where scrollbars take room, the view jumping by its height,
+ * macOS flashing its scrollers. Sampled on every frame while a message goes, in a short chat (nothing to scroll at all)
+ * and a long one (the view only goes down, to the bottom). Narrow columns only: at 1280 the column has room around it.
+ */
+
+interface Frame { sw: number; cw: number; sh: number; ch: number; top: number; rows: number }
+
+/** Seeds a chat of `count` messages straight into storage and opens it. */
+async function seedChat(p: Peer, count: number) {
+  const mine = createLink().mine;
+  await p.page.evaluate(({ mine, count }) => {
+    const id = crypto.randomUUID().replaceAll("-", "");
+    const start = Date.now() - 86_400_000;
+    const messages = Array.from({ length: count }, (_, i) => ({
+      id: `m${i}`, sender: i % 2 ? "peer" : "me", timestamp: start + i * 60_000, delivery: i % 2 ? undefined : "delivered",
+      text: i % 4 === 3 ? `Message ${i}\nwith a second line` : `Message ${i}`,
+    }));
+    localStorage.setItem(`ghostly_${id}`, JSON.stringify({ id, mySeedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, messages, createdAt: start }));
+    window.dispatchEvent(new Event("session-updated"));
+    location.hash = `/chat/${id}`;
+  }, { mine, count });
+  await expect(chat(p).locator("[data-message-id]")).toHaveCount(count);
+}
+
+/** Sends `text` and returns the list's sizes on every frame, from just before it went until its bubble has settled. */
+async function sendSampled(p: Peer, text: string): Promise<Frame[]> {
+  await p.page.evaluate(() => {
+    const frames: Frame[] = [];
+    (window as unknown as { sampled: Frame[] }).sampled = frames;
+    const started = performance.now();
+    const tick = () => {
+      const list = document.querySelector<HTMLElement>("[data-message-list]")!;
+      frames.push({ sw: list.scrollWidth, cw: list.clientWidth, sh: list.scrollHeight, ch: list.clientHeight, top: list.scrollTop, rows: list.querySelectorAll("[data-message-id]").length });
+      if (performance.now() - started < 1200) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  const box = p.page.getByPlaceholder("Message…");
+  await box.fill(text);
+  await box.press("Enter");
+  await expect(chat(p).getByText(text, { exact: true })).toBeVisible();
+  await p.page.waitForTimeout(1300);
+  return p.page.evaluate(() => (window as unknown as { sampled: Frame[] }).sampled);
+}
+
+for (const [where, viewport] of [["a narrow window", { width: 900, height: 800 }], ["a phone", undefined]] as const) {
+  test(`sending shows no scrollbar, in ${where}`, { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
+    const bob = await peer("send-bob", viewport ? { viewport } : { mobile: true });
+
+    // A short chat: nothing overflows, on any frame.
+    await seedChat(bob, 3);
+    for (const text of ["Short and sweet", "One more"]) {
+      const frames = await sendSampled(bob, text);
+      expect(frames.length).toBeGreaterThan(20);
+      // The bubble arrived while the frames were sampled, so they saw it come in.
+      expect(frames.at(-1)!.rows).toBeGreaterThan(frames[0].rows);
+      const overflowing = frames.filter(f => f.sw > f.cw || f.sh > f.ch || f.ch !== frames[0].ch);
+      expect(overflowing, `frames where the list overflowed while "${text}" went`).toEqual([]);
+    }
+
+    // A long chat at its bottom: never sideways, and the view only goes down, ending at the new message.
+    await seedChat(bob, 40);
+    const frames = await sendSampled(bob, "At the bottom");
+    expect(frames.at(-1)!.rows).toBeGreaterThan(frames[0].rows);
+    expect(frames.filter(f => f.sw > f.cw || f.ch !== frames[0].ch), "frames scrolling sideways or losing height").toEqual([]);
+    for (let i = 1; i < frames.length; i++) expect(frames[i].top, `scrollTop at frame ${i}`).toBeGreaterThanOrEqual(frames[i - 1].top);
+    const last = frames.at(-1)!;
+    expect(last.sh - last.top - last.ch).toBeLessThanOrEqual(2);
+  });
+}
