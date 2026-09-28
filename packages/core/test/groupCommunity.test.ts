@@ -245,7 +245,7 @@ describe("community sessions", { timeout: 60_000 }, () => {
     const captured: CommunityFrame[] = [];
     const quiet = new CommunitySession(clone(alice.saved), { save: async () => {}, broadcast: f => { captured.push(f); }, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} });
     await quiet.sendText("hi", "alice");
-    const frame = captured.find(f => (f as { t?: string }).t === "group-msg") as Record<string, unknown>;
+    const frame = captured.find(f => (f as { t?: string }).t === "group-msg") as unknown as Record<string, unknown>;
     // An epoch bob does not know yet, and a signature that is not alice's.
     for (let n = 0; n < COMMUNITY_LIMITS.waiting + 4; n++) await bob.session.handle(alice.session.myKey, { ...frame, e: (frame.e as number) + 1, n, sig: toBase64Url(new Uint8Array(64)) });
     expect((bob.session as unknown as { waiting: unknown[] }).waiting).toHaveLength(0);
