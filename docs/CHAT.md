@@ -21,7 +21,7 @@ What a chat is, what its header, menus and composer hold, and how messages rende
 
 ## Header
 
-Left to right (`src/pages/Chat.tsx`): avatar, name (click to rename), the contact's identity marks ([IDENTITIES.md](IDENTITIES.md)), then on the right the **connection icon**, the audio and video call buttons, and ⋮.
+Left to right (`src/pages/Chat.tsx`): avatar (click to see the picture large, #447), name (click to rename), the contact's identity marks ([IDENTITIES.md](IDENTITIES.md)), then on the right the **connection icon**, the audio and video call buttons, and ⋮.
 
 Under the name, the contact's key, or **typing…** with three dots while the contact writes (`src/components/TypingIndicator.tsx`); **recording audio…** while the contact records a voice note (from the moment the mic opens, held or hands-free, until it is sent or thrown away); **thinking…**, or a bot's own short status such as "Transcribing your audio…", shown as plain text. The chat list row shows the same in its preview line, in the accent. It is presence, not connection, so it never goes in the icon. Paired 1:1 chats only, over the live session (`typing/1`, [WISP 401](wisps/401-paired-chat.md#typing)): it goes with the message, a cleared composer, 5 seconds without a keystroke, or, if the stop is lost, 6 seconds after the contact's last word. Settings → Security → **Send typing indicator** (per profile, on by default) stops telling contacts; theirs still shows.
 
@@ -178,7 +178,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 | Spec | [WISP 9xx Group Mesh](wisps/9xx-group-mesh.md) | [WISP 9xx Group Community](wisps/9xx-group-community.md) |
 
 - New group offers Community (default) or Private (`src/components/NewGroupDialog.tsx`). Negotiation: [WISP 900](wisps/900-group-sessions.md).
-- The group link can be replaced or turned off by the admin. Leaving deletes the group and its history from the device; an admin hands the role on first.
+- The admin renames the group in Members… (Rename) or with `ghostly group rename` (#438); every member sees the new name, and apps from before keep the old one. The group link can be replaced or turned off by the admin. Leaving deletes the group and its history from the device; an admin hands the role on first.
 - Group ⋮: Members…, Mute, Rotate keys (admin), Leave group, Delete from this device.
 - Hubs (private groups past 16 members, #402): the Desktop app and the CLI, which stay online, pass messages on. The admin makes a member a hub, or keeps one from being one, in Members…. A Mac holds at most 40 group connections, and past that stops being a hub (#439).
 - In a community, the admin's changes are final: a member's longer branch cannot undo them (#300).
