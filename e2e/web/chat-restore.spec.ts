@@ -69,9 +69,15 @@ async function scrollUp(p: Peer, ticks: number): Promise<void> {
     await p.page.mouse.wheel(0, -700);
     await p.page.waitForTimeout(60);
   }
-  // The wheel's own smooth scrolling has ended.
-  let last = -1;
-  await expect.poll(async () => { const top = await chat(p).evaluate(el => el.scrollTop); const still = top === last; last = top; return still; }).toBe(true);
+  // Every wheel event has been taken and the smooth scrolling has ended: still for half a second.
+  await chat(p).evaluate(el => new Promise<void>(done => {
+    let last = el.scrollTop, since = performance.now();
+    const check = () => {
+      if (el.scrollTop !== last) { last = el.scrollTop; since = performance.now(); }
+      if (performance.now() - since > 500) done(); else requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  }));
 }
 
 /** The first message whose top is in the view, and how far down the view its top is. */
@@ -185,6 +191,9 @@ test("a group left scrolled up opens again on that message, from another group t
       await expect(chat(bob).getByText(`${name} ${i}`, { exact: false })).toBeVisible();
     }
   }
+  // History, not arrivals: a message under 5 s old slides in each time its bubble mounts (MessageBubble's `enter`), and
+  // its box is somewhere else until the slide ends.
+  await page.waitForTimeout(5_500);
   const [alpha, beta] = groups;
   const open = (id: string) => page.evaluate(id => { location.hash = `/group/${id}`; }, id);
   const last = (name: string) => chat(bob).getByText(`${name} 39`, { exact: false });
@@ -205,7 +214,7 @@ test("a group left scrolled up opens again on that message, from another group t
   await backOn(bob, left);
 
   // By way of a 1:1 chat.
-  await open(direct);
+  await page.evaluate(id => { location.hash = `/chat/${id}`; }, direct);
   await expect(chat(bob).getByText("C last message", { exact: false })).toBeVisible();
   await open(alpha);
   await backOn(bob, left);
