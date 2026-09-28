@@ -76,6 +76,7 @@ export * from "./groupEdits";
 export * from "./replies";
 export * from "./forwards";
 export * from "./reactions";
+export * from "./pins";
 export * from "./groupEntry";
 export * from "./groupCommunity";
 export * from "./communityRendezvous";

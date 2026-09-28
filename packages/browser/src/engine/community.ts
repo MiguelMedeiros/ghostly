@@ -243,6 +243,9 @@ export class Communities {
     }
   }
 
+  /** A community as kept here, to change in place and save (`Groups.setPin`). */
+  record(groupId: string): StoredGroup | undefined { return this.stored.get(groupId); }
+
   views(): GroupView[] {
     return [...this.stored.values()].flatMap((group): GroupView[] => {
       const live = this.live.get(group.id);

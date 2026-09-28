@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
-import { useServicesPlatform } from "../../hooks/useServicesPlatform";
+import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
@@ -25,8 +25,7 @@ const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-blac
  * bytes, and starts again from there. A type this device does not play offers the file instead.
  */
 export function VideoBubble({ file, sender, peerName = "Your contact" }: { file: ChatFile; sender: "me" | "peer"; peerName?: string }) {
-  const platform = useServicesPlatform();
-  const transfer = platform?.getTransfer(file.id) ?? null;
+  const { platform, transfer } = useTransfer(file.id);
   const ready = transfer === null || transfer.state === "done";
   const [playable] = useState(() => canPlayVideo(file.mime));
   const [phase, setPhase] = useState<Phase>("poster");

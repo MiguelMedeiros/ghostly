@@ -74,6 +74,7 @@ import { cardOn } from "../lib/chatPayments";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
+import { PinnedBar } from "../components/chat/PinnedBar";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -482,6 +483,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
   };
   const reactionName = (by: string) => by === "peer" ? shownName : by.slice(0, 8);
+  // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
+  const pin = paired ? chatLink?.pin : undefined;
+  const pinMessage = (messageId: string | undefined, remove = false) => {
+    if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
+  };
   const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: replySnippet(replyingTo.text),
     mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
@@ -666,6 +672,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       </div>
 
       <ChatSearchBar search={search} />
+      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
 
@@ -730,6 +737,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
               // The same: a compatibility chat has no room for a reaction.
               onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
+              onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
+              pinned={!!pin && replyTarget(row.message) === pin.id}
               reactionName={reactionName}
               highlight={search.highlight(row.message.id)}
               {...forwarding.rowProps(row.message)}

@@ -14,10 +14,15 @@ import { renderApp } from "../render";
  * and lagged while open). Each message's text is drawn by `RichText`, so its draws count the bubbles drawn.
  */
 
-const draws = vi.hoisted(() => ({ text: 0 }));
+const draws = vi.hoisted(() => ({ text: 0, files: [] as string[] }));
 vi.mock("../../components/rich/RichText", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../components/rich/RichText")>();
   return { ...real, RichText: (props: Parameters<typeof real.RichText>[0]) => { draws.text++; return real.RichText(props); } };
+});
+// A bubble with a file asks, each time it is drawn, whether its transfer can be tried again: its draws.
+vi.mock("../../lib/fileStatus", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../lib/fileStatus")>();
+  return { ...real, canRetryFile: (...args: Parameters<typeof real.canRetryFile>) => { draws.files.push(args[0].id); return real.canRetryFile(...args); } };
 });
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
 
@@ -40,8 +45,8 @@ function history(): ChatMessage[] {
 
 const link = () => linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" } } as never);
 
-function openChat(withLink = true) {
-  saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: history(), createdAt: 1_700_000_000_000 });
+function openChat(withLink = true, messages = history()) {
+  saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages, createdAt: 1_700_000_000_000 });
   const utils = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
   utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("react", () => ({ error: null })).on("sendMessage", () => ({ error: null }));
   if (withLink) utils.engine.update({ links: [link()] });
@@ -50,7 +55,7 @@ function openChat(withLink = true) {
 
 const settle = () => act(() => vi.advanceTimersByTimeAsync(50));
 
-beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); draws.text = 0; });
+beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); draws.text = 0; draws.files = []; });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("a long chat", () => {
@@ -68,6 +73,27 @@ describe("a long chat", () => {
     }
     await settle();
     expect(draws.text).toBe(0);
+  });
+
+  it("draws its files again only when their transfer changes, not on every change of the engine's state", { timeout: 15_000 }, async () => {
+    // Every thirtieth message a voice note of mine: each one watches its transfer.
+    const messages = history().map((m, i): ChatMessage => i % 30 === 0
+      ? { ...m, text: "", file: { id: `voice-${i}`, name: `voice-${i}.webm`, size: 40_000, mime: "audio/webm", voice: { duration: 4_000, peaks: [1, 2, 3] } } }
+      : m);
+    const { engine } = openChat(true, messages);
+    await screen.findByText(`Message ${COUNT - 1}`);
+    await settle();
+    expect(new Set(draws.files).size).toBe(COUNT / 30);
+
+    draws.files = [];
+    for (let i = 0; i < 5; i++) act(() => engine.update({ links: [link()], transport: { ...engine.state.transport, relays: [`wss://relay-${i}.example`] } }));
+    await settle();
+    expect(draws.files).toEqual([]);
+
+    // Its transfer moves: that bubble, and only that one, is drawn again.
+    act(() => engine.update({ transfers: { "voice-270": { state: "transferring", transferred: 10_000, size: 40_000 } } } as never));
+    await settle();
+    expect(new Set(draws.files)).toEqual(new Set(["voice-270"]));
   });
 
   it("draws no message while you type, and does not collapse the field on each keystroke", async () => {

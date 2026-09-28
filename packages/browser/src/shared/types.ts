@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, TypingKind, VideoMeta, VoiceMeta, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -79,6 +79,10 @@ export interface StoredLink {
   deletedIds?: string[];
   /** This side's reactions the contact has not confirmed yet (WISP 401 § Reactions), in the order of their numbers. */
   reactionsOut?: WireReaction[];
+  /** The chat's pinned message (WISP 400 § Pinned message): the latest pin, either side's; `id` "" once unpinned. */
+  pin?: StoredPin;
+  /** This side's pin the contact has not confirmed yet (WISP 401 § Pinned message): said on each live session until it does. */
+  pinOut?: WirePin;
   /** Ways of paying this device allows in this chat. Absent or true: allowed. */
   paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
   /**
@@ -145,6 +149,8 @@ export interface StoredGroup {
    * signed leave (`bye`) that they carry to the admin.
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
+  /** The group's pinned message (WISP 400 § Pinned message): the latest pin; `id` "" once unpinned. */
+  pin?: StoredPin;
   /** A community group (`group-community/1`) I am in: its session state. Mesh groups use `state`. */
   community?: CommunityState;
   /**
@@ -219,6 +225,8 @@ export interface GroupView {
   lastMentionAt?: number;
   /** The latest reaction in the group, for the chat list. */
   lastReaction?: ReactionNote;
+  /** The group's pin (WISP 400 § Pinned message): `id` "" once unpinned; absent when nothing was ever pinned. */
+  pin?: PinView;
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
@@ -691,6 +699,16 @@ export interface StoredMessage {
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
 export interface MessagePage { messages: StoredMessage[]; more: boolean }
+
+/**
+ * A chat's pin as kept (WISP 400 § Pinned message): the message's id both sides know (`id`, "" unpinned), the pinner's
+ * number (the highest wins), who pinned (`me`, `peer`, or a member's key) and when it came here. `messageId`: the row
+ * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on.
+ */
+export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string }
+
+/** A chat's pin, as the pages and the CLI see it. `id`: the id both sides know the message by ("" once unpinned); `messageId`: the row here. */
+export interface PinView { id: string; by: string; at: number; messageId?: string }
 
 /** One person's reaction to a message: the emoji ("" once taken back), their number (the highest wins), when it came. */
 export interface MessageReaction { e: string; n: number; at: number }
@@ -1305,6 +1323,8 @@ export interface LinkView {
   identitySharedAt?: number;
   /** The latest reaction in this chat, for the chat list; paired chats. */
   lastReaction?: ReactionNote;
+  /** The chat's pin (WISP 400 § Pinned message): `id` "" once unpinned; absent when nothing was ever pinned. */
+  pin?: PinView;
   id: string;
   myPubKeyZ32: string;
   peerPubKeyZ32: string;

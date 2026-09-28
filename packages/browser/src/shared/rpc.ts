@@ -154,6 +154,12 @@ export interface EngineApi {
    * person per message: a new one replaces the old.
    */
   react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null };
+  /**
+   * Pins a message (WISP 400 § Pinned message), or unpins with `remove`: `linkId` a chat's link or `group:<id>`,
+   * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
+   * community only the admin pins.
+   */
+  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */

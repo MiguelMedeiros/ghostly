@@ -303,6 +303,17 @@ const METHODS: Record<string, Method> = {
     return { chat: link.id, ...(await react(ctx, link.id, params)) };
   },
   /**
+   * WISP 400 § Pinned message: one per chat or group, a new pin replaces it; `remove` unpins. In a community only the
+   * admin pins. Answers the chat (or group) and the message now pinned (null once unpinned).
+   */
+  async "chat.pin"(ctx, params) {
+    const target = chatOrGroup(ctx, str(params, "chat", true));
+    const remove = bool(params, "remove"), messageId = remove ? str(params, "message") : str(params, "message", true);
+    const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
+    if (result.error) throw new CliError(/not in this chat|Nothing is pinned/.test(result.error) ? "not_found" : /Only the admin/.test(result.error) ? "refused" : "bad_request", result.error);
+    return { [target.group ? "group" : "chat"]: target.id, messageId: remove ? null : messageId, removed: remove };
+  },
+  /**
    * WISP 400 § Forwards: messages of a chat or a group sent on to up to 5 chats and groups, each as a new message of mine
    * that says it was forwarded (one hop more) and nothing of who wrote it. A file goes from the bytes here, never
    * fetched again; a group takes texts only. `wait: sent`: each text until it is on its way (a group's until an edge

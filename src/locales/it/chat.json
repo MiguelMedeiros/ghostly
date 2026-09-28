@@ -88,6 +88,13 @@
   "offline": "offline",
   "online": "online",
   "options": "Opzioni",
+  "pinned": {
+    "bar": "Messaggio fissato",
+    "info": "Un messaggio fissato per chat, visibile a tutti. Uno nuovo sostituisce il precedente. In una community, solo l’admin fissa.",
+    "notHere": "Non è su questo dispositivo",
+    "pin": "Fissa",
+    "unpin": "Non fissare"
+  },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",
     "more": "Altre emoji",

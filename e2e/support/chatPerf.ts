@@ -26,6 +26,8 @@ export interface Open {
   /** The open chat left alone for two seconds after the settle: long tasks' total, and React commits. */
   idleLong: number;
   idleCommits: number;
+  /** Coming from another chat: its message rows in the page at the click. */
+  before: number;
 }
 
 /** A tiny JPEG, as a link preview's thumbnail carries one. */
@@ -115,12 +117,15 @@ export function openAndMeasure(label: string): Promise<Open> {
     channel.port2.postMessage(0);
   }));
   const commits0 = w.__ghostlyCommits;
+  // Coming from another chat: its list stays in the page until the new one takes its place.
+  const previous = document.querySelector<HTMLElement>(".chat-wallpaper");
+  const before = previous?.querySelectorAll("[data-message-row]").length ?? 0;
   const t0 = performance.now();
   row.click();
   return (async () => {
     let paint = 0, settled = 0, still = 0, last = "", atBottom = 0, offBottom = 0;
     let watcher: ResizeObserver | undefined;
-    const list = () => document.querySelector<HTMLElement>(".chat-wallpaper");
+    const list = () => [...document.querySelectorAll<HTMLElement>(".chat-wallpaper")].find(el => el !== previous) ?? null;
     while (performance.now() - t0 < 30_000) {
       const now = await afterPaint();
       const el = list();
@@ -154,7 +159,7 @@ export function openAndMeasure(label: string): Promise<Open> {
       paint: Math.round(paint), bottom: Math.round(atBottom), settled: Math.round(settled), offBottom,
       longTasks: inWindow.length, longTotal: Math.round(inWindow.reduce((s, e) => s + e.duration, 0)), longMax: Math.round(Math.max(0, ...inWindow.map(e => e.duration))),
       commits: commitsSettled, rows: document.querySelectorAll(".chat-wallpaper [data-message-row]").length,
-      idleLong: Math.round(idle.reduce((s, e) => s + e.duration, 0)), idleCommits: w.__ghostlyCommits - commits0 - commitsSettled,
+      idleLong: Math.round(idle.reduce((s, e) => s + e.duration, 0)), idleCommits: w.__ghostlyCommits - commits0 - commitsSettled, before,
     };
   })();
 }

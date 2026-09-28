@@ -88,6 +88,13 @@
   "offline": "hors ligne",
   "online": "en ligne",
   "options": "Options",
+  "pinned": {
+    "bar": "Message épinglé",
+    "info": "Un message épinglé par discussion, vu par tous ses membres. Un nouveau remplace l’ancien. Dans une communauté, seul l’admin épingle.",
+    "notHere": "Absent de cet appareil",
+    "pin": "Épingler",
+    "unpin": "Désépingler"
+  },
   "reactions": {
     "chipLabel": "{{emoji}} : {{names}}",
     "more": "Plus d’emoji",

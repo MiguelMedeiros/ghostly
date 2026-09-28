@@ -30,6 +30,7 @@ import { ReactAction, ReactionBar, ReactionChips } from "./chat/Reactions";
 import { myReaction, reactionChips } from "../lib/reactions";
 import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
+import { PinIcon } from "./PinIcon";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -57,6 +58,9 @@ interface MessageBubbleProps {
   onEdit?: () => void;
   /** Forwards this message (WISP 400 § Forwards): its ⋮ says Forward. Left out for what cannot be forwarded. */
   onForward?: () => void;
+  /** Pins this message, or unpins it when it is the chat's pinned one (`pinned`), from its ⋮ (WISP 400 § Pinned message). */
+  onPin?: () => void;
+  pinned?: boolean;
   /** Starts choosing messages with this one chosen: its ⋮, and the bar a long press opens, say Select. */
   onSelect?: () => void;
   /**
@@ -439,7 +443,7 @@ function ForwardItem({ file, sender, onForward }: { file?: ChatFile; sender: "me
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
+function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pinned, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
   onDelete?: () => void;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
@@ -448,6 +452,9 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onForward,
   onEdit?: () => void;
   /** Opens the reactions' quick bar (WISP 400 § Reactions): after Reply. */
   onReact?: () => void;
+  /** Pins it, or unpins it (`pinned`) (WISP 400 § Pinned message): after React. */
+  onPin?: () => void;
+  pinned?: boolean;
   /** Forwards it (WISP 400 § Forwards): after React. */
   onForward?: () => void;
   /** Starts choosing messages, with this one: after Forward. */
@@ -497,6 +504,9 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onForward,
         </MenuItem>}
         {onReact && <MenuItem testId="message-react" onClick={() => { setOpen(false); onReact(); }} icon={<SmileIcon size={16} />}>
           {t("chat.reactions.react")}
+        </MenuItem>}
+        {onPin && <MenuItem testId="message-pin" onClick={() => { setOpen(false); onPin(); }} icon={<PinIcon active={pinned} size={16} />}>
+          {pinned ? t("chat.pinned.unpin") : t("chat.pinned.pin")}
         </MenuItem>}
         {onForward && <ForwardItem file={download?.file} sender={sender ?? "me"} onForward={() => { setOpen(false); onForward(); }} />}
         {onSelect && <MenuItem testId="message-select-start" onClick={() => { setOpen(false); onSelect(); }} icon={<SelectGlyph />}>
@@ -572,6 +582,7 @@ export function MessageBubble(props: MessageBubbleProps) {
     onEdit: () => latest.current.onEdit?.(),
     onReact: (emoji: string) => latest.current.onReact?.(emoji),
     onForward: () => latest.current.onForward?.(),
+    onPin: () => latest.current.onPin?.(),
     onSelect: () => latest.current.onSelect?.(),
     onToggle: () => latest.current.selection?.onToggle?.(),
     reactionName: (by: string) => latest.current.reactionName?.(by) ?? by.slice(0, 8),
@@ -586,17 +597,18 @@ export function MessageBubble(props: MessageBubbleProps) {
       peerPubKey={props.peerPubKey} peerNick={props.peerNick} linkId={props.linkId} quote={props.quote} names={names}
       onDelete={props.onDelete && stable.onDelete} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
+      onPin={props.onPin && stable.onPin} pinned={props.pinned}
       reactionName={stable.reactionName} highlight={props.highlight}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
   );
 }
 
-const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onSelect"] as const;
+const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin"] as const;
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.message, b.message);
@@ -611,9 +623,10 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, selection, names, highlight }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
+  const onPin = choosing ? undefined : pinIt;
   const onDelete = choosing ? undefined : deleteIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
   const onReact = choosing ? undefined : reactIt, onForward = choosing ? undefined : forwardIt, onSelect = choosing ? undefined : selectIt;
   const { t } = useI18n();
@@ -785,7 +798,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* The bubble, and its reactions under it. */}
       <div className={`flex flex-col min-w-0 max-w-[85%] ${isMe ? "items-end" : "items-start"}`}>
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
@@ -901,7 +914,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       </div>
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
-      {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
+      {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
       {!isMe && onReply && <ReplyAction onReply={onReply} />}
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
