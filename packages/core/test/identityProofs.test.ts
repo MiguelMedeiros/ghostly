@@ -263,7 +263,8 @@ describe("identity exchange", () => {
     await ab.share(id, true);
     await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].status).toBe("rejected"));
     expect(w.ledger(alice, bob).shared[0].error).toBe(IDENTITY_CHECK_UNAVAILABLE);
-    expect(JSON.stringify(w.frames)).not.toMatch(/jenkins|503/);
+    // The detail itself, not a bare "503": the frames carry random keys and signatures, where those digits turn up.
+    expect(JSON.stringify(w.frames)).not.toMatch(/jenkins|answered 503/);
     // Any other refusal still says why: it is about the proof, not about the verifier's network.
     failure = new Error("The file on the homeserver is not this proof");
     await ab.share(id, true);

@@ -5,6 +5,7 @@ import { createServer, type Server } from "node:http";
 import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CONNECT_TIMEOUT_MS } from "@ghostly/core";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit
@@ -118,6 +119,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       const daemon = new Running(["--home", bob, "daemon"], env);
       running.push(daemon);
       sockets[bob] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
+      return Date.now();
     };
     const bothWays = async (tag: string) => {
       expect(ok(await as(alice, "send", "bob", `↻ alice ${tag}`, "--wait", "delivered", "--timeout", "30"))).toMatchObject({ delivery: "delivered" });
@@ -138,18 +140,23 @@ describe("two headless peers", { timeout: 180_000 }, () => {
 
     // Killed: nothing said. Alice still holds the dead session; Bob's app, back, offers at once. Here over WebRTC, whose
     // Node build never says a connection went `disconnected`, Alice reads that offer at a live chat's pace, or her
-    // liveness gives up first: under a minute and a half, where a native knock takes over in about a second.
+    // liveness gives up first, where a native knock takes over in about a second. Most runs are live in seconds. When
+    // the relays' request budget holds Alice's answer back until her answering attempt is over, Bob's offer runs to its
+    // own attempt timeout (CONNECT_TIMEOUT_MS, 90 s) and the HyperDHT dial goes live after it, in about a second, up to
+    // 14 s on a loaded machine. So the bound is one attempt timeout and one redial, counted from Bob's daemon being up,
+    // when that offer starts, not from the kill: the daemon's own start is not part of it (with it, that path measured
+    // 90.7 to 91.4 s against a 90 s bound). Two attempts in a row would still fail it.
     const killed = running.pop()!;
     await new Promise((r) => { killed.child.once("exit", r); killed.child.kill("SIGKILL"); });
-    started = Date.now();
-    await restartBob();
-    await live(bob, "alice", 90);
+    started = await restartBob();
+    const redial = 30_000;
+    await live(bob, "alice", (CONNECT_TIMEOUT_MS + redial) / 1000 + 10);
     const afterKill = Date.now() - started;
     await bothWays("after a kill");
     console.log(`[restart] live again after a stop in ${afterStop} ms, after a kill in ${afterKill} ms`);
     expect(afterStop).toBeLessThan(10_000);
-    expect(afterKill).toBeLessThan(90_000);
-  });
+    expect(afterKill).toBeLessThan(CONNECT_TIMEOUT_MS + redial);
+  }, 240_000);
 
   it("move a chat to native HyperDHT when asked", async () => {
     ok(await as(alice, "chat", "transport", "bob", "hyperdht"));
@@ -229,10 +236,16 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(alice, "typing", "bob", "--stop"));
     await listen.waitFor((l) => l.type === "typing.stopped");
     // --for keeps the kind and status it was given: past the contact's 6 s it is still thinking, never plain typing.
+    // The window ends before the 15 s are up counted from the command, when the daemon's timer starts: counted from
+    // when Bob saw the start (over HyperDHT here, 1.7 s later on an idle machine, more on a busy one) it took in the
+    // stop that ends it.
     const before = listen.lines.length;
-    ok(await as(alice, "typing", "bob", "--kind", "thinking", "--status", "Working", "--for", "10"));
+    const asked = Date.now();
+    ok(await as(alice, "typing", "bob", "--kind", "thinking", "--status", "Working", "--for", "15"));
     await listen.waitFor((l) => l.type === "typing.started" && l.status === "Working");
-    await new Promise((r) => setTimeout(r, 8000));
+    const seen = Date.now();
+    await new Promise((r) => setTimeout(r, asked + 13_000 - Date.now()));
+    expect(Date.now() - seen, "the window outlasts the contact's 6 s timeout").toBeGreaterThan(6_000);
     expect(listen.lines.slice(before).map((l) => [l.type, l.kind, l.status])).toEqual([["typing.started", "thinking", "Working"]]);
     await listen.waitFor((l) => l.type === "typing.stopped" && listen.lines.indexOf(l) >= before);
     // What the contact's app would not show is refused here.
