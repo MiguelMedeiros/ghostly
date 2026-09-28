@@ -27,6 +27,10 @@ the command prints and are never committed.
 - `ONLY=chat,file` saves just the shots whose names start with those.
 - `CAPTURE_PORT` (4380), `CAPTURE_APP_PORT` (4391, the gallery the services spec shares),
   `CAPTURE_WORKERS` (2) and `CAPTURE_INFRA_HOST` (one) move things when they collide.
+  `CAPTURE_INFRA_HOST=local` joins this machine's own environment, no SSH (on "one" itself).
+- Each site shot's visible text is saved beside it in the scratch folder, and the run fails when one
+  shows copy the app no longer has ("Draft", "Invisible to everyone else", "10M+", "messag.es",
+  `undefined`, `NaN`). The list is `STALE` in `run.mjs`.
 
 It needs `ssh-keygen` and `gpg` on this machine (the identity proofs are signed by the real tools,
 with throwaway keys in temporary folders) and, for the Spark card, the Spark counterpart's phrase

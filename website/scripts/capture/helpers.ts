@@ -95,6 +95,8 @@ export async function shot(p: Peer, file: string) {
   await p.page.mouse.move(vp.width > 600 ? vp.width - 4 : vp.width - 2, vp.height / 2);
   await p.page.waitForTimeout(800);
   await p.page.screenshot({ path: join(OUT, file) });
+  // The words on screen beside the shot, in the scratch folder only: run.mjs looks them over for stale copy.
+  if (process.env.SHOTS) writeFileSync(join(OUT, file.replace(/\.png$/, ".txt")), await p.page.evaluate(() => document.body.innerText));
   console.log("  saved", file);
 }
 

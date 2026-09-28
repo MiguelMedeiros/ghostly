@@ -36,8 +36,9 @@ function run(cmd, cmdArgs, options = {}) {
 }
 
 // 1. The shared environment, as it is.
+// CAPTURE_INFRA_HOST=local joins this machine's own environment (on "one" itself, say), no SSH.
 log(`joining the shared e2e environment on "${HOST}"`);
-run(process.execPath, ["e2e/infra/infra.mjs", "use", "--host", HOST]);
+run(process.execPath, ["e2e/infra/infra.mjs", "use", ...(HOST === "local" ? [] : ["--host", HOST])]);
 
 // 2. What the shots are taken of.
 if (build) {
@@ -77,4 +78,14 @@ for (const name of shots.filter((n) => !n.startsWith("x-"))) {
   log(`wrote ${target.slice(REPO.length)}`);
 }
 log(`${shots.filter((n) => n.startsWith("x-")).length} x-* shots kept in ${env.SHOTS}`);
-process.exit(tests.status ?? 1);
+
+// 6. Nothing old on a site shot: the words each one showed (helpers.ts `shot` keeps them) against copy the app no
+// longer has. A hit fails the run; the .txt files stay in the scratch folder to look at.
+const STALE = [/\bDraft\b/, /Invisible to everyone else/, /10M\+/, /messag\.es/i, /\bundefined\b/, /\bNaN\b/, /\[object Object\]/];
+let stale = 0;
+for (const name of readdirSync(env.SHOTS).filter((n) => n.endsWith(".txt") && !n.startsWith("x-"))) {
+  const text = readFileSync(join(env.SHOTS, name), "utf8");
+  for (const pattern of STALE.filter((p) => p.test(text))) { stale++; log(`STALE ${name}: ${pattern}`); }
+}
+if (stale) log(`${stale} stale ${stale === 1 ? "word" : "words"} on screen: see the .txt files in ${env.SHOTS}`);
+process.exit(tests.status !== 0 ? tests.status ?? 1 : stale ? 1 : 0);

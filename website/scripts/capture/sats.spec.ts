@@ -94,6 +94,9 @@ test("wallets and payments in the chat, desktop and phone", async ({ browser, ba
   const phone = await open(browser, relay, baseURL!, "mBoo", { mobile: true, profile });
   await go(phone, route);
   await expect(chat(phone).getByText("paid ⚡ see you friday")).toBeVisible({ timeout: 60_000 });
+  // The reopened chat reconnects to Casper first: the header says "Connected", not "retrying live".
+  await expect(phone.page.locator('[data-testid=connection-options][aria-label*="Connected · WebRTC"]')).toBeVisible({ timeout: 90_000 })
+    .catch(() => console.log("  [mBoo] not live yet"));
   await phone.page.waitForTimeout(1500);
   await toBottom(phone);
   await shot(phone, "sats-mobile.png");
