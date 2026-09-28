@@ -317,12 +317,21 @@ export const servicesPlatform: ServicesPlatform | null = {
       const digest = await blobDigest(source);
       keepJustSent(file.id, new Blob([source], { type: file.mime }));
       await fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
-      await engine.call("sendFile", { linkId: link.id, file, timestamp });
+      try {
+        await engine.call("sendFile", { linkId: link.id, file, timestamp });
+      } catch (error) {
+        // Refused before it started (the contact's app takes no files, a stopped chat, offline): nothing is in the chat,
+        // so the copy goes too, and the composer says why.
+        justSent.delete(file.id);
+        await fileStore.delete(file.id).catch(() => {});
+        throw error;
+      }
       return { timestamp, file };
     }
     // Copied first, which takes a while for a large file: the bubble shows the copy, then the transfer.
     preparing.set(file.id, { state: "transferring", stage: "preparing", transferred: 0, size: file.size });
     preparingChanged(true);
+    let staged = false;
     void (async () => {
       const bytes = await fileBytes();
       const digest = await bytes.stage(file.id, source, (copied) => {
@@ -330,13 +339,15 @@ export const servicesPlatform: ServicesPlatform | null = {
         preparingChanged();
       });
       await fileStore.put({ id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+      // Copied: from here a refusal is the chat's, said as it is (its bubble keeps Retry), not a failed copy.
+      staged = true;
       await engine.call("sendFile", { linkId: link.id, file, timestamp });
       preparing.delete(file.id);
       preparingChanged(true);
     })().catch((error: unknown) => {
       const reason = error instanceof Error ? error.message : String(error);
       const full = /quota|space|full/i.test(reason) || (error as { name?: string })?.name === "QuotaExceededError";
-      preparing.set(file.id, { state: "failed", transferred: 0, size: file.size, error: full ? "Not enough space on this device to send it" : `Could not prepare the file: ${reason}` });
+      preparing.set(file.id, { state: "failed", transferred: 0, size: file.size, error: staged ? reason : full ? "Not enough space on this device to send it" : `Could not prepare the file: ${reason}` });
       preparingChanged(true);
     });
     return { timestamp, file };
