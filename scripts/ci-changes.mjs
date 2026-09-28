@@ -3,7 +3,7 @@
 //
 //   gh api --paginate repos/o/r/pulls/N/files --jq '.[].filename' | node scripts/ci-changes.mjs --draft=false
 //
-// writes `rust=`, `website=` and `app=` to $GITHUB_OUTPUT (and prints them), with a notice for each job it
+// writes `rust=`, `website=`, `app=` and `packages=` to $GITHUB_OUTPUT (and prints them), with a notice for each job it
 // skips. A gate may only leave a job out when that job cannot read any of the changed files:
 // scripts/test/ci-changes.test.ts holds the website's list to what the site's scripts actually read.
 
@@ -51,6 +51,18 @@ export const WEBSITE_INPUTS = [
  */
 export const NOT_APP = /^(website|docs)\//;
 
+/**
+ * The packages' unit tests (the packages shards) read no document and, of the site, only what is below: they skip a
+ * pull request whose every change is in docs/ or elsewhere in website/. scripts/test/ci-changes.test.ts holds this
+ * list to the paths the packages' tests and sources name.
+ */
+export const PACKAGES_READ_FROM_SITE = [
+  // packages/core's websiteInvite test: the join page's own copy of the invite rules.
+  "website/lib/invite.ts",
+  // packages/browser's atprotoOAuth test: the client metadata the site serves.
+  "website/public/oauth/",
+];
+
 export const covers = (inputs, file) => inputs.some((p) => (p.endsWith("/") ? file.startsWith(p) : file === p));
 
 /** @param {string[]} files @param {{ draft: boolean }} options */
@@ -62,7 +74,9 @@ export function plan(files, { draft }) {
   if (!website) why.push("Nothing the website reads changed: Website skipped");
   const app = files.some((f) => !NOT_APP.test(f));
   if (!app) why.push("Only website/ and docs/ changed: the Desktop jobs on macOS skipped");
-  return { rust, website, app, why };
+  const packages = files.some((f) => !NOT_APP.test(f) || covers(PACKAGES_READ_FROM_SITE, f));
+  if (!packages) why.push("Nothing the packages' tests read changed: the packages shards skipped");
+  return { rust, website, app, packages, why };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { WEBSITE_INPUTS, covers, plan } from "../ci-changes.mjs";
+import { PACKAGES_READ_FROM_SITE, WEBSITE_INPUTS, covers, plan } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../website/scripts/sync-app-deck.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -37,6 +37,34 @@ describe("the website gate", () => {
   });
 });
 
+describe("the packages gate", () => {
+  it("covers every site file the packages' tests and sources name, and they name no document", () => {
+    // What `npm run test:packages` runs: packages/* and extension/, their sources, tests and configs. A path into
+    // website/ or docs/ is written relative ("../../../website/lib/invite") or from the root ("website/...").
+    const code: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (["node_modules", ".turbo"].includes(entry.name) || entry.name.startsWith("dist")) continue;
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (/\.(ts|tsx|mts|js|mjs)$/.test(entry.name)) code.push(path);
+      }
+    };
+    for (const dir of readdirSync(join(root, "packages"))) walk(join(root, "packages", dir));
+    walk(join(root, "extension"));
+    const named = code.flatMap((file) =>
+      [...readFileSync(file, "utf8").matchAll(/(?:\.\.\/)+((?:website|docs)\/[^"'`\s)]*)|["'`]((?:website|docs)\/[^"'`\s)]*)/g)].map((m) => ({ file, path: m[1] ?? m[2] })),
+    );
+    expect(named.map((n) => n.path)).toEqual(expect.arrayContaining(["website/lib/invite", "website/public/oauth/client-metadata.json"]));
+    for (const { file, path } of named) {
+      // An import names a module without its extension.
+      const real = [path, ...[".ts", ".tsx", ".mjs", ".js"].map((ext) => path + ext)].find((p) => { try { statSync(join(root, p)); return true; } catch { return false; } });
+      const covered = real !== undefined && (statSync(join(root, real)).isDirectory() ? covers(PACKAGES_READ_FROM_SITE, `${real}/any`) : covers(PACKAGES_READ_FROM_SITE, real));
+      expect(covered, `${file.slice(root.length + 1)} names ${path}`).toBe(true);
+    }
+  });
+});
+
 describe("plan", () => {
   const ready = { draft: false };
   const draft = { draft: true };
@@ -60,7 +88,7 @@ describe("plan", () => {
   });
 
   it("the workflow runs everything, even in a draft", () => {
-    expect(plan([".github/workflows/ci.yml"], draft)).toMatchObject({ rust: true, website: true, app: true });
+    expect(plan([".github/workflows/ci.yml"], draft)).toMatchObject({ rust: true, website: true, app: true, packages: true });
   });
 
   it("only a draft skips the Rust jobs", () => {
@@ -68,6 +96,15 @@ describe("plan", () => {
     expect(plan(["src/App.tsx"], ready).rust).toBe(true);
     expect(plan(["src-tauri/src/lib.rs"], draft).rust).toBe(true);
     expect(plan(["Cargo.lock"], draft).rust).toBe(true);
+  });
+
+  it("only docs/ and the site's own files skip the packages' tests", () => {
+    expect(plan(["docs/TESTING.md", "docs/wisps/101-webrtc.md"], ready).packages).toBe(false);
+    expect(plan(["website/app/page.tsx"], ready).packages).toBe(false);
+    expect(plan(["website/lib/invite.ts"], ready).packages).toBe(true);
+    expect(plan(["website/public/oauth/client-metadata.json"], ready).packages).toBe(true);
+    expect(plan(["docs/TESTING.md", "e2e/support/avatar-fixtures/avatar-extended.webp"], ready).packages).toBe(true);
+    expect(plan(["README.md"], draft).packages).toBe(true);
   });
 
   it("the Desktop workflow is not the site", () => {
