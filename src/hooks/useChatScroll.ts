@@ -10,6 +10,10 @@ export interface ScrollRow {
 export const NEAR_BOTTOM_PX = 100;
 /** Further than this from the bottom, the ↓ button shows even with nothing new. */
 export const FAR_FROM_BOTTOM_PX = 400;
+/** A hand's wheel, touch or key moves the list for this long after it (smooth scrolling, a trackpad's momentum). */
+export const HAND_MS = 1000;
+/** Keys that scroll the list (outside a text field). */
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 
 interface Anchor {
   id: string;
@@ -55,6 +59,9 @@ const editable = (target: EventTarget | null) =>
  * At the bottom, it stays pinned there until a hand moves it: a picture, a video poster or a long message laying out after
  * the chat opened (or at any time) keeps the last message in view. A scroll event is a hand's only when the scroll
  * position moved since this hook last set or saw it; content growing under the view moves nothing, so there is no timer.
+ * One exception: a move that leaves it a little short of the bottom with no wheel, touch, press or scrolling key on the
+ * list in the last `HAND_MS` is the browser's, not a hand's (something measured at another size for an instant, like the
+ * composer sizing itself to its text), and it goes back to the bottom.
  *
  * Give `listRef` to the scrolling element and `columnRef` to the one that grows with the rows. `chat` starts it over: a
  * chat opens where it was left (on the same message, or at its bottom) with nothing counted, and one never opened opens
@@ -87,6 +94,9 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   hasRows.current = rows.length > 0;
   /** The scroll position as this hook last set or saw it: a scroll event that finds it unchanged is not a hand's. */
   const lastTop = useRef(0);
+  /** When a hand last touched the list (wheel, touch, a press on it, a scrolling key), and whether it is still pressed. */
+  const handAt = useRef(-Infinity);
+  const pressed = useRef(false);
 
   const distance = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
   /** A list not on screen (a chat kept loaded for a call) has no size: nothing about it says where the view is. */
@@ -240,25 +250,40 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       if (hidden(el)) return;
       // Not moved since it was last set or seen: content grew or shrank under the view, and no hand scrolled it.
       if (Math.abs(el.scrollTop - lastTop.current) < 1) { settle(); return; }
+      const d = distance(el);
+      // Moved a little short of the bottom with no hand on it: the browser pulled it back while something under it was
+      // measured one size and drawn another in the same moment (the composer measuring its text grows the list for an
+      // instant). Nothing reports that, and the view would stay short of the last message: back to the bottom.
+      const hand = pressed.current || performance.now() - handAt.current < HAND_MS;
+      if (atBottom.current && !hand && d <= NEAR_BOTTOM_PX) { following.current = false; settle(); return; }
       lastTop.current = el.scrollTop;
       // A hand moved it: where the chat was left no longer matters.
       pending.current = null;
-      const d = distance(el);
       if (d <= NEAR_BOTTOM_PX) following.current = false;
       atBottom.current = following.current || d <= NEAR_BOTTOM_PX;
       setFar(d > FAR_FROM_BOTTOM_PX);
       if (atBottom.current) { anchor.current = null; clear(); } else capture(el);
     };
-    const takeOver = () => { following.current = false; };
+    const takeOver = (e: Event) => {
+      following.current = false;
+      handAt.current = performance.now();
+      if (e.type === "pointerdown") pressed.current = true;
+    };
+    const release = () => { pressed.current = false; };
+    const onKey = (e: KeyboardEvent) => { if (SCROLL_KEYS.has(e.key) && !editable(e.target)) handAt.current = performance.now(); };
     el.addEventListener("scroll", onScroll, { passive: true });
-    for (const type of ["wheel", "touchstart", "pointerdown"]) el.addEventListener(type, takeOver, { passive: true });
+    for (const type of ["wheel", "touchstart", "touchmove", "pointerdown"]) el.addEventListener(type, takeOver, { passive: true });
+    for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, release, { passive: true });
+    window.addEventListener("keydown", onKey, { capture: true, passive: true });
     // A picture or a video loading, a bubble growing, the list itself getting shorter (a bar under it, the keyboard).
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => settle()) : undefined;
     observer?.observe(el);
     if (columnEl) observer?.observe(columnEl);
     return () => {
       el.removeEventListener("scroll", onScroll);
-      for (const type of ["wheel", "touchstart", "pointerdown"]) el.removeEventListener(type, takeOver);
+      for (const type of ["wheel", "touchstart", "touchmove", "pointerdown"]) el.removeEventListener(type, takeOver);
+      for (const type of ["pointerup", "pointercancel"]) window.removeEventListener(type, release);
+      window.removeEventListener("keydown", onKey, { capture: true });
       observer?.disconnect();
     };
   }, [listEl, columnEl, capture, settle, clear]);
