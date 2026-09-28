@@ -33,3 +33,6 @@ dist-e2e
 .env.e2e
 playwright-report-matrix
 blob-report-matrix
+
+# npm run test:map:write (the whole test map; generated, see docs/TESTING.md)
+/docs/test-map.md

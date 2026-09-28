@@ -1,0 +1,19 @@
+{
+  "applyHint": "Atualizar encerra suas chamadas e conexões.",
+  "auto": "Verificar atualizações automaticamente",
+  "autoDescription": "Desligado: só quando você tocar em Verificar agora",
+  "available": "Ghostly {{version}} disponível",
+  "checkNow": "Verificar agora",
+  "checking": "Verificando...",
+  "download": "Baixar",
+  "downloading": "Baixando... {{percent}}%",
+  "failed": "Não foi possível verificar atualizações",
+  "installing": "Atualizando...",
+  "lastChecked": "Última verificação às {{when}}",
+  "later": "Depois",
+  "manualHint": "Baixe e substitua esta instalação.",
+  "reload": "Recarregar",
+  "restart": "Atualizar e reiniciar",
+  "title": "Atualizações",
+  "upToDate": "O Ghostly está atualizado"
+}

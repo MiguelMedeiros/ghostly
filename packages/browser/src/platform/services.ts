@@ -7,6 +7,7 @@ import {
   sanitizeFileName,
   sanitizeMime,
   parseVideoMeta,
+  readImageMeta,
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
@@ -296,6 +297,8 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (tooLarge) throw new Error(tooLarge);
 
     const wireId = toBase64Url(randomBytes(12));
+    // A picture goes with its size, read from its first bytes, so the contact's chat keeps its place while it loads.
+    const image = options?.voice || options?.video ? undefined : await readImageMeta(source, sanitizeMime(source.type));
     const file = {
       // Its own key space: nothing a peer sends can land on this id.
       id: `${link.id}-out-${wireId}`,
@@ -305,24 +308,34 @@ export const servicesPlatform: ServicesPlatform | null = {
       ...(options?.voice && { voice: parseVoiceMeta(options.voice, sanitizeMime(source.type)) }),
       // A description that does not check out is left off: the video still goes, without a poster.
       ...(!options?.voice && options?.video && { video: parseVideoMeta(options.video, sanitizeMime(source.type)) }),
+      ...(image && { image }),
     };
     if (options?.voice && !file.voice) throw new Error("That recording cannot be sent as a voice message");
     // The page and the peer share this database and the file storage; the bytes never go through a message.
     // A small file is kept whole; a larger one is copied into file storage a step at a time.
     const timestamp = Date.now();
-    const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video };
+    const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video, image: file.image };
     const transfer = { state: "transferring" as const, transferred: 0, size: file.size };
     if (source.size <= SMALL_FILE_BYTES) {
       // Its digest from the bytes in hand (a recording in memory): sending never has to read the stored copy back whole.
       const digest = await blobDigest(source);
       keepJustSent(file.id, new Blob([source], { type: file.mime }));
       await fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
-      await engine.call("sendFile", { linkId: link.id, file, timestamp });
+      try {
+        await engine.call("sendFile", { linkId: link.id, file, timestamp });
+      } catch (error) {
+        // Refused before it started (the contact's app takes no files, a stopped chat, offline): nothing is in the chat,
+        // so the copy goes too, and the composer says why.
+        justSent.delete(file.id);
+        await fileStore.delete(file.id).catch(() => {});
+        throw error;
+      }
       return { timestamp, file };
     }
     // Copied first, which takes a while for a large file: the bubble shows the copy, then the transfer.
     preparing.set(file.id, { state: "transferring", stage: "preparing", transferred: 0, size: file.size });
     preparingChanged(true);
+    let staged = false;
     void (async () => {
       const bytes = await fileBytes();
       const digest = await bytes.stage(file.id, source, (copied) => {
@@ -330,13 +343,15 @@ export const servicesPlatform: ServicesPlatform | null = {
         preparingChanged();
       });
       await fileStore.put({ id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+      // Copied: from here a refusal is the chat's, said as it is (its bubble keeps Retry), not a failed copy.
+      staged = true;
       await engine.call("sendFile", { linkId: link.id, file, timestamp });
       preparing.delete(file.id);
       preparingChanged(true);
     })().catch((error: unknown) => {
       const reason = error instanceof Error ? error.message : String(error);
       const full = /quota|space|full/i.test(reason) || (error as { name?: string })?.name === "QuotaExceededError";
-      preparing.set(file.id, { state: "failed", transferred: 0, size: file.size, error: full ? "Not enough space on this device to send it" : `Could not prepare the file: ${reason}` });
+      preparing.set(file.id, { state: "failed", transferred: 0, size: file.size, error: staged ? reason : full ? "Not enough space on this device to send it" : `Could not prepare the file: ${reason}` });
       preparingChanged(true);
     });
     return { timestamp, file };

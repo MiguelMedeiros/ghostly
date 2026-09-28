@@ -1,0 +1,25 @@
+{
+  "chats": "Conversas",
+  "copyInvite": "Copiar código de convite",
+  "deleteAllChats": "Excluir todas as conversas",
+  "deleteChat": "Excluir conversa",
+  "join": "Entrar",
+  "joinChat": "Entrar numa conversa",
+  "new": "Nova",
+  "newChat": "Nova Conversa",
+  "newMenu": {
+    "chat": "Conversa",
+    "chatHint": "Uma pessoa, com um convite",
+    "group": "Grupo",
+    "groupHint": "Um link que qualquer pessoa pode abrir",
+    "label": "Criar um grupo ou uma conversa"
+  },
+  "noChats": "Nenhuma conversa",
+  "pinned": "Fixada",
+  "quiet": "Está quieto por aqui...",
+  "quietHint": "Hora de assombrar alguém! 👻",
+  "searchPlaceholder": "Buscar conversas...",
+  "settings": "Configurações",
+  "sharedIdentity": "Compartilhou uma identidade",
+  "startChat": "Nova conversa"
+}

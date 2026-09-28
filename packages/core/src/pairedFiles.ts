@@ -5,6 +5,7 @@ import { sanitizeFileName, sanitizeMime, type FileInfo, type FileSink, type File
 import { pairedReplyAuthor, readReply, wireReply } from "./replies";
 import { readForwarded } from "./forwards";
 import { parseVideoMeta } from "./video";
+import { parseImageMeta } from "./image";
 import { parseVoiceMeta } from "./voice";
 
 const CHUNK = 16 * 1024;
@@ -62,7 +63,7 @@ export class PairedFiles {
     try {
       const { reply, forwarded, ...announced } = file;
       const hops = readForwarded(forwarded);
-      await this.exchange(file.id, 0, "start", { t: "pf-start", ...announced, name: sanitizeFileName(file.name), mime: sanitizeMime(file.mime), voice: parseVoiceMeta(file.voice, sanitizeMime(file.mime)), video: parseVideoMeta(file.video, sanitizeMime(file.mime)), ...(reply && { r: wireReply(reply) }), ...(hops && { fw: hops }) });
+      await this.exchange(file.id, 0, "start", { t: "pf-start", ...announced, name: sanitizeFileName(file.name), mime: sanitizeMime(file.mime), voice: parseVoiceMeta(file.voice, sanitizeMime(file.mime)), video: parseVideoMeta(file.video, sanitizeMime(file.mime)), image: parseImageMeta(file.image, sanitizeMime(file.mime)), ...(reply && { r: wireReply(reply) }), ...(hops && { fw: hops }) });
       const hash = sha256.create();
       let offset = 0;
       for await (const part of source) {
@@ -126,6 +127,8 @@ export class PairedFiles {
         if (voice) file.voice = voice;
         const video = parseVideoMeta(frame.video, file.mime);
         if (video) file.video = video;
+        const image = parseImageMeta(frame.image, file.mime);
+        if (image) file.image = image;
         const reply = readReply(frame.r, pairedReplyAuthor);
         if (reply) file.reply = reply;
         const forwarded = readForwarded(frame.fw);

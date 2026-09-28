@@ -1,0 +1,41 @@
+{
+  "accept": "Accetta",
+  "audio": "Chiamata audio",
+  "camera": "Fotocamera",
+  "cameraOff": "Fotocamera disattivata",
+  "connected": "Connesso",
+  "connecting": "Connessione...",
+  "decline": "Rifiuta",
+  "devices": {
+    "back": "{{name}} è tornato",
+    "lost": "{{name}} scollegato. Uso quello predefinito.",
+    "menu": "Dispositivi",
+    "switchBack": "Torna a usarlo"
+  },
+  "duration": "Durata: {{duration}}",
+  "end": "Termina chiamata",
+  "ended": "Chiamata terminata",
+  "hangUp": "Riaggancia",
+  "incoming": "Chiamata in arrivo",
+  "missed": "Chiamata persa",
+  "mute": "Disattiva audio",
+  "outgoing": "Chiamata in corso...",
+  "rejected": "Chiamata rifiutata",
+  "selfView": "Trascina per spostare, tira un angolo per ridimensionare, doppio clic per ripristinare",
+  "shareScreen": "Condividi schermo",
+  "sharing": {
+    "both": "Tu e {{name}} state condividendo i vostri schermi",
+    "peer": "{{name}} sta condividendo il suo schermo",
+    "you": "Stai condividendo il tuo schermo"
+  },
+  "stopSharing": "Interrompi condivisione",
+  "turnCameraOff": "Spegni fotocamera",
+  "turnCameraOn": "Accendi fotocamera",
+  "unmute": "Attiva audio",
+  "video": "Videochiamata",
+  "window": {
+    "chat": "Torna alla chat",
+    "full": "Torna a schermo intero",
+    "small": "Tieni la chiamata in una finestra piccola"
+  }
+}

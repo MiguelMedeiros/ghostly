@@ -1,0 +1,7 @@
+{
+  "enterPassword": "パスワードを入力してロック解除",
+  "incorrectPassword": "パスワードが正しくありません。もう一度お試しください",
+  "title": "Ghostlyはロックされています",
+  "tooManyAttempts": "試行回数が多すぎます。{{seconds}} 秒後に再試行してください",
+  "unlock": "ロック解除"
+}

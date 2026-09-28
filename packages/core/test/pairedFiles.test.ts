@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PairedFiles } from "../src/pairedFiles";
 import { LIMITS, type FrameChannel } from "../src/frames";
 import type { FileSink } from "../src/files";
-// covers: files.paired.send, files.voice.meta
+// covers: files.paired.send, files.voice.meta, files.image.meta
 const file = { id: "abcdefgh12345678", name: "test.bin", mime: "application/octet-stream", size: 70001, timestamp: 10 };
 async function* source(size = file.size) { yield new Uint8Array(size).fill(123); }
 function setup(sink?: FileSink | null, mutate?: (frame: string) => string) {
@@ -85,6 +85,29 @@ describe("paired files with durable receipts", () => {
     const other = setup();
     await other.a.send({ ...file, id: "voice-bin-0001", voice }, source());
     expect(other.received).toHaveBeenCalledWith({ ...file, id: "voice-bin-0001" });
+    other.a.closeAll(); other.b.closeAll();
+  });
+  it("carries a picture's size (files/2); an offer without one or with a bad one still brings the file", async () => {
+    const image = { width: 3024, height: 4032 };
+    const t = setup();
+    await t.a.send({ ...file, mime: "image/jpeg", image }, source());
+    expect(t.received).toHaveBeenCalledWith({ ...file, mime: "image/jpeg", image });
+    t.a.closeAll(); t.b.closeAll();
+
+    const none = setup();
+    await none.a.send({ ...file, id: "image-none-001", mime: "image/png" }, source());
+    expect(none.received).toHaveBeenCalledWith({ ...file, id: "image-none-001", mime: "image/png" });
+    none.a.closeAll(); none.b.closeAll();
+
+    const lied = setup(undefined, frame => frame.replace('"width":3024', '"width":-1'));
+    await lied.a.send({ ...file, id: "image-bad-0001", mime: "image/jpeg", image }, source());
+    expect(lied.received).toHaveBeenCalledWith({ ...file, id: "image-bad-0001", mime: "image/jpeg" });
+    lied.a.closeAll(); lied.b.closeAll();
+
+    // Not a picture: no size, whatever is announced.
+    const other = setup();
+    await other.a.send({ ...file, id: "image-bin-0001", image }, source());
+    expect(other.received).toHaveBeenCalledWith({ ...file, id: "image-bin-0001" });
     other.a.closeAll(); other.b.closeAll();
   });
   it("carries the message a file answers (r), and drops one that does not check out", async () => {

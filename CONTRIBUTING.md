@@ -94,6 +94,10 @@ CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop ch
 
 Details: [docs/TESTING.md](docs/TESTING.md).
 
+### Text in the app
+
+Every string the app shows goes through `t("area.key")`. Each language is a folder of one file per area of the app, `src/locales/<language>/<area>.json`: add a key to its area's file in all eight languages (English in `en/`, the source). A new area is a new file in every folder, plus its two lines in `src/locales/en/index.ts`, which gives `t()` its types. Keys are sorted in every file: `npm run locales:sort` puts them in order, and the i18n tests fail on a file out of order, on a key missing from a language, and on a placeholder a translation drops.
+
 ### Writing docs and site copy
 
 - Keep the README short; details go in `docs/`. A new topic gets its own page there and one link from the README.
