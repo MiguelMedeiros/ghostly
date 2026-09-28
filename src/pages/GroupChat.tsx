@@ -151,7 +151,9 @@ export function GroupChat() {
   const shown = useMemo(() => group ? messages.filter(m => !m.event && !m.groupPay).map(m => toChatMessage(m, group, settings.defaultNickname)) : [],
     [messages, group, settings.defaultNickname]);
   const forwarding = useForwarding(group ? `group:${groupId}` : undefined, shown);
-  const shownOf = (m: StoredMessage) => shown.find(c => c.id === m.id) ?? toChatMessage(m, group!, settings.defaultNickname);
+  // By id: a row looks its message up once per draw, and a long group has thousands of rows.
+  const shownById = useMemo(() => new Map(shown.map(c => [c.id, c])), [shown]);
+  const shownOf = (m: StoredMessage) => shownById.get(m.id) ?? toChatMessage(m, group!, settings.defaultNickname);
   // Members learn my name on the edges, as a contact does on a chat: the engine must know it here too.
   const engineNick = state?.settings.nick;
   useEffect(() => {
