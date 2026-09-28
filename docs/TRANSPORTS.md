@@ -78,6 +78,11 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 ### Relay budget: a wait, not an error
 
 - A browser allows itself 30 requests a minute per relay (reads and publishes together, shared by every chat; `REQUESTS_PER_MINUTE` in `packages/core/src/relay.ts`). Background reads have a share of 20.
+- Who goes first when links want more than that ([#401](https://github.com/MiguelMedeiros/ghostly/pull/401), [#434](https://github.com/MiguelMedeiros/ghostly/pull/434)):
+  - A 1:1 chat that polls fast (a signal from its contact due any moment), or whose request the budget refused, keeps the last 10 requests of each relay's minute for itself. Group requests stop at 20, until a minute after the chat last needed them.
+  - While any link polls fast, background reads (a community's lookups, slow mailbox checks) drop to 5 a relay per minute.
+  - After a window that looked fast for a contact's offer, a link slows down step by step (4, 4, 8, 16 s on the relays), not straight to its background pace: an offer held back by the other side's budget can land just after the window.
+  - A signal's fast window counts from when the signal went out, not from when it was made.
 - A request this budget holds back, or a relay's 429, is a **wait** ([#271](https://github.com/MiguelMedeiros/ghostly/pull/271)). `RelayTransport` throws a typed `DiscoveryBudgetError` with the time until a request frees, and every publisher retries then. It never counts as a failed attempt and the UI shows no error.
 
 ### Circuit breaker per relay
