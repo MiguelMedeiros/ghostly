@@ -27,8 +27,8 @@ const LOOKS_LIKE_HOST = /\.\p{L}[\p{L}\p{N}-]{1,62}$|^\d{1,3}(?:\.\d{1,3}){3}$/u
 const NOT_A_TLD = /\.(?:[cm]?js|jsx|tsx?|json|css|html?|txt|log|csv|png|jpe?g|gif|svg|webp|toml|ya?ml|lock|wasm|pdf|rb|go)$/i;
 /** Extensions that are country domains too (Moldova, Paraguay…): a file only as a path's last part ("docs/CHAT.md"). */
 const FILE_IN_PATH = /\.(?:md|py|rs|sh)$/i;
-/** Characters a browser reads as the dot between a host's labels. */
-const DOTS = /[\u3002\uff0e\uff61\u2024]/g;
+/** Characters a browser reads as the dot between a host's labels, and ones that only look like it. */
+const DOTS = /[\u00b7\u0701\u06d4\u2024\u2027\u2e3c\u3002\uff0e\uff61]/g;
 
 /**
  * Whether a link's text would make a reader think it goes somewhere else: it names a host that is not the link's (nor

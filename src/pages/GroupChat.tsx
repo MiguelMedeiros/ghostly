@@ -321,7 +321,8 @@ export function GroupChat() {
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
       <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
-        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3">
+        {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
+        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
           {messages.map(m => m.event
             ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group)}</span></div>
             // A note about a payment this device is part of is shown under its own bubble instead.

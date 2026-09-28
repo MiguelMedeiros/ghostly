@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { CONTACT_KEY } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 
@@ -47,21 +48,16 @@ export class Allowlist {
   }
 }
 
-/** A contact key as chats show it (`peer`): 52 characters of z-base-32. */
-const CONTACT_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
-
 /**
- * `--from` and `--group` as ids, resolved once at start: a chat by id, prefix or name, else a contact key; a group by
- * id, prefix or name. A name that later changes (or a contact who renames themselves) moves nothing.
+ * `--from` and `--group` as ids, resolved once at start: a contact key as that key (whatever any chat is named), else a
+ * chat by id, prefix or name (`findChat`); a group by id, prefix or name. A name that later changes (or a contact who
+ * renames themselves) moves nothing.
  */
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
-    try { chats.add(((await call("chat.get", { chat: ref })) as { id: string }).id); }
-    catch (error) {
-      if (!(error instanceof CliError && error.code === "not_found") || !CONTACT_KEY.test(ref)) throw error;
-      keys.add(ref);
-    }
+    if (CONTACT_KEY.test(ref)) keys.add(ref);
+    else chats.add(((await call("chat.get", { chat: ref })) as { id: string }).id);
   }
   for (const ref of groups) groupIds.add(((await call("group.get", { group: ref })) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);
@@ -125,7 +121,9 @@ export function readCursor(path: string | undefined): number | undefined {
 }
 
 function writeCursor(path: string, seq: number): void {
-  writeFileSync(path + ".tmp", String(seq) + "\n", { mode: 0o600 });
+  // A new file each time (`wx`): a link left where the temporary file goes is removed, never written through.
+  rmSync(path + ".tmp", { force: true });
+  writeFileSync(path + ".tmp", String(seq) + "\n", { mode: 0o600, flag: "wx" });
   renameSync(path + ".tmp", path);
 }
 
@@ -134,13 +132,20 @@ export function matches(event: GhostlyEvent, types: readonly string[]): boolean 
   return types.some((type) => type.endsWith(".") || type.endsWith("*") ? event.type.startsWith(type.replace(/\*$/, "")) : event.type === type);
 }
 
+/** The environment a hook runs in: this one's, less the backup passphrase (a hook, and what it runs, never needs it). */
+export function hookEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const rest = { ...env };
+  delete rest.GHOSTLY_BACKUP_PASSPHRASE;
+  return rest;
+}
+
 /** Runs `command` through the shell with the event on stdin (never in its arguments); resolves with its exit code. */
 function runExec(command: string, event: GhostlyEvent): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(command, {
       shell: true,
       stdio: ["pipe", "inherit", "inherit"],
-      env: { ...process.env, GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
+      env: { ...hookEnv(process.env), GHOSTLY_EVENT_TYPE: event.type, GHOSTLY_EVENT_ID: event.id, GHOSTLY_EVENT_SEQ: String(event.seq) },
     });
     child.on("error", () => resolve(127));
     child.on("close", (code) => resolve(code ?? 1));
