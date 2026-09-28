@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONNECT_TIMEOUT_MS } from "@ghostly/core";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
-// covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit
+// covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -587,6 +587,47 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     }
     expect(chat.peerPicture).toBe(true);
     await listen.stop();
+  });
+
+  it("forward a text and a file on: each a new message that says it was forwarded, the file from the bytes here, byte for byte", async () => {
+    const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+    const listen = await listenTo(alice, "--type", "message.received", "--type", "file.done");
+    const text = ok(await as(bob, "send", "alice", "pass **this** on", "--wait", "delivered")).messageId as string;
+    const picture = join(bob, "ghost.png");
+    writeFileSync(picture, randomBytes(120_000));
+    ok(await as(bob, "file", "send", "alice", picture));
+    const got = await listen.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: unknown }).file);
+    const fileMessage = got.message as { id: string; file: { id: string } };
+    await listen.waitFor((e) => e.type === "file.done" && e.file === fileMessage.file.id);
+    await listen.stop();
+    const theirs = (ok(await as(alice, "chat", "history", "bob", "--limit", "20")).messages as { id: string; text: string; from: string }[]).find((m) => m.text === "pass **this** on" && m.from === "peer")!;
+    expect(theirs).toBeTruthy();
+    expect(text).toMatch(/^me_/);
+
+    // Back into the chat: Bob's side reads two messages of Alice's, forwarded once, the Markdown source kept.
+    const watch = await listenTo(bob, "--type", "message.received", "--type", "file.done");
+    const forwarded = ok(await as(alice, "forward", "bob", theirs.id, fileMessage.id, "--to", "bob", "--wait", "sent"));
+    expect(forwarded).toMatchObject({ from: chatA, results: [{ to: chatA, kind: "chat", messageIds: [expect.any(String), expect.any(String)], error: null }] });
+    const again = await watch.waitFor((e) => e.type === "message.received" && !!(e.message as { file?: unknown }).file, 60_000);
+    const copy = again.message as { id: string; forwarded?: number; file: { id: string; name: string } };
+    expect(copy).toMatchObject({ forwarded: 1, file: { name: "ghost.png" } });
+    await watch.waitFor((e) => e.type === "file.done" && e.file === copy.file.id, 60_000);
+    await watch.stop();
+    const rows = ok(await as(bob, "chat", "history", "alice", "--limit", "5")).messages as { text: string; from: string; forwarded?: number }[];
+    expect(rows.find((m) => m.from === "peer" && m.text === "pass **this** on")).toMatchObject({ forwarded: 1 });
+    const saved = ok(await as(bob, "file", "save", copy.file.id, "--path", join(bob, "ghost-forwarded.png")));
+    expect(sha(saved.path as string)).toBe(sha(picture));
+
+    // Into the group: the text goes, a file is refused (groups take texts only), a message not in the chat is not found.
+    const inGroup = await listenTo(bob, "--type", "group.message");
+    const toGroup = ok(await as(alice, "forward", "bob", theirs.id, "--to", "Bot crew", "--wait", "sent"));
+    expect(toGroup).toMatchObject({ results: [{ kind: "group", error: null }] });
+    // By its text: a message said in the group just before may still be arriving.
+    expect(await inGroup.waitFor((e) => e.type === "group.message" && (e.message as { text?: string }).text === "pass **this** on", 60_000)).toMatchObject({ message: { forwarded: 1 } });
+    await inGroup.stop();
+    expect(error(await as(alice, "forward", "bob", fileMessage.id, "--to", "Bot crew"), "refused", 1).message).toMatch(/Groups take no files yet/);
+    error(await as(alice, "forward", "bob", "no-such-message", "--to", "bob"), "not_found", 3);
+    error(await as(alice, "forward", "bob", theirs.id), "bad_request", 1);
   });
 
   it("talk in a private mesh group: the stream names the sender, and a reply names the id group send gave", async () => {

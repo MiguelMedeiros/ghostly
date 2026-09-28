@@ -17,7 +17,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "loadPublicGraph", "loadPublicPostImage", "setDidListed", "nostrLoadContact", "nostrForgetContact", "nostrLoadOwn",
   "nostrLookup", "nostrDraft", "nostrPublish", "createLink", "takeInvite", "joinLink", "ensureLink", "confirmPair",
   "pollNow", "removeLink", "renameLink", "setActiveLink", "sendMessage", "editMessage", "retryMessage", "react", "messageDetails",
-  "deleteMessage", "exportLinks", "sendFile", "fileAction", "setDeliveryMode", "setTransportPreference",
+  "deleteMessage", "exportLinks", "sendFile", "forwardMessages", "fileAction", "setDeliveryMode", "setTransportPreference",
   "setChatTransport", "setChatPaymentMethods", "setChatHold", "connect", "walletAddMint", "walletCreate",
   "walletRemove", "walletTestCoins", "wake", "peekProfile", "walletSetPrimaryMint", "walletRemoveMint", "walletReceiveLightning",
   "walletQuoteInvoice", "walletPayQuote", "lnurlResolve", "lnurlInvoice", "checkPayment", "lightningSetSource",

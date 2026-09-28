@@ -5,7 +5,7 @@ import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import {
-  bool, chatOf, findChat, groupOf, list, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, findChat, findGroup, groupOf, list, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -299,6 +299,40 @@ const METHODS: Record<string, Method> = {
     const link = chatOf(ctx, params);
     return { chat: link.id, ...(await react(ctx, link.id, params)) };
   },
+  /**
+   * WISP 400 § Forwards: messages of a chat or a group sent on to up to 5 chats and groups, each as a new message of mine
+   * that says it was forwarded (one hop more) and nothing of who wrote it. A file goes from the bytes here, never
+   * fetched again; a group takes texts only. `wait: sent`: each text until it is on its way (a group's until an edge
+   * took it), each file until its transfer is done. What a chat refused comes back per chat; any refusal fails the call.
+   */
+  async "chat.forward"(ctx, params) {
+    const from = chatOrGroup(ctx, str(params, "chat", true));
+    const messageIds = list(params, "messages");
+    if (!messageIds.length) throw new CliError("bad_request", "Name the messages to forward (their ids, from history or an event)");
+    const to = list(params, "to").map((ref) => chatOrGroup(ctx, ref));
+    if (!to.length) throw new CliError("bad_request", "Forward to which chat? Name one or more with --to");
+    const history = from.group ? await node(ctx).groupMessages({ groupId: from.id }) : await node(ctx).getMessages(from.id);
+    const chosen = messageIds.map((id) => history.find((m) => m.id === id) ?? (() => { throw new CliError("not_found", `No message ${id} in this ${from.group ? "group" : "chat"}`); })());
+    if (!bool(params, "force")) for (const message of chosen) {
+      const secret = message.file ? null : findSecret(message.text);
+      if (secret) throw new CliError("confirm", `A message looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
+    }
+    const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    let results;
+    try { ({ results } = await node(ctx).forwardMessages({ linkId: from.linkId, messageIds, to: to.map((t) => t.linkId) })); }
+    catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
+    const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, error: result.error }));
+    if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
+      if (to[i]!.group) { await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms); continue; }
+      const sent = (await node(ctx).getMessages(to[i]!.id)).find((m) => m.id === messageId);
+      if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
+      else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
+    }
+    const failed = out.filter((r) => r.error);
+    if (failed.length) throw new CliError(failed.length === out.length ? "refused" : "engine", failed.map((r) => `${r.to}: ${r.error}`).join("; "), { from: from.id, results: out });
+    return { from: from.id, results: out };
+  },
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);
     await node(ctx).retryMessage({ linkId: link.id, messageId: str(params, "message", true) });
@@ -502,6 +536,22 @@ const METHODS: Record<string, Method> = {
 };
 
 /** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
+/**
+ * A chat or a group, as `forward` names them: `group:<id>` is a group; anything else a chat first (id, prefix or name),
+ * then a group. `linkId` is what the engine calls it.
+ */
+function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
+  if (ref.startsWith("group:")) { const group = findGroup(state(ctx).groups, ref.slice("group:".length)); return { id: group.id, linkId: `group:${group.id}`, group: true }; }
+  try {
+    const link = findChat(state(ctx).links, ref);
+    return { id: link.id, linkId: link.id, group: false };
+  } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    const group = findGroup(state(ctx).groups, ref);
+    return { id: group.id, linkId: `group:${group.id}`, group: true };
+  }
+}
+
 async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean }> {
   const messageId = str(params, "message", true);
   const removed = bool(params, "remove");

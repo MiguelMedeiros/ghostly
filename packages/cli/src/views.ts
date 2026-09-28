@@ -109,6 +109,8 @@ export interface MessageJson {
   editedAt?: number;
   /** Mine: the contact has not confirmed the latest edit yet. */
   editPending?: boolean;
+  /** A forwarded message (WISP 400 § Forwards): how many times it has been forwarded. Never who wrote it first. */
+  forwarded?: number;
 }
 
 export function messageJson(message: StoredMessage): MessageJson {
@@ -133,6 +135,7 @@ export function messageJson(message: StoredMessage): MessageJson {
       ...(message.replyTo.member ? { member: message.replyTo.member } : {}), found: !!message.replyTo.messageId } } : {}),
     ...(reactionsJson(message).length ? { reactions: reactionsJson(message) } : {}),
     ...(message.edit ? { edits: message.edit.seq, editedAt: message.edit.at, ...(message.edit.pending ? { editPending: true } : {}) } : {}),
+    ...(message.forwarded ? { forwarded: message.forwarded } : {}),
   };
 }
 

@@ -48,6 +48,21 @@
     }
   },
   "chat": {
+    "forward": {
+      "forward": "Transférer",
+      "select": "Sélectionner",
+      "forwarded": "Transféré",
+      "many": "Transféré de nombreuses fois",
+      "title": "Transférer à…",
+      "search": "Rechercher des discussions",
+      "messages": "{{count}} messages",
+      "noMatch": "Aucune discussion de ce nom",
+      "noChats": "Aucune discussion pour l’instant",
+      "filesHint": "Les groupes n’acceptent que du texte",
+      "pick": "Choisissez-en jusqu’à {{count}}",
+      "send": "Envoyer",
+      "selected": "{{count}} sélectionnés"
+    },
     "typeMessage": "Tapez un message...",
     "send": "Envoyer",
     "online": "en ligne",

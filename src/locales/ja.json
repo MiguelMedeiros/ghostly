@@ -48,6 +48,21 @@
     }
   },
   "chat": {
+    "forward": {
+      "forward": "転送",
+      "select": "選択",
+      "forwarded": "転送されたメッセージ",
+      "many": "何度も転送されたメッセージ",
+      "title": "転送先…",
+      "search": "チャットを検索",
+      "messages": "{{count}}件のメッセージ",
+      "noMatch": "その名前のチャットはありません",
+      "noChats": "チャットはまだありません",
+      "filesHint": "グループはテキストのみ",
+      "pick": "最大{{count}}件まで選択",
+      "send": "送信",
+      "selected": "{{count}}件選択中"
+    },
     "typeMessage": "メッセージを入力...",
     "send": "送信",
     "online": "オンライン",

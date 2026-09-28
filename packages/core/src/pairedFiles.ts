@@ -3,6 +3,7 @@ import { fromBase64Url, toBase64Url } from "./bytes";
 import { LIMITS, type FrameChannel } from "./frames";
 import { sanitizeFileName, sanitizeMime, type FileInfo, type FileSink, type FileTransferEvents } from "./files";
 import { pairedReplyAuthor, readReply, wireReply } from "./replies";
+import { readForwarded } from "./forwards";
 import { parseVideoMeta } from "./video";
 import { parseVoiceMeta } from "./voice";
 
@@ -59,8 +60,9 @@ export class PairedFiles {
     if (this.outgoing.has(file.id) || this.outgoing.size >= LIMITS.maxIncomingFilesPerPeer) throw new Error("File transfer already active");
     this.outgoing.add(file.id);
     try {
-      const { reply, ...announced } = file;
-      await this.exchange(file.id, 0, "start", { t: "pf-start", ...announced, name: sanitizeFileName(file.name), mime: sanitizeMime(file.mime), voice: parseVoiceMeta(file.voice, sanitizeMime(file.mime)), video: parseVideoMeta(file.video, sanitizeMime(file.mime)), ...(reply && { r: wireReply(reply) }) });
+      const { reply, forwarded, ...announced } = file;
+      const hops = readForwarded(forwarded);
+      await this.exchange(file.id, 0, "start", { t: "pf-start", ...announced, name: sanitizeFileName(file.name), mime: sanitizeMime(file.mime), voice: parseVoiceMeta(file.voice, sanitizeMime(file.mime)), video: parseVideoMeta(file.video, sanitizeMime(file.mime)), ...(reply && { r: wireReply(reply) }), ...(hops && { fw: hops }) });
       const hash = sha256.create();
       let offset = 0;
       for await (const part of source) {
@@ -126,6 +128,8 @@ export class PairedFiles {
         if (video) file.video = video;
         const reply = readReply(frame.r, pairedReplyAuthor);
         if (reply) file.reply = reply;
+        const forwarded = readForwarded(frame.fw);
+        if (forwarded) file.forwarded = forwarded;
         const stored = await this.events.onStored?.(file);
         if (this.closed) return;
         const sink = stored ? null : this.events.onIncoming(file);

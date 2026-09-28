@@ -121,6 +121,18 @@ export const COMMANDS: Record<string, Command> = {
     args: ["chat", "message", "emoji..."], options: { remove: { type: "boolean", description: "Take your reaction back" } },
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true }),
   },
+  "forward": {
+    method: "chat.forward", usage: "forward <chat|group> <message>... --to <chat|group>... [--force] [--wait none|sent] [--timeout s]",
+    summary: "Forward messages (texts, files from the bytes here) to up to 5 chats and groups, as new messages of yours",
+    args: ["chat", "message..."],
+    options: {
+      to: { type: "list", description: "A chat or a group to forward to (id, prefix or name; group:<id> for a group); up to 5" },
+      force: { type: "boolean", description: "Forward even if a text looks like a seed, a key or ecash" },
+      wait: { type: "string", description: "none or sent: each text on its way (in a group, taken by an edge), each file's transfer done (default none)" },
+      timeout: groupWait.timeout,
+    },
+    params: ({ options }, a) => ({ chat: a.chat, messages: (a.message ?? "").split(" ").filter(Boolean), to: options.to, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+  },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message delete": { method: "chat.delete", usage: "message delete <chat> <message>", summary: "Forget a message on this device (the contact keeps theirs)", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message details": { method: "chat.details", usage: "message details <chat> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },

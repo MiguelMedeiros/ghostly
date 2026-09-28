@@ -48,6 +48,21 @@
     }
   },
   "chat": {
+    "forward": {
+      "forward": "Encaminhar",
+      "select": "Selecionar",
+      "forwarded": "Encaminhada",
+      "many": "Encaminhada muitas vezes",
+      "title": "Encaminhar para…",
+      "search": "Buscar conversas",
+      "messages": "{{count}} mensagens",
+      "noMatch": "Nenhuma conversa com esse nome",
+      "noChats": "Nenhuma conversa ainda",
+      "filesHint": "Grupos só recebem texto",
+      "pick": "Escolha até {{count}}",
+      "send": "Enviar",
+      "selected": "{{count}} selecionadas"
+    },
     "typeMessage": "Digite uma mensagem...",
     "send": "Enviar",
     "online": "online",

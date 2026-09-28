@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 501; editorial family allocation |
 | Status | Draft |
-| Revision | 0.4.2 |
+| Revision | 0.4.3 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
@@ -28,7 +28,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 
 | Frame | From | Meaning |
 |---|---|---|
-| `pf-offer {id, name, mime, size, ts, voice?, video?, r?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
+| `pf-offer {id, name, mime, size, ts, voice?, video?, r?, fw?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)), `fw` when it was forwarded (its hop count, [401](401-paired-chat.md#forwards)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
 | `pf-accept {id, offset}` | receiver | Send from `offset` (0, or where the stored part ends) |
 | `pf-wait {id, why}` | receiver | Not now: `consent` (its person has not decided), `paused`, `busy` (other files arrive first) |
 | `pf-data {id, offset, data}` | sender | base64url bytes at `offset`, at most 16 KiB |
@@ -50,6 +50,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 - **Integrity.** The receiver computes the SHA-256 of what it stored (read back, not what passed through memory) and compares it with `pf-sum`. A mismatch deletes the file and is refused with `damaged`; the sender may offer it again under the same id, and the receiver takes it from the start without asking again.
 - **Pause and cancel.** The sender pauses by offering with `paused` and resumes by offering without it; the receiver pauses with `pf-wait` `paused` and resumes with `pf-accept`. Either side cancels: the sender with `pf-abort`, the receiver with `pf-refuse` `cancelled`; the receiver removes what it stored.
 - **Offered again after a stop (0.4.2, no wire change).** A transfer its sender stopped with `pf-abort` (a read failure, for example) is taken again from the start when the sender offers it again under the same id. One the receiver's person cancelled stays refused with `cancelled`. An older receiver refuses both, as before.
+- **Forwarded files (0.4.3).** A file forwarded from another chat ([400](400-chat.md#forwards)) is offered like any file, from the bytes on the forwarder's device, with `fw` (and `pf-start` carries it for `files/2`). The receiver's consent rules apply as they do to any file. A receiver drops a `fw` that is not a whole number from 1 to 255 and takes the file.
 - **Storage.** Received bytes go to storage as they arrive and are read back in ranges, so no file is held whole in memory (browsers: the origin-private file system, IndexedDB pieces where it is missing; Desktop: files in the app's data folder). There is no size limit but the receiver's space and safe integers (2^53 - 1 bytes).
 
 Implemented in [`chatFiles.ts`](../../packages/core/src/chatFiles.ts) (protocol) and [`fileDesk.ts`](../../packages/browser/src/engine/fileDesk.ts) (the app's records, storage and messages).
@@ -68,6 +69,7 @@ For `files/2`: the common contract's 100 MiB file bound, three concurrent incomi
 
 ## Revision log
 
+- 0.4.3 (2026-09-27): forwarded files carry `fw` on `pf-offer` and `pf-start`.
 - 0.4.2 (2026-09-27): a transfer its sender stopped (`pf-abort`) is taken again from the start when offered again; one the receiver cancelled stays refused (#352).
 - 0.4.1 (2026-09-27): optional `video` description on an offer (length, size, poster); no change for apps that ignore it.
 - 0.4 (2026-09-27): `r` on `pf-offer` and `pf-start`: a file that answers a message. A reply that does not check out is dropped; the file is taken all the same. Older apps ignore it.

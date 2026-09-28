@@ -4,14 +4,14 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2.10 |
+| Revision | 0.2.11 |
 | Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, `on-dht`, self-upgrade, DHT only per chat; replies, reactions, edits and the text's display conventions; compatibility chats for v0.4 |
+| Implementation | The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, `on-dht`, self-upgrade, DHT only per chat; replies, reactions, edits, forwards and the text's display conventions; compatibility chats for v0.4 |
 | Summary | One chat for everyone: the DHT to meet, a live link when one connects, the DHT again when none does. |
 | Availability | Available |
-| Notes | Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited, in a chat or a group, reactions put one emoji per person on a message, and lists, quotes, headings and links show as such. |
+| Notes | Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited, in a chat or a group, reactions put one emoji per person on a message, messages can be forwarded to other chats, and lists, quotes, headings and links show as such. |
 | Feature | [Chat](https://ghostly.tools/#next) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
@@ -237,6 +237,19 @@ A person can edit a text they sent in a 1:1 chat (revision 0.2.9) or a group (re
 
 **Older apps.** An app from before this revision gets nothing: it offers no `edit/1`, so no edit is sent to it, and it keeps the text it has. The edit waits on the author's side and goes once the contact's app shows edits. No second message with the new text is sent instead: a bot rewriting a status would fill an older app's chat with copies. In a group, a member on an older app drops the edit frame and keeps showing the original text; the members on newer apps see the edit.
 
+## Forwards
+
+A person can send a message they have on to other chats and groups (revision 0.2.11), as in WhatsApp: one message from its ⋮ (Forward), or several chosen first (Select, then Forward), to at most **5** chats and groups at once. Each copy is a **new message of the forwarder's**, in the order the messages were written. It carries one thing more than a message written there: a **hop count**, how many times it has been forwarded, this time included.
+
+- **What goes.** Only the content, never who wrote it first, the chat it came from or its time: a forwarded message says the forwarder sent it, and nothing more. There is no "forwarded from" line, not even as an option. The original author did not choose to be named in a chat they are not in, and a name the forwarder's app wrote in would prove nothing: any app can claim any author. The hop count says only that the text was not written here.
+- **Kinds.** A text goes as it was written (its Markdown source, [Message text](#message-text); a link preview made by the original sender goes with it on a live session). Places and the parser's cards come back because the text does. A voice message keeps its length and its bars; pictures, videos, audio files and files go from the bytes **on this device**, copied for the new chat, never fetched again: a file not all here yet cannot be forwarded until it is. A large file follows its chat's own path, so the receiver's app still asks before taking it ([501](501-paired-files.md)). Payments and payment requests (a token or a request is for the chat it was made in), identities shared in the timeline, call lines, notices and a group's history lines have no Forward.
+- **Groups.** A group's message can be forwarded anywhere. A group takes forwarded texts; it takes no files yet, so a file is not offered groups to go to.
+- **The hop count.** A message written here and forwarded carries **1**; one that came forwarded carries one more than it came with, at most **255** (the count stops there). The reader shows "↪ Forwarded" above the message, and from **5** hops on "Forwarded many times", so a text that went round many chats reads as such. A hop count that is not a whole number from 1 to 255 is dropped, and the message is kept as one written there.
+- **Secrets.** Text that looks like a seed, a private key or ecash asks first, exactly as the composer does when it is typed: forwarding a secret is sending it.
+- **How it travels.** `fw` on a 1:1 chat's `paired-message` and on a file's announcement ([401](401-paired-chat.md#forwards)), a held item's meta ([4xx](4xx-store-and-forward.md#bundle)), the DHT envelope's fifteenth element ([403](403-dht-text.md#forwards)), `f` on a private group's `group-msg` ([mesh](9xx-group-mesh.md#forwards)) and `fw` inside a community's sealed payload ([community](9xx-group-community.md#forwards)). A compatibility chat ([402](402-legacy-chat.md)) takes the text without it.
+
+**Older apps.** The hop count is an optional field an app from before this revision ignores: it shows the message as one written there. No "Forwarded:" prefix is copied into the text for it, for the reasons a reply has none ([Replies](#replies)).
+
 ## Candidate semantics
 
 Future messages need a stable sender-scoped message ID, authenticated channel/participation context, sequence within a sender generation, content type and bounded body. Distinguish locally queued, sent, received, durably stored and read; only advertise receipts actually implemented. Retries reuse IDs. Deduplication retention must cover the declared retry window and survive restart where durable delivery is promised.
@@ -271,6 +284,7 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
+- 0.2.11 (2026-09-27): forwards: a new message of the forwarder's with a hop count (1 to 255, "many times" from 5), never the original author; texts and files (from the bytes here) to at most 5 chats and groups; groups take texts only; payments, identity shares and call lines are not forwarded.
 - 0.2.10 (2026-09-27): edits in groups, private and community: authenticated as the author by the group, dropped once the author is out, no receipts; mentions carried with the new text, never notifying; older members keep the original.
 - 0.2.9 (2026-09-27): edits: the whole new text of one of the author's texts, numbered per message (highest wins, at most 100), no time limit; never rings, never unread; nothing to older apps.
 - 0.2.8 (2026-09-27): message text: the display conventions (formatting, code, lists, quotes, headings, `[text](url)` links), with the link rules; the text is still sent as typed.
