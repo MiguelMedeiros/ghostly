@@ -130,7 +130,12 @@
 .agx-controls {
   justify-content: flex-start;
 }
+/* Until the caption fits beside the picture, it comes first, so the words and the picture share one screen. */
 @container psx (max-width: 1099px) {
+  .agx .psx-grid {
+    grid-template-areas: "steps" "copy" "stage" "controls";
+    gap: 16px;
+  }
   .agx-controls {
     justify-content: center;
   }
@@ -317,8 +322,8 @@ html:not(.js) .agx .agx-untrusted {
 }
 .agx-shield {
   position: absolute;
-  top: 42px;
-  right: 12px;
+  right: 14px;
+  bottom: 12px;
   width: 44px;
   height: 44px;
   filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.45));
@@ -569,7 +574,7 @@ html:not(.js) .agx .agx-untrusted {
 @keyframes agx-fly-y {
   0% {
     opacity: 0;
-    transform: translate(-50%, -50%) translateY(-110px) scale(0.7);
+    transform: translate(-50%, -50%) translateY(-93px) scale(0.7);
   }
   18%,
   82% {
@@ -577,7 +582,7 @@ html:not(.js) .agx .agx-untrusted {
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -50%) translateY(110px) scale(1);
+    transform: translate(-50%, -50%) translateY(103px) scale(1);
   }
 }
 
@@ -585,11 +590,13 @@ html:not(.js) .agx .agx-untrusted {
 @container psx (max-width: 719px) {
   .agx-panels {
     grid-template-columns: minmax(0, 1fr);
-    gap: 20px;
+    gap: 18px;
   }
-  .agx-term,
+  .agx-term {
+    height: 188px;
+  }
   .agx-app {
-    height: 200px;
+    height: 168px;
   }
   .agx-lines {
     gap: 4px;

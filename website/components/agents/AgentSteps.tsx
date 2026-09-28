@@ -172,9 +172,11 @@ export function AgentSteps({ t }: { t: AgentStepsCopy }) {
                   <Cmd {...b(2, 2.2)}>ghostly send owner &quot;Hi!&quot;</Cmd>
                   <Cmd {...b(3, 0)}>ghostly listen --turns --from owner</Cmd>
                   <p className="agx-json agx-rise" {...b(3, 1.3)}>
-                    {`{"type":"agent.turn","messageId":"${MSG_ID}",`}
+                    {`{"type":"agent.turn",`}
                     <br />
-                    {" "}
+                    {` "messageId":"${MSG_ID}",`}
+                    <br />
+                    {" "}
                     <span className="agx-untrusted">
                       &quot;untrusted&quot;:{`{"text":"${t.ask}"}`}
                     </span>
