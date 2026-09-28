@@ -185,9 +185,9 @@ fn main() {
             }
             notifications::install(app.handle());
             // Files sent and received in chats, one folder per profile.
-            app.manage(file_store::FileStore::new(
-                app.path().app_data_dir()?.join("files"),
-            ));
+            let files = file_store::FileStore::new(app.path().app_data_dir()?.join("files"));
+            files.keep_private();
+            app.manage(files);
             // A video's Full screen button works in the Ghostly window (WKWebView has it off, WebView2 fills only
             // the webview).
             if let Some(main) = app.get_webview_window("main") {

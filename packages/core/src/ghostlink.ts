@@ -76,6 +76,11 @@ export const CROSSED_WAIT_MS = 3_000;
  */
 export const CROSSED_FRESH_MS = 10_000;
 /**
+ * A connection dialled in on a pinned chat must authenticate within this long, or it closes. Anyone who read the
+ * endpoint from the record can dial it: until it proves the pinned key it holds no place a person waits on.
+ */
+export const UNPROVEN_AUTH_MS = 15_000;
+/**
  * A WebRTC offer this side made that has no answer after this long: a direct native transport ranked after WebRTC is
  * dialled meanwhile, the offer still standing, and whichever goes live first carries the chat. The contact may not read
  * the offer for a while (a live chat reads every minute), or the relays' request budget may hold its answer back until
@@ -459,7 +464,8 @@ export class GhostLink {
   private switchAllowedUntil = 0;
   private switchAck: (() => void) | null = null;
   private readonly switcher: TransportSwitch;
-  private candidate: { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; reject(error: Error): void } | null = null;
+  /** `plan`: a switch both sides agreed; without one, a replacement the contact dialled (`attachReplacement`). */
+  private candidate: { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; plan?: SwitchPlan; reject(error: Error): void } | null = null;
   private candidateEpoch = 0;
   /** Channels a switch replaced, closed after `SWITCH_RETIRE_MS` (or at once on disconnect). */
   private retiring = new Map<FrameChannel, { timer: ReturnType<typeof setTimeout>; close(): void }>();
@@ -2248,7 +2254,15 @@ export class GhostLink {
    * Before the pin a held session keeps the chat, as it always did.
    */
   private attachReplacement(channel: FrameChannel, binding: NativeBinding): void {
-    if (this.candidate || !this.options.pairing?.credentials.peerKey || !this.options.params.profile) { channel.close(); return; }
+    if (!this.options.pairing?.credentials.peerKey || !this.options.params.profile) { channel.close(); return; }
+    // A replacement dialled in that has not authenticated yet keeps no place against a newer one: whoever read the
+    // endpoint could otherwise hold it while the contact, back after a restart, is turned away.
+    const waiting = this.candidate;
+    if (waiting && !waiting.plan && this.unproven(waiting.channel) && waiting.session.state.status !== "ready") {
+      traceLink(this.myPubKeyZ32, "dialed-in-dropped", { transport: waiting.binding?.transport });
+      this.candidate = null; waiting.session.stop(); waiting.channel.close(); waiting.reject(new Error("A newer connection took its place"));
+    }
+    if (this.candidate) { channel.close(); return; }
     // Two dials crossed and both connected: the lower key's carries the chat. Here, the lower key's side, holding the
     // one it just dialled, refuses the contact's; the contact takes this one over as a replacement.
     const held = this.channel;
@@ -2285,9 +2299,11 @@ export class GhostLink {
           if (wasLive) this.peerLost("closed");
         }
       };
+      const unproven = this.unproven(channel);
       if (!migration) {
         this.activeBinding = binding; this.channel = channel; this.channelSince = Date.now();
-        this.session.setDataLinkOpen(true);
+        // One dialled in is nobody until it authenticated: the DHT keeps its pace meanwhile (set once it is ready).
+        if (!unproven) this.session.setDataLinkOpen(true);
       }
       const paired = new PairedSession(channel, {
         ...this.options.pairing,
@@ -2296,6 +2312,7 @@ export class GhostLink {
         fingerprints: fingerprints ?? undefined,
         binding, transports: migration?.plan?.choices ?? this.transportOffer(), allowFallback: migration?.plan?.local.fallback ?? this.fallback,
         transportSwitchSupport: true,
+        ...(unproven ? { authTimeoutMs: UNPROVEN_AUTH_MS } : {}),
         holdSupport: !!this.options.holdSupport,
         proofSupport: !!this.options.events?.onPeerProof,
         identitySupport: !!this.options.events?.onIdentityProof,
@@ -2345,6 +2362,7 @@ export class GhostLink {
             else { replaced = true; traceLink(this.myPubKeyZ32, "replaced", { from, to: paired.state.transport }); }
           }
           if (this.channel !== channel) return;
+          this.session.setDataLinkOpen(true);
           this.securityRejected = false;
           const events = this.options.events ?? {};
           if (carried) this.pairedFiles = carried;
@@ -2590,7 +2608,7 @@ export class GhostLink {
           }
         },
       });
-      if (migration) this.candidate = { channel, session: paired, binding, reject: migration.reject };
+      if (migration) this.candidate = { channel, session: paired, binding, ...(migration.plan && { plan: migration.plan }), reject: migration.reject };
       else this.paired = paired;
       paired.start();
       return;

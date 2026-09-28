@@ -1,0 +1,1 @@
+a member given a token on an edge that a group on hubs later dropped is remembered as holding the subscription: its leaving the roster, this profile leaving or forgetting the group, or muting the group replaces the subscription.

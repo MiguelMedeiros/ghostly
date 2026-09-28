@@ -999,6 +999,12 @@ export interface Settings {
    */
   wakeMutedGroups?: string[];
   /**
+   * Private groups → members that were given a token on an edge a group on hubs later dropped: they still hold the
+   * subscription with no edge to close, so their leaving the group (or this profile leaving it, or muting it) replaces
+   * it. Cleared with every new subscription. Set by the engine only.
+   */
+  wakeHeldBy?: Record<string, string[]>;
+  /**
    * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
    */
