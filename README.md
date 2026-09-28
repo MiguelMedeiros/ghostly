@@ -1,6 +1,6 @@
+https://github.com/user-attachments/assets/38824bb2-0e73-4066-93e2-0850ccd15c2e
+
 <div align="center">
-  <img src="website/public/favicon.svg" width="96" height="96" alt="Ghostly logo">
-  <h1>Ghostly</h1>
   <p>An end-to-end encrypted, peer-to-peer messenger with a wallet and verifiable identities built in.<br>No Ghostly server, no account.</p>
   <p>
     <a href="https://github.com/MiguelMedeiros/ghostly/releases/latest"><img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?label=release" alt="Latest release"></a>
@@ -13,8 +13,6 @@
     <a href="https://ghostly.tools"><img src="https://img.shields.io/badge/Website-475569?style=for-the-badge" alt="Website"></a>
   </p>
 </div>
-
-https://github.com/user-attachments/assets/38824bb2-0e73-4066-93e2-0850ccd15c2e
 
 <table>
   <tr>
@@ -49,4 +47,4 @@ https://github.com/user-attachments/assets/38824bb2-0e73-4066-93e2-0850ccd15c2e
 
 ---
 
-<p align="center"><sub><a href="LICENSE">MIT License</a>. Built by Miguel Medeiros (<a href="https://github.com/MiguelMedeiros">GitHub</a>, <a href="https://x.com/_miguelmedeiros">X @_miguelmedeiros</a>).</sub></p>
+<p align="center">Built by <a href="https://github.com/MiguelMedeiros">Miguel Medeiros</a><br><a href="LICENSE">MIT License</a></p>
