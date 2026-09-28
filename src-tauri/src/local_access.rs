@@ -381,6 +381,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn after_a_few_refused_shares_the_page_brings_up_no_more_dialogs() {
+        let access = LocalAccess::default();
+        let asked = AtomicUsize::new(0);
+        for port in 1..=MAX_REFUSALS + 3 {
+            let refused = access
+                .ensure(
+                    "p",
+                    &format!("http://127.0.0.1:{port}"),
+                    Reason::Share,
+                    |_, _| {
+                        asked.fetch_add(1, Ordering::SeqCst);
+                        async { false }
+                    },
+                )
+                .await;
+            assert!(refused.is_err());
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), MAX_REFUSALS);
+        // The same address again, or one nobody refused: still no dialog until the app restarts.
+        for origin in ["http://127.0.0.1:1", "http://localhost:3400"] {
+            assert!(access
+                .ensure("p", origin, Reason::Share, |_, _| async {
+                    panic!("asked after {MAX_REFUSALS} refused shares")
+                })
+                .await
+                .is_err());
+        }
+        assert!(!access.is_allowed("p", "http://localhost:3400"));
+    }
+
+    #[tokio::test]
+    async fn an_allowed_share_does_not_count_toward_the_limit() {
+        let access = LocalAccess::default();
+        for port in 1..=MAX_REFUSALS + 2 {
+            access
+                .ensure(
+                    "p",
+                    &format!("http://127.0.0.1:{port}"),
+                    Reason::Share,
+                    |_, _| async { true },
+                )
+                .await
+                .unwrap();
+        }
+        for _ in 1..MAX_REFUSALS {
+            let _ = access
+                .ensure("p", "http://127.0.0.1:9000", Reason::Share, |_, _| async {
+                    false
+                })
+                .await;
+        }
+        // One refusal short of the limit: the person is still asked.
+        access
+            .ensure("p", "http://127.0.0.1:9000", Reason::Share, |_, _| async {
+                true
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn requests_arriving_together_wait_on_one_dialog() {
         let access = Arc::new(LocalAccess::default());
         let asked = Arc::new(AtomicUsize::new(0));

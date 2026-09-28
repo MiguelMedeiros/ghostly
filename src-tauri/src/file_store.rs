@@ -563,4 +563,54 @@ mod tests {
         );
         fs::remove_dir_all(dir).ok();
     }
+
+    /// A saved copy came from a contact: it carries the system's "downloaded from the internet"
+    /// mark, so opening it goes through Gatekeeper (macOS) or SmartScreen (Windows) first.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_saved_copy_is_quarantined() {
+        use std::os::unix::ffi::OsStrExt;
+        let (files, dir) = store();
+        files.append("p", "f", 0, b"#!/bin/sh\necho boo\n").unwrap();
+        let target = dir.join("run me.command");
+        files.copy_to("p", "f", &target).unwrap();
+
+        let path = std::ffi::CString::new(target.as_os_str().as_bytes()).unwrap();
+        let mut value = [0u8; 256];
+        // SAFETY: both strings are NUL-terminated and the buffer is as long as the size given.
+        let read = unsafe {
+            libc::getxattr(
+                path.as_ptr(),
+                c"com.apple.quarantine".as_ptr(),
+                value.as_mut_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            )
+        };
+        assert!(read > 0, "no quarantine attribute on the saved copy");
+        let value = std::str::from_utf8(&value[..read as usize]).unwrap();
+        let fields: Vec<&str> = value.split(';').collect();
+        assert_eq!(fields[0], "0081", "{value}");
+        assert!(u64::from_str_radix(fields[1], 16).unwrap() > 0, "{value}");
+        assert_eq!(fields[2], "Ghostly", "{value}");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_saved_copy_is_quarantined() {
+        let (files, dir) = store();
+        files.append("p", "f", 0, b"@echo boo\r\n").unwrap();
+        let target = dir.join("run me.cmd");
+        files.copy_to("p", "f", &target).unwrap();
+        let mut stream = target.clone().into_os_string();
+        stream.push(":Zone.Identifier");
+        assert_eq!(
+            fs::read_to_string(PathBuf::from(stream)).unwrap(),
+            "[ZoneTransfer]\r\nZoneId=3\r\n"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"@echo boo\r\n");
+        fs::remove_dir_all(dir).ok();
+    }
 }

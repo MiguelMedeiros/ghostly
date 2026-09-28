@@ -77,6 +77,11 @@ fn is_own_origin(host: Option<&str>, peer: &str, service: &str) -> bool {
     }
 }
 
+/// Whether the window may go to `url`. STUB (tests first).
+fn may_navigate(_url: &url::Url, _peer: &str, _service: &str) -> bool {
+    true
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -282,6 +287,51 @@ mod tests {
             "atlas"
         ));
         assert!(!is_own_origin(None, PEER, "atlas"));
+    }
+
+    fn may(url: &str) -> bool {
+        may_navigate(&url::Url::parse(url).unwrap(), PEER, "atlas")
+    }
+
+    #[test]
+    fn the_window_stays_on_its_own_origin() {
+        for own in [
+            format!("{SCHEME}://atlas.{PEER}/"),
+            format!("{SCHEME}://atlas.{PEER}/maps/2?x=1#top"),
+            format!("{SCHEME}://ATLAS.{PEER}/"),
+            // How Windows and Android spell it.
+            format!("http://{SCHEME}.atlas.{PEER}/page"),
+            format!("https://{SCHEME}.atlas.{PEER}/page"),
+            // Frames the app makes of its own.
+            "about:blank".into(),
+            "about:srcdoc".into(),
+            format!("blob:{SCHEME}://atlas.{PEER}/1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
+        ] {
+            assert!(may(&own), "{own}");
+        }
+        for elsewhere in [
+            // The Ghostly window's own origin, under a "<title> — Ghostly" title.
+            "tauri://localhost/".to_string(),
+            "http://tauri.localhost/".into(),
+            "https://example.com/login".into(),
+            "http://127.0.0.1:3400/".into(),
+            "file:///etc/passwd".into(),
+            "data:text/html,<h1>Ghostly</h1>".into(),
+            "javascript:alert(1)".into(),
+            "about:config".into(),
+            // Another contact's, or another app of the same contact.
+            format!("{SCHEME}://atlas.{OTHER}/"),
+            format!("{SCHEME}://notes.{PEER}/"),
+            format!("{SCHEME}://atlas.{PEER}.evil.test/"),
+            // The Windows spelling is wry's alone: under the custom scheme it is another host.
+            format!("{SCHEME}://{SCHEME}.atlas.{PEER}/"),
+            // A real website whose name happens to spell the origin.
+            format!("https://atlas.{PEER}/"),
+            "blob:https://example.com/1b4e28ba-2fa1-11d2-883f-0016d3cca427".into(),
+            format!("blob:{SCHEME}://atlas.{OTHER}/1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
+        ] {
+            assert!(!may(&elsewhere), "{elsewhere}");
+        }
     }
 }
 

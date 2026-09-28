@@ -255,6 +255,28 @@ mod tests {
     }
 
     #[test]
+    fn tunnel_translation_and_site_local_ranges_are_not_public() {
+        for private in [
+            // fec0::/10 site-local (deprecated, still routed inside some networks)
+            "fec0::1",
+            "feff:ffff::1",
+            // 2002::/16 6to4: the next 32 bits are an IPv4 address, here 127.0.0.1
+            "2002:7f00:1::1",
+            "2002:c0a8:101::1",
+            // 2001::/32 Teredo: carries an IPv4 server and client address
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+            // 64:ff9b:1::/48 local-use NAT64 (inside 64:ff9b::/32, refused whole)
+            "64:ff9b:1::a00:1",
+        ] {
+            assert!(!is_public(private.parse().unwrap()), "{private}");
+        }
+        // Neighbours of those ranges stay public.
+        for public in ["2001:4860:4860::8888", "2003::1", "2a00:1450::1"] {
+            assert!(is_public(public.parse().unwrap()), "{public}");
+        }
+    }
+
+    #[test]
     fn refuses_links_that_name_this_machine_or_the_local_network() {
         for url in [
             "http://localhost/",
