@@ -316,7 +316,6 @@ export class MeshHubs {
         // Only members: someone removed, or a key the roster never had, is nobody's member here.
         if (now - ts > COMMUNITY_TOPOLOGY.lobbyFreshMs || key === session.myKey || !rosterHas(session.roster, key)) continue;
         if (!live.members.has(key)) {
-          if (live.members.size >= MESH_HUBS.hubCapacity) continue;
           live.lobbyBusyUntil = now + this.timings.lobbyBusyMs;
           live.expect.add(key);
           const id = edges.get(key);

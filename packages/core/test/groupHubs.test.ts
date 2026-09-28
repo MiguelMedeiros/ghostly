@@ -74,7 +74,7 @@ describe("the hubs a member counts on and picks", () => {
     expect(meshHubs(hubs, me, { pin: [], no: [c] }, k => k !== d, now).map(h => h.key)).toEqual([a]);
   });
 
-  it("picks two, spreads members over the hubs, prefers hubs that said so lately, and skips full ones", () => {
+  it("picks two, spreads members over the hubs, prefers hubs that said so lately and with room, a full one rather than none", () => {
     const hubKeys = keys(4), hubs = hubKeys.map(key => ({ key, ts: now, load: 3 }));
     const counts = new Map<string, number>();
     for (const me of keys(200)) for (const key of pickMeshHubs(me, hubs, now)) counts.set(key, (counts.get(key) ?? 0) + 1);
@@ -83,7 +83,10 @@ describe("the hubs a member counts on and picks", () => {
     for (const key of hubKeys) expect(counts.get(key)).toBeGreaterThan(60);
     const [me] = keys(1);
     const stale = [{ key: hubKeys[0], ts: now - 60_000, load: 0 }, { key: hubKeys[1], ts: now, load: 0 }, { key: hubKeys[2], ts: now, load: MESH_HUBS.hubCapacity }];
-    expect(pickMeshHubs(me, stale, now)).toEqual([hubKeys[1], hubKeys[0]]);
+    expect(pickMeshHubs(me, stale, now)).toEqual([hubKeys[1], hubKeys[2]]);
+    // Two hubs, both full (a group of 64 and more): both, not none.
+    const full = hubKeys.slice(0, 2).map(key => ({ key, ts: now, load: 63 }));
+    expect(pickMeshHubs(me, full, now).sort()).toEqual(hubKeys.slice(0, 2).sort());
     // One that did not take me comes last.
     expect(pickMeshHubs(me, hubs.slice(0, 3), now, new Set([hubKeys[0]]))).not.toContain(hubKeys[0]);
   });

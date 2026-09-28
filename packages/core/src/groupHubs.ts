@@ -24,7 +24,7 @@ export const MESH_HUBS = {
   hubsPerMember: 2,
   /** Hubs listed at most (the beacon's own bound). */
   maxHubs: COMMUNITY_TOPOLOGY.maxHubs,
-  /** Members one hub takes; a full hub is not picked. */
+  /** Members one hub holds before members prefer another: hubs with room first, a full one rather than none. */
   hubCapacity: COMMUNITY_TOPOLOGY.hubCapacity,
   /** Members the admin pins, and excludes, at most. */
   pinned: 8,
@@ -84,15 +84,18 @@ export function meshHubs(hubs: Hub[], me: string, policy: MeshHubPolicy, inRoste
 }
 
 /**
- * The hubs a member keeps edges with: `hubsPerMember` of those with room, by rendezvous rank for this member, so the
- * members spread over the hubs and a hub that goes moves only its own members. A hub that republished lately comes
- * before one that may be gone (its app closed; it stays listed a while), and hubs to `avoid` (they did not take me)
- * only when there is no other.
+ * The hubs a member keeps edges with: `hubsPerMember` of them, by rendezvous rank for this member, so the members
+ * spread over the hubs and a hub that goes moves only its own members. First hubs with room that republished lately,
+ * then full ones (a hub keeps an edge with every member, so a full one is only a busier one), then hubs that may be
+ * gone (their app closed; they stay listed a while), and hubs to `avoid` (they did not take me) last.
  */
 export function pickMeshHubs(me: string, hubs: Hub[], now = Date.now(), avoid: ReadonlySet<string> = new Set()): string[] {
   const lately = (h: Hub) => now - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5;
-  const open = hubs.filter(h => h.key !== me && h.load < MESH_HUBS.hubCapacity);
+  const room = (h: Hub) => h.load < MESH_HUBS.hubCapacity;
   const ranked = (list: Hub[]) => rankHubs(me, list.map(h => h.key));
-  const order = [...ranked(open.filter(h => lately(h) && !avoid.has(h.key))), ...ranked(open.filter(h => !lately(h) && !avoid.has(h.key))), ...ranked(open.filter(h => avoid.has(h.key)))];
+  const tiers = [(h: Hub) => lately(h) && room(h), (h: Hub) => lately(h), () => true];
+  const order: string[] = [];
+  for (const tier of tiers) for (const key of ranked(hubs.filter(h => h.key !== me && !avoid.has(h.key) && tier(h)))) if (!order.includes(key)) order.push(key);
+  for (const key of ranked(hubs.filter(h => h.key !== me && avoid.has(h.key)))) if (!order.includes(key)) order.push(key);
   return order.slice(0, MESH_HUBS.hubsPerMember);
 }
