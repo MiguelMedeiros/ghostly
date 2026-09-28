@@ -141,7 +141,7 @@ import { WALLET_TYPES } from "../shared/types";
 import type { WakeSubscription } from "../shared/types";
 import type { MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
-import { canEdit, takesPeerEdit, withEdit } from "../shared/edits";
+import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { EditBuffer, EditQueue } from "./edits";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { walletAwaiting } from "./walletAwaiting";
@@ -1950,6 +1950,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!message || !canEdit(message)) return refuse("Only your own text messages can be edited");
     const text = params.text.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
+    if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
     if (new TextEncoder().encode(text).length > LIMITS.maxChatMessageBytes) return refuse(`Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`);
     const stop = this.chatStopped(live);
     if (stop) return { error: stop };
@@ -1982,9 +1983,9 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The contact's edit on its message here, when it is newer than what shows. Not a new message: no sound, no unread, no move. */
   private async applyPeerEdit(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
-    if (!takesPeerEdit(message) || (message.edit?.seq ?? 0) >= edit.e) return;
+    if (!takesPeerEdit(message, edit.m) || (message.edit?.seq ?? 0) >= edit.e) return;
     const updated = await db.patchMessage(linkId, message.id, current => {
-      if (!takesPeerEdit(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
+      if (!takesPeerEdit(current, edit.m) || (current.edit?.seq ?? 0) >= edit.e) return null;
       const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, preview: edit.pv });
       return { text: next.text, edit: next.edit, preview: next.preview };
     });

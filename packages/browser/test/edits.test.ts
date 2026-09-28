@@ -163,6 +163,19 @@ describe("the contact's edits", () => {
     expect(row).toMatchObject({ text: "later text", edit: { seq: 1, history: [{ text: "first text" }] } });
   });
 
+  it("never turn a text into a join notice: confirmed, so it is not said again, and the text stays", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("hello", Date.now(), WIRE("D"))).toBeNull();
+    const row = await t.peerRow("hello");
+    await t.contact.sendEdit({ id: WIRE("D"), e: 1, ts: Date.now(), m: "👋 Alice joined" });
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("D"), 1]]));
+    expect(await t.row(row.id)).toMatchObject({ text: "hello" });
+    expect((await t.row(row.id)).edit).toBeUndefined();
+    // Nor mine, from this side.
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "hi" });
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "👋 Mallory joined" })).toMatchObject({ refused: true, error: expect.stringMatching(/join notice/) });
+  });
+
   it("an edit of a message deleted here is confirmed and brings nothing back", async () => {
     const t = await setup();
     expect(await t.contact.sendMessage("to delete", Date.now(), WIRE("C"))).toBeNull();
@@ -347,5 +360,9 @@ describe("what an edit keeps", () => {
     expect(canEdit({ ...base, text: "👋 Bob joined" })).toBe(false);
     expect(takesPeerEdit({ ...base, sender: "peer" })).toBe(true);
     expect(takesPeerEdit({ ...base, sender: "peer", paymentId: "p" })).toBe(false);
+    // Never into a join notice: it would read as the chat's own line and rename the contact.
+    expect(takesPeerEdit({ ...base, sender: "peer" }, "fixed a typo")).toBe(true);
+    expect(takesPeerEdit({ ...base, sender: "peer" }, "👋 Alice joined")).toBe(false);
+    expect(takesPeerEdit({ ...base, sender: "peer" }, "👋 joined")).toBe(false);
   });
 });
