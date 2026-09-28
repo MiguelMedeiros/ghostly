@@ -13,6 +13,7 @@ import { siteFields } from "./wisp-header.mjs";
 import { readChanges, withRevisions } from "./wisp-changes.mjs";
 import { writeLlms } from "./llms.mjs";
 import { agentPromptJson } from "./agent-prompt.mjs";
+import { expectedReadme } from "./wisp-index.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "docs/wisps");
 const destination = resolve(root, "website/public/reference");
@@ -25,7 +26,7 @@ console.log(`Catalogue coverage: ${candidates.length} roadmap inventory entries,
 writeFileSync(resolve(root, "website/lib/wisp-numbering.json"), JSON.stringify(numbering, null, 2) + "\n");
 const guide = `# WISP numbering and compatibility
 
-All ${numbering.length} specifications have the document status Draft; what is implemented is in the [catalogue](README.md). Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All ${numbering.length} specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -61,6 +62,8 @@ New profile entries describe existing wire behavior, not new implementations. No
 Old website reader URLs render the current document with a canonical link and a migration notice. Old raw Markdown URLs remain downloadable aliases. Existing section fragments remain usable; renamed top-level WISP headings have legacy anchor aliases. Catalogue fragments use current IDs first. Old numeric-only fragments 01/02/03 are ambiguous after the foundations migration; current numbering wins. Legacy full-slug reader URLs remain unambiguous. Repository forwarding documents preserve old Markdown links. No server redirect is required, including for a static export.
 `;
 writeFileSync(resolve(source, "NUMBERING.md"), guide);
+// The index on GitHub (docs/wisps/README.md): its table is read from the WISPs' headers (scripts/wisp-index.mjs).
+writeFileSync(resolve(source, "README.md"), expectedReadme(source));
 for (const entry of numbering.filter((entry) => entry.oldFile !== entry.file)) {
   writeFileSync(resolve(source, entry.oldFile), `# WISP ${entry.oldId} moved to ${entry.id}\n\nThis Draft has a new editorial number. Read [WISP ${entry.id}](${entry.file}). Protocol identifiers and implementation status are unchanged. See [the migration map](NUMBERING.md).\n`);
 }

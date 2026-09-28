@@ -5,7 +5,7 @@ Ghostly is an ephemeral, identity-addressed peer-to-peer service layer. Chat, vo
 This document describes the protocol as implemented in [`packages/core`](../packages/core), which the web app, Ghostly Browser and Ghostly Desktop share; the CLI implements the compatibility profile in Rust ([`cli`](../cli)). The [WISP catalogue](wisps/README.md) holds the per-module specifications; this page is the overview. How the bytes travel (relays, DHT, WebRTC, Iroh, HyperDHT) is in [TRANSPORTS.md](TRANSPORTS.md).
 
 - [The one chat](#the-one-chat): what every new chat speaks (invite, DHT records, capability record, chat session).
-- Sections 1 to 7: the record and frame profile first shipped in Ghostly 0.4. **Compatibility chats** ([WISP 402](wisps/402-legacy-chat.md)) still speak all of it, and the one chat reuses its link record signaling (§2, §5), its frames (§6) and its HTTP mapping (§6.4).
+- Sections 1 to 8: the record and frame profile first shipped in Ghostly 0.4. **Compatibility chats** ([WISP 402](wisps/402-legacy-chat.md)) still speak all of it, and the one chat reuses its link record signaling (§2, §5), its frames (§6) and its HTTP mapping (§6.4).
 
 ## The one chat
 
@@ -113,7 +113,7 @@ All values except `_ts` and `_ack` are `base64(nonce(24) || secretbox(plaintext)
 | Label | Content | Since |
 |---|---|---|
 | `_msgs` | JSON array of `{ "t": <ms timestamp>, "m": <text> }`, oldest first, the messages the peer has not acknowledged yet | v0 |
-| `_ts` | timestamp of the newest message in `_msgs`, plaintext | v0 |
+| `_ts` | timestamp of the newest message in `_msgs`, plaintext, so a reader sees that something is new without decrypting | v0 |
 | `_ack` | newest peer message timestamp I have received, plaintext | v0 |
 | `_nick` | my nickname | v0 |
 | `_call` | voice/video signaling, see §4 | v0 |
@@ -126,7 +126,7 @@ Clients ignore labels they do not know. A v0 client therefore keeps working with
 
 **Presence.** A peer that advertises services publishes on start and republishes every 4 minutes. It is considered online while its packet carries `_svc` and is younger than 10 minutes. When it goes offline it publishes once more without `_svc` and `_rtc`. If it cannot (the machine lost power), the packet goes stale on its own. Presence is a hint; the real test is whether the data link comes up.
 
-**Transports.** Desktop and the Rust `ghostly-cli` read the Mainline DHT directly and publish to the DHT and to the Pkarr relays; the headless `ghostly` CLI publishes to both and reads the DHT when every relay fails. Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees public keys, signed packets, plaintext `_ts`/`_ack`, sizes and activity. Without link secrets it cannot decrypt protected values or forge the expected signature. Browser peers publish to every configured relay (a publish returns once one relay took it) and read from them in turn, keeping the newest validly signed packet seen. Relay clients poll slower than DHT clients (4 s active, 2 s while signaling for at most 45 s or for 30 s when the peer's offer is due, 30 s in the background, 60 s while the data link is up), keep to 30 requests a minute per relay, 60 on `pkarr.pubky.app` (a request that budget, or a relay's 429, holds back is a wait, never an error), stop using a relay that keeps failing (a circuit breaker per relay), and send `If-Match: <timestamp of the packet being replaced>` so that a burst of publishes is not refused with 428. The relay list, the budget and the breaker: [TRANSPORTS.md](TRANSPORTS.md#layer-0-pkarr-and-the-mainline-dht).
+**Transports.** Desktop and the Rust `ghostly-cli` read the Mainline DHT directly and publish to the DHT and to the Pkarr relays; the headless `ghostly` CLI publishes to both and reads the DHT when every relay fails. Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees public keys, signed packets, plaintext `_ts`/`_ack`, sizes and activity. Without link secrets it cannot decrypt protected values or forge the expected signature. Browser peers publish to every configured relay (a publish returns once one relay took it) and read from them in turn, keeping the newest validly signed packet seen. Desktop reads the DHT every 2 s while a chat is active, every 8 s after 60 s without activity, every 0.7 s while signaling (for at most 45 s), every 20 s in the background and every 30 s while the data link is up (`DHT_POLL_INTERVALS` in `packages/core/src/link.ts`). Relay clients poll slower than DHT clients (4 s active, 10 s idle, 2 s while signaling for at most 45 s or for 30 s when the peer's offer is due, 30 s in the background, 60 s while the data link is up), keep to 30 requests a minute per relay, 60 on `pkarr.pubky.app` (a request that budget, or a relay's 429, holds back is a wait, never an error), stop using a relay that keeps failing (a circuit breaker per relay), and send `If-Match: <timestamp of the packet being replaced>` so that a burst of publishes is not refused with 428. The relay list, the budget and the breaker: [TRANSPORTS.md](TRANSPORTS.md#layer-0-pkarr-and-the-mainline-dht).
 
 ## 3. Services (v1)
 
@@ -153,6 +153,8 @@ The advertisement is authenticated twice: by the secretbox (only the link peer c
 `_call` carries `{ "t": "o" | "a" | "h" | "v", "ts", "u", "p", "f", "s", "m", "c", "ss", "v", "k", "ap", "vp" }`: ICE credentials, DTLS fingerprint, setup role, media order, the candidates (at most two in a `_call` record, one host and one server reflexive; up to eight in a `paired-call` frame, local networks first and VPN tunnels last, relay ones included), the SSRCs, what picture the sender has on, and the payload types its SDP gives Opus and VP8 when they are not 111 and 96 (§4.2). Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
 
 Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, `v` is 0 or 1, `k` is `c` or `s`, `ap` and `vp` are dynamic payload types (35-63 or 96-127) and not the same one, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Signals whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
+
+`o` is an offer, `a` the answer to it, `h` ends a call or declines an incoming one, and `v` says what picture the sender has on (§4.1). A receiver acts on a signal only when its `ts` is newer than the last one it acted on, and on an answer only when it is newer than its own offer. An offer that arrives while a call is under way does not ring a second call (a caller may offer again on a call that never connected: [WISP 601](wisps/601-webrtc-media.md#paired-profile)).
 
 v1 changed two things, both compatible with v0 peers:
 
@@ -380,7 +382,19 @@ A second profile, `group-community/1`, is for a group whose link (`group2/<group
 - Past 16 members, members whose apps stay online (or whom the admin pins in the metadata's `hubs`) are hubs: listed in the community profile's sealed beacon, found through its lobbies, both derived from the current epoch's rendezvous secret (HKDF of the epoch secret, info `ghostly-group-mesh/1 rendezvous`). The others keep edges with two hubs, and hubs pass on what they take for the first time, which receivers take as frames handed on. `group-bye` is a signed leave hubs carry to the admin, `group-reach` says whom a hub reaches, `group-reacted` is a member's signed reaction passed on by a hub. `paired-groups` version 4 says an app takes part; with no hub the group is a full mesh. See [9xx § Hubs](wisps/9xx-group-mesh.md#hubs).
 - Payments with a member use the ordinary payment frames of §6.3 on the edge to that member (`pay-ask`, `pay-req`, `pay`, `pay-res`), negotiated on the edge exactly as in a 1:1 chat; they never cross another member. A request to the whole group is one `pay-req` sent on every edge, on one rail (Cashu or Lightning), paid once. `group-pay` tells the other members what happened: `k` is `req` or `pay`, `f` the payer (or `*`, a request anyone may pay), `to` the payee, `v`/`u`/`d` the amount, unit and decimals, `r` the rail, `st` `open`, `sent`, `paid` or `closed`, `by` who paid. A receiver believes it only from the member it is about (the edge's peer): the payee for a request's state and for `paid`, the payer for `sent` and for taking that back. Additive: an app without it drops the frame, and an edge of an app without payments on edges negotiates none. Full rules: [WISP 9xx § Payments](wisps/9xx-group-mesh.md#payments).
 
-## 7. What is not in the protocol
+## 7. Why the v0.4 profile looks like this
+
+- **The Mainline DHT.** It is the largest DHT there is, run by BitTorrent clients for years: two apps can meet on it with no Ghostly server and no bootstrap network of their own.
+- **Pkarr rather than raw BEP44.** A Pkarr packet is a DNS message, so one key carries several records (`_msgs`, `_ts`, `_call`, …), each with a TTL, in a format existing DNS tools can read.
+- **Ed25519.** BEP44 requires it. Keys are 32 bytes, and their z-base-32 form is DNS-safe and serves as the address.
+- **NaCl secretbox (XSalsa20-Poly1305).** Authenticated, simple and in every libsodium binding. Its 24-byte nonce is large enough to pick at random for every value.
+- **One symmetric key per link.** Both sides can read from the first record, with no key exchange and no per-message overhead; the price is in §1: whoever holds a copy of the invite holds the key.
+- **Two keypairs per link.** Each side signs only its own packet, so neither can write in the other's name, and each side's messages, acknowledgements and signaling move independently.
+- **Polling.** The DHT stores values; it cannot push. Clients poll, fast while something is happening and slowly otherwise (§2).
+- **Compact call signals.** A full SDP is several kilobytes and a packet holds 1000 bytes, so only what is unique to the session travels and each side rebuilds the SDP (§4, §5).
+- **WebRTC for media and the data link.** The DHT is far too slow for audio, video or bulk data; it carries only the signaling, then the peers talk directly.
+
+## 8. What is not in the protocol
 
 - **A central Ghost message server.** The host serves its enabled services while online. Closing Ghostly ends live connectivity; published presence may remain stale and local history persists. Pkarr relays can carry encrypted small-message records; STUN assists discovery and TURN can relay encrypted live traffic.
 - **Public services.** A service is reachable by the peers you are linked with. Serving strangers needs a rendezvous that Pkarr, being pull-only, does not provide out of the box. One possible design is a published one-time mailbox key that strangers write their offer to; it is deliberately left for later.

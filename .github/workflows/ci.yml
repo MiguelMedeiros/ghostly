@@ -416,6 +416,11 @@ jobs:
       - name: Generate the reference files
         run: npm run sync:references
 
+      # The index table in docs/wisps/README.md is written by the sync above from the WISPs' headers
+      # (scripts/wisp-index.mjs) and committed, so GitHub shows it: the sync must leave it as it was.
+      - name: The WISP index is up to date
+        run: git diff --exit-code -- ../docs/wisps/README.md || { echo "::error file=docs/wisps/README.md::The WISP index is out of date. Run npm run sync:references in website/ and commit docs/wisps/README.md."; exit 1; }
+
       # The home's wallet deck is the app's own code, copied (scripts/sync-app-deck.mjs).
       - name: App deck copies match the app
         run: node scripts/sync-app-deck.mjs --check
