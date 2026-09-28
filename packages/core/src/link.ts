@@ -149,6 +149,8 @@ export class LinkSession {
   private callSignal: string | null = null;
   private rtcSignal: string | null = null;
   private lastCallSignalIn: string | null = null;
+  /** The `_rtc` signal the last packet that went out carried. */
+  private rtcSignalOut: string | null = null;
   private lastRtcSignalIn: string | null = null;
 
   private running = false;
@@ -461,6 +463,15 @@ export class LinkSession {
     }
     const ms = Date.now() - started;
     this.lastPublishedAt = Date.now();
+    // Signaling's fast window counts from when its signal went out: one the relays' budget held back for most of the
+    // window (an offer held 50 s) would otherwise have its answer read at the background pace (2026-09-27).
+    if (rtcSignal && rtcSignal !== this.rtcSignalOut && this.fastPollUntil > 0) {
+      const lapsed = this.fastPollUntil <= Date.now();
+      this.fastPollUntil = Math.max(this.fastPollUntil, Date.now() + FAST_POLL_MAX_MS);
+      // Its next look was put off to a slower pace: it comes at the fast one now.
+      if (lapsed) this.pollNow();
+    }
+    this.rtcSignalOut = rtcSignal;
     traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, advertise });
     this.events.onPublish?.({ ms, rtc: !!rtcSignal });
     this.discoveryResult("publish");
