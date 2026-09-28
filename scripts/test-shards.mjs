@@ -32,7 +32,8 @@ export const ALONE = ["packages/cli/test/twoPeers.test.ts"];
 export function packages() {
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const script = pkg.scripts["test:packages"];
-  const match = /^npm run test((?: -w @[\w/-]+)+)$/.exec(script);
+  // Scoped (`@ghostly/core`) or not (`ghostly-cli`, the name the CLI has on npm).
+  const match = /^npm run test((?: -w @?[\w/-]+)+)$/.exec(script);
   if (!match) throw new Error(`test:packages is "${script}": scripts/test-shards.mjs only knows "npm run test -w <workspace> ..."`);
   const names = match[1].trim().split(/\s+/).filter((w) => w !== "-w");
   const folders = new Map();

@@ -81,6 +81,16 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
 
 4. A download URL (`releases/download/v1.0.0/Ghostly_1.0.0_aarch64.dmg`) answers 200, and so does `releases/latest/download/latest.json`. That address is what every installed app asks, and it only moves to this release once the release is the latest one.
 
+5. Publishing the release starts `Publish npm` (`.github/workflows/npm-publish.yml`), which puts the CLI on npm as `ghostly-cli` at the tag's version, with provenance. It refuses a tag that is not `packages/cli/package.json`'s version, skips a version already on npm, and ends by installing it from npm and running `ghostly --version`. To run it again for a tag: `gh workflow run npm-publish.yml -f tag=v1.0.0`.
+
+### npm trusted publishing
+
+The workflow publishes with npm trusted publishing (OIDC), so no npm token is kept. npm only lets a package that exists trust a workflow, so the first time:
+
+1. Add an npm automation token as the repository secret `NPM_TOKEN` and publish the release. The workflow uses it once.
+2. On npmjs.com, `ghostly-cli` → Settings → Trusted Publisher → GitHub Actions: user `MiguelMedeiros`, repository `ghostly`, workflow `npm-publish.yml`.
+3. In the same settings, choose "Require two-factor authentication and disallow tokens", then delete the `NPM_TOKEN` secret and revoke the token.
+
 The website's download panel asks GitHub for the latest published release (at most once an hour) and uses it once every installer it links to is attached; until then it keeps the version in `website/lib/release.ts`.
 
 ## 5. Deploy

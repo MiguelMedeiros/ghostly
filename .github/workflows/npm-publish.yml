@@ -1,0 +1,102 @@
+name: Publish npm
+
+# The headless CLI (packages/cli) goes to npm as `ghostly-cli` once its release
+# is published: a person publishing the draft (docs/RELEASING.md, step 4)
+# starts this workflow. A security autorelease publishes its release with the
+# workflow token, which starts nothing, so security-autorelease.yml dispatches
+# this workflow itself. A tag can also be (re)published by hand:
+#   gh workflow run npm-publish.yml -f tag=v1.0.0
+#
+# Authentication is npm trusted publishing (OIDC): no long-lived token. npm
+# only lets a package that already exists trust a workflow, so the very first
+# publish uses the NPM_TOKEN repository secret; once the package is on npm and
+# trusts this workflow, delete that secret. See docs/RELEASING.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: ghostly-cli to npm
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # The OIDC token for trusted publishing and the provenance statement.
+      id-token: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      # Trusted publishing needs npm 11.5.1+ and Node 22.14+: Node 24 ships both.
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          registry-url: https://registry.npmjs.org
+
+      - name: The tag is the package's version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./packages/cli/package.json').version")
+          if [[ "v$version" != "$TAG" ]]; then
+            echo "::error::packages/cli/package.json is $version, the release is $TAG: nothing published"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "ghostly-cli@$version" version >/dev/null 2>&1; then
+            echo "ghostly-cli@$version is already on npm." >> "$GITHUB_STEP_SUMMARY"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.version.outputs.published == 'false'
+        run: npm ci
+
+      - name: Build
+        if: steps.version.outputs.published == 'false'
+        run: npm run build -w ghostly-cli
+
+      - name: Publish
+        if: steps.version.outputs.published == 'false'
+        env:
+          # Only for the first publish (see the top of this file); empty afterwards, and npm uses OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace ghostly-cli --provenance --access public
+
+      # What a person gets from `npm install -g ghostly-cli`: the registry can take a moment to serve a new version.
+      - name: Installs and runs from npm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          for attempt in $(seq 1 12); do
+            if npm install --no-audit --no-fund --prefer-online "ghostly-cli@$VERSION"; then break; fi
+            if [[ "$attempt" == 12 ]]; then echo "::error::ghostly-cli@$VERSION does not install from npm"; exit 1; fi
+            sleep 20
+          done
+          node_modules/.bin/ghostly --version | tee version.json
+          node -e "process.exit(require('./version.json').version === process.env.VERSION ? 0 : 1)"
+          echo "ghostly-cli@$VERSION: https://www.npmjs.com/package/ghostly-cli/v/$VERSION" >> "$GITHUB_STEP_SUMMARY"

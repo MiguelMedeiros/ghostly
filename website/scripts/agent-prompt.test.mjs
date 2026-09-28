@@ -20,7 +20,7 @@ test("the prompt is short and walks the agent from the guide to answering", () =
   assert.ok(lines.length >= 8 && lines.length <= 15, `8 to 15 lines, not ${lines.length}`);
   for (const part of [
     "https://raw.githubusercontent.com/MiguelMedeiros/ghostly/dev/packages/cli/SKILL.md",
-    "npm run build -w @ghostly/cli",
+    "npm run build -w ghostly-cli",
     "npm install -g ./ghostly-cli-*.tgz",
     "ghostly profile set --name",
     "ghostly daemon --detach",

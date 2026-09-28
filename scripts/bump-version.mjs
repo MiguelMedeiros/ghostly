@@ -47,6 +47,7 @@ for (const file of [
   "extension/public/manifest.json",
   "packages/core/package.json",
   "packages/browser/package.json",
+  "packages/cli/package.json",
   "packages/react/package.json",
   "packages/sdk/package.json",
   "src-tauri/tauri.conf.json",
