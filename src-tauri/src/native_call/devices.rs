@@ -167,6 +167,9 @@ pub fn element(kind: Kind, name: &str) -> Option<gst::Element> {
     }
 }
 
+/// How long the bus stays quiet before a burst of changes is told.
+const SETTLE: gst::ClockTime = gst::ClockTime::from_mseconds(250);
+
 fn watchers() -> &'static Mutex<Vec<Sink>> {
     static WATCHERS: OnceLock<Mutex<Vec<Sink>>> = OnceLock::new();
     WATCHERS.get_or_init(Mutex::default)
@@ -182,18 +185,25 @@ pub fn watch(changed: Sink) {
         };
         let spawned = std::thread::Builder::new()
             .name("device-watch".into())
-            .spawn(move || loop {
-                let Some(_) = bus.timed_pop_filtered(
-                    gst::ClockTime::NONE,
-                    &[
-                        gst::MessageType::DeviceAdded,
-                        gst::MessageType::DeviceRemoved,
-                    ],
-                ) else {
-                    continue;
-                };
-                for tell in watchers().lock().unwrap().iter() {
-                    tell(b"{\"devices\":\"changed\"}".to_vec());
+            .spawn(move || {
+                let changes = [
+                    gst::MessageType::DeviceAdded,
+                    gst::MessageType::DeviceRemoved,
+                ];
+                loop {
+                    if bus
+                        .timed_pop_filtered(gst::ClockTime::NONE, &changes)
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    // Changes come in bursts (a headset is a microphone and a speaker; every device at start):
+                    // told once, when the bus has been quiet a moment and the providers' lists are settled.
+                    while bus.timed_pop_filtered(SETTLE, &changes).is_some() {}
+                    crate::diagnostics::log("native call: the devices changed");
+                    for tell in watchers().lock().unwrap().iter() {
+                        tell(b"{\"devices\":\"changed\"}".to_vec());
+                    }
                 }
             });
         if let Err(error) = spawned {

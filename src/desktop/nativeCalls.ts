@@ -134,6 +134,9 @@ export function askedDevice(constraint: boolean | MediaTrackConstraints | undefi
 function reporting(track: MediaStreamTrack, wanted: string | null): void {
   wantedOf.set(track, wanted);
   usedOf.set(track, wanted);
+  // Its name, as a browser's track has the device's: the call's notices say which one went. (WebKitGTK's own
+  // label on this AudioContext track left the call's "disconnected" notice unshown.)
+  Object.defineProperty(track, "label", { configurable: true, get: () => usedOf.get(track) ?? "" });
   const settings = track.getSettings?.bind(track);
   // "default", as browsers call the system's default: the call's device menu offers a chosen one back from it.
   track.getSettings = () => ({ ...(settings?.() ?? {}), deviceId: usedOf.get(track) ?? "default" });
