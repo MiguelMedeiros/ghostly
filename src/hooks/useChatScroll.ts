@@ -273,7 +273,8 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     const onKey = (e: KeyboardEvent) => { if (SCROLL_KEYS.has(e.key) && !editable(e.target)) handAt.current = performance.now(); };
     el.addEventListener("scroll", onScroll, { passive: true });
     for (const type of ["wheel", "touchstart", "touchmove", "pointerdown"]) el.addEventListener(type, takeOver, { passive: true });
-    for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, release, { passive: true });
+    // A release the page never sees (over another window, a native menu) is let go when the window loses focus.
+    for (const type of ["pointerup", "pointercancel", "blur"]) window.addEventListener(type, release, { passive: true });
     window.addEventListener("keydown", onKey, { capture: true, passive: true });
     // A picture or a video loading, a bubble growing, the list itself getting shorter (a bar under it, the keyboard).
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => settle()) : undefined;
@@ -282,7 +283,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     return () => {
       el.removeEventListener("scroll", onScroll);
       for (const type of ["wheel", "touchstart", "touchmove", "pointerdown"]) el.removeEventListener(type, takeOver);
-      for (const type of ["pointerup", "pointercancel"]) window.removeEventListener(type, release);
+      for (const type of ["pointerup", "pointercancel", "blur"]) window.removeEventListener(type, release);
       window.removeEventListener("keydown", onKey, { capture: true });
       observer?.disconnect();
     };
