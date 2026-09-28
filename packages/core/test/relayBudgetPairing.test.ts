@@ -25,14 +25,14 @@ const yieldToLoop = () => new Promise<void>(resolve => realSetTimeout(resolve, 0
 /** A relay kept in memory: the newest payload per key, requests counted. */
 class MemoryRelay {
   packets = new Map<string, Uint8Array>();
-  requests: { at: number; who: string; method: string }[] = [];
+  requests: { at: number; who: string; method: string; host: string }[] = [];
   /** Whose publications fail at the network level (a relay down for them), as a browser sees it. */
   putsDown = new Set<string>();
   fetchFor(who: string): typeof fetch {
     return (async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "PUT" && this.putsDown.has(who)) throw new TypeError("Failed to fetch");
       const key = new URL(String(input)).pathname.slice(1);
-      this.requests.push({ at: Date.now(), who, method: init?.method ?? "GET" });
+      this.requests.push({ at: Date.now(), who, method: init?.method ?? "GET", host: new URL(String(input)).host });
       if (init?.method === "PUT") { this.packets.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
       const packet = this.packets.get(key);
       return packet ? new Response(packet as BodyInit) : new Response(null, { status: 404 });
@@ -107,11 +107,11 @@ const trouble: string[] = [];
 const states: { who: string; at: number; status: string; error?: string }[] = [];
 const links: GhostLink[] = [];
 
-function side(name: string, relay: MemoryRelay, params: LinkParams, me: Identity, peer: Identity): Side {
+function side(name: string, relay: MemoryRelay, params: LinkParams, me: Identity, peer: Identity, relays = new RelayTransport({ fetch: relay.fetchFor(name) }), paired = true): Side {
   return { name, params: { ...params, profile: "paired-chat/1", deliveryMode: "stream" }, seedB64: me.seedB64, peerKey: peer.pubKeyZ32,
-    // Paired a while ago, over the stream.
-    state: { ...emptyDhtDeliveryState(), sequence: 3, peerSequence: 3, peerMode: "stream" },
-    relays: new RelayTransport({ fetch: relay.fetchFor(name) }) };
+    // Paired a while ago, over the stream; or a first pairing.
+    state: paired ? { ...emptyDhtDeliveryState(), sequence: 3, peerSequence: 3, peerMode: "stream" } : emptyDhtDeliveryState(),
+    relays };
 }
 
 function open(s: Side): GhostLink {
@@ -167,6 +167,33 @@ afterEach(async () => {
   await Promise.all(links.splice(0).map(link => link.stop(false)));
   byFingerprint.clear();
   vi.useRealTimers();
+});
+
+describe("pairing three contacts in a row", () => {
+  /**
+   * One app pairs three people in a row, all its chats on one budget (e2e/web/invite-code.spec.ts: by the link, by the
+   * code, by the QR, in fifteen seconds). A pairing's requests on each relay are most of what a minute allows, so the
+   * third waited for the minute to free its requests, 50 s (2026-09-27). What a pairing spends is held here.
+   */
+  it("goes live each time in seconds, and each pairing spends a bounded share of the inviter's minute on each relay", async () => {
+    const relay = new MemoryRelay();
+    const inviter = new RelayTransport({ fetch: relay.fetchFor("A") });
+    const spent: number[] = [];
+    for (const n of [1, 2, 3]) {
+      const invitation = createLink();
+      const [pa, pb] = [createIdentity(), createIdentity()];
+      const before = relay.requests.length;
+      const a = open(side("A", relay, invitation.mine, pa, pb, inviter, false));
+      const b = open(side(`B${n}`, relay, invitation.invite, pb, pa, undefined, false));
+      expect(await untilLive(a, b, 20_000), `pairing ${n} goes live`).toBeLessThan(10_000);
+      const mine = relay.requests.slice(before).filter(r => r.who === "A");
+      spent.push(Math.max(...[...new Set(mine.map(r => r.host))].map(host => mine.filter(r => r.host === host).length)));
+    }
+    // The link and DHT delivery alone (an app adds its capability record): 6 or 7 on the busier relay, with a read of
+    // a key just read answered from memory (7 or 8 when every read was a request).
+    for (const n of spent) expect(n).toBeLessThanOrEqual(7);
+    expect(trouble).toEqual([]);
+  }, 60_000);
 });
 
 describe("the relays' request budget runs out in the middle of a pairing", () => {
