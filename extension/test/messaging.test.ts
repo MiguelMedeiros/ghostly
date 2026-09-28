@@ -278,14 +278,19 @@ describe("viewer tabs", () => {
     expect(engine().requests).toEqual([]);
   });
 
-  it("refuses requests from a tab it never bound, or one that was closed", async () => {
+  it("sends nothing to a tab it never bound, or one that was closed", async () => {
     const tabId = await openViewer(world);
+    const before = world.callsTo("debugger.sendCommand").length;
     const url = `https://${SERVICE}.${PEER}.invalid/`;
-    expect((await pauseRequest(world, 9999, { url })).method).toBe("Fetch.failRequest");
+    const paused = (tab: number) =>
+      fire(world.chrome.debugger.onEvent, { tabId: tab }, "Fetch.requestPaused", { requestId: `r${tab}`, request: { url, method: "GET", headers: {} } });
+    paused(9999);
     await world.chrome.tabs.remove(tabId);
     await settle();
     expect(world.session.has(`viewer:${tabId}`)).toBe(false);
-    expect((await pauseRequest(world, tabId, { url })).method).toBe("Fetch.failRequest");
+    paused(tabId);
+    await settle();
+    expect(world.callsTo("debugger.sendCommand").slice(before)).toEqual([]);
     expect(engine().requests).toEqual([]);
   });
 
@@ -340,6 +345,15 @@ describe("viewer tabs", () => {
     navigate({ url: "https://example.com/" });
     await settle();
     expect(world.callsTo("debugger.detach")).toEqual([[{ tabId }]]);
+    // The tab is no viewer any more: coming back to the virtual origin is not served.
+    expect(world.session.has(`viewer:${tabId}`)).toBe(false);
+  });
+
+  it("forgets the tab when the debugger leaves it, as when the person cancels Chrome's debugging bar", async () => {
+    const tabId = await openViewer(world);
+    fire(world.chrome.debugger.onDetach, { tabId }, "canceled_by_user");
+    await settle();
+    expect(world.session.has(`viewer:${tabId}`)).toBe(false);
   });
 
   it("ignores debugger events that do not come from a tab", async () => {
@@ -349,6 +363,65 @@ describe("viewer tabs", () => {
     });
     await settle();
     expect(world.callsTo("debugger.sendCommand")).toEqual([]);
+  });
+});
+
+describe("the debugger stays on the tabs the worker opened", () => {
+  const url = `https://${SERVICE}.${PEER}.invalid/`;
+
+  it("attaches only to the tab it just created, whatever tab a page names", async () => {
+    const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
+    const reply = await send({ target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE, tabId: bank.id });
+    expect(reply).toEqual({ ok: true });
+    const viewer = [...world.tabs.values()].find((t) => t.url === url)!;
+    expect(viewer.id).not.toBe(bank.id);
+    expect(world.callsTo("debugger.attach")).toEqual([[{ tabId: viewer.id }, "1.3"]]);
+    expect(world.callsTo("debugger.sendCommand").every(([target]) => (target as { tabId: number }).tabId === viewer.id)).toBe(true);
+    expect(world.session.has(`viewer:${bank.id}`)).toBe(false);
+  });
+
+  it("sends nothing to a tab it did not create, even one that pauses a request for a real service", async () => {
+    await openViewer(world);
+    const before = world.callsTo("debugger.sendCommand").length;
+    const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
+    fire(world.chrome.debugger.onEvent, { tabId: bank.id }, "Fetch.requestPaused", { requestId: "1", request: { url, method: "GET", headers: {} } });
+    fire(world.chrome.debugger.onEvent, { tabId: bank.id }, "Page.frameNavigated", { frame: { url: "https://bank.example/" } });
+    await settle();
+    expect(world.callsTo("debugger.sendCommand").slice(before)).toEqual([]);
+    expect(world.callsTo("debugger.detach")).toEqual([]);
+    expect(engine().requests).toEqual([]);
+  });
+
+  it("sends only the commands the viewer needs, and only to a viewer tab", async () => {
+    const { devtools } = await world.load("background", () => import("../src/background.ts"));
+    const tabId = await openViewer(world);
+    const before = world.callsTo("debugger.sendCommand").length;
+    for (const method of ["Runtime.evaluate", "Network.getCookies", "Page.navigate", "Input.dispatchKeyEvent", "Fetch.continueRequest"]) {
+      await expect(devtools(tabId, method, {})).rejects.toThrow(`DevTools command not allowed: ${method}`);
+    }
+    const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
+    await expect(devtools(bank.id!, "Fetch.failRequest", { requestId: "1", errorReason: "BlockedByClient" })).rejects.toThrow("Not a viewer tab");
+    expect(world.callsTo("debugger.sendCommand").slice(before)).toEqual([]);
+    await devtools(tabId, "Fetch.failRequest", { requestId: "1", errorReason: "BlockedByClient" });
+    expect(world.callsTo("debugger.sendCommand").slice(before)).toHaveLength(1);
+  });
+
+  it.each([
+    ["another extension", { id: "abcdefghijklmnopabcdefghijklmnop", url: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/page.html" }],
+    ["a web page", { url: "https://evil.example/" }],
+    ["a web page claiming the extension's id", { id: "nbedaagicniejlmfcncndfjcejaidbcf", url: "https://evil.example/" }],
+    ["a sender with no url", { id: "nbedaagicniejlmfcncndfjcejaidbcf" }],
+  ])("does not hear %s", async (_, sender) => {
+    for (const message of [
+      { target: "background", type: "open-service", peerPubKeyZ32: PEER, serviceId: SERVICE },
+      { target: "background", type: "open-payment-link", uri: "lightning:lnbc1" },
+      { target: "background", type: "ensure-engine" },
+    ]) {
+      await expect(world.sendMessageFrom(sender, message)).rejects.toThrow("message port closed");
+    }
+    expect(world.callsTo("tabs.create")).toEqual([]);
+    expect(world.callsTo("debugger.attach")).toEqual([]);
+    expect(world.callsTo("offscreen.createDocument")).toEqual([]);
   });
 });
 

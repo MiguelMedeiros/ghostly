@@ -96,6 +96,11 @@ export interface FakeWorld {
   /** Chrome stops an idle service worker: its listeners and memory go, everything else stays. */
   restartServiceWorker(): void;
   callsTo(api: string): unknown[][];
+  /**
+   * `runtime.sendMessage` as `sender` sent it. `sendMessage` itself sends as the context calling it:
+   * the app page (`app.html`), the offscreen document or the worker, all with the extension's id.
+   */
+  sendMessageFrom(sender: chrome.runtime.MessageSender, message: unknown): Promise<unknown>;
   /** Each `runtime.connect`: the caller's end and the end `onConnect` handed out. */
   ports: { caller: FakePort; receiver: FakePort }[];
   /** The offscreen document's window events. */
@@ -172,22 +177,8 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       getManifest: () => world.manifest,
       getURL: (path: string) => `chrome-extension://nbedaagicniejlmfcncndfjcejaidbcf/${path}`,
       sendMessage(message: unknown): Promise<unknown> {
-        record("runtime.sendMessage", message);
-        return new Promise((resolve, reject) => {
-          if (!onMessage.hasListeners()) {
-            reject(new Error("Could not establish connection. Receiving end does not exist."));
-            return;
-          }
-          let answered = false;
-          const sendResponse = (response: unknown) => {
-            if (answered) return;
-            answered = true;
-            resolve(structuredClone(response));
-          };
-          const sender = { id: chromeApi.runtime.id } as chrome.runtime.MessageSender;
-          const kept = onMessage.dispatch(structuredClone(message) as never, sender as never, sendResponse as never).some((r) => r === true);
-          if (!kept && !answered) reject(new Error("The message port closed before a response was received."));
-        });
+        const url = chromeApi.runtime.getURL(world.context === "offscreen" ? "offscreen.html" : world.context === "background" ? "background.js" : "app.html");
+        return world.sendMessageFrom({ id: chromeApi.runtime.id, url }, message);
       },
       connect({ name }: { name: string }) {
         record("runtime.connect", name);
@@ -265,6 +256,7 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     action: { onClicked: event<() => void>() },
     debugger: {
       onEvent: event<(source: chrome.debugger.Debuggee, method: string, params?: object) => void>(),
+      onDetach: event<(source: chrome.debugger.Debuggee, reason: string) => void>(),
       async attach(target: chrome.debugger.Debuggee, version: string) {
         record("debugger.attach", target, version);
         if (world.failDebuggerAttach) throw new Error(world.failDebuggerAttach);
@@ -305,6 +297,23 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     for (const e of world.events) e.dropContext("background");
   };
   world.callsTo = (api) => world.calls.filter((c) => c.api === api).map((c) => c.args);
+  world.sendMessageFrom = (sender, message) => {
+    record("runtime.sendMessage", message);
+    return new Promise((resolve, reject) => {
+      if (!onMessage.hasListeners()) {
+        reject(new Error("Could not establish connection. Receiving end does not exist."));
+        return;
+      }
+      let answered = false;
+      const sendResponse = (response: unknown) => {
+        if (answered) return;
+        answered = true;
+        resolve(structuredClone(response));
+      };
+      const kept = onMessage.dispatch(structuredClone(message) as never, { ...sender } as never, sendResponse as never).some((r) => r === true);
+      if (!kept && !answered) reject(new Error("The message port closed before a response was received."));
+    });
+  };
 
   // The offscreen document is a page: it listens for its own `pagehide`.
   const page = new EventTarget();

@@ -114,6 +114,18 @@ Ghostly opens a tab, attaches the debugger to **that tab only**, and answers req
 
 The cost is Chrome's "Ghostly started debugging this browser" banner while such a tab is open.
 
+### How the `debugger` permission is kept narrow
+
+Chrome grants `debugger` for every tab and does not allow it as an optional permission, so the manifest declares it. The extension keeps its own use of it to the viewer:
+
+- Only the service worker (`extension/src/background.ts`) calls `chrome.debugger`; a test fails if any other source file does.
+- A page asks for a contact's service (peer key and service id), never for a tab. The worker opens the tab itself, and attaches only to that tab.
+- Every command goes to a tab the worker opened for a service. A tab stops being one when it closes, leaves the virtual origin, or the person cancels Chrome's debugging bar. Events from any other tab get no answer.
+- Only `Fetch.enable`, `Page.enable`, `Fetch.fulfillRequest` and `Fetch.failRequest` are ever sent. Anything else is refused.
+- The worker only hears messages from the extension's own pages.
+
+Chrome gives an API to every page of an extension, not to one part of it, so an extension page that ran foreign script could still call `chrome.debugger` itself. The CSP (`script-src 'self'`, no inline script) is what keeps foreign script out of those pages. The offscreen document only gets `chrome.runtime`.
+
 ### What works, what does not
 
 Works: HTML, CSS, scripts (inline, classic, ES modules, dynamic `import()`), images, fonts, `fetch`/XHR with any method and binary bodies, redirects, in-app navigation and history, `localStorage`/IndexedDB per contact and app, responses up to 32 MiB.
