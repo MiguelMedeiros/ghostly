@@ -20,7 +20,7 @@ async function photoWithExif(peer: Peer): Promise<Buffer> {
 const decoded = (peer: Peer, testId: string) =>
   chat(peer).page().getByTestId(testId).first().evaluate((img: HTMLImageElement) => atob(img.src.split(",")[1]));
 
-test("a profile picture goes to paired contacts, without anything of the file, and can be removed", { tag: ["@feature:profiles.picture", "@feature:profiles.picture.sanitize"] }, async ({ peer }) => {
+test("a profile picture goes to paired contacts, without anything of the file, and can be removed", { tag: ["@feature:profiles.picture", "@feature:profiles.picture.sanitize", "@feature:profiles.picture.viewer"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -46,6 +46,22 @@ test("a profile picture goes to paired contacts, without anything of the file, a
   const bytes = await decoded(bob, "chat-avatar");
   expect(bytes).not.toContain("GHOSTLY-SECRET-GPS");
   expect(bytes).not.toContain("Exif");
+
+  // A click on it shows it large, as it arrived (128 px drawn at 320), with her name as the chat shows it; Escape
+  // closes it and gives the focus back to the avatar.
+  const name = (await bob.page.getByTestId("chat-name").textContent())!;
+  const opener = bob.page.getByTestId("chat-avatar-open");
+  await expect(opener).toHaveAttribute("aria-label", `View photo of ${name}`);
+  await opener.click();
+  const viewer = bob.page.getByTestId("avatar-viewer");
+  await expect(viewer).toBeVisible();
+  await expect(viewer).toContainText(name);
+  const large = viewer.getByTestId("avatar-viewer-image");
+  await expect(large).toHaveAttribute("src", (await header.getAttribute("src"))!);
+  await expect.poll(() => large.evaluate((img: HTMLImageElement) => img.getBoundingClientRect().width)).toBeGreaterThanOrEqual(256);
+  await bob.page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
+  await expect(opener).toBeFocused();
 
   // It stays with the chat after a reload.
   await bob.page.reload();

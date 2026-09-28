@@ -15,5 +15,6 @@
   "moreInfo": "Plus d'infos",
   "save": "Enregistrer",
   "success": "Succès",
-  "unnamedContact": "Contact · {{key}}"
+  "unnamedContact": "Contact · {{key}}",
+  "viewPhoto": "Voir la photo de {{name}}"
 }

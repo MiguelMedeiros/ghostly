@@ -15,5 +15,6 @@
   "moreInfo": "詳細",
   "save": "保存",
   "success": "成功",
-  "unnamedContact": "連絡先 · {{key}}"
+  "unnamedContact": "連絡先 · {{key}}",
+  "viewPhoto": "{{name}}の写真を見る"
 }
