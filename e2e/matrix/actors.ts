@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator } from "@playwright/test";
 import { createWallet, expect, showNetwork, type CreateWallet, type Peer, type WalletKind, type WalletNetwork } from "../support/fixtures";
@@ -23,8 +23,11 @@ type Tree = { [key: string]: string | Tree };
 const flatten = (tree: Tree, prefix = ""): [string, string][] =>
   Object.entries(tree).flatMap(([k, v]) => (typeof v === "string" ? [[`${prefix}${k}`, v] as [string, string]] : flatten(v, `${prefix}${k}.`)));
 const locales = join(import.meta.dirname, "..", "..", "src", "locales");
-const en = new Map(flatten(JSON.parse(readFileSync(join(locales, "en.json"), "utf8"))));
-const pt = new Map(flatten(JSON.parse(readFileSync(join(locales, "pt.json"), "utf8"))));
+/** A language as `t()` sees it: src/locales/<language>/<area>.json, each area under its file's name. */
+const language = (name: string): Tree =>
+  Object.fromEntries(readdirSync(join(locales, name)).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), JSON.parse(readFileSync(join(locales, name, f), "utf8"))]));
+const en = new Map(flatten(language("en")));
+const pt = new Map(flatten(language("pt")));
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

@@ -18,6 +18,7 @@
     "test:ui": "vitest run -c vitest.ui.config.ts",
     "test:matrix": "vitest run -c e2e/matrix/vitest.config.ts",
     "test:scripts": "vitest run -c scripts/vitest.config.ts",
+    "locales:sort": "node scripts/locales-sort.mjs",
     "test:map": "node scripts/test-map.mjs",
     "test:map:write": "node scripts/test-map.mjs --write",
     "coverage": "node scripts/coverage.mjs",

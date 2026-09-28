@@ -5,6 +5,7 @@ import type { WalletRail } from "../walletCardTypes";
 import { CASHU_MINT_SOURCE } from "../walletCardData";
 import { NetworkTag } from "../NetworkTag";
 import { Block, Button, Notice, Row, Section } from "./ui";
+import { externalLinkProps } from "../../lib/externalLink";
 
 /**
  * Where a Testnet wallet's test coins come from. `ask`: Ghostly asks the faucet itself, on one press. `open`: the
@@ -79,7 +80,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
         <Row label={label} hint={`${faucet.amount} from ${faucet.from}, only when you press the button. Worth nothing.`}>
           <Button data-testid="test-coins-get" disabled={asking || !!faucet.needs} aria-busy={asking || undefined} onClick={() => void ask()}>{asking ? "Asking the faucet…" : "Get test coins"}</Button>
         </Row>
-        {faucet.needs && <Block><Notice tone="warning" testId="test-coins-needs">{faucet.needs.hint} <a className="underline" href={faucet.needs.url} target="_blank" rel="noopener noreferrer">{faucet.needs.label}</a></Notice></Block>}
+        {faucet.needs && <Block><Notice tone="warning" testId="test-coins-needs">{faucet.needs.hint} <a className="underline" {...externalLinkProps(faucet.needs.url)}>{faucet.needs.label}</a></Notice></Block>}
         {got && <Block><Notice tone="success" testId="test-coins-result">{got}</Notice></Block>}
         {error && <Block>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -89,7 +90,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
         </Block>}
       </> : (
         <Row label={label} hint={`${faucet.name}. ${faucet.hint}`}>
-          <a data-testid="test-coins-open" href={faucet.url} target="_blank" rel="noopener noreferrer"
+          <a data-testid="test-coins-open" {...externalLinkProps(faucet.url)}
             className="px-4 py-2 min-h-10 max-md:min-h-11 inline-flex items-center whitespace-nowrap rounded-lg text-sm bg-surface-alt text-text-primary hover:bg-surface-hover border border-border">Open faucet</a>
         </Row>
       )}

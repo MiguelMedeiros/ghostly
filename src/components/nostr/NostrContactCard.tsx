@@ -5,6 +5,7 @@ import { useEngineState } from "../../lib/identities";
 import { ago } from "../../lib/nostr";
 import { Button, Notice } from "../wallet/ui";
 import { NostrPublishDialog } from "./NostrPublishDialog";
+import { externalLinkProps } from "../../lib/externalLink";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -44,7 +45,7 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
               <p className="text-sm text-text-primary break-words" data-testid="nostr-profile-name">{profile.name ?? "No name"}{profile.handle && <span className="text-xs text-text-muted"> · @{profile.handle}</span>}</p>
               {profile.nip05 && <p data-testid="nostr-profile-nip05" className="break-all">{profile.nip05} <span className="text-[11px]">(NIP-05, as written by them, not checked)</span></p>}
               {profile.about && <p className="whitespace-pre-wrap break-words text-text-secondary" data-testid="nostr-profile-about">{profile.about}</p>}
-              {profile.website && <a href={profile.website} target="_blank" rel="noopener noreferrer nofollow" className="text-accent underline break-all">{profile.website}</a>}
+              {profile.website && <a {...externalLinkProps(profile.website)} rel="noopener noreferrer nofollow" className="text-accent underline break-all">{profile.website}</a>}
               {profile.hasPicture && !profile.avatar && <p className="text-[11px]">Their picture is on a host Ghostly does not fetch from.</p>}
             </div>
           </div>

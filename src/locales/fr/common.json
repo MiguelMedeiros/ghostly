@@ -1,0 +1,19 @@
+{
+  "anonymous": "Anonyme",
+  "back": "Retour",
+  "cancel": "Annuler",
+  "chatCreated": "Discussion créée le {{date}}",
+  "close": "Fermer",
+  "confirm": "Confirmer",
+  "copied": "Copié !",
+  "copy": "Copier",
+  "delete": "Supprimer",
+  "deleteChatLocal": "La conversation et son historique seront supprimés de cet appareil, pas chez votre contact.",
+  "deleteChatTitle": "Supprimer la conversation ?",
+  "error": "Erreur",
+  "loading": "Chargement...",
+  "moreInfo": "Plus d'infos",
+  "save": "Enregistrer",
+  "success": "Succès",
+  "unnamedContact": "Contact · {{key}}"
+}

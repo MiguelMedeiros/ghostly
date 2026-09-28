@@ -1,16 +1,18 @@
 import React, { useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { shownUrl, SPOILER_PLAIN, type Atom, type MdLinkData, type Segment, type TimeData } from "../../lib/parse";
+import { externalLinkProps } from "../../lib/externalLink";
 import { CopyButton } from "./CopyButton";
 
 /**
- * A web address: a new tab, with no opener and no referrer. It reads left to right on its own (`dir`), so no
+ * A web address: a new tab, with no opener and no referrer; on Desktop the system browser, since its WebView opens
+ * no new tab (`externalLinkProps`). It reads left to right on its own (`dir`), so no
  * direction control before or inside it can make it show another address, and as it is typed only when that is
  * plain ASCII: anything else shows as the browser will read it (`shownUrl`).
  */
 export function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
   return (
-    <a href={atom.data.url} dir="ltr" target="_blank" rel="noopener noreferrer" className="text-link underline hover:decoration-2 break-all">
+    <a {...externalLinkProps(atom.data.url)} dir="ltr" className="text-link underline hover:decoration-2 break-all">
       {shownUrl(atom.text)}
     </a>
   );
@@ -41,8 +43,8 @@ export function MdLinkView({ atom }: { atom: Atom<"md-link", MdLinkData> }) {
   let title = shown;
   try { title = `${new URL(url).hostname}\n${shown}`; } catch { /* the parser only takes addresses a URL parser reads */ }
   return showUrl
-    ? <a data-testid="rich-md-link" data-shows="url" href={url} title={title} dir="ltr" target="_blank" rel="noopener noreferrer" className="text-link underline hover:decoration-2 break-all">{shown}</a>
-    : <a data-testid="rich-md-link" data-shows="text" href={url} title={title} target="_blank" rel="noopener noreferrer" className="text-link underline hover:decoration-2">{labelNodes(label)}</a>;
+    ? <a data-testid="rich-md-link" data-shows="url" {...externalLinkProps(url)} title={title} dir="ltr" className="text-link underline hover:decoration-2 break-all">{shown}</a>
+    : <a data-testid="rich-md-link" data-shows="text" {...externalLinkProps(url)} title={title} className="text-link underline hover:decoration-2">{labelNodes(label)}</a>;
 }
 
 /** A long key or token: one line until "Show all", and Copy either way. */

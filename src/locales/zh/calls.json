@@ -1,0 +1,41 @@
+{
+  "accept": "接听",
+  "audio": "语音通话",
+  "camera": "摄像头",
+  "cameraOff": "关闭摄像头",
+  "connected": "已连接",
+  "connecting": "正在连接...",
+  "decline": "拒绝",
+  "devices": {
+    "back": "{{name}} 已重新连接",
+    "lost": "{{name}} 已断开。正在使用默认设备。",
+    "menu": "设备",
+    "switchBack": "切换回去"
+  },
+  "duration": "通话时长：{{duration}}",
+  "end": "结束通话",
+  "ended": "通话结束",
+  "hangUp": "挂断",
+  "incoming": "来电",
+  "missed": "未接来电",
+  "mute": "静音",
+  "outgoing": "呼叫中...",
+  "rejected": "通话被拒绝",
+  "selfView": "拖动以移动，拉动角落以调整大小，双击以重置",
+  "shareScreen": "共享屏幕",
+  "sharing": {
+    "both": "你和 {{name}} 正在共享屏幕",
+    "peer": "{{name}} 正在共享屏幕",
+    "you": "你正在共享屏幕"
+  },
+  "stopSharing": "停止共享",
+  "turnCameraOff": "关闭摄像头",
+  "turnCameraOn": "打开摄像头",
+  "unmute": "取消静音",
+  "video": "视频通话",
+  "window": {
+    "chat": "返回聊天",
+    "full": "返回全屏",
+    "small": "将通话保留在小窗口中"
+  }
+}
