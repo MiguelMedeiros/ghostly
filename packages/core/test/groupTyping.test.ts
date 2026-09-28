@@ -60,11 +60,11 @@ describe("GroupTypingBoard", () => {
     board.receive(ANA, word("start", { kind: "thinking", status: "see https://evil.example" }));
     expect(board.typing()).toEqual([{ member: ANA, activity: { kind: "thinking" } }]);
     board.receive(BO, word("start", { status: "Look‮ing\u0007\nup" }));
-    expect(board.typing()[1].activity.status).not.toMatch(/[‮\u0007\n]/);
+    for (const c of ["‮", "\u0007", "\n"]) expect(board.typing()[1].activity.status).not.toContain(c);
   });
 
   it("holds a member who floods without holding the others, and hides who the roster took out", () => {
-    let now = 0;
+    const now = 0;
     const board = new GroupTypingBoard(() => {}, () => now);
     for (let i = 0; i < TYPING_RATE_LIMIT; i++) expect(board.receive(ANA, word(i % 2 ? "stop" : "start"))).toBe(true);
     expect(board.receive(ANA, word("start"))).toBe(false);

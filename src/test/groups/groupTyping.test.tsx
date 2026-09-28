@@ -68,7 +68,7 @@ describe("GroupChat: who is typing", () => {
     await user.type(screen.getByRole("textbox"), "hi");
     expect(engine.callsTo("setGroupTyping")[0]).toEqual({ groupId: "group-1", typing: true });
     await user.type(screen.getByRole("textbox"), "{Enter}");
-    expect(engine.callsTo("setGroupTyping").at(-1)).toEqual({ groupId: "group-1", typing: false });
+    expect(engine.callsTo("setGroupTyping").slice(-1)[0]).toEqual({ groupId: "group-1", typing: false });
   });
 
   it("a community says nothing yet", async () => {
