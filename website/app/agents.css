@@ -662,6 +662,9 @@ html:not(.js) .agx .psx-card {
   transform: rotate(-45deg);
   transition: transform var(--dur-base) var(--ease-enter);
 }
+.ag-details[open] > .ag-summary {
+  margin-bottom: 12px;
+}
 .ag-details[open] > .ag-summary::before {
   transform: rotate(45deg);
 }

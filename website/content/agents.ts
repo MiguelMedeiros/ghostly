@@ -63,7 +63,7 @@ export const agents = {
   how: {
     title: "How it works",
     lead: "What the prompt has your agent do, with the headless ghostly CLI.",
-    details: "Details: the commands, one turn, what works",
+    details: "Details",
     /** The animated steps (components/agents/AgentSteps.tsx): a short label for its dot, a title and one line. */
     anim: {
       label: "How an agent joins, step by step",
