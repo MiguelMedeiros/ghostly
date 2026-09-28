@@ -8,7 +8,7 @@ import { useEffect } from "react";
  * the rising particles. One observer watches every outermost ghost, every
  * stage and every particle field; what is not on screen gets `data-offscreen`
  * (CSS pauses its animations) and, for an svg, its SMIL timeline paused. New
- * elements (the deck mounts late, the swarm comes and goes) are picked up by a
+ * elements (the deck mounts late, the boo comes and goes) are picked up by a
  * mutation observer. Nothing here changes what is drawn; it only stops the
  * clock on things nobody can see.
  */

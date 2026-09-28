@@ -43,7 +43,7 @@ is checked (see the end).
 | `PAIR` | see `lib/motion.ts` | The app's pairing look: eye ink, mesh and node tones, stroke widths. |
 | `DUR.fast` | 0.14 s | Hover, press, focus; a step's copy leaving. |
 | `DUR.base` | 0.28 s | A chip, a caption swap, a cross-fade, a step's copy arriving. |
-| `DUR.slow` | 0.56 s | A card, a panel, a large element or a scene arriving; the swarm in and out. |
+| `DUR.slow` | 0.56 s | A card, a panel, a large element or a scene arriving. |
 | `DUR.beat` | 1.8 s | One story beat played in full (cards mode, loops). |
 | `STAGGER` | 0.06 s | Between siblings entering in sequence; after `STAGGER_MAX` (6) the rest arrive together. |
 | `SPRING.body` | 130 / 19 / 0.9 | Physical things: the ghosts, the pointer ghost. Just under critical damping. |
@@ -177,7 +177,7 @@ the look:
 - **The ghost.** Every character ghost on the site is the app's `GHOST_PATH`
   (exported from `components/ghost/Ghost.tsx`): a round head and a hem cut
   into points like the arcade ghosts' feet, five points and four notches. The
-  story's ghosts, the swarm (`GhostSprite`), the footer's `GhostPet` and the
+  story's ghosts, the boo transition, the footer's `GhostPet` and the
   404 draw it. Rounded, cloth-like folds are gone. The hem stirs, it does not
   ripple: over 3.2 s the notches move sideways and the points up or down by
   about a unit (the corners and sides stay put), the loop rests off screen
@@ -199,20 +199,30 @@ the look:
   both in the accent (cyan, about 11:1 on the page), the text 17/36 of the
   icon. It does not move: the app's opening motion stays the app's.
 
-### The swarm (page changes and long jumps)
+### The boo (page changes and long jumps)
 
-`components/site/GhostSwarm.tsx`: a flock of 30 small ghosts rises over the
-page (`slow`, `enter`, staggered left to right), holds while the change happens
-underneath, and leaves up and to the right (`slow`, `exit`).
+`components/site/Boo.tsx` + `app/boo.css`: one ghost (Boo, the character,
+cyan) pops up from below to the middle of the screen with the app's hop,
+puffs up and says "boo!" in a small bubble, then floats away up and to the
+right. Behind it a veil (the page colour at 88% and a 6 px blur) comes up in
+180 ms, the change happens once the veil is up, and the veil goes with the
+ghost. A jump takes about 720 ms in all: the ghost leaves 440 ms after the
+start, in 280 ms (`exit`). The durations live in `Boo.tsx` and reach the CSS
+as `--boo-*`, so the two never drift.
 
 - It plays on internal link navigation and on jumps longer than 1.5 viewports
   on the same page (`jumpTo()`: the story rail's marks, the logo on the page
-  you are on). Shorter jumps are a smooth scroll.
-- It never plays on ordinary scrolling, in either direction.
-- The flock is the only thing moving while it is on screen; the page under it
-  changes in one step (no rewinding of scenes).
-- Reduced motion: no swarm, the change happens at once.
-- Add `data-no-swarm` to a link that must navigate without it.
+  you are on). Shorter jumps are a smooth scroll. `boo(run)` plays it around
+  any change.
+- On a page change the ghost bobs over the veil until the new page has
+  rendered (a second at most), then leaves.
+- It never plays on ordinary scrolling, in either direction, and never twice
+  at once: a change asked for while it plays happens under the same ghost.
+- The ghost is the only thing moving while it is on screen; the page under it
+  changes in one step (no rewinding of scenes). The overlay is fixed and
+  unmounted at the end: no layout shift, no scrollbar, no pointer events left.
+- Reduced motion: no ghost, the change happens at once.
+- Add `data-no-boo` to a link that must navigate without it.
 
 ### The story rail
 
@@ -291,7 +301,7 @@ the playhead only decides how the pictures catch up with it.
   same way, the picture holds until the scroll passes it; turning back
   reverses it at once.
 - **Jumps are taken at once.** A scroll that moves more than `SCRUB.jump`
-  viewports in one go (a link, the rail, the swarm, a reload mid-page) moves
+  viewports in one go (a link, the rail, the boo, a reload mid-page) moves
   the playhead there in one frame: nothing rewinds or replays.
 - Place a scene's beats with `useStep(p, step, n, [from, to], out, curve)`
   (`components/home/stage.tsx`), inside the step's beat window
@@ -332,7 +342,7 @@ Lessons from recording the story at slow, flick and reverse speeds
 - Nothing reads layout in a frame loop. The pointer ghost measures the page on
   resize and writes `left`/`top` itself; nothing calls `setState` per frame.
 - `will-change` only where a layer must be its own: the act's network field
-  (`.act-field`), the swarm's ghosts, the rail's fill.
+  (`.act-field`), the boo's ghost, the rail's fill.
 - Idle loops rest off screen. `components/site/IdleLoops.tsx` watches every
   outermost ghost, every stage and every particle field, pauses their CSS
   animations (`data-offscreen`) and their SMIL timelines (`pauseAnimations()`)
@@ -358,7 +368,7 @@ Lessons from recording the story at slow, flick and reverse speeds
   needs a reason.
 - `npm run motion:record http://localhost:PORT out/` and look at the clips
   (`scripts/motion/gif.sh` makes GIFs for a PR): every chapter, the hero, the
-  swarm, the deck, the finale, the footer ghost, in film and in cards, and
+  boo, the deck, the finale, the footer ghost, in film and in cards, and
   the reduced-motion pass.
 - `npm run motion:speeds http://localhost:PORT out/` records the first act at
   six window sizes (landscape, upright, phone) and three scroll speeds (slow,

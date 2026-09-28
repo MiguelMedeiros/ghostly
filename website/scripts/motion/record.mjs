@@ -107,8 +107,8 @@ await clip(browser, "desktop-deck", desktop, async (page) => {
   await page.evaluate(() => document.getElementById("wallets").scrollIntoView({ block: "center", behavior: "instant" }));
   await page.waitForTimeout(9500);
 });
-// The rail: pointing at it, then a long jump (the swarm).
-await clip(browser, "desktop-rail-swarm", desktop, async (page) => {
+// The rail: pointing at it, then a long jump (the boo).
+await clip(browser, "desktop-rail-boo", desktop, async (page) => {
   const inv = await topOf(page, "invite");
   await page.evaluate((y) => scrollTo({ top: y + 400, behavior: "instant" }), inv);
   await page.waitForTimeout(800);
@@ -120,7 +120,7 @@ await clip(browser, "desktop-rail-swarm", desktop, async (page) => {
   await mark.hover();
   await page.waitForTimeout(600);
   await mark.click();
-  await page.waitForTimeout(2600);
+  await page.waitForTimeout(1400);
 });
 await clip(browser, "desktop-finale", desktop, async (page) => {
   await page.evaluate(() => document.getElementById("download").scrollIntoView({ block: "start", behavior: "instant" }));
@@ -190,6 +190,13 @@ for (const id of ["invite", "dht", "agree", "alive", "open"]) {
 await clip(browser, "phone-deck", phone, async (page) => {
   await page.evaluate(() => document.getElementById("wallets").scrollIntoView({ block: "center", behavior: "instant" }));
   await page.waitForTimeout(9000);
+});
+// The logo far down the page: back to the top (the boo).
+await clip(browser, "phone-logo-boo", phone, async (page) => {
+  await page.evaluate(() => document.getElementById("wallets").scrollIntoView({ block: "center", behavior: "instant" }));
+  await page.waitForTimeout(900);
+  await page.locator('a[href="/"]').first().click();
+  await page.waitForTimeout(1400);
 });
 await clip(browser, "phone-finale", phone, async (page) => {
   await page.evaluate(() => document.getElementById("download").scrollIntoView({ block: "start", behavior: "instant" }));
