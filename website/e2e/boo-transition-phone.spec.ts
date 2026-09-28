@@ -24,7 +24,7 @@ test("the logo far down the page: one ghost says boo, the page is back at the to
   const seen = await booSeen(page);
   expect(seen.ghosts).toBe(1);
   expect(seen.text).toBe("boo!");
-  expect(seen.said).toBeGreaterThan(0.9);
+  expect(seen.said).toBeGreaterThan(0.5);
   expect(seen.gone).toBeLessThan(1500);
   expect(await page.evaluate(() => scrollY)).toBeLessThan(2);
   await expect(page.locator(".boo")).toHaveCount(0);

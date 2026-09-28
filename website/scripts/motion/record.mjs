@@ -195,7 +195,7 @@ await clip(browser, "phone-deck", phone, async (page) => {
 await clip(browser, "phone-logo-boo", phone, async (page) => {
   await page.evaluate(() => document.getElementById("wallets").scrollIntoView({ block: "center", behavior: "instant" }));
   await page.waitForTimeout(900);
-  await page.locator('a[href="/"]').first().click();
+  await page.locator('a[href="/"]').filter({ visible: true }).first().click();
   await page.waitForTimeout(1400);
 });
 await clip(browser, "phone-finale", phone, async (page) => {
