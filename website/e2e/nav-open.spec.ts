@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 /**
  * The nav (components/site/Nav.tsx): its pages, AI agents among them, and the Open app split button. The main part
  * opens the web app; the chevron opens a menu with the web app and a download (the home page's download section).
+ * The chevron is disabled until the page hydrates, so each test waits for it to be enabled before using it.
  */
 
 test("the nav lists AI agents after the CLI and marks it on its page", async ({ page }) => {
@@ -29,6 +30,7 @@ test("Open app opens the web app; its chevron offers the web app or a download",
   await expect(page.locator(".nav-open-main")).toHaveAttribute("href", "https://app.ghostly.tools");
   const more = page.getByRole("button", { name: "Ways to open Ghostly" });
   await expect(more).toHaveAttribute("aria-expanded", "false");
+  await expect(more).toBeEnabled();
   await more.click();
   await expect(more).toHaveAttribute("aria-expanded", "true");
   const menu = page.getByRole("menu", { name: "Ways to open Ghostly" });
@@ -50,6 +52,7 @@ test("Open app opens the web app; its chevron offers the web app or a download",
 test("the open menu works from the keyboard", async ({ page }) => {
   await page.goto("/developers");
   const more = page.getByRole("button", { name: "Ways to open Ghostly" });
+  await expect(more).toBeEnabled();
   await more.focus();
   await page.keyboard.press("Enter");
   const items = page.getByRole("menu").getByRole("menuitem");

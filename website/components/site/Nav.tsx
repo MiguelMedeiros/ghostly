@@ -14,9 +14,13 @@ export function Nav() {
   const pathname = usePathname() ?? "/";
   const [scrolled, setScrolled] = useState(false);
   const [openWays, setOpenWays] = useState(false);
+  // The chevron only works once React runs: until then it is disabled, so an early click can't be lost.
+  const [hydrated, setHydrated] = useState(false);
   const menu = useRef<HTMLDetailsElement>(null);
   const ways = useRef<HTMLDivElement>(null);
   const waysButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => setHydrated(true), []);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -25,8 +29,12 @@ export function Nav() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Close the phone menu and the open menu after navigating.
+  // Close the phone menu and the open menu after navigating. Not on the first render: the phone menu is a native
+  // <details>, so a tap before hydration already opened it, and hydrating must not shut it.
+  const shownPath = useRef(pathname);
   useEffect(() => {
+    if (shownPath.current === pathname) return;
+    shownPath.current = pathname;
     if (menu.current) menu.current.open = false;
     setOpenWays(false);
   }, [pathname]);
@@ -130,6 +138,7 @@ export function Nav() {
               aria-haspopup="menu"
               aria-expanded={openWays}
               aria-controls="nav-open-menu"
+              disabled={!hydrated}
               onClick={() => (openWays ? setOpenWays(false) : showWays("first"))}
               onKeyDown={onWaysButtonKeyDown}
             >
