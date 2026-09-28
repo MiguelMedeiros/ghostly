@@ -107,3 +107,20 @@ export function parseRelayPayload(pubKeyZ32: string, payload: Uint8Array): Signe
   }));
   return { pubKeyZ32, timestampMicros, records };
 }
+
+/** How far ahead of this clock a packet's time may be and still count as now: clocks drift, not by this much. */
+export const PKARR_FUTURE_SKEW_MS = 10 * 60_000;
+
+/**
+ * The newer of two signed packets of one key. A packet dated further ahead than `PKARR_FUTURE_SKEW_MS` never wins over
+ * one dated now or before: whoever could sign it once (a key several people hold, a clock far off) must not keep every
+ * later packet from being taken. Between two of the same kind, the later time wins; on a tie, `known` stays.
+ */
+export function newerPacket(known: SignedPacket | null | undefined, packet: SignedPacket | null | undefined, now = Date.now()): SignedPacket | null {
+  if (!known) return packet ?? null;
+  if (!packet) return known;
+  const limit = BigInt(now + PKARR_FUTURE_SKEW_MS) * 1000n;
+  const knownAhead = known.timestampMicros > limit, packetAhead = packet.timestampMicros > limit;
+  if (knownAhead !== packetAhead) return knownAhead ? packet : known;
+  return packet.timestampMicros > known.timestampMicros ? packet : known;
+}

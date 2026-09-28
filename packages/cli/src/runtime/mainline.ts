@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
-  RelayTransport, createRelayPayload, isDiscoveryBudgetError, parseRelayPayload, publicKeyFromZ32,
+  RelayTransport, createRelayPayload, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
   type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
@@ -138,9 +138,7 @@ export class RelaysAndDht implements PkarrTransport {
     try {
       const fromDht = await this.dht.get(pubKeyZ32);
       this.lastVia = "dht";
-      if (!fromRelays) return fromDht;
-      if (!fromDht) return fromRelays;
-      return fromDht.timestampMicros > fromRelays.timestampMicros ? fromDht : fromRelays;
+      return newerPacket(fromRelays, fromDht);
     } catch (error) {
       if (fromRelays) return fromRelays;
       throw failed ?? error;

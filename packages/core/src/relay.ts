@@ -1,5 +1,5 @@
 import type { Identity } from "./identity";
-import { createRelayPayload, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
@@ -358,8 +358,7 @@ export class RelayTransport implements PkarrTransport {
         if (response.status !== 404) {
           if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
           const packet = parseRelayPayload(pubKeyZ32, payload!);
-          const known = this.newest.get(pubKeyZ32);
-          if (!known || packet.timestampMicros > known.timestampMicros) this.newest.set(pubKeyZ32, packet);
+          this.newest.set(pubKeyZ32, newerPacket(this.newest.get(pubKeyZ32), packet)!);
         }
         this.answered(relay, undefined, "GET");
         this.lastRelay = relay;
