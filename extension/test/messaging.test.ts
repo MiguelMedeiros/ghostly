@@ -278,7 +278,7 @@ describe("viewer tabs", () => {
     expect(engine().requests).toEqual([]);
   });
 
-  it("sends nothing to a tab it never bound, or one that was closed", async () => {
+  it("sends no command to a tab it never bound, or one that was closed: it only lets go of it", async () => {
     const tabId = await openViewer(world);
     const before = world.callsTo("debugger.sendCommand").length;
     const url = `https://${SERVICE}.${PEER}.invalid/`;
@@ -291,6 +291,7 @@ describe("viewer tabs", () => {
     paused(tabId);
     await settle();
     expect(world.callsTo("debugger.sendCommand").slice(before)).toEqual([]);
+    expect(world.callsTo("debugger.detach")).toEqual([[{ tabId: 9999 }], [{ tabId }]]);
     expect(engine().requests).toEqual([]);
   });
 
@@ -380,7 +381,7 @@ describe("the debugger stays on the tabs the worker opened", () => {
     expect(world.session.has(`viewer:${bank.id}`)).toBe(false);
   });
 
-  it("sends nothing to a tab it did not create, even one that pauses a request for a real service", async () => {
+  it("sends no command to a tab it did not create, even one that pauses a request for a real service", async () => {
     await openViewer(world);
     const before = world.callsTo("debugger.sendCommand").length;
     const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
@@ -388,7 +389,9 @@ describe("the debugger stays on the tabs the worker opened", () => {
     fire(world.chrome.debugger.onEvent, { tabId: bank.id }, "Page.frameNavigated", { frame: { url: "https://bank.example/" } });
     await settle();
     expect(world.callsTo("debugger.sendCommand").slice(before)).toEqual([]);
-    expect(world.callsTo("debugger.detach")).toEqual([]);
+    // Letting go is the only thing it does there.
+    expect(world.callsTo("debugger.detach").every(([target]) => (target as { tabId: number }).tabId === bank.id)).toBe(true);
+    expect(world.session.has(`viewer:${bank.id}`)).toBe(false);
     expect(engine().requests).toEqual([]);
   });
 

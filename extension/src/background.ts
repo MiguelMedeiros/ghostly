@@ -234,8 +234,12 @@ const UNREACHABLE_CODES = new Set(["unreachable", "timeout", "closed", "offline"
 
 async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   const binding = await bindingOf(tabId);
-  // Not a tab this worker opened, or not any more: nothing is sent to it, not even a refusal.
-  if (!binding) return;
+  // Not a tab this worker opened, or not any more: no command goes to it. Chrome only sends events from a
+  // tab the debugger is on, so letting go of it is all that is left, and its request goes on unanswered.
+  if (!binding) {
+    await chrome.debugger.detach({ tabId }).catch(() => {});
+    return;
+  }
   const parsed = parseViewerUrl(paused.request.url);
   if (!parsed || parsed.peerPubKeyZ32 !== binding.peerPubKeyZ32 || parsed.serviceId !== binding.serviceId) {
     await devtools(tabId, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" });
@@ -309,11 +313,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     // Once the tab leaves the virtual origin there is nothing left to serve, and it is no viewer any more.
     const { frame } = params as { frame: { parentId?: string; url: string } };
     if (frame.parentId || frame.url === "about:blank" || parseViewerUrl(frame.url)) return;
-    void (async () => {
-      if (!(await bindingOf(tabId))) return;
-      await forget(tabId);
-      await chrome.debugger.detach({ tabId }).catch(() => {});
-    })();
+    void forget(tabId).then(() => chrome.debugger.detach({ tabId }).catch(() => {}));
   }
 });
 
