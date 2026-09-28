@@ -132,7 +132,7 @@ export const BLOCKS: Block[] = [
 /** What the headless `ghostly` CLI runs (docs/wisps/11xx-headless.md, "Parity with the app"). */
 const CLI_BLOCKS = [
   "core", "keys", "invite", "ghostly1", "caps", "webrtc", "iroh", "hyperdht", "dhttext", "chat", "paired", "onechat", "files",
-  "cashu", "lightning", "lnurl", "onchain", "arkade", "spark", "usdt", "testnet",
+  "cashu", "lightning", "lnurl", "onchain", "arkade", "spark", "fedimint", "usdt", "testnet",
   "proofs", "nostr", "proofkinds", "did", "pubky", "http", "profiles", "backups", "groups", "headless",
 ];
 
@@ -149,7 +149,7 @@ export const PRESETS: { id: PresetId; blocks: (bl: Block) => boolean; title: str
     id: "cli",
     blocks: (bl) => CLI_BLOCKS.includes(bl.id),
     title: "The headless CLI",
-    blurb: "The app's engine without a screen, for bots: chats, groups, files, wallets and proofs through JSON events. No calls; Bark and Fedimint stay in the app.",
+    blurb: "The app's engine without a screen, for bots: chats, groups, files, wallets and proofs through JSON events. No calls; Bark stays in the app.",
   },
   {
     id: "today",
