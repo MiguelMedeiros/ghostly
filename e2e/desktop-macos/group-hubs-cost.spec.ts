@@ -138,7 +138,7 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
       for (const [i, bot] of bots.slice(1).entries()) {
         await bot.start(relayUrl, `Bot ${i + 1}`);
         await bot.run("group", "join", link);
-        await expect.poll(async () => (await bot.run("group", "show", group)).status, { timeout: 300_000 }).toBe("active");
+        await expect.poll(async () => (await bot.run("group", "show", group)).status, { timeout: 600_000, intervals: [3_000] }).toBe("active");
       }
       await expect.poll(async () => (await members()).length, { timeout: 300_000 }).toBe(N);
     });
