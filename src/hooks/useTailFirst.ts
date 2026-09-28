@@ -1,4 +1,12 @@
 import { startTransition, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
+
+const DRAW_ALL = "ghostly:draw-every-row";
+
+/** Draws every row of the timelines still drawing their older ones, before this returns: for a jump to a message. */
+export function drawEveryRow(): void {
+  window.dispatchEvent(new Event(DRAW_ALL));
+}
 
 /** Rows a long timeline draws first: its last ones, more than a tall window shows. */
 export const FIRST_ROWS = 60;
@@ -22,6 +30,13 @@ export function useTailFirst(count: number, key: string, whole: boolean): number
   if (state.key !== key || state.from !== from) setState({ key, from });
 
   const pending = from !== null && from > 0;
+  // Asked for a row not drawn yet (a quote's original): every row, now, in this very call.
+  useEffect(() => {
+    if (!pending) return;
+    const all = () => flushSync(() => setState(now => now.key === key ? { key, from: 0 } : now));
+    window.addEventListener(DRAW_ALL, all);
+    return () => window.removeEventListener(DRAW_ALL, all);
+  }, [pending, key]);
   useEffect(() => {
     if (!pending) return;
     // A step at a time, each its own task: the page paints and answers between them.

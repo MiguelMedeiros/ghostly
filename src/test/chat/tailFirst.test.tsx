@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FIRST_ROWS, MORE_ROWS, useTailFirst } from "../../hooks/useTailFirst";
+import { drawEveryRow, FIRST_ROWS, MORE_ROWS, useTailFirst } from "../../hooks/useTailFirst";
 
 // covers: chat.scroll
 
@@ -34,6 +34,13 @@ describe("useTailFirst", () => {
   it("draws a short timeline, or one opening on a message further up, whole", () => {
     expect(renderHook(() => useTailFirst(FIRST_ROWS, "a", false)).result.current).toBe(0);
     expect(renderHook(() => useTailFirst(2_000, "b", true)).result.current).toBe(0);
+  });
+
+  it("draws every row at once when a row not drawn yet is asked for (a quote's original)", () => {
+    const { result } = renderHook(() => useTailFirst(1_000, "chat-1", false));
+    expect(result.current).toBe(1_000 - FIRST_ROWS);
+    act(() => drawEveryRow());
+    expect(result.current).toBe(0);
   });
 
   it("starts over for another timeline (a group page kept from one group to the next)", () => {
