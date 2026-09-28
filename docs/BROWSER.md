@@ -120,7 +120,7 @@ Chrome grants `debugger` for every tab and does not allow it as an optional perm
 
 - Only the service worker (`extension/src/background.ts`) calls `chrome.debugger`; a test fails if any other source file does.
 - A page asks for a contact's service (peer key and service id), never for a tab. The worker opens the tab itself, and attaches only to that tab.
-- Every command goes to a tab the worker opened for a service. A tab stops being one when it closes, leaves the virtual origin, or the person cancels Chrome's debugging bar. Events from any other tab get no answer.
+- Every command goes to a tab the worker opened for a service. A tab stops being one when it closes, leaves the virtual origin, or the person cancels Chrome's debugging bar. If an event comes from any other tab, the worker sends it no command and detaches from it.
 - Only `Fetch.enable`, `Page.enable`, `Fetch.fulfillRequest` and `Fetch.failRequest` are ever sent. Anything else is refused.
 - The worker only hears messages from the extension's own pages.
 
