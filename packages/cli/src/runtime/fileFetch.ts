@@ -11,8 +11,9 @@ export function installFileFetch(): void {
   const patched: typeof fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.startsWith("file:")) {
-      if (!url.endsWith(".wasm")) throw new TypeError(`Refusing to fetch ${url}`);
-      const bytes = await readFile(fileURLToPath(url));
+      const parsed = new URL(url);
+      if (!parsed.pathname.endsWith(".wasm") || parsed.search || parsed.hash) throw new TypeError(`Refusing to fetch ${url}`);
+      const bytes = await readFile(fileURLToPath(parsed));
       return new Response(bytes, { headers: { "content-type": "application/wasm" } });
     }
     return original(input, init);

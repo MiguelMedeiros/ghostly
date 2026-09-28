@@ -66,14 +66,29 @@ export function oneOf<T extends string>(params: Params, name: string, values: re
 
 // ---------- finding things ----------
 
-/** A chat by its id, a unique prefix of it, or its name (label or the contact's name), in that order. */
+/** A contact key as chats show it (`peer`): 52 characters of z-base-32. */
+export const CONTACT_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
+
+/**
+ * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by a unique prefix of its
+ * id; or by its name: the label this side gave it first, and only when no label matches, the name the contact gave
+ * itself (which the contact controls, so it never wins over a label).
+ */
 export function findChat(links: readonly LinkView[], ref: string): LinkView {
   const exact = links.find((link) => link.id === ref);
   if (exact) return exact;
+  if (CONTACT_KEY.test(ref)) {
+    const byKey = links.filter((link) => link.peerPubKeyZ32 === ref);
+    if (byKey.length === 1) return byKey[0];
+    if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
+    throw new CliError("not_found", `No chat with ${JSON.stringify(ref)}`);
+  }
   const byPrefix = links.filter((link) => link.id.startsWith(ref));
   if (byPrefix.length === 1) return byPrefix[0];
   const lower = ref.toLowerCase();
-  const byName = links.filter((link) => [link.label, link.peerNick].some((name) => name?.trim().toLowerCase() === lower));
+  const named = (name: string | null | undefined) => name?.trim().toLowerCase() === lower;
+  const byLabel = links.filter((link) => named(link.label));
+  const byName = byLabel.length ? byLabel : links.filter((link) => named(link.peerNick));
   if (byName.length === 1) return byName[0];
   if (byPrefix.length > 1 || byName.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: [...byPrefix, ...byName].map((link) => link.id) });
   throw new CliError("not_found", `No chat ${JSON.stringify(ref)}`);

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseCallSignal, signalHasVideo, CALL_SIGNAL_MAX_AGE_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
+import { findChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath } from "./audioSocket";
 import { CallMedia, loadCallStack, type CallStack, type MediaOptions } from "./media";
@@ -446,17 +447,9 @@ export class CallManager {
     return this.host.engine.getState().links.find((l) => l.id === chat);
   }
 
-  /** A chat by id, prefix or name (the API's rules). */
+  /** A chat by id, contact key, prefix or name (the API's rules, `findChat`). */
   private chatId(ref: string): string {
-    const links = this.host.engine.getState().links;
-    const exact = links.find((l) => l.id === ref);
-    if (exact) return exact.id;
-    const byPrefix = links.filter((l) => l.id.startsWith(ref));
-    if (byPrefix.length === 1) return byPrefix[0].id;
-    const lower = ref.toLowerCase();
-    const byName = links.filter((l) => [l.label, l.peerNick].some((n) => n?.trim().toLowerCase() === lower));
-    if (byName.length === 1) return byName[0].id;
-    throw new CliError(byPrefix.length + byName.length > 1 ? "bad_request" : "not_found", byPrefix.length + byName.length > 1 ? `${JSON.stringify(ref)} names more than one chat: use its id` : `No chat ${JSON.stringify(ref)}`);
+    return findChat(this.host.engine.getState().links, ref).id;
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */

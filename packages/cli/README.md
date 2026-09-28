@@ -286,8 +286,8 @@ side that invited answers once.
 
 ## The socket API
 
-The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `/tmp` under a hashed name
-when the folder's path is too long for a socket). One JSON object per line each way:
+The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `/tmp/ghostly-<hash>/`, a
+folder of the user's alone, when the folder's path is too long for a socket). One JSON object per line each way:
 
 ```json
 {"id":1,"method":"chat.send","params":{"chat":"alice","text":"hi","wait":"sent"}}
