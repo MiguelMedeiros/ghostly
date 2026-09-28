@@ -149,6 +149,8 @@ const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
  * one received and it did not: messages sent where the two of them were cut apart (WISP 9xx § Catch-up).
  */
 export const MESH_GOSSIP_MS = 60_000;
+/** Where a member's gossip turns start among the members it is connected to: a number of its own, from its key. */
+const gossipStart = (key: string) => { let n = 0; for (let i = 0; i < key.length; i++) n = (n * 31 + key.charCodeAt(i)) >>> 0; return n; };
 /** How often the edges a mesh roster asks for are checked against the ones that exist (one that failed to open is tried again). */
 const RECONCILE_MS = 30_000;
 /** A member back after this long unreachable is announced to the others (`group-here`), unless someone already did. */
@@ -1077,7 +1079,10 @@ export class Groups {
       const connected = session.others.filter(key => !away.includes(key));
       if (!away.length || !connected.length) continue;
       this.lastGossip.set(groupId, now);
-      const via = connected[this.gossipTurn++ % connected.length];
+      // Each member starts its turns at a place of its own (from its key): members cut off from the same member (a Mac
+      // past its budget) have much the same list and turn count, and in step they would all ask the same ones, those
+      // cut off too, for minutes on end. Spread out, some ask a member that has it, and the others then get it from them.
+      const via = connected[(gossipStart(session.myKey) + this.gossipTurn++) % connected.length];
       const asked = this.relayAsked.get(groupId) ?? new Map<string, { via: string; at: number }>();
       this.relayAsked.set(groupId, asked);
       for (const key of away) asked.set(key, { via, at: now });
