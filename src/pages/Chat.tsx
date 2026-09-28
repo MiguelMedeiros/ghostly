@@ -667,7 +667,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       {/* Messages */}
       <div className="relative flex-1 min-h-0 flex flex-col">
       <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
-        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3">
+        {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
+        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
           {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
             <p data-testid="chat-created" className="mb-3 px-4 text-center text-[11px] text-text-muted">
               <time dateTime={new Date(session.createdAt).toISOString()}>
