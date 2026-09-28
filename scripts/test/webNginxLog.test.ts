@@ -23,7 +23,7 @@ const formats = [...conf.matchAll(/log_format\s+(\S+)\s+([^;]*);/g)].map(([, nam
 
 it("defines its own log format, and it names no one", () => {
   expect(formats.map((f) => f.name)).toEqual(["ghostly"]);
-  const variables = formats[0].format.match(/\$[a-z_]+/g) ?? [];
+  const variables = formats[0].format.match(/\$[a-z0-9_]+/g) ?? [];
   expect(variables.length).toBeGreaterThan(0);
   for (const v of variables) {
     for (const personal of PERSONAL) expect(v === personal || (personal.endsWith("_") && v.startsWith(personal)), `${v} in log_format`).toBe(false);

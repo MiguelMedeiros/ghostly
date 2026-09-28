@@ -22,6 +22,8 @@ To put it behind a tunnel or a reverse proxy, choose where it listens with `GHOS
 
 What is served is static files (nginx, `web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC or Iroh through a relay (HyperDHT too, once a HyperDHT relay is set), and keeps its state in that browser's IndexedDB and localStorage. It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
 
+Its log names no one: each request is one line with the time, the method, the file served, the status, the size and the time taken. There is no IP address, browser, referrer or query string, and error lines (which would name the client) are kept to `crit`. Docker keeps three files of 10 MB of it (`docker compose logs web`).
+
 `npm run test:e2e` checks every feature of the web app in real browsers, and the web app against the extension ([e2e/README.md](../e2e/README.md)). `E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.config.ts --project=web` runs the same tests against a deployed copy.
 
 ## How it shares code
