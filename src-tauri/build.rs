@@ -72,6 +72,7 @@ const COMMANDS: &[&str] = &[
     "publish_messages",
     "publish_records",
     "publish_signed_packet",
+    "push_send",
     "read_clipboard_files",
     "read_clipboard_text",
     "read_pasted_bytes",

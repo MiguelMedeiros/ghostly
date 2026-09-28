@@ -9,7 +9,9 @@ import {
 } from "../src/pairedTyping";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
 import type { FrameChannel } from "../src/frames";
-// covers: chat.typing
+import { generateVapidKeys } from "../src/webPush";
+import { newWakeToken, type WakeTarget } from "../src/pairedWake";
+// covers: chat.typing, push.wake.exchange
 
 afterEach(() => { vi.useRealTimers(); });
 
@@ -412,5 +414,42 @@ describe("typing on a paired session (typing/1)", () => {
     } as unknown as GhostLinkOptions);
     link.setTyping(true);
     expect(link.supportsTyping).toBe(false);
+  });
+});
+
+// The same harness carries wake/1 (WISP 401 § Wake-up push): another capability shared on the live session only.
+describe("sharing a wake-up target on a paired session (wake/1)", () => {
+  const target = (): WakeTarget => ({
+    endpoint: "https://fcm.googleapis.com/fcm/send/x", p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+    auth: "BTBZMqHH6r4Tts7J_aSIgg", vapid: generateVapidKeys(), token: newWakeToken(),
+  });
+
+  it("once both offer it: B learns A's target, then that A stopped; each side is told when it can share", async () => {
+    const seen: (WakeTarget | null)[] = [];
+    const agreed: boolean[] = [];
+    const { a, b } = pair({ a: { wakeSupport: true, events: { onWakeSupport: on => agreed.push(on) } }, b: { wakeSupport: true, events: { onPeerWake: t => seen.push(t) } } });
+    const mine = target();
+    // Not live: nothing goes.
+    expect(a.link.sendWake(mine)).toBe(false);
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsWake && b.link.supportsWake).toBe(true));
+    expect(agreed).toContain(true);
+    expect(a.link.sendWake(mine)).toBe(true);
+    await vi.waitFor(() => expect(seen).toEqual([mine]));
+    expect(a.link.sendWake(null)).toBe(true);
+    await vi.waitFor(() => expect(seen).toEqual([mine, null]));
+  });
+
+  it("an app that does not offer wake/1 is sent nothing, and what arrives from it anyway is ignored", async () => {
+    const seen: unknown[] = [];
+    const { a, b } = pair({ a: { wakeSupport: true, events: { onPeerWake: t => seen.push(t) } } });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.sessionOffers.peer).not.toBeNull());
+    expect(a.link.supportsWake).toBe(false);
+    expect(a.link.sendWake(target())).toBe(false);
+    b.link["channel"]!.send(JSON.stringify({ t: "paired-wake", w: null }));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(seen).toEqual([]);
+    expect(a.sent.some(data => data.includes('"paired-wake"'))).toBe(false);
   });
 });

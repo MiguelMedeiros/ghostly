@@ -254,6 +254,16 @@ pub async fn lnd_request(
     .await
 }
 
+/// Posts a wake-up to a contact's push service (WISP 401 § Wake-up push); see push_send.rs.
+#[tauri::command]
+pub async fn push_send(
+    url: String,
+    headers: Vec<(String, String)>,
+    body: String,
+) -> Result<u16, String> {
+    crate::push_send::send(url, headers, body).await
+}
+
 #[tauri::command]
 pub fn open_service_window<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

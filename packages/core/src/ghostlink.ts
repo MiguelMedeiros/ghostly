@@ -40,7 +40,8 @@ import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, type LinkStatus, type PeerP
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, type WireEdit } from "./pairedEdits";
@@ -286,6 +287,13 @@ export interface GhostLinkEvents {
   onEditReceipt?(id: string, e: number): void | Promise<void>;
   /** Both sides offer `edit/1` on the open session (true), or no longer (false). */
   onEditSupport?(supported: boolean): void;
+  /**
+   * The contact shared how to wake its closed web app (`wake/1`, WISP 401 § Wake-up push), already checked; null:
+   * it stopped sharing (forget it). Kept by the caller: it is what makes a wake-up possible while the contact is away.
+   */
+  onPeerWake?(target: WakeTarget | null): void;
+  /** Both sides offer `wake/1` on the open session (true), or no longer (false): the moment to share this side's. */
+  onWakeSupport?(supported: boolean): void;
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -361,6 +369,8 @@ export interface GhostLinkOptions {
   reactionsSupport?: boolean;
   /** Offer `edit/1` on paired sessions: sent texts can be edited (1:1 chats, not group edges). */
   editSupport?: boolean;
+  /** Offer `wake/1` on paired sessions: this app wakes a contact's closed web app with a push (1:1 chats, not group edges). */
+  wakeSupport?: boolean;
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -507,6 +517,7 @@ export class GhostLink {
   private readonly reactionsReceived = new ReactionWindow(REACTION_LIMITS.receive);
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
+  private readonly wakeReceived = new RateWindow(6, 60_000);
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   /** When the ping awaiting its pong went, and the round trip last measured on this session. */
@@ -1957,6 +1968,7 @@ export class GhostLink {
     if (this.options.typingSupport) offered.push(TYPING_CAPABILITY);
     if (this.options.reactionsSupport) offered.push(REACTIONS_CAPABILITY);
     if (this.options.editSupport) offered.push(EDIT_CAPABILITY);
+    if (this.options.wakeSupport) offered.push(WAKE_SESSION_CAPABILITY);
     return offered;
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
@@ -1988,6 +2000,16 @@ export class GhostLink {
   get peerTyping(): boolean { return this.typingReceiver.peerTyping; }
   /** What the contact is doing now (typing, recording, thinking, and a bot's status), or null. */
   get peerTypingActivity(): TypingActivity | null { return this.typingReceiver.peerActivity; }
+  /** Both sides offer `wake/1` on the open session: push subscriptions can be shared (WISP 401 § Wake-up push). */
+  get supportsWake(): boolean { return !!this.options.params.profile && this.isDataLinkOpen && this.sessionCapabilities.agreed(WAKE_SESSION_CAPABILITY); }
+  /**
+   * Shares how to wake this side's closed web app (null: stop, forget it) on the live session, once both sides offer
+   * `wake/1`. False when it could not go now: the caller shares it again on the next session.
+   */
+  sendWake(target: WakeTarget | null): boolean {
+    if (!this.channel || !this.supportsWake) return false;
+    try { this.channel.send(JSON.stringify(wakeFrame(target))); return true; } catch { return false; }
+  }
   /** Both sides offer `edit/1` on the open session: edits can be said and confirmed. */
   get supportsEdits(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(EDIT_CAPABILITY); }
   /**
@@ -2083,6 +2105,7 @@ export class GhostLink {
     if (changed.includes(TYPING_CAPABILITY) && !this.supportsTyping) { this.typingSender.reset(); this.typingReceiver.clear(); }
     if (changed.includes(REACTIONS_CAPABILITY)) this.options.events?.onReactionsSupport?.(this.supportsReactions);
     if (changed.includes(EDIT_CAPABILITY)) this.options.events?.onEditSupport?.(this.supportsEdits);
+    if (changed.includes(WAKE_SESSION_CAPABILITY)) this.options.events?.onWakeSupport?.(this.supportsWake);
     this.emitPairingState();
   }
   /** Both sides announced groups on this session and it is open. */
@@ -2438,6 +2461,13 @@ export class GhostLink {
           if (frame?.t === SESSION_CAPABILITIES_FRAME) {
             const changed = this.sessionCapabilities.receive(frame);
             if (changed) this.sessionCapabilitiesChanged(changed);
+            return;
+          }
+          if (frame?.t === WAKE_FRAME) {
+            // Only once both said wake/1; a handful per minute at most (it changes when the contact rotates it).
+            if (!this.supportsWake || !this.wakeReceived.take()) return;
+            const target = parseWakeFrame(frame);
+            if (target !== undefined) this.options.events?.onPeerWake?.(target);
             return;
           }
           if (frame?.t === TYPING_FRAME) {
