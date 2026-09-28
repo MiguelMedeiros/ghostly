@@ -11,6 +11,7 @@ mod diagnostics;
 mod e2e_driver;
 mod file_store;
 mod file_stream;
+mod fullscreen;
 mod hyperdht;
 mod link_preview;
 mod lnd;
@@ -181,6 +182,11 @@ fn main() {
             app.manage(file_store::FileStore::new(
                 app.path().app_data_dir()?.join("files"),
             ));
+            // A video's Full screen button works in the Ghostly window (WKWebView has it off, WebView2 fills only
+            // the webview).
+            if let Some(main) = app.get_webview_window("main") {
+                fullscreen::install(&main);
+            }
             #[cfg(feature = "e2e-driver")]
             {
                 // The apps under test stay out of the Dock and never take the focus from whoever is at the Mac.
