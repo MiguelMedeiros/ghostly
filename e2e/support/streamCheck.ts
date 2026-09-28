@@ -187,3 +187,101 @@ export function servedRequests(log: string): Served[] {
   }
   return out;
 }
+
+export interface FullscreenReport {
+  /** `document.fullscreenEnabled`: false where the engine has the API off (WKWebView before src-tauri/src/fullscreen.rs). */
+  enabled: boolean;
+  /** Where `requestFullscreen` got: the element full screen, or why not. */
+  entered: boolean;
+  error?: string;
+  /** The Tauri window's own state while the element was full screen (WebView2 needs the host for it). */
+  windowFullscreen?: boolean | string;
+  /** The page's size then, against the screen's. */
+  inner?: [number, number];
+  screen?: [number, number];
+  /** Out again, and the window with it. */
+  exited: boolean;
+  windowAfter?: boolean | string;
+}
+
+/**
+ * A `<video>` asks for full screen from a button, as its Full screen button does, and leaves it again. `click` presses
+ * it through the driver (WebDriver's click is a real gesture on Linux); otherwise the press runs inside the driver's
+ * script, which WKWebView and WebView2 take as the person's gesture.
+ */
+export async function fullscreenInPage(app: DesktopApp, { click = false }: { click?: boolean } = {}): Promise<FullscreenReport> {
+  await app.execute(
+    `const press = !arguments[0];
+     const video = document.createElement("video");
+     video.id = "e2e-fullscreen-video";
+     video.muted = true;
+     video.style.cssText = "position:fixed;left:0;top:0;width:160px;height:90px;background:#000;z-index:2147483646";
+     const button = document.createElement("button");
+     button.id = "e2e-fullscreen";
+     button.textContent = "Full screen";
+     button.style.cssText = "position:fixed;left:0;top:100px;z-index:2147483647";
+     window.__e2eFullscreen = { enabled: !!document.fullscreenEnabled };
+     button.onclick = () => {
+       try { video.requestFullscreen().catch((e) => { window.__e2eFullscreen.error = e.name + ": " + e.message; }); }
+       catch (e) { window.__e2eFullscreen.error = String(e); }
+     };
+     document.body.append(video, button);
+     if (press) button.click();`,
+    click,
+  );
+  if (click) await app.click("#e2e-fullscreen");
+  return app.executeAsync<FullscreenReport>(
+    `const done = arguments[arguments.length - 1];
+     const video = document.getElementById("e2e-fullscreen-video");
+     const report = { ...window.__e2eFullscreen, entered: false, exited: false };
+     const change = (want, ms) => new Promise((resolve) => {
+       const start = performance.now();
+       const tick = () => {
+         if ((document.fullscreenElement === video) === want) return resolve(true);
+         if (performance.now() - start > ms) return resolve(false);
+         setTimeout(tick, 50);
+       };
+       tick();
+     });
+     const windowState = () => window.__TAURI_INTERNALS__.invoke("plugin:window|is_fullscreen", { label: "main" }).catch((e) => "threw: " + e);
+     (async () => {
+       report.entered = await change(true, 8000);
+       report.error = window.__e2eFullscreen.error;
+       // The window follows a moment later (an animation on macOS).
+       await new Promise((r) => setTimeout(r, 1500));
+       report.windowFullscreen = await windowState();
+       report.inner = [window.innerWidth, window.innerHeight];
+       report.screen = [screen.width, screen.height];
+       if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+       report.exited = await change(false, 8000);
+       await new Promise((r) => setTimeout(r, 1500));
+       report.windowAfter = await windowState();
+       video.remove();
+       document.getElementById("e2e-fullscreen")?.remove();
+       return report;
+     })().then(done, (e) => done({ ...report, error: String(e) }));`,
+  );
+}
+
+export interface WindowFullscreenReport { api: { enabled: boolean; request: string }; on?: boolean | string; off?: boolean | string; error?: string }
+
+/**
+ * Where the engine's full screen is off (Desktop on Linux), what the video's own Full screen button uses instead: the
+ * window in and out of full screen (`plugin:window|set_fullscreen`, which the capability must grant).
+ */
+export function windowFullscreenInPage(app: DesktopApp): Promise<WindowFullscreenReport> {
+  return app.executeAsync<WindowFullscreenReport>(
+    `const done = arguments[arguments.length - 1];
+     const invoke = window.__TAURI_INTERNALS__.invoke;
+     const report = { api: { enabled: !!document.fullscreenEnabled, request: typeof document.createElement("video").requestFullscreen } };
+     const state = () => invoke("plugin:window|is_fullscreen", { label: "main" });
+     const settle = async (want) => { for (let i = 0; i < 40; i++) { if ((await state()) === want) return want; await new Promise((r) => setTimeout(r, 100)); } return state(); };
+     (async () => {
+       await invoke("plugin:window|set_fullscreen", { label: "main", value: true });
+       report.on = await settle(true);
+       await invoke("plugin:window|set_fullscreen", { label: "main", value: false });
+       report.off = await settle(false);
+       return report;
+     })().then(done, (e) => done({ ...report, error: String(e) }));`,
+  );
+}

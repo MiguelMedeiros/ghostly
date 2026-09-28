@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "core:app:default",
+    "core:window:allow-set-fullscreen",
     "allow-paired-iroh-start",
     "allow-paired-iroh-address",
     "allow-paired-iroh-connect",

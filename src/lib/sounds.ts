@@ -1,3 +1,4 @@
+import { followSpeaker } from "./mediaDevices";
 import { loadSettings } from "./settings";
 
 /**
@@ -128,6 +129,8 @@ const decoded = new Map<SoundName, Promise<AudioBuffer>>();
 let context: AudioContext | null = null;
 const playing = new Set<() => void>();
 let listening = false;
+/** Stops the sounds following the speaker chosen in Settings (where the engine can send Web Audio to one). */
+let unfollowSpeaker: (() => void) | null = null;
 
 function load(name: SoundName): Promise<AudioBuffer> | undefined {
   const url = assets[`../assets/sounds/${name}.mp3`];
@@ -149,6 +152,7 @@ export function installAudioGestures(): () => void {
   const unlock = () => {
     try {
       context ??= new AudioContext();
+      unfollowSpeaker ??= followSpeaker(context).stop;
       if (context.state === "suspended") void context.resume().catch(()=>{});
       for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
     } catch { /* no audio device */ }
@@ -160,6 +164,8 @@ export function installAudioGestures(): () => void {
   window.addEventListener("storage",mute);
   return () => {
     listening = false;
+    unfollowSpeaker?.();
+    unfollowSpeaker = null;
     document.removeEventListener("pointerdown",unlock,true);
     document.removeEventListener("keydown",unlock,true);
     window.removeEventListener("settings-updated",mute);

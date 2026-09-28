@@ -54,6 +54,11 @@ export interface BrowserHost {
    */
   openPaymentLink?(uri: string): Promise<void>;
   /**
+   * Puts the app's window in or out of full screen. The desktop app on Linux has it: WebKitGTK's element full screen
+   * aborts the app there, so the page fills the window with the video instead (src-tauri/src/fullscreen.rs).
+   */
+  fullscreenWindow?(on: boolean): Promise<void>;
+  /**
    * Hands a link to the system's share sheet, pointing at `anchor` (the button, in CSS pixels).
    * Resolves to false where the platform has no sheet to show; left out where the page's own Web
    * Share API is the way (a web page).

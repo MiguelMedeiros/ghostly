@@ -148,6 +148,8 @@ export class FakeEngine implements BrowserHost {
   /** Every request, in order. */
   readonly calls: { method: EngineMethod; params: unknown }[] = [];
   openPaymentLink?: BrowserHost["openPaymentLink"];
+  /** The desktop host's window full screen (Linux), when a test gives one. */
+  fullscreenWindow?: BrowserHost["fullscreenWindow"];
   /** The desktop host's native clipboard read, when a test gives one; left out, the page's Clipboard API is used. */
   readClipboardText?: BrowserHost["readClipboardText"];
   /** The desktop host's native read of copied files or a picture, when a test gives one. */
@@ -201,6 +203,7 @@ export class FakeEngine implements BrowserHost {
     this.calls.length = 0;
     this.handlers.clear();
     this.openPaymentLink = undefined;
+    this.fullscreenWindow = undefined;
     this.readClipboardText = undefined;
     this.readClipboardFiles = undefined;
     this.setState({});

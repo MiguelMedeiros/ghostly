@@ -1,4 +1,5 @@
-import { act, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useWebRTC } from "@ghostly/react";
 import { FakePeerConnection, device, installWebRTCFakes, remote, type FakeMediaDevices, type FakeTrack } from "../../../packages/react/test/fakes";
@@ -6,8 +7,9 @@ import { CallOverlay } from "../../components/CallOverlay";
 import { MediaSettings } from "../../components/MediaSettings";
 import { CameraCapture } from "../../components/composer/CameraCapture";
 import { useCallDevices } from "../../hooks/useCallDevices";
-import { chooseDevice, groupDevices, loadDeviceChoices, preferredDevice, resolveDevice } from "../../lib/mediaDevices";
-import { setStorageProfile } from "../../lib/storage";
+import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
+import { chooseDevice, followSpeaker, groupDevices, loadDeviceChoices, preferredDevice, resolveDevice } from "../../lib/mediaDevices";
+import { getPrefix, setStorageProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 import { choose, optionsOf } from "../select";
 
@@ -210,6 +212,106 @@ describe("Settings → Audio & video", () => {
   });
 });
 
+describe("the chosen speaker, beyond calls", () => {
+  it("plays an element there, follows a new choice, and stops following when told", async () => {
+    const sinks = speakerChoice();
+    chooseDevice("audiooutput", { id: "out-headset", label: "AirPods" });
+    const audio = document.createElement("audio");
+    const { ready, stop } = followSpeaker(audio);
+    await ready;
+    expect(sinks.map(([, id]) => id)).toEqual(["out-headset"]);
+
+    chooseDevice("audiooutput", { id: "out-builtin", label: "MacBook Pro Speakers" });
+    await waitFor(() => expect(sinks.map(([, id]) => id)).toEqual(["out-headset", "out-builtin"]));
+    chooseDevice("audiooutput", null);
+    await waitFor(() => expect(sinks.map(([, id]) => id)).toEqual(["out-headset", "out-builtin", ""]));
+
+    stop();
+    chooseDevice("audiooutput", { id: "out-headset", label: "AirPods" });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(sinks).toHaveLength(3);
+  });
+
+  it("finds the chosen speaker by its name when the browser gave it a new id", async () => {
+    const sinks = speakerChoice();
+    chooseDevice("audiooutput", { id: "old-id", label: "AirPods" });
+    const { ready, stop } = followSpeaker(document.createElement("audio"));
+    await ready;
+    stop();
+    expect(sinks.map(([, id]) => id)).toEqual(["out-headset"]);
+  });
+
+  it("plays on the default when the chosen one is unplugged, or the engine refuses it", async () => {
+    const sinks = speakerChoice();
+    chooseDevice("audiooutput", { id: "out-usb", label: "USB Speakers" });
+    const audio = followSpeaker(document.createElement("audio"));
+    await audio.ready;
+    audio.stop();
+    // The default already: nothing to set.
+    expect(sinks).toEqual([]);
+
+    chooseDevice("audiooutput", { id: "out-headset", label: "AirPods" });
+    const setSinkId = vi.fn(async (id: string) => { if (id) throw new DOMException("no permission", "NotAllowedError"); });
+    const other = document.createElement("audio");
+    Object.defineProperty(other, "setSinkId", { configurable: true, value: setSinkId });
+    Object.defineProperty(other, "sinkId", { configurable: true, value: "out-builtin" });
+    const refused = followSpeaker(other);
+    await expect(refused.ready).resolves.toBeUndefined();
+    refused.stop();
+    expect(setSinkId.mock.calls).toEqual([["out-headset"], [""]]);
+  });
+
+  it("does nothing where the engine cannot choose a speaker", async () => {
+    chooseDevice("audiooutput", { id: "out-headset", label: "AirPods" });
+    await expect(followSpeaker(document.createElement("audio")).ready).resolves.toBeUndefined();
+    expect(devices.enumerateDevices).not.toHaveBeenCalled();
+  });
+
+  it("an element on screen (a voice message, an audio file, a video) follows it", async () => {
+    const sinks = speakerChoice();
+    chooseDevice("audiooutput", { id: "out-headset", label: "AirPods" });
+    function Player() {
+      const ref = useRef<HTMLAudioElement>(null);
+      useChosenSpeaker(ref, "blob:1");
+      return <audio ref={ref} data-testid="player" />;
+    }
+    const { unmount } = render(<Player />);
+    await waitFor(() => expect(sinks.map(([element, id]) => [element, id])).toEqual([[screen.getByTestId("player"), "out-headset"]]));
+    unmount();
+    chooseDevice("audiooutput", null);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(sinks).toHaveLength(1);
+  });
+
+  it("app sounds play there too, where Web Audio can choose a speaker", async () => {
+    speakerChoice();
+    chooseDevice("audiooutput", { id: "out-headset", label: "AirPods" });
+    const contexts: { sinks: string[] }[] = [];
+    class FakeAudioContext {
+      state = "running";
+      sinkId = "";
+      sinks: string[] = [];
+      constructor() { contexts.push(this); }
+      async setSinkId(id: string) { this.sinks.push(id); this.sinkId = id; }
+      resume() { return Promise.resolve(); }
+      decodeAudioData() { return Promise.reject(new Error("no decoder")); }
+    }
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })));
+    const { installAudioGestures } = await import("../../lib/sounds");
+    const uninstallSounds = installAudioGestures();
+    try {
+      document.dispatchEvent(new Event("pointerdown"));
+      await waitFor(() => expect(contexts[0]?.sinks).toEqual(["out-headset"]));
+      chooseDevice("audiooutput", { id: "out-builtin", label: "MacBook Pro Speakers" });
+      await waitFor(() => expect(contexts[0].sinks).toEqual(["out-headset", "out-builtin"]));
+    } finally {
+      uninstallSounds();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 /** A connected call placed with the chosen devices, with the call window's device controls. */
 async function callWithDevices() {
   let signal: string | null = null;
@@ -305,6 +407,57 @@ describe("a headset plugged in and out during a call", () => {
     await waitFor(() => expect(audio.track).toBe(builtIn));
     expect(loadDeviceChoices().audioinput).toEqual({ id: "mic-builtin", label: "MacBook Pro Microphone" });
     expect(hook.result.current.devices?.current.audioinput).toBe("mic-builtin");
+    // Switched once: the choice it saved is not taken for one made in Settings.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(devices.userMedia).toHaveLength(2);
+  });
+});
+
+describe("a device chosen in Settings during a call", () => {
+  it("a microphone: the call switches to it with replaceTrack and stays connected", async () => {
+    const { hook, audio } = await callWithDevices();
+    act(() => chooseDevice("audioinput", { id: "mic-headset", label: "AirPods" }));
+    await waitFor(() => expect(devices.userMedia).toHaveLength(2));
+    expect(devices.userMedia[1].constraints).toEqual({ audio: { deviceId: { exact: "mic-headset" } } });
+    const headset = devices.userMedia[1].grant().getAudioTracks()[0];
+    await waitFor(() => expect(audio.replaceTrack).toHaveBeenCalledWith(headset));
+    expect(hook.result.current.webrtc.callState).toBe("connected");
+    await waitFor(() => expect(hook.result.current.devices?.current.audioinput).toBe("mic-headset"));
+
+    // Back to the system default.
+    act(() => chooseDevice("audioinput", null));
+    await waitFor(() => expect(devices.userMedia).toHaveLength(3));
+    expect(devices.userMedia[2].constraints).toEqual({ audio: true });
+  });
+
+  it("the one the call already uses: nothing to switch", async () => {
+    chooseDevice("audioinput", { id: "mic-headset", label: "AirPods" });
+    await callWithDevices();
+    act(() => chooseDevice("audioinput", { id: "mic-headset", label: "AirPods (renamed)" }));
+    act(() => chooseDevice("videoinput", { id: "cam-usb", label: "Logitech C920" }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    // An audio call has no camera to switch either.
+    expect(devices.userMedia).toHaveLength(1);
+  });
+
+  it("a speaker: the call's sound moves to it", async () => {
+    speakerChoice();
+    const { hook } = await callWithDevices();
+    expect(hook.result.current.devices?.speaker).toBeUndefined();
+    act(() => chooseDevice("audiooutput", { id: "out-headset", label: "AirPods" }));
+    await waitFor(() => expect(hook.result.current.devices?.speaker).toBe("out-headset"));
+    act(() => chooseDevice("audiooutput", null));
+    await waitFor(() => expect(hook.result.current.devices?.speaker).toBeUndefined());
+  });
+
+  it("from another page of the app (a storage event) too", async () => {
+    await callWithDevices();
+    const choices = JSON.stringify({ audioinput: { id: "mic-builtin", label: "MacBook Pro Microphone" } });
+    const key = `${getPrefix()}media_devices`;
+    localStorage.setItem(key, choices);
+    act(() => { window.dispatchEvent(new StorageEvent("storage", { key, newValue: choices })); });
+    await waitFor(() => expect(devices.userMedia).toHaveLength(2));
+    expect(devices.userMedia[1].constraints).toEqual({ audio: { deviceId: { exact: "mic-builtin" } } });
   });
 });
 
@@ -368,6 +521,36 @@ describe("the call window's device menu", () => {
     expect(screen.getByTestId("call-device-notice")).toHaveTextContent("AirPods is back");
     await user.click(screen.getByTestId("call-device-switch-back"));
     expect(switchBack).toHaveBeenCalledOnce();
+  });
+
+  it("speaks the app's language", async () => {
+    const { user } = renderApp(
+      <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff={false} canSendVideo canShareScreen
+        isScreenSharing remoteIsScreenSharing remoteHasVideo={false} callStartedAt={Date.now()} peerName="Ana" onHangUp={vi.fn()}
+        onToggleMute={vi.fn()} onToggleVideo={vi.fn()} onToggleScreenShare={vi.fn()} devices={null} />,
+      { language: "pt" },
+    );
+    expect(screen.getByTestId("call-mute")).toHaveAttribute("title", "Silenciar");
+    expect(screen.getByTestId("call-camera")).toHaveAttribute("title", "Ligar câmera");
+    expect(screen.getByTestId("call-hang-up")).toHaveAttribute("title", "Encerrar chamada");
+    expect(screen.getByTestId("share-screen")).toHaveAccessibleName("Parar de compartilhar");
+    expect(screen.getByTestId("call-sharing")).toHaveTextContent("Você e Ana estão compartilhando as telas");
+    await user.click(screen.getByTestId("call-minimize"));
+    expect(screen.getByTestId("call-minimize")).toHaveAttribute("title", "Voltar para a tela cheia");
+  });
+
+  it("says Calling... and Connecting... in the app's language", () => {
+    const { rerender } = renderApp(
+      <CallOverlay callState="offering" localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+        callStartedAt={null} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} />,
+      { language: "es" },
+    );
+    expect(screen.getByTestId("call-status")).toHaveTextContent("Llamando...");
+    rerender(
+      <CallOverlay callState="connecting" localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+        callStartedAt={null} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} />,
+    );
+    expect(screen.getByTestId("call-status")).toHaveTextContent("Conectando...");
   });
 
   it("sends the call's sound to the chosen speaker, on both elements that play it", () => {

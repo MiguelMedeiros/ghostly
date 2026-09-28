@@ -165,8 +165,47 @@ describe("an audio file in the chat", () => {
     expect(screen.getByTestId("audio-download")).toBeInTheDocument();
   });
 
-  it("too large to hand out here (Desktop above its limit): Download to listen", async () => {
+  // covers: files.video.stream
+  it("on Desktop it plays from the platform's stream, even a large one, and lets go of it", async () => {
     getFile.mockResolvedValue(null);
+    const release = vi.fn();
+    const streamFile = vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/song-1", release });
+    const file = song({ size: 300 * MB });
+    show(file);
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    expect(streamFile).toHaveBeenCalledWith(file.id);
+    const audio = screen.getByTestId("audio-element") as HTMLAudioElement;
+    expect(audio.getAttribute("src")).toBe("ghostly-file://localhost/song-1");
+    expect(screen.queryByTestId("audio-problem")).toBeNull();
+    fireEvent.ended(audio);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("a stream the player refuses is played again from the file's bytes, once, from where it was", async () => {
+    const release = vi.fn();
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/song-2", release });
+    show(song());
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    const streamed = screen.getByTestId("audio-element") as HTMLAudioElement;
+    streamed.currentTime = 3;
+    fireEvent.error(streamed);
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+    const fromBytes = screen.getByTestId("audio-element") as HTMLAudioElement;
+    expect(fromBytes.getAttribute("src")).toMatch(/^blob:/);
+    expect(fromBytes.currentTime).toBe(3);
+    expect(screen.queryByTestId("audio-problem")).toBeNull();
+    // The bytes refused too: nothing more to try.
+    fireEvent.error(fromBytes);
+    await flush();
+    expect(screen.getByTestId("audio-problem")).toHaveTextContent("(MP3)");
+  });
+
+  it("too large to hand out here, and nothing streams it: Download to listen", async () => {
+    getFile.mockResolvedValue(null);
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue(null);
     vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
     show(song());
     fireEvent.click(screen.getByTestId("audio-play"));

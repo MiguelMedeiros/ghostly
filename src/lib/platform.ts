@@ -413,6 +413,8 @@ export interface ServicesPlatform {
    * itself (the desktop app, the extension). Null where a plain link does it: the caller leaves the link alone.
    */
   openPaymentLink(uri: string): Promise<void> | null;
+  /** Puts the app's window in or out of full screen, where the page's own full screen is off (Desktop on Linux). */
+  readonly fullscreenWindow?: ((on: boolean) => Promise<void>) | null;
   /**
    * The system's share sheet for a link, where the platform has to show it itself (the desktop app).
    * Null where it does not: the page uses the Web Share API, or copies. Resolves to false when no sheet was shown.
