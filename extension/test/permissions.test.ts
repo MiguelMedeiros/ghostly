@@ -52,9 +52,9 @@ describe("the host the app page runs on", () => {
 
   it("asks Chrome for one local origin, and reports what the person chose", async () => {
     const { extensionHost } = await load();
-    expect(await extensionHost.requestLocalAccess!("http://127.0.0.1/*")).toBe(true);
+    expect(await extensionHost.requestLocalAccess!("http://127.0.0.1/*", "http://127.0.0.1:3400")).toBe(true);
     world.permissionsGranted = false;
-    expect(await extensionHost.requestLocalAccess!("http://localhost/*")).toBe(false);
+    expect(await extensionHost.requestLocalAccess!("http://localhost/*", "http://localhost:3400")).toBe(false);
     expect(world.callsTo("permissions.request")).toEqual([[{ origins: ["http://127.0.0.1/*"] }], [{ origins: ["http://localhost/*"] }]]);
   });
 

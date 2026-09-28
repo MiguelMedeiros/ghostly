@@ -38,6 +38,12 @@ function keepJustSent(id: string, blob: Blob): void {
   justSent.set(id, blob);
   while (justSent.size > JUST_SENT_MAX) justSent.delete(justSent.keys().next().value!);
 }
+/** A stored service target's origin (`http://localhost:3400`), or null for one that no longer parses. */
+function originOf(target: string | undefined): string | null {
+  if (!target) return null;
+  try { return parseLocalTarget(target).origin; } catch { return null; }
+}
+
 const preparingListeners = new Set<() => void>();
 let preparingTold = 0;
 function preparingChanged(force = false): void {
@@ -213,11 +219,20 @@ export const servicesPlatform: ServicesPlatform | null = {
     const { origin } = parseLocalTarget(target);
     const url = new URL(origin);
     // Where the platform asks the user, it only does so from a user gesture: this has to come first.
-    const granted = await getBrowserHost().requestLocalAccess(`${url.protocol}//${url.hostname}/*`);
+    const granted = await getBrowserHost().requestLocalAccess(`${url.protocol}//${url.hostname}/*`, origin);
     if (!granted) throw new Error("Ghostly needs your permission to reach that local address");
     await engine.call("addService", { name, target });
   },
-  removeService: (serviceId) => engine.call("removeService", { serviceId }),
+  async removeService(serviceId) {
+    // Read before the call: the state after it may not have caught up yet.
+    const services = engine.state?.services ?? [];
+    const origin = originOf(services.find((s) => s.id === serviceId)?.target);
+    await engine.call("removeService", { serviceId });
+    // The last app at that address: the host may stop reaching it (desktop: Rust's list).
+    if (origin && !services.some((s) => s.id !== serviceId && originOf(s.target) === origin)) {
+      await getBrowserHost().forgetLocalAccess?.(origin).catch(() => {});
+    }
+  },
   setServiceEnabled: (serviceId, enabled) => engine.call("setServiceEnabled", { serviceId, enabled }),
   setServiceShared: (serviceId, peerPubKeyZ32, shared) => engine.call("setServiceShared", { serviceId, peerPubKeyZ32, shared }),
 

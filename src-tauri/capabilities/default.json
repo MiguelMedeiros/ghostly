@@ -36,6 +36,8 @@
     "allow-link-preview-fetch",
     "allow-lnd-request",
     "allow-local-fetch",
+    "allow-local-service-allow",
+    "allow-local-service-forget",
     "allow-native-call-accept",
     "allow-native-call-answer",
     "allow-native-call-camera",

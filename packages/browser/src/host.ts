@@ -45,8 +45,14 @@ export interface BrowserHost {
   };
   /** Reaches the peer. `onDisconnect` fires when it goes away; the client then connects again. */
   connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect: () => void): Promise<EngineConnection>;
-  /** Asks the user for access to a local origin, where the platform has such a thing. */
-  requestLocalAccess(originPattern: string): Promise<boolean>;
+  /**
+   * Asks the user for access to a local origin, where the platform has such a thing: `originPattern` is the
+   * extension's host pattern (`http://localhost/*`), `origin` the exact address with its port (`http://localhost:3400`),
+   * which the desktop app has Rust ask about in a native dialog.
+   */
+  requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
+  /** The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach). */
+  forgetLocalAccess?(origin: string): Promise<void>;
   openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
   /**
    * Opens a `lightning:` or `bitcoin:` link in a wallet on this device. Left out where a plain link

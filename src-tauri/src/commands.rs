@@ -7,6 +7,7 @@ use crate::crypto;
 use crate::diagnostics;
 use crate::link_preview::{self, PreviewResponse};
 use crate::lnd::{self, LndRequest, LndResponse};
+use crate::local_access::{self, LocalAccess, Reason};
 use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
 use crate::pkarr_network::Pkarr;
@@ -176,14 +177,92 @@ pub fn diagnostic_log(line: String) {
     diagnostics::log(&line);
 }
 
+/// A request to a local app the profile shares (`space`, the page's database name): only to an
+/// address the person allowed in a native dialog, see `local_access`.
 #[tauri::command]
-pub async fn local_fetch(
+pub async fn local_fetch<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    access: State<'_, LocalAccess>,
+    space: String,
     url: String,
     method: String,
     headers: Vec<(String, String)>,
     body_b64: Option<String>,
 ) -> Result<LocalResponse, String> {
-    local_fetch::fetch(url, method, headers, body_b64).await
+    local_fetch::fetch_shared(
+        &access,
+        &space,
+        url,
+        method,
+        headers,
+        body_b64,
+        |origin, reason| ask_to_share(app.clone(), origin, reason),
+    )
+    .await
+}
+
+/// The person shares a local app (`origin`, `http://localhost:3400`): Rust asks them in a native
+/// dialog, which the page can neither draw nor answer. True once the address is on the list.
+#[tauri::command]
+pub async fn local_service_allow<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    access: State<'_, LocalAccess>,
+    space: String,
+    origin: String,
+) -> Result<bool, String> {
+    let origin = local_access::parse_origin(&origin)?;
+    Ok(access
+        .ensure(&space, &origin, Reason::Share, |origin, reason| {
+            ask_to_share(app.clone(), origin, reason)
+        })
+        .await
+        .is_ok())
+}
+
+/// The profile no longer shares an app at `origin`: off the list. The page can only take away.
+#[tauri::command]
+pub fn local_service_forget(
+    access: State<'_, LocalAccess>,
+    space: String,
+    origin: String,
+) -> Result<(), String> {
+    access.forget(&space, &local_access::parse_origin(&origin)?)
+}
+
+/// The native dialog that adds an address to the list. In a build for the end-to-end tests
+/// (debug only) there is nobody to click it: the answer is yes.
+async fn ask_to_share<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    origin: String,
+    reason: Reason,
+) -> bool {
+    #[cfg(feature = "e2e-driver")]
+    {
+        let _ = (app, reason);
+        diagnostics::log(&format!("local access: {origin} allowed (e2e build)"));
+        true
+    }
+    #[cfg(not(feature = "e2e-driver"))]
+    {
+        use tauri::Manager;
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        let (title, text) = local_access::dialog_text(&origin, reason);
+        let mut dialog = app
+            .dialog()
+            .message(text)
+            .title(title)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Allow".into(),
+                "Don't allow".into(),
+            ));
+        if let Some(main) = app.get_webview_window("main") {
+            dialog = dialog.parent(&main);
+        }
+        tauri::async_runtime::spawn_blocking(move || dialog.blocking_show())
+            .await
+            .unwrap_or(false)
+    }
 }
 
 /// A page, oEmbed answer or picture for a link preview the person is writing

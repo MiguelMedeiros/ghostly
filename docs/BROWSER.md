@@ -151,7 +151,7 @@ Ghostly Desktop runs the same peer in its WebView as a third host (`src/desktop/
 |---|---|---|
 | Pkarr | `RelayTransport` (HTTP relays) | The Mainline DHT directly, plus writes to the relays (`src-tauri/src/pkarr_network.rs`) |
 | Iroh, HyperDHT | Through relays | Native Iroh and a HyperDHT sidecar |
-| Local fetch | `fetch` with a host permission | `local_fetch` in Rust: loopback only, never follows redirects, forwards cookies, no `Origin` header |
+| Local fetch | `fetch` with a host permission | `local_fetch` in Rust: loopback addresses the person allowed in a native dialog only (`local_access.rs`), never follows redirects, forwards cookies, no `Origin` header |
 | Viewer | `chrome.debugger` on a virtual origin | A window per app on a `ghostly-svc://<service>.<peer>` origin, with no access to Tauri commands |
 
 Profiles (`GHOSTLY_PROFILE`) get their own storage and peer, so two instances can run side by side.
