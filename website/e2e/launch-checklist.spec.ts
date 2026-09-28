@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 /**
  * What a crawler or a share sees: robots.txt and the sitemap are valid, and every page in the sitemap answers with
- * its own title, description and share card (a 1200x630 image at an absolute address). A missing page has a title of
+ * its own title, description and share card (a 1200x630 image under 300 KB at an absolute address). A missing page has a title of
  * its own, no picture on the home page lacks alt text, and no page calls another site or sets a cookie (the site has
  * no analytics, so it needs no cookie banner).
  */
@@ -105,12 +105,14 @@ test("every page in the sitemap has its own title, description and share card", 
   }
 });
 
-test("the share image is 1200x630", async ({ request, page }) => {
+test("the share image is 1200x630 and under 300 KB", async ({ request, page }) => {
   const h = head(await (await request.get("/")).text());
   const local = new URL(h.ogImage!).pathname;
   const res = await request.get(local);
   expect(res.status()).toBe(200);
   expect(res.headers()["content-type"]).toMatch(/^image\//);
+  // Some apps drop a share picture over their limit (WhatsApp's is about 300 KB); scripts/og-image.mjs keeps it small.
+  expect((await res.body()).length).toBeLessThan(300 * 1024);
   await page.goto("/");
   const size = await page.evaluate(async (src) => {
     const img = new Image();
