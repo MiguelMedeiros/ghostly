@@ -77,9 +77,21 @@ fn is_own_origin(host: Option<&str>, peer: &str, service: &str) -> bool {
     }
 }
 
-/// Whether the window may go to `url`. STUB (tests first).
-fn may_navigate(_url: &url::Url, _peer: &str, _service: &str) -> bool {
-    true
+/// Whether the window, or a frame in it, may go to `url`: its own origin (in either spelling, see
+/// `is_own_origin`, each under its own scheme), an empty frame, or a blob the app made there. Never
+/// the Ghostly window's pages or another website, which would show under the app's
+/// "<title> — Ghostly" window title.
+fn may_navigate(url: &url::Url, peer: &str, service: &str) -> bool {
+    let host = url.host_str().unwrap_or_default();
+    match url.scheme() {
+        SCHEME => host.eq_ignore_ascii_case(&format!("{}.{}", service, peer)),
+        "http" | "https" => host.eq_ignore_ascii_case(&format!("{}.{}.{}", SCHEME, service, peer)),
+        "about" => matches!(url.path(), "blank" | "srcdoc"),
+        "blob" => url::Url::parse(url.path()).is_ok_and(|inner| {
+            !matches!(inner.scheme(), "blob" | "about") && may_navigate(&inner, peer, service)
+        }),
+        _ => false,
+    }
 }
 
 pub fn open<R: tauri::Runtime>(
@@ -105,6 +117,7 @@ pub fn open<R: tauri::Runtime>(
         .map_err(|e| format!("URL: {}", e))?;
     WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url))
         .title(format!("{} — Ghostly", title))
+        .on_navigation(move |to| may_navigate(to, &peer, &service))
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;

@@ -49,6 +49,9 @@ fn client() -> Result<&'static reqwest::Client, String> {
         // Never follow: a redirect could point anywhere, and the peer side
         // decides what to do with an on-target one.
         .redirect(reqwest::redirect::Policy::none())
+        // Straight to this machine: a proxy set on the system would be handed every request to
+        // the shared app, and where it sends them is its own business.
+        .no_proxy()
         .timeout(TIMEOUT)
         .build()
         .map_err(|e| format!("HTTP client: {}", e))?;
@@ -469,12 +472,22 @@ mod tests {
         for name in ["NO_PROXY", "no_proxy"] {
             child.env_remove(name);
         }
-        for name in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
+        for name in [
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ] {
             child.env(name, &address);
         }
         let output = child.output().unwrap();
         let log = String::from_utf8_lossy(&output.stdout);
-        assert!(log.contains("1 passed"), "the child run did not pass:\n{log}");
+        assert!(
+            log.contains("1 passed"),
+            "the child run did not pass:\n{log}"
+        );
         assert_eq!(used.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 

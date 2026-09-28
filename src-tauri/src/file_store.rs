@@ -174,13 +174,56 @@ impl FileStore {
         fs4::available_space(dir).map_err(|e| e.to_string())
     }
 
-    /// Copies a stored file to `target`, a step at a time.
+    /// Copies a stored file to `target`, a step at a time, marked as downloaded (`mark_downloaded`).
     pub fn copy_to(&self, space: &str, id: &str, target: &Path) -> Result<(), String> {
         let mut from = File::open(self.path(space, id)?).map_err(|e| e.to_string())?;
         let mut to = File::create(target).map_err(|e| e.to_string())?;
         std::io::copy(&mut from, &mut to).map_err(|e| e.to_string())?;
-        to.sync_all().map_err(|e| e.to_string())
+        to.sync_all().map_err(|e| e.to_string())?;
+        drop(to);
+        mark_downloaded(target);
+        Ok(())
     }
+}
+
+/// The system's "downloaded from the internet" mark on a saved copy: a contact sent it, so opening
+/// or running it goes through Gatekeeper (macOS) or SmartScreen and Office's Protected View
+/// (Windows) first, as it would from a browser. Best effort: a disk that cannot hold the mark (FAT,
+/// some network shares) still gets the copy.
+fn mark_downloaded(target: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(path) = std::ffi::CString::new(target.as_os_str().as_bytes()) else {
+            return;
+        };
+        let seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        // Flags 0x0001 (downloaded) and 0x0080, as browsers write them; then time and agent.
+        let value = format!("0081;{seconds:08x};Ghostly;");
+        // SAFETY: both names are NUL-terminated; the value is passed with its length.
+        unsafe {
+            libc::setxattr(
+                path.as_ptr(),
+                c"com.apple.quarantine".as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            );
+        }
+    }
+    #[cfg(windows)]
+    {
+        // The Mark of the Web: an NTFS stream next to the file's data, zone 3 (internet).
+        let mut stream = target.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        let _ = fs::write(PathBuf::from(stream), "[ZoneTransfer]\r\nZoneId=3\r\n");
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let _ = target;
 }
 
 /// The folder and any missing above it, made the user's alone (0700) on Unix.

@@ -2205,6 +2205,7 @@ dependencies = [
  "gstreamer",
  "gstreamer-app",
  "iroh",
+ "libc",
  "mainline",
  "objc2",
  "objc2-app-kit",

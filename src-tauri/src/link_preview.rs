@@ -69,10 +69,16 @@ pub fn is_public(ip: IpAddr) -> bool {
                 // fc00::/7 unique local, fe80::/10 link-local, 2001:db8::/32 documentation
                 || (first & 0xfe00) == 0xfc00
                 || (first & 0xffc0) == 0xfe80
+                // fec0::/10 site-local: deprecated, still routed inside some networks
+                || (first & 0xffc0) == 0xfec0
                 || (first == 0x2001 && v6.segments()[1] == 0x0db8)
-                // ::/96 IPv4-compatible and 64:ff9b::/96 NAT64 can reach IPv4 space: refused whole.
+                // ::/96 IPv4-compatible, 64:ff9b::/32 NAT64 (64:ff9b::/96 and the local-use
+                // 64:ff9b:1::/48), 2002::/16 6to4 and 2001::/32 Teredo all carry an IPv4
+                // address that a gateway may reach: refused whole.
                 || v6.segments()[..6].iter().all(|s| *s == 0)
-                || (first == 0x0064 && v6.segments()[1] == 0xff9b))
+                || (first == 0x0064 && v6.segments()[1] == 0xff9b)
+                || first == 0x2002
+                || (first == 0x2001 && v6.segments()[1] == 0))
         }
     }
 }
