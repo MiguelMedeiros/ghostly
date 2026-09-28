@@ -626,6 +626,50 @@ describe("private groups through the engine", () => {
     expect(await saved(edgeId)).toBeUndefined();
   });
 
+  it("a member's name stays while their edge is down, and only the member removes it", async () => {
+    const { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Friends", profile: "mesh" });
+    const state = (await db.getGroups()).find((g) => g.id === groupId)!.state;
+    const member = createIdentity().pubKeyZ32;
+    const edgeId = await node["openEdge"](state as never, member);
+    const edge = links.find((l) => l.options.params.id === edgeId)!;
+    const session = node["groups"]["sessions"].get(groupId)!;
+    const hooks = session["hooks"], changed = hooks.changed;
+    let changes = 0;
+    hooks.changed = () => { changes++; changed(); };
+    const nick = async () => { await session["serialize"](async () => {}); return session.state.nicks[member]; };
+    const { events } = edge.options;
+    // As GhostLink says it: an open edge before and after the member's own `paired-nick`, then the edge closing.
+    const opens = async (name: string | null) => {
+      edge.isDataLinkOpen = true;
+      events.onPresence({ online: true, lastPacketAt: 0, services: null });
+      events.onPeerNick?.(name);
+      events.onPresence({ online: true, lastPacketAt: 0, services: null, nick: name ?? undefined });
+    };
+    const closes = () => { edge.isDataLinkOpen = false; events.onPresence({ online: false, lastPacketAt: 0, services: null }); };
+    await opens("Carol");
+    expect(await nick()).toBe("Carol");
+    expect(changes).toBe(1);
+    for (let i = 0; i < 3; i++) {
+      closes();
+      expect(await nick()).toBe("Carol");
+      await opens("Carol");
+      expect(await nick()).toBe("Carol");
+    }
+    expect(changes).toBe(1);
+    // A new name, and a name the member removed on purpose, are theirs to say.
+    await opens("Caz");
+    expect(await nick()).toBe("Caz");
+    await opens(null);
+    expect(await nick()).toBeUndefined();
+    closes();
+    expect(await nick()).toBeUndefined();
+    // While it is down, the member's packet can still bring a new name.
+    events.onPresence({ online: true, lastPacketAt: 5, services: null, nick: "Cee" });
+    expect(await nick()).toBe("Cee");
+    expect(changes).toBe(4);
+  });
+
   it("a community group is what a group is by default; its link is group2 and every member's", async () => {
     const { node } = await started();
     const { groupId } = await node.createGroup({ name: "Plaza" });
