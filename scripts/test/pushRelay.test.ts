@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { PUSH_SERVICE_HOSTS } from "../../packages/core/src/webPush";
-import { PUSH_HOSTS, clientAddress, readRelayRequest, startRelay } from "../../native-transports/push-relay/relay.mjs";
+import { PUSH_HOSTS, clientAddress, rateKey, readRelayRequest, startRelay } from "../../native-transports/push-relay/relay.mjs";
 
 // covers: push.wake.send
 
@@ -46,6 +46,16 @@ describe("the push relay (native-transports/push-relay)", () => {
     expect(clientAddress(req(), 1)).toBe("10.0.0.1");
   });
 
+  it("counts an IPv6 address by its /64, and an IPv4 one as it is", () => {
+    expect(rateKey("2001:db8:1:2:aaaa::1")).toBe(rateKey("2001:db8:1:2:bbbb:cccc:dddd:eeee"));
+    expect(rateKey("2001:db8:1:2::1")).toBe("2001:db8:1:2::/64");
+    expect(rateKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(rateKey("2001:db8:1:3::1")).not.toBe(rateKey("2001:db8:1:2::1"));
+    expect(rateKey("::ffff:1.2.3.4")).toBe("1.2.3.4");
+    expect(rateKey("1.2.3.4")).toBe("1.2.3.4");
+    expect(rateKey("::1")).toBe("0:0:0:0::/64");
+  });
+
   let close: (() => Promise<void>) | undefined;
   afterEach(async () => { await close?.(); close = undefined; });
 
@@ -72,5 +82,20 @@ describe("the push relay (native-transports/push-relay)", () => {
     expect((await post("2.2.2.2")).status).toBe(400);
     expect((await post("1.1.1.1")).status).toBe(429);
     expect(relay.tracked()).toBe(2);
+  });
+
+  it("a full table forgets the address seen longest ago, not every newcomer", async () => {
+    const relay = await startRelay({ limits: { perMinute: 1, tracked: 3 }, proxies: 1 });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    const post = (xff: string) => fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools", "X-Forwarded-For": xff }, body: request({ endpoint: "https://example.com/" }) });
+    for (const address of ["1.1.1.1", "2.2.2.2", "3.3.3.3"]) expect((await post(address)).status).toBe(400);
+    // A newcomer still gets in; the table stays at its size.
+    expect((await post("4.4.4.4")).status).toBe(400);
+    expect(relay.tracked()).toBe(3);
+    // The ones kept are still limited; the first one was forgotten.
+    expect((await post("4.4.4.4")).status).toBe(429);
+    expect((await post("3.3.3.3")).status).toBe(429);
+    expect((await post("1.1.1.1")).status).toBe(400);
   });
 });
