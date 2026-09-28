@@ -12,6 +12,8 @@ const sections = {
 const overrides = {
   "QR / explicit invitation": ["8", "Discovery / invitation"],
   GossipSub: ["9", "Distribution adapter"],
+  Mixnet: ["1", "Metadata protection"],
+  "Post-quantum key exchange": ["1", "Cryptographic profile"],
   "Ark via Bark": ["2", "Alternative Ark provider"],
   "Manual external wallet": ["2", "Wallet handoff"],
   "Bitcoin Core RPC": ["2", "Wallet connector / data source"],
@@ -29,6 +31,7 @@ const overrides = {
   "Voice/video/screenshare": ["6", "Media profile"],
   "Private groups": ["9", "Membership capability"],
   "Group crypto": ["9", "Cryptographic profile"],
+  "MLS group encryption": ["9", "Cryptographic profile"],
   "Channels / topics / forums": ["9", "Content profile"],
   "Password / payment-gated access": ["8", "Admission policy"],
   "Local HTTP / Bitcoin / Lightning services": ["7", "Service profile"],
