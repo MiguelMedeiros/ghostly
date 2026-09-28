@@ -8,7 +8,7 @@ const DESCRIPTION =
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description: DESCRIPTION,
-  alternates: { canonical: "https://ghostly.tools/privacy" },
+  alternates: { canonical: "/privacy" },
   openGraph: {
     title: "Privacy Policy | Ghostly",
     description: DESCRIPTION,
