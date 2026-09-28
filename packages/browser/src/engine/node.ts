@@ -1321,7 +1321,7 @@ export class GhostlyNode implements EngineImplementation {
     const existing = [...this.links.values()].find((l) => l.stored.seedB64 === params.seedB64);
     if (existing) {
       if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
-      return { linkId: existing.stored.id };
+      return { linkId: await this.existingLink(existing.stored.id) };
     }
     this.refuseOwnInvite(params);
     return { linkId: await this.addLink(params) };
@@ -1346,7 +1346,7 @@ export class GhostlyNode implements EngineImplementation {
     const existing = [...this.links.values()].find((l) => l.stored.seedB64 === checked.seedB64);
     if (existing) {
       if (existing.stored.profile !== checked.profile) throw new Error("Invitation profile does not match the stored link");
-      return { linkId: existing.stored.id };
+      return { linkId: await this.existingLink(existing.stored.id) };
     }
     if (!inviteCode && !participationSeedB64) this.refuseOwnInvite(checked);
     return { linkId: await this.addLink({ ...checked, ...(participationSeedB64 ? { participationSeedB64 } : {}) }, inviteCode) };
@@ -3613,7 +3613,24 @@ export class GhostlyNode implements EngineImplementation {
 
   // -- internals -----------------------------------------------------------
 
-  private async addLink({ participationSeedB64, ...params }: LinkParams, inviteCode?: string): Promise<string> {
+  /**
+   * A chat is in `links` the moment it is being added, before it is saved and started. Another ensureLink or
+   * joinLink for it meanwhile (a sync, the automatic "joined" message) waits for that here, rather than taking
+   * an id whose chat cannot send yet ("You are offline"), and fails with it if it fails.
+   */
+  private linksAdding = new Map<string, Promise<string>>();
+  private async existingLink(id: string): Promise<string> {
+    return (await this.linksAdding.get(id)) ?? id;
+  }
+
+  private addLink(params: LinkParams, inviteCode?: string): Promise<string> {
+    const id = identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16);
+    const adding = this.addLinkNow(params, inviteCode).finally(() => { if (this.linksAdding.get(id) === adding) this.linksAdding.delete(id); });
+    this.linksAdding.set(id, adding);
+    return adding;
+  }
+
+  private async addLinkNow({ participationSeedB64, ...params }: LinkParams, inviteCode?: string): Promise<string> {
     const stored: StoredLink = {
       id: identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16),
       ...params,
