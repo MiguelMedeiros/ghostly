@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Identity provider `pubky` (web, extension, desktop): `packages/browser/src/proofs/providers/pubky.ts`, `proofs/pubky.ts`; core `pubkyProofs.ts`, `pkdns.ts` |
@@ -85,3 +83,7 @@ Before this provider, Pubky existed only in the old per-chat proof dialog, disab
 ## References
 
 [Peer proofs](300-peer-proofs.md), [PROOFS.md](../../packages/browser/src/proofs/PROOFS.md), [Pubky Passport integration guide](https://github.com/pubky/pubky-passport/blob/main/docs/integration.md), [Pubky homeserver and SDK](https://github.com/pubky/pubky-homeserver).
+
+## Revision log
+
+One file per change in [changes/302-pubky/](changes/302-pubky/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

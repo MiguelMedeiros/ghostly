@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 801; editorial family allocation |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [800](800-invite-join.md), [400](400-chat.md), [403](403-dht-text.md) |
 | Implementation | Every current app creates only `ghostly1…` codes and links, and reads by the rules below (`pair1/`, `pair2d/` and v0.4 codes still accepted as input) |
@@ -144,6 +142,4 @@ The stronger single-use admission state machine, atomic global use limits, group
 
 ## Revision log
 
-- 0.3 (2026-09-27): the site's page opens a readable code in the web app after a cancellable countdown, and remembers a device that chose the Ghostly app (Q12).
-- 0.2 (2026-09-25): one invite format, a bech32m `ghostly1…` string with its version inside (replacing a first `pair3/` draft); exact layout, lengths, QR and link form; reading rules and messages both ways; versioning rule; Q8 to Q11 decided; version 1 is the 220-character layout with the inviter's participation key.
-- 0.1 (2026-09-22): `pair1/`, `pair2d/` and legacy imports.
+One file per change in [changes/801-invitation-profiles/](changes/801-invitation-profiles/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

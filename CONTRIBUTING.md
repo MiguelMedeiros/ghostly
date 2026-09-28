@@ -101,6 +101,7 @@ Every string the app shows goes through `t("area.key")`. Each language is a fold
 
 ### Writing docs and site copy
 
+- A change to a WISP (`docs/wisps/`) adds one file to its folder in `docs/wisps/changes/` saying what changed; do not edit a Revision row or a log line. See [WISP 00](docs/wisps/00-process.md#revisions).
 - Keep the README short; details go in `docs/`. A new topic gets its own page there and one link from the README.
 - No em dashes or en dashes (U+2014, U+2013) in `docs/`, `website/`, this file or `SECURITY.md`: use a period, a comma, a colon or parentheses, and a hyphen or "to" in a range. `npm run lint` in `website/` checks the files the site renders (`scripts/check-dashes.mjs`).
 - Short sentences, plain words. Prefer a table or a list to a long paragraph.

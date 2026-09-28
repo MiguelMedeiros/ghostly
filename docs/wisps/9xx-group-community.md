@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.11 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [900](900-group-sessions.md), [9xx · Group Mesh](9xx-group-mesh.md) |
 | Implementation | `group-community/1`: core protocol in [`groupCommunity.ts`](../../packages/core/src/groupCommunity.ts) and [`communityRendezvous.ts`](../../packages/core/src/communityRendezvous.ts); engine in [`community.ts`](../../packages/browser/src/engine/community.ts), payments in [`communityPay.ts`](../../packages/browser/src/engine/communityPay.ts); UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test |
@@ -304,13 +302,4 @@ Approval of each entry, expiry and use count; several admins; member key updates
 
 ## Revision log
 
-- 0.11 (2026-09-27): forwards: `fw`, a forwarded text's hop count, inside the payload.
-- 0.10 (2026-09-27): the beacon's head: hubs publish the newest frame they hold, by its identity, beside the hub list, for a member's other profile on the same device (§ Head).
-- 0.8 (2026-09-27): reactions as a sealed, signed application frame that every member and hub carries, caught up like messages (#354).
-- 0.7 (2026-09-27): replies: `r` inside the sealed payload, beside the mentions (#347).
-- 0.6 (2026-09-26): the admin's changes are final: a member's longer branch cannot undo a remove, a role, a rotation or a new link (#300).
-- 0.5 (2026-09-25): @mentions bound to member keys (#279).
-- 0.4 (2026-09-24): a join by link takes seconds: the door answers before the relay budget runs out (#167).
-- 0.3 (2026-09-24): payments between two members, sealed to them and carried by the hubs (#169).
-- 0.2 (2026-09-24): a group picture set by the admin (#154).
-- 0.1 (2026-09-24): `group-community/1`: a link anyone can open, admission by any member, elected hubs, up to 256 members (#153).
+One file per change in [changes/9xx-group-community/](changes/9xx-group-community/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

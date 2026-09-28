@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 700; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
 | Implementation | Existing HTTP proxy, in every chat (desktop and extension hosts) |
@@ -44,6 +42,4 @@ Test path traversal, alternate URL/header injection, redirects, local credential
 
 ## Revision log
 
-- 0.3 (2026-09-25): in the chat session, shared apps need `services/1` on both sides and a live session.
-- 0.2 (2026-09-25): implementation line: hosting works in compatibility chats and in the chat session of every new chat.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/700-local-services/](changes/700-local-services/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

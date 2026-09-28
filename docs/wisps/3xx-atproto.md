@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Experimental provider `atproto`: `packages/core/src/atprotoRepo.ts`, `atprotoIdentity.ts`, `packages/browser/src/proofs/atproto/`, `proofs/providers/atproto.ts`. Real servers need the client metadata served at ghostly.tools (it ships with the website) |
@@ -88,3 +86,7 @@ Unit tests: `packages/core/test/atprotoRepo.test.ts` (strict DAG-CBOR, CAR, MST 
 Publishing the lexicon through AT Protocol lexicon resolution (`_lexicon.ghostly.tools`); did:web accounts with ports (not atproto-conformant today).
 
 The verified account's public profile, posts and follows are read from the public Bluesky AppView, not from this proof: see [PUBLIC-PROFILES](PUBLIC-PROFILES.md).
+
+## Revision log
+
+One file per change in [changes/3xx-atproto/](changes/3xx-atproto/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

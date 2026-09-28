@@ -4,8 +4,6 @@
 |---|---|
 | Number assignment | 3xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
 | Implementation | Experimental providers `ssh`, `ssh-github`, `ssh-gitlab`; see below |
@@ -87,3 +85,7 @@ Test vectors made with a real `ssh-keygen` (OpenSSH 9.2p1, Debian; the generator
 ## References
 
 [WISP 300](300-peer-proofs.md), [PROTOCOL.sshsig](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig), [PROTOCOL.u2f](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.u2f), [ssh-keygen(1)](https://man.openbsd.org/ssh-keygen), [GitHub: list public keys for a user](https://docs.github.com/en/rest/users/keys#list-public-keys-for-a-user), [GitLab: list SSH keys for a user](https://docs.gitlab.com/api/user_keys/).
+
+## Revision log
+
+One file per change in [changes/3xx-ssh/](changes/3xx-ssh/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

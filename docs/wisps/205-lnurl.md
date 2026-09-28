@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 205; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-26 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md), [203](203-lightning.md) |
 | Implementation | Paying a Lightning address or LNURL through a Lightning card; no wire format |
@@ -78,3 +76,7 @@ paid.
 ## References
 
 [Parser and checks](../../packages/core/src/lnurl.ts), [Lightning service](../../packages/browser/src/engine/paymentAdapters/providers/lightningService.ts), [payment negotiation](200-payments.md), [Lightning](203-lightning.md).
+
+## Revision log
+
+One file per change in [changes/205-lnurl/](changes/205-lnurl/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

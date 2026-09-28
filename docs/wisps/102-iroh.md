@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 102; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
-| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [100](100-transports.md) |
 | Implementation | Experimental: native adapter of the chat session (desktop); relay-only browser build in the web app and the extension; endpoint id and home relay in the layer-0 capability record |
@@ -59,6 +57,4 @@ Two independent Ghost adapter implementations exchange the same capability paylo
 
 ## Revision log
 
-- 0.3 (2026-09-25): browser profile, relay only: same wire and binding, `relayed` descriptor, relay settings, measurements.
-- 0.2 (2026-09-25): place in the one chat; endpoint id in the layer-0 capability record.
-- 0.1 (2026-09-20): initial review draft.
+One file per change in [changes/102-iroh/](changes/102-iroh/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

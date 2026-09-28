@@ -4,8 +4,6 @@
 |---|---|
 | Candidate number | 601; editorial family allocation |
 | Status | Draft |
-| Revision | 0.7 |
-| Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
 | Implementation | Compatibility chats (`_call`) and the chat session of every new chat (`calls/1`); capture varies by platform. Desktop on Linux runs WebRTC in Rust and media in GStreamer (#331), with no screen sharing yet. |
@@ -52,13 +50,4 @@ This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of 
 
 ## Revision log
 
-- 0.7 (2026-09-27): a signal on the chat session carries up to eight candidates (local networks first, VPN tunnels last, relay included); calls use the profile's ICE servers (a TURN relay) after the apps' STUN servers. Found by the macOS app calling the headless CLI on a Mac with NordVPN as its default route.
-
-- 0.6 (2026-09-27): the headless CLI calls, voice only (11xx § Calls): audio-only offers, video sections answered and dropped, up to eight candidates in a signal. Tested with the web app both ways (e2e/web/headless-call.spec.ts).
-
-- 0.5 (2026-09-26): Desktop on Linux calls: WebRTC in Rust (webrtc-rs), media in GStreamer, no wire change; a host candidate may end at `typ host`. Tested between two Linux Desktops (e2e/desktop/calls.spec.ts) and against Chromium both ways (e2e/desktop/calls-interop.spec.ts).
-
-- 0.4 (2026-09-25): signals carry the Opus/VP8 payload types when not 111/96 (`ap`, `vp`; PROTOCOL.md §4.2) and accept an IPv6 related address: WebKit's offers rang nowhere or showed one picture. Found by two Desktop apps on a Mac (e2e/desktop-macos/).
-- 0.3 (2026-09-25): paired profile: `paired-call` signals on the live session, media on a WebRTC connection of its own whatever carries the chat.
-- 0.2 (2026-09-25): scope named as compatibility chats; calls in the chat session being implemented.
-- 0.1 (2026-09-22): WebRTC media profile.
+One file per change in [changes/601-webrtc-media/](changes/601-webrtc-media/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.
