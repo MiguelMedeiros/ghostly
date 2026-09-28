@@ -15,6 +15,10 @@ updates:
     ignore:
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # The Fedimint adapter pins a canary of the web SDK exactly (docs/wisps/2xx-fedimint.md).
+      # The stable 0.1.x (2025-10) is a year older, but semver ranks it above 0.0.0-canary;
+      # drop once a stable release embeds fedimint 0.12 or later.
+      - dependency-name: "@fedimint/*"
     groups:
       npm:
         patterns: ["*"]
