@@ -240,6 +240,33 @@ describe("group name, group-mesh/1", () => {
     expect(mesh.names.filter(n => n.at === carol.myKey).map(n => n.name)).toEqual(["Book club", null, "Admin says", null]);
   });
 
+  it("a member away at the rename, or on an app from before names or metadata, shows the name once back or updated", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice), dave = await admit(mesh, alice);
+    await alice.setPicture(RED);
+    await mesh.settle();
+    // Bob's app is closed; Dave's predates metadata and drops the frame.
+    mesh.sessions.delete(bob.myKey);
+    mesh.old.add(dave.myKey);
+    await alice.rename("Book club");
+    await mesh.settle();
+    expect([carol.name, bob.name, dave.name]).toEqual(["Book club", "Ghosts", "Ghosts"]);
+    // Bob is back and meets Carol, not the admin: her sync hands him the statement.
+    mesh.sessions.set(bob.myKey, bob);
+    await mesh.open(bob, carol);
+    expect([bob.name, bob.picture]).toEqual(["Book club", RED]);
+    // An app from before names kept the statement whole, as signed: updated, it reads the name from what it kept.
+    const kept = clone(mesh.saved.get(carol.myKey)!);
+    expect(JSON.parse(kept.meta!.body)).toMatchObject({ name: "Book club" });
+    expect(new GroupSession(kept, { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
+    // Dave's app is updated: its first sync says it holds an older statement (or none), and a member hands it the name.
+    mesh.old.delete(dave.myKey);
+    await mesh.open(dave, bob);
+    expect([dave.name, dave.picture]).toEqual(["Book club", RED]);
+    expect(mesh.names.filter(n => n.name === "Book club").map(n => n.at).sort()).toEqual([alice, bob, carol, dave].map(s => s.myKey).sort());
+  });
+
   it("a new admin signs the name again", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Ghosts"));
@@ -407,5 +434,25 @@ describe("group name, group-community/1", () => {
     expect([bob.session.name, carol.session.name, carol.session.picture]).toEqual(["Book club", "Book club", undefined]);
     expect(net.names.filter(n => n.at === "bob").map(n => n.name)).toEqual(["Book club"]);
     expect(new CommunitySession(clone(bob.saved), { save: async () => {}, broadcast: () => {}, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
+  });
+
+  it("a member away at the rename gets it from another member when back; what an app from before names kept shows it once updated", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    net.members.delete("carol");
+    await alice.session.rename("Book club");
+    await net.settle();
+    expect([bob.session.name, carol.session.name]).toEqual(["Book club", "Ghosts"]);
+    // The admin goes away; Carol comes back and meets only Bob.
+    net.members.delete("alice");
+    net.members.set("carol", carol);
+    await net.meet(bob, carol);
+    expect(carol.session.name).toBe("Book club");
+    expect(net.names).toContainEqual({ at: "carol", name: "Book club" });
+    const kept = clone(bob.saved);
+    expect(JSON.parse(kept.meta!.body)).toMatchObject({ name: "Book club" });
+    expect(new CommunitySession(kept, { save: async () => {}, broadcast: () => {}, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
   });
 });
