@@ -622,7 +622,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const inGroup = await listenTo(bob, "--type", "group.message");
     const toGroup = ok(await as(alice, "forward", "bob", theirs.id, "--to", "Bot crew", "--wait", "sent"));
     expect(toGroup).toMatchObject({ results: [{ kind: "group", error: null }] });
-    expect(await inGroup.waitFor((e) => e.type === "group.message", 60_000)).toMatchObject({ message: { text: "pass **this** on", forwarded: 1 } });
+    // By its text: a message said in the group just before may still be arriving.
+    expect(await inGroup.waitFor((e) => e.type === "group.message" && (e.message as { text?: string }).text === "pass **this** on", 60_000)).toMatchObject({ message: { forwarded: 1 } });
     await inGroup.stop();
     expect(error(await as(alice, "forward", "bob", fileMessage.id, "--to", "Bot crew"), "refused", 1).message).toMatch(/Groups take no files yet/);
     error(await as(alice, "forward", "bob", "no-such-message", "--to", "bob"), "not_found", 3);
