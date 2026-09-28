@@ -72,10 +72,12 @@ const legacyFiles = new Set(numbering.filter((entry) => entry.oldFile !== entry.
 mkdirSync(destination, { recursive: true });
 // Working notes between agents (local paths, internal state) live next to the WISPs but are not published.
 const internal = (name) => /^(HANDOFF|QA)-CLAUDE/.test(name);
-// README.md is the index on GitHub. On the site the index is /wisps, so the README is not a page of its own
-// (lib/references.ts sends links to it there).
+// The WISP list is on the site once, at /wisps. Documents that repeat it stay on GitHub: README.md is the index
+// there (lib/references.ts sends links to it to /wisps), IMPLEMENTATION.md lists the evidence per WISP and
+// NUMBERING.md the old and new numbers (links to them go to GitHub; next.config.ts redirects their old pages).
+const githubOnly = new Set([basename(README), "IMPLEMENTATION.md", "NUMBERING.md"]);
 const paths = readdirSync(source)
-  .filter((name) => name.endsWith(".md") && name !== basename(README) && !legacyFiles.has(name) && !internal(name))
+  .filter((name) => name.endsWith(".md") && !githubOnly.has(name) && !legacyFiles.has(name) && !internal(name))
   .map((name) => `docs/wisps/${name}`);
 paths.push(
   "docs/PROTOCOL.md",

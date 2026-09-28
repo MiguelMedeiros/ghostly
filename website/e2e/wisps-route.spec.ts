@@ -101,16 +101,18 @@ for (const [from, to] of [
   });
 }
 
-// Security and Contributing are on GitHub only.
+// Security, Contributing and the two WISP documents that repeat the list are on GitHub only.
 for (const [slug, file] of [
-  ["security", "SECURITY.md"],
-  ["contributing", "CONTRIBUTING.md"],
+  ["security", "main/SECURITY.md"],
+  ["contributing", "main/CONTRIBUTING.md"],
+  ["implementation", "dev/docs/wisps/IMPLEMENTATION.md"],
+  ["numbering", "dev/docs/wisps/NUMBERING.md"],
 ]) {
   for (const from of [`/wisps/${slug}`, `/developers/wisps/${slug}`]) {
     test(`${from} redirects permanently to ${file} on GitHub`, async ({ request }) => {
       const res = await request.get(from, { maxRedirects: 0 });
       expect([301, 308]).toContain(res.status());
-      expect(res.headers()["location"]).toBe(`https://github.com/MiguelMedeiros/ghostly/blob/main/${file}`);
+      expect(res.headers()["location"]).toBe(`https://github.com/MiguelMedeiros/ghostly/blob/${file}`);
     });
   }
 }
@@ -121,7 +123,7 @@ test("the sitemap lists the WISPs page, and neither /docs nor the GitHub-only do
   expect(xml).toContain("<loc>https://ghostly.tools/wisps/01-ghost-core</loc>");
   expect(xml).not.toContain("/developers/wisps");
   expect(xml).not.toContain("https://ghostly.tools/docs<");
-  expect(xml).not.toMatch(/\/wisps\/(security|contributing|readme)</);
+  expect(xml).not.toMatch(/\/wisps\/(security|contributing|readme|implementation|numbering)</);
 });
 
 test("the 404 page points at the WISPs", async ({ page }) => {
