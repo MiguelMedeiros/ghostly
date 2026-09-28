@@ -89,11 +89,12 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
   const mask = (value: unknown, key = ""): unknown => {
     if (value && typeof value === "object" && !Array.isArray(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mask(v, k)]));
     if (Array.isArray(value)) return value.map((item) => mask(item, key));
-    if (typeof value === "string" && /secret|password|token|credential|privatekey|nsec|bunker/i.test(key)) return "<hidden>";
+    if (typeof value === "string" && (/secret|password|token|credential|privatekey|nsec|bunker/i.test(key) || key === "auth" || key === "space")) return "<hidden>";
     return value;
   };
-  const { avatar, ...rest } = settings;
-  return { ...(mask(rest) as Record<string, unknown>), ...(avatar ? { avatar: "<set>" } : {}) };
+  // The push subscription (wake-up push) is a capability: who holds it can wake this profile's web app.
+  const { avatar, wake, ...rest } = settings;
+  return { ...(mask(rest) as Record<string, unknown>), ...(avatar ? { avatar: "<set>" } : {}), ...(wake ? { wake: "<set>" } : {}) };
 }
 
 /** Settings a command may change; the rest are the app's to manage. */
@@ -125,7 +126,9 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
     if (ref === "everyone" || ref === MENTION_EVERYONE) { key = MENTION_EVERYONE; spelled = ["everyone", "all"]; }
     else {
       const lower = ref.toLowerCase();
-      const matches = group.members.filter((m) => !m.me && (m.key === ref || m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower));
+      // A member's key is that member, whatever another member calls itself.
+      const byKey = group.members.filter((m) => !m.me && m.key === ref);
+      const matches = byKey.length ? byKey : group.members.filter((m) => !m.me && (m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower));
       if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${JSON.stringify(ref)} names more than one member` : `No member ${JSON.stringify(ref)} in ${group.name}`);
       key = matches[0].key;
       spelled = [matches[0].nick?.trim(), ref, key.slice(0, 8)].filter((s): s is string => !!s);
@@ -231,7 +234,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);
-    return history(await node(ctx).getMessages(link.id), params);
+    return historyOf(ctx, link.id, params);
   },
   async "chat.send"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -437,7 +440,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.history"(ctx, params) {
     const group = groupOf(ctx, params);
-    return history(await node(ctx).groupMessages({ groupId: group.id }), params, (m) => groupMessageJson(m, group));
+    return historyOf(ctx, `group:${group.id}`, params, (m) => groupMessageJson(m, group));
   },
   async "group.send"(ctx, params) {
     const group = groupOf(ctx, params);
@@ -602,6 +605,21 @@ function typingWord(params: Params, typing: boolean): { kind: TypingKind; status
   const status = sanitizeTypingStatus(oneLine);
   if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
   return { kind, status };
+}
+
+/**
+ * A page of a chat's or a group's history. Without `after` only that page is read from the store (the newest, or those
+ * before `before`), so a long chat's is as quick as a short one's; with `after` the whole history is read and cut.
+ */
+async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
+  if (params.after !== undefined && params.after !== null) return history(await node(ctx).getMessages(chat), params, json);
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+  const before = params.before ?? undefined;
+  if (before !== undefined && typeof before !== "number" && typeof before !== "string") throw new CliError("bad_request", "before must be a timestamp or a message id");
+  const page = await node(ctx).messagePage({ linkId: chat, limit, before }).catch((error: unknown) => {
+    throw error instanceof Error && error.message === `No message ${before}` ? new CliError("not_found", error.message) : error;
+  });
+  return { messages: page.messages.map((m) => json(m)), more: page.more };
 }
 
 function history(messages: StoredMessage[], params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {

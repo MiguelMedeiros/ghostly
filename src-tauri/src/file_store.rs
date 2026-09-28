@@ -25,6 +25,18 @@ impl FileStore {
         Self { base }
     }
 
+    /// Once at start: a files folder an older version made with the default mode (others may list it, on a
+    /// machine whose home folders they may enter) becomes the user's alone. Best effort.
+    pub fn keep_private(&self) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if self.base.is_dir() {
+                let _ = fs::set_permissions(&self.base, fs::Permissions::from_mode(0o700));
+            }
+        }
+    }
+
     fn folder(&self, space: &str) -> Result<PathBuf, String> {
         if space.is_empty()
             || space.len() > 100
@@ -53,13 +65,13 @@ impl FileStore {
             return Err("Too much at once".into());
         }
         let path = self.path(space, id)?;
-        fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .map_err(|e| e.to_string())?;
+        private_folder(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        let mut options = OpenOptions::new();
+        options.create(true).truncate(false).write(true);
+        // A received file is the chat's plain bytes: the user's alone, whatever the umask.
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let mut file = options.open(&path).map_err(|e| e.to_string())?;
         let length = file.metadata().map_err(|e| e.to_string())?.len();
         if length != offset {
             return Err("File write out of order".into());
@@ -163,6 +175,15 @@ impl FileStore {
         std::io::copy(&mut from, &mut to).map_err(|e| e.to_string())?;
         to.sync_all().map_err(|e| e.to_string())
     }
+}
+
+/// The folder and any missing above it, made the user's alone (0700) on Unix.
+fn private_folder(path: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path)
 }
 
 fn check_id(id: &str) -> Result<&str, String> {
@@ -456,6 +477,23 @@ mod tests {
         files.truncate("p", "missing", 0).unwrap();
         assert!(files.truncate("p", "missing", 1).is_err());
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stored_files_and_their_folders_are_the_users_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let (files, dir) = store();
+        files.append("space", "chat-in-x", 0, b"bytes").unwrap();
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&dir.join("space")), 0o700);
+        assert_eq!(mode(&dir.join("space").join("chat-in-x")), 0o600);
+        // A folder an older version left open to others is closed at start.
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        files.keep_private();
+        assert_eq!(mode(&dir), 0o700);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -71,6 +71,7 @@ export * from "./groupCrypto";
 export * from "./groupCommits";
 export * from "./groupSession";
 export * from "./groupMentions";
+export * from "./groupWake";
 export * from "./groupEdits";
 export * from "./replies";
 export * from "./forwards";

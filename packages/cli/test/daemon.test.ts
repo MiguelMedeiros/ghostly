@@ -1,11 +1,11 @@
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { createInterface } from "node:readline";
 import type { Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
 import { createProfile, profilePaths } from "../src/profiles";
-import { ghostly, home, hyperdhtTestnet, localRelay, ok } from "./support/cli";
+import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.cli
 
 /** A daemon started before an upgrade: commands say so, and `daemon restart` runs the new code. */
@@ -65,5 +65,20 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const listed = await ghostly(["--home", dir, "chat", "list"], { env });
     expect(ok(listed)).toEqual({ chats: [] });
     expect(listed.stderr).toBe("");
+  });
+
+  it("a daemon whose terminal closes (SIGHUP) stops cleanly and frees its profile", async () => {
+    const hung = home("hangup");
+    ok(await ghostly(["--home", hung, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    const daemon = new Running(["--home", hung, "daemon"], env);
+    try {
+      const ready = await daemon.waitFor((l) => l.daemon === "ready");
+      daemon.child.kill("SIGHUP");
+      expect(await daemon.exited(30_000)).toBe(0);
+      expect(existsSync(ready.socket as string)).toBe(false);
+      expect(existsSync(profilePaths(hung, "default").lock)).toBe(false);
+    } finally {
+      await daemon.stop();
+    }
   });
 });

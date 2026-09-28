@@ -12,8 +12,9 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult, WakeSubscription } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
+import type { MessageChanges } from "./messageChanges";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
@@ -271,6 +272,7 @@ export interface EngineApi {
   /**
    * A chat muted here (#250) is not woken: its contact is told to forget this side's subscription until it is unmuted,
    * so no push for it reaches the browser at all (a push that shows nothing counts against the app with some browsers).
+   * A private group's `group:<id>` does the same for every member of it (WISP 9xx · Group Mesh § Wake-up push).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
@@ -295,6 +297,11 @@ export interface EngineApi {
   /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
   groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
   groupMessages(params: { groupId: string }): StoredMessage[];
+  /**
+   * A page of a chat's or a group's (`group:<id>`) history, oldest first: the latest `limit` (50 by default) messages,
+   * or those before `before` (the id of a message in it, or a time). Reads that page only, however long the chat is.
+   */
+  messagePage(params: { linkId: string; limit?: number; before?: string | number }): MessagePage;
   leaveGroup(params: { groupId: string }): void;
   removeGroupMember(params: { groupId: string; key: string }): void;
   makeGroupAdmin(params: { groupId: string; key: string }): void;
@@ -360,4 +367,6 @@ export type EngineEvent =
   | { kind: "attention"; event: AttentionEvent }
   | { kind: "state"; state: EngineState }
   | { kind: "messages"; linkId: string; messages: StoredMessage[] }
+  /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
+  | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string };

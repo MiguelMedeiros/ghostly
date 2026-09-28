@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { jumpToMessage, type QuoteView } from "../../lib/replies";
+import { drawEveryRow } from "../../hooks/useTailFirst";
 
 /** How long "not in this chat" stays under a quote whose original cannot be shown. */
 const NOT_HERE_MS = 3000;
@@ -35,7 +36,9 @@ export function ReplyQuote({ quote }: { quote: QuoteView }) {
       onClick={(e) => {
         // The bubble's own double click opens its details: a tap on the quote is only the jump.
         e.stopPropagation();
-        if (!quote.targetId || !jumpToMessage(quote.targetId)) setNotHere(true);
+        // A long chat just opened may not have drawn it yet (useTailFirst): then every row first, and again.
+        const jumped = !!quote.targetId && (jumpToMessage(quote.targetId) || (drawEveryRow(), jumpToMessage(quote.targetId)));
+        if (!jumped) setNotHere(true);
       }}
       onDoubleClick={(e) => e.stopPropagation()}
       title={quote.state === "found" ? t("chat.reply.jump") : undefined}

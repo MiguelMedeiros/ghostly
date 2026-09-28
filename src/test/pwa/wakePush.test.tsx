@@ -1,13 +1,13 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateVapidKeys } from "@ghostly/core";
-import { setChatMute } from "../../lib/chatMute";
+import { groupChat, setChatMute } from "../../lib/chatMute";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
-import { pushPlatform, setPushPlatform, setWake, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
+import { pushPlatform, rotateWake, setPushPlatform, setWake, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
 import { engineState, fakeEngine, linkView } from "../fakeEngine";
 
-// covers: push.wake.notify, push.wake.mute
+// covers: push.wake.notify, push.wake.mute, push.wake.group
 
 const keys = { endpoint: "https://fcm.googleapis.com/fcm/send/x", p256dh: "p", auth: "a" };
 type Fake = PushPlatform & { [K in keyof PushPlatform]: PushPlatform[K] & ReturnType<typeof vi.fn> };
@@ -94,6 +94,52 @@ describe("the push worker's table", () => {
     await waitFor(() => expect(platform.syncTable.mock.lastCall![1]).toEqual([
       { token: "tokenaaaaaaaaaaaaaaaaa", path: "/chat/chata" }, { token: "tokenbbbbbbbbbbbbbbbbb", path: "/chat/chatb" },
     ]));
+  });
+
+  it("a contact that held it was deleted or muted: a new subscription with a new key pair, or off without notifications", async () => {
+    const old = generateVapidKeys();
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    vi.stubGlobal("Notification", { permission: "granted" });
+    fakeEngine.on("setWakeSubscription", () => undefined);
+    fakeEngine.setState(engineState({ settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: old }, wakeRotate: true } }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(fakeEngine.callsTo("setWakeSubscription")).toHaveLength(1));
+    const subscription = fakeEngine.callsTo("setWakeSubscription")[0]!.subscription!;
+    expect(subscription.vapid.publicKey).not.toBe(old.publicKey);
+    expect(platform.subscribe).toHaveBeenCalledWith("", subscription.vapid);
+
+    vi.stubGlobal("Notification", { permission: "denied" });
+    await rotateWake();
+    const calls = fakeEngine.callsTo("setWakeSubscription");
+    expect(calls[calls.length - 1]).toEqual({ subscription: null });
+    expect(platform.unsubscribe).toHaveBeenCalledWith("");
+    vi.unstubAllGlobals();
+  });
+
+  it("a private group: a token per member, all opening the group; its mute tells the engine; a community has none", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    setChatMute(groupChat("g2"), "forever");
+    fakeEngine.on("setWakeMuted", () => undefined);
+    const group = (id: string, extra: Record<string, unknown>) => ({ id, name: id, createdAt: 1, isAdmin: false, members: [], invited: [], memberLinks: {}, lastMessageAt: 0, canSend: true, ...extra });
+    fakeEngine.setState(engineState({
+      settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } },
+      groups: [
+        group("g1", { profile: "mesh", wakeTokens: ["tokenmember1aaaaaaaaaa", "tokenmember2aaaaaaaaaa"] }),
+        group("g2", { profile: "mesh", wakeTokens: ["tokenmutedaaaaaaaaaaaa"] }),
+        group("c1", { profile: "community", wakeTokens: ["tokencommunityaaaaaaaa"] }),
+      ] as never,
+    }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalled());
+    expect(platform.syncTable.mock.lastCall![1]).toEqual([
+      { token: "tokenmember1aaaaaaaaaa", path: "/group/g1" },
+      { token: "tokenmember2aaaaaaaaaa", path: "/group/g1" },
+      { token: "tokenmutedaaaaaaaaaaaa", path: "/group/g2", mutedUntil: "forever" },
+    ]);
+    expect(fakeEngine.callsTo("setWakeMuted")).toEqual([{ linkId: "group:g2", muted: true }]);
+    setChatMute(groupChat("g2"), undefined);
   });
 
   it("a subscription the browser dropped while closed is made again with the same key pair", async () => {

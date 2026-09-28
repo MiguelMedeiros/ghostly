@@ -158,6 +158,12 @@ function splitMarkers(text: string, prev: string | undefined, nextChar: string |
   if (from < text.length) items.push({ t: "text", s: text.slice(from) });
 }
 
+/**
+ * The most styles open inside one another. Past it a marker stays text: a peer's message cannot nest spans
+ * thousands deep, which every recursive reader of the tree (the bubble, the chat list's preview) would follow.
+ */
+export const MAX_SPAN_DEPTH = 8;
+
 /** Pass 3, pairing: per-run stacks, so a closer finds its opener in O(1) and each marker is dropped at most once. */
 function pairMarkers(items: Item[]) {
   // Open markers in order, where each one sits in that list, and the same markers per run.
@@ -182,7 +188,7 @@ function pairMarkers(items: Item[]) {
       popTo(depthOf[opener]);
       (items[opener] as Mark).pair = "open";
       item.pair = "close";
-    } else if (item.canOpen) {
+    } else if (item.canOpen && stack.length < MAX_SPAN_DEPTH) {
       depthOf[i] = stack.length;
       stack.push(i);
       if (openers) openers.push(i);

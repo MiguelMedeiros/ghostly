@@ -2,11 +2,12 @@ import type { IdentityTimelineEntry } from "@ghostly/core";
 import { IDENTITY_CHALLENGE_WINDOW } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { focus } from "../../lib/connection";
+import { clockTime } from "../../lib/time";
 import { providerLabel, shortSubject, useEngineState } from "../../lib/identities";
 import { idCard, receivedIdCard } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
 
-const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const time = clockTime;
 
 /** Where a share stands, as the card's corner shows it. `waiting`: mine, the contact not connected yet. `unanswered`: theirs, never presented. */
 type ShareMark = "verifying" | "verified" | "failed" | "waiting" | "unanswered";

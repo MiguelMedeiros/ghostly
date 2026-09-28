@@ -22,7 +22,8 @@ import { contactArrived } from "../lib/pairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
-import { useChatScroll } from "../hooks/useChatScroll";
+import { leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
+import { useTailFirst } from "../hooks/useTailFirst";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
@@ -420,9 +421,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const closeMenu = () => setMenuOpen(false);
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
+  // A long chat draws its last rows first, and the older ones in the moment after (useTailFirst).
+  const rowIds = useMemo(() => timeline.map(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`), [timeline]);
+  const firstRow = useTailFirst(rowIds, sessionId, leftScrolledUp(sessionId));
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
-  // A notice (joined, a call) is not a message to count.
-  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
+  // A notice (joined, a call) is not a message to count. Always every message, drawn yet or not; a new list when older
+  // rows come in above, so the view is put back in the same commit, before a scroll can see the rows moved.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
+  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
   const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible });
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
@@ -667,7 +673,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       {/* Messages */}
       <div className="relative flex-1 min-h-0 flex flex-col">
       <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
-        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3">
+        {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
+        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
           {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
             <p data-testid="chat-created" className="mb-3 px-4 text-center text-[11px] text-text-muted">
               <time dateTime={new Date(session.createdAt).toISOString()}>
@@ -694,7 +701,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </div>
             </div>
           )}
-          {timeline.map((row) => row.kind === "transport"
+          {timeline.slice(firstRow).map((row) => row.kind === "transport"
             ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
             : row.kind === "identity"
             ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}

@@ -20,6 +20,7 @@ import { GROUP_EDIT_FRAME, meshMessageRef, validEditText, type GroupIncomingEdit
 import { validEditNumber } from "./pairedEdits";
 import { MESH_HUBS, meshRendezvous, NO_HUB_POLICY, type MeshHubPolicy } from "./groupHubs";
 import { readReaction, type WireReaction } from "./reactions";
+import { RateWindow } from "./pairedEdits";
 
 /**
  * One member's view of a `group-mesh/1` group: the membership chain, the epoch
@@ -63,6 +64,14 @@ export const GROUP_LIMITS = {
   /** Commits carried in one welcome or chain frame, and their size: a frame stays well within the 60 KiB an edge carries. */
   chainPiece: 24,
   chainPieceBytes: 40 * 1024,
+  /**
+   * Syncs of one member answered in `syncWindowMs`: an edge opening, a question every ten seconds at most and a gossip
+   * turn a minute fit well within; a member asking more is not answered until the window has room.
+   */
+  syncAnswers: 8,
+  syncWindowMs: 60_000,
+  /** Messages delivered from a copy that was not whole, remembered until a whole copy completes them. */
+  provisional: 256,
 } as const;
 
 /** What every member should know about who can read what, in the words the apps show. */
@@ -139,7 +148,11 @@ export interface GroupState {
   meta?: GroupMeta;
 }
 
-export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number }
+/**
+ * `completes`: this message was delivered before from a copy another member handed on without its author's whole
+ * signature (its text only); this is the whole one, with the mentions, reply and hop count its author put there.
+ */
+export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; completes?: true }
 
 export interface GroupSessionHooks {
   save(state: GroupState): Promise<void>;
@@ -153,6 +166,8 @@ export interface GroupSessionHooks {
   changed(): void;
   /** The group's name or picture changed (set, replaced or removed), by `by`. */
   metaChanged?(by: string, change: GroupMetaChange): void;
+  /** The clock the limits read (the engine's, or a simulation's); the wall clock when absent. */
+  clock?(): number;
 }
 
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
@@ -269,6 +284,13 @@ export class GroupSession {
   private pendingMeta: { from: string; frame: unknown } | undefined;
   /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
   private passOn: GroupEdgeFrame[] | null = null;
+  /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
+  private syncsAnswered = new Map<string, RateWindow>();
+  /**
+   * Messages delivered from a copy that was not whole (handed on without its author's whole signature): not seen, so
+   * a sync still asks for them and a whole copy completes them. In memory only, oldest first.
+   */
+  private provisional = new Set<string>();
 
   constructor(state: GroupState, private readonly hooks: GroupSessionHooks) {
     this.state = state;
@@ -703,7 +725,15 @@ export class GroupSession {
     // Not from a member of that epoch, or from before I was one: nothing to read, nothing to ask for.
     if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
     if (this.isDuplicate(raw)) return;
-    if (relayed && (raw.m || raw.r || raw.f !== undefined) && !this.wholeSigned(raw)) { delete raw.m; delete raw.r; delete raw.f; delete raw.xs; }
+    // Whole: from its author's own edge, or handed on with the author's signature over every field. Anything else a
+    // member handing it on may have stripped (the mentions, the reply, the hop count): its text is shown, but it is
+    // neither seen nor kept nor handed on, so a sync still asks for it and a whole copy completes it.
+    const id = groupMessageId(raw.s, raw.e, raw.n);
+    const whole = !relayed || this.wholeSigned(raw);
+    if (!whole) {
+      if (this.provisional.has(id)) return;
+      delete raw.m; delete raw.r; delete raw.f; delete raw.xs;
+    }
     const secret = this.secret(raw.e);
     if (!secret) { this.park(from, raw); return; }
     const key = epochKeys(secret, this.id, raw.e).message;
@@ -713,7 +743,13 @@ export class GroupSession {
     const mentions = this.openMentions(key, raw, text, rosterAdmin(commit.m) === raw.s);
     const reply = this.openReply(key, raw);
     const forwarded = readForwarded(raw.f);
-    await this.hooks.message({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}) });
+    const completes = whole && this.provisional.delete(id);
+    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(completes ? { completes: true as const } : {}) });
+    if (!whole) {
+      this.provisional.add(id);
+      if (this.provisional.size > GROUP_LIMITS.provisional) this.provisional.delete(this.provisional.values().next().value!);
+      return;
+    }
     this.markSeen(raw);
     this.keep(clean(raw));
     await this.persist();
@@ -897,6 +933,10 @@ export class GroupSession {
 
   private async receiveSync(from: string, frame: GroupSyncFrame): Promise<void> {
     if (!rosterHas(this.roster, from) || !Number.isSafeInteger(frame.e) || frame.e < 0 || typeof frame.h !== "string") return;
+    // Each answer may carry the chain, secrets and logs: a few a minute per member, however often it asks.
+    let answered = this.syncsAnswered.get(from);
+    if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(GROUP_LIMITS.syncAnswers, GROUP_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
+    if (!answered.take()) return;
     if (frame.e > this.epoch) { this.ask(from); this.offerMeta(from, frame.mt); return; }
     if (frame.h !== commitHash(this.state.chain[frame.e])) {
       // A claim is not a fork: they get my commit for that epoch, and fork on it if their own is validly signed and different.

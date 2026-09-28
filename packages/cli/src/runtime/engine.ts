@@ -108,7 +108,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   // `GHOSTLY_LINK_TRACE=<file>`: each step of each chat's way to live, one JSON line (packages/core/src/linkTrace.ts),
   // as the Desktop writes to its log. For measuring, not needed to run.
   const trace = process.env.GHOSTLY_LINK_TRACE;
-  if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n"));
+  if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
   const store = await openPersistentIndexedDb(paths.db);
   const webrtc = await installWebRtc();
   // Voice calls (WISP 11xx § Calls): offered to contacts (calls/1) only where their media can run.

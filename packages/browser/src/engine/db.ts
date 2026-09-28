@@ -1,7 +1,29 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
 import { STORES, fileStore, store, wrap, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
-import type { Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import type { MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
+
+/**
+ * The newest `count` rows of an index range, newest first: one descending read where IndexedDB has it (the options
+ * that came with `getAllRecords`), else a cursor from the end.
+ */
+function newestMessages(index: IDBIndex, query: IDBKeyRange, count: number): Promise<StoredMessage[]> {
+  if (typeof (index as { getAllRecords?: unknown }).getAllRecords === "function") {
+    const descending = index as unknown as { getAll(options: { query: IDBKeyRange; count: number; direction: IDBCursorDirection }): IDBRequest<StoredMessage[]> };
+    return wrap(descending.getAll({ query, count, direction: "prev" }));
+  }
+  return new Promise((resolve, reject) => {
+    const rows: StoredMessage[] = [];
+    const request = index.openCursor(query, "prev");
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) rows.push(cursor.value as StoredMessage);
+      if (!cursor || rows.length >= count) resolve(rows);
+      else cursor.continue();
+    };
+  });
+}
 
 /**
  * Durable local state of the browser peer. Identity seeds live here the same
@@ -112,6 +134,29 @@ export const db = {
   async getMessages(linkId: string): Promise<StoredMessage[]> {
     const messages = await wrap<StoredMessage[]>((await store(STORES.messages, "readonly")).index("byLink").getAll(linkId));
     return messages.sort((a, b) => a.timestamp - b.timestamp);
+  },
+  /** Whether the chat has a message with this id. */
+  async hasMessage(linkId: string, id: string): Promise<boolean> {
+    return (await wrap((await store(STORES.messages, "readonly")).getKey([linkId, id]))) !== undefined;
+  },
+  async getMessage(linkId: string, id: string): Promise<StoredMessage | undefined> {
+    return wrap((await store(STORES.messages, "readonly")).get([linkId, id]));
+  },
+  /**
+   * The newest `limit` messages of a chat before `before`, oldest first, in `getMessages`' order (time, then id), and
+   * whether older ones remain. Reads those rows only: a long chat's first page costs what a short one's does.
+   * `before`: a message's place (the page ends just before it), or a time (`id` left out: the page ends before it).
+   */
+  async getMessagePage(linkId: string, { limit, before }: { limit: number; before?: { timestamp: number; id?: string } }): Promise<MessagePage> {
+    const range = IDBKeyRange.bound([linkId, -Infinity], [linkId, before?.timestamp ?? Infinity], false, !!before && before.id === undefined);
+    // Messages of `before`'s time from it on are in the range but not before it: read past them.
+    const kept = (m: StoredMessage) => !(before?.id !== undefined && m.timestamp === before.timestamp && m.id >= before.id);
+    for (let want = limit + 1; ;) {
+      const newest = await newestMessages((await store(STORES.messages, "readonly")).index("byLinkTime"), range, want);
+      const page = newest.filter(kept);
+      if (page.length > limit || newest.length < want) return { messages: page.slice(0, limit).reverse(), more: page.length > limit };
+      want += newest.length - page.length;
+    }
   },
   /** Returns false when the message was already stored. */
   async addMessage(message: StoredMessage): Promise<boolean> {

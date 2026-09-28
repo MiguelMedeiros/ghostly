@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostLink } from "../src/ghostlink";
+import { GhostLink, UNPROVEN_AUTH_MS } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { DiscoveryBudgetError, type PkarrTransport } from "../src/transport";
@@ -221,6 +221,45 @@ describe("coming back after a restart, the edges", () => {
     expect(stranger.link.isDataLinkOpen).toBe(false);
     expect(channelOf(stays)).toBe(held);
     expect(goes.link.isDataLinkOpen && stays.link.isDataLinkOpen).toBe(true);
+  }, 120_000);
+
+  it("connections dialled in that never authenticate hold no place against the contact coming back", async () => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    let goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, "iroh", emptyDhtDeliveryState());
+    const stays = startApp(world, "stays", made.joiner, { side: made.inviter, name: "goes" }, "iroh", emptyDhtDeliveryState());
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(5_000);
+    await quit(world, goes, "graceful");
+    // Someone who reads the endpoint from the record dials it twice and never says a word: one connection takes the
+    // session's place, the other the place of the one that would replace it.
+    const silent = world.native.endpoint("iroh/1", "silent");
+    for (let i = 0; i < 2; i++) { void silent.connect({ id: "stays:iroh/1" }); await run(1_000); }
+    expect(stays.link.isDataLinkOpen).toBe(false);
+    await run(RESTART_AFTER_MS);
+    goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, "iroh", goes.dhtState, true);
+    // Back within the time a restart takes, not after the three minutes a peer has to finish authenticating.
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 170_000)).toBeLessThanOrEqual(15_000);
+  }, 240_000);
+
+  it("a connection dialled in that never authenticates closes soon, and the DHT keeps its pace meanwhile", async () => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, "iroh", emptyDhtDeliveryState());
+    const stays = startApp(world, "stays", made.joiner, { side: made.inviter, name: "goes" }, "iroh", emptyDhtDeliveryState());
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await quit(world, goes, "graceful");
+    await run(1_000);
+    const connected = () => (stays.link as unknown as { session: { connected: boolean } }).session.connected;
+    expect(connected()).toBe(false);
+    const dial = world.native.endpoint("iroh/1", "silent").connect({ id: "stays:iroh/1" });
+    await run(1_000);
+    const { channel } = await dial;
+    expect(channelOf(stays)).toBeTruthy();
+    expect(connected()).toBe(false);
+    await run(UNPROVEN_AUTH_MS);
+    expect((channel as unknown as { closed: boolean }).closed).toBe(true);
+    expect(channelOf(stays)).toBeNull();
   }, 120_000);
 });
 

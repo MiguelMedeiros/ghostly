@@ -2,6 +2,7 @@ import { connect, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { CliError, type ErrorCode } from "./errors";
 import type { GhostlyEvent } from "./events";
+import { ownSocket } from "./privateFolder";
 
 /**
  * A connection to a profile's daemon over its socket (WISP 11xx § Local control API). `null` from `connectDaemon`
@@ -53,6 +54,8 @@ export class DaemonClient {
 }
 
 export function connectDaemon(path: string, timeoutMs = 2_000): Promise<DaemonClient | null> {
+  // Someone else's socket (or a link) where the daemon's should be is no daemon of this profile's.
+  if (!ownSocket(path)) return Promise.resolve(null);
   return new Promise((resolve) => {
     const socket = connect(path);
     const timer = setTimeout(() => { socket.destroy(); resolve(null); }, timeoutMs);
