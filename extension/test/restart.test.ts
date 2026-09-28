@@ -96,6 +96,7 @@ describe("after the service worker restarts", () => {
     const background = (event: { listeners: { context: string }[] }) => event.listeners.filter((l) => l.context === "background").length;
     expect(background(world.chrome.runtime.onMessage as never)).toBe(1);
     expect(background(world.chrome.debugger.onEvent as never)).toBe(1);
+    expect(background(world.chrome.debugger.onDetach as never)).toBe(1);
     expect(background(world.chrome.action.onClicked as never)).toBe(1);
     expect(background(world.chrome.tabs.onRemoved as never)).toBe(1);
   });

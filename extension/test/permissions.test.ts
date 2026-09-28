@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import manifest from "../public/manifest.json";
 import { settle, type FakeWorld } from "./fakeChrome";
@@ -24,6 +26,15 @@ describe("what the extension may do, as the manifest declares it", () => {
     expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger"]);
     expect(manifest.optional_permissions).toEqual(["notifications", "identity"]);
     expect(manifest).not.toHaveProperty("host_permissions");
+  });
+
+  it("uses the debugger from the service worker only", () => {
+    // `debugger` cannot be an optional permission in Chrome, so it is declared; background.ts scopes it.
+    const src = resolve(__dirname, "../src");
+    const callers = readdirSync(src, { recursive: true, encoding: "utf8" })
+      .filter((file) => /\.(ts|tsx)$/.test(file))
+      .filter((file) => /chrome\s*\.\s*debugger|\["debugger"\]/.test(readFileSync(resolve(src, file), "utf8")));
+    expect(callers).toEqual(["background.ts"]);
   });
 
   it("can only ever be granted this machine's hosts", () => {
