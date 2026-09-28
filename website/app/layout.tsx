@@ -3,7 +3,7 @@ import { JetBrains_Mono, Inter } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import "./site.css";
-import { OG_IMAGE } from "@/lib/pageMeta";
+import { OG_IMAGE, X_HANDLE } from "@/lib/pageMeta";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -86,7 +86,8 @@ export const metadata: Metadata = {
     title: siteConfig.title,
     description: siteConfig.description,
     images: [OG_IMAGE.url],
-    creator: "@paborsa",
+    site: X_HANDLE,
+    creator: X_HANDLE,
   },
   category: "technology",
 };

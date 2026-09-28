@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 
 export const SITE_URL = "https://ghostly.tools";
 export const SITE_NAME = "Ghostly";
+/** Miguel's X account: the site and the author of every card. */
+export const X_HANDLE = "@_miguelmedeiros";
 
 /** The one share image: 1200x630, the size Open Graph and X read without cropping. */
 export const OG_IMAGE = {
@@ -34,6 +36,8 @@ export function pageMetadata({ title, description, path, absolute = false }: { t
     },
     twitter: {
       card: "summary_large_image",
+      site: X_HANDLE,
+      creator: X_HANDLE,
       title: full,
       description,
       images: [OG_IMAGE.url],

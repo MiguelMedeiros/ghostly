@@ -19,6 +19,7 @@ type Head = {
   ogHeight: string | null;
   twitterCard: string | null;
   twitterImage: string | null;
+  twitterCreator: string | null;
 };
 
 function head(html: string): Head {
@@ -37,6 +38,7 @@ function head(html: string): Head {
     ogHeight: meta("property", "og:image:height"),
     twitterCard: meta("name", "twitter:card"),
     twitterImage: meta("name", "twitter:image"),
+    twitterCreator: meta("name", "twitter:creator"),
   };
 }
 
@@ -94,6 +96,8 @@ test("every page in the sitemap has its own title, description and share card", 
     expect([h.ogWidth, h.ogHeight], path).toEqual(["1200", "630"]);
     expect(h.twitterCard, path).toBe("summary_large_image");
     expect(h.twitterImage, path).toMatch(/^https:\/\//);
+    // /privacy writes its own card; every page built by lib/pageMeta.ts names the author.
+    if (path !== "/privacy") expect(h.twitterCreator, path).toBe("@_miguelmedeiros");
     for (const [seen, key] of [[titles, h.title], [descriptions, h.description!], [shareTitles, h.ogTitle!]] as const) {
       expect(seen.get(key), `${path} repeats ${seen.get(key)}: ${key}`).toBeUndefined();
       seen.set(key, path);
