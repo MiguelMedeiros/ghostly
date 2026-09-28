@@ -40,7 +40,7 @@ const pactl = (...args: string[]) => execFileSync("pactl", args, { encoding: "ut
 const load = (module: string, ...args: string[]) => pactl("load-module", module, ...args).trim();
 
 /** A named null source (a microphone) or null sink (a speaker). */
-const mic = (name: string, description: string) => load("module-null-source", `source_name=${name}`, `source_properties='device.description="${description}"'`);
+const mic = (name: string, description: string) => load("module-null-source", `source_name=${name}`, `description='${description}'`);
 const speaker = (name: string, description: string) => load("module-null-sink", `sink_name=${name}`, `sink_properties='device.description="${description}"'`);
 
 /** The names of the sources something records from, and of the sinks something plays on. */
