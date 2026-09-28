@@ -224,6 +224,35 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(changes).toBe(0);
   });
 
+  it("takes a long history in one write, in time order, and one changed message costs one write", async () => {
+    // Out of order, some sharing a time: the chat holds them as addMessage one by one would have.
+    const history = Array.from({ length: 600 }, (_, i) => message({ id: `peer_${i}`, timestamp: 1_000 + ((i * 7) % 600) - (i % 3), delivery: "delivered" }));
+    const expected = [...history].map((m, i) => ({ id: m.id, at: m.timestamp, i })).sort((a, b) => a.at - b.at || a.i - b.i).map((m) => m.id);
+    const writes = vi.spyOn(localStorage, "setItem");
+    const stored = await mirror(history);
+    const sessionWrites = () => writes.mock.calls.filter(([key]) => key.endsWith("s1")).length;
+    expect(stored.messages.map((m) => m.id)).toEqual(expected);
+    expect(sessionWrites()).toBe(2); // the chat made, then the history
+    expect(changes).toBe(1);
+
+    changes = 0;
+    writes.mockClear();
+    const reacted = history.map((m) => (m.id === "peer_300" ? { ...m, reactions: { me: { e: "👍", n: 1, at: 5 } } } : m));
+    engine.messageListeners[0]("link-1", reacted);
+    expect(sessionWrites()).toBe(1);
+    expect(changes).toBe(1);
+    expect(storage.loadSession("s1")!.messages.find((m) => m.id === "peer_300")?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
+
+    // A message the user deleted and the peer still has: nothing to write, nothing to tell.
+    changes = 0;
+    writes.mockClear();
+    storage.deleteMessage("s1", "peer_1");
+    writes.mockClear();
+    engine.messageListeners[0]("link-1", reacted);
+    expect(sessionWrites()).toBe(0);
+    expect(changes).toBe(0);
+  });
+
   it("attributes a join announcement to whoever made it, fixing an old attribution", async () => {
     const stored = await mirror([message({ id: "j", text: "👋 Casper joined" })], {
       messages: [{ id: "j", sender: "system", text: "👋 Casper joined", timestamp: 10, systemEvent: { type: "join", pubKey: "me-1" } }],
@@ -252,6 +281,67 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(stored.messages[0].meta).toBeUndefined();
     const legacy = sync.toChatMessage(message({ id: "q", via: "dht" as never }), "peer-1", "me-1");
     expect(legacy.meta?.dnsRecords).toEqual(["_msgs", "_ts", "_ack"]);
+  });
+});
+
+describe("a long chat, on every update", () => {
+  /** A chat with its history mirrored, and a link with a name and an identity share, settled. */
+  async function settledChat() {
+    imported();
+    storage.saveSession(session({ profile: "paired-chat/1" }));
+    const history = Array.from({ length: 300 }, (_, i) => message({ id: `peer_${i}`, timestamp: 1_000 + i, delivery: "delivered" }));
+    engine.messages.set("link-1", history);
+    await start([link({ createdAt: 1, profile: "paired-chat/1", peerNick: "Ana", identitySharedAt: 5 })]);
+    expect(storage.loadSession("s1")!.messages).toHaveLength(300);
+    const parse = vi.spyOn(JSON, "parse");
+    const chatParses = () => parse.mock.calls.filter(([text]) => typeof text === "string" && text.startsWith('{"id":"s1"')).length;
+    return { history, parse, chatParses };
+  }
+  /** The peer reports a new state with the same links. */
+  async function stateChanges() {
+    engine.state = { links: engine.state!.links.map((l) => ({ ...l })) };
+    for (const listener of engine.stateListeners) listener();
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it("reads a stored chat again only when what is stored for it changed", async () => {
+    const { parse, chatParses } = await settledChat();
+    parse.mockClear();
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(15_000);
+    await stateChanges();
+    expect(chatParses()).toBe(0);
+
+    storage.setSessionPinned("s1", true);
+    storage.updateSessionLabel("s1", "Work");
+    parse.mockClear();
+    window.dispatchEvent(new Event("session-updated"));
+    await stateChanges();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(chatParses()).toBe(1);
+    expect(sync.sessionForPeer("peer-1")?.label).toBe("Work");
+  });
+
+  it("still sees a chat changed or deleted elsewhere while nothing else moves", async () => {
+    await settledChat();
+    const stale = storage.loadSession("s1")!;
+    storage.saveSession({ ...stale, deliveryMode: "dht" });
+    window.dispatchEvent(new Event("session-updated"));
+    expect(storage.loadSession("s1")!.deliveryMode).toBe("stream");
+
+    storage.deleteSession("s1");
+    window.dispatchEvent(new Event("session-updated"));
+    expect(engine.calls).toContainEqual(["removeLink", { linkId: "link-1" }]);
+  });
+
+  it("mirrors the same history again when the chat was written over with an older copy", async () => {
+    await settledChat();
+    const stale = storage.loadSession("s1")!;
+    storage.saveSession({ ...stale, messages: stale.messages.slice(0, 100).map((m) => ({ ...m, delivery: "sending" })) });
+    await stateChanges();
+    const stored = storage.loadSession("s1")!;
+    expect(stored.messages).toHaveLength(300);
+    expect(stored.messages.every((m) => m.delivery === "delivered")).toBe(true);
   });
 });
 

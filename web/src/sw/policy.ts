@@ -133,7 +133,8 @@ export function wakeNotice(found: { entry: { path: string; mutedUntil?: number |
   if (entry.mutedUntil === "forever" || (typeof entry.mutedUntil === "number" && entry.mutedUntil > options.now)) return null;
   if (!/^\/(chat|group)\/[^/?#]+$/.test(entry.path)) return null;
   // A call says so ("Incoming call", the app's own words): the caller is waiting for the chat to go live.
-  const call = options.kind === "call";
+  // Groups have no calls: a group's token woken as a call is a message wake-up (WISP 9xx · Group Mesh § Wake-up push).
+  const call = options.kind === "call" && entry.path.startsWith("/chat/");
   return {
     title: text.title, body: call ? text.call || "Incoming call" : text.body, tag: `${call ? "wake-call" : "wake"}:${options.profile}:${entry.path}`, call,
     data: { path: entry.path, profile: options.profile },

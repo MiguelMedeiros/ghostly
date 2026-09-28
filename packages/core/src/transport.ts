@@ -24,7 +24,12 @@ import type { GhostRecord, SignedPacket } from "./pkarr";
 /** What changed in how discovery goes: a relay tripped (left alone), or one answered again. */
 export type DiscoveryChange = "tripped" | "recovered";
 
-export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean }
+/**
+ * `door`: a community door reading its knock bell. A background read, but not held to the small share while a link
+ * signals (`BACKGROUND_WHILE_SIGNALING`): the door admitting one person opens links that signal, and the next person's
+ * knock would wait for them (2026-09-28).
+ */
+export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean; door?: boolean }
 
 /**
  * `transport` with `extra` added to every request's options: a group's edges say `group` so. The optional methods

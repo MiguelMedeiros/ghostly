@@ -163,6 +163,25 @@ describe("what the peer tells the page", () => {
     expect(engine.messages.get("l1")).toEqual([]);
   });
 
+  it("makes what changed on the chat's messages it has, and hands listeners the whole list as it is now", async () => {
+    await engine.connect();
+    const listener = vi.fn();
+    engine.onMessages(listener);
+    const at = (id: string, timestamp: number) => ({ id, linkId: "l1", text: id, sender: "peer", timestamp, via: "datalink" }) as const;
+    const deliver = scripted.connections[0].deliver;
+    deliver({ kind: "messages", linkId: "l1", messages: [at("a", 1), at("b", 2), at("c", 3)] });
+    const before = engine.messages.get("l1");
+    deliver({ kind: "message-changes", linkId: "l1", messages: [at("d", 4), { ...at("a", 1), text: "edited" }, at("a2", 1)], deleted: ["b"] });
+    expect(engine.messages.get("l1")!.map((m) => [m.id, m.text])).toEqual([["a", "edited"], ["a2", "a2"], ["c", "c"], ["d", "d"]]);
+    expect(engine.messages.get("l1")).not.toBe(before);
+    expect(listener).toHaveBeenLastCalledWith("l1", engine.messages.get("l1"));
+    // A chat whose messages it was never sent: nothing to make them on, nothing to tell.
+    listener.mockClear();
+    deliver({ kind: "message-changes", linkId: "l2", messages: [at("x", 1)], deleted: [] });
+    expect(engine.messages.has("l2")).toBe(false);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("passes attention events through to listeners", async () => {
     await engine.connect();
     const listener = vi.fn();

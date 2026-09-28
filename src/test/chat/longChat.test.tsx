@@ -98,6 +98,23 @@ describe("a long chat", () => {
     expect(engine.callsTo("react")).toEqual([{ linkId: "link-1", messageId: `me_${wire(0)}`, emoji: "❤️" }]);
   });
 
+  it("a quote tapped before the older rows are drawn still goes to its original", () => {
+    // Timers held: the older rows stay undrawn until the tap asks for them.
+    vi.useRealTimers();
+    vi.useFakeTimers();
+    const messages = history();
+    messages[COUNT - 1] = { ...messages[COUNT - 1], replyTo: { id: wire(0), snippet: "Message 0", from: "me", messageId: `me_${wire(0)}` } };
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages, createdAt: 1_700_000_000_000 });
+    const { engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
+    engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
+    const original = () => document.querySelector<HTMLElement>(`[data-message-id="me_${wire(0)}"]`);
+    expect(original()).toBeNull();
+    const last = document.querySelector<HTMLElement>(`[data-message-id="${messages[COUNT - 1].id}"]`)!;
+    act(() => within(last).getByTestId("message-quote").click());
+    expect(original()).toHaveAttribute("data-reply-flash");
+    expect(within(last).queryByTestId("reply-quote-note")).not.toBeInTheDocument();
+  });
+
   it("names the contact anew in its reactions and quotes when the chat is renamed", async () => {
     const { user } = openChat();
     await screen.findByText(`Message ${COUNT - 1}`);

@@ -34,6 +34,11 @@ export const nodeLocalFetch: LocalFetch = async (request) => {
 const open = new Map<string, { server: Server; url: string }>();
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
+/** A request's `Host` names this machine's loopback on `port`, as the URL `service.open` gives does. */
+export function localHost(host: string | undefined, port: number): boolean {
+  return !!host && ["127.0.0.1", "localhost", "[::1]"].some((name) => host.toLowerCase() === `${name}:${port}`);
+}
+
 export const SERVICE_METHODS: Record<string, Method> = {
   async "service.list"(ctx) {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
@@ -74,6 +79,8 @@ export const SERVICE_METHODS: Record<string, Method> = {
     if (already) return { chat: link.id, service, url: already.url };
     if (!link.peerServices?.some((s) => s.id === service)) throw new CliError("not_found", `The contact shares no service ${service} (or is not live)`);
     const server = createServer((request, response) => {
+      // Only a page on this port asks: a name that merely resolves here (DNS rebinding) is not this service.
+      if (!localHost(request.headers.host, (server.address() as AddressInfo).port)) { response.writeHead(421, { "content-type": "text/plain; charset=utf-8" }); response.end("Open this service at 127.0.0.1 or localhost"); return; }
       const chunks: Buffer[] = [];
       request.on("data", (c: Buffer) => chunks.push(c));
       request.on("end", () => {

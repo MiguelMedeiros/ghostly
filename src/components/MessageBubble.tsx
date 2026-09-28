@@ -1,6 +1,7 @@
 import { publicKeyLabel } from "../lib/publicKeyLabel";
 import React, { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { sameValue } from "../lib/sameValue";
+import { clockTime } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { Menu, MenuItem } from "./Menu";
@@ -206,7 +207,7 @@ function EditGlyph() {
  */
 function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean }) {
   const { t } = useI18n();
-  const time = new Date(edit.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time = clockTime(edit.at);
   return (
     <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
@@ -662,10 +663,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
   };
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: retry } : {};
-  const time = new Date(message.timestamp).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const time = clockTime(message.timestamp);
   const contentType = imgError || message.file || message.paymentId ? "text" : detectContentType(message.text);
   const download = message.file && !isSystem
     ? {

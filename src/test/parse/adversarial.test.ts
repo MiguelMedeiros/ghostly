@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { previewText } from "../../lib/chatList";
 import { findMoney } from "../../lib/money";
-import { DETECTORS, parseMessage, plainText, shownUrl, tokenizeInline } from "../../lib/parse";
+import { DETECTORS, parseMessage, plainText, shownUrl, tokenizeInline, type Segment } from "../../lib/parse";
+import { MAX_SPAN_DEPTH } from "../../lib/parse/inline";
 import { JSON_LIMITS, prettyJson } from "../../lib/parse/json";
 import { findLocation, locationIn } from "../../lib/parse/location";
 import { mentionViews } from "../../lib/parse/mentions";
@@ -50,6 +51,23 @@ describe("deep JSON", () => {
     expect(wide.length).toBeLessThan(JSON_LIMITS.inputChars);
     expect(quickly(() => prettyJson(wide))).toBeNull();
     expect(prettyJson('{"a":[1,2]}')).toBe('{\n  "a": [\n    1,\n    2\n  ]\n}');
+  });
+});
+
+describe("deeply nested styles", () => {
+  const depth = (segments: Segment[]): number =>
+    Math.max(0, ...segments.map((s) => (s.type === "span" ? 1 + depth(s.children) : 0)));
+
+  it("open at most a few levels; past them the markers are text, and the whole message still reads", () => {
+    const levels = SIZE / 6 - 1;
+    const nested = "*a ".repeat(levels) + "x " + "a* ".repeat(levels);
+    const segments = quickly(() => tokenizeInline(nested, DETECTORS));
+    expect(depth(segments)).toBe(MAX_SPAN_DEPTH);
+    expect(quickly(() => plainText(nested)).length).toBeGreaterThan(SIZE / 2);
+    expect(quickly(() => previewText(nested)).length).toBeGreaterThan(0);
+    // Up to the bound, nesting is unchanged.
+    const bounded = "*a _a ".repeat(MAX_SPAN_DEPTH / 2) + "x " + "a_ a* ".repeat(MAX_SPAN_DEPTH / 2);
+    expect(depth(tokenizeInline(bounded, DETECTORS))).toBe(MAX_SPAN_DEPTH);
   });
 });
 

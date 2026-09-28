@@ -1,0 +1,1 @@
+a file taken without asking that ended here (failed, or stopped by its sender) and is offered again is decided again against the contact's limits and the free space, as a new offer is; a new offer under the id of a message the chat already holds is refused with `invalid`.

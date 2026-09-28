@@ -45,13 +45,21 @@ export interface GroupsHost {
   linkSeen?(linkId: string): boolean;
   /**
    * Pkarr, for the knocks under a link's knock identity (and a community's beacon and lobbies).
-   * `background`: a periodic look that can wait, spending only part of the relays' budget.
+   * `background`: a periodic look that can wait, spending only part of the relays' budget. `door`: the community
+   * door's look at its knock bell (`PkarrRequestOptions.door`).
    */
   publish(identity: Identity, records: GhostRecord[], background?: boolean): Promise<void>;
-  resolve(pubKeyZ32: string, background?: boolean): Promise<GhostRecord[] | null>;
+  resolve(pubKeyZ32: string, background?: boolean, door?: boolean): Promise<GhostRecord[] | null>;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
   storeMessage(message: StoredMessage): Promise<void>;
+  /**
+   * A message stored from a copy that was not whole, now whole: its mentions, reply and hop count join the stored one
+   * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
+   */
+  completeMessage?(message: StoredMessage): Promise<void>;
+  /** A private group's roster or my status in it changed, or I forgot it. */
+  membersChanged?(groupId: string): void;
   emit(): void;
   /** My name, for community groups, where it travels (encrypted) with my messages. */
   myNick?(): string | undefined;
@@ -143,6 +151,8 @@ const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
  * one received and it did not: messages sent where the two of them were cut apart (WISP 9xx § Catch-up).
  */
 export const MESH_GOSSIP_MS = 60_000;
+/** Where a member's gossip turns start among the members it is connected to: a number of its own, from its key. */
+const gossipStart = (key: string) => { let n = 0; for (let i = 0; i < key.length; i++) n = (n * 31 + key.charCodeAt(i)) >>> 0; return n; };
 /** How often the edges a mesh roster asks for are checked against the ones that exist (one that failed to open is tried again). */
 const RECONCILE_MS = 30_000;
 /** A member back after this long unreachable is announced to the others (`group-here`), unless someone already did. */
@@ -310,6 +320,13 @@ export class Groups {
   meshSize(groupId: string): number {
     const session = this.sessions.get(groupId);
     return session ? this.hubs.edgeLoad(groupId, session) : 0;
+  }
+  /** Whether a member of a private group is reachable now: its edge is up, or a hub whose edge is up reaches it. */
+  reachable(groupId: string, key: string): boolean {
+    const session = this.sessions.get(groupId);
+    if (!session || this.isCommunity(groupId)) return false;
+    const edge = this.host.edges(groupId).get(key), now = this.now();
+    return (!!edge && this.host.linkReady(edge)) || (this.hubs.active(groupId, session, now) && this.hubs.viaHub(groupId, session, key, now));
   }
   /** A community group (`group-community/1`) rather than a private one. */
   isCommunityGroup(groupId: string): boolean { return this.isCommunity(groupId); }
@@ -529,6 +546,7 @@ export class Groups {
     this.hereActed.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
+    this.host.membersChanged?.(groupId);
     this.host.emit();
   }
 
@@ -1064,7 +1082,10 @@ export class Groups {
       const connected = session.others.filter(key => !away.includes(key));
       if (!away.length || !connected.length) continue;
       this.lastGossip.set(groupId, now);
-      const via = connected[this.gossipTurn++ % connected.length];
+      // Each member starts its turns at a place of its own (from its key): members cut off from the same member (a Mac
+      // past its budget) have much the same list and turn count, and in step they would all ask the same ones, those
+      // cut off too, for minutes on end. Spread out, some ask a member that has it, and the others then get it from them.
+      const via = connected[(gossipStart(session.myKey) + this.gossipTurn++) % connected.length];
       const asked = this.relayAsked.get(groupId) ?? new Map<string, { via: string; at: number }>();
       this.relayAsked.set(groupId, asked);
       for (const key of away) asked.set(key, { via, at: now });
@@ -1087,6 +1108,7 @@ export class Groups {
 
   private attach(state: GroupState): void {
     const session: GroupSession = new GroupSession(state, {
+      clock: () => this.now(),
       save: async next => {
         const group = this.stored.get(state.id);
         if (!group) return;
@@ -1108,8 +1130,10 @@ export class Groups {
         const timestamp = receivedTimestamp(m.timestamp);
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, timestamp));
-        await this.host.storeMessage({ linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }) });
+        const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }) };
+        // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
+        await (m.completes && this.host.completeMessage ? this.host.completeMessage(message) : this.host.storeMessage(message));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
@@ -1144,6 +1168,7 @@ export class Groups {
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
     }
     this.reconcileEdges(groupId);
+    this.host.membersChanged?.(groupId);
     this.host.emit();
   }
 

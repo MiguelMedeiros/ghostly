@@ -32,6 +32,8 @@ export interface FileDeskDeps {
   wireIds(linkId: string): Set<string> | undefined;
   /** A message the person deleted here: a transfer for it is not taken. */
   deleted(linkId: string, messageId: string): boolean;
+  /** A message the chat holds already (a new file must not take the id of the contact's text, say). */
+  messageExists?(linkId: string, messageId: string): Promise<boolean>;
   storeMessage(message: StoredMessage): Promise<void>;
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
@@ -83,7 +85,7 @@ export class FileDesk {
     const made: Chat = { local: new Map(), saving: Promise.resolve(), lastSaved: new Map(), files: undefined as unknown as ChatFiles };
     made.files = new ChatFiles({
       send: (frame) => this.deps.send(linkId, frame),
-      decide: (file) => this.decide(linkId, file),
+      decide: (file, again) => this.decide(linkId, file, again),
       openTarget: (record) => this.openTarget(linkId, record),
       openSource: (record) => this.openSource(linkId, record),
       changed: (record, transferred, progress) => this.changed(linkId, record, transferred, progress),
@@ -244,10 +246,12 @@ export class FileDesk {
    * Small files are taken as before; above 25 MiB, or past the contact's 500 MiB taken without asking, the
    * person decides. A file larger than the room this device has left is refused, and the sender told the room.
    */
-  private async decide(linkId: string, file: FileInfo): Promise<OfferDecision> {
+  private async decide(linkId: string, file: FileInfo, again = false): Promise<OfferDecision> {
     const used = this.deps.wireIds(linkId);
-    if (!used || used.has(file.id)) return { refuse: "invalid" };
+    // Offered again, the file is this chat's already (its id is in use by it); new, its id must be new.
+    if (!used || (!again && used.has(file.id))) return { refuse: "invalid" };
     if (this.deps.deleted(linkId, `peer_${file.id}`)) return { refuse: "declined" };
+    if (!again && await this.deps.messageExists?.(linkId, `peer_${file.id}`)) return { refuse: "invalid" };
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };
     const taken = this.deps.receivedBytes(linkId) + this.autoTaken(linkId);

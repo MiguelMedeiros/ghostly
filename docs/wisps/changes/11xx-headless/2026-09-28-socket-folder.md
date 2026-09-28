@@ -1,0 +1,1 @@
+the daemon's socket, when the profile's path is too long for one, is `/tmp/ghostly-<hash>/daemon.sock` in a folder of the user's alone (checked before use), and a client connects only to a socket its own user owns. A chat named by a contact key is that key's chat only; a label wins over a contact's own name.

@@ -7,6 +7,7 @@ import {UsdtAdapter, type UsdtConfig} from '../src/engine/paymentAdapters/usdt';
 import {UsdtWallet} from '../src/engine/paymentAdapters/usdtWallet';
 import {PaymentCoordinator} from '../src/engine/paymentAdapters/coordinator';
 import {intentRepository} from '../src/engine/paymentAdapters/persistence';
+import {walletKey} from '../src/engine/paymentAdapters/walletNetworks';
 import {STORES,transact} from '../src/shared/idb';
 import {USDT_LOCAL} from '../../../e2e/support/usdt-local.mjs';
 // covers-gated: wallet.usdt.create, wallet.usdt.send, wallet.usdt.backup, payments.chat.reconcile
@@ -16,7 +17,7 @@ test.skipIf(!enabled)('WDK signs locally, sends a real local ERC20 transaction a
  const params={...USDT_LOCAL} as UsdtConfig;
  const config=await UsdtAdapter.inspect(params);
  const mnemonic=generateMnemonic(wordlist),password='disposable usdt test password';
- const owner=new UsdtWallet(()=>{});await owner.start();await owner.setMode('testnet');
+ const owner=new UsdtWallet('testnet',()=>{});await owner.start();
  await owner.create({...config,mnemonic,password});
  const alice=owner.require(),bob=await UsdtAdapter.connect(config,generateMnemonic(wordlist));
  const from=await alice.address();
@@ -74,8 +75,8 @@ test.skipIf(!enabled)('WDK signs locally, sends a real local ERC20 transaction a
   } finally {await restored.dispose();}
   const backup=await owner.exportBackup(password);expect(backup).not.toContain(mnemonic);
   await owner.lock();expect(()=>owner.require()).toThrow("Unlock");
-  await transact([STORES.settings,STORES.intents],s=>{s[STORES.settings].delete('usdtWallet');s[STORES.intents].clear();});
-  const restoredOwner=new UsdtWallet(()=>{});await restoredOwner.start();await restoredOwner.setMode('testnet');
+  await transact([STORES.settings,STORES.intents],s=>{s[STORES.settings].delete(walletKey('usdtWallet','testnet'));s[STORES.intents].clear();});
+  const restoredOwner=new UsdtWallet('testnet',()=>{});await restoredOwner.start();
   await expect(restoredOwner.restoreBackup(backup,'wrong password')).rejects.toThrow('unlock');
   await restoredOwner.restoreBackup(backup,password);expect(restoredOwner.view.locked).toBe(true);
   await expect(restoredOwner.restoreBackup(backup,password)).rejects.toThrow('fresh profile');

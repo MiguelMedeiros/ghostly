@@ -6,7 +6,8 @@ import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessag
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
-import { useChatScroll } from "../hooks/useChatScroll";
+import { leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
+import { useTailFirst } from "../hooks/useTailFirst";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
@@ -170,14 +171,27 @@ export function GroupChat() {
   useEffect(() => {
     if (!groupId) return;
     let current = true;
-    const show = (list: StoredMessage[]) => { if (current) setLoaded({ groupId, list }); };
+    let whole = false;
+    const show = (list: StoredMessage[]) => { if (current) { whole = true; setLoaded({ groupId, list }); } };
+    // Its newest page first, straight from the store's index: a long group shows before its whole history is read, and
+    // the rest comes in above it (useTailFirst). Not when the engine already sent this group's history, nor when the
+    // group opens on a message further up, which must be there when it opens.
+    const linkId = `group:${groupId}`;
+    if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
+      void engine.call("messagePage", { linkId }).then(page => { if (current && !whole) setLoaded({ groupId, list: page.messages }); }).catch(() => {});
+    }
     void engine.call("groupMessages", { groupId }).then(show).catch(() => {});
     const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
+  // A long group draws its last rows first, and the older ones in the moment after (useTailFirst).
+  const rowIds = useMemo(() => messages.map(m => m.id), [messages]);
+  const firstRow = useTailFirst(rowIds, groupId ?? "", leftScrolledUp(groupId ?? ""));
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
-  const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
+  // Always every message, drawn yet or not; a new list when older rows come in above (see Chat.tsx).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
+  const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId });
   useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
 
@@ -321,8 +335,9 @@ export function GroupChat() {
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
       <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
-        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3">
-          {messages.map(m => m.event
+        {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
+        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
+          {messages.slice(firstRow).map(m => m.event
             ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group)}</span></div>
             // A note about a payment this device is part of is shown under its own bubble instead.
             : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)

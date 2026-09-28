@@ -312,6 +312,43 @@ describe("files a contact sends", () => {
     expect(node["receiveFile"]("unknown", { id: "x", name: "x", size: 1, mime: "", timestamp: 1 }), "a chat that is not there").toBe("refused");
   });
 
+  it("two files announced at the same time each get a message of their own: no bytes without one", async () => {
+    const { chat, events, announce } = await incoming();
+    const first = announce("w1", 5, 9) as FileSink, second = announce("w2", 5, 9) as FileSink;
+    for (const sink of [first, second]) sink.write(bytes("hello"));
+    await first.close("d1"); await second.close("d2");
+    events.onFileComplete("w1", "in"); events.onFileComplete("w2", "in");
+    const messages = await db.getMessages(chat.id);
+    expect(messages.map((m) => m.wireId).sort()).toEqual(["w1", "w2"]);
+    // The first keeps the id the sender's reactions, edits and deletes name; the other has one of its own.
+    expect(messages.find((m) => m.wireId === "w1")!.id).toBe("peer_9");
+    expect(messages.find((m) => m.wireId === "w2")!.id).not.toBe("peer_9");
+    const stored = await fileStore.listForLink(chat.id);
+    expect(stored.map((f) => f.id).sort()).toEqual(messages.map((m) => m.file!.id).sort());
+    // Nor does a message already there at that time take a file's place (an app whose texts are named by their time).
+    await db.addMessage({ linkId: chat.id, id: "peer_11", text: "hi", sender: "peer", timestamp: 11, via: "datalink" });
+    const third = announce("w3", 5, 11) as FileSink;
+    third.write(bytes("hello")); await third.close("d3");
+    const after = await db.getMessages(chat.id);
+    expect(after.find((m) => m.id === "peer_11")!.text).toBe("hi");
+    expect(after.find((m) => m.wireId === "w3")!.file!.id).toBe((await fileStore.listForLink(chat.id)).find((f) => f.wireId === "w3")!.id);
+  });
+
+  it("a file sent again after its transfer failed lands in the message it had, not in bytes of nobody's", async () => {
+    const { chat, events, announce } = await incoming();
+    const first = announce("w1", 5, 9) as FileSink;
+    await vi.waitFor(async () => expect(await db.getMessages(chat.id)).toHaveLength(1));
+    first.abort();
+    events.onFileFailed("w1", "cancelled", "in");
+    const again = announce("w1", 5, 9) as FileSink;
+    again.write(bytes("hello")); await again.close("d1");
+    events.onFileComplete("w1", "in");
+    const messages = await db.getMessages(chat.id);
+    expect(messages).toHaveLength(1);
+    const [stored] = await fileStore.listForLink(chat.id);
+    expect(messages[0].file!.id).toBe(stored.id);
+  });
+
   it("a cancelled transfer or one whose message was deleted leaves no bytes behind", async () => {
     const { node, chat, announce } = await incoming();
     const cancelled = announce("w1", 5, 1) as FileSink;
