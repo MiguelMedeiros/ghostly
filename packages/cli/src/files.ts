@@ -103,7 +103,7 @@ export const FILE_METHODS: Record<string, Method> = {
       metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, ...(voice ? { voice } : {}), ...(image ? { image } : {}) },
       transfer: { state: "transferring", transferred: 0, size: file.size },
     });
-    endTyping(ctx, link.id, true);
+    endTyping(ctx, { linkId: link.id }, true);
     try {
       await node(ctx).sendFile({ linkId: link.id, file, timestamp, ...(replyTo ? { replyTo } : {}) });
     } catch (error) {

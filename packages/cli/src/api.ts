@@ -10,7 +10,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
-import { endTyping, keepTyping } from "./typing";
+import { endTyping, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
 import { IDENTITY_METHODS } from "./identities";
 import { SERVICE_METHODS } from "./services";
@@ -243,7 +243,7 @@ const METHODS: Record<string, Method> = {
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
     const replyTo = str(params, "reply");
     // A kept `typing --for` ends with the message (the engine says stop with it).
-    endTyping(ctx, link.id, false);
+    endTyping(ctx, { linkId: link.id }, false);
     const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
@@ -284,10 +284,10 @@ const METHODS: Record<string, Method> = {
     const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
     const seconds = params.for === undefined ? 0 : num(params, "for", 0, { min: 1, max: 600 });
     if (!typing && seconds) throw new CliError("bad_request", "for keeps typing on: not with stop");
-    endTyping(ctx, link.id, false);
+    endTyping(ctx, { linkId: link.id }, false);
     node(ctx).setTyping({ linkId: link.id, typing, ...word });
     const until = seconds ? Date.now() + seconds * 1000 : null;
-    const kept = seconds ? keepTyping(ctx, link.id, seconds * 1000, word) : null;
+    const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
     if (kept && ctx.mode === "one-shot") await kept;
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
@@ -449,6 +449,8 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    // A kept `group typing --for` ends with the message (the engine says stop with it).
+    endTyping(ctx, { groupId: group.id }, false);
     const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}) });
     if (result.error) throw new CliError("unavailable", result.error);
     const messageId = result.messageId ?? null;
@@ -483,6 +485,30 @@ const METHODS: Record<string, Method> = {
   async "group.react"(ctx, params) {
     const group = groupOf(ctx, params);
     return { group: group.id, ...(await react(ctx, `group:${group.id}`, params)) };
+  },
+  /**
+   * WISP 9xx · Group Mesh § Typing: `chat.typing` in a private group, said on the edges that are open (`reached`: to
+   * how many members), with the same kinds, status rules, 6 s hold and `for`. A community does not carry typing yet.
+   */
+  async "group.typing"(ctx, params) {
+    const group = groupOf(ctx, params);
+    if (group.profile !== "mesh") throw new CliError("unavailable", "A community does not carry typing yet: only a private group does");
+    const typing = !bool(params, "stop");
+    const { kind, status } = typingWord(params, typing);
+    const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
+    const seconds = params.for === undefined ? 0 : num(params, "for", 0, { min: 1, max: 600 });
+    if (!typing && seconds) throw new CliError("bad_request", "for keeps typing on: not with stop");
+    if (typing && group.status !== "active") throw new CliError("bad_request", "You are not in this group");
+    const target = { groupId: group.id };
+    endTyping(ctx, target, false);
+    sayTyping(ctx, target, typing, word);
+    const until = seconds ? Date.now() + seconds * 1000 : null;
+    const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
+    if (kept && ctx.mode === "one-shot") await kept;
+    return {
+      group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
+      reached: group.members.filter((m) => !m.me && m.online && !m.viaHub).length, sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+    };
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);

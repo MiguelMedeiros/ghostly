@@ -19,5 +19,16 @@
     "hint": "Tutti i membri vedono il nuovo nome. Le app più vecchie mantengono il nome con cui sono entrate.",
     "label": "Nome del gruppo",
     "save": "Salva"
+  },
+  "typing": {
+    "many": "{{count}} persone stanno scrivendo…",
+    "one": "{{name}} sta scrivendo…",
+    "recordingMany": "{{count}} persone stanno registrando un audio…",
+    "recordingOne": "{{name}} sta registrando un audio…",
+    "recordingTwo": "{{name}} e {{other}} stanno registrando un audio…",
+    "thinkingMany": "{{count}} persone stanno pensando…",
+    "thinkingOne": "{{name}} sta pensando…",
+    "thinkingTwo": "{{name}} e {{other}} stanno pensando…",
+    "two": "{{name}} e {{other}} stanno scrivendo…"
   }
 }
