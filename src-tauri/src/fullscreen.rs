@@ -6,7 +6,10 @@
 //!   under Tauri's `macos-private-api`.
 //! - Windows: WebView2 has the API, but a full-screen element only fills the webview. The host puts the window in
 //!   full screen when WebView2 says it holds one (`ContainsFullScreenElementChanged`), and back out after.
-//! - Linux: WebKitGTK has it on (`enable-fullscreen`) and puts its own window in full screen.
+//! - Linux: WebKitGTK 2.50 aborts the whole app (SIGABRT inside libwebkit2gtk) as soon as an element enters full
+//!   screen: a real click, with or without a window manager, the DMA-BUF renderer or compositing. So the API is off
+//!   there (`enable-fullscreen`), and the page shows its own Full screen: the window goes full screen and the video
+//!   fills it (`VideoBubble`, `fullscreenWindow`).
 
 /// Turns the Fullscreen API on for this window's webview, where the engine needs it.
 pub fn install<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
@@ -17,8 +20,22 @@ pub fn install<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
         let target = window.clone();
         let _ = window.with_webview(move |webview| windows::follow(webview.controller(), target));
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    let _ = window.with_webview(|webview| linux::disable(webview.inner()));
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     let _ = window;
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use webkit2gtk::{SettingsExt, WebViewExt};
+
+    /// `document.fullscreenEnabled` false and no `requestFullscreen`: the page offers its own full screen instead.
+    pub fn disable(webview: webkit2gtk::WebView) {
+        if let Some(settings) = WebViewExt::settings(&webview) {
+            settings.set_enable_fullscreen(false);
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]

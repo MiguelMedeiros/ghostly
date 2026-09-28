@@ -262,3 +262,26 @@ export async function fullscreenInPage(app: DesktopApp, { click = false }: { cli
      })().then(done, (e) => done({ ...report, error: String(e) }));`,
   );
 }
+
+export interface WindowFullscreenReport { api: { enabled: boolean; request: string }; on?: boolean | string; off?: boolean | string; error?: string }
+
+/**
+ * Where the engine's full screen is off (Desktop on Linux), what the video's own Full screen button uses instead: the
+ * window in and out of full screen (`plugin:window|set_fullscreen`, which the capability must grant).
+ */
+export function windowFullscreenInPage(app: DesktopApp): Promise<WindowFullscreenReport> {
+  return app.executeAsync<WindowFullscreenReport>(
+    `const done = arguments[arguments.length - 1];
+     const invoke = window.__TAURI_INTERNALS__.invoke;
+     const report = { api: { enabled: !!document.fullscreenEnabled, request: typeof document.createElement("video").requestFullscreen } };
+     const state = () => invoke("plugin:window|is_fullscreen", { label: "main" });
+     const settle = async (want) => { for (let i = 0; i < 40; i++) { if ((await state()) === want) return want; await new Promise((r) => setTimeout(r, 100)); } return state(); };
+     (async () => {
+       await invoke("plugin:window|set_fullscreen", { label: "main", value: true });
+       report.on = await settle(true);
+       await invoke("plugin:window|set_fullscreen", { label: "main", value: false });
+       report.off = await settle(false);
+       return report;
+     })().then(done, (e) => done({ ...report, error: String(e) }));`,
+  );
+}

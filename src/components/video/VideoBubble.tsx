@@ -35,6 +35,12 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   const [local, setLocal] = useState<{ url: string; width: number; height: number; duration: number } | null>(null);
   /** On screen: true, off it: false, not known yet (no answer from the observer so far): null. */
   const [visible, setVisible] = useState<boolean | null>(() => (typeof IntersectionObserver === "undefined" ? true : null));
+  /**
+   * Full screen where the engine's own is off (Desktop on Linux: WebKitGTK aborts the app entering it): the window
+   * goes full screen and the video fills it. Elsewhere the player's own Full screen button does it.
+   */
+  const [theater, setTheater] = useState(false);
+  const canTheater = typeof document !== "undefined" && !document.fullscreenEnabled && !!platform?.fullscreenWindow;
   const [actionError, setActionError] = useState("");
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
@@ -87,7 +93,21 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
     srcRef.current = null;
     setSrc(null);
     setPhase("poster");
+    setTheater(false);
   }, [file.id]);
+
+  // In full screen: the window with it, until Escape, the exit button, or the video stopping for any reason.
+  useEffect(() => {
+    const fullscreen = theater ? platform?.fullscreenWindow : null;
+    if (!fullscreen) return;
+    void fullscreen(true).catch(() => {});
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setTheater(false); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      void fullscreen(false).catch(() => {});
+    };
+  }, [theater, platform]);
 
   const play = useCallback(async () => {
     if (!platform || phase === "loading") return;
@@ -214,26 +234,46 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
         role="group"
         aria-label={`Video, ${durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size)}`}
         onKeyDown={onKeyDown}
-        className="relative rounded-[4px] overflow-hidden bg-black max-w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-        style={{ width: box.width, height: box.height }}
+        className={`${theater ? "fixed inset-0 z-[2147483000] rounded-none" : "relative rounded-[4px] max-w-full"} overflow-hidden bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
+        style={theater ? { width: "100vw", height: "100vh" } : { width: box.width, height: box.height }}
         data-testid="video-frame"
+        data-theater={theater ? "true" : undefined}
       >
         {phase === "playing" && src ? (
-          <video
-            ref={videoRef}
-            src={src}
-            poster={poster}
-            controls
-            playsInline
-            preload="auto"
-            aria-label={file.name}
-            data-testid="video-player"
-            className="w-full h-full object-contain block bg-black"
-            onPlay={() => claimPlayback(file.id)}
-            onPause={() => releasePlayback(file.id)}
-            onEnded={() => { resumeAt.current = 0; unload(); }}
-            onError={refused}
-          />
+          <>
+            <video
+              ref={videoRef}
+              src={src}
+              poster={poster}
+              controls
+              playsInline
+              preload="auto"
+              aria-label={file.name}
+              data-testid="video-player"
+              className="w-full h-full object-contain block bg-black"
+              onPlay={() => claimPlayback(file.id)}
+              onPause={() => releasePlayback(file.id)}
+              onEnded={() => { resumeAt.current = 0; unload(); }}
+              onError={refused}
+            />
+            {canTheater && (
+              <button
+                type="button"
+                data-testid="video-fullscreen"
+                aria-label={theater ? "Exit full screen" : "Full screen"}
+                title={theater ? "Exit full screen" : "Full screen"}
+                aria-pressed={theater}
+                onClick={() => setTheater(!theater)}
+                className="absolute top-[6px] end-[6px] w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center border-none cursor-pointer"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {theater
+                    ? <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                    : <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />}
+                </svg>
+              </button>
+            )}
+          </>
         ) : (
           <>
             {poster ? (

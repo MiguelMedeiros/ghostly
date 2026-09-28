@@ -257,6 +257,53 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MP4).");
   });
 
+  // covers: files.video.play
+  it("where the engine has no full screen (Desktop on Linux), its own button fills the window with it", async () => {
+    const fullscreenWindow = vi.fn(async (_on: boolean) => {});
+    fakeEngine.fullscreenWindow = fullscreenWindow;
+    const view = show(video());
+    const enter = async () => {
+      fireEvent.click(screen.getByTestId("video-play"));
+      await flush();
+      fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+      expect(screen.getByTestId("video-frame")).toHaveAttribute("data-theater", "true");
+    };
+    await enter();
+    expect(fullscreenWindow).toHaveBeenLastCalledWith(true);
+    expect(screen.getByRole("button", { name: "Exit full screen" })).toHaveAttribute("aria-pressed", "true");
+    // Escape leaves it, the window with it; the video goes on.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByTestId("video-frame")).not.toHaveAttribute("data-theater");
+    expect(fullscreenWindow).toHaveBeenLastCalledWith(false);
+    expect(screen.getByTestId("video-player")).toBeInTheDocument();
+    // The exit button, and the video ending, leave it too.
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Exit full screen" }));
+    expect(fullscreenWindow).toHaveBeenLastCalledWith(false);
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    fireEvent.ended(screen.getByTestId("video-player"));
+    expect(fullscreenWindow).toHaveBeenLastCalledWith(false);
+    // Leaving the chat in full screen gives the window back.
+    await enter();
+    view.unmount();
+    expect(fullscreenWindow).toHaveBeenLastCalledWith(false);
+    expect(fullscreenWindow.mock.calls.filter(([on]) => on)).toHaveLength(4);
+  });
+
+  it("where the engine has full screen (macOS, Windows, the web), the player's own button does it", async () => {
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
+    try {
+      show(video());
+      fireEvent.click(screen.getByTestId("video-play"));
+      await flush();
+      expect(screen.getByTestId("video-player")).toBeInTheDocument();
+      expect(screen.queryByTestId("video-fullscreen")).toBeNull();
+    } finally {
+      Reflect.deleteProperty(document, "fullscreenEnabled");
+    }
+  });
+
   it("too large to hand out, and nothing streams it here: Download to watch", async () => {
     getFile.mockResolvedValue(null);
     vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue(null);

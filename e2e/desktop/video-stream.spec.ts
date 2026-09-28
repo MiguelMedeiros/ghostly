@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { makeBigVideo } from "../support/bigVideo";
 import { desktopHome, expect, openDesktop, test } from "../support/desktop";
-import { freePort, fullscreenInPage, openDriven, playFromStore, removeFromApp, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
+import { freePort, fullscreenInPage, openDriven, windowFullscreenInPage, playFromStore, removeFromApp, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
 
 /**
  * A video too large for the page (#381: over 64 MiB) plays and seeks in the Desktop WebView from the stored file,
@@ -70,13 +70,26 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
   }
 });
 
-// A video's Full screen button fills the screen: WebKitGTK does it itself; WebView2 fills only the webview until the
-// window follows it (src-tauri/src/fullscreen.rs). The macOS WKWebView: e2e/desktop-macos/video-stream.spec.ts.
+// A video's Full screen button fills the screen. WebView2 fills only the webview until the window follows it
+// (src-tauri/src/fullscreen.rs). WebKitGTK 2.50 aborts the app entering element full screen, so on Linux the API is off
+// and the video's own button puts the window in full screen instead. The macOS WKWebView:
+// e2e/desktop-macos/video-stream.spec.ts.
 test("a video goes full screen, the window with it, and comes back", { tag: ["@feature:files.video.play"] }, async () => {
   const home = desktopHome("fullscreen");
   const { app, stop } = DRIVEN ? await openDriven() : await openDesktop({ home: home.dir });
   try {
     await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+    if (process.platform === "linux") {
+      const report = await windowFullscreenInPage(app);
+      test.info().annotations.push({ type: "fullscreen", description: JSON.stringify(report) });
+      expect(report.api).toEqual({ enabled: false, request: "undefined" });
+      expect(report.error).toBeUndefined();
+      expect(report.on).toBe(true);
+      expect(report.off).toBe(false);
+      // Still here: the app answers.
+      expect(await app.execute<string>(`return document.readyState;`)).toBe("complete");
+      return;
+    }
     const report = await fullscreenInPage(app, { click: !DRIVEN });
     test.info().annotations.push({ type: "fullscreen", description: JSON.stringify(report) });
     expect(report.enabled).toBe(true);
