@@ -17,5 +17,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     entry("/cli", 0.7),
     entry("/developers/agents", 0.7),
     entry("/privacy", 0.3, "yearly"),
+    entry("/terms", 0.3, "yearly"),
   ];
 }

@@ -344,6 +344,12 @@ export const home = {
     },
     cli: { title: "Command line", body: "For bots and agents. Needs Node; built from source for now.", cta: "CLI guide" },
     all: "All release files",
+    legal: {
+      lead: "Free and open source (MIT). Using Ghostly means you accept the",
+      terms: "Terms of Service",
+      and: "and have read the",
+      privacy: "Privacy Policy",
+    },
     conversation: [
       { side: "boo", text: "Boo! 👻" },
       { side: "casper", text: "Found you." },
