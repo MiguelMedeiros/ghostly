@@ -2,7 +2,8 @@ import { useEffect, useSyncExternalStore } from "react";
 import { generateVapidKeys, type VapidKeys } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { activeProfileId } from "./profiles";
-import { MUTE_EVENT, chatOfLink, mutedUntil } from "./chatMute";
+import { MUTE_EVENT, chatOfLink, groupChat, mutedUntil } from "./chatMute";
+import { groupPath } from "./groups";
 import { chatPath } from "./url";
 
 /*
@@ -97,6 +98,7 @@ export function useWakeTableSync(text: { title: string; body: string; call?: str
   const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
   const wake = state?.settings.wake;
   const links = state?.links;
+  const groups = state?.groups;
   const { title, body, call } = text;
   useEffect(() => {
     const push = pushPlatform();
@@ -114,6 +116,13 @@ export function useWakeTableSync(text: { title: string; body: string; call?: str
           if (!link.wakeToken) continue;
           entries.push({ token: link.wakeToken, path: chatPath(chat), ...(until !== undefined && { mutedUntil: until }) });
         }
+        // Private groups (WISP 9xx · Group Mesh § Wake-up push): a token per member, all opening the group; muted, none.
+        for (const group of groups ?? []) {
+          if (group.profile !== "mesh") continue;
+          const until = mutedUntil(groupChat(group.id));
+          if (!!group.wakeMuted !== (until !== undefined)) void engine.call("setWakeMuted", { linkId: groupChat(group.id), muted: until !== undefined }).catch(() => {});
+          for (const token of group.wakeTokens ?? []) entries.push({ token, path: groupPath(group.id), ...(until !== undefined && { mutedUntil: until }) });
+        }
       }
       void push.syncTable(profile, entries, { title, body, ...(call && { call }) }).catch(() => {});
     };
@@ -126,7 +135,7 @@ export function useWakeTableSync(text: { title: string; body: string; call?: str
       window.removeEventListener("storage", write);
       window.removeEventListener("session-updated", write);
     };
-  }, [wake, links, title, body, call]);
+  }, [wake, links, groups, title, body, call]);
 
   // A contact that held the subscription was deleted or muted: a new one (new endpoint, new key pair, new tokens for
   // the others), and the old one ends at the push service, so that contact can no longer wake this app.

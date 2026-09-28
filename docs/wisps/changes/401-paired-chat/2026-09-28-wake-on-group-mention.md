@@ -1,0 +1,1 @@
+Groups and wake-up push: a private group carries the same target on its edges (`group-wake`) and a mention wakes the member it names, within limits of its own; a community is not woken. The earlier "groups do not offer `wake/1`" gives way to that.
