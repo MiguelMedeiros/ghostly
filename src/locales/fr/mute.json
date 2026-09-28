@@ -1,0 +1,19 @@
+{
+  "bell": "Notifications coupées",
+  "bellUntil": "Notifications coupées jusqu'à {{time}}",
+  "choice": {
+    "15m": "15 minutes",
+    "1d": "1 jour",
+    "1h": "1 heure",
+    "forever": "Jusqu'à ce que je les réactive"
+  },
+  "mentions": "Me notifier quand même si on me mentionne",
+  "muted": "Coupées",
+  "mutedUntil": "Coupées jusqu'à {{time}}",
+  "noEnd": "Sans fin prévue",
+  "open": "Couper les notifications…",
+  "stillArrive": "Les messages arrivent. Les appels sonnent.",
+  "title": "Couper les notifications",
+  "unmute": "Réactiver les notifications",
+  "until": "Jusqu'à {{time}}"
+}

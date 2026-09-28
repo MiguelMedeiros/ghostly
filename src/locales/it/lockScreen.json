@@ -1,0 +1,7 @@
+{
+  "enterPassword": "Inserisci la password per sbloccare",
+  "incorrectPassword": "Password errata, riprova",
+  "title": "Ghostly è bloccato",
+  "tooManyAttempts": "Troppi tentativi. Riprova tra {{seconds}} s",
+  "unlock": "Sblocca"
+}

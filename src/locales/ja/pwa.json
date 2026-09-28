@@ -1,0 +1,17 @@
+{
+  "install": "インストール",
+  "installHint": "専用のウィンドウと、ホーム画面や Dock のアイコン。",
+  "installLabel": "Ghostly をインストール",
+  "installTitle": "インストール",
+  "iosHint": "Safari で共有をタップし、ホーム画面に追加を選びます。",
+  "iosLabel": "ホーム画面に追加",
+  "offline": "オフライン",
+  "offlineHint": "チャットはここにあります。オンラインに戻るまで何も送信されません。",
+  "shareFiles": "{{count}} 個のファイル",
+  "shareHint": "チャットを選んでください。そこで確認して送信します。",
+  "shareNoChats": "まだチャットがありません。始めてから、もう一度共有してください。",
+  "shareNone": "共有されたものはないか、すでに受け取り済みです。",
+  "shareOneFile": "1 個のファイル",
+  "shareTitle": "共有先…",
+  "shareWaiting": "共有された内容を受け取っています..."
+}

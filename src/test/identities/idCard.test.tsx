@@ -4,7 +4,7 @@ import { AddIdCardFace, IdCardFace } from "../../components/identities/IdCardFac
 import { contactGhostlyCard, ghostlyCard, idCard, idCardTone, machineLine, shortKey } from "../../components/identities/idCard";
 import type { Translate } from "../../contexts/I18nContext";
 import { date } from "../../lib/identities";
-import en from "../../locales/en.json";
+import en from "../../locales/en";
 import { renderApp } from "../render";
 import { DAY, now, proofView } from "./views";
 

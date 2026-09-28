@@ -1,0 +1,16 @@
+{
+  "add": "Adicionar um perfil",
+  "current": "perfil atual",
+  "holdHint": "Ou segure Configurações na barra de abas",
+  "locked": "bloqueado",
+  "manage": "Gerenciar perfis",
+  "new": "mensagens novas",
+  "newShort": "Nova",
+  "open": "Abrir perfil",
+  "othersNew": "mensagens novas em outro perfil",
+  "othersUnread": "mensagens não lidas em outro perfil",
+  "switchTo": "Trocar para {{name}}",
+  "switching": "Abrindo {{name}}…",
+  "title": "Trocar de perfil",
+  "unread": "{{count}} não lidas"
+}

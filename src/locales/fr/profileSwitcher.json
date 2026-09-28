@@ -1,0 +1,16 @@
+{
+  "add": "Ajouter un profil",
+  "current": "profil actuel",
+  "holdHint": "Ou maintenez Paramètres dans la barre d’onglets",
+  "locked": "verrouillé",
+  "manage": "Gérer les profils",
+  "new": "nouveaux messages",
+  "newShort": "Nouveau",
+  "open": "Ouvrir le profil",
+  "othersNew": "nouveaux messages dans un autre profil",
+  "othersUnread": "messages non lus dans un autre profil",
+  "switchTo": "Passer à {{name}}",
+  "switching": "Ouverture de {{name}}…",
+  "title": "Changer de profil",
+  "unread": "{{count}} non lus"
+}
