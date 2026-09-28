@@ -111,3 +111,18 @@ jobs:
           # The marker is how the gate finds the previous automatic release.
           printf '%s\n\n%s\n\n%s\n' "$NOTES" "Security patch, released automatically. Checksums: SHA256SUMS.txt." "<!-- security-autorelease -->" > notes.md
           gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "Ghostly $VERSION" --notes-file notes.md --latest
+
+  # A release published with the workflow token starts no workflow, npm-publish.yml's
+  # `release: published` included; a dispatch is the exception GitHub makes.
+  npm:
+    name: CLI to npm
+    needs: [gate, notes]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch npm-publish.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: gh workflow run npm-publish.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="v$VERSION"

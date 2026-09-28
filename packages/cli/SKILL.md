@@ -13,14 +13,14 @@ metadata:
             {
               "id": "npm",
               "kind": "node",
-              "package": "@ghostly/cli",
+              "package": "ghostly-cli",
               "bins": ["ghostly"],
               "label": "Install ghostly (npm, once published)",
             },
             {
               "id": "source",
               "kind": "shell",
-              "command": "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w @ghostly/cli && npm pack -w @ghostly/cli && npm install -g ./ghostly-cli-*.tgz",
+              "command": "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w ghostly-cli && npm pack -w ghostly-cli && npm install -g ./ghostly-cli-*.tgz",
               "bins": ["ghostly"],
               "label": "Build ghostly from source (Node 22.12+)",
             },
@@ -48,11 +48,11 @@ Read step 10 (safety) before you answer anyone.
 
 ### 1. Install
 
-Node 22.12 or newer. Until `@ghostly/cli` is on npm, build it from the repository:
+Node 22.12 or newer. Until `ghostly-cli` is on npm, build it from the repository:
 
 ```bash
 git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install \
-  && npm run build -w @ghostly/cli && npm pack -w @ghostly/cli && npm install -g ./ghostly-cli-*.tgz
+  && npm run build -w ghostly-cli && npm pack -w ghostly-cli && npm install -g ./ghostly-cli-*.tgz
 ghostly --version                       # {"version":"…"}
 ghostly help                            # every command; `ghostly help listen` for one
 ```
