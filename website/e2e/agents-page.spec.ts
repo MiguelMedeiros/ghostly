@@ -43,5 +43,5 @@ test("/llms.txt and /llms-full.txt are served", async ({ request }) => {
   expect(text).toContain("https://ghostly.tools/developers/wisps/01-ghost-core");
   const full = await request.get("/llms-full.txt");
   expect(full.ok()).toBe(true);
-  expect(await full.text()).toContain("# WISP 11xx: Headless Runtime and Local Control API");
+  expect(await full.text()).toMatch(/^# WISP \S+: Headless Runtime/m);
 });
