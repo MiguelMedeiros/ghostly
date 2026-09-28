@@ -1,8 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // /terms and /privacy: they render with their titles, the footer and the sitemap list them, and the site sets no
-// cookie and loads nothing from an analytics or font service (the privacy policy says so). That last check needs
-// Google Analytics gone from app/layout.tsx, which the launch-checklist change does.
+// cookie and loads nothing from an analytics or font service (the privacy policy says so).
 
 for (const [path, title] of [
   ["/terms", "Terms of Service"],
