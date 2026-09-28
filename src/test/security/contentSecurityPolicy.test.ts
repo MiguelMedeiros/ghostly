@@ -94,3 +94,12 @@ describe("the Content-Security-Policy of every shell", () => {
     expect(allowed("default-src 'self'; media-src 'self' blob:; media-src 'none'", "media-src")).toEqual(["'self'", "blob:"]);
   });
 });
+
+describe("HTTPS only", () => {
+  // Both sites are served over HTTPS by Cloudflare, which added no Strict-Transport-Security of its own, so a browser
+  // given the bare name could try plain HTTP first. The servers say it themselves.
+  it("the web app's server and the website send Strict-Transport-Security for a year", () => {
+    expect(read("web/nginx-headers.conf")).toMatch(/^add_header Strict-Transport-Security "max-age=31536000" always;$/m);
+    expect(read("website/next.config.ts")).toMatch(/key: "Strict-Transport-Security", value: "max-age=31536000"/);
+  });
+});
