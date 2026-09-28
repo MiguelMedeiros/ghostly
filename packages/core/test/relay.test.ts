@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DiscoveryBudgetError, FRESH_READ_MS, REQUESTS_PER_MINUTE, RelayTransport, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DiscoveryBudgetError, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 // covers: core.relay-client
 
 describe("relay transport", () => {
   const id = createIdentity();
   const packet = (micros: bigint) => createRelayPayload(id, [{ label: "_ts", value: String(micros) }], micros);
+  const parse = async (micros: bigint) => parseRelayPayload(id.pubKeyZ32, packet(micros));
 
   function transport(handlers: Record<string, () => Response>) {
     const calls: string[] = [];
@@ -25,6 +26,21 @@ describe("relay transport", () => {
     // b still serves an older cached copy; the newer one already seen wins
     expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(2000n);
     expect(calls).toEqual(["a.test", "b.test"]);
+  });
+
+  it("a packet dated far ahead never hides one dated now: the next read of a present packet is taken", async () => {
+    const now = BigInt(Date.now()) * 1000n;
+    const ahead = now + BigInt(PKARR_FUTURE_SKEW_MS + 3_600_000) * 1000n;
+    const { relay } = transport({
+      "a.test": () => new Response(packet(ahead) as BodyInit),
+      "b.test": () => new Response(packet(now) as BodyInit),
+    });
+    expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(ahead);
+    expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(now);
+    // Within the skew, a later time still wins as before.
+    const soon = now + 60_000_000n;
+    expect(newerPacket(await parse(now), await parse(soon))?.timestampMicros).toBe(soon);
+    expect(newerPacket(await parse(ahead), await parse(ahead + 1n))?.timestampMicros).toBe(ahead + 1n);
   });
 
   it("answers a read of a key it just read from that answer, until the key is published or the answer ages", async () => {
