@@ -107,7 +107,7 @@ export const cli = {
       calls: "Voice calls, the audio handed to your program",
       npm: "An npm release",
       dht: "Reading the DHT directly (relays for now)",
-      wallets: "Bark and Fedimint wallets",
+      wallets: "Bark wallets",
       binary: "A single binary, without Node",
     } as Record<string, string>,
   },

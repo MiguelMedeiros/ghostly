@@ -2,11 +2,11 @@ import type { BitcoinNetwork } from "@ghostly/core";
 
 /**
  * The part of the Fedimint web SDK (`@fedimint/core`, WebAssembly client in a worker) Ghostly uses, behind an
- * interface small enough to fake in tests: the client needs a worker and the origin-private file system, which
- * Node has neither of.
+ * interface small enough to fake in tests. The client runs in a worker, on a file it reads and writes through a sync
+ * access handle: in a browser, a module worker and the origin-private file system; on Node, the CLI's
+ * `worker_threads` worker and a file of the profile (`FedimintPlatform`).
  *
- * One client database per joined federation (`ghostly-fedimint-<id>.db`, a file of the origin-private file
- * system): the SDK's services are bound to one client per database, and each database is held by one worker.
+ * One client database per joined federation (`ghostly-fedimint-<id>.db`, one file): the SDK's services are bound to one client per database, and each database is held by one worker.
  * Every database of a profile and mode is given the same mnemonic; the client derives a different secret per
  * federation from it. Amounts are millisatoshis, as the SDK counts them.
  */
@@ -128,7 +128,7 @@ function compiled(): Promise<WebAssembly.Module> {
 }
 
 /** A transport of `@fedimint/core` onto our own worker (fedimintWorker.ts). */
-async function transport() {
+async function browserTransport() {
   const [{ Transport }, module] = await Promise.all([import("@fedimint/types"), compiled()]);
   class WorkerTransport extends Transport {
     readonly logger = { debug() {}, info() {}, warn() {}, error() {} };
@@ -255,52 +255,73 @@ class RealClient implements FedimintClient {
   async close() { try { await this.wallet.cleanup(); } catch { /* already gone */ } this.end(); }
 }
 
+/**
+ * Where the client runs: a worker per database, and the files the databases are. The browser's is a module worker on
+ * the origin-private file system (below); a headless Ghostly on Node brings its own (packages/cli/src/runtime/fedimint.ts).
+ */
+export interface FedimintPlatform {
+  /** A `@fedimint/types` Transport onto a new worker of its own, which one database will be opened in. */
+  transport(): Promise<{ terminate(): void }>;
+  exists(database: string): Promise<boolean>;
+  /** Deletes a database, and is done when there is none. */
+  remove(database: string): Promise<void>;
+}
+
+const BROWSER: FedimintPlatform = {
+  transport: browserTransport,
+  async exists(database) {
+    const root = await navigator.storage.getDirectory();
+    try { const file = await (await root.getFileHandle(database)).getFile(); return file.size > 0; } catch { return false; }
+  },
+  async remove(database) {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry(database).catch((error: unknown) => { if ((error as { name?: string })?.name !== "NotFoundError") throw error; });
+  },
+};
+
 let loading: Promise<FedimintSdk> | undefined;
 /** Loads the SDK on first use: profiles that never join a federation never fetch its 11 MB. */
 export function loadFedimintSdk(): Promise<FedimintSdk> {
-  return loading ??= (async () => {
-    const { WalletDirector } = await import("@fedimint/core");
-    /** A director on its own worker and database, with the mnemonic in place. */
-    const director = async (database: string, mnemonic?: string) => {
-      const t = await transport();
-      const d = new WalletDirector(t as any, database, true);
-      try {
-        await d.initialize(database);
-        if (mnemonic && !(await d.hasMnemonicSet())) await d.setMnemonic(mnemonic.trim().split(/\s+/));
-        return { director: d, end: () => t.terminate() };
-      } catch (error) { t.terminate(); throw error; }
-    };
-    const client = async (database: string, mnemonic: string, start: (wallet: any) => Promise<void>) => {
-      const { director: d, end } = await director(database, mnemonic);
-      try {
-        const wallet = await d.createWallet();
-        await start(wallet);
-        return new RealClient(await wallet.federation.getFederationId(), wallet, d, end);
-      } catch (error) { end(); throw error; }
-    };
-    const sdk: FedimintSdk = {
-      async preview(invite) {
-        // A scratch database of its own: previewing joins nothing.
-        const database = fedimintDatabase(`preview-${crypto.randomUUID()}`);
-        const { director: d, end } = await director(database);
-        try { const preview = await d.previewFederation(invite.trim()); return federationInfo(preview.federation_id, preview.config); }
-        finally { end(); await sdk.remove(database).catch(() => {}); }
-      },
-      join: ({ database, mnemonic, invite, recover }) => client(database, mnemonic, async (wallet) => {
-        // joinFederation says false instead of throwing; its reason goes to the (silenced) logger.
-        if (!(await wallet.joinFederation(invite.trim(), { clientName: CLIENT_NAME, forceRecover: recover }))) throw new Error("Could not join the federation: its guardians did not answer, or the invite code is not valid");
-      }),
-      open: ({ database, mnemonic }) => client(database, mnemonic, (wallet) => wallet.open(CLIENT_NAME)),
-      async exists(database) {
-        const root = await navigator.storage.getDirectory();
-        try { const file = await (await root.getFileHandle(database)).getFile(); return file.size > 0; } catch { return false; }
-      },
-      async remove(database) {
-        const root = await navigator.storage.getDirectory();
-        await root.removeEntry(database).catch((error: unknown) => { if ((error as { name?: string })?.name !== "NotFoundError") throw error; });
-      },
-    };
-    return sdk;
-  })().catch((error) => { loading = undefined; throw error; });
+  return loading ??= fedimintSdkOn(BROWSER).catch((error) => { loading = undefined; throw error; });
+}
+
+/** The SDK on a platform's workers and files. */
+export async function fedimintSdkOn(platform: FedimintPlatform): Promise<FedimintSdk> {
+  const { WalletDirector } = await import("@fedimint/core");
+  /** A director on its own worker and database, with the mnemonic in place. */
+  const director = async (database: string, mnemonic?: string) => {
+    const t = await platform.transport();
+    const d = new WalletDirector(t as any, database, true);
+    try {
+      await d.initialize(database);
+      if (mnemonic && !(await d.hasMnemonicSet())) await d.setMnemonic(mnemonic.trim().split(/\s+/));
+      return { director: d, end: () => t.terminate() };
+    } catch (error) { t.terminate(); throw error; }
+  };
+  const client = async (database: string, mnemonic: string, start: (wallet: any) => Promise<void>) => {
+    const { director: d, end } = await director(database, mnemonic);
+    try {
+      const wallet = await d.createWallet();
+      await start(wallet);
+      return new RealClient(await wallet.federation.getFederationId(), wallet, d, end);
+    } catch (error) { end(); throw error; }
+  };
+  const sdk: FedimintSdk = {
+    async preview(invite) {
+      // A scratch database of its own: previewing joins nothing.
+      const database = fedimintDatabase(`preview-${crypto.randomUUID()}`);
+      const { director: d, end } = await director(database);
+      try { const preview = await d.previewFederation(invite.trim()); return federationInfo(preview.federation_id, preview.config); }
+      finally { end(); await sdk.remove(database).catch(() => {}); }
+    },
+    join: ({ database, mnemonic, invite, recover }) => client(database, mnemonic, async (wallet) => {
+      // joinFederation says false instead of throwing; its reason goes to the (silenced) logger.
+      if (!(await wallet.joinFederation(invite.trim(), { clientName: CLIENT_NAME, forceRecover: recover }))) throw new Error("Could not join the federation: its guardians did not answer, or the invite code is not valid");
+    }),
+    open: ({ database, mnemonic }) => client(database, mnemonic, (wallet) => wallet.open(CLIENT_NAME)),
+    exists: (database) => platform.exists(database),
+    remove: (database) => platform.remove(database),
+  };
+  return sdk;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

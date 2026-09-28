@@ -208,5 +208,5 @@ that exact payment.
 ## Anything else the app does
 
 Every call of the app's engine is reachable: `ghostly engine --list`, then `ghostly engine <method> '<json params>'`.
-Not on the CLI yet: Bark and Fedimint wallets, OpenID Connect proofs, and video in calls (voice only).
+Not on the CLI yet: Bark wallets, OpenID Connect proofs, and video in calls (voice only).
 See the [README](https://github.com/MiguelMedeiros/ghostly/blob/dev/packages/cli/README.md) and WISP 11xx.
