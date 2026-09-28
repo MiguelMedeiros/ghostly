@@ -16,7 +16,7 @@ import { dominantHz, tone, wavFile } from "./support/tone";
  * one-shot command while the other side's daemon runs. Everything on loopback: a Pkarr relay in this process and a
  * HyperDHT testnet.
  */
-let relay: { url: string; server: Server };
+let relays: { url: string; server: Server }[] = [];
 let dht: { bootstrap: string; destroy(): Promise<void> };
 const running: Running[] = [];
 const alice = home("alice"), bob = home("bob");
@@ -48,7 +48,10 @@ async function waitForMember(dir: string, group: string, name: string): Promise<
 }
 
 beforeAll(async () => {
-  relay = await localRelay();
+  // Two relays, as a profile has by default (DEFAULT_RELAYS): each gives a daemon its own 30 requests a minute. On one,
+  // a daemon in a community group had about 10 a minute left for a new mesh edge, whose offer and answer then missed
+  // each other's fast polls and the edge never opened in 90 s.
+  relays = await Promise.all([localRelay(), localRelay()]);
   dht = await hyperdhtTestnet();
   // Calls bind their media to loopback: on some machines (a VPN on a Mac) UDP to the machine's own LAN address is dropped.
   env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1", ...(process.env.GHOSTLY_LINK_TRACE ? { GHOSTLY_LINK_TRACE: process.env.GHOSTLY_LINK_TRACE } : {}) };
@@ -57,7 +60,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all(running.map((r) => r.stop()));
   await dht?.destroy();
-  relay?.server.close();
+  for (const relay of relays) relay.server.close();
 }, 30_000);
 
 describe("two headless peers", { timeout: 180_000 }, () => {
@@ -65,7 +68,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
 
   it("set up profiles offline, as one-shots", async () => {
     for (const [dir, name] of [[alice, "Alice bot"], [bob, "Bob"]] as const) {
-      ok(await as(dir, "settings", "set", "relays", JSON.stringify([relay.url])));
+      ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
       expect(ok(await as(dir, "profile", "set", "--name", name))).toMatchObject({ name });
     }
     error(await as(alice, "chat", "show", "nobody"), "not_found", 3);
@@ -700,8 +703,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(await daemonA.exited()).toBe(0);
     expect(ok(await as(alice, "daemon", "status"))).toMatchObject({ running: false });
     expect((ok(await as(alice, "group", "list")).groups as unknown[]).length).toBeGreaterThanOrEqual(2);
-    // A fresh process on one relay, in the two groups above: a one-shot for a chat leaves their sessions unstarted.
-    // With them, their edges spent the relay's 30 requests a minute in seconds and the message waited for the next
+    // A fresh process, in the two groups above: a one-shot for a chat leaves their sessions unstarted.
+    // With them, their edges spent the relays' requests of the minute in seconds and the message waited for the next
     // minute (about 65 s on CI); without, it goes out in a few seconds.
     const started = Date.now();
     expect(ok(await as(alice, "send", "bob", "from a one-shot", "--wait", "delivered", "--timeout", "30"))).toMatchObject({ delivery: "delivered" });

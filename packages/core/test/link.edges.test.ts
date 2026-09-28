@@ -428,10 +428,19 @@ describe("LinkSession poll pacing", () => {
     a.s.pollNow();
     await settle();
     expect(lastPoll(a.ev)).toBe(I.fast);
+    // Then it slows down step by step: twice the fast pace, then as long as the window has been over, up to its pace.
     vi.setSystemTime(NOW + EXPECT_PEER_MS);
     a.s.pollNow();
     await settle();
-    expect(lastPoll(a.ev)).toBe(I.background);
+    expect(lastPoll(a.ev)).toBe(2 * I.fast);
+    const steps: number[] = [];
+    for (const after of [6_000, 12_000, 24_000, I.background, 2 * I.background]) {
+      vi.setSystemTime(NOW + EXPECT_PEER_MS + after);
+      a.s.pollNow();
+      await settle();
+      steps.push(lastPoll(a.ev));
+    }
+    expect(steps).toEqual([6_000, 12_000, 24_000, I.background, I.background]);
 
     // Signaling's own fast window (45 s) is longer: awaiting an offer does not cut it short, nor poll again.
     a.s.setFastPoll(true);
@@ -444,6 +453,25 @@ describe("LinkSession poll pacing", () => {
     a.s.pollNow();
     await settle();
     expect(lastPoll(a.ev)).toBe(I.fast);
+    await a.s.stop(false);
+  });
+
+  it("watches a contact that went away fast, then at the active pace: the step-down never slows that", async () => {
+    const { a, b } = pair();
+    await b.s.refreshAdvertisement();
+    a.s.start();
+    await settle();
+    a.s.watchPeer();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.fast);
+    const paces: number[] = [];
+    for (const after of [0, 10_000, 60_000]) {
+      vi.setSystemTime(NOW + EXPECT_PEER_MS + after);
+      a.s.pollNow();
+      await settle();
+      paces.push(lastPoll(a.ev));
+    }
+    expect(paces).toEqual([I.active, I.active, I.active]);
     await a.s.stop(false);
   });
 
