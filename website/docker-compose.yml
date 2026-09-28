@@ -10,3 +10,9 @@ services:
     environment:
       - NODE_ENV=production
     restart: unless-stopped
+    # Docker keeps a container's output until it is removed: cap it at three files of 10 MB.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
