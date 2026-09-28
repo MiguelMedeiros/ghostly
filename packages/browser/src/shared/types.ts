@@ -644,6 +644,11 @@ export interface StoredMessage {
   reactions?: Record<string, MessageReaction>;
   /** A text edited after it was sent (WISP 400 § Edits): `text` is the latest version. */
   edit?: MessageEdit;
+  /**
+   * A forwarded text or file (WISP 400 § Forwards): how many times it has been forwarded, this hop included. Only the
+   * count: never who wrote it first, nor where it came from.
+   */
+  forwarded?: number;
 }
 
 /** One person's reaction to a message: the emoji ("" once taken back), their number (the highest wins), when it came. */

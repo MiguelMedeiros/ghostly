@@ -31,6 +31,8 @@ export interface FileInfo {
   video?: VideoMeta;
   /** The message this file answers (`r`, WISP 401 § Replies): files/2, files/3 and held items; older apps ignore it. */
   reply?: WireReply;
+  /** How many times it has been forwarded (`fw`, WISP 401 § Forwards): files/2, files/3 and held items; older apps ignore it. */
+  forwarded?: number;
 }
 
 /** Where a platform puts incoming bytes: memory, IndexedDB, disk. */

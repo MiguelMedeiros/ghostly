@@ -10,6 +10,7 @@ import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
 import { parseLinkPreview, type LinkPreview } from "./linkPreview";
 import { pairedReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
+import { readForwarded } from "./forwards";
 import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, verifyPairedSignal } from "./pairedSignal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
@@ -117,6 +118,8 @@ export interface IncomingMessage {
    * (`s` empty, `f` absent): the receiver finds the rest in its own history.
    */
   reply?: WireReply | { i: string };
+  /** How many times it has been forwarded (`fw`, WISP 401 § Forwards); absent for a message written in this chat. */
+  forwarded?: number;
 }
 
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
@@ -125,10 +128,10 @@ export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
 /**
  * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
  * with it: the text matters, the card does not. A reply (`r`, WISP 401 § Replies) is a few hundred bytes at most
- * and always goes.
+ * and always goes, and so does a forwarded message's hop count (`fw`, WISP 401 § Forwards).
  */
-export function pairedMessageFrame(id: string, ts: number, m: string, preview?: LinkPreview, reply?: WireReply): string {
-  const r = reply && { r: wireReply(reply) };
+export function pairedMessageFrame(id: string, ts: number, m: string, preview?: LinkPreview, reply?: WireReply, forwarded?: number): string {
+  const r = { ...(reply && { r: wireReply(reply) }), ...(readForwarded(forwarded) && { fw: forwarded }) };
   const plain = JSON.stringify({ t: "paired-message", id, ts, m, ...r });
   if (!preview) return plain;
   const withPreview = JSON.stringify({ t: "paired-message", id, ts, m, pv: preview, ...r });
@@ -1507,12 +1510,14 @@ export class GhostLink {
    * Chat goes over the data link when it is up, through Pkarr otherwise. A `preview` (WISP 401 § Link previews) goes
    * only with a paired message on the live session, and only while the frame stays within what a session takes;
    * the DHT has no room for one, and the text goes without it. A `reply` (WISP 401 § Replies) goes whole on the
-   * session; on the DHT only its id does, which the contact looks up in its own history.
+   * session; on the DHT only its id does, which the contact looks up in its own history. `forwarded`: the hop count
+   * of a forwarded message (WISP 401 § Forwards), on both paths (the DHT drops it when the packet has no room).
    */
-  async sendMessage(text: string, timestamp = Date.now(), stableId?: string, preview?: LinkPreview, reply?: WireReply): Promise<string | null> {
+  async sendMessage(text: string, timestamp = Date.now(), stableId?: string, preview?: LinkPreview, reply?: WireReply, forwarded?: number): Promise<string | null> {
     const trimmed = text.trim();
     if (!trimmed) return null;
-    if (this.textDelivery === "dht" && this.dht) return this.dht.send(trimmed, timestamp, stableId ?? toBase64Url(randomBytes(16)), reply?.i);
+    if (this.textDelivery === "dht" && this.dht) return forwarded ? this.dht.send(trimmed, timestamp, stableId ?? toBase64Url(randomBytes(16)), reply?.i, undefined, forwarded)
+      : this.dht.send(trimmed, timestamp, stableId ?? toBase64Url(randomBytes(16)), reply?.i);
     if (this.options.params.profile && !this.isDataLinkOpen) return "Confirm the peer and connect before sending. This chat never falls back to DHT messages.";
     if (this.options.params.profile && this.channel) {
       if (utf8Encode(trimmed).length > LIMITS.maxChatMessageBytes) return "Message exceeds 16 KiB";
@@ -1520,7 +1525,7 @@ export class GhostLink {
       const id = stableId ?? toBase64Url(randomBytes(16));
       if (!/^[A-Za-z0-9_-]{22}$/.test(id)) return "Invalid message ID";
       this.pairedPending.set(id, timestamp);
-      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview, reply)); return null; }
+      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded)); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
     }
     if (this.channel && trimmed.length <= LIMITS.maxChatMessageBytes / 4) {
@@ -2432,7 +2437,9 @@ export class GhostLink {
             this.typingReceiver.clear();
             // The same for a reply: one that does not hold is left out (older apps ignore `r`).
             const reply = frame.r === undefined ? undefined : readReply(frame.r, pairedReplyAuthor);
-            await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }), ...(reply && { reply }) });
+            // A hop count that is not one is left out: the message arrives as written here (older apps ignore `fw`).
+            const forwarded = readForwarded(frame.fw);
+            await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }), ...(reply && { reply }), ...(forwarded && { forwarded }) });
             if (this.channel === channel && this.isDataLinkOpen)
               channel.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {

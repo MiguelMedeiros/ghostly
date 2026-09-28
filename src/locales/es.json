@@ -48,6 +48,21 @@
     }
   },
   "chat": {
+    "forward": {
+      "forward": "Reenviar",
+      "select": "Seleccionar",
+      "forwarded": "Reenviado",
+      "many": "Reenviado muchas veces",
+      "title": "Reenviar a…",
+      "search": "Buscar chats",
+      "messages": "{{count}} mensajes",
+      "noMatch": "Ningún chat con ese nombre",
+      "noChats": "Aún no hay chats",
+      "filesHint": "Los grupos solo aceptan texto",
+      "pick": "Elige hasta {{count}}",
+      "send": "Enviar",
+      "selected": "{{count}} seleccionados"
+    },
     "typeMessage": "Escribe un mensaje...",
     "send": "Enviar",
     "online": "en línea",

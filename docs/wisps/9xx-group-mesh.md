@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.11 |
+| Revision | 0.12 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
@@ -126,6 +126,16 @@ A message may answer an earlier message of the group ([400](400-chat.md#replies)
 ```
 
 under the epoch message key, with a nonce of its own and `["ghostly-group/1 reply", g, e, s, n, ts]` as associated data, outside the signature older apps check and inside `xs`, like the mentions. A box that does not open, or holds no valid reply (an `f` that is not a member key included), is no reply; the message is taken all the same. Replies and mentions go together: "@Bob yes" can answer Alice's message and name Bob. A member finds the original among the group's messages it has; an original from before it joined, or from an epoch it cannot read, is shown from the wire's line, marked as not found here.
+
+## Forwards
+
+A forwarded text ([400](400-chat.md#forwards), revision 0.12) carries `f`, its hop count (1 to 255), on the frame itself, in the clear like the header: every member reads it anyway, and it says nothing but a number.
+
+```
+{ "t": "group-msg", …, "sig", "m"?, "r"?, "f"?: 1..255, "xs"? }
+```
+
+Outside `sig`, which older apps check as it was; inside `xs`, after the boxes and only when present (`["ghostly-group/1 msg+", g, e, s, n, ts, nn, c, m.n, m.c, r.n, r.c, f]`), so what an older app signs and checks is unchanged. A member handing the frame on keeps `f` only with the author's `xs`, as the boxes; a frame handed on without it arrives without `f`. A receiver drops an `f` that is not such a number and takes the message. Older apps ignore it.
 
 ## Reactions
 
@@ -285,6 +295,7 @@ Private payments in a group (no note, or amounts hidden); more metadata (renamin
 
 ## Revision log
 
+- 0.12 (2026-09-27): forwards: `f`, a forwarded text's hop count, on `group-msg`, covered by `xs`.
 - 0.11 (2026-09-27): a note that checking other profiles for new messages does not cover mesh groups, and why.
 - 0.10 (2026-09-27): edits handed on like messages: every member keeps the latest edit per message and hands an asked-for author's on; an edit handed on is taken with the author's signature, while both members are in the roster.
 - 0.9 (2026-09-27): up to 32 members (past eight only when every member's app announces `paired-groups` version 3); any member hands on what another missed (`ask`, `miss`, `xs`), removed members neither handed on nor taken from a third member; a large mesh paces its edges and announces who is back (`group-here`) (#373).

@@ -349,12 +349,15 @@ export class Groups {
     await this.forget(groupId);
   }
 
-  /** Sends a text; `messageId` is the id it is kept under here (what history, replies and reactions name). */
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply): Promise<{ error: string | null; messageId?: string }> {
-    if (this.isCommunity(groupId)) return this.communities.send(groupId, text, mentions, reply);
+  /**
+   * Sends a text; `messageId` is the id it is kept under here (what history, replies and reactions name). `forwarded`:
+   * the hop count of a forwarded text (WISP 9xx § Forwards).
+   */
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number): Promise<{ error: string | null; messageId?: string }> {
+    if (this.isCommunity(groupId)) return this.communities.send(groupId, text, mentions, reply, forwarded);
     const session = this.sessions.get(groupId);
     if (!session) return { error: "You are not in this group yet" };
-    const result = await session.sendText(text, Date.now(), mentions, reply);
+    const result = await session.sendText(text, Date.now(), mentions, reply, forwarded);
     return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
   }
 
@@ -959,7 +962,7 @@ export class Groups {
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, timestamp));
         await this.host.storeMessage({ linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }) });
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }) });
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
       },
       edit: e => this.host.groupEdit?.(state.id, e),

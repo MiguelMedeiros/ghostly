@@ -1,6 +1,7 @@
 import { fromBase64Url, toBase64Url } from "./bytes";
 import { formatFileSize, sanitizeFileName, sanitizeMime, type FileInfo } from "./files";
 import { pairedReplyAuthor, readReply, wireReply } from "./replies";
+import { readForwarded } from "./forwards";
 import { parseVideoMeta } from "./video";
 import { parseVoiceMeta } from "./voice";
 
@@ -336,7 +337,7 @@ export class ChatFiles {
 
   private offerFrame(record: FileTransferRecord, paused: boolean): Record<string, unknown> {
     const { file } = record;
-    return { t: "pf-offer", id: file.id, name: file.name, mime: file.mime, size: file.size, ts: file.timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.reply && { r: wireReply(file.reply) }), ...(paused && { paused: true }) };
+    return { t: "pf-offer", id: file.id, name: file.name, mime: file.mime, size: file.size, ts: file.timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.reply && { r: wireReply(file.reply) }), ...(readForwarded(file.forwarded) && { fw: file.forwarded }), ...(paused && { paused: true }) };
   }
 
   private announce(entry: Entry): void {
@@ -492,6 +493,8 @@ export class ChatFiles {
     if (video) file.video = video;
     const reply = readReply(frame.r, pairedReplyAuthor);
     if (reply) file.reply = reply;
+    const forwarded = readForwarded(frame.fw);
+    if (forwarded) file.forwarded = forwarded;
     const paused = frame.paused === true;
     const existing = this.entries.get(key("in", id));
     if (existing) {

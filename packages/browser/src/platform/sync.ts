@@ -56,6 +56,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     ...(message.replyTo && { replyTo: message.replyTo }),
     ...(message.reactions && { reactions: message.reactions }),
     ...(message.edit && { edit: message.edit }),
+    ...(message.forwarded && { forwarded: message.forwarded }),
     meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,
@@ -78,8 +79,8 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
     const reacted = !!previous && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
     if (reacted) previous.reactions = message.reactions;
     // Reviewed payments originate in the engine (including recovery), without
-    // the chat composer's optimistic message or text-delivery status.
-    if (message.sender !== "peer" && !message.delivery && !message.paymentId) {
+    // the chat composer's optimistic message or text-delivery status; so do forwarded files (WISP 400 § Forwards).
+    if (message.sender !== "peer" && !message.delivery && !message.paymentId && !message.forwarded) {
       if (reacted) { saveSession(session); changed = true; }
       continue;
     }

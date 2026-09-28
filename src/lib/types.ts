@@ -51,6 +51,8 @@ export interface ChatMessage {
   reactions?: Record<string, import("@ghostly/browser/shared/types").MessageReaction>;
   /** An edited text (WISP 400 § Edits): `text` is the latest version; the earlier ones are in the history. */
   edit?: import("@ghostly/browser/shared/types").MessageEdit;
+  /** A forwarded message (WISP 400 § Forwards): how many times it has been forwarded. */
+  forwarded?: number;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

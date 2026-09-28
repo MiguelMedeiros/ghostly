@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 11xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.9 |
+| Revision | 0.9.1 |
 | Updated | 2026-09-27 |
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
@@ -139,6 +139,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Chats | Pin and mute | Not applicable: both are UI-only in the app (local display state); a bot filters for itself |
 | Chats | Message details | Phase 1 |
 | Chats | Reactions: `react <chat> <message> <emoji>` and `--remove`, `group react`, reactions on each message of history, `message.reaction` / `group.reaction` events | #354 |
+| Chats | Forwards: `forward <chat\|group> <message>… --to <chat\|group>… [--force] [--wait none\|sent]`, up to 5 targets, files from the stored bytes; `forwarded` (the hop count) on each message of history and events | #404 |
 | Chats | Typing indicator: typing, recording, thinking and a bot's status line ([Typing](#typing)) | Phase 1 (typing), kinds and status with 401 0.11 |
 | Chats | Secret guard | Phase 1: `send` refuses seeds, keys and ecash unless `--force` (the app's detector) |
 | Chats | Rich text | Not applicable: text is text; the bot formats it |
@@ -231,6 +232,7 @@ It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md))
 
 ## Revision log
 
+- 0.9.1 (2026-09-27): forwards: `ghostly forward` (texts, and files from the bytes the profile holds, to up to 5 chats and groups; a group takes texts), the secret guard before a text goes (`--force`), `--wait sent`; `forwarded` on messages (#404).
 - 0.9 (2026-09-27): Pkarr over the Mainline DHT beside the relays (BEP 44, `bittorrent-dht`): a bot keeps finding its contacts and its group's edges while the relays fail; `GHOSTLY_DHT`, `GHOSTLY_DHT_BOOTSTRAP`.
 - 0.8.2 (2026-09-27): `--wait sent` and `edges` on `group send` and `group edit`.
 - 0.8.1 (2026-09-27): group edits: `ghostly group edit`, `group.message.edited`, `edits` and `editedAt` in group history (#378).

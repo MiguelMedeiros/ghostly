@@ -1,20 +1,10 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
+import { useEffect, useState } from "react";
 import { Page } from "../components/layout";
-import { PeerAvatar } from "../components/Avatar";
-import { GroupAvatar } from "../components/GroupAvatar";
-import { shownContactName, useContactFaces } from "../components/identities/contactFace";
+import { ChatTargetRow } from "../components/chat/ChatTargets";
+import { useChatTargets } from "../hooks/useChatTargets";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { dropIncomingShare, sendShareTo, shareText, useIncomingShare } from "../lib/incomingShare";
-import { groupChat } from "../lib/chatMute";
-import { groupPath } from "../lib/groups";
-import { contactTag } from "../lib/publicKeyLabel";
-import { listSessions } from "../lib/storage";
-import { chatPath } from "../lib/url";
-
-const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-const engineSnapshot = () => engine.state;
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
 const WAIT_MS = 5000;
@@ -28,17 +18,14 @@ export function SharePicker() {
   const { t } = useI18n();
   const nav = useAppNavigation();
   const share = useIncomingShare();
-  const faceOf = useContactFaces();
-  const groups = useSyncExternalStore(subscribeEngine, engineSnapshot)?.groups ?? [];
   const [waited, setWaited] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setWaited(true), WAIT_MS);
     return () => clearTimeout(timer);
   }, []);
 
-  const sessions = listSessions();
   const hasFiles = !!share?.files.length;
-  const openGroups = hasFiles ? [] : groups.filter((group) => !group.invitation && group.canSend);
+  const targets = useChatTargets({ files: hasFiles });
   const preview = share ? shareText(share) : "";
 
   const pick = (chat: string, path: string) => {
@@ -66,32 +53,13 @@ export function SharePicker() {
             <p className="m-0 text-xs text-text-muted">{t("pwa.shareHint")}</p>
           </div>
 
-          {sessions.length === 0 && openGroups.length === 0 ? (
+          {targets.length === 0 ? (
             <p className="text-sm text-text-muted">{t("pwa.shareNoChats")}</p>
           ) : (
             <ul className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("pwa.shareTitle")}>
-              {sessions.map((session) => {
-                const face = faceOf(session.peerPubKeyB64);
-                const shown = shownContactName({ nickname: session.label, face, nick: session.nick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) });
-                return (
-                  <li key={session.id}>
-                    <button type="button" data-testid="share-chat" onClick={() => pick(session.id, chatPath(session.id))}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 min-h-12 text-start hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent cursor-pointer">
-                      <span className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center bg-surface-hover">
-                        <PeerAvatar peerPubKey={session.peerPubKeyB64} label={shown.name} named={shown.from !== "key"} photo={face?.photo} />
-                      </span>
-                      <bdi className="min-w-0 truncate text-sm text-text-primary">{shown.name}</bdi>
-                    </button>
-                  </li>
-                );
-              })}
-              {openGroups.map((group) => (
-                <li key={group.id}>
-                  <button type="button" data-testid="share-group" onClick={() => pick(groupChat(group.id), groupPath(group.id))}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 min-h-12 text-start hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent cursor-pointer">
-                    <GroupAvatar picture={group.picture} size={36} />
-                    <bdi className="min-w-0 truncate text-sm text-text-primary">{group.name}</bdi>
-                  </button>
+              {targets.map((target) => (
+                <li key={target.chat}>
+                  <ChatTargetRow target={target} testId={target.kind === "group" ? "share-group" : "share-chat"} onClick={() => pick(target.chat, target.path)} />
                 </li>
               ))}
             </ul>

@@ -75,6 +75,7 @@ Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #2
 - **Edits** (#351): edit a text you sent from its ⋮ (Edit), or press ↑ in an empty composer for your last one. The composer shows what you edit (✕ or Escape leaves it as it was, and your draft comes back); Enter saves. The bubble says *edited* beside the time (until your contact's app confirms it, its hint says it was not shown yet), and the message's details list the earlier versions. An edit never rings, never counts as unread and never moves the chat; the chat list shows the new text. Texts only; at most 100 edits a message, no time limit. A contact whose app does not show edits keeps the old text, and gets the edit once it does ([WISP 400](wisps/400-chat.md#edits)). In groups too (private and community): every member sees the new text; mentions whose @name is still there stay, and @ names more (an edit never notifies anyone); a member on an older app keeps the old text.
 - **Replies** (#347): answer a message from its ⋮ (Reply), the reply button beside it, or a swipe right on a touch screen. The composer shows what you answer (✕ or Escape to let go); the reply's bubble quotes it, and a tap jumps to the original. The reply names the original by the id both sides know it by, with a short line of it, so it still reads where the original is gone ([WISP 400](wisps/400-chat.md#replies)). Texts and files (a voice message included, #359) carry a reply; payments do not.
 - **Reactions** (#354): one emoji per person per message, like WhatsApp. Hover a message for the React button (or its ⋮ → React; a long press on a phone) to open a quick bar of six and + for any emoji. Chips under the bubble show each emoji with its count and who chose it; a click on yours takes it back, on another adds the same. A reaction never counts as unread or plays the message sound; the chat list says the latest. It travels live once both apps say `react/1`, and on DHT envelopes meanwhile; groups carry it too ([WISP 400](wisps/400-chat.md#reactions)).
+- **Forwards** (#404): send a message on to other chats and groups, from its ⋮ (Forward), or choose several first (⋮ → Select, or Select under a long press; then tap others, and Forward). A picker lists your chats and groups, most recent first, with a search; pick up to 5 and Send. Each copy is a new message of yours that says *Forwarded* (*Forwarded many times* from five hops, like WhatsApp), never who wrote it. Texts keep their Markdown; voice messages, pictures, videos, audio and files go from the bytes on this device, never downloaded again (a large one still asks your contact). Groups take texts only, so they are not offered for a file. Payments, shared identities and call lines have no Forward; a seed or a key asks first ([WISP 400](wisps/400-chat.md#forwards)).
 
 ## A message's ⋮
 
@@ -83,11 +84,13 @@ In order, each row when it applies (`src/components/MessageBubble.tsx`):
 1. **Reply** (#347)
 2. **Edit**, for a text you sent (#351; groups #378)
 3. **React** (#354)
-4. **Send again**, for a message that was not sent (#360)
-5. **Download**, for a voice message, a picture or a file, once its bytes are on this device (#346). Desktop opens the save dialog; web and extension download it.
-6. **Download as MP3**, for a voice message: converted on this device, mono at 64 kbit/s (#365)
-7. **Details** (#240)
-8. **Cancel sending** for a message still waiting, else **Delete** (from this device only)
+4. **Forward**, for a text or a file, greyed while a file is still arriving (#404)
+5. **Select**, to choose several messages to forward (#404)
+6. **Send again**, for a message that was not sent (#360)
+7. **Download**, for a voice message, a picture or a file, once its bytes are on this device (#346). Desktop opens the save dialog; web and extension download it.
+8. **Download as MP3**, for a voice message: converted on this device, mono at 64 kbit/s (#365)
+9. **Details** (#240)
+10. **Cancel sending** for a message still waiting, else **Delete** (from this device only)
 
 ## Delivery marks
 

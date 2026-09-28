@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.10 |
+| Revision | 0.11 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [900](900-group-sessions.md), [9xx · Group Mesh](9xx-group-mesh.md) |
@@ -145,6 +145,16 @@ As in [the mesh profile](9xx-group-mesh.md#replies): `{ "i", "s", "f" }`, the or
 ```
 
 Its JSON counts against the text's 16 KiB, as the mentions' does. A reply that does not hold is left out and the text kept. Apps from before read `text` and `nick` and ignore `r` (revision 0.7).
+
+## Forwards
+
+A forwarded text ([400](400-chat.md#forwards), revision 0.11) carries `fw`, its hop count (1 to 255), inside the sealed payload beside the text, so the author's signature covers it:
+
+```
+{ "text", "m"?: [ … ], "r"?: { … }, "fw"?: 1..255, "nick"? }
+```
+
+It counts 16 bytes against the text's 16 KiB. A `fw` that does not hold is left out and the text kept. Apps from before ignore it.
 
 ## Reactions
 
@@ -294,6 +304,7 @@ Approval of each entry, expiry and use count; several admins; member key updates
 
 ## Revision log
 
+- 0.11 (2026-09-27): forwards: `fw`, a forwarded text's hop count, inside the payload.
 - 0.10 (2026-09-27): the beacon's head: hubs publish the newest frame they hold, by its identity, beside the hub list, for a member's other profile on the same device (§ Head).
 - 0.8 (2026-09-27): reactions as a sealed, signed application frame that every member and hub carries, caught up like messages (#354).
 - 0.7 (2026-09-27): replies: `r` inside the sealed payload, beside the mentions (#347).

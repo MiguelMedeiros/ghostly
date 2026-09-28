@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 403; editorial family allocation |
 | Status | Draft |
-| Revision | 0.7 |
+| Revision | 0.8 |
 | Updated | 2026-09-27 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
@@ -97,6 +97,10 @@ A reader that takes edits applies it as the live frame does ([401](401-paired-ch
 
 The author sends an edit on the floor only after its message's receipt, since the reader must have the message to find it. The element costs about 40 bytes of the packet: a text near 256 bytes does not fit with it, and its edit waits for a live session instead, never going without the element. It takes the floor's one text slot like any text, with the same retries and expiry; a confirmation of the same edit on the live session ends them.
 
+## Forwards
+
+A forwarded text ([400](400-chat.md#forwards), revision 0.8) carries its hop count as the signed body's optional **fifteenth** element: a whole number from 1 to 255. The eleventh to fourteenth are then present: `null` for no reply and no edit, `[]` for no reactions, `null` for none taken. An edit never carries one. The element costs about 20 bytes: a text whose packet, or whose plaintext against the reader's 900 bytes, has no room for it goes **without** it, and reads as written there. A reader drops a fifteenth element that is not such a number and keeps the text; readers from before ignore it (they accept a body of up to 16 elements).
+
 ## When text goes over the DHT
 
 | Chat state ([400](400-chat.md#states-of-a-chat)) | A new text of at most 256 bytes | A longer text |
@@ -143,6 +147,7 @@ DHT only avoids stream discovery/dialing. Native clients read the Mainline DHT d
 
 ## Revision log
 
+- 0.8 (2026-09-27): forwards: a forwarded text's hop count as the fifteenth element, left out when it does not fit.
 - 0.7 (2026-09-27): one TTL (300 s) and one packet size (padded to 992 bytes) for every envelope, so a read of a mailbox does not tell a text from a keep-alive; what a mailbox shows.
 - 0.6 (2026-09-27): edits ride as a text of their own id with a twelfth element naming the edited message and its number, only to a contact whose record lists `edit/1`.
 - 0.5 (2026-09-27): reactions ride as the thirteenth element (the author's, not yet confirmed, as many as fit) with the fourteenth saying which of the reader's were taken; the twelfth is kept for edits.

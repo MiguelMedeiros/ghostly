@@ -29,6 +29,7 @@ import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { replySnippet, type GroupMention } from "@ghostly/core";
 import { quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { useForwarding } from "../hooks/useForwarding";
 import { canEditInGroup } from "@ghostly/browser/shared/edits";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -42,7 +43,7 @@ function toChatMessage(message: StoredMessage, group: GroupView, myName = ""): C
   return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, paymentId: message.paymentId,
     nick: message.sender === "peer" && message.member ? (member ? memberName(member) : `Member ${message.member.slice(0, 8)}`) : undefined,
     ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }),
-    ...(message.edit && { edit: message.edit }) };
+    ...(message.edit && { edit: message.edit }), ...(message.forwarded && { forwarded: message.forwarded }) };
 }
 
 /** A member as a reply's quote names them: me, the roster's name, or the start of a key no longer in the roster. */
@@ -137,6 +138,11 @@ export function GroupChat() {
   const [error, setError] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettings();
+  // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
+  const shown = useMemo(() => group ? messages.filter(m => !m.event && !m.groupPay).map(m => toChatMessage(m, group, settings.defaultNickname)) : [],
+    [messages, group, settings.defaultNickname]);
+  const forwarding = useForwarding(group ? `group:${groupId}` : undefined, shown);
+  const shownOf = (m: StoredMessage) => shown.find(c => c.id === m.id) ?? toChatMessage(m, group!, settings.defaultNickname);
   // Members learn my name on the edges, as a contact does on a chat: the engine must know it here too.
   const engineNick = state?.settings.nick;
   useEffect(() => {
@@ -289,11 +295,11 @@ export function GroupChat() {
             // A note about a payment this device is part of is shown under its own bubble instead.
             : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
             : m.paymentId ? <div key={m.id} data-testid="group-payment">
-              <MessageBubble message={toChatMessage(m, group, settings.defaultNickname)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} />
+              <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} />
               {/* Said once, under the request (or the payment) itself: not again under a payment that answers it. */}
               {noteIdOf(state, m.paymentId) === m.paymentId && notes.get(m.paymentId) && <GroupPaymentCaption note={notes.get(m.paymentId)!} group={group} />}
             </div>
-            : <MessageBubble key={m.id} message={toChatMessage(m, group, settings.defaultNickname)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`}
+            : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))}
               onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
               onEdit={canEditInGroup(m) && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
               onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName} />)}
@@ -302,7 +308,9 @@ export function GroupChat() {
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
       </div>}
 
-      {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
+      {!joiningByLink && forwarding.bar}
+      {forwarding.dialog}
+      {!joiningByLink && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: replySnippet(replyingTo.text),
           mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined}
         // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.

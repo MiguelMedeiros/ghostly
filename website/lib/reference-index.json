@@ -92,7 +92,7 @@
     "slug": "04-profiles",
     "title": "WISP 04: Local Profiles",
     "status": "Draft",
-    "updated": "2026-09-24",
+    "updated": "2026-09-27",
     "implementation": "Experimental: web, desktop and browser extension clients",
     "dependencies": [
       "01-ghost-core.md",
@@ -758,7 +758,7 @@
     "title": "WISP 400: Chat Messaging",
     "status": "Draft",
     "updated": "2026-09-27",
-    "implementation": "The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, on-dht, self-upgrade, DHT only per chat; replies, reactions, edits and the text's display conventions; compatibility chats for v0.4",
+    "implementation": "The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, on-dht, self-upgrade, DHT only per chat; replies, reactions, edits, forwards and the text's display conventions; compatibility chats for v0.4",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -770,7 +770,7 @@
     "notices": [],
     "benefit": "One chat for everyone: the DHT to meet, a live link when one connects, the DHT again when none does.",
     "level": "available",
-    "note": "Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited, in a chat or a group, reactions put one emoji per person on a message, and lists, quotes, headings and links show as such.",
+    "note": "Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited, in a chat or a group, reactions put one emoji per person on a message, messages can be forwarded to other chats, and lists, quotes, headings and links show as such.",
     "feature": {
       "label": "Chat",
       "href": "/#next"
@@ -784,7 +784,7 @@
     "title": "WISP 401: Chat Session",
     "status": "Draft",
     "updated": "2026-09-27",
-    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (calls/1, screen sharing inside a call), shared apps (services/1), files/3, the typing indicator (typing/1), reactions (react/1) and edits (edit/1) on the live session; replies on texts and files.",
+    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (calls/1, screen sharing inside a call), shared apps (services/1), files/3, the typing indicator (typing/1), reactions (react/1) and edits (edit/1) on the live session; replies on texts and files; forwarded texts and files with their hop count.",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md",
