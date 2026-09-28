@@ -93,6 +93,7 @@ const joinSteps = (community: boolean): { stage: JoinStep; label: string }[] => 
 ];
 /** How long after joining a group with nobody reached yet says it is still connecting (later, they are simply away). */
 const JUST_JOINED_MS = 5 * 60_000;
+const NO_MESSAGES: StoredMessage[] = [];
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
 
 function joiningText(stage: GroupJoinStage, name: string, community: boolean): { title: string; body: string } {
@@ -120,7 +121,11 @@ export function GroupChat() {
     const chats = chatsByPeer();
     return withContactFaces(rosterGroup, state?.links, faceOf, peerKey => chats.get(peerKey)?.label);
   }, [rosterGroup, state?.links, faceOf]);
-  const [messages, setMessages] = useState<StoredMessage[]>([]);
+  // The history of this group only: the page stays mounted from one group to the next, and for the render that changes
+  // groups the last one's messages would still be here (the timeline would open on them, and never find where this
+  // group was left). Until this group's own list comes, what the engine last sent for it.
+  const [loaded, setLoaded] = useState<{ groupId: string; list: StoredMessage[] }>({ groupId: "", list: NO_MESSAGES });
+  const messages = loaded.groupId === groupId ? loaded.list : engine.messages.get(`group:${groupId}`) ?? NO_MESSAGES;
   /** The message the composer answers (WISP 9xx § Replies). */
   const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
   /** The message of mine the composer edits (WISP 9xx § Edits). */
@@ -164,9 +169,12 @@ export function GroupChat() {
 
   useEffect(() => {
     if (!groupId) return;
-    setMessages(engine.messages.get(`group:${groupId}`) ?? []);
-    void engine.call("groupMessages", { groupId }).then(setMessages).catch(() => {});
-    return engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) setMessages(list); });
+    let current = true;
+    const show = (list: StoredMessage[]) => { if (current) setLoaded({ groupId, list }); };
+    void engine.call("groupMessages", { groupId }).then(show).catch(() => {});
+    const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
+    // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
+    return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
   const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages]);
