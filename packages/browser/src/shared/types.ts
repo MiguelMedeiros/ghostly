@@ -99,7 +99,7 @@ export interface StoredLink {
 }
 
 /** What happened to a group's membership, as a line in its history. */
-export type GroupEvent = "created" | "joined" | "gone" | "admin" | "rotated" | "removed" | "left" | "forked" | "picture";
+export type GroupEvent = "created" | "joined" | "gone" | "admin" | "rotated" | "removed" | "left" | "forked" | "picture" | "renamed";
 
 /** A private group as stored: an invitation not yet answered, or a group I am (or was) in. */
 export interface StoredGroup {

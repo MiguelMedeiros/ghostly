@@ -5,8 +5,8 @@ import { epochKeys } from "../src/groupCrypto";
 import { commitHash } from "../src/groupCommits";
 import { GroupSession, type GroupEdgeFrame, type GroupState } from "../src/groupSession";
 import { CommunitySession, communityCommitHash, type CommunityFrame, type CommunityState } from "../src/groupCommunity";
-import { encodeGroupMetaBody, signGroupMeta, wrapGroupMeta, type GroupMetaFrame } from "../src/groupMeta";
-// covers: groups.picture.protocol, groups.picture.set, groups.picture.late-joiner
+import { encodeGroupMetaBody, signGroupMeta, wrapGroupMeta, type GroupMetaChange, type GroupMetaFrame } from "../src/groupMeta";
+// covers: groups.picture.protocol, groups.picture.set, groups.picture.late-joiner, groups.rename.protocol
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 function jpeg(side: number, fill = 0): string {
@@ -22,6 +22,7 @@ class Mesh {
   readonly sessions = new Map<string, GroupSession>();
   readonly saved = new Map<string, GroupState>();
   readonly pictures: { at: string; by: string; picture: string | undefined }[] = [];
+  readonly names: { at: string; by: string; name: string | null }[] = [];
   /** Members whose app predates metadata: `group-meta` never reaches them, and their syncs say nothing of it. */
   readonly old = new Set<string>();
   readonly sent: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
@@ -36,7 +37,10 @@ class Mesh {
       },
       message: () => {},
       changed: () => {},
-      metaChanged: (by, picture) => { this.pictures.push({ at: session.myKey, by, picture }); },
+      metaChanged: (by, change) => {
+        if ("picture" in change) this.pictures.push({ at: session.myKey, by, picture: change.picture ?? undefined });
+        if ("name" in change) this.names.push({ at: session.myKey, by, name: change.name ?? null });
+      },
     });
     this.sessions.set(session.myKey, session);
     return session;
@@ -178,6 +182,81 @@ describe("group picture, group-mesh/1", () => {
   });
 });
 
+describe("group name, group-mesh/1", () => {
+  it("the admin renames it for every member; the picture and the hubs stay, and a picture change keeps the name", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice);
+    await alice.setPicture(RED);
+    await alice.setHub(bob.myKey, "exclude");
+    await alice.rename("  Book\nclub  ");
+    await mesh.settle();
+    expect([alice.name, bob.name]).toEqual(["Book club", "Book club"]);
+    expect([bob.picture, bob.hubPolicy.no]).toEqual([RED, [bob.myKey]]);
+    expect(mesh.names).toContainEqual({ at: bob.myKey, by: alice.myKey, name: "Book club" });
+    // What was created stays: the name to fall back on.
+    expect(bob.state.name).toBe("Ghosts");
+    // The name never crosses an edge in the clear.
+    expect(JSON.stringify(mesh.sent.filter(s => s.frame.t === "group-meta"))).not.toContain("Book club");
+
+    await alice.setPicture(BLUE);
+    await alice.setPicture(null);
+    await mesh.settle();
+    expect([bob.name, bob.picture, bob.hubPolicy.no]).toEqual(["Book club", undefined, [bob.myKey]]);
+    // Only the name changed once: the picture lines are no renames.
+    expect(mesh.names.filter(n => n.at === bob.myKey)).toHaveLength(1);
+    // The same name again is no new statement.
+    const r = alice.state.meta!.r;
+    await alice.rename("Book club");
+    expect(alice.state.meta!.r).toBe(r);
+
+    // Carol, invited after, is told the new name, and gets it at sync; kept across a restart.
+    const carol = await admit(mesh, alice);
+    expect([carol.state.name, carol.name]).toEqual(["Book club", "Book club"]);
+    expect(new GroupSession(clone(mesh.saved.get(bob.myKey)!), { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
+  });
+
+  it("only the admin renames, a forged or unsafe name is refused, and a body without a name gives back the first one", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
+    await expect(bob.rename("Bob's")).rejects.toThrow("Only the admin");
+    for (const bad of ["", " \n\t ", "‮​", "x".repeat(65)]) await expect(alice.rename(bad)).rejects.toThrow("1 to 64 characters");
+    await alice.rename("Book club");
+    await mesh.settle();
+    const bobId = identityFromSeedB64(bob.state.seedB64);
+    for (const frame of [handMade(carol, bobId.seed, bob.myKey, encodeGroupMetaBody({ name: "Pwned" })), handMade(carol, bobId.seed, alice.myKey, encodeGroupMetaBody({ name: "Pwned" }))])
+      await carol.handle(bob.myKey, clone(frame));
+    expect(carol.name).toBe("Book club");
+    // The admin's own app, signing a name no Ghostly would send: dropped, the rest of the body kept.
+    const aliceSeed = identityFromSeedB64(alice.state.seedB64).seed;
+    await carol.handle(alice.myKey, clone(handMade(carol, aliceSeed, alice.myKey, JSON.stringify({ name: "x".repeat(300), pic: RED }), { r: 100 })));
+    expect([carol.name, carol.picture]).toEqual(["Ghosts", RED]);
+    await carol.handle(alice.myKey, clone(handMade(carol, aliceSeed, alice.myKey, JSON.stringify({ name: "Admin‮\nsays" }), { r: 101 })));
+    expect(carol.name).toBe("Admin says");
+    // An admin on an app from before names sets a picture: its body says no name, so the group has its first one again.
+    await carol.handle(alice.myKey, clone(handMade(carol, aliceSeed, alice.myKey, JSON.stringify({ pic: BLUE }), { r: 102 })));
+    expect([carol.name, carol.picture]).toEqual(["Ghosts", BLUE]);
+    expect(mesh.names.filter(n => n.at === carol.myKey).map(n => n.name)).toEqual(["Book club", null, "Admin says", null]);
+  });
+
+  it("a new admin signs the name again", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
+    await alice.rename("Book club");
+    await mesh.settle();
+    await alice.transferAdmin(bob.myKey);
+    await mesh.settle();
+    expect(carol.state.meta!.by).toBe(bob.myKey);
+    expect(carol.name).toBe("Book club");
+    await expect(alice.rename("Mine")).rejects.toThrow("Only the admin");
+    await bob.rename("Reading club");
+    await mesh.settle();
+    expect([alice.name, carol.name]).toEqual(["Reading club", "Reading club"]);
+  });
+});
+
 // -- group-community/1 ------------------------------------------------------------------------------
 
 interface Member { name: string; session: CommunitySession; saved: CommunityState }
@@ -185,6 +264,7 @@ interface Member { name: string; session: CommunitySession; saved: CommunityStat
 class Net {
   readonly members = new Map<string, Member>();
   readonly pictures: { at: string; picture: string | undefined }[] = [];
+  readonly names: { at: string; name: string | null }[] = [];
   readonly relayed: CommunityFrame[] = [];
   private pending: Promise<unknown>[] = [];
   private hooks(name: string) {
@@ -200,7 +280,10 @@ class Net {
       addressed: (to: string, frame: CommunityFrame) => deliver(this.byKey(to), frame),
       message: () => {},
       changed: () => {},
-      metaChanged: (_by: string, picture: string | undefined) => { this.pictures.push({ at: name, picture }); },
+      metaChanged: (_by: string, change: GroupMetaChange) => {
+        if ("picture" in change) this.pictures.push({ at: name, picture: change.picture ?? undefined });
+        if ("name" in change) this.names.push({ at: name, name: change.name ?? null });
+      },
       relay: (frame: CommunityFrame) => { this.relayed.push(frame); },
     };
   }
@@ -290,5 +373,39 @@ describe("group picture, group-community/1", () => {
     const stale = signGroupMeta({ g: s.id, e: before.e, h: communityCommitHash(before), r: 999, ts: 1 }, "{}", aliceSeed, alice.session.myKey);
     expect(await s.handle(alice.session.myKey, clone(wrapGroupMeta(stale, s.topHash, now, true)))).toBe(false);
     expect(s.picture).toBe(RED);
+  });
+});
+
+describe("group name, group-community/1", () => {
+  it("the admin renames it beside the picture; someone let in while the admin is away gets both; a member's rename is refused", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    await alice.session.setPicture(RED);
+    await alice.session.rename("Book club");
+    await net.settle();
+    expect([bob.session.name, bob.session.picture]).toEqual(["Book club", RED]);
+    expect(bob.session.state.name).toBe("Ghosts");
+    await expect(bob.session.rename("Bob's")).rejects.toThrow("Only the admin");
+    const s = bob.session, key = epochKeys(fromBase64Url(s.state.secrets[s.topHash]), s.id, s.epoch).message;
+    const bobId = identityFromSeedB64(s.state.seedB64);
+    const forged = wrapGroupMeta(signGroupMeta({ g: s.id, e: s.epoch, h: s.topHash, r: 50, ts: 1 }, encodeGroupMetaBody({ name: "Pwned" }), bobId.seed, alice.session.myKey), s.topHash, key, true);
+    expect(await alice.session.handle(s.myKey, clone(forged))).toBe(false);
+    expect(alice.session.name).toBe("Book club");
+    // Alice goes away; Bob lets Carol in: the welcome names the group as it is now, the statement follows at sync.
+    net.members.delete("alice");
+    const carol = await net.admit(bob, "carol");
+    expect(carol.session.state.name).toBe("Book club");
+    await net.meet(bob, carol);
+    expect([carol.session.name, carol.session.picture]).toEqual(["Book club", RED]);
+    // Alice is back, removes the picture: the name stays.
+    net.members.set("alice", alice);
+    await net.meet(alice, carol);
+    await alice.session.setPicture(null);
+    await net.settle();
+    expect([bob.session.name, carol.session.name, carol.session.picture]).toEqual(["Book club", "Book club", undefined]);
+    expect(net.names.filter(n => n.at === "bob").map(n => n.name)).toEqual(["Book club"]);
+    expect(new CommunitySession(clone(bob.saved), { save: async () => {}, broadcast: () => {}, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
   });
 });

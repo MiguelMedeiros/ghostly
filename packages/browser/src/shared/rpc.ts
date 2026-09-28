@@ -296,6 +296,8 @@ export interface EngineApi {
   rotateGroup(params: { groupId: string }): void;
   /** The admin sets the group's picture (a data URL as `avatarFromFile` makes it), or removes it with null. */
   setGroupPicture(params: { groupId: string; picture: string | null }): void;
+  /** The admin renames the group (1 to 64 characters, one line); the picture stays. */
+  renameGroup(params: { groupId: string; name: string }): void;
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
 }

@@ -2,7 +2,7 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  communityMessageId, type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type Hub, type Roster,
+  communityMessageId, type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -11,6 +11,16 @@ import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
 export const pictureText = (name: string, set: boolean) => `${name} ${set ? "changed" : "removed"} the group's picture`;
+/** The line a new name leaves (both profiles): `group` is the name the group has now. */
+export const renameText = (name: string, group: string) => `${name} renamed the group to “${group}”`;
+
+/** The lines a statement that changed the group's name or picture leaves in its history, in that order. */
+export function metaLines(name: string, change: GroupMetaChange, group: string): { event: GroupEvent; text: string }[] {
+  return [
+    ...("name" in change ? [{ event: "renamed" as const, text: renameText(name, group) }] : []),
+    ...("picture" in change ? [{ event: "picture" as const, text: pictureText(name, !!change.picture) }] : []),
+  ];
+}
 
 /**
  * Community groups (`group-community/1`, WISP 9xx · Group Community): a link anyone can open, any
@@ -372,6 +382,7 @@ export class Communities {
   async makeAdmin(groupId: string, key: string): Promise<void> { await this.require(groupId).transferAdmin(key); }
   async rotate(groupId: string): Promise<void> { await this.require(groupId).rotate(); }
   async setPicture(groupId: string, picture: string | null): Promise<void> { await this.require(groupId).setPicture(picture); }
+  async rename(groupId: string, name: string): Promise<void> { await this.require(groupId).rename(name); }
   /** A new link (the old one reaches nobody), or none. */
   async replaceLink(groupId: string, off = false): Promise<string> {
     const s = this.require(groupId);
@@ -996,9 +1007,12 @@ export class Communities {
       app: m => this.deliver(id, () => this.host.communityApp?.(id, m.sender, m.frame)),
       pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
-      metaChanged: (by, picture) => {
+      metaChanged: (by, change) => {
         const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
-        void this.event(id, "picture", pictureText(name, !!picture), this.now(), session.epoch, by).then(() => this.host.emit());
+        void (async () => {
+          for (const line of metaLines(name, change, session.name)) await this.event(id, line.event, line.text, this.now(), session.epoch, by);
+          this.host.emit();
+        })();
       },
       clock: () => this.now(),
       relay: frame => { if (this.live.get(id)?.hub) for (const linkId of this.host.edges(id).values()) this.sendTo(linkId, frame); },

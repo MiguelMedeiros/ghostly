@@ -3,10 +3,10 @@ import { createIdentity } from "../src/identity";
 import { MAX_AVATAR_LENGTH } from "../src/avatar";
 import { epochKeys, newEpochSecret } from "../src/groupCrypto";
 import {
-  MAX_GROUP_META_BODY, MAX_GROUP_PICTURE_LENGTH, encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaBody, parseGroupMetaFrame,
+  MAX_GROUP_META_BODY, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, encodeGroupMetaBody, groupDisplayName, groupMetaChange, groupMetaNewer, groupMetaPicture, groupName, groupMetaTag, openGroupMeta, parseGroupMetaBody, parseGroupMetaFrame,
   parseGroupMetaStatement, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
 } from "../src/groupMeta";
-// covers: groups.picture.protocol
+// covers: groups.picture.protocol, groups.rename.protocol
 
 function jpeg(width: number, height: number, padding = 0): Uint8Array {
   const app0 = [0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00];
@@ -33,6 +33,40 @@ describe("group metadata body", () => {
     for (const bad of ["", "[]", "null", "not json", JSON.stringify({ pic: "https://example.com/a.jpg" }), JSON.stringify({ pic: url(jpeg(0, 10)) }),
       JSON.stringify({ pic: 7 }), JSON.stringify({ x: "y".repeat(MAX_GROUP_META_BODY) }), JSON.stringify({ pic: url(jpeg(128, 128, MAX_GROUP_PICTURE_LENGTH)) })])
       expect(parseGroupMetaBody(bad), bad.slice(0, 30)).toBeNull();
+  });
+});
+
+describe("group name", () => {
+  it("is one clean line of 1 to 64 characters and at most 256 bytes, refused rather than cut", () => {
+    expect(groupName("  Book\n\tclub  ")).toBe("Book club");
+    expect(groupName("Book ​ club")).toBe("Book club");
+    // Direction overrides and other invisible characters go; the joiners emoji need stay.
+    expect(groupName("‮evil⁦ club x")).toBe("evil club x");
+    expect(groupName("👨‍👩‍👧 family")).toBe("👨‍👩‍👧 family");
+    expect(groupName("é".repeat(MAX_GROUP_NAME_LENGTH))).toBe("é".repeat(MAX_GROUP_NAME_LENGTH));
+    // 64 characters of four bytes each is the byte bound exactly; one more character is too long.
+    expect(groupName("😀".repeat(MAX_GROUP_NAME_LENGTH))).toHaveLength(2 * MAX_GROUP_NAME_LENGTH);
+    expect(MAX_GROUP_NAME_BYTES).toBe(4 * MAX_GROUP_NAME_LENGTH);
+    for (const bad of [undefined, null, 7, {}, "", "   ", "\n", "‮​⁦", "x".repeat(MAX_GROUP_NAME_LENGTH + 1), "😀".repeat(MAX_GROUP_NAME_LENGTH + 1), "x".repeat(10_000)])
+      expect(groupName(bad), String(bad).slice(0, 20)).toBeUndefined();
+  });
+  it("travels in the body beside the picture; a name that does not hold is dropped and the picture kept", () => {
+    expect(JSON.parse(encodeGroupMetaBody({ name: " Book club\n", pic: PIC }))).toEqual({ name: "Book club", pic: PIC });
+    for (const bad of ["", "‮", "x".repeat(65)]) expect(() => encodeGroupMetaBody({ name: bad })).toThrow("1 to 64 characters");
+    expect(parseGroupMetaBody(JSON.stringify({ name: "Book\nclub", pic: PIC }))).toEqual({ name: "Book club", pic: PIC });
+    for (const name of [7, "", "x".repeat(65), ["a"]]) expect(parseGroupMetaBody(JSON.stringify({ name, pic: PIC }))).toEqual({ pic: PIC });
+  });
+  it("falls back to the name a member got in with, and says what changed", () => {
+    const seed = createIdentity();
+    const meta = (body: string, r = 1) => signGroupMeta({ g: G, e: 0, h: H, r, ts: 1 }, body, seed.seed, seed.pubKeyZ32);
+    const named = meta(encodeGroupMetaBody({ name: "Book club", pic: PIC })), pictured = meta(encodeGroupMetaBody({ pic: PIC }), 2);
+    expect(groupDisplayName(undefined, "Ghosts")).toBe("Ghosts");
+    expect(groupDisplayName(named, "Ghosts")).toBe("Book club");
+    expect(groupDisplayName(pictured, "Ghosts")).toBe("Ghosts");
+    expect(groupMetaChange(undefined, named)).toEqual({ name: "Book club", picture: PIC });
+    expect(groupMetaChange(named, pictured)).toEqual({ name: null });
+    expect(groupMetaChange(pictured, meta(encodeGroupMetaBody({}), 3))).toEqual({ picture: null });
+    expect(groupMetaChange(named, meta(named.body, 4))).toBeNull();
   });
 });
 

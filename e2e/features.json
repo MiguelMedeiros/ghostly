@@ -289,6 +289,8 @@
     {"id":"groups.protocol.replies","wisp":"900","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"Replies on group-msg: sealed apart from the text (`r`, mesh) or inside the payload (community), the author a member key; older apps ignore them"},
     {"id":"groups.reactions","wisp":"900","kind":"feature","clients":["web","extension","desktop","cli"],"infra":[],"title":"Reactions in a private group or a community: chips per emoji with the members' names, one per member per message, the latest wins"},
     {"id":"groups.remove-member","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The admin removes a member"},
+    {"id":"groups.rename","wisp":"900","kind":"feature","clients":["web","extension","desktop","cli"],"infra":[],"title":"The admin renames a private group or a community; every member sees the new name, and the picture stays"},
+    {"id":"groups.rename.protocol","wisp":"900","kind":"protocol","clients":["web","extension","desktop","cli"],"infra":[],"title":"Group metadata: a name beside the picture, one clean line, the name a member got in with as the fallback"},
     {"id":"groups.replies","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Reply to a message in a private group or a community, beside @mentions: the quote names the member"},
     {"id":"groups.rotate","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Epoch rotation: a new secret sealed per member"},
     {"id":"groups.send","wisp":"902","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Everyone reads everyone over the member mesh"},

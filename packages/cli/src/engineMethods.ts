@@ -29,7 +29,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "setServiceShared", "updateSettings", "setCallSignal", "setTyping", "setWakeSubscription", "setWakeMuted", "setFastPoll", "createGroup", "inviteToGroup",
   "acceptGroupInvitation", "declineGroupInvitation", "enableGroupLink", "disableGroupLink", "joinGroupByLink",
   "sendGroupMessage", "groupMessages", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
-  "setGroupPicture", "forgetGroup",
+  "setGroupPicture", "renameGroup", "forgetGroup",
 ];
 
 /** Reads the hosts use outside `EngineApi`: the whole state, and one chat's stored messages. */
