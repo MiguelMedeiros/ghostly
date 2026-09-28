@@ -91,6 +91,16 @@ export const UNIT_PROJECTS = [
     whole: ["scripts/vitest.config.ts", "vitest.shared.ts"],
     tests: ["scripts/test/**"],
   },
+  {
+    name: "cli", cwd: "packages/cli", args: [],
+    sources: ["packages/core/src/**", "packages/browser/src/**", "packages/cli/**"],
+    whole: ["packages/cli/package.json", "packages/cli/vitest.config.ts", "packages/cli/vite.config.ts", "packages/cli/test/support/build.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
+    tests: ["packages/cli/test/**"],
+    // Most CLI tests run dist/ghostly.mjs (built by the globalSetup) through `runner`, which imports none of what
+    // the binary is built from. A change the build takes in (bundleReaches from `entry`; without the sources, one
+    // under `sources`) hands vitest the runner too, and vitest runs the tests that import it.
+    bundle: { entry: "packages/cli/src/bin.ts", runner: "packages/cli/test/support/cli.ts", sources: ["packages/core/src/**", "packages/browser/src/**", "packages/cli/src/**"] },
+  },
 ];
 
 /** `npm run lint`'s scope: what eslint is given, and what makes the whole lint run. */
@@ -225,6 +235,36 @@ export function testsReaching(changed, files, tests) {
   return [...out].sort();
 }
 
+// ---------- what a bundle is built from ----------
+
+/**
+ * The modules a bundle is built from (paths without extension): `entry` and what it imports, by relative path or
+ * through a workspace package (`@ghostly/core` is core's barrel, `@ghostly/browser/x` is packages/browser/src/x).
+ * A module not in `files` (a .json, a deleted file) is kept but not followed.
+ *
+ * @param {string} entry  the bundle's entry file
+ * @param {Record<string, string>} files  path → text of the files to follow
+ * @returns {Set<string>}
+ */
+export function bundleReaches(entry, files) {
+  const byModule = new Map(Object.keys(files).map((p) => [stripExt(p), p]));
+  const out = new Set();
+  const queue = [stripExt(entry)];
+  while (queue.length) {
+    const mod = queue.pop();
+    const path = byModule.get(mod) ?? byModule.get(`${mod}/index`);
+    const id = path ? stripExt(path) : mod;
+    if (out.has(id)) continue;
+    out.add(id);
+    if (!path) continue;
+    queue.push(...relativeImports(path, files[path]));
+    for (const m of files[path].matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']@ghostly\/(core|browser\/([^"']+))["']/g)) {
+      queue.push(m[1] === "core" ? CORE_INDEX : stripExt(`packages/browser/src/${m[2]}`));
+    }
+  }
+  return out;
+}
+
 // ---------- seeing through @ghostly/core's barrel ----------
 
 const CORE_SRC = "packages/core/src/";
@@ -336,12 +376,16 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
     const outside = [...code.map((c) => c.path), ...coreDependents].filter((f) => !match(p.sources, f));
     const viaPath = outside.length && codeFiles ? testsReaching(outside, codeFiles, p.tests).filter((f) => !direct.includes(f) && !viaCore.includes(f)) : [];
     const files = [...direct, ...viaCore, ...viaPath];
+    const reach = p.bundle && codeFiles ? bundleReaches(p.bundle.entry, codeFiles) : null;
+    const bundled = p.bundle ? code.filter((c) => (reach ? reach.has(stripExt(c.path)) : match(p.bundle.sources, c.path))) : [];
+    if (bundled.length && !files.includes(p.bundle.runner)) files.push(p.bundle.runner);
     if (!files.length) return { ...p, mode: "skip", reason: coreChanged.length && match(p.sources, coreChanged[0]) ? "nothing it tests imports the changed core code" : "nothing it imports changed" };
     const tests = files.filter(isTest).length;
     const parts = [];
     if (direct.length) parts.push(`${direct.length} changed file(s)`);
     if (viaCore.length) parts.push(`${viaCore.length} importer(s) of the changed core code`);
     if (viaPath.length) parts.push(`${viaPath.length} test file(s) importing the change by relative path`);
+    if (bundled.length) parts.push(`the tests of the built CLI (${bundled.length} changed file(s) it is built from)`);
     return { ...p, mode: "related", files, reason: `vitest related over ${parts.join(" + ")}${tests ? ` (${tests} test file(s) among them)` : ""}` };
   });
 
