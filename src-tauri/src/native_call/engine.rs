@@ -79,6 +79,7 @@ const NEEDED: &[(&str, &str)] = &[
     ("jpegenc", "gstreamer1.0-plugins-good"),
     ("autoaudiosrc", "gstreamer1.0-plugins-good"),
     ("autoaudiosink", "gstreamer1.0-plugins-good"),
+    ("level", "gstreamer1.0-plugins-good"),
     ("opusenc", "gstreamer1.0-plugins-base"),
     ("opusdec", "gstreamer1.0-plugins-base"),
     ("volume", "gstreamer1.0-plugins-base"),
@@ -332,6 +333,115 @@ impl Drop for Camera {
     fn drop(&mut self) {
         self.attach(None);
         stop(self.pipeline.clone());
+    }
+}
+
+/// A microphone's loudness for Settings' meter: `level` reports it every 80 ms, and nothing goes anywhere else.
+const METER: &str = "{device} ! queue ! audioconvert ! audioresample ! audio/x-raw,channels=1 \
+     ! level interval=80000000 post-messages=true ! fakesink sync=false async=false";
+
+/// How loud a `level` reading is on the page's meter (`voiceLevel` in core): the RMS in dB as a linear RMS,
+/// times four, at most 1. Silence (-inf dB) is 0.
+pub fn meter_level(rms_db: f64) -> f64 {
+    if !rms_db.is_finite() {
+        return 0.0;
+    }
+    (10f64.powf(rms_db / 20.0) * 4.0).min(1.0)
+}
+
+/// A microphone open for Settings' meter, until dropped.
+pub struct Meter {
+    pipeline: gst::Pipeline,
+    /// The microphone's name, None for the default one.
+    pub device: Option<String>,
+}
+
+impl Meter {
+    /// The microphone named `wanted`, or the default one (the test tone with `fake`, as in a call). `levels`
+    /// gets its loudness, 0 to 1, as JSON (`{"level":0.4}`), about 12 times a second.
+    pub fn open(fake: bool, wanted: Option<&str>, levels: Sink) -> Result<Meter, String> {
+        let default = if fake { TONE } else { "autoaudiosrc" };
+        let (pipeline, device) = start_with(
+            "The microphone",
+            METER,
+            Kind::Microphone,
+            wanted,
+            default,
+            |pipeline| {
+                let levels = levels.clone();
+                // Read where `level` posts them; anything else (an error) stays on the bus for `start`.
+                pipeline
+                    .bus()
+                    .ok_or("No bus")?
+                    .set_sync_handler(move |_, message| {
+                        let gst::MessageView::Element(element) = message.view() else {
+                            return gst::BusSyncReply::Pass;
+                        };
+                        let Some(reading) = element.structure().filter(|s| s.name() == "level")
+                        else {
+                            return gst::BusSyncReply::Pass;
+                        };
+                        if let Ok(rms) = reading.get::<gst::glib::ValueArray>("rms") {
+                            let loudest = rms
+                                .iter()
+                                .filter_map(|v| v.get::<f64>().ok())
+                                .fold(f64::NEG_INFINITY, f64::max);
+                            let level = serde_json::json!({ "level": meter_level(loudest) });
+                            levels(level.to_string().into_bytes());
+                        }
+                        gst::BusSyncReply::Drop
+                    });
+                Ok(())
+            },
+        )?;
+        Ok(Meter { pipeline, device })
+    }
+}
+
+impl Drop for Meter {
+    fn drop(&mut self) {
+        stop(self.pipeline.clone());
+        if let Some(bus) = self.pipeline.bus() {
+            bus.unset_sync_handler();
+        }
+    }
+}
+
+/// The speakers' test: a tone, a second long.
+const SPEAKER_TEST: &str =
+    "audiotestsrc wave=sine freq=660 volume=0.3 samplesperbuffer=4800 num-buffers=10 \
+     ! audio/x-raw,rate=48000,channels=1 ! audioconvert ! audioresample ! {device}";
+
+/// Plays the speakers' test on the speaker named `wanted`, or the default one (nothing heard with `fake`, as in
+/// a call). Returns once it has played, with the name of the speaker it played on (None: the default). Blocking.
+///
+/// A tone, not the page's own test sound: that one is a file for the WebView, which GStreamer would need a
+/// decoder from another plugin set to play.
+pub fn test_speaker(fake: bool, wanted: Option<&str>) -> Result<Option<String>, String> {
+    let default = if fake {
+        "fakesink sync=true async=false"
+    } else {
+        "autoaudiosink"
+    };
+    let (pipeline, device) = start_with(
+        "The speakers",
+        SPEAKER_TEST,
+        Kind::Speaker,
+        wanted,
+        default,
+        |_| Ok(()),
+    )?;
+    let ended = pipeline.bus().and_then(|bus| {
+        bus.timed_pop_filtered(
+            gst::ClockTime::from_seconds(5),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        )
+    });
+    stop(pipeline);
+    match ended.as_ref().map(|message| message.view()) {
+        Some(gst::MessageView::Eos(_)) => Ok(device),
+        Some(gst::MessageView::Error(error)) => Err(format!("The speakers: {}", error.error())),
+        _ => Err("The speakers did not finish the tone".into()),
     }
 }
 
@@ -1281,6 +1391,70 @@ mod tests {
                  a=candidate:8 1 udp 2130706431 fd00::2 42935 typ host\r\n"
             ),
             "{out}"
+        );
+    }
+
+    #[test]
+    fn the_meter_reads_loudness_as_the_pages_meter_does() {
+        assert_eq!(meter_level(f64::NEG_INFINITY), 0.0);
+        assert_eq!(meter_level(f64::NAN), 0.0);
+        // A sine at 0.2 has an RMS of 0.141 (-17 dB): 0.57 on the meter, as `voiceLevel` gives its samples.
+        let sine = 20.0 * (0.2 / 2f64.sqrt()).log10();
+        assert!(
+            (meter_level(sine) - 0.566).abs() < 0.001,
+            "{}",
+            meter_level(sine)
+        );
+        assert_eq!(meter_level(0.0), 1.0);
+        assert!(meter_level(-60.0) < 0.005);
+    }
+
+    /// Settings' meter on the test tone, then on a microphone that is not there (the default instead), and the
+    /// speakers' test, which ends by itself. Skipped where the GStreamer plugins are missing.
+    #[test]
+    fn the_meter_hears_the_microphone_and_the_speakers_test_ends() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let heard = Arc::new(Mutex::new(Vec::<f64>::new()));
+        let meter = |wanted: Option<&str>| {
+            heard.lock().unwrap().clear();
+            let into = heard.clone();
+            let meter = Meter::open(
+                true,
+                wanted,
+                Arc::new(move |bytes: Vec<u8>| {
+                    let reading: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    into.lock()
+                        .unwrap()
+                        .push(reading["level"].as_f64().unwrap());
+                }),
+            )
+            .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while heard.lock().unwrap().len() < 5 {
+                assert!(Instant::now() < deadline, "no readings");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let device = meter.device.clone();
+            drop(meter);
+            let heard = heard.lock().unwrap();
+            (device, heard.iter().copied().fold(0.0, f64::max))
+        };
+        let (device, loudest) = meter(None);
+        assert_eq!(device, None);
+        assert!((loudest - 0.566).abs() < 0.05, "the tone read {loudest}");
+        let (device, loudest) = meter(Some("No such microphone"));
+        assert_eq!(device, None);
+        assert!(loudest > 0.5, "the default read {loudest}");
+
+        let started = Instant::now();
+        assert_eq!(test_speaker(true, Some("No such speaker")), Ok(None));
+        assert!(
+            started.elapsed() >= Duration::from_millis(900),
+            "the tone lasted {:?}",
+            started.elapsed()
         );
     }
 
