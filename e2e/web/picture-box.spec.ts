@@ -31,13 +31,14 @@ test("a picture's bubble is as tall from the start as the picture it shows", { t
   await link(alice, bob);
   await connect(alice, bob);
 
-  // Every height Bob's picture box has had, from the moment it is in the page.
+  // Every height Bob's picture box has had in the layout, from the moment it is in the page (a new message's entry
+  // animation scales the bubble, which is not the layout moving).
   await bob.page.evaluate(() => {
     const seen: number[] = [];
     (window as unknown as { pictureHeights: number[] }).pictureHeights = seen;
     const note = () => {
       const box = document.querySelector<HTMLElement>("[data-testid='file-picture']");
-      if (box) seen.push(Math.round(box.getBoundingClientRect().height));
+      if (box) seen.push(box.offsetHeight);
     };
     new MutationObserver(note).observe(document.body, { childList: true, subtree: true, attributes: true });
   });
@@ -52,9 +53,7 @@ test("a picture's bubble is as tall from the start as the picture it shows", { t
   await expect(box).toHaveAttribute("data-box", "sized");
   expect(await box.evaluate((el) => el.style.aspectRatio)).toBe("200 / 600");
   // 200 × 600 fits 330 high: 110 × 330.
-  const shown = (await box.boundingBox())!;
-  expect(Math.round(shown.width)).toBe(110);
-  expect(Math.round(shown.height)).toBe(330);
+  expect(await box.evaluate((el) => [el.offsetWidth, el.offsetHeight])).toEqual([110, 330]);
   const heights = await bob.page.evaluate(() => (window as unknown as { pictureHeights: number[] }).pictureHeights);
   expect(heights.length).toBeGreaterThan(0);
   expect(new Set(heights)).toEqual(new Set([330]));
@@ -62,5 +61,5 @@ test("a picture's bubble is as tall from the start as the picture it shows", { t
   // Alice's own bubble has its box at once too.
   const mine = chat(alice).getByTestId("file-bubble").filter({ hasText: "tall ghost.png" }).getByTestId("file-picture");
   await expect(mine).toHaveAttribute("data-box", "sized");
-  expect(Math.round((await mine.boundingBox())!.height)).toBe(330);
+  expect(await mine.evaluate((el) => el.offsetHeight)).toBe(330);
 });
