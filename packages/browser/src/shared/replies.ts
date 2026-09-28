@@ -40,8 +40,8 @@ export function replyRef(message: ReplyTarget, group = message.linkId?.startsWit
   return row && !/^\d+$/.test(row[1]) ? row[1] : undefined;
 }
 
-/** A reply to `original` as this side keeps it: always found, since it is here. */
-export function replyTo(original: StoredMessage, ref: string): MessageReply {
+/** A reply to `original` as this side keeps it: always found, since it is here. The engine's row, or the UI's copy. */
+export function replyTo(original: Pick<StoredMessage, "id" | "text" | "member"> & { sender: string }, ref: string): MessageReply {
   return { id: ref, snippet: replySnippet(original.text), from: original.sender === "me" ? "me" : "peer",
     ...(original.member && { member: original.member }), messageId: original.id };
 }
