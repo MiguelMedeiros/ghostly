@@ -462,7 +462,9 @@ export class Communities {
     if (!live.hub) {
       // A newcomer first connects to the member who let it in (a hub): only then, or a while after, is it one more.
       const settled = () => now - live.joinedAt >= this.timings.newcomerMs || !freshHubs(live.beacon, now).some(h => h.key !== me);
-      const want = () => settled() && (shouldBeHub(me, live.beacon, now) || (!!live.forceHub && freshHubs(live.beacon, now).length < COMMUNITY_TOPOLOGY.maxHubs));
+      // On an app with a budget of connections (a Mac), only with room for a member beside the other hubs.
+      const want = () => settled() && (shouldBeHub(me, live.beacon, now) || (!!live.forceHub && freshHubs(live.beacon, now).length < COMMUNITY_TOPOLOGY.maxHubs))
+        && this.capacity(groupId, live, now) > 0;
       if (want()) {
         // With no hub at all there is nobody to agree with: at once (another member doing the same is one
         // more hub, which steps down when idle). Otherwise a random wait, so a crowd does not all step up.
@@ -495,7 +497,7 @@ export class Communities {
         // A publish that just failed (the relays' budget, say) is tried again in a moment, not every tick.
       } else if (now - live.lastBeaconWrite >= COMMUNITY_TOPOLOGY.beaconEveryMs || !live.beacon.some(h => h.key === me)
         // A load that moved much (or filled up) is said at once, so members stop asking a full hub.
-        || (now - live.lastBeaconWrite >= 5_000 && Math.abs(load - (live.beacon.find(h => h.key === me)?.load ?? load)) >= 8)) {
+        || (now - live.lastBeaconWrite >= 5_000 && Math.abs(this.beaconLoad(groupId, live, now) - (live.beacon.find(h => h.key === me)?.load ?? load)) >= 8)) {
         await this.publishBeacon(groupId, live, now, true);
       }
     }
@@ -583,7 +585,41 @@ export class Communities {
       if (id && this.host.linkReady(id, 2)) live.members.set(key, now);
       else if (now - since > this.timings.memberGoneMs || live.session.wasRemoved(key)) live.members.delete(key);
     }
+    this.shed(groupId, live, now);
     return live.members.size;
+  }
+
+  /**
+   * Past its room (more hubs, another group or a 1:1 chat took some): the members whose edge is not up go first, and
+   * those dropped ask another hub.
+   */
+  private shed(groupId: string, live: Live, now: number): void {
+    const extra = live.members.size - this.capacity(groupId, live, now, false);
+    if (extra <= 0) return;
+    const edges = this.host.edges(groupId);
+    const up = (key: string) => { const id = edges.get(key); return id && this.host.linkReady(id, 2) ? 1 : 0; };
+    for (const key of [...live.members.keys()].sort((a, b) => up(a) - up(b) || (a < b ? 1 : -1)).slice(0, extra)) live.members.delete(key);
+  }
+
+  /**
+   * The members this hub may keep edges with: `hubCapacity`, or on an app with a budget of connections (a Mac, WISP
+   * 9xx · Group Mesh § Hubs, Budget) what its other groups and 1:1 chats leave (`peerRoom`), less its edges to the
+   * other hubs and, for taking someone new (`entries`), its entry sessions.
+   */
+  private capacity(groupId: string, live: Live, now: number, entries = true): number {
+    const room = this.host.peerRoom?.(groupId);
+    if (room === undefined) return COMMUNITY_TOPOLOGY.hubCapacity;
+    const hubs = new Set(freshHubs(live.beacon, now).map(h => h.key));
+    for (const key of this.host.edges(groupId).keys()) if (!live.members.has(key)) hubs.add(key);
+    hubs.delete(live.session.myKey);
+    const held = hubs.size + (entries ? this.host.entries(groupId).size : 0);
+    return Math.max(0, Math.min(COMMUNITY_TOPOLOGY.hubCapacity, room - held));
+  }
+
+  /** The load the beacon says: a hub with no room left says it is full, as one at `hubCapacity` does. */
+  private beaconLoad(groupId: string, live: Live, now: number): number {
+    const n = live.members.size;
+    return n >= this.capacity(groupId, live, now, false) ? Math.max(n, COMMUNITY_TOPOLOGY.hubCapacity) : n;
   }
 
   private async readBeacon(groupId: string, live: Live, now: number): Promise<void> {
@@ -616,7 +652,7 @@ export class Communities {
       existing = readBeacon(keys, records); head = readBeaconHead(keys, records);
     }
     // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
-    const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: live.members.size, since: live.hubSince || now } : null, now, key => !live.session.wasRemoved(key));
+    const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !live.session.wasRemoved(key));
     // Nor a newer head: several hubs write this record in turn.
     const newest = newerHead(head, this.newestFrame(live), now);
     await this.host.publish(keys.identity, beaconRecords(keys, hubs, newest), true);
@@ -648,7 +684,7 @@ export class Communities {
       if (now - ts > COMMUNITY_TOPOLOGY.lobbyFreshMs || key === live.session.myKey || live.session.wasRemoved(key)) continue;
       // Someone is asking: not the moment to step down.
       live.emptySince = now;
-      if (!live.members.has(key) && live.members.size >= COMMUNITY_TOPOLOGY.hubCapacity) continue;
+      if (!live.members.has(key) && live.members.size >= this.capacity(groupId, live, now)) continue;
       if (!live.members.has(key)) { traceJoin(groupId, "lobby.seen", { age: now - ts }); live.lobbyBusyUntil = now + this.timings.lobbyBusyMs; }
       live.members.set(key, Math.max(live.members.get(key) ?? 0, now));
     }
@@ -660,6 +696,7 @@ export class Communities {
     const wanted = new Set<string>();
     if (s.status === "active") {
       if (live.hub) {
+        this.shed(groupId, live, now);
         for (const h of freshHubs(live.beacon, now)) if (h.key !== s.myKey) wanted.add(h.key);
         for (const key of live.members.keys()) wanted.add(key);
       } else for (const key of live.myHubs) wanted.add(key);
@@ -763,6 +800,8 @@ export class Communities {
       const turn = Math.floor(waited / KNOCK_SLOT_MS) % order.length, early = waited % KNOCK_SLOT_MS < KNOCK_SLOT_OPEN_MS;
       if (order[turn] !== s.myKey || !early || (waited >= KNOCK_SLOT_MS && !stillKnocking)) continue;
       if (live.pendingEntries.size >= MAX_PENDING_ENTRIES) break;
+      // A hub with no room for one more member (its budget of connections) lets the next hub in turn answer.
+      if (live.members.size >= this.capacity(groupId, live, now)) break;
       live.pendingEntries.set(key, now);
       traceJoin(groupId, "knock.seen", { age: now - ts, turn });
       try { await this.host.openEntry(link, "host", s.state.entry.seedB64, key); } catch { live.pendingEntries.delete(key); }
@@ -853,7 +892,7 @@ export class Communities {
         this.host.entryDone?.(linkId);
         live.admittedAt = this.now();
         // Its first hub is me (it knows): its edge at once, both sides looking fast, no lobby in between.
-        if (live.hub && (live.members.has(peer) || live.members.size < COMMUNITY_TOPOLOGY.hubCapacity)) {
+        if (live.hub && (live.members.has(peer) || live.members.size < this.capacity(g, live, this.now()))) {
           live.members.set(peer, this.now());
           if (!this.host.edges(g).has(peer)) live.expect.add(peer);
           await this.reconcile(g, live, this.now());
