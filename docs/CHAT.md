@@ -156,7 +156,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 | | Private (`group-mesh/1`) | Community (`group-community/1`) |
 |---|---|---|
 | Members | up to 32 | up to 256 |
-| Shape | every member linked to every other | online members elected as hubs relay |
+| Shape | every member linked to every other; past 16, members whose apps stay online are hubs and the others link to two of them | online members elected as hubs relay |
 | Admin | one, signs every change | one; keeps remove, role, rotate and link. Any member can let people in |
 | Link | `group1/…`, works while the admin's app is open | `group2/…`, works while the admin is away |
 | Spec | [WISP 9xx Group Mesh](wisps/9xx-group-mesh.md) | [WISP 9xx Group Community](wisps/9xx-group-community.md) |

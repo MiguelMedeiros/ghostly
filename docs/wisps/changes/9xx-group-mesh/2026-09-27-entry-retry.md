@@ -1,0 +1,1 @@
+A joiner whose entry session timed out is answered again after 30 s, then a minute, doubling up to ten minutes, instead of being locked out (#397). Recorded after the fact: the text came in before change files.

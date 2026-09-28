@@ -6,7 +6,7 @@
 | Status | Draft |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
-| Implementation | The floor and first contact of every new chat (web, extension, desktop); DHT only per chat; pinned mailboxes. Native clients read the Mainline DHT directly; browsers go through Pkarr relays. |
+| Implementation | The floor and first contact of every new chat (web, extension, desktop, CLI); DHT only per chat; pinned mailboxes. Desktop reads the Mainline DHT directly, the headless CLI when every relay fails; browsers go through Pkarr relays. |
 | Summary | The floor of every chat: very short text through DHT records when no live link is up. Bounded, not a mailbox. |
 | Availability | Available |
 | Notes | 256 bytes, retried for five minutes: the first contact of every chat, after a live link drops, or in a chat set to DHT only. Chats with 0.4 contacts: up to 500 bytes (WISP 402). |

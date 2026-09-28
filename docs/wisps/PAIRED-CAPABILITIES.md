@@ -1,11 +1,12 @@
 # Files and sats in the chat session
 
-> **State on `dev` (2026-09-26).** Everything below is merged and still runs. Since then:
+> **State on `dev` (2026-09-28).** Everything below is merged and still runs. Since then:
 >
 > - **Files of any size:** `files/3` (#228, #233), announced in the `paired-capabilities` frame, replaces `files/2` whenever both apps have it: offered and accepted (above 25 MiB, or past 500 MiB from one contact, the receiver is asked), streamed to storage, resumed from the last confirmed byte, checked by digest ([501](501-paired-files.md)). `files/2` below stays for apps without it, with its 100 MiB cap.
 > - **Payments per network:** a request or payment names its network, Mainnet or Testnet (older apps leave it out), and each rail is its own method (Cashu, Lightning, Arkade, Bark, Spark, Fedimint, on-chain, USDT); see [200](200-payments.md).
 > - **Calls and shared apps:** `calls/1` and `services/1` (#207), in the same frame.
 > - **Typing indicator:** `typing/1`, in the same frame too ([401](401-paired-chat.md#typing)).
+> - **Reactions:** `react/1`, in the same frame; on the DHT floor reactions ride in the envelope ([401](401-paired-chat.md#reactions), [403](403-dht-text.md#reactions)).
 > - **Edits:** `edit/1`, in the same frame, and in the layer-0 capability record for edits on the DHT floor ([401](401-paired-chat.md#edits), [403](403-dht-text.md#edits)).
 > - **Wake-up push:** `wake/1`, in the same frame: a push subscription shared per chat, so a message to a closed web app wakes it ([401](401-paired-chat.md#wake-up-push)).
 

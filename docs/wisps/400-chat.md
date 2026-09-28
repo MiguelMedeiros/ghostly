@@ -6,10 +6,10 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | The single layered chat of revision 0.2 in every new chat (web, extension, desktop): first contact on the DHT and a stream in parallel, `on-dht`, self-upgrade, DHT only per chat; replies, reactions, edits, forwards and the text's display conventions; compatibility chats for v0.4 |
+| Implementation | The single layered chat of revision 0.2 in every new chat (web, extension, desktop, CLI): first contact on the DHT and a stream in parallel, `on-dht`, self-upgrade, DHT only per chat; replies, reactions, edits, forwards and the text's display conventions; compatibility chats for v0.4 |
 | Summary | One chat for everyone: the DHT to meet, a live link when one connects, the DHT again when none does. |
 | Availability | Available |
-| Notes | Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited, in a chat or a group, reactions put one emoji per person on a message, messages can be forwarded to other chats, and lists, quotes, headings and links show as such. |
+| Notes | Messages with storage receipts and retries. A first pairing with no direct path starts on the DHT, short texts fall back to it when a live link drops, and every chat returns to a live link by itself. You can keep a chat on the DHT only. Replies quote a message, a text you sent can be edited, in a chat or a group, reactions put one emoji per person on a message, messages can be forwarded to other chats and groups (only texts to a group), and lists, quotes, headings and links show as such. |
 | Feature | [Chat](https://ghostly.tools/#next) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
@@ -111,18 +111,19 @@ sequenceDiagram
 7. What a state cannot carry is said before it is attempted, not after a silent failure. The composer and the chat's actions show the reason ("Needs a live connection", "Up to 256 bytes on the DHT") next to the disabled action, and anything that can wait is queued rather than refused.
 8. A security rejection (key mismatch, a forged record, a proof bound to another channel) MUST stop the chat on both layers until the person acts. It MUST NOT trigger a fallback. After the pin, a key mismatch is proven only by a layer-1 session this side dialled, or whose connection details were signed by the pinned key: the DHT mailboxes, the link's signals and native endpoints whose address an invite could read are written under keys any copy of the invite derives. Another key there MUST be ignored, never a stop and never a replaced pin; it MAY be shown as a passive warning ("someone else is publishing on this chat's invite keys").
 9. The actual state and transport are reported separately from the person's preference.
+10. A message's time is the sender's claim. A receiver keeps a received message at the time it says, but never later than 5 minutes past its own clock, and at its own clock when the time is not a positive number, so a peer cannot pin its chat to the top of the list (`receivedTimestamp` in `packages/core/src/messageTime.ts`, #301).
 
 ## What each state can carry
 
 | Ability | `live` | `on-dht` and `dht-chosen` | UI while on the DHT |
 |---|---|---|---|
 | Text up to 256 UTF-8 bytes | Yes | Yes ([403](403-dht-text.md)) | Sends; one text awaits a receipt at a time, the rest queue |
-| Text of 257 bytes to 16 KiB | Yes | Held ([4xx](4xx-store-and-forward.md)) if both allow; otherwise queued for layer 1 | "Sends when live" on the bubble; the byte count turns amber past 256 |
+| Text of 257 bytes to 16 KiB | Yes | Held ([4xx](4xx-store-and-forward.md)) if both allow; otherwise queued for layer 1 | A waiting mark by the bubble's time ("Sends by itself when your contact is online" on hover); the byte count turns amber past 256 |
 | Receipts ("Received by peer") | Yes | Yes, for DHT text and held items | Same states as live |
 | Link previews ([401](401-paired-chat.md#link-previews)) | Yes, with the text | No; the text goes without it | The link shows as a link |
 | Name | Yes (`paired-nick`) | Yes, in the capability record (at most 64 bytes) | Unchanged |
 | Picture | Yes (`paired-avatar`) | No; waits for layer 1 | The last picture stays |
-| Files and voice messages | Yes (`files/3`, or `files/2` with older apps, [501](501-paired-files.md)) | Held if both allow (8 MiB each); otherwise queued for layer 1 | Attach stays enabled; the bubble says "Sends when live" or "Held for <contact>" |
+| Files and voice messages | Yes (`files/3`, or `files/2` with older apps, [501](501-paired-files.md)) | Held if both allow (8 MiB each); otherwise queued for layer 1 | Attach stays enabled; the bubble's delivery mark says it waits for the contact or is kept for them |
 | Payment requests | Yes (`payments/1`) | Held if both allow (Cashu and Lightning requests); otherwise queued | As files |
 | Paying (ecash, Lightning, Ark, Spark, on-chain) | Yes, per [200](200-payments.md) | No. Bearer tokens never enter the DHT or a hold, and a payment is not queued | Pay disabled in the payment sheet: "Payments need a live connection"; requests still go |
 | Calls, voice and video | Yes (`calls/1`, [601](601-webrtc-media.md#paired-profile)): signals on the session, media on a WebRTC connection of its own | No | Call buttons disabled: "Calls need a live connection" |
@@ -130,6 +131,8 @@ sequenceDiagram
 | Identity proofs shared with the contact | Yes | No; they wait for layer 1 | Unchanged |
 
 A place is text too: a `geo:` URI (RFC 5870) or a Google Maps, Apple Maps or OpenStreetMap link that carries its coordinates shows as a location card, read from the text alone. Its map is not loaded until the person asks for it, because loading map tiles tells the tile server the device's address; the card says so. Short map links that hide their coordinates stay plain links.
+
+Other things a text can hold are shown as cards, read from the text alone, with nothing added on the wire: a `ghostly1` invite, a group link, a Nostr profile or note (`npub`, `nprofile`, `note`, `nevent`), a Pubky key or a DID (#281), and money in the formats the app reads, each checked against the network it is for (BIP 21 links and bitcoin addresses, BOLT 12 offers, Ark addresses, USDT addresses and EIP-681 links, #284). The text itself is sent as typed. These are the "parser cards" the rules below refer to.
 
 A Lightning invoice pasted as text is text: it fits the DHT when short enough, and sending it starts no payment. Cashu tokens are refused as DHT text.
 
@@ -181,7 +184,7 @@ A receiver MUST drop a reply that is not an object of these three strings, whose
 - **Not found** (never received here, or named from another chat): the quote shows the wire's line, marked as not found in this chat. It proves nothing about the original; the app never presents it as checked.
 - **Only the id came** (a reply over the DHT, [403](403-dht-text.md#replies)) and nothing here has it: "Original message not available".
 
-A reply is started from the message's ⋮ (Reply), a reply button beside the message for a pointer, or a swipe towards the end of the line on a touch screen. The composer shows the message being answered above the field, with ✕; Escape lets go of it too, once whatever else the composer has open is closed. A message whose row only this device has (a notice, a group's payment line, an identity shared in the timeline, which is local, [300](300-peer-proofs.md)) cannot be answered. Files, voice messages and payments cannot carry a reply yet: only text does. Ghostly's message rows do not take the keyboard focus, so there is no reply shortcut; the reply button is reachable with Tab.
+A reply is started from the message's ⋮ (Reply), a reply button beside the message for a pointer, or a swipe towards the end of the line on a touch screen. The composer shows the message being answered above the field, with ✕; Escape lets go of it too, once whatever else the composer has open is closed. A message whose row only this device has (a notice, a group's payment line, an identity shared in the timeline, which is local, [300](300-peer-proofs.md)) cannot be answered. Texts, files and voice messages carry a reply (a file since 401 revision 0.9, #359; a voice message or file sent while a reply is open goes as one, #437); payments cannot. Ghostly's message rows do not take the keyboard focus, so there is no reply shortcut; the reply button is reachable with Tab.
 
 **Older apps.** The reply is an optional field, which an app from before this revision ignores: it shows the text alone. No quote is copied into the text for it (no "> …" prefix): a reply's text reads on its own in a conversation, as it does when people answer each other without quoting, and a prefix would be shown twice by every app that knows replies, sent to the DHT's 256 bytes, and counted against every bound.
 

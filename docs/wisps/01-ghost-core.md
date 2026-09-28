@@ -6,7 +6,7 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [00](00-process.md) |
-| Implementation | Rendezvous and DHT text in every client; the DHT as rendezvous and floor of every chat; native clients (Desktop, CLI) read the Mainline DHT directly; a circuit breaker per Pkarr relay in every client |
+| Implementation | Rendezvous and DHT text in every client; the DHT as rendezvous and floor of every chat; Desktop and the Rust CLI read the Mainline DHT directly, the headless CLI when every relay fails (#392); a circuit breaker per Pkarr relay in every client, asked again every 15 s when all are down (#382, #395) |
 | Summary | Find a peer through small signed records on the Mainline DHT, without turning discovery into storage. |
 | Availability | Available |
 | Notes | The rendezvous exists since the first release; the modular boundary is a proposal. |
@@ -47,6 +47,8 @@ The existing profile is [PROTOCOL.md](../PROTOCOL.md): signed Pkarr DNS packets,
 Keep the current wire profile unchanged until a migration is specified. Pkarr relay access and direct DHT access are ways of reaching rendezvous, not alternative application data transports. A relay can observe public keys, activity, packet sizes and plaintext metadata. DHT records are publicly retrievable by address; the shared secret protects contents. Presence expiry neither proves deletion nor hides network addresses. See [limitations](IMPLEMENTATION.md).
 
 ## Open decisions
+
+Revision 2026-09-28 (implemented, client policy, no wire change): how one app shares the relays. A browser keeps 30 requests a minute per relay for all its links (`REQUESTS_PER_MINUTE` in `packages/core/src/relay.ts`), 60 on `pkarr.pubky.app` (#435). A 1:1 chat that polls fast, or whose request was refused, keeps the last 10 of each minute (`CHAT_RESERVE`); group requests stop at 20 meanwhile; background reads drop from 20 to 5 while any link polls fast (#401, #434). A read of a key answered under 500 ms ago is answered from memory (#427). While every relay is left alone for failing, the one whose wait ends first is asked every 15 s, and a new network forgets every breaker, in the TypeScript client and the Desktop's Rust client (#382, #395). The CLI publishes to the DHT beside the relays and reads the DHT when every relay fails (#392). Details: [TRANSPORTS.md](../TRANSPORTS.md#relay-budget-a-wait-not-an-error). These are one client's limits, not requirements on a peer; the open decision below on budgets across platforms stays open.
 
 Revision 0.3 (implemented): native clients read the DHT directly. Desktop and the CLI resolve on the Mainline DHT and publish to the DHT and the relays; relay reads are an opt-in. They still write to the relays because a relay keeps serving the copy it holds for minutes, and browser contacts read only relays. Every client keeps a circuit breaker per relay. Records, sequence numbers and the relays' compare-and-swap (409, `If-Match`) are unchanged. The relay list and how one is chosen: [RELAYS.md](../RELAYS.md).
 

@@ -5,9 +5,10 @@ the extension and the Desktop, on Node. A bot keeps a profile online with `ghost
 `ghostly listen` (JSON lines), and acts with the other commands (JSON answers). The contract behind it, and why it
 is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md). A guided tour: [docs/CLI.md](../../docs/CLI.md).
 
-> Status: phases 1 to 4 (profiles, pictures and backups, invites, one chat, groups with their admin tools, the
-> event stream and hooks, wallets and payments, files and voice notes, identity proofs, shared web apps; an npm
-> package, not yet published); every engine call is already
+> Status: phases 1 to 5 (profiles, pictures and backups, invites, one chat, private and community groups with their
+> admin tools and hubs, the event stream, hooks and agent turns, wallets and payments, files and voice notes, identity
+> proofs, shared web apps, voice calls, typing, replies, edits, reactions and forwards, Pkarr over the Mainline DHT;
+> an npm package, not yet published); every engine call is already
 > reachable through `ghostly engine <method>`. The older Rust `ghostly-cli` (the `cli/` folder) stays as the
 > compatibility client for v0.4 chats.
 
@@ -215,7 +216,7 @@ stderr. OpenID Connect needs a browser window: make that proof in the app.
 
 ### Wallets on Node
 
-Cashu (and Lightning through the mints), Lightning cards (NWC, LND, Core Lightning, Breez, LNURL, Fedimint), Arkade,
+Cashu (and Lightning through the mints), Lightning cards (NWC, LND, Core Lightning, Breez, Fedimint; a Lightning address or LNURL is paid with `pay`), Arkade,
 Spark, BDK, Fedimint and USDT run as in the app. One does not yet: **Bark** (its SDK ships a browser build only);
 `wallet list` offers it as unavailable, with the reason. A Fedimint wallet joins a federation by its invite
 (`wallet create fedimint --invite fed1…`); its Lightning card is `wallet create lightning --provider fedimint --value
@@ -294,10 +295,10 @@ when the folder's path is too long for a socket). One JSON object per line each 
 ```
 
 Methods: `status`, `profile.get|set`, `settings.get|set`, `invite.create|join`, `chat.list|get|history|send|retry|
-delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|request|payRequest|accept`,
-`group.create|join|list|get|history|send|leave|forget|accept|decline`, `wallet.list|create|remove|faucet|history|
+delete|details|rename|remove|transport|connect|disconnect|verify|wait|pay|request|payRequest|accept|edit|react|forward|typing`,
+`group.create|join|list|get|history|send|edit|react|leave|forget|accept|decline`, `wallet.list|create|remove|faucet|history|
 receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `payment.list|check|reclaim`,
-`file.send|list|action|wait|save`, `group.invite|remove|admin|rotate|link|picture`, `profile.picture|backup`,
+`file.send|list|action|wait|save`, `group.invite|remove|admin|rotate|link|picture|hub`, `profile.picture|backup`,
 `identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `service.list|add|remove|enable|share|peer|open|close`,
 `call.start|answer|hangup|list|get|flush|auto`,
 `events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
