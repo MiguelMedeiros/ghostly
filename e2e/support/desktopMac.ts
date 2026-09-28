@@ -115,6 +115,14 @@ export class MacDriver implements DesktopApp {
     return (await this.request("GET", "/windows")) as string[];
   }
 
+  /**
+   * Every link the app handed to the system so far, in order, exactly as `open` would have received it. The app under
+   * the driver writes them down instead of opening them (`launch` in src-tauri/src/commands.rs), so no browser starts.
+   */
+  async opened(): Promise<string[]> {
+    return (await this.request("GET", "/opened")) as string[];
+  }
+
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
     const response = await fetch(`${this.endpoint}${path}`, {
       method,
@@ -247,6 +255,8 @@ export interface MacDesktop {
   bundle: string;
   /** What the app printed, for the report when something fails. */
   log: string[];
+  /** The app's own process (its WKWebView runs in WebKit processes of their own). */
+  pid?: number;
   /** Quits the app. `keep` leaves its data, for opening the same copy again with `open`. */
   stop(options?: { keep?: boolean }): Promise<void>;
 }
@@ -301,5 +311,5 @@ export async function openMacDesktop(options: MacDesktopOptions): Promise<MacDes
     await cleanup();
     throw error;
   }
-  return { app, bundleId: copy.bundleId, bundle: copy.app, log, stop: cleanup };
+  return { app, bundleId: copy.bundleId, bundle: copy.app, log, pid: child.pid, stop: cleanup };
 }

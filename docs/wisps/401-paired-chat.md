@@ -6,10 +6,10 @@
 | Status | Draft |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
-| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`), reactions (`react/1`) and edits (`edit/1`) on the live session; replies on texts and files; forwarded texts and files with their hop count. |
+| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT in parallel, and automatic upgrade; calls (`calls/1`, screen sharing inside a call), shared apps (`services/1`), `files/3`, the typing indicator (`typing/1`), reactions (`react/1`) and edits (`edit/1`), wake-up push (`wake/1`) on the live session; replies on texts and files; forwarded texts and files with their hop count. |
 | Summary | The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT. |
 | Availability | Available |
-| Notes | Every new chat on web, desktop and extension, calls included while it is live. The typing indicator goes over the live session only, and each person can turn it off. |
+| Notes | Every new chat on web, desktop and extension, calls included while it is live. The typing indicator goes over the live session only, and each person can turn it off. A closed web app can be woken by its contacts' apps with a content-free push, when its person turns that on. |
 | Feature | [Chat](https://ghostly.tools/#next) |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
@@ -140,13 +140,45 @@ A text can be edited after it was sent (revision 0.10; what an edit is, [400](40
 
 Groups do not carry edits yet: 1:1 chats first. A mesh or community edit needs its own frame inside the group's sealed boxes, and a rule for members who joined after the message.
 
+### Wake-up push
+
+A web app is only a peer while it is open. A contact's message to a closed web app waits (on the DHT, or held, [4xx](4xx-store-and-forward.md)) until the app opens by itself. Wake-up push (revision 2026-09-28) lets the sender's own app wake it, with no server of Ghostly's: the browser's push service carries a few encrypted bytes, and the woken app connects and fetches the message itself.
+
+**Sharing.** Both sides list `wake/1` in `paired-capabilities`. A side whose person turned it on (Settings, "Wake me while closed"; the installed web app only) has a browser push subscription made with a VAPID key pair of its own, and gives each paired contact, on this session only, where to post and how:
+
+```
+{"t":"paired-wake","w":{"e":"<endpoint>","p":"<p256dh>","a":"<auth>","vp":"<VAPID public>","vk":"<VAPID private>","k":"<token>"}}
+{"t":"paired-wake","w":null}
+```
+
+`e` is the subscription's endpoint, `p` and `a` its P-256 key and auth secret (`PushSubscription.getKey`), `vp` and `vk` the VAPID key pair it was made with (an uncompressed P-256 point and its 32-byte scalar, base64url), `k` a random token (16 bytes, base64url) that names this chat to the waking side's own worker. Every contact gets a different token. `w: null` says: forget it. The side sends its target once `wake/1` is agreed on each new session, and again when it changes; a new subscription is a new token for every chat, so what anyone kept from before names nothing. A reader MUST ignore a frame while `wake/1` is not agreed, a malformed one (it keeps what it had), an endpoint that is not `https` on a public host name (no address, no `localhost`, no `.local`, no credentials), and a key pair whose halves do not match. It reads at most 6 frames a minute. The frame carries no message ID; older apps drop it. Group edges never offer it: a wake-up names a chat.
+
+**Waking.** When a message (a text, a file, a voice note) to a contact that shared a target cannot go on this session, the sender posts one Web Push message to the endpoint: body `{"wake":1,"k":"<token>"}` encrypted to `p` and `a` ([RFC 8291](https://www.rfc-editor.org/rfc/rfc8291), `aes128gcm`), `Authorization: vapid t=<JWT>, k=<vp>` signed with `vk` ([RFC 8292](https://www.rfc-editor.org/rfc/rfc8292); audience the endpoint's origin, 12 hours, subject `https://ghostly.tools`), `TTL: 3600`, `Urgency: high`. At most one per contact every 5 minutes; the count starts over once the contact is live again. A push service that answers 404 or 410 says the subscription is gone: the sender forgets the target until a new one comes. Nothing is retried: the message waits for the contact either way.
+
+**Where the post goes from.** Push services answer without CORS, so a browser page may not post there itself. Ghostly Desktop posts from Rust (`push_send`, only `https` push services on public addresses, only the Web Push headers, no redirect), and the CLI from Node. A browser (the web app, the extension) posts itself where the service allows it, and otherwise hands the finished request to a push relay only if its person set one (Settings, Network, "Push relay"; empty by default, and Ghostly runs none):
+
+```
+POST <relay>  {"endpoint":"<e>","headers":{"Authorization":"vapid …","TTL":"3600",…},"body":"<base64url>"}
+→ {"status":<the push service's status>}
+```
+
+The request is already encrypted and signed; the relay forwards it as it is. `native-transports/push-relay` is a reference relay (no dependencies, big push services only, Web Push headers only, a rate limit per address).
+
+**Showing.** The browser hands the decrypted body to the profile's push worker: the app's service worker script, registered once more at `/push/<profile>/`, so each local profile ([04](04-profiles.md)) has its own subscription and contacts of two profiles cannot tell they share a browser. The worker reads the token in a table the app keeps for it (IndexedDB: token, chat route, mute) and shows "New message", nothing else: no text and no name. It shows nothing for a token it no longer knows (a chat deleted, a subscription replaced), for a muted chat ([400](400-chat.md), the chat mute), or while the app is on screen.
+
+**Muted chats.** Browsers expect a push to show something: Chrome shows its own "updated in the background" notice when none is shown, and Safari may drop a subscription whose pushes show nothing. So a muted chat is not woken at all: the muted side sends `w: null` to that contact (on every session while it stays muted) and drops the chat's token; unmuted, it shares a new token. The worker's mute check covers only a contact that was away when the chat was muted and posts before its next session. A tap opens that chat (switching profile when it belongs to another); the app connects and fetches the message itself.
+
+**Privacy.** No content leaves: not the message, not a name, not which chat (the token means something only to the woken app). The push service (Google, Apple or Mozilla, by browser) learns that this browser got a push, and when. A contact learns the subscription and can wake it until the chat is deleted or the subscription replaced ("New address" in Settings rotates it: a new key pair and new tokens, so only contacts told again can wake it). A push relay, when one is used, learns what the push service learns and the sender's address. Unpairing or deleting a chat drops the contact's target on this side and the token on the other; turning it off tells every live contact to forget it, and the push service answers 410 to anyone who kept it.
+
+**Browsers.** Chrome and Edge (desktop and Android, through FCM), Firefox (Mozilla's push service), and Safari on iPhone and iPad from iOS 16.4, only for the app added to the Home Screen. Desktop and the extension keep running on their own and do not ask to be woken; they wake others.
+
 ## Runtime boundary and compatibility
 
 First contact runs on the DHT and on a stream in parallel, and native transports are tried from their descriptors in the capability record ([100](100-transports.md)). Compatibility chats use [402](402-legacy-chat.md) and never this session. DHT text uses [403](403-dht-text.md), preserving conversation/history without treating DHT as a stream adapter. Files and payments are negotiated in the offer; calls and shared apps after it ([above](#calls-and-shared-apps)).
 
 ## Evidence and checks
 
-[Paired implementation profile](PAIRED-CHAT-INCREMENT.md), [paired session](../../packages/core/src/pairedSession.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [durable outbox](../../packages/browser/src/engine/outbox.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [paired calls](../../packages/core/src/pairedCalls.ts), [typing](../../packages/core/src/pairedTyping.ts), [reactions](../../packages/core/src/reactions.ts), [edits](../../packages/core/src/pairedEdits.ts) and [the edit queue](../../packages/browser/src/engine/edits.ts). Exercise commit-before-ack, duplicate IDs, disconnect before receipt, restart, adapter switch and unsupported capability rejection.
+[Paired implementation profile](PAIRED-CHAT-INCREMENT.md), [paired session](../../packages/core/src/pairedSession.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [durable outbox](../../packages/browser/src/engine/outbox.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [paired calls](../../packages/core/src/pairedCalls.ts), [typing](../../packages/core/src/pairedTyping.ts), [reactions](../../packages/core/src/reactions.ts), [edits](../../packages/core/src/pairedEdits.ts) and [the edit queue](../../packages/browser/src/engine/edits.ts), [wake-up push](../../packages/core/src/pairedWake.ts) and [its Web Push encryption](../../packages/core/src/webPush.ts). Exercise commit-before-ack, duplicate IDs, disconnect before receipt, restart, adapter switch and unsupported capability rejection.
 
 ## Revision log
 

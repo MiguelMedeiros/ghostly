@@ -31,10 +31,13 @@ export const REACTIONS_CAPABILITY = "react/1";
 /** Editing sent texts: `paired-edit` frames on this session, 1:1 chats only (WISP 401 § Edits, `pairedEdits.ts`). */
 export const EDIT_CAPABILITY = "edit/1";
 
-export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY;
+/** Wake-up push: `paired-wake` frames on this session, 1:1 chats only (WISP 401 § Wake-up push, `pairedWake.ts`). */
+export const WAKE_SESSION_CAPABILITY = "wake/1";
+
+export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY;
 
 /** Every capability this app knows on a session: what `receive` reports changes of. */
-export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY];
+export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY];
 
 export const SESSION_CAPABILITIES_FRAME = "paired-capabilities";
 

@@ -8,7 +8,7 @@ import { MediaSettings } from "../../components/MediaSettings";
 import { CameraCapture } from "../../components/composer/CameraCapture";
 import { useCallDevices } from "../../hooks/useCallDevices";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
-import { chooseDevice, followSpeaker, groupDevices, loadDeviceChoices, preferredDevice, resolveDevice } from "../../lib/mediaDevices";
+import { chooseDevice, followSpeaker, groupDevices, loadDeviceChoices, preferredDevice, resolveDevice, setDeviceSource, type DeviceSource } from "../../lib/mediaDevices";
 import { getPrefix, setStorageProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 import { choose, optionsOf } from "../select";
@@ -203,6 +203,71 @@ describe("Settings → Audio & video", () => {
     await screen.findByTestId("settings-microphone");
     await waitFor(() => expect(devices.enumerateDevices).toHaveBeenCalled());
     expect(screen.queryByTestId("settings-speaker")).toBeNull();
+  });
+
+  describe("where calls capture and play outside the page (Linux Desktop)", () => {
+    /** Devices from a source that knows them by name, as Rust lists GStreamer's. */
+    function source(extra: Partial<DeviceSource> = {}) {
+      const list = { audioinput: [{ id: "Mic A", label: "Mic A" }], videoinput: [], audiooutput: [{ id: "Speaker B", label: "Speaker B" }], defaults: {}, named: true };
+      const next: DeviceSource = {
+        list: async () => list,
+        watch: () => () => {},
+        getUserMedia: vi.fn(),
+        playCallOn: vi.fn(),
+        ...extra,
+      };
+      setDeviceSource(next);
+      return next;
+    }
+    afterEach(() => setDeviceSource(null));
+
+    it("meters the chosen microphone there, and lets it go on Stop", async () => {
+      let level: (level: number) => void = () => {};
+      const stop = vi.fn();
+      const meter = vi.fn(async (_id: string | undefined, heard: (level: number) => void) => { level = heard; return stop; });
+      source({ meter });
+      chooseDevice("audioinput", { id: "Mic A", label: "Mic A" });
+      const { user } = renderApp(<MediaSettings />);
+      await user.click(await screen.findByTestId("settings-microphone-test"));
+      expect(meter).toHaveBeenCalledWith("Mic A", expect.any(Function));
+      act(() => level(0.42));
+      expect(await screen.findByTestId("settings-microphone-level")).toHaveAttribute("aria-valuenow", "42");
+      expect(devices.getUserMedia, "the page's own microphone stays shut").not.toHaveBeenCalled();
+
+      await user.click(screen.getByTestId("settings-microphone-test"));
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId("settings-microphone-level")).toBeNull();
+    });
+
+    it("says so when the microphone there would not open", async () => {
+      source({ meter: vi.fn(async () => { throw new Error("The microphone could not start"); }) });
+      const { user } = renderApp(<MediaSettings />);
+      await user.click(await screen.findByTestId("settings-microphone-test"));
+      expect(await screen.findByTestId("settings-microphone-failed")).toBeInTheDocument();
+      expect(screen.getByTestId("settings-microphone-test")).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("plays the test sound on the chosen speaker there", async () => {
+      const testSpeaker = vi.fn(async () => {});
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      source({ testSpeaker });
+      chooseDevice("audiooutput", { id: "Speaker B", label: "Speaker B" });
+      const { user } = renderApp(<MediaSettings />);
+      await user.click(await screen.findByTestId("settings-speaker-test"));
+      await waitFor(() => expect(testSpeaker).toHaveBeenCalledWith("Speaker B"));
+      expect(play, "not on the page's own speaker").not.toHaveBeenCalled();
+      testSpeaker.mockRejectedValueOnce(new Error("The speakers could not start"));
+      await user.click(screen.getByTestId("settings-speaker-test"));
+      expect(await screen.findByTestId("settings-speaker-failed")).toBeInTheDocument();
+    });
+
+    it("offers neither test where the source cannot run them", async () => {
+      source();
+      renderApp(<MediaSettings />);
+      await screen.findByTestId("settings-speaker");
+      expect(screen.queryByTestId("settings-microphone-test")).toBeNull();
+      expect(screen.queryByTestId("settings-speaker-test")).toBeNull();
+    });
   });
 
   it("is not there where the browser has no devices API", () => {

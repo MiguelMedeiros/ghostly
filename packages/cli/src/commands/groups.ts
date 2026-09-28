@@ -22,6 +22,12 @@ export const commands: Record<string, Command> = {
     options: { limit: { type: "number", description: "Messages per page (default 50)" }, before: { type: "string", description: "Only before this message id or timestamp" }, after: { type: "string", description: "Only after this message id or timestamp" } },
     params: ({ options }, { group }) => ({ group, limit: options.limit, before: cursor(options.before), after: cursor(options.after) }),
   },
+  "group hub": {
+    method: "group.hub", usage: "group hub <group> <member> [--pin | --exclude | --auto] [--show-secret]",
+    summary: "Pin a member as a hub of a private group past 16 members, exclude one, or leave it to their app (admin)", args: ["group", "member"],
+    options: { ...showSecret, pin: { type: "boolean", description: "Always a hub while online" }, exclude: { type: "boolean", description: "Never a hub" }, auto: { type: "boolean", description: "A hub if their app stays online (the default)" } },
+    params: ({ options }, a) => ({ group: a.group, member: a.member, role: options.pin === true ? "pin" : options.exclude === true ? "exclude" : "auto", ...secret(options) }),
+  },
   "group invite": {
     method: "group.invite", usage: "group invite <group> <chat> [--show-secret]", summary: "Invite a contact into a group you administer", args: ["group", "chat"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, chat: a.chat, ...secret(options) }),

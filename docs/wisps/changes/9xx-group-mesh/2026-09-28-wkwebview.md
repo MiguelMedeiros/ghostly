@@ -1,0 +1,1 @@
+What a group costs the Desktop app on a Mac, measured (§ Cost per member, WKWebView): about 0.2 MiB and no measurable CPU per edge at rest, and a ceiling of 46 connections in one page, which a member or a hub of 32 stays within and a hub of more than one large group would reach (#402).

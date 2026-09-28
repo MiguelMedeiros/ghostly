@@ -7,7 +7,7 @@ import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "../engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
-import type { PaymentReview, PaymentTarget, WalletNetwork } from "@ghostly/core";
+import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
 import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
@@ -17,10 +17,19 @@ import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSoc
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, IdentityTimelineEntry, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, LiveAttempt, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
-import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
+import type { CommunityState, GroupByeFrame, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
 export interface StoredLink {
+  /**
+   * Paired 1:1 chats: how to wake the contact's closed web app, as it shared it (`wake/1`, WISP 401 § Wake-up push).
+   * Absent until it does, and again once it stops sharing or its push service says the subscription is gone.
+   */
+  peerWake?: WakeTarget;
+  /** Paired 1:1 chats: this side's token for this chat in its own wake-ups; a new one whenever the subscription changes. */
+  wakeToken?: string;
+  /** Paired 1:1 chats: muted here, so the contact is told to forget this side's subscription until it is unmuted. */
+  wakeMuted?: boolean;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
   /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
@@ -123,11 +132,19 @@ export interface StoredGroup {
    */
   large?: string[];
   /**
+   * Past 16 members, with hubs (WISP 9xx · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
+   * where my edges go when the app starts again, before the beacon is read.
+   */
+  hubs?: string[];
+  /** Members whose edge came up without `paired-groups` version 4: their apps take no hubs, so hubs keep edges with them. */
+  legacy?: string[];
+  /**
    * I left: the group is gone from the list and its history from the device. What is kept is the
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
-   * a leave said while the admin was away still reaches it.
+   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, and my
+   * signed leave (`bye`) that they carry to the admin.
    */
-  left?: { at: number; admin: string };
+  left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /** A community group (`group-community/1`) I am in: its session state. Mesh groups use `state`. */
   community?: CommunityState;
   /**
@@ -142,8 +159,13 @@ export interface GroupMemberView {
   role: GroupRole;
   me: boolean;
   nick?: string;
-  /** The pairwise edge to this member is open (always true for me). */
+  /** The pairwise edge to this member is open, or a hub I am connected to reaches them (always true for me). */
   online: boolean;
+  /** Reached through a hub, not an edge of mine (WISP 9xx · Group Mesh § Hubs). */
+  viaHub?: boolean;
+  /** A hub of the group now (listed in its beacon), and what the admin said: pinned as a hub, or never one. */
+  hub?: boolean;
+  hubRole?: "pin" | "exclude";
   /** Messages of the current epoch known to be missing from this member. */
   missing: number;
   /** The pairwise edge to this member as the engine sees it: absent for me, and until the edge exists. */
@@ -200,6 +222,11 @@ export interface GroupView {
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
+  /**
+   * A private group past 16 members that runs on hubs (WISP 9xx · Group Mesh § Hubs): `hub` when I am one. Absent for
+   * the full mesh.
+   */
+  hubs?: { hub: boolean };
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
   community?: { hub: boolean; hubs: number; connected: number };
 }
@@ -941,6 +968,24 @@ export interface Settings {
    * page; never copied into a backup.
    */
   holdStorage?: { s3: S3Config; space: string } | null;
+  /**
+   * This profile's push subscription (the installed web app, WISP 401 § Wake-up push): shared with each paired
+   * contact whose app offers `wake/1`, so it can wake this app while it is closed. Absent: not woken.
+   */
+  wake?: WakeSubscription;
+  /**
+   * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
+   * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
+   */
+  pushRelay?: string;
+}
+
+/** A browser push subscription and the VAPID key pair it was made with. */
+export interface WakeSubscription {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  vapid: VapidKeys;
 }
 
 /**
@@ -1172,6 +1217,12 @@ export interface LinkView {
   callsUnavailable?: string | null;
   /** Paired 1:1 chats: the contact is typing now (`typing/1` on the live session). Absent otherwise. Never stored. */
   peerTyping?: boolean;
+  /** Paired 1:1 chats: this side's wake-up token for this chat (the push worker's table), when it shared its subscription. */
+  wakeToken?: string;
+  /** Paired 1:1 chats: the contact was told not to wake this side while the chat is muted (`setWakeMuted`). */
+  wakeMuted?: boolean;
+  /** Paired 1:1 chats: the contact shared how to wake its closed app, so a message sent while it is away wakes it. */
+  peerWakes?: boolean;
   /** While `peerTyping`: what the contact is doing when it is not plain typing (recording a voice note, thinking). */
   peerTypingKind?: Exclude<TypingKind, "typing">;
   /** While `peerTyping`: the contact's (a bot's) status line, sanitized: one line, at most 40 characters, no links. */

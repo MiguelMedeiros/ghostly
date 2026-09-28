@@ -183,7 +183,10 @@ export function groupJson(group: GroupView, showSecret = false) {
     canSend: group.canSend,
     link: group.entryLink ? (showSecret ? group.entryLink : "<hidden>") : null,
     lastMessageAt: group.lastMessageAt,
-    members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online })),
+    // Past 16 members with hubs (WISP 9xx · Group Mesh § Hubs): who is one, who is reached through them, what the admin chose.
+    members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online,
+      ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),
+    ...(group.hubs ? { hubs: group.hubs } : {}),
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
     community: group.community ?? null,
     picture: !!group.picture,

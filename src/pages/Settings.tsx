@@ -4,6 +4,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
 import { promptInstall, useInstallState } from "../lib/installPrompt";
+import { pushPlatform, setWake, useWakeOn } from "../lib/wakePush";
 import { noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -52,6 +53,16 @@ export function Settings() {
   const { lock } = useLockScreen();
   const update = useUpdate();
   const install = useInstallState();
+  // Wake-up push (WISP 401 § Wake-up push): the installed web app only.
+  const canWake = !!pushPlatform();
+  const wakeOn = useWakeOn();
+  const [wakeBusy, setWakeBusy] = useState(false);
+  const [wakeError, setWakeError] = useState("");
+  const changeWake = async (on: boolean) => {
+    setWakeBusy(true);
+    setWakeError("");
+    try { await setWake(on); } catch (e) { setWakeError(e instanceof Error ? e.message : String(e)); } finally { setWakeBusy(false); }
+  };
   const isMobile = useIsMobile();
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
@@ -338,6 +349,13 @@ export function Settings() {
           )}
           <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
         </Row>
+        {canWake && (
+          <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
+            hint={<span role="status">{wakeError || t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint")}</span>}>
+            {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
+            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
+          </Row>
+        )}
       </Section>
 
       <MediaSettings />

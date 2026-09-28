@@ -26,9 +26,9 @@ export const ENGINE_METHODS: readonly string[] = [
   "bitcoinReconfigureSource", "bitcoinReceiveAddress", "bitcoinRefresh", "walletReceiveToken", "walletInspectCashu",
   "walletExport", "sendPayment", "requestPayment", "requestGroupPayment", "groupPaymentHello", "askToPay",
   "payRequest", "reclaimPayment", "disconnect", "addService", "removeService", "setServiceEnabled",
-  "setServiceShared", "updateSettings", "setCallSignal", "setTyping", "setFastPoll", "createGroup", "inviteToGroup",
+  "setServiceShared", "updateSettings", "setCallSignal", "setTyping", "setWakeSubscription", "setWakeMuted", "setFastPoll", "createGroup", "inviteToGroup",
   "acceptGroupInvitation", "declineGroupInvitation", "enableGroupLink", "disableGroupLink", "joinGroupByLink",
-  "sendGroupMessage", "groupMessages", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "rotateGroup",
+  "sendGroupMessage", "groupMessages", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
   "setGroupPicture", "forgetGroup",
 ];
 

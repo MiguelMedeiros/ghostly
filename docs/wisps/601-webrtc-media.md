@@ -35,6 +35,7 @@ WebKitGTK, the WebView of Ghostly Desktop on Linux, is built without WebRTC by U
 
 - **WebRTC** is `webrtc-rs`. Its host candidates end at `typ host` (browsers add `generation 0`), which a signal must still read as a host candidate; a socket on an unspecified address (`::` where there is no IPv6) gives no candidate.
 - **Media** is GStreamer: the microphone to Opus, the camera to VP8, and back through a jitter buffer to the speakers and to the page, which shows the peer's picture as JPEG frames drawn on a canvas. Only gst-plugins-base and gst-plugins-good are used; WebKitGTK depends on both, so an installed app has them. Not GStreamer's `webrtcbin`: its libnice links libsoup 2 on Ubuntu 22.04 and Debian 12, and loading libsoup 2 into a WebKitGTK 4.1 process (libsoup 3) aborts it.
+- **Devices** are GStreamer's, known to the page by name: Settings lists them and the calls use the chosen ones. The page cannot hear that microphone or play on that speaker, so Settings' level meter reads GStreamer's `level` element on the chosen microphone, and its test sound is a one-second tone GStreamer plays on the chosen speaker.
 - **Missing plugins**: the app checks for every element it uses when it starts. When one is missing it does not offer `calls/1`, and its call buttons name the packages to install.
 - **Screen sharing** is not available on Linux yet (it needs the desktop portal): the share button stays in the call window, turned off, with that reason.
 

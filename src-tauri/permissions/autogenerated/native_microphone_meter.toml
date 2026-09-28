@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-microphone-meter"
+description = "Enables the native_microphone_meter command without any pre-configured scope."
+commands.allow = ["native_microphone_meter"]
+
+[[permission]]
+identifier = "deny-native-microphone-meter"
+description = "Denies the native_microphone_meter command without any pre-configured scope."
+commands.deny = ["native_microphone_meter"]

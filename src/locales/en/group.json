@@ -1,4 +1,12 @@
 {
+  "hubs": {
+    "auto": "Hub if always on",
+    "badge": "hub",
+    "badgeHint": "Passes the group's messages on to the members it is connected to. It sees who talks when, not what is said.",
+    "choice": "Hub",
+    "exclude": "Never a hub",
+    "pin": "Always a hub"
+  },
   "menu": {
     "forget": "Delete from this device",
     "leave": "Leave group",

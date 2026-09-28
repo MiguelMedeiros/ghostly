@@ -23,6 +23,7 @@ mod paired_transport;
 mod pkarr_client;
 mod pkarr_network;
 mod pubky_session;
+mod push_send;
 mod records;
 mod share;
 #[cfg(test)]
@@ -82,6 +83,7 @@ macro_rules! commands {
             commands::publish_messages,
             commands::publish_records,
             commands::publish_signed_packet,
+            commands::push_send,
             commands::resolve_messages,
             commands::resolve_records,
             commands::service_respond,
@@ -121,6 +123,9 @@ macro_rules! commands {
             native_call::native_call_support,
             native_call::native_camera_close,
             native_call::native_camera_open,
+            native_call::native_microphone_meter,
+            native_call::native_microphone_meter_close,
+            native_call::native_speaker_test,
             notifications::native_notification_permission,
             notifications::native_private_notification,
             notifications::open_notification_settings,

@@ -41,6 +41,7 @@ import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNe
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, parseCommunityEdit } from "@ghostly/core";
+import { WakeLimiter, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, wireReaction, type WireReaction } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
@@ -134,6 +135,7 @@ import type {
   PublicPostsView,
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
+import type { WakeSubscription } from "../shared/types";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
 import { canEdit, takesPeerEdit, withEdit } from "../shared/edits";
 import { EditBuffer, EditQueue } from "./edits";
@@ -160,6 +162,7 @@ import { PaymentDesk } from "./payments";
 import { CashuWallet, TEST_COINS_NOTE } from "./wallet";
 import { groupCue, identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
+import { pushRelayProblem } from "../shared/pushRelay";
 import { traceJoin } from "./joinTrace";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
 
@@ -304,6 +307,11 @@ export interface NodeOptions {
   automaticWallets?: boolean;
   /** Where this engine runs, for the wallet providers that only work on some platforms. Default: web. */
   platform?: ProviderPlatform;
+  /**
+   * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 9xx · Group
+   * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
+   */
+  staysOnline?: boolean;
   /** The Lightning and on-chain providers on offer. Default: the registry (tests pass their own). */
   providers?: ProviderRegistry;
   /** Desktop: the Tauri commands the providers that need them call (see `ProviderHost.invoke`). */
@@ -326,6 +334,12 @@ export interface NodeOptions {
    * one-shot that only talks to one chat, whose relay budget they would spend in seconds. What is stored stays as it is.
    */
   deferGroups?: boolean;
+  /**
+   * Posts a wake-up to a contact's push service (WISP 401 § Wake-up push) and answers its HTTP status. Default:
+   * `fetch` from here, and when that is refused (a browser page: push services answer without CORS) the push
+   * relay in the settings. Ghostly Desktop posts from Rust; the CLI's `fetch` has no CORS to refuse it.
+   */
+  pushSend?: (request: PushRequest) => Promise<number>;
 }
 
 export interface NodeEvents {
@@ -410,6 +424,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly editQueues = new Map<string, EditQueue>();
   /** The contacts' edits of messages not here yet. */
   private readonly editBuffer = new EditBuffer();
+  /** At most one wake-up per contact per `WAKE_INTERVAL_MS` (WISP 401 § Wake-up push). */
+  private readonly wakeLimiter = new WakeLimiter();
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
   /** files/3 in every chat: offers, resumable transfers, checked by digest (WISP 501 rev 0.3). */
@@ -802,6 +818,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     myNick: () => this.sharedNick,
+    staysOnline: () => this.options.staysOnline ?? this.options.platform === "desktop",
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
     edges: groupId => this.groupEdges(groupId),
     entries: groupId => {
@@ -829,6 +846,7 @@ export class GhostlyNode implements EngineImplementation {
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
       : this.communityPay.receiveApp(groupId, sender, frame),
     groupEdit: async (groupId, { sender, ...edit }) => { await this.groupEdits.receive(groupId, sender, edit); },
+    groupReaction: (groupId, member, reaction) => this.receiveGroupReaction(groupId, member, reaction),
     // My latest edits, again, to a member whose edge opened: a private group has no catch-up for them.
     edgeUp: (groupId, peer) => { void this.groupEdits.resend(groupId, peer).catch(() => {}); },
     communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
@@ -1416,6 +1434,100 @@ export class GhostlyNode implements EngineImplementation {
     this.links.get(linkId)?.link?.session.pollNow();
   }
 
+  // ---------- wake-up push (WISP 401 § Wake-up push) ----------
+
+  async setWakeSubscription({ subscription }: { subscription: WakeSubscription | null }): Promise<void> {
+    if (subscription) {
+      checkPushEndpoint(subscription.endpoint);
+      if (!/^[A-Za-z0-9_-]{80,100}$/.test(subscription.p256dh) || !/^[A-Za-z0-9_-]{20,24}$/.test(subscription.auth)) throw new Error("Not a push subscription");
+      if (!vapidKeysMatch(subscription.vapid)) throw new Error("The VAPID keys are not a pair");
+    }
+    const before = this.settings.wake;
+    this.settings = { ...this.settings, wake: subscription ?? undefined };
+    if (!subscription) delete this.settings.wake;
+    await db.putSettings(this.settings);
+    for (const live of this.links.values()) {
+      if (!live.stored.profile || live.stored.group) continue;
+      if (!subscription) {
+        // Stopped: every contact told now forgets it; one away still has it, and its push service answers 410.
+        if (before && live.link?.supportsWake) live.link.sendWake(null);
+        if (live.stored.wakeToken) { live.stored = { ...live.stored, wakeToken: undefined }; void db.patchLink(live.stored.id, { wakeToken: undefined }); }
+        continue;
+      }
+      // A new subscription is a new token everywhere: what anyone kept from before names nothing now.
+      live.stored = { ...live.stored, wakeToken: undefined };
+      void db.patchLink(live.stored.id, { wakeToken: undefined });
+      void this.shareWake(live.stored.id);
+    }
+    this.emitState();
+  }
+
+  async setWakeMuted({ linkId, muted }: { linkId: string; muted: boolean }): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live?.stored.profile || live.stored.group || !!live.stored.wakeMuted === muted) return;
+    live.stored = { ...live.stored, wakeMuted: muted || undefined, ...(muted && { wakeToken: undefined }) };
+    await db.patchLink(linkId, { wakeMuted: muted || undefined, ...(muted && { wakeToken: undefined }) });
+    // Muted: the contact forgets it now if live, else on the next session; unmuted: a new token goes to it.
+    await this.shareWake(linkId);
+    this.emitState();
+  }
+
+  /**
+   * Tells the contact how to wake this app, under this chat's token, once both sides offer `wake/1`; for a muted chat,
+   * to forget it (said on every session: the contact may have been away when the chat was muted).
+   */
+  private async shareWake(linkId: string): Promise<void> {
+    const live = this.links.get(linkId);
+    const own = this.settings.wake;
+    if (!live?.link?.supportsWake) return;
+    if (live.stored.wakeMuted) { live.link.sendWake(null); return; }
+    if (!own) return;
+    let token = live.stored.wakeToken;
+    if (!token) {
+      token = newWakeToken();
+      live.stored = { ...live.stored, wakeToken: token };
+      await db.patchLink(linkId, { wakeToken: token });
+      this.emitState();
+    }
+    live.link.sendWake({ ...own, token });
+  }
+
+  /** The contact is away: one wake-up, if it shared how and none went to it lately. Never waits, never fails a send. */
+  private wakePeer(live: LiveLink): void {
+    const target = live.stored.peerWake, linkId = live.stored.id;
+    if (!target || !live.stored.profile || live.stored.group || !this.settings.online) return;
+    if (!this.wakeLimiter.take(linkId)) return;
+    let request: PushRequest;
+    try { request = wakeRequest(target); } catch { return; }
+    void this.postPush(request).then((status) => {
+      // The subscription is gone (the contact turned it off, or its browser dropped it): forget it until it shares a new one.
+      if ((status === 404 || status === 410) && this.links.get(linkId)?.stored.peerWake?.endpoint === target.endpoint) {
+        const current = this.links.get(linkId)!;
+        current.stored = { ...current.stored, peerWake: undefined };
+        void db.patchLink(linkId, { peerWake: undefined });
+        this.emitState();
+      }
+    }).catch(() => { /* no network, or refused and no relay: the message still waits for the contact */ });
+  }
+
+  /** Posts a wake-up: the host's way, or `fetch`, then the push relay when a page may not post it itself. */
+  private async postPush(request: PushRequest): Promise<number> {
+    if (this.options.pushSend) return this.options.pushSend(request);
+    const quiet = { credentials: "omit", referrerPolicy: "no-referrer", redirect: "error" } as const;
+    try {
+      const response = await fetch(request.url, { method: "POST", headers: request.headers, body: request.body as BodyInit, signal: AbortSignal.timeout(10_000), ...quiet });
+      return response.status;
+    } catch (error) {
+      const relay = this.settings.pushRelay;
+      if (!relay) throw error;
+      const response = await fetch(relay, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(relayRequest(request)), signal: AbortSignal.timeout(15_000), ...quiet,
+      });
+      const answer = await response.json().catch(() => null) as { status?: unknown } | null;
+      return typeof answer?.status === "number" ? answer.status : response.status;
+    }
+  }
+
   removeLink({ linkId }: { linkId: string }): void {
     const live = this.links.get(linkId);
     if (!live) return;
@@ -1430,6 +1542,8 @@ export class GhostlyNode implements EngineImplementation {
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
     this.fileDesk.drop(linkId);
+    // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken.
+    this.wakeLimiter.reset(linkId);
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
     this.emitState();
@@ -1539,6 +1653,8 @@ export class GhostlyNode implements EngineImplementation {
     if (stop) return { error: stop };
     const wireId = toBase64Url(randomBytes(16)), id = `me_${wireId}`;
     const delivery = link.isDataLinkOpen ? "stream" : link.textDelivery === "dht" ? "dht" : "unavailable";
+    // Not live: the contact's app may be closed. Wake it, if it shared how; it then connects and takes this message.
+    if (delivery !== "stream") this.wakePeer(live);
     const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }) };
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
@@ -1952,6 +2068,7 @@ export class GhostlyNode implements EngineImplementation {
     if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return refuse("Invalid file id");
     // A file too large to hold waits for the chat to be live instead, like one sent where nothing holds it.
     const holdable = file.size <= HOLD_LIMITS.maxBundleBytes - 4096;
+    if (!live.link.isDataLinkOpen) this.wakePeer(live);
     if (!GhostlyNode.takesFiles(live.link) && this.holdingFor(live) && holdable) {
       // The contact is away: the file waits in this device's storage, sealed for them.
       live.files.wireIds.add(wireId);
@@ -2482,7 +2599,8 @@ export class GhostlyNode implements EngineImplementation {
       try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_REACTION_FRAME, ...wireReaction(reaction) }); return { error: null }; }
       catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
     }
-    const frame = { t: GROUP_REACTION_FRAME, g: groupId, ...wireReaction(reaction) };
+    // Signed, so that hubs pass it on to members I have no edge with (older apps read the wire fields only).
+    const frame = { t: GROUP_REACTION_FRAME, g: groupId, ...wireReaction(reaction), ...this.groups.signReaction(groupId, wireReaction(reaction)) };
     // An edge that is down hears it when it opens (`resendGroupReactions`).
     for (const edge of this.groupEdges(groupId).values()) { try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ } }
     return { error: null };
@@ -2494,20 +2612,24 @@ export class GhostlyNode implements EngineImplementation {
       const r = m.reactions?.me, id = replyRef(m, true);
       return r && id ? [{ id, e: r.e, n: r.n }] : [];
     }).sort((a, b) => b.n - a.n).slice(0, REACTION_LIMITS.pending).reverse();
-    for (const reaction of mine) { try { this.links.get(linkId)?.link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction }); } catch { return; } }
+    for (const reaction of mine) { try { this.links.get(linkId)?.link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }
   }
 
-  /** A reaction from a member of a group: over the edge pinned to them (private), or signed by them (community). */
-  private async receiveGroupReaction(groupId: string, member: string, raw: Record<string, unknown>): Promise<void> {
+  /**
+   * A reaction from a member of a group: over the edge pinned to them or signed and passed on by a hub (private, read by
+   * `Groups`), or signed by them (community).
+   */
+  private async receiveGroupReaction(groupId: string, member: string, raw: Record<string, unknown> | WireReaction): Promise<void> {
     const membership = this.membership(groupId);
     if (!membership?.members.has(member) || member === membership.me) return;
-    if (raw.t === GROUP_REACTION_FRAME && raw.g !== groupId) return;
     const reaction = readReaction(raw);
     if (reaction) await this.reactions.receive(`group:${groupId}`, member, reaction);
   }
   leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
   removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
+  /** The admin of a private group pins a member as a hub, excludes one, or leaves it to the member's app (`role` null). */
+  setGroupHub({ groupId, key, role }: { groupId: string; key: string; role: "pin" | "exclude" | null }): Promise<void> { return this.groups.setHub(groupId, key, role); }
   rotateGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.rotate(groupId); }
   setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { this.groupEdits.forget(groupId); return this.groups.forget(groupId); }
@@ -3172,6 +3294,14 @@ export class GhostlyNode implements EngineImplementation {
       const problem = settings.hyperdhtRelay && hyperdhtRelayProblem(settings.hyperdhtRelay);
       if (problem) throw new Error(problem);
     }
+    if (settings.pushRelay !== undefined) {
+      if (typeof settings.pushRelay !== "string") throw new Error("Enter a relay address (https://…)");
+      settings.pushRelay = settings.pushRelay.trim();
+      const problem = settings.pushRelay && pushRelayProblem(settings.pushRelay);
+      if (problem) throw new Error(problem);
+    }
+    // Only through setWakeSubscription, which checks it and gives every chat a new token.
+    delete (settings as Partial<Settings>).wake;
     const relayBefore = this.hyperdhtRelay;
     // Of the Nostr settings, only what the patch names changes; the rest stays as stored (or the defaults).
     if (nostr) {
@@ -3230,6 +3360,10 @@ export class GhostlyNode implements EngineImplementation {
       if (settings.hyperdhtRelay === DEFAULT_HYPERDHT_RELAY) delete this.settings.hyperdhtRelay;
       await db.putSettings(this.settings);
       if (this.hyperdhtRelay !== relayBefore && this.settings.online) await this.relayChanged();
+    }
+    if (settings.pushRelay !== undefined) {
+      if (!this.settings.pushRelay) delete this.settings.pushRelay;
+      await db.putSettings(this.settings);
     }
     if (settings.holdStorage !== undefined) {
       if (!this.settings.holdStorage) delete this.settings.holdStorage;
@@ -3422,7 +3556,6 @@ export class GhostlyNode implements EngineImplementation {
         // An entry session carries the admission frames a contact chat would; an edge, the group's own, and what the group sees of payments.
         onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame)
           : (frame as { t?: unknown }).t === "group-pay" ? this.groupPayments.receive(group, peer, frame)
-          : (frame as { t?: unknown }).t === GROUP_REACTION_FRAME ? this.receiveGroupReaction(group, peer, frame as Record<string, unknown>)
           : this.groups.handleEdgeFrame(group, peer, frame),
         onGroupsSupport: supported => {
           if (supported) traceJoin(group, "link.ready", { role });
@@ -3501,6 +3634,8 @@ export class GhostlyNode implements EngineImplementation {
       reactionsSupport: this.options.reactions !== false,
       // 1:1 chats only, as typing. `ghostly-test-no-edit` makes this app an older one for the e2e.
       editSupport: !GhostlyNode.testNoEdit(),
+      // 1:1 chats only, as typing: a wake-up names a chat, and a group edge is none.
+      wakeSupport: true,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
@@ -3633,6 +3768,13 @@ export class GhostlyNode implements EngineImplementation {
         onMessageEdit: stored.profile && !stored.group ? edit => this.receiveEdit(linkId, edit) : undefined,
         onEditReceipt: stored.profile && !stored.group ? (id, e) => this.editsFor(linkId).received(id, e) : undefined,
         onEditSupport: supported => { if (supported && stored.profile && !stored.group) void this.editsFor(linkId).flush({ reopened: true }).catch(() => {}); },
+        onWakeSupport: supported => { if (supported && stored.profile && !stored.group) void this.shareWake(linkId); },
+        onPeerWake: target => {
+          if (!stored.profile || stored.group) return;
+          live.stored = { ...live.stored, peerWake: target ?? undefined };
+          void db.patchLink(linkId, { peerWake: target ?? undefined });
+          this.emitState();
+        },
         onPeerAck: (ack) => {
           if (stored.profile) return;
           if (ack === live.peerAck) return;
@@ -3643,6 +3785,8 @@ export class GhostlyNode implements EngineImplementation {
           const was = live.dataLink;
           live.dataLink = state;
           if (state === "open") {
+            // Live again: the next time it is away, the first message may wake it at once.
+            this.wakeLimiter.reset(linkId);
             void this.desk.replay(linkId).catch(() => {}).then(() => this.sendWaiting(linkId)).catch(() => {});
             this.identities.ready(linkId);
           }
@@ -3988,6 +4132,7 @@ export class GhostlyNode implements EngineImplementation {
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
       callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
       ...(stored.profile && !stored.group && live.link?.peerTyping ? typingView(live.link.peerTypingActivity) : {}),
+      ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
       peerParticipationKey: stored.pairedPeerKey,
