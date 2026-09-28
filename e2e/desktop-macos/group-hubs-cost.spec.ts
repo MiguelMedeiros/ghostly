@@ -40,6 +40,7 @@ const COUNT_PEERS = `
   if (window.__meshPeers) return;
   window.__meshPeers = [];
   const Native = window.RTCPeerConnection;
+  window.__nativePeer = Native;
   window.RTCPeerConnection = class extends Native { constructor(...args) { super(...args); window.__meshPeers.push(this); } };
 `;
 const CONNECTED = `return (window.__meshPeers ?? []).filter((pc) => pc.connectionState === "connected").length;`;
@@ -50,6 +51,38 @@ const PEERS = `
   for (const pc of all ?? []) states[pc.connectionState] = (states[pc.connectionState] ?? 0) + 1;
   return { counting: !!all, made: all?.length ?? 0, states, href: location.href };
 `;
+
+/**
+ * `arguments[0]` edges made in the page itself: two peer connections each, connected to each other over loopback, with
+ * one data channel, as an edge is. What WKWebView pays per edge without a network or peers in the way (both ends are
+ * here, so it counts two connections per edge: an upper bound).
+ */
+const LOOPBACK = `
+  const done = arguments[arguments.length - 1];
+  const n = arguments[0];
+  const Peer = window.__nativePeer ?? window.RTCPeerConnection;
+  (async () => {
+    window.__loop = [];
+    for (let i = 0; i < n; i++) {
+      const a = new Peer(), b = new Peer();
+      a.onicecandidate = (e) => { if (e.candidate) b.addIceCandidate(e.candidate).catch(() => {}); };
+      b.onicecandidate = (e) => { if (e.candidate) a.addIceCandidate(e.candidate).catch(() => {}); };
+      const channel = a.createDataChannel("edge");
+      const far = new Promise((resolve) => { b.ondatachannel = (event) => { event.channel.onmessage = () => {}; resolve(event.channel); }; });
+      await a.setLocalDescription(await a.createOffer());
+      await b.setRemoteDescription(a.localDescription);
+      await b.setLocalDescription(await b.createAnswer());
+      await a.setRemoteDescription(b.localDescription);
+      await Promise.race([Promise.all([far, new Promise((resolve) => { if (channel.readyState === "open") resolve(); else channel.onopen = resolve; })]),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("edge " + i + " did not open")), 20000))]);
+      window.__loop.push({ a, b, channel });
+    }
+    return window.__loop.length;
+  })().then(done, (error) => done(String(error)));
+`;
+/** One message on every loopback edge, as a hub passes one on: a frame of about 400 bytes each. */
+const LOOP_SEND = `const text = "x".repeat(400); let sent = 0; for (const e of window.__loop ?? []) { if (e.channel.readyState === "open") { e.channel.send(text); sent++; } } return sent;`;
+const LOOP_CLOSE = `for (const e of window.__loop ?? []) { e.a.close(); e.b.close(); } window.__loop = []; return true;`;
 
 interface Sample { at: number; rss: Record<string, number>; cpu: Record<string, number> }
 /** `ps` time (`[[dd-]hh:]mm:ss.cc`) in seconds. */
@@ -141,6 +174,22 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
     report.alone = await measure(pids, 30_000);
     writeFileSync(testInfo.outputPath("mesh-cost.json"), JSON.stringify(report, null, 2));
 
+    await test.step(`${N - 1} edges in the page itself (loopback), idle and passing a message on every 2 s`, async () => {
+      const made = await app.app.executeAsync<number | string>(LOOPBACK, N - 1);
+      report.loopbackEdges = made;
+      if (typeof made === "number") {
+        const idle = await measure(pids, IDLE_MS);
+        const stop = Date.now() + BUSY_MS;
+        let messages = 0;
+        const sending = (async () => { while (Date.now() < stop) { await app.app.execute(LOOP_SEND); messages++; await new Promise((r) => setTimeout(r, 2_000)); } })();
+        const busy = await measure(pids, BUSY_MS);
+        await sending;
+        report.loopback = { edges: made, idle, busy: { ...busy, messages } };
+      }
+      await app.app.execute(LOOP_CLOSE);
+      writeFileSync(testInfo.outputPath("mesh-cost.json"), JSON.stringify(report, null, 2));
+    });
+
     await test.step(`the app and ${N - 2} more bots join through the admin's link`, async () => {
       // Pasted into Join, as a person does with a link someone sent them.
       await app.join(link);
@@ -190,15 +239,15 @@ test("what a private group of 32 costs the Desktop app in WKWebView: full mesh, 
     };
 
     await test.step("the app the only hub: an edge with everyone, passing everything on", async () => {
-      await state("theHub", N - 1);
+      await state("theHub", N - 1, SETTLE_MS, false);
     });
     await test.step("the app a plain member of a group on two hubs: two edges", async () => {
       await hub([...botKeys][1], "--pin");
       await hub([...botKeys][2], "--pin");
       await hub(appKey, "--exclude");
-      await state("memberWithHubs", 2);
+      await state("memberWithHubs", 2, SETTLE_MS, false);
     });
-    await test.step("a full mesh: nobody a hub, every pair on its own edge", async () => {
+    if (process.env.E2E_MESH_COST_MESH) await test.step("a full mesh: nobody a hub, every pair on its own edge", async () => {
       await hub([...botKeys][1], "--auto");
       await hub([...botKeys][2], "--auto");
       await state("fullMesh", N - 1, Number(process.env.E2E_MESH_COST_MESH_MS ?? 10 * 60_000), false);
