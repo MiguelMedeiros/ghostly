@@ -98,16 +98,19 @@ async function scale(n: number, network: NetworkModel | null, burst = false, hub
   }
 
   // Fan-out: everyone says something, everyone reads everyone.
-  const frames0 = peers.reduce((s, p) => s + p.sent.frames, 0);
   // What one member's message costs its author (the rest is what hubs pass on), measured on a member that is no hub.
-  const writer = peers[n - 3], writerFrames0 = writer.sent.frames, writerBytes0 = writer.sent.bytes;
-  const hubFrames0 = peers.filter(isHub).map(p => p.sent.frames);
+  // Only its message frames: a hub's periodic `group-reach` or a gossip sync may fall in the same two seconds.
+  const writer = peers[n - 3], carried = new Map<Peer, { frames: number; bytes: number }>();
+  world.drop = (from, _to, frame) => {
+    if (frame.t === "group-msg") { const c = carried.get(from) ?? { frames: 0, bytes: 0 }; c.frames++; c.bytes += JSON.stringify(frame).length; carried.set(from, c); }
+    return false;
+  };
   await writer.groups.send(id, "one message");
   await world.run(2_000);
-  report.authorPerMessage = { frames: writer.sent.frames - writerFrames0, bytes: writer.sent.bytes - writerBytes0 };
-  if (hubbed) report.hubFramesPerMessage = Math.max(...peers.filter(isHub).map((p, i) => p.sent.frames - hubFrames0[i]));
-  const frames1 = peers.reduce((s, p) => s + p.sent.frames, 0) - frames0;
-  report.networkFramesPerMessage = frames1;
+  world.drop = null;
+  report.authorPerMessage = carried.get(writer) ?? { frames: 0, bytes: 0 };
+  if (hubbed) report.hubFramesPerMessage = Math.max(...peers.filter(isHub).map(p => carried.get(p)?.frames ?? 0));
+  report.networkFramesPerMessage = [...carried.values()].reduce((sum, c) => sum + c.frames, 0);
   for (const p of peers) expect(world.texts(p, id)).toContain("one message");
   const fanFrames0 = peers.reduce((s, p) => s + p.sent.frames, 0), fanBytes0 = peers.reduce((s, p) => s + p.sent.bytes, 0);
   t = wall();
