@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 100; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.6 |
+| Revision | 0.7 |
 | Updated | 2026-09-27 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [403](403-dht-text.md) |
@@ -30,7 +30,7 @@ Each side's candidates come from its layer-0 capability record ([03](03-capabili
 Once the contact is pinned, and unless either side is `dht-chosen`:
 
 1. The dialling side (the lower rendezvous key, as today) ranks the intersection of both sides' transports by the implemented rank sum ([TRANSPORT-INCREMENT](TRANSPORT-INCREMENT.md#agreement-and-fallback)).
-2. It tries them in that order, each within its own bounded attempt (WebRTC 15 s for a first pairing and 90 s later, as the pairing-latency work sets; Iroh and HyperDHT their dial timeouts). The first transport whose session authenticates ([401](401-paired-chat.md)) is used. With **Allow fallback** off, only the preferred transport is tried, as today, and the chat stays `on-dht` when it does not connect.
+2. It tries them in that order, each within its own bounded attempt (WebRTC 15 s for a first pairing and 90 s later, as the pairing-latency work sets; Iroh and HyperDHT their dial timeouts). A WebRTC offer with no answer does not hold back what ranks after it for all of its attempt ([An unanswered offer](#an-unanswered-offer-revision-07)). The first transport whose session authenticates ([401](401-paired-chat.md)) is used. With **Allow fallback** off, only the preferred transport is tried, as today, and the chat stays `on-dht` when it does not connect.
 3. The chat moves to `live` on that transport, and the outbox flushes in order.
 
 ### Downgrade
@@ -74,6 +74,19 @@ An app that quits or crashes with the chat live leaves its contact holding a ses
 5. **After any drop,** the contact is watched the same way, and the first new packet from it ends the wait failed attempts built up, once per drop. A WebRTC connection gone `disconnected` (the contact's app may have crashed) reads the contact's packet at once rather than at the minute pace of a live chat, so a restarted contact's offer is answered then.
 
 Measured in process (two links, relay pace, chat in the background), from the restart to live on both sides: Iroh 28-61 s before, under 1 s after (2 s when the quit only closed its connections); WebRTC 16-18 s before, 2-5 s after, a crash included. Discovery stays at 3-7 requests a minute. Two browser pages (e2e): a reload about 3 s before and after (the browser closes the connection itself); a crashed tab 18-19 s before, about 3 s after.
+
+### An unanswered offer (revision 0.7)
+
+A WebRTC offer needs the contact to read it and publish an answer, both through the relays. The contact may not read it for a while (a live chat reads every minute, one in the background every 30 s), and the relays' request budget (30 requests a minute per relay, for every chat of the app) may hold its answer back. Found in the headless CLI after a restart: the contact's answer was held back until its answering connection gave up (ICE, 31 s), nothing else answered, and the offer ran to its 90 s attempt timeout before the HyperDHT ranked after it was dialled. That dial connected in 0.1 s. Now:
+
+1. **Dialled meanwhile.** When the dialling side's offer has no answer after **8 s**, the direct transports ranked after WebRTC are dialled while the offer stands. Relayed ones wait **40 s**, once a contact reading in the background has had its look: a chat that goes live over a relay stays there (no probing, above), where the answer would have made it direct.
+2. **First live wins.** A native session that authenticates ends the WebRTC attempt still under way, on both sides (the offer, or an answer the budget still holds), and clears its signal. An offer answered first carries the chat, and the native connection is closed.
+3. **Once per attempt.** Each transport is dialled once per attempt: the offer that times out later goes on to what was not dialled yet, never to these again, so the failures that demote a transport (above) count as before.
+4. **No request.** A native dial asks nothing of the relays. Ending the offer sooner also ends its fast reads sooner.
+
+An offer that has been answered is left alone: ICE is under way, and WebRTC settles as before ([Relayed transports](#relayed-transports-revision-03)).
+
+Measured in process (the CLI's case: WebRTC then HyperDHT, the staying side's publishes held back for 45 s, its answer given up after 31 s), from the restart to live on both sides: 90.7 s before (48.4 s when the staying side had the lower key and offered once the budget freed), 8.7-9.0 s after, over HyperDHT; the busier app's requests went from 19.5 to 6.5 a minute. With Iroh through its relay in place of HyperDHT: 90.7 s before, 40.6 s after, 19.5 to 15.5 requests a minute.
 
 ### Why a chat is not live (revision 0.5)
 
@@ -119,7 +132,7 @@ A transport is **relayed** on a chat when either side's descriptor says it reach
 
 1. **Rank.** A relayed transport ranks after every direct one; within each group the rank sum and the fixed order decide as before. The result stays the same from either side. A relayed path is never chosen over a working direct one by the rule alone.
 2. **Explicit choice wins.** A transport chosen in the Connection menu is used even when relayed.
-3. **Fallback after WebRTC.** WebRTC settles late (ICE can fail long after the offer). When the dialling side's WebRTC attempt ends without opening, it goes on to the next ranked transports, typically a relayed Iroh, before the chat is left `on-dht`. With **Allow fallback** off on either side, it does not.
+3. **Fallback after WebRTC.** WebRTC settles late (ICE can fail long after the offer). When the dialling side's WebRTC attempt ends without opening, it goes on to the next ranked transports, typically a relayed Iroh, before the chat is left `on-dht`. An offer still unanswered after 40 s has it dialled already ([An unanswered offer](#an-unanswered-offer-revision-07)). With **Allow fallback** off on either side, it does not.
 4. **No probing.** A live relayed session is kept while it works, as any other (above, and [open decisions](#open-decisions)). The next dial, after a drop or a restart, ranks direct paths first again, so a network that lets WebRTC through again is used then.
 5. **Shown.** The connection indicator says "relayed" and names the relays, which see who talks to whom and when, never what is said.
 
@@ -165,6 +178,8 @@ Fix canonical encodings, adapter IDs, timeout/retry values, simultaneous negotia
 
 ## Conformance
 
+Revision 0.7: a restarted app whose WebRTC offer the contact cannot answer (its answer held back by the relays' budget until its attempt gave up) is live again over a direct native transport ranked after WebRTC within 15 s, and over a relayed one within 45 s; each transport is dialled once per attempt, and nothing dials an app that is not there.
+
 Revision 0.6: an app that quits, is quit, or crashes, and starts again is live again with its contact within 5 s (graceful or closed) or 15 s (a crash), on Iroh and WebRTC, whichever side has the lower key, within the relays' budget; a dial in from another key than the pinned one leaves the held session as it was; two apps that restart together settle on one connection.
 
 Revision 0.5: a choice made while not live shows on the contact as one row and is dialled first by whichever side dials; a browser whose WebRTC cannot reach a desktop goes live over relayed Iroh once the desktop's record names its relay, including when the relay came after the endpoint started.
@@ -181,6 +196,7 @@ Reverse offer arrival order and still choose the same result; exercise disjoint 
 
 ## Revision log
 
+- 0.7 (2026-09-27): an unanswered WebRTC offer has the transports ranked after it dialled meanwhile (direct after 8 s, relayed after 40 s); the first live session wins and ends the other attempt.
 - 0.6 (2026-09-27): back after a restart: goodbye and watch, a dial in from the pinned contact takes over a held session, resume dials by either side, crossed dials settled by key.
 - 0.5 (2026-09-25): a choice made while not live travels in the capability record, is told once on the contact, is dialled first, and begins the next session as a switch intent; each side keeps and shows why its last attempt to go live did not.
 - 0.4 (2026-09-25): a chosen transport not reached yet is waited for, never failed: why it waits, when it is retried, where the chat is meanwhile (live on a fallback, or on the DHT with Fallback off), and no timeline rows for it.
