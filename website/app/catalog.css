@@ -19,7 +19,7 @@
   border-top: 1px solid var(--line);
   scroll-margin-top: var(--nav-h);
 }
-.catalog {
+.reader-layout.catalog {
   row-gap: 0;
   padding-bottom: 56px;
 }
@@ -256,7 +256,7 @@
 }
 @media (max-width: 1000px) {
   /* One column: title, controls, list, in that order (the reader puts its side column last). */
-  .catalog {
+  .reader-layout.catalog {
     row-gap: 24px;
   }
   .catalog > .catalog-head,
@@ -269,7 +269,7 @@
   .catalog-head {
     margin-bottom: 0;
   }
-  .catalog-families {
+  .reader-all.catalog-families {
     border-top: 0;
     padding-top: 0;
   }
