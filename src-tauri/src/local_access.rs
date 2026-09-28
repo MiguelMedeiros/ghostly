@@ -73,11 +73,11 @@ pub fn dialog_text(origin: &str, reason: Reason) -> (String, String) {
             ),
         ),
         Reason::FirstUse => (
-            format!("Keep sharing {at}?"),
+            format!("Let contacts reach {at}?"),
             format!(
-                "A contact is opening the app at {at}, which you shared in Ghostly before. \
-                 Ghostly now asks once for each address it may reach.\n\n\
-                 Allow only if you shared this app."
+                "A contact is asking for the app at {at}. This address is not on your list of \
+                 shared apps: Ghostly now asks once for each address it may reach.\n\n\
+                 Allow only if you shared this app in Ghostly."
             ),
         ),
     }
@@ -90,6 +90,10 @@ fn not_allowed(origin: &str) -> String {
     )
 }
 
+/// Refusals of a contact's request after which, until the app restarts, a contact's request for an
+/// address not on the list is refused without a dialog. Sharing still asks.
+const MAX_REFUSALS: usize = 3;
+
 #[derive(Default, Serialize, Deserialize)]
 struct Saved {
     spaces: BTreeMap<String, BTreeSet<String>>,
@@ -100,8 +104,9 @@ pub struct LocalAccess {
     /// Where the list is kept (`local-services.json` in the app's data folder); none in tests.
     file: Option<PathBuf>,
     approved: Mutex<BTreeMap<String, BTreeSet<String>>>,
-    /// Refused since the app started: a contact's next request does not ask again.
-    denied: Mutex<HashSet<(String, String)>>,
+    /// Addresses refused since the app started, whatever profile the page named: a contact's next
+    /// request does not ask again. Past `MAX_REFUSALS` of them, contacts' requests ask no more at all.
+    denied: Mutex<HashSet<String>>,
     /// One dialog at a time; requests for an address being asked about wait for the answer.
     asking: tokio::sync::Mutex<()>,
 }
@@ -145,8 +150,8 @@ impl LocalAccess {
     }
 
     /// Ok once `origin` is on the profile's list, asking the person (`ask`) when it is not. A
-    /// contact's request (`FirstUse`) the person refused since the app started is refused without
-    /// asking; sharing (`Share`) always asks.
+    /// contact's request (`FirstUse`) for an address the person refused since the app started, or
+    /// any once they refused `MAX_REFUSALS`, is refused without asking; sharing (`Share`) always asks.
     pub async fn ensure<F, Fut>(
         &self,
         space: &str,
@@ -167,15 +172,17 @@ impl LocalAccess {
         if self.is_allowed(space, origin) {
             return Ok(());
         }
-        let key = (space.to_string(), origin.to_string());
-        if reason == Reason::FirstUse && self.denied.lock().unwrap().contains(&key) {
-            return Err(not_allowed(origin));
+        if reason == Reason::FirstUse {
+            let denied = self.denied.lock().unwrap();
+            if denied.contains(origin) || denied.len() >= MAX_REFUSALS {
+                return Err(not_allowed(origin));
+            }
         }
         if !ask(origin.to_string(), reason).await {
-            self.denied.lock().unwrap().insert(key);
+            self.denied.lock().unwrap().insert(origin.to_string());
             return Err(not_allowed(origin));
         }
-        self.denied.lock().unwrap().remove(&key);
+        self.denied.lock().unwrap().remove(origin);
         let mut approved = self.approved.lock().unwrap();
         approved
             .entry(space.to_string())
@@ -332,6 +339,11 @@ mod tests {
             .ensure("p", origin, Reason::FirstUse, ask(true))
             .await
             .is_err());
+        // The profile is the page's word: naming another does not bring the dialog back.
+        assert!(access
+            .ensure("q", origin, Reason::FirstUse, ask(true))
+            .await
+            .is_err());
         assert_eq!(asked.load(Ordering::SeqCst), 1, "a contact asks once");
         access
             .ensure("p", origin, Reason::Share, ask(true))
@@ -339,6 +351,33 @@ mod tests {
             .unwrap();
         assert_eq!(asked.load(Ordering::SeqCst), 2);
         assert!(access.is_allowed("p", origin));
+    }
+
+    #[tokio::test]
+    async fn after_a_few_refusals_contacts_bring_up_no_more_dialogs() {
+        let access = LocalAccess::default();
+        let asked = AtomicUsize::new(0);
+        for port in 1..=MAX_REFUSALS + 2 {
+            let _ = access
+                .ensure(
+                    "p",
+                    &format!("http://127.0.0.1:{port}"),
+                    Reason::FirstUse,
+                    |_, _| {
+                        asked.fetch_add(1, Ordering::SeqCst);
+                        async { false }
+                    },
+                )
+                .await;
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), MAX_REFUSALS);
+        // Sharing is the person's own click: it still asks.
+        access
+            .ensure("p", "http://127.0.0.1:9000", Reason::Share, |_, _| async {
+                true
+            })
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
