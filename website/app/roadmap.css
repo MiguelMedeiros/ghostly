@@ -252,9 +252,6 @@
     transform: translateY(-4px);
   }
 }
-.rm-cat[data-instant] > ul {
-  animation: none;
-}
 @media (prefers-reduced-motion: reduce) {
   .rm-cat-chevron,
   .rm-cat[open] > ul {

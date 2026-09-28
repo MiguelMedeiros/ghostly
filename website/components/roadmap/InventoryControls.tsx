@@ -19,17 +19,13 @@ function reveal(hash: string) {
   let opened = false;
   for (let d = target.parentElement?.closest("details"); d; d = d.parentElement?.closest("details")) {
     if (!d.open) {
-      d.dataset.instant = "";
       d.open = true;
       opened = true;
     }
   }
   // Already in sight: the browser's own jump to the hash did the work.
   if (!opened) return;
-  requestAnimationFrame(() => {
-    target.scrollIntoView({ block: "start" });
-    document.querySelectorAll<HTMLElement>("details[data-instant]").forEach((d) => delete d.dataset.instant);
-  });
+  requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
 }
 
 /** "Open all" / "Close all" for the inventory's categories, and the hash reveal for the whole page. */
