@@ -39,7 +39,8 @@ export function AvatarViewer({ src, name, onClose, returnFocus }: { src: string;
     // closes on Escape at the document, and must stay open when only the viewer goes.
     <dialog ref={dialog} tabIndex={-1} aria-labelledby={`${id}-name`} data-testid="avatar-viewer"
       onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); } }}
-      onCancel={e => { e.preventDefault(); onClose(); }} onClose={onClose}
+      // Not on to a dialog it was opened from (the members'): React passes `cancel` and `close` up its own tree.
+      onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }} onClose={e => { e.stopPropagation(); onClose(); }}
       className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none bg-transparent p-0 text-text-primary backdrop:bg-black/75">
       <div {...backdrop} data-testid="avatar-viewer-backdrop" className="flex h-full w-full items-center justify-center p-4 max-md:bg-sidebar-bg max-md:p-0">
         <figure className="m-0 flex max-w-full flex-col items-center gap-3">
@@ -67,6 +68,8 @@ export function AvatarOpener({ src, name, className = "", testId, children }: { 
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
+  // The picture went while it was open (the contact removed it): closed, so a new one does not open by itself.
+  if (!src && open) setOpen(false);
   if (!src) return <div className={className}>{children}</div>;
   return <>
     <button ref={button} type="button" aria-label={t("common.viewPhoto", { name })} data-testid={testId} onClick={() => setOpen(true)}

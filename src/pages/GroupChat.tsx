@@ -129,6 +129,7 @@ export function GroupChat() {
   /** The group's picture, large (AvatarViewer.tsx), and the header's avatar that opened it. */
   const [viewingPicture, setViewingPicture] = useState(false);
   const avatarButton = useRef<HTMLButtonElement>(null);
+  if (viewingPicture && !group?.picture) setViewingPicture(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);

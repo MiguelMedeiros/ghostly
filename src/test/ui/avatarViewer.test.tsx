@@ -57,6 +57,16 @@ describe("the picture viewer", () => {
     expect(screen.getByText("A")).toBeInTheDocument();
   });
 
+  it("closes when the picture goes while it is open, and a new one does not open by itself", async () => {
+    const { user, rerender } = renderApp(<AvatarOpener src={PHOTO} name="Alice"><Face /></AvatarOpener>);
+    await user.click(screen.getByRole("button", { name: "View photo of Alice" }));
+    expect(viewer()).toBeInTheDocument();
+    rerender(<AvatarOpener src={undefined} name="Alice"><span>A</span></AvatarOpener>);
+    expect(viewer()).not.toBeInTheDocument();
+    rerender(<AvatarOpener src={PHOTO} name="Alice"><Face /></AvatarOpener>);
+    expect(viewer()).not.toBeInTheDocument();
+  });
+
   it("opens from a chat's header with the contact's picture", async () => {
     const PEER = "peer".padEnd(52, "p");
     saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000 });
