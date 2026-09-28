@@ -694,6 +694,8 @@ export class GroupSession {
     if (!isMessageFrame(raw) || raw.s === this.myKey) return;
     const relayed = raw.s !== from;
     if (relayed && (!rosterHas(this.roster, from) || !rosterHas(this.roster, raw.s))) return;
+    // Signed by its author before it may wait, so a frame no member wrote never takes the place of one that was.
+    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.park(from, raw); return; }
     // Its replay window is gone (markSeen), even if a sparse set of secrets still holds its secret.
     if (raw.e < this.epoch - GROUP_LIMITS.secrets) return;
@@ -701,7 +703,6 @@ export class GroupSession {
     // Not from a member of that epoch, or from before I was one: nothing to read, nothing to ask for.
     if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
     if (this.isDuplicate(raw)) return;
-    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (relayed && (raw.m || raw.r || raw.f !== undefined) && !this.wholeSigned(raw)) { delete raw.m; delete raw.r; delete raw.f; delete raw.xs; }
     const secret = this.secret(raw.e);
     if (!secret) { this.park(from, raw); return; }
@@ -728,10 +729,10 @@ export class GroupSession {
    */
   private async receiveEdit(from: string, raw: unknown): Promise<void> {
     if (!isEditFrame(raw) || raw.s === this.myKey || !rosterHas(this.roster, raw.s) || !rosterHas(this.roster, from)) return;
+    if (!verify(fromBase64Url(raw.sig), editSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.parkEdit(from, raw); return; }
     const commit = this.state.chain[raw.e];
     if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
-    if (!verify(fromBase64Url(raw.sig), editSigned(raw), publicKeyFromZ32(raw.s))) return;
     const secret = this.secret(raw.e);
     if (!secret) { if (raw.e >= this.epoch - GROUP_LIMITS.secrets) this.parkEdit(from, raw); return; }
     const plain = decryptText(epochKeys(secret, this.id, raw.e).message, editAad(raw), raw.nn, raw.c);

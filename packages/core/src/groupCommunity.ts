@@ -1111,13 +1111,16 @@ export class CommunitySession {
 
   private async receiveMessage(from: string, raw: unknown): Promise<boolean> {
     if (!isMessageFrame(raw) || raw.s === this.myKey) return false;
+    // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
+    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
+    // Someone the chain took out is heard no more, even for an epoch it was in (whose secret it still holds).
+    if (this.wasRemoved(raw.s)) return false;
     const found = this.commitByShort(raw.e, raw.h);
     if (!found) { this.park(from, raw); return false; }
     const roster = this.rosterOf(found.hash)!;
     // Not a member of that epoch, or I was not one: nothing to read, nothing to relay.
     if (!rosterHas(roster, raw.s) || !rosterHas(roster, this.myKey)) return false;
     if (this.isDuplicate(raw)) return false;
-    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     const secret = this.state.secrets[found.hash];
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
@@ -1230,7 +1233,7 @@ export class CommunitySession {
     // What was said while they were away, by anyone, for epochs they were in.
     const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
     for (const stored of this.state.store) {
-      if (stored.s === from) continue;
+      if (stored.s === from || this.wasRemoved(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found || !rosterHas(this.rosterAt(found.hash) ?? [], from)) continue;
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];

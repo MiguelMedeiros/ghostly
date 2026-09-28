@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
+import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { Reactions, latestReaction } from "../src/engine/reactions";
@@ -187,6 +187,20 @@ describe("the reactions store", () => {
     };
     return { reactions: new Reactions(host), host, changed, tick: (ms: number) => { now += ms; } };
   }
+
+  it("takes at most REACTION_LIMITS.receive a window from one group member", async () => {
+    const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+    const rows = [row({ id: `${ana}:0:1`, member: ana, text: "hello group" })];
+    const { reactions, tick } = memory(rows);
+    const outcomes: string[] = [];
+    for (let n = 1; n <= REACTION_LIMITS.receive + 5; n++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "👍", n }));
+    expect(outcomes.filter(o => o === "applied")).toHaveLength(REACTION_LIMITS.receive);
+    expect(outcomes.slice(-5)).toEqual(Array(5).fill("dropped"));
+    // Another member has a window of its own, and the window passes.
+    expect(await reactions.receive("group:g", ana, { id: `${ana}:0:1`, e: "😂", n: 1 })).toBe("applied");
+    tick(REACTION_LIMITS.windowMs);
+    expect(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "🙏", n: 100 })).toBe("applied");
+  });
 
   it("keeps one reaction per member per message in a group, by member key", async () => {
     const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];

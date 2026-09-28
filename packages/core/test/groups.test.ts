@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createIdentity, identityFromSeedB64 } from "../src/identity";
-import { fromBase64Url, toBase64Url } from "../src/bytes";
+import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
+import { fromBase64Url, toBase64Url, utf8Encode } from "../src/bytes";
 import { confirmationMatches, confirmationTag, decryptText, edgeParams, encryptText, epochKeys, newEpochSecret, openSecret, sealSecret } from "../src/groupCrypto";
 import { MAX_GROUP_MEMBERS, commitHash, commitUntaggedHash, signCommit, verifyChain, verifyCommit, type GroupCommit, type Roster } from "../src/groupCommits";
 import { GROUP_LIMITS, GroupSession, groupMessageId, type GroupMessageFrame } from "../src/groupSession";
@@ -320,7 +320,13 @@ describe("group session", () => {
     await bob.handle(alice.myKey, far);
     expect((bob as unknown as { waiting: unknown[] }).waiting).toHaveLength(0);
     mesh.setEdge(alice.myKey, bob.myKey, false);
+    // Unsigned by Alice, none of them waits: a frame no member wrote never takes the place of one that was.
     for (let i = 0; i < GROUP_LIMITS.waiting + 10; i++) await bob.handle(alice.myKey, { ...alice.state.sent[0], e: alice.epoch + 1, n: i });
+    expect((bob as unknown as { waiting: unknown[] }).waiting).toHaveLength(0);
+    // Signed by her, they wait, up to the bound.
+    const seed = identityFromSeedB64(alice.state.seedB64).seed;
+    const signed = (f: GroupMessageFrame): GroupMessageFrame => ({ ...f, sig: toBase64Url(sign(utf8Encode(JSON.stringify(["ghostly-group/1 msg", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c])), seed)) });
+    for (let i = 0; i < GROUP_LIMITS.waiting + 10; i++) await bob.handle(alice.myKey, signed({ ...alice.state.sent[0], e: alice.epoch + 1, n: i }));
     expect((bob as unknown as { waiting: unknown[] }).waiting).toHaveLength(GROUP_LIMITS.waiting);
     // Only one question was asked of Alice for all of that.
     expect(mesh.sentFrames.filter(f => f.from === bob.myKey && f.frame.t === "group-sync").length).toBeLessThanOrEqual(2);
