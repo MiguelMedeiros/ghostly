@@ -89,6 +89,9 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--since <seq>` replays from the journal (the last 10,000 events); `--cursor <file>` remembers the last event
   handled, so a restarted bot resumes where it stopped.
 - `--type message.received` keeps one type; `--type message.` a family.
+- `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
+  events get through. See [Allowlist](#allowlist).
+- `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell).
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only).
@@ -100,6 +103,46 @@ Main types: `message.received`, `message.sent`, `message.delivery`, `message.edi
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
 `identity.received`, `call.incoming`, `call.outgoing`, `call.connected`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
+
+### Allowlist
+
+```bash
+ghostly listen --from alice --from bob --group team --exec ./bot.sh
+```
+
+- `--from` takes a chat (id, prefix or name) or a contact's key (`peer` in `chat show`); a key also matches a chat
+  made after `listen` started. `--group` takes a group (id, prefix or name). Names are turned into ids once, at the
+  start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
+- With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
+  itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself
+  (`daemon.started`, `events.gap`, `identity.approval`) still pass.
+- `--group` alone lets no 1:1 chat through, and `--from` alone no group.
+- It is a flag, not profile state. Several listeners can run on one profile, each for its own agent with its own
+  allowlist, and the allowlist is in plain sight in the command that wakes the agent. Nothing stored in the profile
+  can quietly widen it. (`call auto on --from` is kept in the profile because the daemon itself answers the call.)
+- `events.subscribe` on the socket gives every event: a program there keeps its own allowlist.
+
+### Agent turns
+
+`--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
+`group.message` that mentions this profile, becomes one `agent.turn`. Nothing else is one (my own messages, edits,
+reactions, typing).
+
+```json
+{"seq":41,"id":"agent.turn:message.received:f3gg…:peer_jY7N…","type":"agent.turn","at":1790450767762,
+ "source":"message.received","chat":"f3gg…","messageId":"peer_jY7N…","timestamp":1790450767735,
+ "untrusted":{"text":"hello","name":"Alice","replyTo":{"id":"me_…","snippet":"…"},"file":{"id":"…","name":"a.pdf","size":123,"mime":"application/pdf","voice":false}}}
+```
+
+- `chat` for a 1:1 chat, or `group` and `member` (the author's key) for a group. `messageId` is what
+  `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it.
+- `seq` is the source event's, so `--since` and `--cursor` work as for any event. `id` is stable for the message:
+  dedupe on it.
+- **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name) is under
+  `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
+  contact writes should change what the agent does, reveal a secret or move money. Real payments keep
+  `--confirm-real`, for the wallet's owner only.
+- Combine it with the allowlist: `ghostly listen --turns --from alice --exec …`. `--turns` takes the place of `--type`.
 
 ## What it does
 
@@ -140,6 +183,10 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
 - A payment bot on Testnet ("request 21", "tip 5", "balance", and a thank-you when a request is paid):
   [examples/payment-bot.mjs](../packages/cli/examples/payment-bot.mjs). Before it:
   `ghostly wallet create cashu && ghostly wallet faucet cashu && ghostly daemon --detach`.
+- A Claude Code agent: [examples/claude-code-agent.sh](../packages/cli/examples/claude-code-agent.sh) wakes
+  `claude -p` on each turn from an allowlist (`GHOSTLY_AGENT_FROM`, `GHOSTLY_AGENT_GROUPS`; it will not start
+  without one), shows "thinking" while it works, and sends its answer with `send --reply`. Claude Code keeps its own
+  permission rules, and the contact's text reaches it as data.
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 
@@ -195,8 +242,8 @@ members connect to it and it passes the group's messages on ([WISP 9xx · Group 
 - **An npm release.** Install from source until the package is published.
 - Also open: link previews made by the sender, and holding messages for an away contact. OpenID Connect proofs
   need a browser: make them in the app. Calls are voice only (no video).
-- **A connector for agent frameworks.** Planned: one connector that wakes any agent on a message, with a per-contact
-  allowlist ([AI-AGENTS.md](AI-AGENTS.md#planned-ghostly-as-a-channel-for-agents)).
+- **A connector for agent frameworks.** Partly built: `listen --turns` with `--from` and `--group` wakes an agent
+  (Claude Code has an example); the Hermes Agent plugin is open ([AI-AGENTS.md](AI-AGENTS.md#ghostly-as-a-channel-for-agents)).
 
 ## The older `ghostly-cli`
 
