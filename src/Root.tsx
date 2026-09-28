@@ -173,6 +173,15 @@ function LockGate({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The app's router. A move to another page is drawn at once, not as a transition: the engine's state comes several
+ * times a second, each time a sync render, and each one started a transition's render over. Leaving a long chat still
+ * drawing its older rows (useTailFirst, transitions too) waited behind them: seconds on a slow machine.
+ */
+export function AppRouter({ children }: { children: ReactNode }) {
+  return <HashRouter useTransitions={false}>{children}</HashRouter>;
+}
+
 /** The whole Ghostly UI. Desktop and Browser both render this; only the platform modules differ. */
 export function Root() {
   return (
@@ -182,7 +191,7 @@ export function Root() {
           <LockScreenProvider>
             <LockScreen />
             <ProfileSwitchSplash />
-            <HashRouter>
+            <AppRouter>
               <ErrorBoundary>
               <ChatLinkIntake />
               <JoinNotice />
@@ -213,7 +222,7 @@ export function Root() {
                 </UpdateProvider>
               </LockGate>
               </ErrorBoundary>
-            </HashRouter>
+            </AppRouter>
           </LockScreenProvider>
         </I18nProvider>
       </ThemeProvider>

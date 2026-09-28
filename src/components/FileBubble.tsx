@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../lib/fileStatus";
@@ -14,8 +14,7 @@ const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-blac
 
 /** A file in the chat: progress while it travels, then a preview (images) and a way to save it. */
 export function FileBubble({ file, peerName = "Your contact", highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
-  const platform = useServicesPlatform();
-  const transfer = platform?.getTransfer(file.id) ?? null;
+  const { platform, transfer } = useTransfer(file.id);
   /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
   const blobUrl = preview?.id === file.id ? preview.url : null;

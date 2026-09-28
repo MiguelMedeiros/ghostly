@@ -60,6 +60,39 @@ test("a long chat opens without costing in proportion to its length", { tag: ["@
   expect(long.idleLong).toBeLessThan(150);
 });
 
+test("leaving a long chat still drawing its older rows costs what leaving a short one does", { tag: ["@feature:app.navigation"] }, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const bob = await peer("switch-bob");
+  await bob.context.addInitScript(countCommits);
+  await seed(bob.page, [{ label: "Long chat", count: 600 }, { label: "Short chat", count: 20 }, { label: "Other chat", count: 20 }]);
+  await bob.page.reload();
+  await expect(bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" })).toBeVisible();
+  // A slower processor: the long chat is still drawing its older rows when it is left, however fast the runner.
+  const cdp = await bob.context.newCDPSession(bob.page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  const open = async (label: string) => {
+    const opened = await bob.page.evaluate(openAndMeasure, label);
+    await expect(chat(bob).locator("[data-message-row]").last()).toBeInViewport();
+    return opened;
+  };
+  await open("Short chat");
+  const leaveLong: Open[] = [], leaveShort: Open[] = [];
+  // From one chat to another in the chat list, as a person goes back and forth; the first round warms the code paths.
+  for (let run = -1; run < RUNS; run++) {
+    await open("Long chat");
+    const fromLong = await open("Short chat");
+    const fromShort = await open("Other chat");
+    if (run >= 0) { leaveLong.push(fromLong); leaveShort.push(fromShort); }
+    await open("Short chat");
+  }
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  const long = summary(leaveLong), short = summary(leaveShort);
+  console.log(`chat-switch-perf, 4x slower (median of ${RUNS}): ${JSON.stringify({ long, short })}`);
+  // Before, the move to the next chat was a transition: each change of the engine's state (a sync render, several a
+  // second) started it over, and it waited behind the long chat's older rows (1.1 to 1.7 s here, against 0.3 s).
+  expect(long.paint).toBeLessThan(Math.max(700, short.paint * 2));
+});
+
 test("the message list is a layer of its own, but not while a video in it plays full screen", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
   const bob = await peer("layer-bob");
   await seed(bob.page, [{ label: "Short chat", count: 50 }]);
