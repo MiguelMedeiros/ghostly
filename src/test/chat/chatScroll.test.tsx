@@ -11,6 +11,8 @@ import { renderApp } from "../render";
  * says), stacked in order. Setting `scrollTop` clamps and fires `scroll`, as a browser does.
  */
 const VIEW = 300;
+/** The list's height now: shorter when something under it (the composer) grows. */
+let view = VIEW;
 const ROW = 50;
 const heights = new Map<string, number>();
 /** Rows still in their entry animation, and how far down it draws them for now (a transform: the layout does not move). */
@@ -20,7 +22,7 @@ const isList = (el: Element) => el instanceof HTMLElement && el.dataset.testid =
 const rowsIn = (el: Element) => [...el.querySelectorAll<HTMLElement>("[data-message-id]")];
 const heightOf = (row: HTMLElement) => heights.get(row.dataset.messageId!) ?? ROW;
 const contentHeight = (el: Element) => rowsIn(el).reduce((sum, row) => sum + heightOf(row), 0);
-const maxTop = (el: Element) => Math.max(0, contentHeight(el) - VIEW);
+const maxTop = (el: Element) => Math.max(0, contentHeight(el) - view);
 
 function inherited(name: string): PropertyDescriptor {
   for (let proto: object | null = Element.prototype; proto; proto = Object.getPrototypeOf(proto)) {
@@ -38,8 +40,8 @@ beforeAll(() => {
   const top = inherited("scrollTop");
   const rect = Element.prototype.getBoundingClientRect;
   Object.defineProperties(HTMLElement.prototype, {
-    scrollHeight: { configurable: true, get(this: HTMLElement) { return isList(this) ? Math.max(VIEW, contentHeight(this)) : 0; } },
-    clientHeight: { configurable: true, get(this: HTMLElement) { return isList(this) ? VIEW : 0; } },
+    scrollHeight: { configurable: true, get(this: HTMLElement) { return isList(this) ? Math.max(view, contentHeight(this)) : 0; } },
+    clientHeight: { configurable: true, get(this: HTMLElement) { return isList(this) ? view : 0; } },
     scrollTop: {
       configurable: true,
       get(this: HTMLElement) { return isList(this) ? positions.get(this) ?? 0 : top.get!.call(this); },
@@ -55,7 +57,7 @@ beforeAll(() => {
     getBoundingClientRect: {
       configurable: true,
       value(this: HTMLElement) {
-        if (isList(this)) return new DOMRect(0, 0, 400, VIEW);
+        if (isList(this)) return new DOMRect(0, 0, 400, view);
         const list = this.closest<HTMLElement>("[data-testid='list']");
         if (!list || !this.dataset.messageId) return rect.call(this);
         let y = -list.scrollTop;
@@ -87,7 +89,7 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-beforeEach(() => { heights.clear(); entering.clear(); observed = []; forgetChatScroll(); });
+beforeEach(() => { heights.clear(); entering.clear(); observed = []; view = VIEW; forgetChatScroll(); });
 
 function Timeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
   const jump = useChatScroll({ rows, chat });
@@ -270,6 +272,60 @@ describe("the chat timeline's scrolling", () => {
     act(() => { fireEvent.scroll(list()); });
     resized();
     expect(list().scrollTop).toBe(100);
+  });
+
+  it("just opened, content growing again and again (pictures, previews, a voice bubble) keeps the last message in view", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    expect(list().scrollTop).toBe(700);
+    for (const [id, height] of [["peer_19", 180], ["peer_12", 240], ["peer_18", 90], ["peer_3", 400]] as const) {
+      heights.set(id, height);
+      resized();
+      expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
+    }
+    expect(pill()).toBeNull();
+  });
+
+  it("at the bottom, the list getting shorter (the composer growing with a draft) keeps the last message in view", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    expect(list().scrollTop).toBe(200);
+    view = 220;
+    resized();
+    expect(list().scrollTop).toBe(280);
+    expect(list().scrollHeight - list().scrollTop - list().clientHeight).toBe(0);
+  });
+
+  it("at the bottom, the browser pulling the view a little up with no hand on it goes back to the bottom", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    expect(list().scrollTop).toBe(200);
+    // The composer sizes itself to its text: for an instant the list is 66 px taller, and the browser clamps the view to
+    // it. The list is its old height again by the time anything looks, so nothing reports a new size.
+    act(() => { list().scrollTop = 134; });
+    expect(list().scrollTop).toBe(200);
+    expect(pill()).toBeNull();
+  });
+
+  it("at the bottom, a hand's small scroll up stays where the hand put it", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    fireEvent.wheel(list());
+    act(() => { list().scrollTop = 140; });
+    expect(list().scrollTop).toBe(140);
+    // A press on the list (dragging its scrollbar) is a hand too.
+    fireEvent.pointerDown(list());
+    act(() => { list().scrollTop = 150; });
+    fireEvent.pointerUp(window);
+    expect(list().scrollTop).toBe(150);
+  });
+
+  it("scrolled up by hand, content growing above and below keeps the message it shows in place", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    fireEvent.wheel(list());
+    scrollTo(300);
+    const before = topOf("peer_7");
+    heights.set("peer_2", 300);
+    heights.set("peer_19", 300);
+    resized();
+    expect(topOf("peer_7")).toBe(before);
+    expect(list().scrollTop).toBe(550);
   });
 
   it("far from the bottom with nothing new, a plain ↓ shows; near it, nothing", async () => {

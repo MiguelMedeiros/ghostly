@@ -105,8 +105,11 @@ function clip(value: unknown, max: number): string | undefined {
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
 
-/** The thumbnail if it is one Ghostly shows: a JPEG data URL within the limits whose header declares a sane size. */
-export function sanitizePreviewImage(value: unknown): string | undefined {
+/**
+ * A thumbnail's size in pixels, from its JPEG header: a card keeps its box before the picture decodes. Undefined for
+ * anything but a JPEG data URL within the limits.
+ */
+export function previewImageSize(value: unknown): { width: number; height: number } | undefined {
   if (typeof value !== "string" || !value.startsWith(JPEG_PREFIX)) return;
   const data = value.slice(JPEG_PREFIX.length);
   if (data.length > Math.ceil(LINK_PREVIEW_LIMITS.imageBytes / 3) * 4 || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return;
@@ -115,10 +118,15 @@ export function sanitizePreviewImage(value: unknown): string | undefined {
   if (binary.length > LINK_PREVIEW_LIMITS.imageBytes) return;
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const size = jpegSize(bytes);
+  return jpegSize(bytes);
+}
+
+/** The thumbnail if it is one Ghostly shows: a JPEG data URL within the limits whose header declares a sane size. */
+export function sanitizePreviewImage(value: unknown): string | undefined {
+  const size = previewImageSize(value);
   const side = LINK_PREVIEW_LIMITS.imageSide;
   if (!size || size.width < 1 || size.height < 1 || size.width > side || size.height > side) return;
-  return value;
+  return value as string;
 }
 
 /**
