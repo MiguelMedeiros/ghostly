@@ -218,6 +218,8 @@ interface LinkFiles {
   wireIds: Set<string>;
   /** Transfers in flight from the peer, by wire id. */
   incoming: Map<string, { localId: string; size: number }>;
+  /** files/2 message ids taken since the app started, by the wire id of the file whose message it is. */
+  messageIds?: Map<string, string>;
 }
 
 function emptyLinkFiles(): LinkFiles {
@@ -2383,9 +2385,16 @@ export class GhostlyNode implements EngineImplementation {
     let writing: Promise<void> = appender.then(() => {});
     const discard = () => appender.then((a) => a.bytes.remove(file.id)).catch(() => {});
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
-    const messageStored = this.storeMessage({
+    // files/2 names a file's message by the sender's time, as the sender's reactions, edits and deletes do. Another
+    // file (or a message) already at that time keeps its place, and this one gets an id of its own: its bytes never
+    // land without a message. The same file sent again after its transfer failed lands in the message it had.
+    const first = `peer_${wire.timestamp}`, own = `${first}_${wire.id}`;
+    const messageIds = (files.messageIds ??= new Map());
+    const holder = messageIds.get(first);
+    if (holder === undefined) messageIds.set(first, wire.id);
+    const storeFileMessage = (id: string) => this.storeMessage({
       linkId,
-      id: `peer_${wire.timestamp}`,
+      id,
       // The id both sides know the file by: what a reply to it names (WISP 400 § Replies).
       wireId: wire.id,
       text: fileMessageText(file),
@@ -2396,17 +2405,27 @@ export class GhostlyNode implements EngineImplementation {
       ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
       details: { wire: fileWire("files/2", wire.size) },
     });
+    const messageStored = (async (): Promise<string> => {
+      let id = holder === undefined || holder === wire.id ? first : own;
+      if (id === first && (holder === wire.id || await db.hasMessage(linkId, first))) {
+        const again = await db.patchMessage(linkId, first, (m) => m.sender === "peer" && m.wireId === wire.id && m.file ? { file: { ...m.file, id: file.id } } : null);
+        if (again) { this.events.onMessages(linkId, await db.getMessages(linkId)); return first; }
+        if (holder !== wire.id) id = own;
+      }
+      await storeFileMessage(id);
+      return id;
+    })();
     void messageStored.catch(() => {});
     return {
       write: (chunk) => (writing = writing.then(async () => { if (!cancelled) await (await appender).append(chunk); })),
       // The message keeps the announced type for display; the bytes are served as something inert.
       close: async (digest?: string) => {
-        await messageStored;
+        const messageId = await messageStored;
         await writing;
         if (cancelled) throw new Error("Transfer cancelled");
         const live = this.links.get(linkId);
         // Deleted while it was still arriving: the bytes have nowhere to land, and give their room back.
-        if (live?.stored.deletedIds?.includes(`peer_${wire.timestamp}`)) {
+        if (live?.stored.deletedIds?.includes(messageId)) {
           await discard();
           throw new Error("The receiving message was deleted");
         }
