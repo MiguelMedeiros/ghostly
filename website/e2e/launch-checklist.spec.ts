@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 
 /**
  * What a crawler or a share sees: robots.txt and the sitemap are valid, and every page in the sitemap answers with
- * its own title, description and share card (a 1200x630 image at an absolute address). A missing page has a title of
+ * its own title, description and share card (a 1200x630 image under 300 KB at an absolute address). A missing page has a title of
  * its own, no picture on the home page lacks alt text, and no page calls another site or sets a cookie (the site has
  * no analytics, so it needs no cookie banner).
  */
@@ -105,12 +107,14 @@ test("every page in the sitemap has its own title, description and share card", 
   }
 });
 
-test("the share image is 1200x630", async ({ request, page }) => {
+test("the share image is 1200x630 and under 300 KB", async ({ request, page }) => {
   const h = head(await (await request.get("/")).text());
   const local = new URL(h.ogImage!).pathname;
   const res = await request.get(local);
   expect(res.status()).toBe(200);
   expect(res.headers()["content-type"]).toMatch(/^image\//);
+  // Some apps drop a share picture over their limit (WhatsApp's is about 300 KB); scripts/og-image.mjs keeps it small.
+  expect((await res.body()).length).toBeLessThan(300 * 1024);
   await page.goto("/");
   const size = await page.evaluate(async (src) => {
     const img = new Image();
@@ -119,6 +123,14 @@ test("the share image is 1200x630", async ({ request, page }) => {
     return [img.naturalWidth, img.naturalHeight];
   }, local);
   expect(size).toEqual([1200, 630]);
+});
+
+test("the repository's social preview is 1280x640 and under 1 MB", () => {
+  // The same art (scripts/og-image.mjs) for GitHub's Settings, Social preview; a PNG's size is in its IHDR chunk.
+  const png = readFileSync(resolve(__dirname, "../../docs/assets/social-preview.png"));
+  expect(png.subarray(12, 16).toString("latin1")).toBe("IHDR");
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1280, 640]);
+  expect(png.length).toBeLessThan(1024 * 1024);
 });
 
 test("the icons and the manifest answer", async ({ request }) => {
