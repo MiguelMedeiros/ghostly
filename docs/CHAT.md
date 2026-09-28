@@ -23,7 +23,7 @@ What a chat is, what its header, menus and composer hold, and how messages rende
 
 Left to right (`src/pages/Chat.tsx`): avatar (click to see the picture large, #447), name (click to rename), the contact's identity marks ([IDENTITIES.md](IDENTITIES.md)), then on the right the **connection icon**, the audio and video call buttons, and ⋮.
 
-Under the name, the contact's key, or **typing…** with three dots while the contact writes (`src/components/TypingIndicator.tsx`); **recording audio…** while the contact records a voice note (from the moment the mic opens, held or hands-free, until it is sent or thrown away); **thinking…**, or a bot's own short status such as "Transcribing your audio…", shown as plain text. The chat list row shows the same in its preview line, in the accent. It is presence, not connection, so it never goes in the icon. Paired 1:1 chats only, over the live session (`typing/1`, [WISP 401](wisps/401-paired-chat.md#typing)): it goes with the message, a cleared composer, 5 seconds without a keystroke, or, if the stop is lost, 6 seconds after the contact's last word. Settings → Security → **Send typing indicator** (per profile, on by default) stops telling contacts and groups; theirs still shows.
+Under the name, the contact's key, or **typing…** with three dots while the contact writes (`src/components/TypingIndicator.tsx`); **recording audio…** while the contact records a voice note (from the moment the mic opens, held or hands-free, until it is sent or thrown away); **thinking…**, or a bot's own short status such as "Transcribing your audio…", shown as plain text. The chat list row shows the same in its preview line, in the accent. It is presence, not connection, so it never goes in the icon. In paired 1:1 chats over the live session (`typing/1`, [WISP 401](wisps/401-paired-chat.md#typing)), and in private groups (below): it goes with the message, a cleared composer, 5 seconds without a keystroke, or, if the stop is lost, 6 seconds after the contact's last word. Settings → Security → **Send typing indicator** (per profile, on by default) stops telling contacts and groups; theirs still shows.
 
 A private group's header says who is writing, recording or thinking, in place of its subtitle: "Ana is typing…", "Ana and Bo are typing…", "3 people are typing…" (#442, [WISP 9xx Group Mesh](wisps/9xx-group-mesh.md)). It is never stored, and a message ends it. Communities do not show it yet.
 
@@ -169,7 +169,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 | Interface | cards, new wallets, new groups | off |
 
 - A chat's cues are silent while that chat is muted (a mention it lets through still plays). Nothing new plays while the app is in the background.
-- The message sound and a notification come only with a new message at the end of a chat (#527). A group's history lines (joined, left, renamed, a new admin, keys rotated), a late catch-up of older messages, typing, edits, reactions and receipts stay quiet. Messages of one chat that arrive together play one sound.
+- The message sound and a notification come only with a new message at the end of a chat (#527, `packages/browser/src/engine/attention.ts`). A line of a group's history (someone joined, left, is the admin, renamed it), a late catch-up of older messages and an empty text stay quiet, and so do typing, edits, reactions and receipts. Files and payments have cues of their own. Messages of one chat that arrive together play one sound.
 
 ## Groups
 
