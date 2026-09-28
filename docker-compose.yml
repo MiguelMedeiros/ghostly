@@ -17,3 +17,9 @@ services:
       # address, set e.g. GHOSTLY_WEB_BIND=0.0.0.0:8090 (the app itself needs HTTPS there).
       - "${GHOSTLY_WEB_BIND:-127.0.0.1:8080}:80"
     restart: unless-stopped
+    # Docker keeps a container's output until it is removed: cap it at three files of 10 MB.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

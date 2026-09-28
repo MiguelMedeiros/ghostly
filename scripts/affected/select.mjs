@@ -87,7 +87,7 @@ export const UNIT_PROJECTS = [
   },
   {
     name: "scripts", cwd: ".", args: ["-c", "scripts/vitest.config.ts"],
-    sources: ["scripts/**", "e2e/features.json"],
+    sources: ["scripts/**", "e2e/features.json", "web/nginx.conf"],
     whole: ["scripts/vitest.config.ts", "vitest.shared.ts"],
     tests: ["scripts/test/**"],
   },
