@@ -77,8 +77,9 @@ test("typing in a long chat draws no message rows and costs what it does in a sh
     // Message rows are not drawn again for keystrokes (a row the engine changed meanwhile may be; every row of the
     // long chat drawn once would be 20 per keystroke here).
     expect(results[`${label} ${rate}x rows`].rows, `${label} ${rate}x rows`).toBeLessThan(5);
-    // Typing on one line gives the field its height once, not on every keystroke (it was four writes per key).
-    expect(results[`${label} ${rate}x`].heightWrites, `${label} ${rate}x height writes`).toBeLessThanOrEqual(2);
+    // The field grows a line at a time as the text wraps, and is left alone in between: it was four writes per
+    // keystroke (about 800 here).
+    expect(results[`${label} ${rate}x`].heightWrites, `${label} ${rate}x height writes`).toBeLessThanOrEqual(8);
   }
   // Generous on purpose (a loaded runner): 30 times the messages may not make a keystroke cost 3 times more.
   const long = results["Long chat 4x"], short = results["Short chat 4x"];
