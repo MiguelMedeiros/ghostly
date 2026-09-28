@@ -22,7 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@arkade-os/sdk": "0.4.75",
+    "@arkade-os/sdk": "0.4.76",
     "@atproto/jwk-webcrypto": "^0.3.4",
     "@atproto/oauth-client": "^0.8.7",
     "@bitcoindevkit/bdk-wallet-web": "0.3.0",
@@ -62,6 +62,6 @@
     "@types/node": "^26.6.2",
     "typescript": "^5.9.3",
     "vite": "^8.3.1",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.2"
   }
 }
