@@ -74,7 +74,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull req
 | [Nostr social · 3xx planned](3xx-nostr-social.md) | Nostr social layer | Draft | Experimental: profile, follows, notes on request; publication through the person's signer, off by default |
 | [Profile DID · 3xx planned](3xx-did-dht.md) | Profile DID (did:dht) | Draft | Experimental (#247): every profile's did:dht of its own key, the key alone unless the person lists identities; published by web, extension and Desktop (#299); @web5/dids interop |
 | [Pubky · 3xx planned](302-pubky.md) | Pubky | Draft | Experimental provider `pubky` (#246): approved in Pubky Ring or Pubky Passport, proof file on the homeserver |
-| [Keet · 3xx planned](303-keet.md) | Keet | Draft | Blocked: no supported Keet signing or export API; the 2026-09-20 compatible import is off |
+| [Keet · Research](303-keet.md) | Keet | Draft | **Research** (#511): blocked until Keet offers a supported signing API; the 2026-09-20 compatible import is off |
 | [Domain · 3xx planned](3xx-domain.md) | Domain Proofs | Draft | Experimental provider `domain`: DNS TXT, /.well-known/ghostly.json, NIP-05 |
 | [OpenPGP · 3xx planned](3xx-openpgp.md) | OpenPGP | Draft | Experimental provider `openpgp`; gpg-made vectors, contract suite and e2e |
 | [Bitcoin address · 3xx planned](3xx-bitcoin.md) | Bitcoin Address Proof | Draft | Experimental provider `bitcoin`: BIP-322 2.0.0 and legacy P2PKH, verified locally |
@@ -149,7 +149,7 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 | 3xx Nostr social | Experimental | Read on request, publication off by default |
 | 3xx Profile DID (did:dht) | Experimental | Public links opt-in, new |
 | 3xx Pubky | Experimental | Merged 2026-09-25 |
-| 3xx Keet | Experimental | Blocked on a Keet API |
+| Keet | Research | Blocked until Keet offers a supported signing API |
 | 3xx Domain | Experimental | Identity provider |
 | 3xx OpenPGP | Experimental | Identity provider |
 | 3xx Bitcoin address | Experimental | Identity provider |

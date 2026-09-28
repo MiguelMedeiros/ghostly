@@ -167,7 +167,7 @@ export const home = {
         icon: "group",
         title: "Bring the whole group.",
         body: "A private group of up to 32, or a community of up to 256 that anyone with its link can join. Invite people from your chats or share the link.",
-        extra: "Text, @mentions, replies, edits, reactions, a group picture and payments between members. No files or calls in groups yet.",
+        extra: "Text, @mentions, replies, edits, reactions, a group picture and payments between members. Typing shows in private groups. No files or calls yet.",
       },
       {
         id: "identities",
