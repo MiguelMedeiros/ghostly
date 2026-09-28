@@ -13,7 +13,7 @@ export function setDatabaseName(name: string): void {
 export function databaseName(): string {
   return dbName;
 }
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 export const STORES = {
   links: "links",
@@ -80,9 +80,6 @@ export function openDb(): Promise<IDBDatabase> {
       if (!has(STORES.messages)) {
         db.createObjectStore(STORES.messages, { keyPath: ["linkId", "id"] }).createIndex("byLink", "linkId");
       }
-      // v9: a chat's messages in time order, so its latest page is read without the rest.
-      const messages = request.transaction!.objectStore(STORES.messages);
-      if (!messages.indexNames.contains("byLinkTime")) messages.createIndex("byLinkTime", ["linkId", "timestamp"]);
       if (!has(STORES.proofs)) db.createObjectStore(STORES.proofs, { keyPath: "secret" });
       if (!has(STORES.payments)) db.createObjectStore(STORES.payments, { keyPath: "id" });
       if (!has(STORES.quotes)) db.createObjectStore(STORES.quotes, { keyPath: "quote" });
@@ -99,6 +96,9 @@ export function openDb(): Promise<IDBDatabase> {
       if (!has(STORES.fileChunks)) db.createObjectStore(STORES.fileChunks, { keyPath: ["id", "index"] });
       // v9: what changes about a stored file, apart from its record (see `fileStore`).
       if (!has(STORES.fileState)) db.createObjectStore(STORES.fileState, { keyPath: "id" });
+      // v10: a chat's messages in time order, so its latest page is read without the rest.
+      const messages = request.transaction!.objectStore(STORES.messages);
+      if (!messages.indexNames.contains("byLinkTime")) messages.createIndex("byLinkTime", ["linkId", "timestamp"]);
     };
     request.onsuccess = () => {
       // Let the other context upgrade the schema instead of blocking it.

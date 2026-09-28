@@ -80,9 +80,9 @@ describe.each([
     expect(await db.getMessage("chat", "zz")).toBeUndefined();
   });
 
-  it("works on a database kept before pages (v8): the upgrade indexes the history already there", async () => {
+  it.each([8, 9])("works on a database kept before pages (v%i): the upgrade indexes the history already there", async (version) => {
     await new Promise<void>((resolve, reject) => {
-      const open = indexedDB.open("ghostly", 8);
+      const open = indexedDB.open("ghostly", version);
       open.onupgradeneeded = () => {
         const messages = open.result.createObjectStore("messages", { keyPath: ["linkId", "id"] });
         messages.createIndex("byLink", "linkId");
