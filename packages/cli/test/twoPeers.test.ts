@@ -142,19 +142,21 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // Node build never says a connection went `disconnected`, Alice reads that offer at a live chat's pace, or her
     // liveness gives up first, where a native knock takes over in about a second. Most runs are live in seconds. When
     // the relays' request budget holds Alice's answer back until her answering attempt is over, Bob's offer runs to its
-    // own attempt timeout (CONNECT_TIMEOUT_MS, 90 s) and the HyperDHT dial goes live at once after it. So the bound is
-    // counted from Bob's daemon being up, when that offer starts, not from the kill: the daemon's own start is not part
-    // of it (with it, that path measured 90.7 to 91.4 s against a 90 s bound).
+    // own attempt timeout (CONNECT_TIMEOUT_MS, 90 s) and the HyperDHT dial goes live after it, in about a second, up to
+    // 14 s on a loaded machine. So the bound is one attempt timeout and one redial, counted from Bob's daemon being up,
+    // when that offer starts, not from the kill: the daemon's own start is not part of it (with it, that path measured
+    // 90.7 to 91.4 s against a 90 s bound). Two attempts in a row would still fail it.
     const killed = running.pop()!;
     await new Promise((r) => { killed.child.once("exit", r); killed.child.kill("SIGKILL"); });
     started = await restartBob();
-    await live(bob, "alice", CONNECT_TIMEOUT_MS / 1000 + 30);
+    const redial = 30_000;
+    await live(bob, "alice", (CONNECT_TIMEOUT_MS + redial) / 1000 + 10);
     const afterKill = Date.now() - started;
     await bothWays("after a kill");
     console.log(`[restart] live again after a stop in ${afterStop} ms, after a kill in ${afterKill} ms`);
     expect(afterStop).toBeLessThan(10_000);
-    expect(afterKill).toBeLessThan(CONNECT_TIMEOUT_MS + 10_000);
-  });
+    expect(afterKill).toBeLessThan(CONNECT_TIMEOUT_MS + redial);
+  }, 240_000);
 
   it("move a chat to native HyperDHT when asked", async () => {
     ok(await as(alice, "chat", "transport", "bob", "hyperdht"));
