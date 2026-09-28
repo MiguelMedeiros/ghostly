@@ -49,7 +49,8 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
   };
 }
 
-function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, kind: Kind, dhtState: DhtDeliveryState, wasLive = false): App {
+/** `endpointAfterMs`: the native endpoint starts this long after the link (a Desktop's Iroh can take seconds). */
+function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, kind: Kind, dhtState: DhtDeliveryState, wasLive = false, endpointAfterMs?: number): App {
   const app = { name, side, dhtState, requests: [] } as unknown as App;
   const native = kind === "webrtc" ? undefined : kind === "webrtc+hyperdht" ? "hyperdht/1" as const : "iroh/1" as const;
   const peerNative = native === "hyperdht/1" ? { publicKey: `${contact.name}:hyperdht/1` } : { id: `${contact.name}:iroh/1`, relay: "https://relay.test./", addresses: [] };
@@ -73,7 +74,8 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
   apps.push(app);
   app.link.start();
   app.link.setChatActive(false);
-  if (native) app.link.registerEndpoint(world.native.endpoint(native, name));
+  if (native && endpointAfterMs) setTimeout(() => app.link.registerEndpoint(world.native.endpoint(native, name)), endpointAfterMs);
+  else if (native) app.link.registerEndpoint(world.native.endpoint(native, name));
   // node.ts startLink: a saved contact with transports known is dialled once the endpoints are up, by the lower key.
   if (app.link.myPubKeyZ32 < side.params.peerPubKeyZ32) void app.link.connect().catch(() => {});
   return app;
@@ -119,8 +121,11 @@ function report(result: Result): void {
   if (file) appendFileSync(file, JSON.stringify(result) + "\n");
 }
 
-/** `budgetHeldMs`: from the restart, the relays' budget holds back every publish of the app that stayed for this long. */
-async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number): Promise<Result> {
+/**
+ * `budgetHeldMs`: from the restart, the relays' budget holds back every publish of the app that stayed for this long.
+ * `endpointAfterMs`: the restarted app's native endpoint starts this long after it.
+ */
+async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number, endpointAfterMs?: number): Promise<Result> {
   const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
   // The inviter has the lower link key here: it is the one that dials.
   const made = invitationWhere("inviter");
@@ -141,7 +146,7 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budg
   const watch = () => { if (!downSeenAt && channelOf(stays) !== before) downSeenAt = Date.now(); };
   for (let t = 0; t < RESTART_AFTER_MS; t += 100) { await run(100); watch(); }
   const dhtState = goes.dhtState;
-  goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, dhtState, true);
+  goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, dhtState, true, endpointAfterMs);
   const restartedAt = Date.now();
   if (budgetHeldMs) stays.heldUntil = restartedAt + budgetHeldMs;
   const liveAgainMs = await until(() => {
@@ -237,6 +242,15 @@ describe("a restart whose WebRTC answer the relays' budget holds back", () => {
     expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(15_000);
     expect(result.transport).toBe("hyperdht/1");
     expect(result.requestsPerMin).toBeLessThanOrEqual(10);
+    expect(result.dialFailures).toBe(0);
+  }, 240_000);
+
+  it("a native endpoint still starting when the offer has waited its grace is dialled once it is up", async () => {
+    const result = await restart("webrtc+hyperdht", "lower", "crash", BUDGET_HELD_MS, 12_000);
+    // Before: 96.1 s; the attempt ranked only what was up when it dialled, so the offer waited out its 90 s alone. After:
+    // 12.7 s, dialled as it starts. (One due in the race but not dialable yet is looked at again, never dropped.)
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(15_000);
+    expect(result.transport).toBe("hyperdht/1");
     expect(result.dialFailures).toBe(0);
   }, 240_000);
 

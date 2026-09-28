@@ -86,6 +86,8 @@ export const RACE_DIRECT_MS = 8_000;
  * over a relay stays there (no probing while live, WISP 100), where the answer would have made it direct.
  */
 export const RACE_RELAYED_MS = 40_000;
+/** A transport due in the race that cannot be dialled yet (its endpoint still starting, no address of the contact's) is looked at again this often. */
+const RACE_RETRY_MS = 2_000;
 export const DEMOTE_AFTER_FAILURES = 3;
 export const DEMOTE_MS = 60 * 60_000;
 const AUTO_CONNECT_MAX_RETRY_MS = 3 * 60_000;
@@ -520,6 +522,8 @@ export class GhostLink {
   private raceTimer: ReturnType<typeof setTimeout> | null = null;
   /** Set while `race` dials: the offer ending meanwhile is followed up by the race. */
   private racing = false;
+  /** The WebRTC offer this side's dial made last, with fallback allowed: what a transport that comes up meanwhile joins. */
+  private offered?: { epoch: number; at: number };
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
   /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
@@ -1310,6 +1314,7 @@ export class GhostLink {
     // transports are usable. Until then descriptors can be saved but not selected.
     this.advertiseTransports();
     if (this.resuming === endpoint.transport) void this.knock(endpoint.transport);
+    else this.joinRace(endpoint.transport);
   }
 
   /**
@@ -1434,6 +1439,7 @@ export class GhostLink {
           // goes, typically a relayed Iroh behind a symmetric NAT (WISP 100, "Relayed"), before the DHT floor.
           this.afterRtc = fallback && index + 1 < ordered.length ? { epoch, rest: ordered.slice(index + 1) } : undefined;
           const offeredAt = Date.now();
+          this.offered = fallback ? { epoch, at: offeredAt } : undefined;
           await this.dataLink.connect();
           if (!this.afterRtc || this.dataLink.state !== "idle" || epoch !== this.connectionEpoch) { this.scheduleRace(epoch, offeredAt); return; }
           this.afterRtc = undefined; continue;
@@ -1507,11 +1513,29 @@ export class GhostLink {
     this.clearRace();
     const next = this.afterRtc;
     if (!next || next.epoch !== epoch || epoch !== this.connectionEpoch || this.dataLink.state !== "offering") return;
-    const natives = next.rest.filter(t => t !== "webrtc/1");
-    if (!natives.length) return;
-    const relayed = this.relayedTransports;
-    const wait = natives.some(t => !relayed.includes(t)) ? RACE_DIRECT_MS : RACE_RELAYED_MS;
-    this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, Math.max(0, offeredAt + wait - Date.now()));
+    const relayed = this.relayedTransports, now = Date.now();
+    const at = next.rest.filter(t => t !== "webrtc/1").map(t => Math.max(offeredAt + (relayed.includes(t) ? RACE_RELAYED_MS : RACE_DIRECT_MS),
+      this.canDial(t) ? 0 : now + RACE_RETRY_MS));
+    if (!at.length) return;
+    this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, Math.max(0, Math.min(...at) - now));
+  }
+  /**
+   * A native endpoint that started while this side's offer is out unanswered: its transport was not up when the dial
+   * ranked what to try, and joins the race (and what the offer ending goes on to) if both sides allow it.
+   */
+  private joinRace(transport: NativeTransport): void {
+    const offered = this.offered;
+    if (!offered || offered.epoch !== this.connectionEpoch || this.dataLink.state !== "offering" || this.channel) return;
+    if (!this.peerFallback || !this.peerTransports?.includes(transport) || !this.transportOffer().includes(transport)) return;
+    const rest = this.afterRtc?.epoch === offered.epoch ? this.afterRtc.rest : [];
+    if (rest.includes(transport)) return;
+    this.afterRtc = { epoch: offered.epoch, rest: [...rest, transport] };
+    traceLink(this.myPubKeyZ32, "race-join", { transport });
+    if (!this.racing) this.scheduleRace(offered.epoch, offered.at);
+  }
+  /** Whether a native dial of `transport` can go now: this side's endpoint is up and the contact's descriptor known. */
+  private canDial(transport: PairedTransport): boolean {
+    return transport !== "webrtc/1" && this.endpoints.has(transport) && !!this.peerDescriptors[transport];
   }
   private clearRace(): void {
     if (this.raceTimer) clearTimeout(this.raceTimer);
@@ -1528,8 +1552,10 @@ export class GhostLink {
     if (!next || next.epoch !== epoch || epoch !== this.connectionEpoch || this.channel || this.dialing || this.stopped || this.leaving
       || this.streamBlocked || this.keyStopped || this.dataLink.state !== "offering") return;
     const relayed = this.relayedTransports, late = Date.now() - offeredAt >= RACE_RELAYED_MS;
-    const due = next.rest.filter(t => t !== "webrtc/1" && (late || !relayed.includes(t)));
+    // One that cannot be dialled yet is not given up on: it stays for later in the race, or for when the offer ends.
+    const due = next.rest.filter(t => this.canDial(t) && (late || !relayed.includes(t)));
     const left = next.rest.filter(t => t !== "webrtc/1" && !due.includes(t));
+    if (!due.length) { this.scheduleRace(epoch, offeredAt); return; }
     this.afterRtc = left.length ? { epoch, rest: left } : undefined;
     traceLink(this.myPubKeyZ32, "race", { transports: due, afterMs: Date.now() - offeredAt });
     this.dialing = this.racing = true;

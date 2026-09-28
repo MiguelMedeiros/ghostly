@@ -81,12 +81,13 @@ A WebRTC offer needs the contact to read it and publish an answer, both through 
 
 1. **Dialled meanwhile.** When the dialling side's offer has no answer after **8 s**, the direct transports ranked after WebRTC are dialled while the offer stands. Relayed ones wait **40 s**, once a contact reading in the background has had its look: a chat that goes live over a relay stays there (no probing, above), where the answer would have made it direct.
 2. **First live wins.** A native session that authenticates ends the WebRTC attempt still under way, on both sides (the offer, or an answer the budget still holds), and clears its signal. An offer answered first carries the chat, and the native connection is closed.
-3. **Once per attempt.** Each transport is dialled once per attempt: the offer that times out later goes on to what was not dialled yet, never to these again, so the failures that demote a transport (above) count as before.
-4. **No request.** A native dial asks nothing of the relays. Ending the offer sooner also ends its fast reads sooner.
+3. **Joined as they start.** A native endpoint that starts while the offer is out (after a restart, a Desktop's can take seconds) joins the race, as its transport was not up when the dial ranked what to try. One due that cannot be dialled yet is looked at again every 2 s, never dropped from the attempt.
+4. **Once per attempt.** Each transport is dialled once per attempt: the offer that times out later goes on to what was not dialled yet, never to these again, so the failures that demote a transport (above) count as before.
+5. **No request.** A native dial asks nothing of the relays. Ending the offer sooner also ends its fast reads sooner.
 
 An offer that has been answered is left alone: ICE is under way, and WebRTC settles as before ([Relayed transports](#relayed-transports-revision-03)).
 
-Measured in process (the CLI's case: WebRTC then HyperDHT, the staying side's publishes held back for 45 s, its answer given up after 31 s), from the restart to live on both sides: 90.7 s before (48.4 s when the staying side had the lower key and offered once the budget freed), 8.7-9.0 s after, over HyperDHT; the busier app's requests went from 19.5 to 6.5 a minute. With Iroh through its relay in place of HyperDHT: 90.7 s before, 40.6 s after, 19.5 to 15.5 requests a minute.
+Measured in process (the CLI's case: WebRTC then HyperDHT, the staying side's publishes held back for 45 s, its answer given up after 31 s), from the restart to live on both sides: 90.7 s before (48.4 s when the staying side had the lower key and offered once the budget freed), 8.7-9.0 s after, over HyperDHT; the busier app's requests went from 19.5 to 6.5 a minute. With Iroh through its relay in place of HyperDHT: 90.7 s before, 40.6 s after, 19.5 to 15.5 requests a minute. With the restarted app's HyperDHT endpoint starting 12 s after it: 96.1 s before, 12.7 s after.
 
 ### Why a chat is not live (revision 0.5)
 
@@ -196,7 +197,7 @@ Reverse offer arrival order and still choose the same result; exercise disjoint 
 
 ## Revision log
 
-- 0.7 (2026-09-27): an unanswered WebRTC offer has the transports ranked after it dialled meanwhile (direct after 8 s, relayed after 40 s); the first live session wins and ends the other attempt.
+- 0.7 (2026-09-27): an unanswered WebRTC offer has the transports ranked after it dialled meanwhile (direct after 8 s, relayed after 40 s), and those whose endpoint starts meanwhile; the first live session wins and ends the other attempt.
 - 0.6 (2026-09-27): back after a restart: goodbye and watch, a dial in from the pinned contact takes over a held session, resume dials by either side, crossed dials settled by key.
 - 0.5 (2026-09-25): a choice made while not live travels in the capability record, is told once on the contact, is dialled first, and begins the next session as a switch intent; each side keeps and shows why its last attempt to go live did not.
 - 0.4 (2026-09-25): a chosen transport not reached yet is waited for, never failed: why it waits, when it is retried, where the chat is meanwhile (live on a fallback, or on the DHT with Fallback off), and no timeline rows for it.
