@@ -10,6 +10,7 @@ import {
   MUTE_SILENCES, attentionOutcome, callRings, chatOfLink, groupChat, muteEnd, muteEndText, mutedUntil, setChatMute,
 } from "../../lib/chatMute";
 import { loadSettings, saveSettings } from "../../lib/settings";
+import { MESSAGE_BURST_MS, resetCues } from "../../lib/cues";
 import { deleteSession, saveSession, setStorageProfile } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
 import { GroupChat } from "../../pages/GroupChat";
@@ -32,6 +33,7 @@ const notifications = (soundEnabled: boolean, systemEnabled: boolean) => ({ soun
 
 afterEach(() => {
   vi.restoreAllMocks();
+  resetCues();
   setStorageProfile("");
   sound.playSound.mockClear();
   sound.notice.mockClear();
@@ -174,7 +176,25 @@ describe("AttentionFeedback in a muted chat", () => {
     expect(await send(event({ linkId: "link-a" }))).toEqual([]);
     setChatMute("a", undefined);
     sound.playSound.mockClear();
+    // A burst later (MESSAGE_BURST_MS): the first message's sound was a moment ago.
+    resetCues();
     expect(await send(event({ linkId: "link-a" }))).toEqual(["message"]);
+  });
+
+  it("plays one sound for a chat's messages that come together, and each chat its own", async () => {
+    setup();
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    expect(await send(event({ linkId: "link-a" }), event({ linkId: "link-a" }), event({ linkId: "group:g1" }), event({ linkId: "group:g1" }))).toEqual(["message", "message"]);
+    sound.playSound.mockClear();
+    clock.mockReturnValue(start + MESSAGE_BURST_MS - 1);
+    expect(await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS - 1 }))).toEqual([]);
+    sound.playSound.mockClear();
+    // A mention is heard inside the burst.
+    expect(await send(event({ linkId: "link-a", mention: true, at: start + MESSAGE_BURST_MS - 1 }))).toHaveLength(1);
+    sound.playSound.mockClear();
+    clock.mockReturnValue(start + MESSAGE_BURST_MS);
+    expect(await send(event({ linkId: "link-a", at: start + MESSAGE_BURST_MS }))).toEqual(["message"]);
   });
 
   it("plays nothing, muted or not, while sounds are off", async () => {

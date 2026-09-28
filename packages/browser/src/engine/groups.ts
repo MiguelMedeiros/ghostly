@@ -200,6 +200,8 @@ export class Groups {
   /** Contacts (chat ids) I invited to each group, until they answer or the app restarts. */
   private readonly invited = new Map<string, Set<string>>();
   private readonly lastRoster = new Map<string, Roster>();
+  /** Each group's status and newest commit as its history last said them: a line per change of either, never one again. */
+  private readonly lastTold = new Map<string, { status: GroupSession["status"]; top: GroupSession["top"] }>();
   private readonly lastMessageAt = new Map<string, number>();
   /** The latest message that names me, per group (the chat list's "@" while it is unread). */
   private readonly lastMentionAt = new Map<string, number>();
@@ -533,6 +535,7 @@ export class Groups {
     this.stored.delete(groupId);
     this.invited.delete(groupId);
     this.lastRoster.delete(groupId);
+    this.lastTold.delete(groupId);
     this.pendingEntries.delete(groupId);
     this.knocked.delete(groupId);
     this.justMet.delete(groupId);
@@ -1148,6 +1151,7 @@ export class Groups {
     });
     this.sessions.set(state.id, session);
     this.lastRoster.set(state.id, session.roster);
+    this.lastTold.set(state.id, { status: session.status, top: session.top });
   }
 
   private async membershipChanged(groupId: string): Promise<void> {
@@ -1155,11 +1159,16 @@ export class Groups {
     if (!session) return;
     const before = this.lastRoster.get(groupId) ?? [], after = session.roster, top = session.top;
     this.lastRoster.set(groupId, after);
+    // A session changes for much besides its membership (a member's name, a secret, the picture): each line says one
+    // change of the chain or of my status, once, never again for the same one (each line is a new row, and was a sound).
+    const told = this.lastTold.get(groupId);
+    const moved = told?.top !== top, statusChanged = told?.status !== session.status;
+    this.lastTold.set(groupId, { status: session.status, top });
     const name = (key: string) => key === session.myKey ? "You" : session.state.nicks[key] ?? `Member ${key.slice(0, 8)}`;
     const when = Date.now();
-    if (session.status === "removed") await this.event(groupId, "removed", session.state.statusReason ?? "You were removed from this group", when, session.epoch);
-    else if (session.status === "forked") await this.event(groupId, "forked", session.state.statusReason ?? "The membership history forked", when, session.epoch);
-    else if (session.status === "active") {
+    if (session.status === "removed") { if (statusChanged) await this.event(groupId, "removed", session.state.statusReason ?? "You were removed from this group", when, session.epoch); }
+    else if (session.status === "forked") { if (statusChanged) await this.event(groupId, "forked", session.state.statusReason ?? "The membership history forked", when, session.epoch); }
+    else if (session.status === "active" && moved) {
       for (const [key] of after) if (!rosterHas(before, key) && key !== session.myKey) await this.event(groupId, "joined", `${name(key)} joined`, when, top.e, key);
       const gone = before.filter(([key]) => !rosterHas(after, key)).map(([key]) => key);
       this.hubs.removed(groupId, gone, this.now());

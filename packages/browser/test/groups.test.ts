@@ -510,6 +510,23 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       void alice;
     });
 
+    it("a membership line is written once: a name or a secret arriving later does not write the admin's line again", async () => {
+      const { world, alice, bob, carol, groupId, key } = await trio();
+      await alice.makeAdmin(groupId, key(bob)); await world.settle();
+      const lines = (name: string) => world.peers.get(name)!.messages.filter(m => m.event === "admin").length;
+      for (const name of ["alice", "bob", "carol"]) expect(lines(name)).toBe(1);
+      // Carol hears a new name for Alice (a nick on an edge), then the same for Bob: each is a change of the session.
+      carol.edgeNick(groupId, key(alice), "Alice again"); await world.settle();
+      carol.edgeNick(groupId, key(bob), "Bob again"); await world.settle();
+      bob.edgeNick(groupId, key(carol), "Carol again"); await world.settle();
+      for (const name of ["alice", "bob", "carol"]) expect(lines(name)).toBe(1);
+      // A restart reads the chain again: still one line.
+      const again = new Groups({ ...(carol as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("carol")!.store);
+      await again.load(); await world.settle();
+      again.edgeNick(groupId, key(alice), "Alice once more"); await world.settle();
+      expect(lines("carol")).toBe(1);
+    });
+
     it("a tombstone survives a restart and still delivers the leave", async () => {
       const { world, alice, bob, groupId, key, edge, known } = await trio();
       const bobKey = key(bob);
