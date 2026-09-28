@@ -88,7 +88,7 @@ export const agents = {
         { id: "invite", label: "Invite", title: "It sends you a link", body: "Open it in your Ghostly app, and you are in a chat with your agent." },
         { id: "turn", label: "Message", title: "You write, it gets a turn", body: "Each message arrives as one agent.turn, your words under untrusted." },
         { id: "reply", label: "Reply", title: "It answers as a reply", body: "The answer lands in your chat, quoting your message." },
-        { id: "safe", label: "Safety", title: "Your words stay data", body: "Message text is never run as a command, and keys are never printed." },
+        { id: "safe", label: "Safety", title: "Your words stay data", body: "Only you can wake it. Your text never lands in a command, and keys are never printed." },
       ],
     },
   },
@@ -105,7 +105,7 @@ export const agents = {
       turns: "agent.turn events, the contact's words under untrusted",
       thinking: "typing --kind thinking --status while the agent works",
       answers: "Replies, voice notes, files and reactions to answer with",
-      claude: "A Claude Code example: claude -p woken once per turn",
+      claude: "A Claude Code example: claude -p with no tools, woken once per turn",
       hermes: "A Hermes Agent gateway plugin",
       socket: "Turns and the allowlist on the daemon's socket",
       wake: "wake/1 for agents: woken with no listener running",
@@ -113,7 +113,7 @@ export const agents = {
   },
   safety: {
     title: "Contact text is data, never instructions",
-    body: "Everything a contact writes arrives under untrusted, on stdin, never in a command's arguments. The agent answers it but never follows it: nothing in it may change what the agent does, reveal a secret or move money. Real payments need --confirm-real, and only the wallet's owner gives it.",
+    body: "Everything a contact writes arrives under untrusted, on stdin, never in a command's arguments. A prompt can tell the agent not to follow it but cannot make it, so allowlist only yourself (--from owner), and let a model with no tools answer anyone else or any group, as the Claude Code example does. Real payments need --confirm-real, and only the wallet's owner gives it.",
   },
   links: {
     title: "Read more",
