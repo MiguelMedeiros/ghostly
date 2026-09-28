@@ -100,6 +100,7 @@ export function composeDetails(message: StoredMessage, around: {
       ...(file?.digest && { digest: file.digest }),
       protocol: message.via === "hold" ? "hold/1" : record ? "files/3" : message.details?.wire?.protocol === "files/3" ? "files/3" : "files/2",
       ...(record ? { state: record.state, confirmed: record.confirmed, since: record.since, ...(record.consented !== undefined && { consented: record.consented }) } : transfer && { state: transfer.state, transferred: transfer.transferred }),
+      ...((record ? record.state !== "done" && record.error : transfer?.state === "failed" && transfer.error) ? { error: record ? record.error : transfer!.error } : {}),
       ...(file?.bytes ? { storage: file.bytes } : file?.blob ? { storage: "blob" } : {}),
       ...(message.file.voice && { voice: { duration: message.file.voice.duration, peaks: message.file.voice.peaks.length } }),
     };
