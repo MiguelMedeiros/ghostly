@@ -861,7 +861,7 @@ export class GhostlyNode implements EngineImplementation {
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
     linkSeen: linkId => { const live = this.links.get(linkId); return !!live?.presence?.online || (!!live?.dataLink && live.dataLink !== "idle"); },
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
-    resolve: async (pubKeyZ32, background) => (await this.groupTransport.resolve(pubKeyZ32, { background }))?.records ?? null,
+    resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: linkId => this.closeGroupLink(linkId),
