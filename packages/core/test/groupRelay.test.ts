@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import { encryptText, epochKeys } from "../src/groupCrypto";
 import { fromBase64Url } from "../src/bytes";
@@ -191,5 +191,74 @@ describe("rosters past eight", () => {
     const frames = mesh.sentFrames.filter(f => f.from === alice.myKey && f.frame.t === "group-secrets").map(f => f.frame as GroupSecretsFrame);
     expect(frames.length).toBeGreaterThan(1);
     for (const frame of frames) expect(frame.secrets.length).toBeLessThanOrEqual(GROUP_LIMITS.secretsPerFrame);
+  });
+});
+
+describe("what a member hands on cannot take a message's place", { timeout: 60_000 }, () => {
+  it("a copy without its author's whole signature is not the message: the author's own copy still brings mentions and reply", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    await alice.sendText("hello all"); await mesh.settle();
+    const hello = mesh.inbox.get(carol.myKey)!.find(m => m.text === "hello all")!;
+    mesh.setEdge(bob.myKey, carol.myKey, false);
+    await carol.sendText("@Bob look", 1_000, [{ k: bob.myKey, o: 0, l: 4 }], { i: hello.id, s: "hello all", f: alice.myKey }); await mesh.settle();
+    // Alice hands it on with only what the plain signature covers: no mention, no reply, no whole signature.
+    const stripped = clone(carol.state.sent[0]); delete stripped.m; delete stripped.r; delete stripped.xs;
+    await bob.handle(alice.myKey, stripped);
+    const copies = () => mesh.inbox.get(bob.myKey)!.filter(m => m.text === "@Bob look");
+    expect(copies()).toHaveLength(1);
+    expect(copies()[0].mentions).toBeUndefined();
+    // Again, and with the boxes but no whole signature: nothing more.
+    await bob.handle(alice.myKey, clone(stripped));
+    const unsigned = clone(carol.state.sent[0]); delete unsigned.xs;
+    await bob.handle(alice.myKey, unsigned);
+    expect(copies()).toHaveLength(1);
+    // Not seen yet: Bob's sync still asks for it, and he hands none of it on.
+    expect(bob.syncFrame().have[carol.myKey]?.[String(carol.epoch)]).toBeUndefined();
+    expect(bob.state.relay?.some(f => f.s === carol.myKey) ?? false).toBe(false);
+    // Carol's own copy, when their edge opens, completes it.
+    await mesh.open(bob, carol);
+    expect(copies()).toHaveLength(2);
+    expect(copies()[1]).toMatchObject({ id: copies()[0].id, completes: true, mentions: [{ k: bob.myKey, o: 0, l: 4 }], reply: { i: hello.id, s: "hello all", f: alice.myKey } });
+    // Seen now: once more changes nothing.
+    await bob.handle(carol.myKey, clone(carol.state.sent[0]));
+    await bob.handle(alice.myKey, clone(carol.state.sent[0]));
+    expect(copies()).toHaveLength(2);
+  });
+
+  it("a whole copy handed on by another member is the message", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    mesh.setEdge(bob.myKey, carol.myKey, false);
+    await carol.sendText("@Bob whole", 1_000, [{ k: bob.myKey, o: 0, l: 4 }]); await mesh.settle();
+    await bob.handle(alice.myKey, clone(carol.state.sent[0]));
+    const got = mesh.inbox.get(bob.myKey)!.filter(m => m.text === "@Bob whole");
+    expect(got).toHaveLength(1);
+    expect(got[0].mentions).toEqual([{ k: bob.myKey, o: 0, l: 4 }]);
+    expect(got[0].completes).toBeUndefined();
+    await mesh.open(bob, carol);
+    expect(mesh.inbox.get(bob.myKey)!.filter(m => m.text === "@Bob whole")).toHaveLength(1);
+  });
+});
+
+describe("sync answers", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("answers one member's syncs a few times a minute, not every one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { mesh, alice, bob } = await three();
+    for (const text of ["a", "b", "c"]) await alice.sendText(text);
+    await mesh.settle();
+    // What the edges said while they opened is a minute ago.
+    vi.setSystemTime(Date.now() + 61_000);
+    // A sync that claims to have nothing: every answer carries Alice's log again.
+    const empty = () => ({ ...clone(bob.syncFrame()), have: {} });
+    const answers = () => mesh.sentFrames.filter(f => f.from === alice.myKey && f.to === bob.myKey && f.frame.t === "group-msg").length;
+    const before = answers();
+    for (let i = 0; i < 50; i++) await alice.handle(bob.myKey, empty());
+    await mesh.settle();
+    expect((answers() - before) / 3).toBe(GROUP_LIMITS.syncAnswers);
+    // A minute later, answered again.
+    vi.setSystemTime(Date.now() + 61_000);
+    await alice.handle(bob.myKey, empty()); await mesh.settle();
+    expect((answers() - before) / 3).toBe(GROUP_LIMITS.syncAnswers + 1);
   });
 });

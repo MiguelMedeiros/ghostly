@@ -9,8 +9,12 @@ import type { Page } from "@playwright/test";
 export interface Open {
   /** Click to the first message row painted, in ms. */
   paint: number;
-  /** Click to the list at its bottom and still for a quarter of a second. */
+  /** Click to the first frame with the list at its bottom. */
+  bottom: number;
+  /** Click to the list at its bottom and still for a quarter of a second: every row in the page, laid out. */
   settled: number;
+  /** Changes of size between `bottom` and the settle that left the view off the bottom: the view jumping. */
+  offBottom: number;
   /** Long tasks (over 50 ms) between the click and the settle: how many, their total and the longest. */
   longTasks: number;
   longTotal: number;
@@ -114,7 +118,8 @@ export function openAndMeasure(label: string): Promise<Open> {
   const t0 = performance.now();
   row.click();
   return (async () => {
-    let paint = 0, settled = 0, still = 0, last = "";
+    let paint = 0, settled = 0, still = 0, last = "", atBottom = 0, offBottom = 0;
+    let watcher: ResizeObserver | undefined;
     const list = () => document.querySelector<HTMLElement>(".chat-wallpaper");
     while (performance.now() - t0 < 30_000) {
       const now = await afterPaint();
@@ -123,6 +128,14 @@ export function openAndMeasure(label: string): Promise<Open> {
       if (!paint || !el) continue;
       const at = `${el.scrollTop}|${el.scrollHeight}|${el.clientHeight}`;
       const bottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
+      if (bottom && !atBottom) {
+        atBottom = now - t0;
+        // From then on, each time the list or its rows change size, where the view is once the app has settled it (this
+        // observer is called after the app's own, which was made first) and before that frame is painted.
+        watcher = new ResizeObserver(() => { if (el.scrollHeight - el.scrollTop - el.clientHeight > 2) offBottom++; });
+        watcher.observe(el);
+        if (el.firstElementChild) watcher.observe(el.firstElementChild);
+      }
       if (bottom && at === last) {
         // Still for a quarter of a second: settled when it last moved.
         if (still && now - t0 - settled >= 250) break;
@@ -130,6 +143,7 @@ export function openAndMeasure(label: string): Promise<Open> {
       } else { still = 0; settled = 0; }
       last = at;
     }
+    watcher?.disconnect();
     const commitsSettled = w.__ghostlyCommits - commits0;
     const idleFrom = performance.now();
     await new Promise(done => setTimeout(done, 2_000));
@@ -137,7 +151,7 @@ export function openAndMeasure(label: string): Promise<Open> {
     const inWindow = long.filter(e => e.startTime >= t0 - 5 && e.startTime <= t0 + settled);
     const idle = long.filter(e => e.startTime >= idleFrom);
     return {
-      paint: Math.round(paint), settled: Math.round(settled),
+      paint: Math.round(paint), bottom: Math.round(atBottom), settled: Math.round(settled), offBottom,
       longTasks: inWindow.length, longTotal: Math.round(inWindow.reduce((s, e) => s + e.duration, 0)), longMax: Math.round(Math.max(0, ...inWindow.map(e => e.duration))),
       commits: commitsSettled, rows: document.querySelectorAll(".chat-wallpaper [data-message-row]").length,
       idleLong: Math.round(idle.reduce((s, e) => s + e.duration, 0)), idleCommits: w.__ghostlyCommits - commits0 - commitsSettled,

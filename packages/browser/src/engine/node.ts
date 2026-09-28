@@ -110,6 +110,7 @@ import type {
   MessageDetails,
   MessageDetailsView,
   MessageFile,
+  MessagePage,
   MessageReply,
   ReactionNote,
   MessageSend,
@@ -217,6 +218,8 @@ interface LinkFiles {
   wireIds: Set<string>;
   /** Transfers in flight from the peer, by wire id. */
   incoming: Map<string, { localId: string; size: number }>;
+  /** files/2 message ids taken since the app started, by the wire id of the file whose message it is. */
+  messageIds?: Map<string, string>;
 }
 
 function emptyLinkFiles(): LinkFiles {
@@ -862,7 +865,7 @@ export class GhostlyNode implements EngineImplementation {
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
     linkSeen: linkId => { const live = this.links.get(linkId); return !!live?.presence?.online || (!!live?.dataLink && live.dataLink !== "idle"); },
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
-    resolve: async (pubKeyZ32, background) => (await this.groupTransport.resolve(pubKeyZ32, { background }))?.records ?? null,
+    resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: linkId => this.closeGroupLink(linkId),
@@ -874,6 +877,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeMessage(message),
+    completeMessage: message => this.completeGroupMessage(message),
     emit: () => this.emitState(),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
@@ -1244,6 +1248,18 @@ export class GhostlyNode implements EngineImplementation {
 
   getMessages(linkId: string): Promise<StoredMessage[]> {
     return db.getMessages(linkId);
+  }
+
+  async messagePage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("limit: a whole number of messages, at least 1");
+    if (before === undefined) return db.getMessagePage(linkId, { limit });
+    if (typeof before === "number") {
+      if (Number.isNaN(before)) throw new Error("before: a time or a message id");
+      return db.getMessagePage(linkId, { limit, before: { timestamp: before } });
+    }
+    const from = await db.getMessage(linkId, before);
+    if (!from) throw new Error(`No message ${before}`);
+    return db.getMessagePage(linkId, { limit, before: from });
   }
 
   // -- links ---------------------------------------------------------------
@@ -1762,8 +1778,13 @@ export class GhostlyNode implements EngineImplementation {
   async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
-    if (!live?.link) return { error: "You are offline" };
     const trimmed = text.trim();
+    // What a compatibility chat's DHT cannot carry is refused before it is kept: it must not show as sent. Whatever
+    // the link's state: one that has not started yet (a chat just added) has no data link either.
+    const bytes = new TextEncoder().encode(trimmed).length;
+    if (live && !live.stored.profile && !(live.link?.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
+      return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
+    if (!live?.link) return { error: "You are offline" };
     if (!trimmed) return { error: null };
 
     const timestamp = params.timestamp ?? Date.now();
@@ -1778,10 +1799,6 @@ export class GhostlyNode implements EngineImplementation {
     // A compatibility chat's records have no room for a reply (WISP 402): said, rather than sent without it.
     if (params.replyTo !== undefined) return { error: "Replies need a current chat; this compatibility chat sends text only.", refused: true };
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
-    // What the DHT cannot carry is refused before it is kept: it must not show as sent.
-    const bytes = new TextEncoder().encode(trimmed).length;
-    if (!(live.link.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
-      return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
     await this.storeMessage({ linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via });
     const at = Date.now(), snapshot = pathSnapshot(live, via);
     const error = await live.link.sendMessage(trimmed, timestamp);
@@ -2369,9 +2386,16 @@ export class GhostlyNode implements EngineImplementation {
     let writing: Promise<void> = appender.then(() => {});
     const discard = () => appender.then((a) => a.bytes.remove(file.id)).catch(() => {});
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
-    const messageStored = this.storeMessage({
+    // files/2 names a file's message by the sender's time, as the sender's reactions, edits and deletes do. Another
+    // file (or a message) already at that time keeps its place, and this one gets an id of its own: its bytes never
+    // land without a message. The same file sent again after its transfer failed lands in the message it had.
+    const first = `peer_${wire.timestamp}`, own = `${first}_${wire.id}`;
+    const messageIds = (files.messageIds ??= new Map());
+    const holder = messageIds.get(first);
+    if (holder === undefined) messageIds.set(first, wire.id);
+    const storeFileMessage = (id: string) => this.storeMessage({
       linkId,
-      id: `peer_${wire.timestamp}`,
+      id,
       // The id both sides know the file by: what a reply to it names (WISP 400 § Replies).
       wireId: wire.id,
       text: fileMessageText(file),
@@ -2382,17 +2406,27 @@ export class GhostlyNode implements EngineImplementation {
       ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
       details: { wire: fileWire("files/2", wire.size) },
     });
+    const messageStored = (async (): Promise<string> => {
+      let id = holder === undefined || holder === wire.id ? first : own;
+      if (id === first && (holder === wire.id || await db.hasMessage(linkId, first))) {
+        const again = await db.patchMessage(linkId, first, (m) => m.sender === "peer" && m.wireId === wire.id && m.file ? { file: { ...m.file, id: file.id } } : null);
+        if (again) { this.events.onMessages(linkId, await db.getMessages(linkId)); return first; }
+        if (holder !== wire.id) id = own;
+      }
+      await storeFileMessage(id);
+      return id;
+    })();
     void messageStored.catch(() => {});
     return {
       write: (chunk) => (writing = writing.then(async () => { if (!cancelled) await (await appender).append(chunk); })),
       // The message keeps the announced type for display; the bytes are served as something inert.
       close: async (digest?: string) => {
-        await messageStored;
+        const messageId = await messageStored;
         await writing;
         if (cancelled) throw new Error("Transfer cancelled");
         const live = this.links.get(linkId);
         // Deleted while it was still arriving: the bytes have nowhere to land, and give their room back.
-        if (live?.stored.deletedIds?.includes(`peer_${wire.timestamp}`)) {
+        if (live?.stored.deletedIds?.includes(messageId)) {
           await discard();
           throw new Error("The receiving message was deleted");
         }
@@ -4245,6 +4279,22 @@ export class GhostlyNode implements EngineImplementation {
     });
     this.nativeQueue = operation.catch(() => {});
     return operation;
+  }
+
+  /**
+   * A group message first stored from a copy a member handed on without its author's whole signature: what the whole
+   * copy adds (mentions, a reply, a hop count) joins the stored row; the text and time stay as they were.
+   */
+  private async completeGroupMessage(message: StoredMessage): Promise<void> {
+    if (!(await db.hasMessage(message.linkId, message.id))) return this.storeMessage(message);
+    const whole = await this.resolveReply(message);
+    const added: Partial<StoredMessage> = { ...(whole.mentions && { mentions: whole.mentions }), ...(whole.mentioned && { mentioned: true }),
+      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }) };
+    if (!Object.keys(added).length) return;
+    const patched = await db.patchMessage(message.linkId, message.id, stored => stored.member === message.member && stored.sender === message.sender ? added : null);
+    if (!patched) return;
+    this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
+    this.emitState();
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> {

@@ -224,6 +224,35 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(changes).toBe(0);
   });
 
+  it("takes a long history in one write, in time order, and one changed message costs one write", async () => {
+    // Out of order, some sharing a time: the chat holds them as addMessage one by one would have.
+    const history = Array.from({ length: 600 }, (_, i) => message({ id: `peer_${i}`, timestamp: 1_000 + ((i * 7) % 600) - (i % 3), delivery: "delivered" }));
+    const expected = [...history].map((m, i) => ({ id: m.id, at: m.timestamp, i })).sort((a, b) => a.at - b.at || a.i - b.i).map((m) => m.id);
+    const writes = vi.spyOn(localStorage, "setItem");
+    const stored = await mirror(history);
+    const sessionWrites = () => writes.mock.calls.filter(([key]) => key.endsWith("s1")).length;
+    expect(stored.messages.map((m) => m.id)).toEqual(expected);
+    expect(sessionWrites()).toBe(2); // the chat made, then the history
+    expect(changes).toBe(1);
+
+    changes = 0;
+    writes.mockClear();
+    const reacted = history.map((m) => (m.id === "peer_300" ? { ...m, reactions: { me: { e: "👍", n: 1, at: 5 } } } : m));
+    engine.messageListeners[0]("link-1", reacted);
+    expect(sessionWrites()).toBe(1);
+    expect(changes).toBe(1);
+    expect(storage.loadSession("s1")!.messages.find((m) => m.id === "peer_300")?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
+
+    // A message the user deleted and the peer still has: nothing to write, nothing to tell.
+    changes = 0;
+    writes.mockClear();
+    storage.deleteMessage("s1", "peer_1");
+    writes.mockClear();
+    engine.messageListeners[0]("link-1", reacted);
+    expect(sessionWrites()).toBe(0);
+    expect(changes).toBe(0);
+  });
+
   it("attributes a join announcement to whoever made it, fixing an old attribution", async () => {
     const stored = await mirror([message({ id: "j", text: "👋 Casper joined" })], {
       messages: [{ id: "j", sender: "system", text: "👋 Casper joined", timestamp: 10, systemEvent: { type: "join", pubKey: "me-1" } }],

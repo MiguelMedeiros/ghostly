@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
+import { pageOf } from "./support/messagePage";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
@@ -20,6 +21,7 @@ function fake(messages: StoredMessage[] = []) {
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" }), link("chat-two", { peerNick: "Bob" })], groups: [group], settings: { online: true, nick: "Bot", relays: ["r"], holdStorage: { s3: { accessKeyId: "AK", secretAccessKey: "SK" } }, avatar: "data:x" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
+    messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     sendMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })),
     sendGroupMessage: vi.fn(async () => ({ error: null })),
     walletCreate: vi.fn(async () => ({ id: "w" })),

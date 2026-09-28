@@ -68,6 +68,11 @@ export interface PairedSessionOptions {
   holdSupport?: boolean;
   /** TOFU admission is distinct from an optional human comparison. */
   trustOnFirstUse?: boolean;
+  /**
+   * How long the peer has to authenticate before the session fails: three minutes by default, room for a person to
+   * compare codes. A connection that holds a place no person waits on (one dialled in on a pinned chat) gets less.
+   */
+  authTimeoutMs?: number;
   verifyPeer?: (key: string) => Promise<void>;
   /** Atomic durable compare-and-set. Resolving means the key is pinned on disk. */
   pinPeer: (key: string, signedSignals?: boolean) => Promise<void>;
@@ -188,7 +193,7 @@ export class PairedSession {
       }).catch(() => this.fail("Invalid session negotiation"))
         .finally(() => { this.pending--; });
     };
-    this.timer = setTimeout(() => this.fail("The peer did not finish authentication. Reconnect to try again."), 180_000);
+    this.timer = setTimeout(() => this.fail("The peer did not finish authentication. Reconnect to try again."), this.options.authTimeoutMs ?? 180_000);
     this.update({ status: "negotiating" });
     this.send(this.offer);
   }

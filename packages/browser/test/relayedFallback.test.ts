@@ -85,7 +85,9 @@ it("goes on to a relayed Iroh when a WebRTC attempt times out, and not before", 
     // WebRTC is still trying: nothing native yet.
     await vi.advanceTimersByTimeAsync(30_000);
     expect(states[0].transport).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(90_000);
+    // A second at a time: the Iroh session authenticates as the clock moves, as it would (a connection dialled in
+    // has 15 s to, and one jump of the clock would pass that before the handshake's hashing is done).
+    for (let s = 0; s < 90; s++) await vi.advanceTimersByTimeAsync(1_000);
     await connected;
     await vi.waitFor(() => expect(states.map(s => [s.status, s.transport])).toEqual([["ready", "iroh/1"], ["ready", "iroh/1"]]));
   } finally { vi.useRealTimers(); }

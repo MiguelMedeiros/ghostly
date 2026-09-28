@@ -1,5 +1,5 @@
 import {
-  addMessage,
+  addMessages,
   saveSession,
   ensureSession,
   findSession,
@@ -72,19 +72,23 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   const session = link && sessionForPeer(link.peerPubKeyZ32);
   if (!link || !session) return;
 
-  let changed = false;
+  // Every state change mirrors every chat: a long one must cost a pass over its messages, not a search per message,
+  // and the session is written once at most, whatever changed.
+  const byId = new Map(session.messages.map((m) => [m.id, m]));
+  const added: ChatMessage[] = [];
+  let dirty = false;
   for (const message of messages) {
-    const previous = session.messages.find(m => m.id === message.id);
+    const previous = byId.get(message.id);
     // Reactions change rows of any kind, mine included (WISP 400 § Reactions).
-    const reacted = !!previous && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
+    const reacted = !!previous && (!!previous.reactions || !!message.reactions) && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
     if (reacted) previous.reactions = message.reactions;
     // Reviewed payments originate in the engine (including recovery), without
     // the chat composer's optimistic message or text-delivery status; so do forwarded files (WISP 400 § Forwards).
     if (message.sender !== "peer" && !message.delivery && !message.paymentId && !message.forwarded) {
-      if (reacted) { saveSession(session); changed = true; }
+      if (reacted) dirty = true;
       continue;
     }
-    const mapped = toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
+    const mapped = () => toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
     if (previous) {
       let updated = reacted;
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
@@ -99,19 +103,24 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
         if (message.preview) previous.preview = message.preview; else delete previous.preview;
         updated = true;
       }
-      if (mapped.systemEvent && previous.systemEvent?.pubKey !== mapped.systemEvent.pubKey) {
-        previous.systemEvent = mapped.systemEvent;
+      // Only a join announcement has one; the others are not mapped again.
+      const systemEvent = JOIN_PATTERN.test(message.text) ? mapped().systemEvent : undefined;
+      if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) {
+        previous.systemEvent = systemEvent;
         updated = true;
       }
-      if (updated) {
-        saveSession(session);
-        changed = true;
-      }
+      if (updated) dirty = true;
       continue;
     }
-    const updated = addMessage(session.id, mapped);
+    added.push(mapped());
+  }
+  let changed = dirty;
+  if (dirty) saveSession(session);
+  if (added.length) {
+    const before = session.messages.length;
+    const updated = addMessages(session.id, added);
     if (updated) session.messages = updated.messages;
-    changed = true;
+    if (session.messages.length !== before) changed = true;
   }
   if (mirrorPeerNick(session.id, link)) changed = true;
   if (mirrorIdentityShare(session, link)) changed = true;

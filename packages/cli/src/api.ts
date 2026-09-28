@@ -234,7 +234,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);
-    return history(await node(ctx).getMessages(link.id), params);
+    return historyOf(ctx, link.id, params);
   },
   async "chat.send"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -440,7 +440,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.history"(ctx, params) {
     const group = groupOf(ctx, params);
-    return history(await node(ctx).groupMessages({ groupId: group.id }), params, (m) => groupMessageJson(m, group));
+    return historyOf(ctx, `group:${group.id}`, params, (m) => groupMessageJson(m, group));
   },
   async "group.send"(ctx, params) {
     const group = groupOf(ctx, params);
@@ -605,6 +605,21 @@ function typingWord(params: Params, typing: boolean): { kind: TypingKind; status
   const status = sanitizeTypingStatus(oneLine);
   if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
   return { kind, status };
+}
+
+/**
+ * A page of a chat's or a group's history. Without `after` only that page is read from the store (the newest, or those
+ * before `before`), so a long chat's is as quick as a short one's; with `after` the whole history is read and cut.
+ */
+async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
+  if (params.after !== undefined && params.after !== null) return history(await node(ctx).getMessages(chat), params, json);
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+  const before = params.before ?? undefined;
+  if (before !== undefined && typeof before !== "number" && typeof before !== "string") throw new CliError("bad_request", "before must be a timestamp or a message id");
+  const page = await node(ctx).messagePage({ linkId: chat, limit, before }).catch((error: unknown) => {
+    throw error instanceof Error && error.message === `No message ${before}` ? new CliError("not_found", error.message) : error;
+  });
+  return { messages: page.messages.map((m) => json(m)), more: page.more };
 }
 
 function history(messages: StoredMessage[], params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {

@@ -1,0 +1,1 @@
+a copy of a message handed on without the author's whole signature (`xs`) is provisional: its text is shown, but it is not marked seen, kept or handed on, and a whole copy completes it with its mentions, reply and hop count; a member answers at most 8 syncs from one member a minute.

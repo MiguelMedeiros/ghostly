@@ -12,7 +12,7 @@ import { mentionsBytes, validMentions, wireMentions, type GroupMention } from ".
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
-import { validEditNumber } from "./pairedEdits";
+import { RateWindow, validEditNumber } from "./pairedEdits";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
@@ -68,6 +68,13 @@ export const COMMUNITY_LIMITS = {
   /** Commits in one welcome or chain piece. */
   chainPiece: 100,
   pendingLeaves: 64,
+  /**
+   * Syncs of one member answered in `syncWindowMs`: each answer may carry the chain's tail, secrets and the whole
+   * store. A member catching up asks every five seconds at most, and every member syncs every thirty; one asking more
+   * waits for the window.
+   */
+  syncAnswers: 16,
+  syncWindowMs: 60_000,
 } as const;
 
 /** What every member should know about who can read what, and what the link does, in the words the apps show. */
@@ -376,6 +383,8 @@ export class CommunitySession {
   private waiting: { from: string; frame: CommunityMessageFrame }[] = [];
   private waitingBytes = 0;
   private asked = new Map<string, number>();
+  /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
+  private syncsAnswered = new Map<string, RateWindow>();
   private queue = Promise.resolve();
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   /** One metadata frame naming a commit or a secret I do not have yet: tried again when the chain or my secrets move. */
@@ -1203,6 +1212,9 @@ export class CommunitySession {
 
   private async receiveSync(from: string, frame: CommunitySyncFrame): Promise<void> {
     if (!this.isRecentMember(from) || !Number.isSafeInteger(frame.e) || typeof frame.h !== "string") return;
+    let answered = this.syncsAnswered.get(from);
+    if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(COMMUNITY_LIMITS.syncAnswers, COMMUNITY_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
+    if (!answered.take()) return;
     const theirs = this.known.get(frame.h);
     let start: number;
     if (theirs && this.mainIndex.has(frame.h)) start = this.mainIndex.get(frame.h)! + 1;
