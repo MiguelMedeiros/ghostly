@@ -134,6 +134,10 @@ Its JSON counts against the text's 16 KiB (a message with mentions carries that 
 
 **No everyone.** A community has no `@everyone`: `*` is never sent and is dropped on receipt. A community is large, anyone with the link may be in it, and every member can let people in. A way for any member, or even the admin, to ring hundreds of devices at once is the notification spam the design avoids. Mentions of one member at a time remain. Notifications, and the muted group's "Still notify me when I'm mentioned", are as in the mesh profile.
 
+## Wake-up push
+
+Not in a community, yet. In a private group a mention wakes a member's closed web app through the subscription that member shared on their own edge ([9xx · Group Mesh § Wake-up push](9xx-group-mesh.md#wake-up-push)). A community has no edge between two members: everything goes through hubs, and a member's subscription (its endpoint and the VAPID key pair that lets anyone holding it post there) would have to travel as a pair payload sealed to each member it is shared with. Whom to share it with is the harder part: the members of a community are whoever opened its link, and handing one's subscription to all of them lets strangers wake one's phone. So a community member is not woken; it reads what it missed from whoever is there when it opens (§ Messages and catch-up). A way to share with a few chosen members (contacts in the community, say) over pair payloads is open.
+
 ## Replies
 
 As in [the mesh profile](9xx-group-mesh.md#replies): `{ "i", "s", "f" }`, the original's community message id, a line of it and its author's member key. It travels **inside** the sealed payload, beside the text and the mentions, so the author's signature covers it:
@@ -302,7 +306,7 @@ On public relays each trip through Pkarr (a packet published, then seen by the o
 
 ## Open decisions
 
-Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; files and media; native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing).
+Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; files and media; native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
 
 A hub's connections on a Mac: a hub keeps edges with up to 48 members (`hubCapacity`) and with the other hubs (up to 8 in the beacon, `maxHubs` in `packages/core/src/communityRendezvous.ts`), while the Desktop's WebView on a Mac opened at most 46 connections at once, 1:1 chats and calls included ([9xx Group Mesh, Cost per member](9xx-group-mesh.md#cost-per-member), #402). A Mac Desktop that becomes a busy hub could reach that ceiling; whether it should cap its hub edges, or not stand as a hub, is open.
 
