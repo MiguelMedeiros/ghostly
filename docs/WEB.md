@@ -64,9 +64,10 @@ The web app is an installable app (a PWA). Everything below is behind feature de
 - **Screen on during calls.** A call keeps the screen from dimming (Screen Wake Lock), asked again each time the app comes back to the foreground.
 - **Woken while closed.** **Settings → Notifications → Wake me while closed** shares a push subscription with each paired contact, so a message sent while the app is closed shows "New message", nothing more, and a tap opens the chat. The sender's own app posts the push (no server of Ghostly's); muted chats stay quiet.
   - **Calls** too: a contact who calls while the app is closed wakes it, and it shows **Incoming call** until you answer or dismiss it. A tap opens the chat, and the call rings once it is live. The caller waits up to 60 s.
-  - **Where:** Chrome, Edge and Firefox, and on iPhone and iPad only the app added to the Home Screen, from iOS 16.4. Groups do not wake anyone yet. The desktop app and the extension keep running on their own, so they only wake others.
+  - **Where:** Chrome, Edge and Firefox, and on iPhone and iPad only the app added to the Home Screen, from iOS 16.4. The desktop app and the extension keep running on their own, so they only wake others.
+  - **Groups:** in a private group, a message that mentions you wakes the app and opens the group. Never `@everyone`, at most once every 5 minutes, and never in a group you muted. Communities do not wake anyone yet.
   - **Push relay.** A browser can post to some push services only through a relay, set in **Settings → Network → Push relay (optional)**, empty by default. `native-transports/push-relay` is a reference one; none is run by Ghostly. The desktop app and the CLI post directly.
-  - **New address** makes a fresh subscription, so nobody you stopped talking to can wake you. Deleting a profile ends its subscription. What the push service, a relay and contacts learn: [WISP 401 § Wake-up push](wisps/401-paired-chat.md#wake-up-push).
+  - **New address** makes a fresh subscription, so nobody you stopped talking to can wake you. Deleting or muting a contact does the same by itself, and your other contacts get the new one. Deleting a profile ends its subscription. What the push service, a relay and contacts learn: [WISP 401 § Wake-up push](wisps/401-paired-chat.md#wake-up-push).
 - **Not here.** Opening files with Ghostly from the file manager (`file_handlers`, desktop Chromium only) is left out: the app has no use for a file it did not receive in a chat.
 
 ## What a web page cannot do

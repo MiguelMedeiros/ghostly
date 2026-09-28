@@ -17,13 +17,15 @@ What a chat is, what its header, menus and composer hold, and how messages rende
 - It carries the seed, the inviter's rendezvous key, the invite secret and the inviter's participation key. The joiner pins that key: another key cannot take the chat over.
 - Shared as `https://ghostly.tools/#ghostly1…` (the code stays in the fragment, so no server sees it) or as a QR (`src/components/InviteCard.tsx`).
 - **Join** (`src/components/JoinDialog.tsx`): paste, scan a QR, open an image, or type. It also takes group links. Bad codes get one of four messages: typo, needs an update, not a Ghostly code, damaged.
-- The ghostly.tools join page takes the code out of the address before analytics load, and offers the web app, the desktop app or a download.
+- The ghostly.tools join page takes the code out of the address before anything else runs, and offers the web app, the desktop app or a download. The site loads no analytics.
 
 ## Header
 
 Left to right (`src/pages/Chat.tsx`): avatar (click to see the picture large, #447), name (click to rename), the contact's identity marks ([IDENTITIES.md](IDENTITIES.md)), then on the right the **connection icon**, the audio and video call buttons, and ⋮.
 
-Under the name, the contact's key, or **typing…** with three dots while the contact writes (`src/components/TypingIndicator.tsx`); **recording audio…** while the contact records a voice note (from the moment the mic opens, held or hands-free, until it is sent or thrown away); **thinking…**, or a bot's own short status such as "Transcribing your audio…", shown as plain text. The chat list row shows the same in its preview line, in the accent. It is presence, not connection, so it never goes in the icon. Paired 1:1 chats only, over the live session (`typing/1`, [WISP 401](wisps/401-paired-chat.md#typing)): it goes with the message, a cleared composer, 5 seconds without a keystroke, or, if the stop is lost, 6 seconds after the contact's last word. Settings → Security → **Send typing indicator** (per profile, on by default) stops telling contacts; theirs still shows.
+Under the name, the contact's key, or **typing…** with three dots while the contact writes (`src/components/TypingIndicator.tsx`); **recording audio…** while the contact records a voice note (from the moment the mic opens, held or hands-free, until it is sent or thrown away); **thinking…**, or a bot's own short status such as "Transcribing your audio…", shown as plain text. The chat list row shows the same in its preview line, in the accent. It is presence, not connection, so it never goes in the icon. In paired 1:1 chats over the live session (`typing/1`, [WISP 401](wisps/401-paired-chat.md#typing)), and in private groups (below): it goes with the message, a cleared composer, 5 seconds without a keystroke, or, if the stop is lost, 6 seconds after the contact's last word. Settings → Security → **Send typing indicator** (per profile, on by default) stops telling contacts and groups; theirs still shows.
+
+A private group's header says who is writing, recording or thinking, in place of its subtitle: "Ana is typing…", "Ana and Bo are typing…", "3 people are typing…" (#442, [WISP 9xx Group Mesh](wisps/9xx-group-mesh.md)). It is never stored, and a message ends it. Communities do not show it yet.
 
 ### Connection icon and panel
 
@@ -101,9 +103,10 @@ One mark beside the time, as in WhatsApp (#360, `src/components/chat/DeliverySta
 (#384, #410, `src/hooks/useChatScroll.ts`)
 
 - At the bottom, a new message keeps the view there. Scrolled up, nothing moves the view: pictures and videos loading above or below keep the message you read in place.
-- A **↓ N new** pill counts the contact's new messages (reactions, edits and notices do not count) and goes to the first one. With nothing new, a plain ↓ shows once you are far from the bottom. **End** or **Ctrl/Cmd+↓** jumps to the bottom.
-- A message you send always goes to the bottom.
-- A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs.
+- A **↓ N new** pill counts the contact's new messages (reactions, edits and notices do not count) and goes to the first one. Older messages that arrive late, such as a group's catch-up after a reconnect, are not new (#506). With nothing new, a plain ↓ shows once you are far from the bottom. **End** or **Ctrl/Cmd+↓** jumps to the bottom.
+- A message you send always goes to the bottom. At the bottom, a composer that grows (a long draft, a saved one) keeps the last message in view (#524).
+- A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs, also when you come to a group from another group (#468).
+- A long chat shows its last 60 messages first; the older ones come in above, 150 at a time, within about a second (#475, `src/hooks/useTailFirst.ts`). A long group reads its newest 50 from the store first (#494). A chat left scrolled up is drawn whole, so it can open on that message.
 - 1:1 chats, groups and communities alike.
 
 ## How messages render
@@ -125,7 +128,7 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 
 **Links** open in a new tab on the web and in the extension, and in the system browser on Desktop (#415, #421). Only `http` and `https` addresses open from Desktop.
 
-**Bounds** (#301): JSON at most 4 KiB and 32 levels, URIs past 4 KiB stay text, a peer's timestamp is clamped to now + 5 min, every bubble has its own error boundary (`MessageBoundary`), atoms sit in `<bdi>`, and non-ASCII links show as punycode.
+**Bounds** (#301): JSON at most 4 KiB and 32 levels, URIs past 4 KiB stay text, a peer's timestamp is clamped to now + 5 min, every bubble has its own error boundary (`MessageBoundary`), atoms sit in `<bdi>`, and non-ASCII links show as punycode. Styles nest at most 8 deep, and past that a marker stays text (#465, `MAX_SPAN_DEPTH`). A `[text](url)` whose text hides another host behind a soft hyphen or a dot look-alike shows the address.
 
 ## Message details
 
@@ -151,7 +154,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 - **Devices** (#388, #400, #406): Settings → Audio & video picks the microphone, camera and speaker, per profile on this device, with **Test** (a level meter), **Preview** and **Test sound**. In a call, the device button beside mute and camera switches them live, without a new offer; a muted call stays muted. An unplugged device falls back to the system default, and the call offers **Switch back** when it returns. The chosen speaker also plays voice messages, audio, videos and app sounds (where the engine has `setSinkId`). On Linux the lists come from GStreamer ([INSTALLATION.md](INSTALLATION.md#desktop-app)).
 - **A closed web app** (#440): when the contact shared a wake-up ([WEB.md](WEB.md#install-it)), the call buttons stay on while they are away. A call wakes their app ("Waking … for the call", with Cancel), their device shows **Incoming call**, and the call rings as soon as they open Ghostly and the chat is live. After 60 s it gives up.
 - **Share screen** is a button inside the call (#253), where the screen can be captured.
-- **Shared services** (`services/1`, [WISP 700](wisps/700-local-services.md), [WISP 701](wisps/701-http-services.md)): local web apps shared with one contact over the chat. Chosen from + → Shared services; the contact's apps show in a strip under the header.
+- **Shared services** (`services/1`, [WISP 700](wisps/700-local-services.md), [WISP 701](wisps/701-http-services.md)): local web apps shared with one contact over the chat. Chosen from + → Shared services; the contact's apps show in a strip under the header. Desktop reaches only the local addresses you allowed: sharing one asks in a system dialog that names it (like `localhost:3000`), and an app shared before that asks once, the first time a contact opens it (#525).
 
 ## Sounds
 
@@ -166,6 +169,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 | Interface | cards, new wallets, new groups | off |
 
 - A chat's cues are silent while that chat is muted (a mention it lets through still plays). Nothing new plays while the app is in the background.
+- The message sound and a notification come only with a new message at the end of a chat (#527, `packages/browser/src/engine/attention.ts`). A line of a group's history (someone joined, left, is the admin, renamed it), a late catch-up of older messages and an empty text stay quiet, and so do typing, edits, reactions and receipts. Files and payments have cues of their own. Messages of one chat that arrive together play one sound.
 
 ## Groups
 
@@ -180,5 +184,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 - New group offers Community (default) or Private (`src/components/NewGroupDialog.tsx`). Negotiation: [WISP 900](wisps/900-group-sessions.md).
 - The admin renames the group in Members… (Rename) or with `ghostly group rename` (#438); every member sees the new name, and apps from before keep the old one. The group link can be replaced or turned off by the admin. Leaving deletes the group and its history from the device; an admin hands the role on first.
 - Group ⋮: Members…, Mute, Rotate keys (admin), Leave group, Delete from this device.
-- Hubs (private groups past 16 members, #402): the Desktop app and the CLI, which stay online, pass messages on. The admin makes a member a hub, or keeps one from being one, in Members…. A Mac holds at most 40 group connections, and past that stops being a hub (#439).
+- Hubs (private groups past 16 members, #402): the Desktop app and the CLI, which stay online, pass messages on. The admin makes a member a hub, or keeps one from being one, in Members…. A Mac holds at most 40 group connections, and past that stops being a hub (#439). As a community's hub, a Mac takes only the members its 40 leave free beside its other groups and 1:1 chats, then says it is full (#503).
+- Typing, recording and thinking show in private groups (#442, [Header](#header)). A message that mentions you wakes your closed web app, if you turned on Wake me while closed (#448, [WEB.md](WEB.md#install-it)).
+- A member's name stays while their connection is down; only the member changes or removes it (#533).
 - In a community, the admin's changes are final: a member's longer branch cannot undo them (#300).

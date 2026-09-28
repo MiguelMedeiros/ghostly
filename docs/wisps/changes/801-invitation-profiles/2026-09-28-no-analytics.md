@@ -1,0 +1,1 @@
+The page at `ghostly.tools` loads no analytics since #535, so the page's section no longer says the code leaves the address before analytics load: the head script still takes it out before anything else runs. The rule that the fragment stays out of analytics, logs and referrers is unchanged.

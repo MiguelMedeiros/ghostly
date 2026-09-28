@@ -1,0 +1,1 @@
+Written down for what the CLI already does: a daemon stops cleanly on SIGHUP as on SIGINT and SIGTERM (#486); `chat.created` carries no invite code (#479); a Cashu token or an API key comes on stdin, and on the command line only with a warning (#483); an opened service answers only a loopback `Host` and passes on only its own cookies (#466, #479).
