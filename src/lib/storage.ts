@@ -91,6 +91,15 @@ export function saveSession(session: ChatSession): void {
   }
 }
 
+/** A session as stored, unparsed: to tell cheaply whether it changed. */
+export function storedSession(sessionId: string): string | null {
+  try {
+    return localStorage.getItem(getKey(sessionId));
+  } catch {
+    return null;
+  }
+}
+
 export function loadSession(sessionId: string): ChatSession | null {
   try {
     const raw = localStorage.getItem(getKey(sessionId));
@@ -220,8 +229,16 @@ export function setSessionPinned(sessionId: string, pinned: boolean): void {
   window.dispatchEvent(new Event("session-updated"));
 }
 
-export function listSessions(): ChatSession[] {
+/**
+ * Sessions already parsed, by key, with the text each was parsed from (`listSessions`). Whoever keeps one owns its
+ * sessions: one changed in place must be saved, or dropped from the cache.
+ */
+export type SessionCache = Map<string, { raw: string; session: ChatSession }>;
+
+/** Every chat, pinned first, then the latest first. With a cache, only a session whose stored text changed is parsed. */
+export function listSessions(cache?: SessionCache): ChatSession[] {
   const sessions: ChatSession[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i < localStorage.length; i++) {
     try {
       const key = localStorage.key(i);
@@ -229,7 +246,10 @@ export function listSessions(): ChatSession[] {
       if (!key?.startsWith(getPrefix()) || key.slice(getPrefix().length).includes("_")) continue;
       const raw = localStorage.getItem(key);
       if (!raw) continue;
-      const session = JSON.parse(raw) as ChatSession;
+      const hit = cache?.get(key);
+      const session = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
+      if (cache && hit?.session !== session) cache.set(key, { raw, session });
+      seen.add(key);
       if (session.id && session.mySeedB64 && session.peerPubKeyB64 && session.encKeyB64) {
         sessions.push(session);
       }
@@ -237,6 +257,7 @@ export function listSessions(): ChatSession[] {
       continue;
     }
   }
+  if (cache) for (const key of cache.keys()) if (!seen.has(key)) cache.delete(key);
   sessions.sort((a, b) => {
     const pinOrder = Number(isSessionPinned(b.id)) - Number(isSessionPinned(a.id));
     if (pinOrder) return pinOrder;
