@@ -292,7 +292,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     pipe.stdout.on("data", (d: Buffer) => aliceHeard.push(d));
     await new Promise((r) => setTimeout(r, 500));
     program.write(tone(440, 48000, 2000));
-    pipe.stdin.write(tone(660, 16000, 2000));
+    // A finite clip, as `ffmpeg -t 2 … | ghostly call pipe` gives it: the end of stdin must not end the pipe, which
+    // goes on writing what Alice hears until the call ends.
+    pipe.stdin.end(tone(660, 16000, 2000));
     await expect.poll(() => Buffer.concat(aliceHeard).length, { timeout: 20_000 }).toBeGreaterThan(640 * 80);
     await expect.poll(() => Buffer.concat(bobHeard).length, { timeout: 20_000 }).toBeGreaterThan(1920 * 80);
     const heardByAlice = Buffer.concat(aliceHeard), heardByBob = Buffer.concat(bobHeard);
