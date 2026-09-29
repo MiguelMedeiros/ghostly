@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatConnection } from "../../components/ChatConnection";
 import { MessageBubble } from "../../components/MessageBubble";
+import { previewText } from "../../lib/chatList";
 import { transportLineText } from "../../lib/transportEvents";
+import { BC1Q } from "../payments/moneyFormatFixtures";
 import { translateWith } from "../../locales/translate";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -37,6 +39,13 @@ describe("the chat's connection and call lines, in the app's language", () => {
     const line = lookup("ar", "calls.timeline.videoMissed")!;
     expect(screen.getByText(line)).toBeInTheDocument();
     expect(screen.queryByText("Missed video call")).toBeNull();
+  });
+
+  it("says what a pasted address is in the chat list, in the language it is handed, English kept apart", () => {
+    const pt = translateWith(LOCALES.pt);
+    expect(previewText(BC1Q, pt)).toBe(`${lookup("pt", "chat.preview.bitcoinAddress")} · ${lookup("pt", "chat.preview.realMoney")}`);
+    // The previews are kept per language: English is still English after Portuguese.
+    expect(previewText(BC1Q)).toBe("₿ Bitcoin address · Real money");
   });
 
   it("puts a transport line in the language it is handed, the contact's name and the transport in place", () => {

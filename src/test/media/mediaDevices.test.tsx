@@ -8,7 +8,7 @@ import { MediaSettings } from "../../components/MediaSettings";
 import { CameraCapture } from "../../components/composer/CameraCapture";
 import { useCallDevices } from "../../hooks/useCallDevices";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
-import { chooseDevice, followSpeaker, groupDevices, loadDeviceChoices, preferredDevice, resolveDevice, setDeviceSource, type DeviceSource } from "../../lib/mediaDevices";
+import { chooseDevice, followSpeaker, groupDevices, loadDeviceChoices, preferredDevice, resolveDevice, setDeviceSource, type DeviceList, type DeviceSource } from "../../lib/mediaDevices";
 import { getPrefix, setStorageProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 import { choose, optionsOf } from "../select";
@@ -220,6 +220,17 @@ describe("Settings → Audio & video", () => {
       return next;
     }
     afterEach(() => setDeviceSource(null));
+
+    it("never offers to name the devices, not even while the list is on its way (nothing moves under the pointer)", async () => {
+      let answer: (list: DeviceList) => void = () => {};
+      const pending = new Promise<DeviceList>((resolve) => { answer = resolve; });
+      source({ list: () => pending });
+      renderApp(<MediaSettings />);
+      await screen.findByTestId("settings-microphone");
+      expect(screen.queryByTestId("settings-media-names")).toBeNull();
+      await act(async () => answer({ audioinput: [{ id: "Mic A", label: "Mic A" }], videoinput: [], audiooutput: [], defaults: {}, named: true }));
+      expect(screen.queryByTestId("settings-media-names")).toBeNull();
+    });
 
     it("meters the chosen microphone there, and lets it go on Stop", async () => {
       let level: (level: number) => void = () => {};
