@@ -1,0 +1,1 @@
+the woken app's push worker limits wake-up notices itself, per token: one message notice per 5 minutes and one call notice per 30 seconds, whatever the sender does; one inside the gap shows nothing new and makes no sound.

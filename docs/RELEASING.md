@@ -34,7 +34,7 @@ On a branch off `dev`:
 node scripts/bump-version.mjs 1.0.0
 ```
 
-That sets the version in every `package.json`, the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves every entry of `changes/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node scripts/changes.mjs --preview` shows the section beforehand.
+That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves every entry of `changes/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node scripts/changes.mjs --preview` shows the section beforehand.
 
 Then, by hand:
 

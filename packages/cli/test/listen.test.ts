@@ -131,6 +131,27 @@ describe("listen with an allowlist and --turns", () => {
     expect(readFileSync(got, "utf8").trim().split("\n").map((line) => (JSON.parse(line) as { messageId: string }).messageId)).toEqual(["ok", "asked"]);
   });
 
+  it("a step that throws is said on stderr; the cursor moves on and later events are still handled", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const cursor = join(dir, "cursor");
+    const lines: string[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const handle = eventHandler({
+        types: [], cursor, print: true,
+        write: (line) => { if (lines.push(line) === 1) throw new Error("output closed"); },
+        allow: new Allowlist(new Set(["c1"]), new Set(), new Set(), async () => null),
+      });
+      const events = [received("c1", "first", "one"), received("c1", "second", "two"), received("c1", "third", "three")];
+      handle(events[0]);
+      await vi.waitFor(() => expect(readFileSync(cursor, "utf8").trim()).toBe(String(events[0].seq)));
+      for (const event of events.slice(1)) handle(event);
+      await vi.waitFor(() => expect(readFileSync(cursor, "utf8").trim()).toBe(String(events[2].seq)));
+      expect(lines.map((line) => (JSON.parse(line) as { seq: number }).seq)).toEqual(events.map((e) => e.seq));
+      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(new RegExp(`event ${events[0].seq} .*output closed`));
+    } finally { stderr.mockRestore(); }
+  });
+
   it("--turns takes the place of --type", async () => {
     const result = await ghostly(["--home", mkdtempSync(join(tmpdir(), "ghostly-listen-")), "listen", "--turns", "--type", "message.received"]);
     expect(result.code).toBe(2);

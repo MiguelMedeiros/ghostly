@@ -299,6 +299,26 @@ describe("group name, group-mesh/1", () => {
     await mesh.settle();
     expect([alice.name, carol.name]).toEqual(["Reading club", "Reading club"]);
   });
+
+  it("an admin who signed the highest revision there is cannot leave the next admin unable to rename", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
+    const aliceSeed = identityFromSeedB64(alice.state.seedB64).seed;
+    const top = handMade(carol, aliceSeed, alice.myKey, encodeGroupMetaBody({ name: "Mine" }), { r: Number.MAX_SAFE_INTEGER });
+    for (const member of [bob, carol]) await member.handle(alice.myKey, clone(top));
+    expect([bob.name, carol.name]).toEqual(["Mine", "Mine"]);
+    await alice.transferAdmin(bob.myKey);
+    await mesh.settle();
+    expect(carol.state.meta!.by).toBe(bob.myKey);
+    await bob.rename("Reading club");
+    await mesh.settle();
+    expect([bob.name, carol.name]).toEqual(["Reading club", "Reading club"]);
+    // Under one epoch the revision still counts up.
+    await bob.rename("Book club");
+    await mesh.settle();
+    expect(carol.name).toBe("Book club");
+  });
 });
 
 // -- group-community/1 ------------------------------------------------------------------------------
@@ -417,6 +437,23 @@ describe("group picture, group-community/1", () => {
     const stale = signGroupMeta({ g: s.id, e: before.e, h: communityCommitHash(before), r: 999, ts: 1 }, "{}", aliceSeed, alice.session.myKey);
     expect(await s.handle(alice.session.myKey, clone(wrapGroupMeta(stale, s.topHash, now, true)))).toBe(false);
     expect(s.picture).toBe(RED);
+  });
+
+  it("an admin who signed the highest revision there is cannot leave the next admin unable to change it", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    const s = carol.session, key = epochKeys(fromBase64Url(s.state.secrets[s.topHash]), s.id, s.epoch).message;
+    const aliceSeed = identityFromSeedB64(alice.session.state.seedB64).seed;
+    const top = wrapGroupMeta(signGroupMeta({ g: s.id, e: s.epoch, h: s.topHash, r: Number.MAX_SAFE_INTEGER, ts: 1 }, encodeGroupMetaBody({ pic: RED }), aliceSeed, alice.session.myKey), s.topHash, key, true);
+    for (const member of [bob, carol]) expect(await member.session.handle(alice.session.myKey, clone(top))).toBe(true);
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    await bob.session.setPicture(BLUE);
+    await net.settle();
+    expect([bob.session.picture, carol.session.picture]).toEqual([BLUE, BLUE]);
   });
 });
 

@@ -23,8 +23,13 @@ export const MAX_ENTITY_CARDS = 3;
 /** Longer messages are only scanned this far. */
 const SCAN_LIMIT = 20_000;
 
-const INVITE_RE = /(?<![A-Za-z0-9])(?:https?:\/\/[^\s#]*#\/?(?:chat\/)?)?(ghostly1[0-9a-z]+)/gi;
-const GROUP_RE = /(?<![A-Za-z0-9])(?:https?:\/\/[^\s#]*#\/?(?:join\/)?)?(group([12])\/[A-Za-z0-9_-]{22}\/[a-z0-9]{52})(?![A-Za-z0-9])/g;
+/**
+ * The address before a code's `#`, at most this long. Unbounded, every `http` in a long run without a space or a `#`
+ * scanned to its end, so a message of `https://` repeated cost the square of its length on every render.
+ */
+const ADDRESS = String.raw`https?:\/\/[^\s#]{0,256}#`;
+const INVITE_RE = new RegExp(String.raw`(?<![A-Za-z0-9])(?:${ADDRESS}\/?(?:chat\/)?)?(ghostly1[0-9a-z]+)`, "gi");
+const GROUP_RE = new RegExp(String.raw`(?<![A-Za-z0-9])(?:${ADDRESS}\/?(?:join\/)?)?(group([12])\/[A-Za-z0-9_-]{22}\/[a-z0-9]{52})(?![A-Za-z0-9])`, "g");
 const NOSTR_RE = /(?<![A-Za-z0-9:])(?:nostr:)?((?:npub|nprofile|note|nevent)1[02-9ac-hj-np-z]+)(?![A-Za-z0-9])/gi;
 const PUBKY_RE = /(?<![A-Za-z0-9])(?:pubky:\/\/|pk:)([a-z0-9]{52})(?![A-Za-z0-9])/gi;
 const DID_RE = /(?<![A-Za-z0-9])did:(?:key|jwk|dht|web):[A-Za-z0-9._%:-]+/g;

@@ -54,6 +54,12 @@ async function setup(contactOptions: { editSupport?: boolean; confirm?: () => bo
   await vi.waitFor(() => expect(view().availableTransports).toHaveLength(1));
   void contact.connect(5_000).catch(() => {});
   await vi.waitFor(() => expect([view().pairing?.status, contactState.status]).toEqual(["ready", "ready"]));
+  // Ready comes before the two capability announcements cross: until each side has the other's, an edit is refused
+  // on the way out ("does not show edits yet") or dropped on the way in.
+  if (contactOptions.editSupport ?? true) {
+    const mineLink = () => (node as unknown as { links: Map<string, { link?: GhostLink }> }).links.get(id)?.link;
+    await vi.waitFor(() => expect([mineLink()?.supportsEdits, contact.supportsEdits]).toEqual([true, true]));
+  }
   const messages = () => db.getMessages(id);
   const peerRow = async (text: string) => { await vi.waitFor(async () => expect((await messages()).find(m => m.text === text)).toBeDefined()); return (await messages()).find(m => m.text === text)!; };
   const row = async (messageId: string) => (await messages()).find(m => m.id === messageId)!;
@@ -133,7 +139,7 @@ describe("the contact's edits", () => {
     expect(t.view().lastMessageAt).toBe(lastMessageAt);
     expect(t.onAttention).not.toHaveBeenCalled();
     // A later one still goes on top.
-    await t.contact.sendEdit({ id: WIRE("A"), e: 4, ts: Date.now(), m: "v4 https://ghostly.tools/", pv: { u: "https://ghostly.tools/", t: "Ghostly" } });
+    expect(await t.contact.sendEdit({ id: WIRE("A"), e: 4, ts: Date.now(), m: "v4 https://ghostly.tools/", pv: { u: "https://ghostly.tools/", t: "Ghostly" } })).toBeNull();
     await vi.waitFor(async () => expect((await t.row(original.id)).text).toBe("v4 https://ghostly.tools/"));
     expect((await t.row(original.id)).preview).toEqual({ u: "https://ghostly.tools/", t: "Ghostly" });
     expect((await t.row(original.id)).edit?.history.map(v => v.text)).toEqual(["v0", "v3"]);
@@ -143,7 +149,7 @@ describe("the contact's edits", () => {
     const t = await setup();
     const sent = await t.node.sendMessage({ linkId: t.id, text: "mine" });
     const mine = await t.row(sent.messageId!);
-    await t.contact.sendEdit({ id: mine.wireId!, e: 1, ts: Date.now(), m: "forged" });
+    expect(await t.contact.sendEdit({ id: mine.wireId!, e: 1, ts: Date.now(), m: "forged" })).toBeNull();
     await new Promise(resolve => setTimeout(resolve, 150));
     expect((await t.row(sent.messageId!)).text).toBe("mine");
     expect((await t.row(sent.messageId!)).edit).toBeUndefined();
@@ -152,7 +158,7 @@ describe("the contact's edits", () => {
 
   it("an edit before its message waits for it, then shows and is confirmed", async () => {
     const t = await setup();
-    await t.contact.sendEdit({ id: WIRE("B"), e: 1, ts: Date.now(), m: "later text" });
+    expect(await t.contact.sendEdit({ id: WIRE("B"), e: 1, ts: Date.now(), m: "later text" })).toBeNull();
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(t.contactReceipts).toEqual([]);
     expect(await t.contact.sendMessage("first text", Date.now(), WIRE("B"))).toBeNull();
@@ -182,7 +188,7 @@ describe("the contact's edits", () => {
     const row = await t.peerRow("to delete");
     t.node.deleteMessage({ linkId: t.id, messageId: row.id });
     await vi.waitFor(async () => expect((await t.messages()).find(m => m.id === row.id)).toBeUndefined());
-    await t.contact.sendEdit({ id: WIRE("C"), e: 1, ts: Date.now(), m: "back?" });
+    expect(await t.contact.sendEdit({ id: WIRE("C"), e: 1, ts: Date.now(), m: "back?" })).toBeNull();
     await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("C"), 1]]));
     expect((await t.messages()).find(m => m.id === row.id)).toBeUndefined();
   });
