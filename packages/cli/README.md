@@ -8,14 +8,13 @@ is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md). A guided t
 > Status: phases 1 to 5 (profiles, pictures and backups, invites, one chat, private and community groups with their
 > admin tools and hubs, the event stream, hooks and agent turns, wallets and payments, files and voice notes, identity
 > proofs, shared web apps, voice calls, typing, replies, edits, reactions and forwards, Pkarr over the Mainline DHT;
-> the npm package `@ghostlytools/cli`, published from 1.0); every engine call is already
+> the npm package `@ghostlytools/cli`, published since 1.0); every engine call is already
 > reachable through `ghostly engine <method>`. The older Rust `ghostly-cli` (the `cli/` folder) stays as the
 > compatibility client for v0.4 chats; it is not this package, and from 1.0 the release no longer ships it.
 
 ## Install
 
-From 1.0: `npm install -g @ghostlytools/cli`. Until then, from this repository:
-<!-- release-1.0: "From 1.0:" becomes "Install:", and "Until then, from this repository" becomes "Or from this repository". -->
+Install: `npm install -g @ghostlytools/cli`, then `ghostly --version`. Or from this repository:
 
 ```bash
 npm install

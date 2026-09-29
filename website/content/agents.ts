@@ -4,10 +4,10 @@ import agentPrompt from "@/lib/agent-prompt.json";
 /**
  * /developers/agents: how an AI agent joins Ghostly through the headless CLI (docs/AI-AGENTS.md, #426 and #431).
  * The prompt at the top is written once, in docs/AI-AGENTS.md (scripts/agent-prompt.mjs cuts it out). Every command
- * is one `ghostly help` lists on `dev`; the turn is the shape of docs/CLI.md's "Agent turns".
+ * is one `ghostly help` lists on `main`; the turn is the shape of docs/CLI.md's "Agent turns".
  */
 
-const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/dev";
+const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/main";
 
 /** What a person pastes into their coding agent. */
 export const PROMPT: string = agentPrompt.prompt;
