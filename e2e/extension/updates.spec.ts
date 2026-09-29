@@ -5,7 +5,7 @@ import { expect, test, LATEST_URL } from "../support/extension";
  * do is say that a new version is out and point at it — which it has to do,
  * because otherwise nobody would know.
  */
-test("says when a new version is out, and points at the download", async ({ extensionPeer }) => {
+test("says when a new version is out, and points at the download", { tag: ["@feature:app.updates.extension"] }, async ({ extensionPeer }) => {
   const { page } = await extensionPeer("alice");
 
   await page.route(LATEST_URL, (route) =>

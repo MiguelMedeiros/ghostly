@@ -18,7 +18,20 @@ export interface CallSignal {
   v?: number;
   /** What the picture is: the camera or a screen. Only meaningful with `v: 1`. */
   k?: "c" | "s";
+  /**
+   * The payload types the sender's SDP gives Opus and VP8, when not 111 and 96 (the rebuilt SDP's own, and
+   * Chromium's). WebKit offers H264 as 96 and VP8 as 106: rebuilt as `96 VP8`, the offerer read the answerer's
+   * VP8 as H264 and never showed its picture.
+   */
+  ap?: number;
+  vp?: number;
 }
+
+/** What the rebuilt SDP gives Opus and VP8 unless the signal says otherwise. */
+const DEFAULT_OPUS_PT = 111;
+const DEFAULT_VP8_PT = 96;
+/** Dynamic RTP payload types: 96-127 (RFC 3551), and 35-63, which WebRTC engines use too. */
+const dynamicPayloadType = (n: unknown): n is number => Number.isInteger(n) && (((n as number) >= 96 && (n as number) <= 127) || ((n as number) >= 35 && (n as number) <= 63));
 
 export type CallState = "idle" | "offering" | "incoming" | "answering" | "connecting" | "connected" | "ended";
 
@@ -29,6 +42,24 @@ export type CallEventType =
   | "call_ended"
   | "call_missed"
   | "call_rejected";
+
+/**
+ * Where a call's media comes from: the browser's own WebRTC and capture, or a stand-in with the same shape.
+ * Ghostly Desktop on Linux brings one: WebKitGTK has no WebRTC there, so GStreamer runs the call (WISP 601).
+ */
+export interface CallMedia {
+  createPeerConnection(config: RTCConfiguration): RTCPeerConnection;
+  getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
+  /** Left out where the screen cannot be shared. */
+  getDisplayMedia?(options: DisplayMediaStreamOptions): Promise<MediaStream>;
+  /** Why the screen cannot be shared, where it cannot: the call window shows it on the share button, turned off. */
+  screenUnavailable?: string;
+  /**
+   * `getUserMedia` captures from the `deviceId` asked for, and `replaceTrack` on the audio sender switches the
+   * microphone: the profile's devices and the call's device menu work as with the browser's own media.
+   */
+  choosesDevices?: boolean;
+}
 
 export function compressSdp(sdp: string): string {
   return btoa(sdp);
@@ -49,7 +80,78 @@ export const RTC_CONFIG: RTCConfiguration = {
   iceCandidatePoolSize: 10,
 };
 
-export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
+/** An ICE server as a profile's settings keep it: one or more URLs in `urls` (space or comma separated). */
+export interface CallIceServer { urls: string | string[]; username?: string; credential?: string }
+
+/**
+ * A call's WebRTC configuration: the apps' STUN servers, then the profile's own (Settings → Network → ICE
+ * servers: a TURN relay, typically). A relay is what connects a call when no direct path works: a VPN that takes
+ * every packet through its tunnel, or a NAT that maps each destination apart.
+ */
+export function callRtcConfig(extra: readonly CallIceServer[] = []): RTCConfiguration {
+  const servers: RTCIceServer[] = [];
+  for (const server of extra) {
+    const urls = (Array.isArray(server.urls) ? server.urls : server.urls.split(/[\s,]+/)).filter(Boolean);
+    if (!urls.length) continue;
+    servers.push({ urls, ...(server.username ? { username: server.username } : {}), ...(server.credential ? { credential: server.credential } : {}) });
+  }
+  return { ...RTC_CONFIG, iceServers: [...(RTC_CONFIG.iceServers ?? []), ...servers] };
+}
+
+/**
+ * How many candidates a signal on the chat session carries (`paired-call`, WISP 601): the receiver takes eight.
+ * A compatibility chat's `_call` record keeps to one host and one server reflexive candidate (a DHT packet's worth).
+ */
+export const PAIRED_CALL_CANDIDATES = 8;
+
+/**
+ * The candidates a signal carries, from the `a=candidate:` values of an SDP, when it may carry up to `max`.
+ *
+ * A computer often has several interfaces (Wi-Fi, Ethernet, VM bridges, Tailscale, a VPN) and the one listed first is
+ * not always one the contact can reach: on a Mac with a VPN as its default route it is the tunnel's address, which
+ * nothing on that machine can answer. So the signal carries every usable path, in this order:
+ *
+ * 1. host candidates on local networks, IPv4 or an mDNS name (at most four);
+ * 2. the first server reflexive candidate, and relay candidates (a TURN server, when the profile has one);
+ * 3. IPv6 host candidates, global ones first (at most two);
+ * 4. host candidates a browser marks as costly (`network-cost` 50 or more: a VPN, or an interface it does not know);
+ * 5. whatever else fits.
+ *
+ * UDP only, loopback, link-local and unspecified addresses left out (loopback kept with `loopback`), the related
+ * address dropped (it is informational, and an IPv6 one broke apps before 0.5).
+ */
+export function pickCallCandidates(candidates: readonly string[], max = PAIRED_CALL_CANDIDATES, { loopback = false } = {}): string[] {
+  const udp = candidates.map((c) => c.trim()).filter((c) => / udp /i.test(c));
+  const address = (c: string) => c.split(" ")[4] ?? "";
+  const type = (c: string) => / typ (\S+)/.exec(c)?.[1];
+  const cost = (c: string) => Number(/ network-cost (\d+)/.exec(c)?.[1] ?? 0);
+  const ipv6 = (c: string) => address(c).includes(":");
+  const usable = (c: string) => {
+    const a = address(c).toLowerCase();
+    if (a === "::" || a === "0.0.0.0" || a.startsWith("169.254.") || a.startsWith("fe80:")) return false;
+    return loopback || !(a === "::1" || a.startsWith("127."));
+  };
+  const hosts = udp.filter((c) => type(c) === "host" && usable(c));
+  const costly = (c: string) => cost(c) >= 50;
+  const groups = [
+    hosts.filter((c) => !ipv6(c) && !costly(c)).slice(0, 4),
+    udp.filter((c) => type(c) === "srflx").slice(0, 1),
+    udp.filter((c) => type(c) === "relay").slice(0, 2),
+    [...hosts.filter((c) => ipv6(c) && !/^f[cd]/i.test(address(c)) && !costly(c)), ...hosts.filter((c) => ipv6(c) && (/^f[cd]/i.test(address(c)) || costly(c)))].slice(0, 2),
+    hosts.filter((c) => !ipv6(c) && costly(c)),
+    hosts,
+  ];
+  const picked: string[] = [];
+  for (const group of groups) for (const c of group) if (picked.length < max && !picked.includes(c)) picked.push(c);
+  return picked.map((c) => c.replace(/ raddr \S+ rport \d+/, ""));
+}
+
+/**
+ * The parameters of a call signal, from an SDP. `maxCandidates` above two (a signal on the chat session) carries
+ * the candidates `pickCallCandidates` chooses; the default keeps a compatibility chat's one host and one server
+ * reflexive candidate.
+ */
+export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback = false }: { maxCandidates?: number; loopback?: boolean } = {}): Partial<CallSignal> {
   const lines = sdp.split("\r\n");
 
   let ufrag = "";
@@ -60,6 +162,8 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
   const candidates: string[] = [];
   let audioSsrc: number | null = null;
   let videoSsrc: number | null = null;
+  let opus: number | null = null;
+  let vp8: number | null = null;
   let currentMedia = "";
 
   for (const line of lines) {
@@ -85,6 +189,12 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
       media.push("v");
       currentMedia = "v";
     }
+    const rtpmap = line.match(/^a=rtpmap:(\d+) (opus\/48000|VP8\/90000)/i);
+    if (rtpmap) {
+      const pt = Number(rtpmap[1]);
+      if (currentMedia === "a" && opus === null && /^opus/i.test(rtpmap[2])) opus = pt;
+      if (currentMedia === "v" && vp8 === null && /^VP8/i.test(rtpmap[2])) vp8 = pt;
+    }
     if (line.startsWith("a=candidate:")) {
       candidates.push(line.substring("a=candidate:".length));
     }
@@ -101,14 +211,17 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
     }
   }
 
-  const srflxCandidates = candidates.filter(c => c.includes(" srflx "));
-  const hostCandidates = candidates.filter(c => c.includes(" host ") && c.includes(" udp "));
+  // `typ host` can end the line: browsers add `generation 0` after it, webrtc-rs (the Linux Desktop) does not.
+  const srflxCandidates = candidates.filter(c => / typ srflx( |$)/.test(c));
+  const hostCandidates = candidates.filter(c => / typ host( |$)/.test(c) && / udp /i.test(c));
   // Include 1 host candidate (for local connections) and 1 srflx (for remote)
   // Keep packet size under 1000 bytes DHT limit
-  const selectedCandidates = [
+  // An IPv6 related address (`raddr ::`, WebKit's IPv6 srflx) made apps before 0.5 refuse the whole signal:
+  // the related address is informational, so it is left out.
+  const selectedCandidates = maxCandidates > 2 ? pickCallCandidates(candidates, maxCandidates, { loopback }) : [
     ...hostCandidates.slice(0, 1),
     ...srflxCandidates.slice(0, 1),
-  ];
+  ].map(c => c.replace(/ raddr \S*:\S* rport \d+/, ""));
   
   const ssrcs: number[] = [];
   if (audioSsrc !== null) ssrcs.push(audioSsrc);
@@ -122,6 +235,9 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
     m: media,
     c: selectedCandidates,
     ss: ssrcs,
+    // Only when they differ from what every rebuilt SDP assumes: signals between Chromium apps stay as they were.
+    ...(opus !== null && opus !== DEFAULT_OPUS_PT && dynamicPayloadType(opus) ? { ap: opus } : {}),
+    ...(vp8 !== null && vp8 !== DEFAULT_VP8_PT && dynamicPayloadType(vp8) ? { vp: vp8 } : {}),
   };
 }
 
@@ -168,14 +284,15 @@ function normalizeCandidate(candidate: unknown): string | null | undefined {
   if (rest.length % 2 !== 0) return null;
   for (let i = 0; i < rest.length; i += 2) {
     const [name, value] = [rest[i], rest[i + 1]];
-    if (!EXTENSION_TOKEN.test(name) || !EXTENSION_TOKEN.test(value)) return null;
+    if (!EXTENSION_TOKEN.test(name)) return null;
+    // raddr is an address, IPv6 too (`raddr ::`, as WebKit gives an IPv6 srflx): the address pattern, not the token one.
     if (name === "raddr") {
       if (!CANDIDATE_ADDRESS.test(value)) return null;
       raddr = value;
     } else if (name === "rport") {
       rport = uint(value, 65535);
       if (rport === null) return null;
-    }
+    } else if (!EXTENSION_TOKEN.test(value)) return null;
     // Other extension attributes (generation, network-id, ufrag...) are dropped.
   }
 
@@ -239,7 +356,16 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
     }
   }
 
-  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture };
+  const payloadTypes: Pick<CallSignal, "ap" | "vp"> = {};
+  for (const key of ["ap", "vp"] as const) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (!dynamicPayloadType(value)) return null;
+    payloadTypes[key] = value;
+  }
+  if (payloadTypes.ap !== undefined && payloadTypes.ap === payloadTypes.vp) return null;
+
+  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture, ...payloadTypes };
 }
 
 /** The `v`/`k` pair of any signal. Returns null for a malformed one, `{}` when it says nothing. */
@@ -284,6 +410,8 @@ export function buildSdpFromSignal(signal: CallSignal): string {
   const sessionId = Math.floor(Math.random() * 1e15);
   const audioSsrc = signal.ss?.[0] ?? Math.floor(Math.random() * 0xFFFFFFFF);
   const videoSsrc = signal.ss?.[1] ?? Math.floor(Math.random() * 0xFFFFFFFF);
+  const opus = signal.ap ?? DEFAULT_OPUS_PT;
+  const vp8 = signal.vp ?? DEFAULT_VP8_PT;
 
   const lines: string[] = [
     "v=0",
@@ -301,7 +429,7 @@ export function buildSdpFromSignal(signal: CallSignal): string {
     
     if (mediaType === "a") {
       lines.push(
-        "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+        `m=audio 9 UDP/TLS/RTP/SAVPF ${opus}`,
         "c=IN IP4 0.0.0.0",
         "a=rtcp:9 IN IP4 0.0.0.0",
       );
@@ -319,14 +447,14 @@ export function buildSdpFromSignal(signal: CallSignal): string {
         "a=sendrecv",
         "a=msid:stream audio0",
         "a=rtcp-mux",
-        "a=rtpmap:111 opus/48000/2",
-        "a=fmtp:111 minptime=10;useinbandfec=1",
+        `a=rtpmap:${opus} opus/48000/2`,
+        `a=fmtp:${opus} minptime=10;useinbandfec=1`,
         `a=ssrc:${audioSsrc} cname:pkarr`,
         `a=ssrc:${audioSsrc} msid:stream audio0`,
       );
     } else if (mediaType === "v") {
       lines.push(
-        "m=video 9 UDP/TLS/RTP/SAVPF 96",
+        `m=video 9 UDP/TLS/RTP/SAVPF ${vp8}`,
         "c=IN IP4 0.0.0.0",
         "a=rtcp:9 IN IP4 0.0.0.0",
       );
@@ -347,11 +475,11 @@ export function buildSdpFromSignal(signal: CallSignal): string {
         `a=msid:stream video0`,
         "a=rtcp-mux",
         "a=rtcp-rsize",
-        "a=rtpmap:96 VP8/90000",
-        "a=rtcp-fb:96 ccm fir",
-        "a=rtcp-fb:96 nack",
-        "a=rtcp-fb:96 nack pli",
-        "a=rtcp-fb:96 goog-remb",
+        `a=rtpmap:${vp8} VP8/90000`,
+        `a=rtcp-fb:${vp8} ccm fir`,
+        `a=rtcp-fb:${vp8} nack`,
+        `a=rtcp-fb:${vp8} nack pli`,
+        `a=rtcp-fb:${vp8} goog-remb`,
         `a=ssrc:${videoSsrc} cname:pkarr`,
         `a=ssrc:${videoSsrc} msid:stream video0`,
       );

@@ -1,28 +1,22 @@
 ---
 name: ghostly-cli
 description: Send and receive encrypted ephemeral messages via the Ghost protocol using ghostly-cli. Use when user needs private, serverless messaging, building chat bots, sending encrypted notifications, or bridging messages to other platforms. Messages are E2E encrypted (NaCl) and transmitted via Mainline DHT (10M+ nodes).
-homepage: https://ghostly.tools/cli
+homepage: https://github.com/MiguelMedeiros/ghostly/blob/dev/cli/README.md
 metadata:
   {
     "openclaw":
       {
         "emoji": "👻",
         "requires": { "bins": ["ghostly-cli"] },
-        "install":
-          [
-            {
-              "id": "cargo",
-              "kind": "cargo",
-              "crate": "ghostly-cli",
-              "bins": ["ghostly-cli"],
-              "label": "Install ghostly-cli (cargo)",
-            },
-          ],
       },
   }
 ---
 
 # ghostly-cli
+
+> **Legacy.** `ghostly-cli` is the compatibility client: it speaks the older v0.4 DHT records (no `ghostly1` invites,
+> no chat sessions, no groups). For a bot that talks to people on today's Ghostly apps, use the `ghostly` CLI and its
+> skill, [packages/cli/SKILL.md](../packages/cli/SKILL.md). This one keeps working for bots already built on it.
 
 Use `ghostly-cli` to send/receive encrypted ephemeral messages via the Ghost protocol.
 
@@ -44,8 +38,12 @@ Use `ghostly-cli` to send/receive encrypted ephemeral messages via the Ghost pro
 
 ## Install
 
+`ghostly-cli` is not on crates.io, and from 1.0 the release no longer ships its binaries. Build it from a clone with
+Rust's stable toolchain (it lands in `~/.cargo/bin`, which must be on your `PATH`):
+
 ```bash
-cargo install ghostly-cli
+git clone https://github.com/MiguelMedeiros/ghostly.git
+cargo install --path ghostly/cli
 ```
 
 ## Quick Start
@@ -59,16 +57,20 @@ ghostly-cli identity new > ~/.ghostly-identity.json
 ### Load Credentials
 
 ```bash
-eval $(cat ~/.ghostly-identity.json | jq -r '@sh "SEED=\(.seed) PUBKEY=\(.pubkey) KEY=\(.shared_key)"')
+eval "$(jq -r '@sh "SEED=\(.seed) PUBKEY=\(.pubkey) KEY=\(.shared_key)"' ~/.ghostly-identity.json)"
 ```
 
 ### Generate Invite URL
 
 ```bash
-ghostly-cli invite new --seed "$SEED"
+ghostly-cli invite new --seed "$SEED" --key "$KEY"
 ```
 
-Share the `invite_url` with users who want to chat.
+Output: `{"invite_url":"ghost://<pubkey>#<shared key>","pubkey":"<pubkey>"}`. Without `--key` it makes a new
+shared key.
+
+Share the `invite_url`. The other side runs `invite parse` on it and sends you its `my_pubkey`: that is your
+`$PEER` (the invite does not carry it).
 
 ## Commands
 
@@ -86,8 +88,10 @@ ghostly-cli recv --peer "$PEER" --key "$KEY"
 
 Output:
 ```json
-{"messages":[{"text":"Hi","timestamp":1708123456789,"nick":"User"}],"message_count":1}
+{"messages":[{"text":"Hi","timestamp":1708123456789,"nick":"User"}],"peer_ack":1708123450000,"latest_ts":1708123456789,"message_count":1}
 ```
+
+`peer_ack` is the newest of your messages the peer has read. Timestamps are Unix milliseconds.
 
 ### Watch Messages (streaming)
 
@@ -95,10 +99,12 @@ Output:
 ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY"
 ```
 
-Output (NDJSON):
+Output (NDJSON), one line per new message:
 ```json
 {"from":"peer","text":"Hello bot!","timestamp":1708123456789,"nick":"User"}
 ```
+
+`watch` acknowledges what it read (always on). `--quiet` hides its polling errors.
 
 ### Read from Stdin
 
@@ -109,13 +115,20 @@ echo "Alert: Server down!" | ghostly-cli send --seed "$SEED" --peer "$PEER" --ke
 ### Parse Invite URL
 
 ```bash
-ghostly-cli invite parse "ghost://pk:abc123...#key..."
+ghostly-cli invite parse "ghost://<pubkey>#<shared key>"
 ```
+
+Output: `{"peer_pubkey","shared_key","my_seed","my_pubkey"}`: the inviter's key, the shared key, and a new keypair
+for you.
+
+The CLI is a compatibility client: it reads only `ghost://` invites. An app invite (`ghostly1...`, or `https://ghostly.tools/#ghostly1...`) is refused with a message saying to open it in the Ghostly app.
 
 ## Flags
 
 | Command | Flag | Description |
 |---------|------|-------------|
+| invite new | `--seed` | Your seed (base64url) |
+| invite new | `--key` | Shared key (optional: a new one if absent) |
 | send | `--seed` | Your seed (base64url) |
 | send | `--peer` | Peer's pubkey (z32) |
 | send | `--key` | Shared encryption key |
@@ -126,8 +139,16 @@ ghostly-cli invite parse "ghost://pk:abc123...#key..."
 | watch | `--seed` | Your seed (base64url) |
 | watch | `--peer` | Peer's pubkey (z32) |
 | watch | `--key` | Shared encryption key |
+| watch | `--nick` | Your nickname |
 | watch | `--poll-interval` | Poll interval in ms (default: 2000) |
-| all | `--json` | Output JSON (default: true) |
+| watch | `--ack` | Accepted; acks are always sent |
+| all | `--read-relays` | Look packets up through the Pkarr relays too, not the Mainline DHT alone |
+| all | `-q`, `--quiet` | `watch` does not print polling errors |
+| all | `--json` | Accepted; output is always JSON |
+
+A packet holds one short message: each `send` replaces your previous one, and a message too long for the packet is
+cut to fit (`messages_kept`). If a message must arrive, wait until `peer_ack` reaches its `timestamp` before sending the
+next one.
 
 ## Bot Patterns
 
@@ -145,11 +166,11 @@ done
 ```bash
 ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY" | while read -r msg; do
   text=$(echo "$msg" | jq -r '.text')
+  body=$(jq -n --arg text "$text" '{model: "gpt-4", messages: [{role: "user", content: $text}]}')
   response=$(curl -s "https://api.openai.com/v1/chat/completions" \
-    -H "Authorization: Bearer $OPENAI_KEY" \
-    -d '{"model":"gpt-4","messages":[{"role":"user","content":"'"$text"'"}]}' \
-    | jq -r '.choices[0].message.content')
-  ghostly-cli send --seed "$SEED" --peer "$PEER" --key "$KEY" "$response"
+    -H "Authorization: Bearer $OPENAI_KEY" -H "Content-Type: application/json" \
+    -d "$body" | jq -r '.choices[0].message.content')
+  ghostly-cli send --seed "$SEED" --peer "$PEER" --key "$KEY" -- "$response"
 done
 ```
 
@@ -182,5 +203,5 @@ tools:
 
 - Store credentials with restricted permissions (`chmod 600`)
 - Use environment variables, never hardcode seeds
-- Check exit codes and parse error JSON from stderr
+- Check exit codes: a failure prints `{"error":"..."}` on stderr and exits with 1
 - Messages are encrypted but metadata (who talks to whom) may be observable

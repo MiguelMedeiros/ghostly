@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/web",
   "private": true,
-  "version": "0.4.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Ghostly on the web: the same peer and UI as the extension, running in a tab. Nothing to install.",
   "scripts": {
@@ -12,12 +12,10 @@
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
-    "@emoji-mart/react": "^1.1.1",
     "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "@ghostly/react": "*",
     "@tauri-apps/api": "^2.11.1",
-    "emoji-mart": "^5.6.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -30,6 +28,6 @@
     "@vitejs/plugin-react": "^6.1.1",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.0"
+    "vite": "^8.3.1"
   }
 }

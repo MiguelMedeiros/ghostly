@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-pasted-bytes"
+description = "Enables the read_pasted_bytes command without any pre-configured scope."
+commands.allow = ["read_pasted_bytes"]
+
+[[permission]]
+identifier = "deny-read-pasted-bytes"
+description = "Denies the read_pasted_bytes command without any pre-configured scope."
+commands.deny = ["read_pasted_bytes"]

@@ -1,68 +1,118 @@
 # Installation
 
-## Nothing to install
+Every download is on the latest GitHub release: **https://github.com/MiguelMedeiros/ghostly/releases/latest**
 
-Open **https://app.ghostly.tools** in any browser. On a phone, add it to the home screen (Share → *Add to Home Screen* on iOS, ⋮ → *Install app* on Android) and it opens like a native app. See [WEB.md](WEB.md) for what a web page can and cannot do, and how to host it yourself.
+## Web app: nothing to install
+
+Open **https://app.ghostly.tools** in any modern browser.
+
+- **Install it as an app** and it opens in a window of its own, even offline, with other apps able to share into it:
+  - Chrome, Edge or Brave (computer or Android): **Settings → Install** in Ghostly, or the install icon in the address bar (⋮, *Install app* on Android).
+  - iPhone and iPad: in Safari, tap Share, then *Add to Home Screen*.
+  - What installing adds (offline start, Share to Ghostly, `web+ghostly:` links, shortcuts, the unread badge): [WEB.md](WEB.md#install-it).
+- Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
+- **Self-hosted:** `docker compose up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
 
 ## Browser extension (Chrome, Brave, Edge)
 
-1. Download [ghostly-browser-extension-0.4.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-browser-extension-0.4.0.zip) and unzip it somewhere you will keep.
+**From the Chrome Web Store:** [Ghostly](https://chromewebstore.google.com/detail/ghostly/nbedaagicniejlmfcncndfjcejaidbcf). Chrome keeps it up to date. The store version can trail the GitHub release while a new one is in review.
+
+**From the release zip** (the newest version, or a browser without store access):
+
+1. Download [ghostly-browser-extension-1.0.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/ghostly-browser-extension-1.0.0.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
-Ghostly tells you when a new version is out, but an unpacked extension is the one thing Chrome never updates by itself: replace the folder's contents with the new zip and press the reload arrow on the extension's card. It is not in the Chrome Web Store yet. More in [BROWSER.md](BROWSER.md).
+Chrome never updates an unpacked extension. Ghostly tells you when a new version is out; replace the folder's contents with the new zip and press the reload arrow on the extension's card. More in [BROWSER.md](BROWSER.md).
 
-## Desktop Apps
+## Desktop app
 
-The app updates itself: when a release is out it offers it, downloads it, checks it carries Ghostly's signature and restarts into the new version. On Linux that is the AppImage; the `.deb` is updated by the package manager it came from. The check runs while **Settings → Updates** allows it, and never installs anything without being asked.
+Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest):
 
-| Platform | Architecture | Download |
-|----------|--------------|----------|
-| **macOS** | Apple Silicon (M1/M2/M3) | [Ghostly_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_aarch64.dmg) |
-| **macOS** | Intel (x64) | [Ghostly_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64.dmg) |
-| **Windows** | x64 (Installer) | [Ghostly_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64-setup.exe) |
-| **Windows** | x64 (MSI) | [Ghostly_x64.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_x64_en-US.msi) |
-| **Linux** | x64 (AppImage) | [Ghostly_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.AppImage) |
-| **Linux** | x64 (Debian/Ubuntu) | [Ghostly_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/Ghostly_0.4.0_amd64.deb) |
+| Platform | File |
+|---|---|
+| macOS, Apple silicon | [Ghostly_1.0.0_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_aarch64.dmg) |
+| macOS, Intel | [Ghostly_1.0.0_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64.dmg) |
+| Windows x64, installer | [Ghostly_1.0.0_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64-setup.exe) |
+| Windows x64, MSI | [Ghostly_1.0.0_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64_en-US.msi) |
+| Linux x64, AppImage | [Ghostly_1.0.0_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_amd64.AppImage) |
+| Linux x64, Debian/Ubuntu | [Ghostly_1.0.0_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_amd64.deb) |
 
-## CLI (Command Line)
+- **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings, Updates** allows it, and nothing installs without your OK.
+- **Linux has no WebRTC in its WebView** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT, and calls run in the app itself, with GStreamer: the `.deb` and `.rpm` depend on its base and good plugins, and the AppImage carries them. If a plugin is missing, the call buttons name the package to install. Screen sharing is not available on Linux yet.
+- **Linux microphones, cameras and speakers** are listed by GStreamer, for calls and for Settings → Audio & video (the microphone meter and the test sound run there too). Microphones and speakers come from GStreamer's PulseAudio plugin (`gstreamer1.0-pulseaudio`, which the `.deb` recommends) or PipeWire's (`gstreamer1.0-pipewire`). Without either, none is listed and calls use the system default.
+- **Checksums.** Each release has `SHA256SUMS.txt` and its signature `SHA256SUMS.txt.asc`. Check a download with `shasum -a 256 -c SHA256SUMS.txt --ignore-missing`.
 
-| Platform | Download |
-|----------|----------|
-| **macOS** (Apple Silicon) | [ghostly-cli-macos-arm64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-cli-macos-arm64) |
-| **macOS** (Intel) | [ghostly-cli-macos-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-cli-macos-x64) |
-| **Linux** (x64) | [ghostly-cli-linux-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-cli-linux-x64) |
-| **Windows** (x64) | [ghostly-cli-windows-x64.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.4.0/ghostly-cli-windows-x64.exe) |
+## CLI
 
-Or install via Cargo:
+For a bot on today's Ghostly, use `ghostly` ([CLI.md](CLI.md)): the app's engine without a screen, in the same chats as the apps. Node 22.12 or newer. From 1.0 it is `npm install -g @ghostlytools/cli`; until then, install it from a clone:
+<!-- release-1.0: "From 1.0 it is" becomes "Install it with", and the clone steps below become "Or from a clone". -->
 
 ```bash
-cargo install ghostly-cli
+npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli
 ```
 
-## Build from Source
+```bash
+npm install -g ./ghostlytools-cli-*.tgz
+```
 
-Prefer to summon your own ghost? Here's how:
+### The older Rust `ghostly-cli` (no longer shipped)
+
+The older Rust `ghostly-cli` is the compatibility client for bots and scripts built on v0.4 chats ([cli/README.md](../cli/README.md)). It talks to other CLIs over the v0.4 record format, not to `ghostly1` app chats. From 1.0 the release no longer ships its binaries, and it is not on crates.io. Build it from a clone:
 
 ```bash
-# Clone the haunted repository
+cargo install --path cli
+```
+
+## Your first chat
+
+1. Open [app.ghostly.tools](https://app.ghostly.tools) or the Desktop app.
+2. **New**, then copy the invite link (or show its QR code) and send it to a friend.
+3. They open it, or paste it under **Join**. The chat goes live as soon as you find each other.
+
+What a chat can do: [Features](FEATURES.md).
+
+## Build from source
+
+Requirements (what the release workflow uses):
+
+- Node.js 22.12 or newer, and npm (the CLI workspace needs 22.12)
+- Rust, stable toolchain
+- The [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS. On Debian/Ubuntu: `libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev`. To call from a Linux build, also `gstreamer1.0-plugins-good` and `gstreamer1.0-pulseaudio` (the call check names what is missing).
+
+```bash
 git clone https://github.com/MiguelMedeiros/ghostly.git
 cd ghostly
+npm ci
 
-# Install dependencies
-npm install
+npm run tauri dev        # Desktop, development
+npm run tauri build      # Desktop, release bundles in target/release/bundle/
 
-# Summon the ghost (development)
-npm run tauri dev
+npm run dev -w @ghostly/web   # web app on http://localhost:5180
+npm run build:web             # web app, static files in web/dist
+npm run build:extension       # extension, load extension/dist unpacked
 
-# Build for production
-npm run tauri build
+cargo build --release -p ghostly-cli   # ghostly-cli, in target/release/
 ```
 
-### Requirements
+The Desktop build bundles the Node runtime that runs it, for HyperDHT (`scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).
 
-- Node.js 18+
-- Rust 1.70+
-- [Tauri prerequisites](https://tauri.app/v1/guides/getting-started/prerequisites)
+Tests and the rest of the workflow: [Contributing](../CONTRIBUTING.md) and [Testing](TESTING.md).
 
-> 💡 **Tip:** The built app will be in `src-tauri/target/release/bundle/`
+## Troubleshooting
+
+**macOS: "Ghostly.app is damaged and can't be opened".** macOS quarantines apps downloaded outside the App Store. Clear the flag, then open the app again:
+
+```bash
+sudo xattr -cr /Applications/Ghostly.app
+```
+
+**macOS: no system notifications ("Move Ghostly to Applications").** macOS gives none to an app run from a temporary folder, such as a disk image or a download it moved aside. Drag Ghostly to Applications and open it from there.
+
+**Linux: the call buttons are off and name a package.** Calls need GStreamer's base and good plugins. Install the package the tooltip names (usually `gstreamer1.0-plugins-good`) and restart the app. No microphone or speaker under Settings → Audio & video: install `gstreamer1.0-pulseaudio` (or `gstreamer1.0-pipewire`).
+
+**Web app: no "Wake me while closed" in Settings → Notifications.** It shows only where the browser has Web Push: Chrome, Edge and Firefox, and on iPhone and iPad only the app added to the Home Screen, from iOS 16.4 ([WEB.md](WEB.md#install-it)). The desktop app and the extension run on their own and are never woken.
+
+**Web app: a second tab only waits.** One tab runs the peer at a time: close the other one ([WEB.md](WEB.md#what-a-web-page-cannot-do)).
+
+Something else? [Open an issue](https://github.com/MiguelMedeiros/ghostly/issues). For a vulnerability, never open an issue: follow [SECURITY.md](../SECURITY.md).

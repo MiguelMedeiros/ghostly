@@ -10,6 +10,7 @@ import {
   parseLinkRecords,
   sanitizeDisplayText,
 } from "../src";
+// covers: core.text-limits
 
 /** Right-to-left override: everything after it renders backwards. */
 const RLO = "\u202e";

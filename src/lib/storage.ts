@@ -1,4 +1,4 @@
-import { MAX_NICK_LENGTH, sanitizeDisplayText } from "@ghostly/core";
+import { MAX_NICK_LENGTH, sanitizeDisplayText, type LinkParams } from "@ghostly/core";
 import type { ChatMessage, ChatSession } from "./types";
 
 /**
@@ -45,9 +45,39 @@ export function setStorageProfile(profile: string): void {
   _profile = profile;
 }
 
-function getPrefix(): string {
+/** The local profile this app runs as (WISP 04). Empty: the default profile, the original namespace. */
+export function getStorageProfile(): string {
+  return _profile;
+}
+
+export function getPrefix(): string {
   return _profile ? `ghostly_${_profile}_` : "ghostly_";
 }
+
+/**
+ * Whether a key with this app's prefix belongs to this profile. The default profile's prefix is also the
+ * start of every other profile's, whose keys carry `<profile>_` after it; a chat's own id never has `_`.
+ */
+export function ownsKey(key: string): boolean {
+  if (!key.startsWith(getPrefix())) return false;
+  if (_profile) return true;
+  const rest = key.slice(getPrefix().length);
+  return !PROFILE_KEY.test(rest) && !otherSpaces().some((ns) => rest.startsWith(`${ns}_`));
+}
+/**
+ * Other storage spaces in this storage area (Desktop's GHOSTLY_PROFILE, and their profiles): each keeps
+ * its settings under `ghostly_<space>_app_settings`, so its keys are not the default profile's.
+ */
+function otherSpaces(): string[] {
+  const spaces: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const match = /^ghostly_(.+)_app_settings$/.exec(localStorage.key(i) ?? "");
+    if (match) spaces.push(match[1]);
+  }
+  return spaces;
+}
+/** What follows `ghostly_` in another profile's keys: its 10-character id and `_`. */
+const PROFILE_KEY = /^[a-z0-9]{10}_/;
 
 function getKey(sessionId: string): string {
   return `${getPrefix()}${sessionId}`;
@@ -58,6 +88,15 @@ export function saveSession(session: ChatSession): void {
     localStorage.setItem(getKey(session.id), JSON.stringify(session));
   } catch {
     // storage full or unavailable
+  }
+}
+
+/** A session as stored, unparsed: to tell cheaply whether it changed. */
+export function storedSession(sessionId: string): string | null {
+  try {
+    return localStorage.getItem(getKey(sessionId));
+  } catch {
+    return null;
   }
 }
 
@@ -81,23 +120,36 @@ export function addMessage(
   sessionId: string,
   message: ChatMessage,
 ): ChatSession | null {
+  return addMessages(sessionId, [message]);
+}
+
+/**
+ * `addMessage` for many at once: the session is read and written once, however many there are (a long history
+ * coming in from the peer). Ones it has, or that were deleted here, are skipped.
+ */
+export function addMessages(
+  sessionId: string,
+  messages: readonly ChatMessage[],
+): ChatSession | null {
   const session = loadSession(sessionId);
   if (!session) return null;
 
-  const exists = session.messages.some((m) => m.id === message.id);
-  if (exists) return session;
-  if (session.deletedIds?.includes(message.id)) return session;
+  const known = new Set([...session.messages.map((m) => m.id), ...(session.deletedIds ?? [])]);
+  const fresh = messages.filter((m) => !known.has(m.id) && known.add(m.id));
+  if (!fresh.length) return session;
 
-  session.messages.push(message);
+  session.messages.push(...fresh);
   session.messages.sort((a, b) => a.timestamp - b.timestamp);
   session.lastSyncAt = Date.now();
-  
-  if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
-    const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
-    const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
-    if (nick) session.nick = nick;
+
+  for (const message of fresh) {
+    if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
+      const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
+      const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
+      if (nick && session.nickSource !== "profile") session.nick = nick;
+    }
   }
-  
+
   saveSession(session);
   return session;
 }
@@ -128,10 +180,17 @@ export function deleteMessage(
 }
 
 export function deleteSession(sessionId: string): void {
+  // The name and photo chosen for the contact (identities/contactFace.ts) go with their last chat.
+  const peer = loadSession(sessionId)?.peerPubKeyB64;
+  const lastOfPeer = !!peer && !listSessions().some(s => s.id !== sessionId && s.peerPubKeyB64 === peer);
   for (const key of [
+    ...(lastOfPeer ? [`${getPrefix()}face_${peer}`] : []),
     getKey(sessionId),
     `${getPrefix()}read_${sessionId}`,
     `${getPrefix()}invite_${sessionId}`,
+    `${getPrefix()}pin_${sessionId}`,
+    `${getPrefix()}mute_${sessionId}`,
+    `${getPrefix()}draft_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,
   ]) {
@@ -151,15 +210,46 @@ export function deleteAllSessions(): void {
   for (const session of listSessions()) deleteSession(session.id);
 }
 
-export function listSessions(): ChatSession[] {
+export function getSessionDraft(id: string): string {
+  try { return localStorage.getItem(`${getPrefix()}draft_${id}`) ?? ""; } catch { return ""; }
+}
+export function setSessionDraft(id: string, text: string): void {
+  try { const key=`${getPrefix()}draft_${id}`; if(text) localStorage.setItem(key,text); else localStorage.removeItem(key); } catch { /* Keep the in-memory draft if storage is unavailable. */ }
+}
+
+export function isSessionPinned(sessionId: string): boolean {
+  return localStorage.getItem(`${getPrefix()}pin_${sessionId}`) === "1";
+}
+
+export function setSessionPinned(sessionId: string, pinned: boolean): void {
+  if (!loadSession(sessionId)) return;
+  const key = `${getPrefix()}pin_${sessionId}`;
+  if (pinned) localStorage.setItem(key, "1");
+  else localStorage.removeItem(key);
+  window.dispatchEvent(new Event("session-updated"));
+}
+
+/**
+ * Sessions already parsed, by key, with the text each was parsed from (`listSessions`). Whoever keeps one owns its
+ * sessions: one changed in place must be saved, or dropped from the cache.
+ */
+export type SessionCache = Map<string, { raw: string; session: ChatSession }>;
+
+/** Every chat, pinned first, then the latest first. With a cache, only a session whose stored text changed is parsed. */
+export function listSessions(cache?: SessionCache): ChatSession[] {
   const sessions: ChatSession[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i < localStorage.length; i++) {
     try {
       const key = localStorage.key(i);
-      if (!key?.startsWith(getPrefix())) continue;
+      // A chat's key is the prefix and its id; a longer key is another profile's, or not a chat.
+      if (!key?.startsWith(getPrefix()) || key.slice(getPrefix().length).includes("_")) continue;
       const raw = localStorage.getItem(key);
       if (!raw) continue;
-      const session = JSON.parse(raw) as ChatSession;
+      const hit = cache?.get(key);
+      const session = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
+      if (cache && hit?.session !== session) cache.set(key, { raw, session });
+      seen.add(key);
       if (session.id && session.mySeedB64 && session.peerPubKeyB64 && session.encKeyB64) {
         sessions.push(session);
       }
@@ -167,12 +257,36 @@ export function listSessions(): ChatSession[] {
       continue;
     }
   }
+  if (cache) for (const key of cache.keys()) if (!seen.has(key)) cache.delete(key);
   sessions.sort((a, b) => {
+    const pinOrder = Number(isSessionPinned(b.id)) - Number(isSessionPinned(a.id));
+    if (pinOrder) return pinOrder;
     const aTime = a.lastSyncAt ?? a.createdAt;
     const bTime = b.lastSyncAt ?? b.createdAt;
     return bTime - aTime;
   });
   return sessions;
+}
+
+/**
+ * Unread messages in the chats kept under a storage prefix: another profile's, read without starting it
+ * (the account bar's switcher). Same count as the chat list's: messages since the last read one.
+ */
+export function unreadUnder(prefix: string): number {
+  let unread = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    try {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(prefix) || key.slice(prefix.length).includes("_")) continue;
+      const session = JSON.parse(localStorage.getItem(key) ?? "null") as ChatSession | null;
+      if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64 || !Array.isArray(session.messages)) continue;
+      const read = parseInt(localStorage.getItem(`${prefix}read_${session.id}`) ?? "0", 10) || 0;
+      unread += Math.max(0, session.messages.length - read);
+    } catch {
+      continue;
+    }
+  }
+  return unread;
 }
 
 export function getLastReadCount(sessionId: string): number {
@@ -201,6 +315,21 @@ export function markSessionAsRead(sessionId: string): void {
 export function getUnreadCount(session: ChatSession): number {
   const lastRead = getLastReadCount(session.id);
   return Math.max(0, session.messages.length - lastRead);
+}
+
+/**
+ * Keeps the chat's contact name to what the contact itself last said (on the paired session, or in a legacy
+ * chat's record); `""` means they have none to show. Returns whether anything changed.
+ */
+export function setSessionPeerNick(sessionId: string, peerNick: string): boolean {
+  const session = loadSession(sessionId);
+  if (!session) return false;
+  const nick = peerDisplayName(peerNick);
+  if (session.nickSource === "profile" && session.nick === nick) return false;
+  session.nick = nick;
+  session.nickSource = "profile";
+  saveSession(session);
+  return true;
 }
 
 export function updateSessionLabel(sessionId: string, label: string): void {
@@ -249,6 +378,10 @@ export function saveInviteCode(sessionId: string, code: string): void {
   }
 }
 
+export function forgetInviteCode(sessionId: string): void {
+  localStorage.removeItem(`${getPrefix()}invite_${sessionId}`);
+}
+
 export function getInviteCode(sessionId: string): string | null {
   try {
     return localStorage.getItem(`${getPrefix()}invite_${sessionId}`);
@@ -291,9 +424,26 @@ export function findSession(
 }
 
 export interface SessionKeys {
+  profile?: "paired-chat/1";
+  deliveryMode?: "stream" | "dht";
   seedB64: string;
   peerPubKeyB64: string;
   encKeyB64: string;
+  participationSeedB64?: string;
+  peerParticipationKeyB64?: string;
+}
+
+/** What the engine needs to run a stored session's link (`ensureLink`). */
+export function sessionLinkParams(session: ChatSession): LinkParams {
+  return {
+    profile: session.profile,
+    deliveryMode: session.deliveryMode,
+    seedB64: session.mySeedB64,
+    peerPubKeyZ32: session.peerPubKeyB64,
+    encKeyB64: session.encKeyB64,
+    ...(session.participationSeedB64 ? { participationSeedB64: session.participationSeedB64 } : {}),
+    ...(session.peerParticipationKeyB64 ? { peerParticipationKeyZ32: session.peerParticipationKeyB64 } : {}),
+  };
 }
 
 /**
@@ -305,13 +455,18 @@ export function ensureSession(
   options: { inviteCode?: string; createdAt?: number } = {},
 ): string {
   const existing = findSession(keys.seedB64, keys.peerPubKeyB64);
+  if (existing && existing.profile !== keys.profile) throw new Error("Invitation profile does not match this stored conversation");
   const id = existing?.id ?? newSessionId();
   if (!existing) {
     saveSession({
       id,
+      profile: keys.profile,
+      deliveryMode: keys.deliveryMode,
       mySeedB64: keys.seedB64,
       peerPubKeyB64: keys.peerPubKeyB64,
       encKeyB64: keys.encKeyB64,
+      ...(keys.participationSeedB64 ? { participationSeedB64: keys.participationSeedB64 } : {}),
+      ...(keys.peerParticipationKeyB64 ? { peerParticipationKeyB64: keys.peerParticipationKeyB64 } : {}),
       messages: [],
       createdAt: options.createdAt ?? Date.now(),
     });

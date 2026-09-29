@@ -15,6 +15,7 @@ import {
 } from "../../../src/lib/storage";
 import type { ChatMessage } from "../../../src/lib/types";
 import { clearAllData } from "../../../src/lib/settings";
+// covers: chat.paired.delete-message, chats.list.delete, app.clear-data, core.text-limits
 
 /** Enough of the Web Storage API for the session store; node has none. */
 class FakeStorage {

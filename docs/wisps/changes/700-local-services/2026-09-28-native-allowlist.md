@@ -1,0 +1,1 @@
+A host whose UI runs in a less trusted layer than its network code keeps the local allowlist in the trusted layer and adds to it only through a confirmation that layer shows. The desktop app does: Rust keeps the addresses each profile shares and adds one only when the person clicks Allow in a native dialog naming it (F2 in the security review).

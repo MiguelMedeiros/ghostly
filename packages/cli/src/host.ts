@@ -1,0 +1,178 @@
+import { createServer, type Server, type Socket } from "node:net";
+import { chmodSync, existsSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
+import { createInterface } from "node:readline";
+import type { StoredMessage } from "@ghostly/browser/shared/types";
+import { announceJoins } from "./announce";
+import { callApi, type ApiContext } from "./api";
+import { CallManager } from "./calls/manager";
+import { asCliError, CliError } from "./errors";
+import { EventHub, type GhostlyEvent } from "./events";
+import { resumeHolds } from "./holds";
+import { ownFolder, privateFolder } from "./privateFolder";
+import { acquireLock, type ProfilePaths } from "./profiles";
+import { startRuntime, type RuntimeOptions } from "./runtime/engine";
+
+/** The longest request line the daemon reads (WISP 11xx § Framing). */
+export const MAX_LINE = 16 * 1024 * 1024;
+
+export interface Host {
+  ctx: ApiContext;
+  close(): Promise<void>;
+}
+
+/**
+ * Runs a profile in this process: takes its lock, starts the engine, and derives events from it. A daemon then
+ * serves the socket (`serve`); a one-shot command calls the API directly and closes. A one-shot for one chat passes
+ * `deferGroups`: the groups' sessions would spend the relays' budget its message needs.
+ */
+export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], version: string, options: RuntimeOptions = {}): Promise<Host> {
+  const release = acquireLock(paths);
+  let runtime;
+  try {
+    runtime = await startRuntime(paths, options);
+  } catch (error) {
+    release();
+    throw error;
+  }
+  const hub = new EventHub(paths.events);
+  let calls!: CallManager;
+  try {
+    await hub.open();
+    const node = runtime.server.node;
+    const now = node.getState();
+    const histories = new Map<string, readonly StoredMessage[]>();
+    for (const link of now.links) histories.set(link.id, await node.getMessages(link.id));
+    for (const group of now.groups) histories.set(`group:${group.id}`, await node.groupMessages({ groupId: group.id }));
+    hub.baseline(now, histories);
+    announceJoins(hub, node);
+    // Calls (WISP 11xx § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
+    calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
+    const manager = calls;
+    hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
+    runtime.server.attach(hub.sink);
+  } catch (error) {
+    await runtime.close().catch(() => {});
+    release();
+    throw error;
+  }
+  const ctx: ApiContext = { runtime, hub, mode, version, calls };
+  resumeHolds(ctx);
+  let closing: Promise<void> | null = null;
+  return {
+    ctx,
+    close: () => (closing ??= (async () => {
+      // Every call is hung up while the engine can still tell the contact.
+      await calls.stopAll().catch(() => {});
+      runtime.server.detach(hub.sink);
+      await runtime.close().catch(() => {});
+      release();
+    })()),
+  };
+}
+
+interface Request { id?: unknown; method?: unknown; params?: unknown }
+
+/**
+ * The local control API over the profile's Unix socket (0600 in the 0700 profile folder): one JSON object per line
+ * each way. `events.subscribe` turns a connection into a stream of `{"event": …}` lines.
+ */
+export interface Served {
+  server: Server;
+  /** Stops listening and ends every connection (subscribers too: they reconnect to the next daemon). */
+  close(): Promise<void>;
+}
+
+export async function serve(host: Host): Promise<Served> {
+  const { ctx } = host;
+  const path = ctx.runtime.paths.socket;
+  // The folder is owner-only before the socket is in it: nobody else can reach the socket in the moment before its chmod.
+  if (process.platform !== "win32") {
+    if (dirname(path) !== ctx.runtime.paths.dir) privateFolder(dirname(path), "the daemon will not put its socket there");
+    else ownFolder(ctx.runtime.paths.dir, "the daemon will not put its socket there");
+  }
+  // A socket file left by a daemon that died: the lock says nobody holds the profile, so it is stale.
+  if (existsSync(path)) rmSync(path, { force: true });
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    connection(ctx, socket);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    // The socket file is made owner-only (the bind happens within listen), then chmod'ed below as well.
+    const umask = ownerOnlyUmask();
+    try { server.listen(path, () => { server.off("error", reject); resolve(); }); } finally { umask?.(); }
+  });
+  if (process.platform !== "win32") chmodSync(path, 0o600);
+  let closing: Promise<void> | null = null;
+  return {
+    server,
+    close: () => (closing ??= new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      for (const socket of sockets) socket.end();
+      setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 500).unref();
+    })),
+  };
+}
+
+let guarded = false;
+
+/**
+ * A daemon says an error nobody caught (with its stack, on stderr: the daemon's log when detached) and keeps serving:
+ * one request gone wrong must not take the profile offline. One-shot commands do not call this; they still fail loudly.
+ */
+export function keepServing(proc: Pick<NodeJS.Process, "on"> = process, write: (text: string) => void = (text) => { process.stderr.write(text); }): void {
+  if (proc === process) { if (guarded) return; guarded = true; }
+  const log = (what: string) => (error: unknown) => {
+    try { write(`ghostly: ${what}, the daemon keeps serving: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); } catch { /* stderr is gone */ }
+  };
+  proc.on("unhandledRejection", log("unhandled rejection"));
+  proc.on("uncaughtException", log("uncaught exception"));
+}
+
+/** Sets a 077 umask; the function it returns puts the old one back. Null where there is none (Windows, a worker). */
+function ownerOnlyUmask(): (() => void) | null {
+  if (process.platform === "win32") return null;
+  try {
+    const old = process.umask(0o077);
+    return () => { process.umask(old); };
+  } catch { return null; }
+}
+
+function connection(ctx: ApiContext, socket: Socket): void {
+  const unsubscribes: (() => void)[] = [];
+  const write = (value: unknown) => { if (!socket.destroyed) socket.write(JSON.stringify(value) + "\n"); };
+  socket.on("close", () => { for (const off of unsubscribes) off(); });
+  socket.on("error", () => {});
+  const lines = createInterface({ input: socket, crlfDelay: Infinity });
+  let buffered = 0;
+  socket.on("data", (chunk) => { buffered += chunk.length; if (buffered > MAX_LINE) socket.destroy(); });
+  lines.on("line", (line) => {
+    buffered = 0;
+    if (!line.trim()) return;
+    let request: Request;
+    try { request = JSON.parse(line) as Request; } catch { write({ id: null, error: new CliError("bad_request", "Not JSON").toJSON() }); return; }
+    const id = typeof request.id === "number" || typeof request.id === "string" ? request.id : null;
+    if (typeof request.method !== "string") { write({ id, error: new CliError("bad_request", "method is required").toJSON() }); return; }
+    if (request.method === "events.subscribe") {
+      const params = (request.params ?? {}) as { since?: unknown };
+      const since = typeof params.since === "number" ? params.since : ctx.hub.lastSeq;
+      // Live events queue while the journal replays, so none falls between the two.
+      const queued: GhostlyEvent[] = [];
+      let replaying = true;
+      unsubscribes.push(ctx.hub.onEvent((event) => { if (replaying) queued.push(event); else write({ event }); }));
+      write({ id, result: { subscribed: true, lastSeq: ctx.hub.lastSeq } });
+      let last = since;
+      for (const event of ctx.hub.replay(since)) { write({ event }); last = event.seq; }
+      replaying = false;
+      for (const event of queued) if (event.seq > last) write({ event });
+      return;
+    }
+    void callApi(ctx, request.method, request.params ?? {}).then(
+      (result) => write({ id, result: result ?? null }),
+      (error) => write({ id, error: asCliError(error).toJSON() }),
+    );
+  });
+}

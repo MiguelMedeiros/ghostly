@@ -1,0 +1,19 @@
+{
+  "applyHint": "Aggiornare termina le chiamate e le connessioni.",
+  "auto": "Controlla automaticamente gli aggiornamenti",
+  "autoDescription": "Disattivato: solo quando premi Controlla ora",
+  "available": "Ghostly {{version}} è disponibile",
+  "checkNow": "Controlla ora",
+  "checking": "Controllo...",
+  "download": "Scarica",
+  "downloading": "Download... {{percent}}%",
+  "failed": "Impossibile controllare gli aggiornamenti",
+  "installing": "Aggiornamento...",
+  "lastChecked": "Ultimo controllo alle {{when}}",
+  "later": "Più tardi",
+  "manualHint": "Scaricalo e sostituisci questa installazione.",
+  "reload": "Ricarica",
+  "restart": "Aggiorna e riavvia",
+  "title": "Aggiornamenti",
+  "upToDate": "Ghostly è aggiornato"
+}

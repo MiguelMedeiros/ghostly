@@ -1,0 +1,43 @@
+{
+  "id": "did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo",
+  "controller": "did:example:abcd",
+  "alsoKnownAs": ["did:example:efgh", "did:example:ijkl"],
+  "verificationMethod": [
+    {
+      "id": "did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#0",
+      "type": "JsonWebKey",
+      "controller": "did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo",
+      "publicKeyJwk": {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "YCcHYL2sYNPDlKaALcEmll2HHyT968M4UWbr-9CFGWE",
+        "alg": "EdDSA",
+        "kid": "0"
+      }
+    },
+    {
+      "id": "did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#sig",
+      "type": "JsonWebKey",
+      "controller": "did:dht:i9xkp8ddcbcg8jwq54ox699wuzxyifsqx4jru45zodqu453ksz6y",
+      "publicKeyJwk": {
+        "kty": "EC",
+        "crv": "secp256k1",
+        "x": "1_o0IKHGNamet8-3VYNUTiKlhVK-LilcKrhJSPHSNP0",
+        "y": "qzU8qqh0wKB6JC_9HCu8pHE-ZPkDpw4AdJ-MsV2InVY",
+        "alg": "ES256K",
+        "kid": "sig"
+      }
+    }
+  ],
+  "authentication": ["did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#0"],
+  "assertionMethod": ["did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#0", "did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#sig"],
+  "capabilityInvocation": ["did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#0", "did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#sig"],
+  "capabilityDelegation": ["did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#0"],
+  "service": [
+    {
+      "id": "did:dht:cyuoqaf7itop8ohww4yn5ojg13qaq83r9zihgqntc5i9zwrfdfoo#service-1",
+      "type": "TestService",
+      "serviceEndpoint": ["https://test-service.com/1", "https://test-service.com/2"]
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { getStorageProfile } from "../lib/storage";
 import {
   createContext,
   useContext,
@@ -14,6 +15,7 @@ import {
   type ColorScheme,
   type ColorTheme,
   type Language,
+  type ChatListDensity,
   type LockScreenSettings,
   type NotificationSettings,
 } from "../lib/settings";
@@ -28,17 +30,21 @@ interface SettingsContextValue {
   updateLockScreen: (lockScreen: Partial<LockScreenSettings>) => void;
   updateNotifications: (notifications: Partial<NotificationSettings>) => void;
   updateDefaultNickname: (nickname: string) => void;
-  updateGiphyApiKey: (key: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
+  updateChatListDensity: (density: ChatListDensity) => void;
   updateCheckForUpdates: (check: boolean) => void;
+  updateLinkPreviews: (on: boolean) => void;
+  updateProfilePeek: (patch: NonNullable<AppSettings["profilePeek"]>) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
+  /** Where this profile's backups go (WISP 1000). */
+  updateBackupStorage: (patch: Pick<Partial<AppSettings>, "backupSpace" | "backupS3">) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<AppSettings>(() => loadSettings(getRandomGhostName));
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
   useEffect(() => {
     saveSettings(settings);
@@ -84,16 +90,24 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, defaultNickname: nickname }));
   }, []);
 
-  const updateGiphyApiKey = useCallback((key: string) => {
-    setSettings((prev) => ({ ...prev, giphyApiKey: key.trim() }));
-  }, []);
-
   const updateReduceMotion = useCallback((reduce: boolean) => {
     setSettings((prev) => ({ ...prev, reduceMotion: reduce }));
   }, []);
 
+  const updateChatListDensity = useCallback((chatListDensity: ChatListDensity) => {
+    setSettings((prev) => ({ ...prev, chatListDensity }));
+  }, []);
+
   const updateCheckForUpdates = useCallback((check: boolean) => {
     setSettings((prev) => ({ ...prev, checkForUpdates: check }));
+  }, []);
+
+  const updateLinkPreviews = useCallback((linkPreviews: boolean) => {
+    setSettings((prev) => ({ ...prev, linkPreviews }));
+  }, []);
+
+  const updateProfilePeek = useCallback((patch: NonNullable<AppSettings["profilePeek"]>) => {
+    setSettings((prev) => ({ ...prev, profilePeek: { ...prev.profilePeek, ...patch } }));
   }, []);
 
   useEffect(() => {
@@ -105,9 +119,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, defaultNickname: randomName }));
   }, []);
 
+  const updateBackupStorage = useCallback((patch: Pick<Partial<AppSettings>, "backupSpace" | "backupS3">) => {
+    setSettings((prev) => ({ ...prev, ...patch }));
+  }, []);
+
   const resetSettings = useCallback(() => {
-    const defaultSettings = loadSettings(getRandomGhostName);
-    localStorage.removeItem("ghostly_app_settings");
+    const defaultSettings = loadSettings();
+    localStorage.removeItem(getStorageProfile() ? `ghostly_${getStorageProfile()}_app_settings` : "ghostly_app_settings");
     setSettings(defaultSettings);
   }, []);
 
@@ -122,11 +140,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateLockScreen,
         updateNotifications,
         updateDefaultNickname,
-        updateGiphyApiKey,
         updateReduceMotion,
+        updateChatListDensity,
         updateCheckForUpdates,
+        updateLinkPreviews,
+        updateProfilePeek,
         randomizeNickname,
         resetSettings,
+        updateBackupStorage,
       }}
     >
       {children}

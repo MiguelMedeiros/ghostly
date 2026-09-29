@@ -1,0 +1,138 @@
+import { copyInvite } from "../support/clipboard";
+import { pasteInvite } from "../support/clipboard";
+import { test, expect, chat, chooseDhtOnly, delivered, say, setDhtOnly, type Peer } from "../support/fixtures";
+import { LocalRelay } from "../support/relay";
+import { DhtDelivery, createIdentity, createRelayPayload, decodeInviteCode } from "@ghostly/core";
+import { composerRow } from "../support/composer";
+
+async function watchStreams(peer: Peer) {
+  // Before creating/joining; retained on reload. This observes real browser construction.
+  const instrument = () => {
+    const Original = window.RTCPeerConnection;
+    window.RTCPeerConnection = new Proxy(Original, { construct(target,args) { localStorage.setItem("qa-stream-dials", String(Number(localStorage.getItem("qa-stream-dials") ?? 0)+1)); return Reflect.construct(target,args); } });
+  };
+  await peer.page.addInitScript(instrument); await peer.page.evaluate(instrument);
+}
+async function createDht(peer:Peer) {
+  await peer.page.getByTitle("New Chat").click();
+  await chooseDhtOnly(peer.page);
+  await expect.poll(() => copyInvite(peer.page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
+  return copyInvite(peer.page);
+}
+async function join(peer:Peer,invite:string) {
+  await peer.page.getByRole("button",{name: "Join chat", exact: true}).first().click();
+  await pasteInvite(peer.page, invite);
+}
+const mode = (peer:Peer,dht:boolean) => setDhtOnly(peer.page, dht);
+async function noStreams(peers:Peer[]) { for(const p of peers) expect(await p.page.evaluate(()=>Number(localStorage.getItem("qa-stream-dials")??0))).toBe(0); }
+const received=(p:Peer)=>delivered(chat(p));
+
+test("DHT-only starts from an invite without streams, preserves drafts and receipts across reload",{ tag: ["@feature:chat.dht.send", "@feature:invite.dht", "@feature:chat.waiting"] },async({peer,relay})=>{
+  const a=await peer("dht-first"),b=await peer("dht-second");
+  await watchStreams(a);await watchStreams(b);
+  await join(b,await createDht(a));
+  for(const p of [a,b]) await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
+  const text="DHT íntegro 👻";
+  await say(a,text);await expect(chat(b).getByText(text,{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
+  expect([...relay.packets.values()].every(packet=>!packet.includes(Buffer.from(text)))).toBe(true);
+  // Past the 256 bytes the DHT carries the counter turns amber, and the text waits for a live connection with a cancel (WISP 400).
+  const large="👻".repeat(65); await b.page.getByPlaceholder("Message…").fill(large);
+  await expect(b.page.getByTestId("dht-byte-count")).toHaveText("260 / 256 B");
+  await b.page.getByRole("button",{name:"Send message",exact:true}).click();
+  const waiting=chat(b).locator(".group").filter({hasText:large});
+  await expect(delivered(waiting,"waiting")).toHaveAccessibleName("Waiting for your contact to be online");await expect(b.page.getByPlaceholder("Message…")).toHaveValue("");
+  // Cancel sending is in the message's ⋮, not a link in the bubble.
+  await waiting.hover();await waiting.getByTestId("message-options").click();await b.page.getByTestId("message-cancel-sending").click();await expect(waiting).toHaveCount(0);
+  await b.page.getByPlaceholder("Message…").fill("Reply over DHT");await b.page.getByRole("button",{name:"Send message",exact:true}).click();
+  await expect(chat(a).getByText("Reply over DHT",{exact:true})).toBeVisible();await expect(received(b)).toHaveCount(1);
+  await a.page.reload();await b.page.reload();
+  // The inviter chose DHT only; the contact, whose ghostly1 code carries no mode, stays on the DHT it learnt from the envelopes.
+  await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only/);
+  await expect(b.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT/);
+  for(const p of [a,b]) {await expect(chat(p).getByText(text,{exact:true})).toHaveCount(1);await expect(chat(p).getByText("Reply over DHT",{exact:true})).toHaveCount(1);}
+  await noStreams([a]);
+  // A file waits for a live connection instead of being refused.
+  await expect(await composerRow(a.page,"composer-file")).toBeEnabled();
+});
+
+test("DHT published while contact is away survives sender restart and is received once when contact returns",{ tag: ["@feature:chat.dht.offline"] },async({peer})=>{
+  const a=await peer("dht-away-sender"),b=await peer("dht-away-reader");await watchStreams(a);await watchStreams(b);
+  await join(b,await createDht(a));for(const p of[a,b])await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
+  const returnTo=b.page.url();await b.page.goto("about:blank");
+  await say(a,"Waiting in the DHT mailbox");await expect(delivered(chat(a),"sent").last()).toBeVisible();
+  await expect(received(a)).toHaveCount(0);await a.page.reload();
+  await expect(chat(a).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);
+  await b.page.goto(returnTo);await expect(chat(b).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);await expect(received(a)).toHaveCount(1);
+  await b.page.reload();await expect(chat(b).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);await noStreams([a]);
+});
+
+test("DHT and live delivery share history; offline text fallback is independent of strict stream fallback",{ tag: ["@feature:chat.dht.fallback"] },async({peer})=>{
+  const a=await peer("dht-migrate-a"),b=await peer("dht-migrate-b");await join(b,await createDht(a));
+  await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();await say(a,"Before migration");await expect(chat(b).getByText("Before migration",{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
+  await mode(b,false);await mode(a,false);
+  for(const p of[a,b])await expect(p.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · WebRTC/);
+  await say(b,"After migration");await expect(chat(a).getByText("After migration",{exact:true})).toBeVisible();
+  await a.page.getByTestId("connection-options").click();
+  const fallback=a.page.getByRole("switch",{name:"Fallback",exact:true});
+  await fallback.click();await expect(fallback).not.toBeChecked();await a.page.keyboard.press("Escape");
+  const returnTo=b.page.url();await b.page.goto("about:blank");
+  await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/On DHT · retrying live/);
+  await say(a,"Offline delivery after stream");await expect(delivered(chat(a),"sent").last()).toBeVisible();
+  await b.page.goto(returnTo);await expect(chat(b).getByText("Offline delivery after stream",{exact:true})).toHaveCount(1);
+  await mode(a,true);await mode(b,true);await say(b,"Back to DHT");await expect(chat(a).getByText("Back to DHT",{exact:true})).toBeVisible();
+  for(const p of[a,b]) for(const text of["Before migration","After migration","Offline delivery after stream","Back to DHT"])await expect(chat(p).getByText(text,{exact:true})).toHaveCount(1);
+});
+
+test("DHT network publication failures are visible and never claimed as receipt",{ tag: ["@feature:chat.dht.errors"] },async({peer})=>{
+  const a=await peer("dht-publish-errors"),b=await peer("dht-publish-peer");await join(b,await createDht(a));
+  await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
+  await a.context.route(LocalRelay.pattern,route=>route.request().method()==="PUT"?route.fulfill({status:503,headers:{"access-control-allow-origin":"*"}}):route.fallback());
+  await say(a,"This publication should fail");
+  await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/Connection issue/);
+  await a.page.getByTestId("connection-options").click();await expect(a.page.getByRole("alert")).toContainText(/publish|relay|publishing/i);
+  await expect(received(a)).toHaveCount(0);
+});
+
+test("a changed DHT participation key is ignored: the saved contact stays, and nothing stops",{ tag: ["@feature:chat.dht.key-change", "@feature:core.peer-keys"] },async({peer})=>{
+  const a=await peer("dht-pinned"),b=await peer("dht-changed");await join(b,await createDht(a));
+  await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
+  await say(a,"Before the identity change");await expect(chat(b).getByText("Before the identity change",{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
+  const readPin=()=>a.page.evaluate(()=>new Promise<string>((resolve,reject)=>{const request=indexedDB.open("ghostly");request.onsuccess=()=>{const db=request.result;const query=db.transaction("links").objectStore("links").getAll();query.onsuccess=()=>{resolve(query.result[0].pairedPeerKey);db.close();};query.onerror=()=>reject(query.error);};request.onerror=()=>reject(request.error);}));
+  const before=await readPin();
+  // Controlled corruption of this disposable peer's own persisted identity models key loss/replacement.
+  await b.page.evaluate(()=>new Promise<void>((resolve,reject)=>{const request=indexedDB.open("ghostly");request.onsuccess=()=>{const db=request.result;const tx=db.transaction("links","readwrite"),store=tx.objectStore("links"),query=store.getAll();query.onsuccess=()=>{const link=query.result[0];link.participationSeed=btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+","-").replaceAll("/","_").replace(/=+$/,"");store.put(link);};tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);};request.onerror=()=>reject(request.error);}));
+  await b.page.reload();
+  await say(b,"After the identity change");
+  // The DHT is written under keys any copy of the invite derives: another key there proves nothing, so it is never a stop (WISP 400).
+  await a.page.waitForTimeout(15_000);
+  await expect(chat(a).getByText("After the identity change",{exact:true})).toHaveCount(0);
+  await expect(a.page.getByTestId("connection-options")).not.toHaveAccessibleName(/Connection issue/);
+  await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
+  expect(await readPin()).toBe(before);
+});
+
+test("a copy of the invite, publishing in the joiner's DHT mailbox with a key of its own, neither stops the chat nor loses a text",{ tag: ["@feature:chat.dht.key-change", "@feature:chat.dht.send"] },async({peer,relay})=>{
+  const a=await peer("dht-owner"),b=await peer("dht-joiner");
+  const invite=await createDht(a);await join(b,invite);
+  await say(a,"Before the copy");await expect(chat(b).getByText("Before the copy",{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
+  await say(b,"Answer before the copy");await expect(chat(a).getByText("Answer before the copy",{exact:true})).toBeVisible();
+  // Someone else who kept the link: the joiner's link keys from it, and a participation key of its own, republishing.
+  const params=decodeInviteCode(invite)!;
+  const copy=new DhtDelivery({params,mode:"dht",credentials:{seedB64:createIdentity().seedB64},
+    transport:{publish:async(identity,records)=>{relay.packets.set(identity.pubKeyZ32,Buffer.from(createRelayPayload(identity,records)));},resolve:async()=>null,describe:()=>({protocol:"copy",relays:[]})},
+    save:async()=>{},pin:async()=>{},message:async()=>{},receipt:async()=>{},changed:()=>{}});
+  await copy.start();
+  const flood=setInterval(()=>{void copy.send("from a copy",Date.now(),"copycopycopycopycopyco");},3_000);
+  try {
+    await a.page.waitForTimeout(10_000);
+    await say(b,"After the copy");
+    await expect(chat(a).getByText("After the copy",{exact:true})).toBeVisible({timeout:60_000});
+    await say(a,"Reply after the copy");
+    await expect(chat(b).getByText("Reply after the copy",{exact:true})).toBeVisible({timeout:60_000});
+  } finally { clearInterval(flood);await copy.stop(); }
+  await expect(chat(a).getByText("from a copy",{exact:true})).toHaveCount(0);
+  for(const p of [a,b]){
+    await expect(p.page.getByTestId("connection-options")).not.toHaveAccessibleName(/Connection issue/);
+    await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
+  }
+});

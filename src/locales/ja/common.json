@@ -1,0 +1,20 @@
+{
+  "anonymous": "匿名",
+  "back": "戻る",
+  "cancel": "キャンセル",
+  "chatCreated": "チャット作成日時：{{date}}",
+  "close": "閉じる",
+  "confirm": "確認",
+  "copied": "コピーしました！",
+  "copy": "コピー",
+  "delete": "削除",
+  "deleteChatLocal": "この端末のチャットと履歴を削除します。相手側のコピーは削除されません。",
+  "deleteChatTitle": "チャットを削除しますか？",
+  "error": "エラー",
+  "loading": "読み込み中...",
+  "moreInfo": "詳細",
+  "save": "保存",
+  "success": "成功",
+  "unnamedContact": "連絡先 · {{key}}",
+  "viewPhoto": "{{name}}の写真を見る"
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compareVersions, isNewerVersion } from "../src";
+// covers: core.version, app.updates.web
 
 describe("comparing released versions", () => {
   it("orders by each number in turn", () => {

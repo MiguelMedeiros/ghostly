@@ -1,4 +1,4 @@
-import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, linkLegacy, say, test, type Peer } from "../support/fixtures";
 
 const clock = /^\d{1,2}:\d{2}$/;
 
@@ -9,15 +9,29 @@ const remoteSize = (peer: Peer) =>
     return video ? `${video.videoWidth}x${video.videoHeight}` : "none";
   });
 
+/** The browser's own "Stop sharing" (a bar the page cannot reach): the shared track ends and fires `ended`, as it does there. */
+const stopFromBrowser = (peer: Peer) =>
+  peer.page.evaluate(() => {
+    const self = document.querySelector<HTMLVideoElement>('[data-testid="call-self-view"] video');
+    const track = (self?.srcObject as MediaStream | null)?.getVideoTracks()[0];
+    if (!track) throw new Error("no picture of our own to stop");
+    track.stop();
+    track.dispatchEvent(new Event("ended"));
+  });
+
 async function linked(peer: (name: string) => Promise<Peer>): Promise<[Peer, Peer]> {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
-  await link(alice, bob);
+  // Calls belong to the compatibility profile, not paired-chat/1.
+  await linkLegacy(alice, bob);
   await connect(alice, bob);
   return [alice, bob];
 }
 
-test("video call: camera, mute, screen share, hang up", async ({ peer }) => {
+test("video call: camera, mute, screen share, hang up", { tag: ["@feature:calls.video", "@feature:calls.screen-share"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
+  // The header starts a voice or a video call; the screen is shared from inside one.
+  await expect(alice.page.getByTestId("call-audio")).toBeVisible();
+  await expect(alice.page.getByTestId("call-screen")).toHaveCount(0);
   await alice.page.getByTitle("Video call").click();
   await expect(bob.page.getByText("Incoming video call...")).toBeVisible();
   await bob.page.getByTitle("Accept video call").click();
@@ -26,25 +40,37 @@ test("video call: camera, mute, screen share, hang up", async ({ peer }) => {
   await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
   const camera = await remoteSize(bob);
 
-  await alice.page.getByTitle("Mute").click();
-  await expect(alice.page.getByTitle("Unmute")).toBeVisible();
-  await alice.page.getByTitle("Unmute").click();
+  await alice.page.getByTitle("Mute", { exact: true }).click();
+  await expect(alice.page.getByTitle("Unmute", { exact: true })).toBeVisible();
+  await alice.page.getByTitle("Unmute", { exact: true }).click();
   await alice.page.getByTitle("Turn camera off").click();
   await expect(alice.page.getByTitle("Turn camera on")).toBeVisible();
   await alice.page.getByTitle("Turn camera on").click();
 
   // Screen sharing swaps the track the video sender carries: no new signaling.
   await alice.page.getByTestId("share-screen").click();
-  await expect(alice.page.getByTitle("Stop sharing your screen")).toBeVisible();
+  await expect(alice.page.getByTestId("share-screen")).toHaveAttribute("title", "Stop sharing");
+  await expect(alice.page.getByTestId("call-sharing")).toHaveText("You're sharing your screen");
+  await expect(bob.page.getByTestId("call-sharing")).toHaveText(/is sharing their screen$/);
   await expect.poll(() => remoteSize(bob)).not.toBe(camera);
+  // Stopping goes back to the camera it replaced, and the notice goes on both sides.
   await alice.page.getByTestId("share-screen").click();
   await expect.poll(() => remoteSize(bob)).toBe(camera);
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-sharing")).toHaveCount(0);
+  await expect(alice.page.getByTitle("Turn camera off")).toBeVisible();
+
+  // The browser's own "Stop sharing" does the same.
+  await alice.page.getByTestId("share-screen").click();
+  await expect.poll(() => remoteSize(bob)).not.toBe(camera);
+  await stopFromBrowser(alice);
+  await expect.poll(() => remoteSize(bob)).toBe(camera);
+  await expect(alice.page.getByTestId("share-screen")).toHaveAttribute("title", "Share screen");
 
   await alice.page.getByTitle("End call").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("your own picture moves, resizes and stays inside the window", async ({ peer }) => {
+test("your own picture moves, resizes and stays inside the window", { tag: ["@feature:calls.self-view"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await bob.page.getByTitle("Accept video call").click();
@@ -87,7 +113,7 @@ test("your own picture moves, resizes and stays inside the window", async ({ pee
   expect(Math.round(reset.width), "a double click puts it back").toBe(Math.round(before.width));
 });
 
-test("a call in a small window leaves the chat usable", async ({ peer }) => {
+test("a call in a small window leaves the chat usable", { tag: ["@feature:calls.mini-window"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await bob.page.getByTitle("Accept video call").click();
@@ -114,7 +140,7 @@ test("a call in a small window leaves the chat usable", async ({ peer }) => {
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("audio call, and a call that is declined", async ({ peer }) => {
+test("audio call, and a call that is declined", { tag: ["@feature:calls.audio", "@feature:calls.decline"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await bob.page.getByTitle("Audio call").click();
   await expect(alice.page.getByText("Incoming audio call...")).toBeVisible();
@@ -133,18 +159,7 @@ test("audio call, and a call that is declined", async ({ peer }) => {
   await expect(alice.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("a call can start as a screen share", async ({ peer }) => {
-  const [alice, bob] = await linked(peer);
-  await alice.page.getByTestId("call-screen").click();
-  await bob.page.getByTitle("Accept video call").click();
-  await expect(bob.page.getByText(clock).first()).toBeVisible();
-  await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
-  await expect(alice.page.getByTitle("Stop sharing your screen")).toBeVisible();
-  await alice.page.getByTitle("End call").click();
-  await expect(bob.page.getByTitle("End call")).toHaveCount(0);
-});
-
-test("an audio call grows a camera and a screen, without calling again", async ({ peer }) => {
+test("an audio call grows a camera and a screen, without calling again", { tag: ["@feature:calls.upgrade", "@feature:calls.screen-share"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Audio call").click();
   await expect(bob.page.getByText("Incoming audio call...")).toBeVisible();
@@ -164,9 +179,9 @@ test("an audio call grows a camera and a screen, without calling again", async (
 
   // A screen rides the same section, and stopping goes back to the camera it replaced.
   await alice.page.getByTestId("share-screen").click();
-  await expect(alice.page.getByTitle("Stop sharing your screen")).toBeVisible();
+  await expect(alice.page.getByTestId("share-screen")).toHaveAttribute("title", "Stop sharing");
   await expect.poll(() => remoteSize(bob)).not.toBe(camera);
-  await alice.page.getByTitle("Stop sharing your screen").click();
+  await alice.page.getByTestId("share-screen").click();
   await expect.poll(() => remoteSize(bob)).toBe(camera);
 
   // The side that answered kept its half of the section open too.
@@ -182,24 +197,57 @@ test("an audio call grows a camera and a screen, without calling again", async (
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("a screen share that starts as one goes back to voice when it stops", async ({ peer }) => {
+test("a voice call shares a screen, from the full window and the small one, and goes back to voice", { tag: ["@feature:calls.screen-share", "@feature:calls.upgrade", "@feature:calls.mini-window"] }, async ({ peer }, testInfo) => {
   const [alice, bob] = await linked(peer);
-  await alice.page.getByTestId("call-screen").click();
-  await bob.page.getByTitle("Accept video call").click();
-  await expect(bob.page.getByText(clock).first()).toBeVisible();
-  await expect(bob.page.getByTestId("remote-video")).toBeVisible();
+  await alice.page.getByTestId("call-audio").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("remote-video")).toBeHidden();
 
-  await alice.page.getByTitle("Stop sharing your screen").click();
-  // By test id, not by title: the composer has a "Share your screen" button too,
-  // disabled during a call, and matching both is a strict-mode violation the
-  // moment this one's title flips back.
-  await expect(alice.page.getByTestId("share-screen")).toHaveAttribute("title", "Share your screen");
+  // A voice call has the button too, on the video section it negotiated empty.
+  const share = alice.page.getByTestId("share-screen");
+  await expect(share).toBeEnabled();
+  await expect(share).toHaveAttribute("title", "Share screen");
+  await alice.page.screenshot({ path: testInfo.outputPath("voice-call-share-button.png") });
+  await share.click();
+  await expect(share).toHaveAttribute("title", "Stop sharing");
+  await expect(alice.page.getByTestId("call-sharing")).toHaveText("You're sharing your screen");
+  // The peer sees the screen appear, with no second ring, and is told what it is.
+  await expect(bob.page.getByTestId("remote-video")).toBeVisible();
+  await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
+  await expect(bob.page.getByTestId("call-sharing")).toHaveText(/is sharing their screen$/);
+  await expect(bob.page.getByText("Incoming video call...")).toHaveCount(0);
+  await alice.page.screenshot({ path: testInfo.outputPath("sharing-self.png") });
+  await bob.page.screenshot({ path: testInfo.outputPath("sharing-peer.png") });
+
+  // Stopped from the button: back to voice, and the picture goes away on the other side.
+  await share.click();
   await expect(bob.page.getByTestId("remote-video")).toBeHidden();
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-sharing")).toHaveCount(0);
+  await expect(alice.page.getByTestId("call-self-view")).toHaveCount(0);
+
+  // The small window has the button, and the notice, too.
+  await alice.page.getByTestId("call-minimize").click();
+  const mini = alice.page.getByTestId("call-window");
+  await expect(mini).toHaveAttribute("data-mini", "true");
+  await mini.getByTestId("share-screen").click();
+  await expect(mini.getByTestId("call-sharing")).toHaveText("You're sharing your screen");
+  await expect(bob.page.getByTestId("remote-video")).toBeVisible();
+  await alice.page.screenshot({ path: testInfo.outputPath("sharing-mini.png") });
+  // Stopped by the browser's own bar this time.
+  await stopFromBrowser(alice);
+  await expect(bob.page.getByTestId("remote-video")).toBeHidden();
+  await expect(mini.getByTestId("share-screen")).toHaveAttribute("title", "Share screen");
+
+  // Hanging up while sharing stops the share with the call.
+  await mini.getByTestId("share-screen").click();
+  await expect(bob.page.getByTestId("remote-video")).toBeVisible();
   await alice.page.getByTitle("End call").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
+  await expect(alice.page.getByTestId("call-window")).toHaveCount(0);
 });
 
-test("a call follows you out of the chat and into Settings", async ({ peer }) => {
+test("a call follows you out of the chat and into Settings", { tag: ["@feature:calls.mini-window"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await bob.page.getByTitle("Accept video call").click();
@@ -220,24 +268,23 @@ test("a call follows you out of the chat and into Settings", async ({ peer }) =>
   await expect.poll(() => remoteSize(bob), "and still has the picture").toMatch(/^[1-9]\d*x[1-9]\d*$/);
 
   await alice.page.getByTitle("Back to the chat").click();
-  await expect(alice.page.getByPlaceholder("Type a message")).toBeVisible();
+  await expect(alice.page.getByPlaceholder("Message…")).toBeVisible();
   await say(alice, "back from settings, still on the call");
   await expect(chat(bob).getByText("back from settings, still on the call")).toBeVisible();
 
   // Another chat is no different: the call comes along, the new chat is its own.
   await alice.page.getByTitle("New Chat").click();
-  await alice.page.getByRole("button", { name: "Create New Chat" }).first().click();
-  await expect(alice.page.locator("code").first()).toBeVisible();
+  await expect(alice.page.getByTestId("invite-card")).toBeVisible();
   await expect(callWindow, "the call comes along here too").toBeVisible();
   await expect(alice.page.getByTitle("Back to the chat")).toBeVisible();
 
   // A hang-up from the other side still reaches a call that is away from its chat.
   await bob.page.getByTitle("End call").click();
   await expect(callWindow).toHaveCount(0);
-  await expect(alice.page.locator("code").first(), "and leaves you where you were").toBeVisible();
+  await expect(alice.page.getByTestId("invite-card"), "and leaves you where you were").toBeVisible();
 });
 
-test("the lock screen covers a call it keeps going", async ({ peer }) => {
+test("the lock screen covers a call it keeps going", { tag: ["@feature:calls.lock"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await bob.page.getByTitle("Accept video call").click();

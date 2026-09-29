@@ -1,8 +1,9 @@
 import { test as base, expect } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export { expect };
@@ -115,6 +116,32 @@ class Driver {
     return element === null ? null : ((await this.call("GET", `/element/${element}/text`)) as string);
   }
 
+  /** An attribute of the first match, or null when there is no match (or no such attribute) yet. */
+  async attribute(selector: string, name: string): Promise<string | null> {
+    const element = await this.find(selector);
+    return element === null ? null : ((await this.call("GET", `/element/${element}/attribute/${name}`)) as string | null);
+  }
+
+  /**
+   * Types into the first match, as keys: React sees each one. `\uE007` is Enter. Throws when nothing
+   * matches, like a click.
+   */
+  async type(selector: string, text: string): Promise<void> {
+    const element = await this.find(selector);
+    if (element === null) throw new Error(`Nothing to type into at ${selector}`);
+    await this.call("POST", `/element/${element}/value`, { text });
+  }
+
+  /** Runs a function body in the page (`arguments[0]`… are `args`) and returns what it returns. */
+  async execute<T = unknown>(script: string, ...args: unknown[]): Promise<T> {
+    return (await this.call("POST", "/execute/sync", { script, args })) as T;
+  }
+
+  /** As `execute`, for a body that finishes later: it calls `arguments[arguments.length - 1]` with its result. */
+  async executeAsync<T = unknown>(script: string, ...args: unknown[]): Promise<T> {
+    return (await this.call("POST", "/execute/async", { script, args })) as T;
+  }
+
   /** Throws when nothing matches: a click is not something to be vague about. */
   async click(selector: string): Promise<void> {
     const element = await this.find(selector);
@@ -131,10 +158,57 @@ class Driver {
   }
 }
 
-export type DesktopApp = Pick<Driver, "text" | "click" | "title">;
+export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
 
-/** `tauri-driver`, and the app it opens, for the length of one test. */
-async function openDesktop(): Promise<{ app: Driver; stop: () => Promise<void> }> {
+/**
+ * Chooses in a `Select` (src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
+ * option. It is a combobox with a listbox, not a native `<select>` — its options exist only while it is open, and
+ * its value is in `data-value`. e2e/support/select.ts does the same for the browser projects.
+ */
+export async function choose(app: DesktopApp, testId: string, value: string): Promise<void> {
+  const select = `[data-testid="${testId}"]`;
+  if ((await app.attribute(select, "aria-expanded")) !== "true") await app.click(select);
+  const option = `[data-testid="${testId}-list"] [role="option"][data-value="${value}"]`;
+  await expect.poll(() => app.text(option)).not.toBeNull();
+  await app.click(option);
+  await expect.poll(() => app.attribute(select, "data-value")).toBe(value);
+}
+
+export interface DesktopOptions {
+  /** `GHOSTLY_PROFILE`: the app's own space in its storage. */
+  profile?: string;
+  /**
+   * A home of its own (HOME and the XDG directories): the WebView's storage, the app's data. Two apps on one
+   * machine need one each, or they share one WebKit store. Kept between two opens with the same directory,
+   * which is how a test closes an app and opens it again.
+   */
+  home?: string;
+  /** More environment for the app, e.g. `GHOSTLY_PKARR_RELAYS` or `GHOSTLY_HYPERDHT_BOOTSTRAP`. */
+  env?: Record<string, string>;
+}
+
+/** A directory for `DesktopOptions.home`, removed by the returned function. */
+export function desktopHome(name: string): { dir: string; remove: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), `ghostly-desktop-${name}-`));
+  // The app may still be writing its store for a moment after it closed.
+  return { dir, remove: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }) };
+}
+
+/** Attaches each app log (`ghostly.log`) under a Desktop home to the running test: what a failure looked like from Rust. */
+export function attachDesktopLogs(name: string, home: string): void {
+  const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);
+  for (const file of find(home)) void base.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
+}
+
+const homeEnv = (dir: string): Record<string, string> => {
+  const env = { HOME: dir, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), XDG_CACHE_HOME: join(dir, "cache") };
+  for (const path of Object.values(env)) mkdirSync(path, { recursive: true });
+  return env;
+};
+
+/** `tauri-driver`, and the app it opens, until `stop`. */
+export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
   // Before anything is spawned: a missing binary is not something to retry for 30 seconds.
   const application = desktopBinary();
   const port = await freePort();
@@ -144,8 +218,15 @@ async function openDesktop(): Promise<{ app: Driver; stop: () => Promise<void> }
     ["--port", String(port), "--native-port", String(nativePort)],
     {
       stdio: ["ignore", "pipe", "pipe"],
-      // A test must never open the person's own chats: its own profile, its own storage.
-      env: { ...process.env, GHOSTLY_PROFILE: process.env.GHOSTLY_PROFILE ?? "e2e" },
+      // A test must never open the person's own chats: its own profile, its own storage. Nor the machine's camera
+      // and microphone: a test picture and a test tone for calls on Linux (debug builds), as Chromium's fake devices.
+      env: {
+        ...process.env,
+        GHOSTLY_FAKE_MEDIA: "1",
+        GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
+        ...(options.home ? homeEnv(options.home) : {}),
+        ...options.env,
+      },
     },
   );
   const log: string[] = [];

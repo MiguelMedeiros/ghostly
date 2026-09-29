@@ -3,9 +3,11 @@
 //! The peer builds and encrypts its own TXT records; this side only signs,
 //! publishes and resolves them, over the Mainline DHT and the default relays.
 
-use pkarr::{Client, Keypair, PublicKey, ResolvePolicy, SignedPacket};
+use pkarr::{Keypair, PublicKey, SignedPacket};
 use serde::{Deserialize, Serialize};
 use simple_dns::rdata::RData;
+
+use crate::pkarr_network::Pkarr;
 
 #[derive(Debug, Deserialize)]
 pub struct RecordInput {
@@ -29,7 +31,7 @@ pub struct ResolvedPacket {
 }
 
 pub async fn publish(
-    client: &Client,
+    pkarr: &Pkarr,
     keypair: &Keypair,
     records: &[RecordInput],
 ) -> Result<(), String> {
@@ -53,25 +55,36 @@ pub async fn publish(
         .sign(keypair)
         .map_err(|e| format!("Sign error: {}", e))?;
 
-    client
-        .publish(&signed_packet)
-        .await
-        .map_err(|e| format!("Publish error: {}", e))?;
-    Ok(())
+    pkarr.publish(&signed_packet).await
 }
 
-pub async fn resolve(
-    client: &Client,
+/// Publishes a packet the peer signed itself, byte for byte: a did:dht document has record names of
+/// its own and a sequence number in seconds, which the builder above would not keep.
+pub async fn publish_signed(
+    pkarr: &Pkarr,
     public_key_z32: &str,
+    payload: &[u8],
+) -> Result<(), String> {
+    let public_key: PublicKey = public_key_z32
+        .try_into()
+        .map_err(|e| format!("Invalid public key: {}", e))?;
+    let signed_packet = SignedPacket::from_relay_payload(&public_key, &payload.to_vec().into())
+        .map_err(|e| format!("Invalid packet: {}", e))?;
+    pkarr.publish(&signed_packet).await
+}
+
+/// `background`: a look that can wait; `urgent`: a signal is due (see `Pkarr::resolve_with`).
+pub async fn resolve(
+    pkarr: &Pkarr,
+    public_key_z32: &str,
+    background: bool,
+    urgent: bool,
 ) -> Result<Option<ResolvedPacket>, String> {
     let public_key: PublicKey = public_key_z32
         .try_into()
         .map_err(|e| format!("Invalid public key: {}", e))?;
 
-    let Ok(signed_packet) = client
-        .resolve(&public_key, ResolvePolicy::NetworkOnly)
-        .await
-    else {
+    let Some(signed_packet) = pkarr.resolve_with(&public_key, background, urgent).await else {
         return Ok(None);
     };
 

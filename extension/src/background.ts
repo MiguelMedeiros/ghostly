@@ -1,5 +1,6 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode } from "@ghostly/core";
-import type { HttpRequestReply, RuntimeMessage } from "./messages";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } from "@ghostly/core";
+import type { EngineStatus, HttpRequestReply, RuntimeMessage } from "./messages";
+import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate } from "./updates";
 
@@ -10,31 +11,55 @@ import { rememberPendingUpdate } from "./updates";
 
 // -- peer lifecycle ----------------------------------------------------------
 
-let creatingOffscreen: Promise<void> | null = null;
+let starting: Promise<void> | null = null;
 
-async function ensureEngine(): Promise<void> {
-  if (await chrome.offscreen.hasDocument()) return;
-  creatingOffscreen ??= chrome.offscreen
+/**
+ * Makes sure the peer runs, as the profile in use (WISP 04). Every caller waits on the same attempt, so
+ * a switch seen by two pages at once restarts the peer once. Nothing of this lives in the worker between
+ * events: the document, and the profile registry the document reads, are the state.
+ */
+function ensureEngine(): Promise<void> {
+  starting ??= startEngine().finally(() => (starting = null));
+  return starting;
+}
+
+async function startEngine(): Promise<void> {
+  if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
+  const status = await waitForEngine();
+  if (status.profile === status.active) return;
+  // A page made another profile the one in use. The running peer stops and its document closes before
+  // the next one opens: never two peers, and never one peer over two profiles' data.
+  await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
+  await chrome.offscreen.closeDocument().catch(() => {});
+  await createEngineDocument();
+  await waitForEngine();
+}
+
+async function createEngineDocument(): Promise<void> {
+  await chrome.offscreen
     .createDocument({
       url: "offscreen.html",
       reasons: [chrome.offscreen.Reason.WEB_RTC],
       justification: "Ghostly keeps WebRTC connections to your peers while the browser is open.",
     })
-    .then(waitForEngine)
-    .finally(() => (creatingOffscreen = null));
-  await creatingOffscreen;
+    // A worker stopped mid-start may have created it already; that one is the peer.
+    .catch(async (error) => {
+      if (!(await chrome.offscreen.hasDocument())) throw error;
+    });
 }
 
 /** The document exists before its script listens; wait until the peer answers. */
-async function waitForEngine(): Promise<void> {
+async function waitForEngine(): Promise<EngineStatus> {
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
-      if (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage)) return;
+      const status = (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage)) as EngineStatus | undefined;
+      if (status) return status;
     } catch {
       // nobody is listening yet
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+  throw new Error("The Ghostly peer did not start. Reopen the extension to retry.");
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
@@ -61,12 +86,23 @@ chrome.action.onClicked.addListener(async () => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
-  if (message?.target !== "background") return false;
+// Only the extension's own pages are heard (`fromOwnPage`).
+chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+  if (message?.target !== "background" || !fromOwnPage(sender)) return false;
   if (message.type === "ensure-engine") {
     void ensureEngine().then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: String(error) }),
+    );
+    return true;
+  }
+  if (message.type === "open-payment-link") {
+    // Only a payment link, and only the characters one is made of: nothing else leaves the extension this way.
+    const uri = typeof message.uri === "string" && /^(lightning|bitcoin):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
+    if (!uri) { sendResponse({ ok: false, error: "Not a payment link" }); return false; }
+    void chrome.tabs.create({ url: uri }).then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
     return true;
   }
@@ -93,8 +129,19 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
 // A tab serves the one service it was opened for. The app in it is a
 // contact's code: if it could reach another virtual origin, it would talk to
 // another contact's app as the user.
+//
+// The `debugger` permission reaches every tab, so its use is kept narrow here,
+// the only place in the extension that calls `chrome.debugger`:
+// - pages ask for a service (peer key and service id), never for a tab;
+// - DevTools attaches only to the tab `openViewer` itself just created, and
+//   every command goes to a tab with a viewer binding, which only `openViewer`
+//   writes and which is forgotten once the debugger leaves the tab;
+// - only the four commands the viewer needs are ever sent.
 
 const PROTOCOL_VERSION = "1.3";
+
+/** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
+const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
 
 interface PausedRequest {
   requestId: string;
@@ -120,7 +167,16 @@ async function bindingOf(tabId: number): Promise<ViewerBinding | null> {
   return ((await chrome.storage.session.get(key))[key] as ViewerBinding | undefined) ?? null;
 }
 
-chrome.tabs.onRemoved.addListener((tabId) => void chrome.storage.session.remove(bindingKey(tabId)));
+const forget = (tabId: number) => chrome.storage.session.remove(bindingKey(tabId));
+
+chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
+
+/** Sends one allowed command to a viewer tab; refuses any other command, and any tab without a binding. */
+export async function devtools(tabId: number, method: string, params?: Record<string, unknown>): Promise<void> {
+  if (!VIEWER_COMMANDS.has(method)) throw new Error(`DevTools command not allowed: ${method}`);
+  if (!(await bindingOf(tabId))) throw new Error("Not a viewer tab");
+  await chrome.debugger.sendCommand({ tabId }, method, params);
+}
 
 async function openViewer(peerPubKeyZ32: string, serviceId: string): Promise<void> {
   const url = viewerUrl(peerPubKeyZ32, serviceId);
@@ -128,30 +184,21 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string): Promise<voi
   if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32) throw new Error("Invalid service");
   await ensureEngine();
 
+  // The one tab DevTools ever attaches to: the one created right here, for this service.
   const tab = await chrome.tabs.create({ url: "about:blank" });
   if (tab.id === undefined) throw new Error("Could not open a tab");
-  const target = { tabId: tab.id };
   await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId } satisfies ViewerBinding });
   try {
-    await chrome.debugger.attach(target, PROTOCOL_VERSION);
-    await chrome.debugger.sendCommand(target, "Fetch.enable", {
+    await chrome.debugger.attach({ tabId: tab.id }, PROTOCOL_VERSION);
+    await devtools(tab.id, "Fetch.enable", {
       patterns: [{ urlPattern: VIEWER_URL_PATTERN, requestStage: "Request" }],
     });
-    await chrome.debugger.sendCommand(target, "Page.enable");
+    await devtools(tab.id, "Page.enable");
   } catch (error) {
     await chrome.tabs.remove(tab.id).catch(() => {});
     throw error;
   }
   await chrome.tabs.update(tab.id, { url });
-}
-
-/** A peer's `Set-Cookie` may not widen a cookie beyond the exact origin it came from. */
-function withoutCookieDomain(name: string, value: string): string {
-  if (name.toLowerCase() !== "set-cookie") return value;
-  return value
-    .split("\n")
-    .map((cookie) => cookie.replace(/;\s*domain\s*=[^;]*/gi, ""))
-    .join("\n");
 }
 
 function errorPage(title: string, detail: string): string {
@@ -165,11 +212,17 @@ function errorPage(title: string, detail: string): string {
 
 const UNREACHABLE_CODES = new Set(["unreachable", "timeout", "closed", "offline", "unknown-peer"]);
 
-async function fulfill(target: chrome.debugger.Debuggee, paused: PausedRequest): Promise<void> {
+async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
+  const binding = await bindingOf(tabId);
+  // Not a tab this worker opened, or not any more: no command goes to it. Chrome only sends events from a
+  // tab the debugger is on, so letting go of it is all that is left, and its request goes on unanswered.
+  if (!binding) {
+    await chrome.debugger.detach({ tabId }).catch(() => {});
+    return;
+  }
   const parsed = parseViewerUrl(paused.request.url);
-  const binding = target.tabId === undefined ? null : await bindingOf(target.tabId);
-  if (!parsed || !binding || parsed.peerPubKeyZ32 !== binding.peerPubKeyZ32 || parsed.serviceId !== binding.serviceId) {
-    await chrome.debugger.sendCommand(target, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" });
+  if (!parsed || parsed.peerPubKeyZ32 !== binding.peerPubKeyZ32 || parsed.serviceId !== binding.serviceId) {
+    await devtools(tabId, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" });
     return;
   }
 
@@ -200,17 +253,17 @@ async function fulfill(target: chrome.debugger.Debuggee, paused: PausedRequest):
   }
 
   if (reply.ok) {
-    await chrome.debugger.sendCommand(target, "Fetch.fulfillRequest", {
+    await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: reply.headers.map(([name, value]) => ({ name, value: withoutCookieDomain(name, value) })),
+      responseHeaders: viewerResponseHeaders(reply.headers).map(([name, value]) => ({ name, value })),
       body: reply.bodyB64,
     });
     return;
   }
 
   const gone = UNREACHABLE_CODES.has(reply.code);
-  await chrome.debugger.sendCommand(target, "Fetch.fulfillRequest", {
+  await devtools(tabId, "Fetch.fulfillRequest", {
     requestId: paused.requestId,
     responseCode: gone ? 503 : 502,
     responseHeaders: [
@@ -229,17 +282,22 @@ async function fulfill(target: chrome.debugger.Debuggee, paused: PausedRequest):
 }
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (source.tabId === undefined) return;
-  const target = { tabId: source.tabId };
+  const { tabId } = source;
+  if (tabId === undefined) return;
 
   if (method === "Fetch.requestPaused") {
-    fulfill(target, params as PausedRequest).catch(() => {
+    fulfill(tabId, params as PausedRequest).catch(() => {
       // tab closed or debugger detached mid-request
     });
   } else if (method === "Page.frameNavigated") {
-    // Once the tab leaves the virtual origin there is nothing left to serve.
+    // Once the tab leaves the virtual origin there is nothing left to serve, and it is no viewer any more.
     const { frame } = params as { frame: { parentId?: string; url: string } };
     if (frame.parentId || frame.url === "about:blank" || parseViewerUrl(frame.url)) return;
-    chrome.debugger.detach(target).catch(() => {});
+    void forget(tabId).then(() => chrome.debugger.detach({ tabId }).catch(() => {}));
   }
+});
+
+// The person cancelled Chrome's "started debugging" bar, or the tab went away: the binding goes with the debugger.
+chrome.debugger.onDetach.addListener((source) => {
+  if (source.tabId !== undefined) void forget(source.tabId);
 });

@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, MintOperationError, type Proof } from "@cashu/cashu-ts";
-import { CashuWallet } from "../src/engine/wallet";
+import { CashuWallet, MINT_TIMEOUT_MS } from "../src/engine/wallet";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
+import { bech32 } from "@scure/base";
 import { failures, mint, resetDb, rows, seed } from "./fakes";
+import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
+import { BITCOIN_INVOICE_ON_TESTNET, TEST_MINT, declareTestMints, fakesLightning } from "../src/shared/mints";
+// covers: wallet.cashu.receive-lightning, wallet.cashu.pay-invoice, payments.cashu.send
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 vi.mock("@cashu/cashu-ts", async (importOriginal) => ({
@@ -88,6 +92,35 @@ describe("Lightning in: mint quotes", () => {
     await setup().wallet["pollQuotes"]();
     expect(rows("quotes")).toHaveLength(1);
     expect(balance()).toBe(0);
+  });
+});
+
+describe("Lightning in: which mint issues the invoice", () => {
+  it("skips a mint that does not answer, and the next one issues the invoice", async () => {
+    vi.useFakeTimers();
+    try {
+      mint.createMintQuoteBolt11.mockImplementation((url: string) => url === "https://down.example" ? new Promise(() => {}) : Promise.resolve({ quote: "q", request: "lnbc100", expiry: null }));
+      const wallet = new CashuWallet(() => ["https://down.example", MINT], { onChange: vi.fn(), onTestMintNeeded: vi.fn(), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() });
+      const receiving = wallet.receiveLightning(100);
+      await vi.advanceTimersByTimeAsync(MINT_TIMEOUT_MS + 1);
+      await expect(receiving).resolves.toMatchObject({ mint: MINT, invoice: "lnbc100" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says which mint failed when none answers", async () => {
+    vi.useFakeTimers();
+    try {
+      mint.createMintQuoteBolt11.mockImplementation(() => new Promise(() => {}));
+      const { wallet } = setup();
+      const receiving = wallet.receiveLightning(100);
+      const settled = expect(receiving).rejects.toThrow("No mint could create an invoice: mint.example did not answer");
+      await vi.advanceTimersByTimeAsync(MINT_TIMEOUT_MS + 1);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -228,5 +261,71 @@ describe("ecash out", () => {
     await expect(wallet.createToken(40, undefined, undefined, payment)).rejects.toThrow();
     expect(rows("payments")).toHaveLength(0);
     expect(rows<StoredProof>("proofs").map((p) => p.secret).sort()).toEqual(["a", "c"]);
+  });
+});
+
+describe("Lightning out on Testnet: a Bitcoin invoice may be real money", () => {
+  const LOCAL = "http://127.0.0.1:3338";
+  // Decodable invoices of each chain (checksummed, blank signature: nobody can pay them).
+  const invoice = (prefix: "lnbc" | "lntb" | "lnbcrt") => {
+    const regtest = fakeInvoice(25, new Uint8Array(32).fill(7));
+    const { words } = bech32.decode(regtest as `${string}1${string}`, false);
+    return bech32.encode(`${prefix}250n`, words, false);
+  };
+  const quoted = { quote: "m1", amount: Amount.from(25), fee_reserve: Amount.from(2), unit: "sat", state: "UNPAID", expiry: 0, request: "" };
+  const testnet = (mints: string[]) => {
+    seed("proofs", [MINT, ...mints].map((url, i) => ({ ...stored(64, `p${i}`), mint: url })));
+    mint.createMeltQuoteBolt11.mockResolvedValue(quoted);
+    const events = { onChange: vi.fn(), onTestMintNeeded: vi.fn(), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() };
+    return new CashuWallet((network) => network === "testnet" ? mints : [MINT], events, () => [MINT, ...mints]);
+  };
+
+  it("a mint on this machine never pays one with test sats: it may be a real mint", async () => {
+    const wallet = testnet([LOCAL]);
+    await expect(wallet.quoteInvoice(invoice("lnbc"), "testnet")).rejects.toThrow(BITCOIN_INVOICE_ON_TESTNET);
+    expect(mint.createMeltQuoteBolt11).not.toHaveBeenCalled();
+    // A test chain's invoice is test money: the local mint pays it.
+    for (const prefix of ["lntb", "lnbcrt"] as const) await expect(wallet.quoteInvoice(invoice(prefix), "testnet")).resolves.toMatchObject({ mint: LOCAL, amount: 25 });
+  });
+
+  it("the public test mint pays one (its Lightning is fake), and Mainnet pays one as before", async () => {
+    const wallet = testnet([LOCAL, TEST_MINT]);
+    await expect(wallet.quoteInvoice(invoice("lnbc"), "testnet")).resolves.toMatchObject({ mint: TEST_MINT });
+    expect(mint.createMeltQuoteBolt11.mock.calls.map(([url]) => url)).toEqual([TEST_MINT]);
+    await expect(wallet.quoteInvoice(invoice("lnbc"), "mainnet")).resolves.toMatchObject({ mint: MINT });
+  });
+
+  it("a local mint the operator declared a test server pays one; declaring a remote mint does nothing", async () => {
+    declareTestMints([`${LOCAL}/`, "https://mint.example"]);
+    const wallet = testnet([LOCAL]);
+    await expect(wallet.quoteInvoice(invoice("lnbc"), "testnet")).resolves.toMatchObject({ mint: LOCAL });
+    expect(fakesLightning("https://mint.example")).toBe(false);
+  });
+});
+
+describe("ecash of one network", () => {
+  const LOCAL = "http://127.0.0.1:3338";
+  const payment = (token: string, mintUrl: string): StoredPayment => ({ id: "p1", linkId: "l", kind: "payment", direction: "out", amount: 40, unit: "sat", state: "pending", createdAt: 0, mint: mintUrl, token });
+  // A real mint and a local test mint, both known and both funded.
+  const both = () => {
+    seed("proofs", [stored(64, "real"), { ...stored(64, "test"), mint: LOCAL }]);
+    mint.send.mockResolvedValue({ keep: [proof(24, "k1")], send: [proof(32, "s1"), proof(8, "s2")] });
+    const events = { onChange: vi.fn(), onTestMintNeeded: vi.fn(), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() };
+    return new CashuWallet((network) => network === "testnet" ? [LOCAL] : [MINT], events, () => [MINT, LOCAL]);
+  };
+
+  it("a request naming a real mint on Testnet spends only test ecash, and never real ecash for it", async () => {
+    const wallet = both();
+    // The real mint first, as a contact may list it: Testnet still pays from the test mint only.
+    expect((await wallet.createToken(40, [MINT, LOCAL], undefined, payment, "testnet")).mint).toBe(LOCAL);
+    expect(rows<StoredProof>("proofs").map((p) => p.secret)).toContain("real");
+  });
+
+  it("with only mints of the other network, nothing is spent", async () => {
+    const wallet = both();
+    await expect(wallet.createToken(40, [MINT], undefined, payment, "testnet")).rejects.toThrow("You share no mint");
+    await expect(wallet.createToken(40, [LOCAL], undefined, payment, "mainnet")).rejects.toThrow("You share no mint");
+    expect(rows<StoredProof>("proofs").map((p) => p.secret).sort()).toEqual(["real", "test"]);
+    expect(rows("payments")).toHaveLength(0);
   });
 });

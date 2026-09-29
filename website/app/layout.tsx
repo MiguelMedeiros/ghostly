@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Inter } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
+import "./site.css";
+import { OG_IMAGE, X_HANDLE } from "@/lib/pageMeta";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -15,24 +17,24 @@ const jetbrains = JetBrains_Mono({
 
 const siteConfig = {
   name: "Ghostly",
-  title: "Ghostly — Your services exist while you are online",
+  title: "Ghostly: Find each other. Talk peer to peer.",
   description:
-    "Ephemeral, peer-to-peer and serverless: chat, calls, files, sats and the web apps on your localhost, shared with the contacts you choose over the DHT and WebRTC. Close Ghostly and it all vanishes.",
+    "Meet the people you choose through a private invitation, then chat, send files and sats, peer to peer. No account to create. Free and open source.",
   url: "https://ghostly.tools",
-  ogImage: "https://ghostly.tools/og-image.png",
   keywords: [
     "encrypted chat",
-    "ephemeral messaging",
+    "peer-to-peer",
     "DHT",
-    "decentralized",
-    "privacy",
-    "end-to-end encryption",
-    "serverless chat",
     "pkarr",
     "mainline DHT",
-    "secure messaging",
-    "no servers",
-    "anonymous chat",
+    "WebRTC",
+    "Iroh",
+    "HyperDHT",
+    "Cashu wallet",
+    "localhost sharing",
+    "peer-to-peer file transfer",
+    "open protocol",
+    "WISP",
   ],
 };
 
@@ -77,29 +79,20 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     title: siteConfig.title,
     description: siteConfig.description,
-    images: [
-      {
-        url: siteConfig.ogImage,
-        width: 1200,
-        height: 630,
-        alt: "Ghostly - Encrypted Ephemeral Chat over the DHT",
-        type: "image/png",
-      },
-    ],
+    images: [OG_IMAGE],
   },
   twitter: {
     card: "summary_large_image",
     title: siteConfig.title,
     description: siteConfig.description,
-    images: [siteConfig.ogImage],
-    creator: "@paborsa",
-  },
-  alternates: {
-    canonical: siteConfig.url,
+    images: [OG_IMAGE.url],
+    site: X_HANDLE,
+    creator: X_HANDLE,
   },
   category: "technology",
 };
 
+// Only what the public release (see lib/release.ts) does today.
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
@@ -107,7 +100,7 @@ const jsonLd = {
   description: siteConfig.description,
   url: siteConfig.url,
   applicationCategory: "CommunicationApplication",
-  operatingSystem: "macOS, Windows, Linux",
+  operatingSystem: "macOS, Windows, Linux, Web",
   offers: {
     "@type": "Offer",
     price: "0",
@@ -119,11 +112,13 @@ const jsonLd = {
     url: "https://miguelmedeiros.dev",
   },
   featureList: [
-    "End-to-end encryption",
-    "Ephemeral messaging",
-    "Decentralized DHT network",
-    "No servers required",
+    "Private one-to-one chat started from an invitation",
     "No account needed",
+    "Peer-to-peer file transfers up to 100 MiB",
+    "Voice, video and screen sharing over WebRTC",
+    "Cashu ecash wallet with Lightning payments through the mint",
+    "Sharing a local web app from the desktop app or browser extension",
+    "Command-line text messaging for scripts and bots",
   ],
 };
 
@@ -133,19 +128,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark scroll-smooth">
+    <html lang="en" className="dark" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
-        <Script
-          src="https://www.googletagmanager.com/gtag/js?id=G-KXK4ESQ5DZ"
-          strategy="afterInteractive"
-        />
-        <Script id="google-analytics" strategy="afterInteractive">
-          {`
-            window.dataLayer = window.dataLayer || [];
-            function gtag(){dataLayer.push(arguments);}
-            gtag('js', new Date());
-            gtag('config', 'G-KXK4ESQ5DZ');
-          `}
+        {/* Scenes only hold the screen when scripts run; without them every step reads in order. Narrow windows and touch devices read them as cards (data-orient, data-touch, stage.tsx useCards). */}
+        <Script id="js-flag" strategy="beforeInteractive">
+          {"var d=document.documentElement;d.classList.add('js');try{var q=function(m,f){var l=matchMedia(m);f(l.matches);l.addEventListener('change',function(e){f(e.matches)})};q('(prefers-reduced-motion: reduce)',function(v){d.classList.toggle('calm',v)});q('(max-width: 860px)',function(v){if(v)d.dataset.orient='portrait';else delete d.dataset.orient});q('(pointer: coarse)',function(v){if(v)d.dataset.touch='';else delete d.dataset.touch})}catch(e){}"}
+        </Script>
+        {/* An invite link (ghostly.tools/#ghostly1…, WISP 801): its code leaves the address before any other
+            script runs (and, pasted later, before any other history listener), so it is never in a referrer or
+            the history. components/site/JoinLanding.tsx reads it. The site loads no analytics and sets no
+            cookies (e2e/launch-checklist.spec.ts). */}
+        <Script id="invite-intake" strategy="beforeInteractive">
+          {"try{var t=function(){var h=location.hash;if(!/^#ghostly1/i.test(h))return;var v=h.slice(1);try{v=decodeURIComponent(v)}catch(e){}window.__ghostlyInvite=v;history.replaceState(history.state,'',location.pathname+location.search);dispatchEvent(new Event('ghostly-invite'))};t();addEventListener('popstate',t);addEventListener('hashchange',t)}catch(e){}"}
         </Script>
         <script
           type="application/ld+json"

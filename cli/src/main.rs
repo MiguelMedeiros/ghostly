@@ -18,6 +18,11 @@ struct Cli {
     /// Suppress extra output
     #[arg(long, short, global = true)]
     quiet: bool,
+
+    /// Look packets up through the Pkarr relays too, not on the Mainline DHT alone. Publishing reaches
+    /// the relays either way: contacts in a browser read only relays.
+    #[arg(long, global = true)]
+    read_relays: bool,
 }
 
 #[derive(Subcommand)]
@@ -35,15 +40,15 @@ enum Commands {
     /// Send a message
     Send {
         /// Your seed (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         seed: String,
 
         /// Peer's public key (z32)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         peer: String,
 
         /// Shared encryption key (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         key: String,
 
         /// Your nickname (optional)
@@ -54,31 +59,31 @@ enum Commands {
         #[arg(long)]
         stdin: bool,
 
-        /// Message text (if not using --stdin)
+        /// Message text (if not using --stdin); put `--` before one that starts with `-`
         message: Option<String>,
     },
     /// Receive messages (single poll)
     Recv {
         /// Peer's public key (z32)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         peer: String,
 
         /// Shared encryption key (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         key: String,
     },
     /// Watch for new messages (streaming mode for bots)
     Watch {
         /// Your seed (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         seed: String,
 
         /// Peer's public key (z32)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         peer: String,
 
         /// Shared encryption key (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         key: String,
 
         /// Your nickname (optional)
@@ -106,16 +111,17 @@ enum InviteAction {
     /// Generate an invite URL
     New {
         /// Your seed (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         seed: String,
 
         /// Shared key (optional, generates new if not provided)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         key: Option<String>,
     },
     /// Parse an invite URL
     Parse {
         /// The invite URL (ghost://...)
+        #[arg(allow_hyphen_values = true)]
         url: String,
     },
 }
@@ -193,7 +199,7 @@ async fn main() {
                 std::process::exit(1);
             }
 
-            let client = GhostClient::new();
+            let client = GhostClient::with_relay_reads(cli.read_relays);
             match client.send(&seed, &peer, &key, &msg, nick.as_deref()).await {
                 Ok(result) => output_json(&result),
                 Err(e) => {
@@ -204,7 +210,7 @@ async fn main() {
         }
 
         Commands::Recv { peer, key } => {
-            let client = GhostClient::new();
+            let client = GhostClient::with_relay_reads(cli.read_relays);
             match client.recv(&peer, &key).await {
                 Ok(result) => output_json(&result),
                 Err(e) => {
@@ -222,7 +228,7 @@ async fn main() {
             poll_interval,
             ack,
         } => {
-            let client = GhostClient::new();
+            let client = GhostClient::with_relay_reads(cli.read_relays);
             let mut last_seen_ts: i64 = 0;
             let key_bytes = match ghostly::from_base64_url(&key) {
                 Ok(k) => k,
@@ -264,11 +270,8 @@ async fn main() {
                         }
 
                         if ack && !new_messages.is_empty() {
-                            let pkarr_client = pkarr::Client::builder()
-                                .build()
-                                .expect("Failed to create client");
                             let _ = ghostly::publish_messages(
-                                &pkarr_client,
+                                client.writer(),
                                 &keypair,
                                 &[],
                                 &key_bytes,

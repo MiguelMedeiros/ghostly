@@ -1,11 +1,29 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
+import { promptInstall, useInstallState } from "../lib/installPrompt";
+import { pushPlatform, setWake, useWakeOn } from "../lib/wakePush";
+import { noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
+import { DomainProofSettings } from "../components/DomainProofSettings";
+import { MediaSettings } from "../components/MediaSettings";
+import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
+import { ColorSwatches } from "../components/ColorSwatches";
+import { ProfileBadge } from "../components/ProfileBadge";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { useMyAvatar } from "../hooks/useAvatars";
+import { currentProfile, listProfiles } from "../lib/profiles";
+import { openProfileSwitcher } from "../hooks/useProfileSwitcher";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { Button, Switch } from "../components/wallet/ui";
+import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
+import { setSendTyping, useSendTyping } from "../hooks/useTyping";
+import { Select } from "../components/ui/Select";
+import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
+import { playSound } from "../lib/sounds";
 import {
   hashPassword,
   verifyPassword,
@@ -14,23 +32,44 @@ import {
   clearAllData,
   LANGUAGE_OPTIONS,
   COLOR_SCHEME_OPTIONS,
-  COLOR_THEME_OPTIONS,
   APP_WEBSITE,
   APP_LICENSE,
+  CUE_CATEGORIES,
+  DEFAULT_CUES,
   type ColorScheme,
-  type ColorTheme,
   type Language,
 } from "../lib/settings";
+import { deleteAllSessions, listSessions } from "../lib/storage";
+import { useAppNavigation } from "../hooks/useAppNavigation";
+import { peekEnabled, peekNotifies } from "../lib/profilePeek";
+import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 
 export function Settings() {
-  const navigate = useNavigate();
-  const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
-    updateGiphyApiKey,
-    updateReduceMotion, updateCheckForUpdates, randomizeNickname } =
+  const nav = useAppNavigation();
+  const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
+    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
+  const install = useInstallState();
+  // Wake-up push (WISP 401 § Wake-up push): the installed web app only.
+  const canWake = !!pushPlatform();
+  const wakeOn = useWakeOn();
+  const [wakeBusy, setWakeBusy] = useState(false);
+  const [wakeError, setWakeError] = useState("");
+  const changeWake = async (on: boolean) => {
+    setWakeBusy(true);
+    setWakeError("");
+    try { await setWake(on); } catch (e) { setWakeError(e instanceof Error ? e.message : String(e)); } finally { setWakeBusy(false); }
+  };
+  const isMobile = useIsMobile();
+  const profile = currentProfile();
+  const myAvatar = useMyAvatar();
+  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  const peekOn = peekEnabled(settings, isDesktopApp());
+  const loadPublicProfiles = useLoadPublicProfiles();
+  const sendTyping = useSendTyping();
 
   const [lockEnabled, setLockEnabled] = useState(settings.lockScreen.enabled);
   const [newPassword, setNewPassword] = useState("");
@@ -46,21 +85,35 @@ export function Settings() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   const [confirmClearData, setConfirmClearData] = useState(false);
+  const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
+  const [chatCount, setChatCount] = useState(0);
+  const [noticePermission, setNoticePermission] = useState<NoticePermission>("default");
+  const [requestingNotice, setRequestingNotice] = useState(false);
+  useEffect(() => {
+    const refresh = () => { void notificationPermission().then(setNoticePermission); };
+    refresh(); window.addEventListener("focus",refresh);
+    return () => window.removeEventListener("focus",refresh);
+  }, []);
+  const toggleNotices = async () => {
+    if (settings.notifications.systemEnabled) { updateNotifications({systemEnabled:false}); return; }
+    setRequestingNotice(true);
+    const permission = await requestNotifications();
+    setNoticePermission(permission);
+    updateNotifications({systemEnabled:permission==="granted"});
+    setRequestingNotice(false);
+  };
   const [appVersion, setAppVersion] = useState("0.0.0");
 
   const hasPassword = !!settings.lockScreen.passwordHash;
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
+    setChatCount(listSessions().length);
     getVersion().then(setAppVersion).catch(() => setAppVersion("0.0.0"));
   }, []);
 
   const handleColorSchemeChange = (scheme: ColorScheme) => {
     updateColorScheme(scheme);
-  };
-
-  const handleColorThemeChange = (theme: ColorTheme) => {
-    updateColorTheme(theme);
   };
 
   const handleLanguageChange = (language: Language) => {
@@ -155,663 +208,314 @@ export function Settings() {
     setTimeout(() => setMessage(null), 3000);
   };
 
+  const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
+  const lockOn = lockEnabled && hasPassword;
+  const systemOn = settings.notifications.systemEnabled && noticePermission === "granted";
+  const systemSettings = noticeSettings();
+  const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); };
+  const deleteChats = () => {
+    deleteAllSessions();
+    setConfirmDeleteChats(false);
+    setChatCount(0);
+    setStorageInfo(getStorageUsage());
+    window.dispatchEvent(new Event("session-updated"));
+    setMessage({ type: "success", text: t("sidebar.deleteAllChats") });
+  };
+  const clearData = async () => {
+    setConfirmClearData(false);
+    setMessage({ type: "success", text: t("settings.dataCleared") });
+    await clearAllData();
+    setStorageInfo(getStorageUsage());
+    // The running peer still holds what was just deleted; start it over.
+    window.location.replace(window.location.pathname);
+  };
+
   return (
-    <div className="flex-1 flex flex-col bg-chat-bg overflow-hidden">
-      <header className="h-14 header-safe shrink-0 bg-panel-header flex items-center px-4 border-b border-border">
-        <button
-          onClick={() => navigate(-1)}
-          className="max-md:hidden p-2 hover:bg-surface-hover rounded-full transition-colors mr-3"
-        >
-          <svg
-            className="w-5 h-5 text-text-secondary"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
-        <h1 className="text-lg font-medium text-text-primary">
-          {t("settings.title")}
-        </h1>
-      </header>
-
-      <div className="flex-1 overflow-y-auto p-6 max-md:p-4">
-        <div className="max-w-2xl mx-auto space-y-8">
-          {message && (
-            <div
-              className={`p-3 rounded-lg ${
-                message.type === "success"
-                  ? "bg-accent/20 text-accent"
-                  : "bg-danger/20 text-danger"
-              }`}
-            >
-              {message.text}
-            </div>
-          )}
-
-          {/* Profile Section */}
-          <section className="space-y-4">
-            <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">
-              {t("settings.profile")}
-            </h2>
-
-            <div className="bg-surface rounded-xl p-4 space-y-4">
-              <div className="space-y-2">
-                <label className="text-text-primary block font-medium">
-                  {t("settings.defaultNickname")}
-                </label>
-                <p className="text-text-muted text-xs">
-                  {t("settings.defaultNicknameHint")}
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={settings.defaultNickname}
-                    onChange={(e) => updateDefaultNickname(e.target.value)}
-                    placeholder={t("settings.nicknamePlaceholder")}
-                    maxLength={20}
-                    className="flex-1 px-3 py-2 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-accent transition-colors"
-                  />
-                  <button
-                    onClick={randomizeNickname}
-                    className="px-3 py-2 bg-surface-alt hover:bg-surface-hover border border-border rounded-lg text-text-secondary hover:text-text-primary transition-colors"
-                    title={t("settings.randomizeName")}
-                  >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2 border-t border-border pt-4">
-                <label className="text-text-primary block font-medium">Giphy API key (optional)</label>
-                <p className="text-text-muted text-xs">
-                  GIFs work with the key built into Ghostly. Use your own if you prefer, or if you built the app
-                  yourself: create a free "API" key at developers.giphy.com. It is stored on this device only.
-                </p>
-                <input
-                  type="text"
-                  value={settings.giphyApiKey}
-                  onChange={(e) => updateGiphyApiKey(e.target.value)}
-                  placeholder="Using the built-in key"
-                  spellCheck={false}
-                  className="w-full px-3 py-2 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted font-mono text-sm focus:outline-none focus:border-accent transition-colors"
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* Appearance Section */}
-          <section className="space-y-4">
-            <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">
-              {t("settings.appearance")}
-            </h2>
-
-            <div className="bg-surface rounded-xl p-4 space-y-6">
-              {/* Color Theme */}
-              <div className="space-y-3">
-                <label className="text-text-primary block font-medium">
-                  {t("settings.colorTheme")}
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {COLOR_THEME_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => handleColorThemeChange(option.value)}
-                      className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all ${
-                        settings.colorTheme === option.value
-                          ? "border-accent bg-accent/10"
-                          : "border-border hover:border-border-bright bg-surface-alt"
-                      }`}
-                    >
-                      <div
-                        className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                          option.value === "classic"
-                            ? "bg-[#00a884]"
-                            : option.value === "monochrome"
-                            ? "bg-gradient-to-br from-white to-gray-400"
-                            : option.value === "cyan"
-                            ? "bg-[#22d3ee]"
-                            : "bg-[#a78bfa]"
-                        }`}
-                      >
-                        <svg width="20" height="20" viewBox="0 0 64 64" className="text-white drop-shadow-sm">
-                          <g transform="translate(12, 8)">
-                            <path d="M20 4C10.059 4 2 12.059 2 22v18c0 1.5 1.2 2 2 1.2l4-3.2 4 3.2c.8.6 1.6.6 2.4 0L18 38l3.6 3.2c.8.6 1.6.6 2.4 0L28 38l4 3.2c.8.8 2 .3 2-1.2V22C34 12.059 25.941 4 20 4z" fill="currentColor"/>
-                            <circle cx="13" cy="20" r="3" fill={option.value === "monochrome" ? "#666" : "#0008"}/>
-                            <circle cx="27" cy="20" r="3" fill={option.value === "monochrome" ? "#666" : "#0008"}/>
-                          </g>
-                        </svg>
-                      </div>
-                      <div className="text-left">
-                        <span className="text-text-primary text-sm font-medium block">
-                          {t(`settings.colorThemes.${option.value}` as const)}
-                        </span>
-                        <span className="text-text-muted text-xs">
-                          {option.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Color Scheme (Dark/Light) */}
-              <div className="flex items-center justify-between pt-2 border-t border-border">
-                <div>
-                  <label className="text-text-primary block font-medium">
-                    {t("settings.colorScheme")}
-                  </label>
-                  <p className="text-sm text-text-muted">
-                    {t("settings.colorSchemeDescription")}
-                  </p>
-                </div>
-                <div className="flex gap-1 bg-surface-alt rounded-lg p-1">
-                  {COLOR_SCHEME_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => handleColorSchemeChange(option.value)}
-                      className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
-                        settings.colorScheme === option.value
-                          ? "bg-accent text-white"
-                          : "text-text-secondary hover:text-text-primary"
-                      }`}
-                    >
-                      {option.value === "light" && (
-                        <svg className="w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <circle cx="12" cy="12" r="5" strokeWidth="2"/>
-                          <path strokeWidth="2" strokeLinecap="round" d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-                        </svg>
-                      )}
-                      {option.value === "dark" && (
-                        <svg className="w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
-                        </svg>
-                      )}
-                      {option.value === "system" && (
-                        <svg className="w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-                        </svg>
-                      )}
-                      {t(`settings.colorSchemes.${option.value}` as const)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Language */}
-              <div className="flex items-center justify-between pt-2 border-t border-border">
-                <label className="text-text-primary font-medium">
-                  {t("settings.language")}
-                </label>
-                <select
-                  value={settings.language}
-                  onChange={(e) =>
-                    handleLanguageChange(e.target.value as Language)
-                  }
-                  className="bg-surface-alt text-text-primary px-4 py-2 rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  {LANGUAGE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.native}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </section>
-
-          {/* Security Section */}
-          <section className="space-y-4">
-            <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">
-              {t("settings.security")}
-            </h2>
-
-            <div className="bg-surface rounded-xl p-4 space-y-4">
-              {/* Lock Screen Toggle */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="text-text-primary block">
-                    {t("settings.lockScreen")}
-                  </label>
-                  <p className="text-sm text-text-muted">
-                    {t("settings.lockScreenDescription")}
-                  </p>
-                </div>
-                <button
-                  onClick={handleLockToggle}
-                  role="switch"
-                  aria-checked={lockEnabled && hasPassword}
-                  aria-label={t("settings.lockScreen")}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${
-                    lockEnabled && hasPassword ? "bg-accent" : "bg-surface-alt"
-                  }`}
-                >
-                  <span
-                    className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                      lockEnabled && hasPassword
-                        ? "translate-x-6"
-                        : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {/* Timeout Selection */}
-              {hasPassword && (
-                <div className="flex items-center justify-between">
-                  <label className="text-text-primary">
-                    {t("settings.timeout")}
-                  </label>
-                  <select
-                    value={timeoutMinutes}
-                    onChange={(e) =>
-                      handleTimeoutChange(Number(e.target.value))
-                    }
-                    className="bg-surface-alt text-text-primary px-4 py-2 rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    <option value={1}>
-                      {t("settings.timeoutOptions.1")}
-                    </option>
-                    <option value={5}>
-                      {t("settings.timeoutOptions.5")}
-                    </option>
-                    <option value={15}>
-                      {t("settings.timeoutOptions.15")}
-                    </option>
-                    <option value={30}>
-                      {t("settings.timeoutOptions.30")}
-                    </option>
-                    <option value={60}>
-                      {t("settings.timeoutOptions.60")}
-                    </option>
-                  </select>
-                </div>
-              )}
-
-              {/* Password Form */}
-              {(showPasswordForm || hasPassword) && (
-                <div className="border-t border-border pt-4 space-y-4">
-                  {hasPassword && (
-                    <div>
-                      <label className="block text-sm text-text-secondary mb-1">
-                        {t("settings.currentPassword")}
-                      </label>
-                      <input
-                        type="password"
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        className="w-full bg-input-bg text-text-primary px-4 py-2 rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-accent"
-                      />
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-sm text-text-secondary mb-1">
-                      {t("settings.newPassword")}
-                    </label>
-                    <input
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full bg-input-bg text-text-primary px-4 py-2 rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-accent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-text-secondary mb-1">
-                      {t("settings.confirmPassword")}
-                    </label>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full bg-input-bg text-text-primary px-4 py-2 rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-accent"
-                    />
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleSetPassword}
-                      className="flex-1 bg-accent hover:bg-accent-hover text-white py-2 px-4 rounded-lg transition-colors"
-                    >
-                      {hasPassword
-                        ? t("settings.changePassword")
-                        : t("settings.setPassword")}
-                    </button>
-                    {hasPassword && (
-                      <button
-                        onClick={handleRemovePassword}
-                        className="bg-danger/10 hover:bg-danger/20 text-danger py-2 px-4 rounded-lg transition-colors"
-                      >
-                        {t("settings.removePassword")}
-                      </button>
-                    )}
-                    {!hasPassword && showPasswordForm && (
-                      <button
-                        onClick={() => {
-                          setShowPasswordForm(false);
-                          setNewPassword("");
-                          setConfirmPassword("");
-                        }}
-                        className="bg-surface-alt hover:bg-surface-hover text-text-secondary py-2 px-4 rounded-lg transition-colors"
-                      >
-                        {t("common.cancel")}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Lock Now Button */}
-              {hasPassword && lockEnabled && (
-                <div className="border-t border-border pt-4">
-                  <button
-                    onClick={() => {
-                      lock();
-                      navigate("/");
-                    }}
-                    className="w-full flex items-center justify-center gap-2 bg-surface-alt hover:bg-surface-hover text-text-primary py-2 px-4 rounded-lg transition-colors"
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                      />
-                    </svg>
-                    {t("settings.lockNow")}
-                  </button>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Notifications Section */}
-          <section className="space-y-4">
-            <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">
-              {t("settings.notifications")}
-            </h2>
-
-            <div className="bg-surface rounded-xl p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="text-text-primary block">
-                    {t("settings.notificationSounds")}
-                  </label>
-                  <p className="text-sm text-text-muted">
-                    {t("settings.notificationSoundsDescription")}
-                  </p>
-                </div>
-                <button
-                  role="switch"
-                  aria-checked={settings.notifications.soundEnabled}
-                  aria-label={t("settings.notificationSounds")}
-                  onClick={() =>
-                    updateNotifications({
-                      soundEnabled: !settings.notifications.soundEnabled,
-                    })
-                  }
-                  className={`relative w-12 h-6 rounded-full transition-colors ${
-                    settings.notifications.soundEnabled
-                      ? "bg-accent"
-                      : "bg-surface-alt"
-                  }`}
-                >
-                  <span
-                    className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                      settings.notifications.soundEnabled
-                        ? "translate-x-6"
-                        : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between border-t border-border pt-4">
-                <div>
-                  <label className="text-text-primary block">Reduce motion</label>
-                  <p className="text-sm text-text-muted">
-                    Turn off animations for messages, payments and calls. Your system's setting is respected either way.
-                  </p>
-                </div>
-                <button
-                  onClick={() => updateReduceMotion(!settings.reduceMotion)}
-                  role="switch"
-                  aria-checked={settings.reduceMotion}
-                  aria-label="Reduce motion"
-                  className={`relative w-12 h-6 rounded-full transition-colors shrink-0 ${
-                    settings.reduceMotion ? "bg-accent" : "bg-surface-alt"
-                  }`}
-                >
-                  <span
-                    className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                      settings.reduceMotion ? "translate-x-6" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <NetworkSettings />
-
-          {/* Data & Storage Section */}
-          <section className="space-y-4">
-            <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">
-              {t("settings.data")}
-            </h2>
-
-            <div className="bg-surface rounded-xl p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <label className="text-text-primary">
-                  {t("settings.storageUsed")}
-                </label>
-                <span className="text-text-secondary">
-                  {formatBytes(storageInfo.used)} ({storageInfo.keys} items)
-                </span>
-              </div>
-
-              <div className="border-t border-border pt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <label className="text-text-primary block">
-                      {t("settings.clearAllData")}
-                    </label>
-                    <p className="text-sm text-text-muted">
-                      {t("settings.clearAllDataDescription")}
-                    </p>
-                  </div>
-                </div>
-                {confirmClearData ? (
-                  <div className="flex items-center gap-3 animate-fade-in">
-                    <span className="text-text-muted text-sm flex-1">
-                      {t("settings.clearAllDataConfirm")}
-                    </span>
-                    <button
-                      onClick={async () => {
-                        setConfirmClearData(false);
-                        setMessage({
-                          type: "success",
-                          text: t("settings.dataCleared"),
-                        });
-                        await clearAllData();
-                        setStorageInfo(getStorageUsage());
-                        // The running peer still holds what was just deleted; start it over.
-                        window.location.replace(window.location.pathname);
-                      }}
-                      className="px-4 py-2 bg-danger/10 hover:bg-danger/20 text-danger rounded-lg text-sm font-medium transition-colors"
-                    >
-                      {t("common.confirm")}
-                    </button>
-                    <button
-                      onClick={() => setConfirmClearData(false)}
-                      className="px-4 py-2 bg-surface-alt hover:bg-surface-hover text-text-secondary rounded-lg text-sm font-medium transition-colors"
-                    >
-                      {t("common.cancel")}
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmClearData(true)}
-                    className="w-full bg-danger/10 hover:bg-danger/20 text-danger py-2 px-4 rounded-lg transition-colors"
-                  >
-                    {t("settings.clearAllData")}
-                  </button>
-                )}
-              </div>
-            </div>
-          </section>
-
-          {/* Updates Section */}
-          {update.supported && (
-            <section className="space-y-4">
-              <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">
-                {t("updates.title")}
-              </h2>
-
-              <div className="bg-surface rounded-xl p-4 space-y-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <label className="text-text-primary block">{t("updates.auto")}</label>
-                    <p className="text-sm text-text-muted">{t("updates.autoDescription")}</p>
-                  </div>
-                  <button
-                    role="switch"
-                    aria-checked={settings.checkForUpdates}
-                    aria-label={t("updates.auto")}
-                    onClick={() => updateCheckForUpdates(!settings.checkForUpdates)}
-                    className={`shrink-0 relative w-12 h-6 rounded-full transition-colors cursor-pointer ${
-                      settings.checkForUpdates ? "bg-accent" : "bg-surface-alt"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                        settings.checkForUpdates ? "translate-x-6" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
-                  <div className="min-w-0">
-                    <p className="text-text-primary m-0" data-testid="update-status">
-                      {update.update
-                        ? t("updates.available", { version: update.update.version })
-                        : update.error
-                          ? t("updates.failed")
-                          : update.lastCheckedAt
-                            ? t("updates.upToDate")
-                            : `${t("settings.version")} ${appVersion}`}
-                    </p>
-                    {update.lastCheckedAt && (
-                      <p className="text-sm text-text-muted m-0">
-                        {t("updates.lastChecked", {
-                          when: new Date(update.lastCheckedAt).toLocaleTimeString(),
-                        })}
-                      </p>
-                    )}
-                  </div>
-
-                  {update.update && update.update.apply === "manual" ? (
-                    <a
-                      href={update.downloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="shrink-0 px-4 py-2 bg-accent hover:bg-accent-hover text-[#111b21] rounded-lg text-sm font-semibold transition-colors"
-                    >
-                      {t("updates.download")}
-                    </a>
-                  ) : update.update ? (
-                    <button
-                      onClick={() => void update.install()}
-                      disabled={update.stage === "installing"}
-                      className="shrink-0 px-4 py-2 bg-accent hover:bg-accent-hover text-[#111b21] rounded-lg text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                    >
-                      {update.stage === "installing"
-                        ? t("updates.installing")
-                        : t(update.update.apply === "restart" ? "updates.restart" : "updates.reload")}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => void update.check()}
-                      disabled={update.stage === "checking"}
-                      className="shrink-0 px-4 py-2 bg-surface-alt hover:bg-surface-hover text-text-primary rounded-lg text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                    >
-                      {update.stage === "checking" ? t("updates.checking") : t("updates.checkNow")}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* About Section */}
-          <section className="space-y-4">
-            <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">
-              {t("settings.about")}
-            </h2>
-
-            <div className="bg-surface rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between py-1">
-                <span className="text-text-primary">{t("settings.version")}</span>
-                <span className="text-text-secondary font-mono">{appVersion}</span>
-              </div>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-text-primary">{t("settings.website")}</span>
-                <a
-                  href={APP_WEBSITE}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-accent hover:text-accent-hover transition-colors flex items-center gap-1"
-                >
-                  GitHub
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                    />
-                  </svg>
-                </a>
-              </div>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-text-primary">{t("settings.license")}</span>
-                <span className="text-text-secondary">{APP_LICENSE}</span>
-              </div>
-            </div>
-          </section>
+    <Page title={t("settings.title")} width="md" testId="settings-page">
+      {message && (
+        <div role="status" className={`p-3 rounded-lg ${message.type === "success" ? "bg-accent/20 text-accent" : "bg-danger/20 text-danger"}`}>
+          {message.text}
         </div>
+      )}
+
+      <Section title={t("settings.profile")}>
+        {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
+        {isMobile && (
+          <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
+            label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
+        )}
+        {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
+        {isMobile && canSwitch && (
+          <LinkRow testId="settings-profile-switch" label={t("profileSwitcher.title")} hint={t("profileSwitcher.holdHint")}
+            value={listProfiles().length > 1 ? listProfiles().length : undefined} onClick={openProfileSwitcher} />
+        )}
+        {/* WISP 04 § Checking other profiles: reads only; on for Desktop, off for the web and the extension unless turned on. */}
+        {canSwitch && (
+          <Row label={t("settings.profilePeek")} hint={t("settings.profilePeekHint")} info={t("settings.profilePeekInfo")} testId="settings-profile-peek-row">
+            <Switch testId="settings-profile-peek" label={t("settings.profilePeek")} checked={peekOn} onChange={(on) => updateProfilePeek({ enabled: on })} />
+          </Row>
+        )}
+        {canSwitch && peekOn && (
+          <Row label={t("settings.profilePeekNotify")} hint={t("settings.profilePeekNotifyHint")} testId="settings-profile-peek-notify-row">
+            <Switch testId="settings-profile-peek-notify" label={t("settings.profilePeekNotify")} checked={peekNotifies(settings)} onChange={(on) => updateProfilePeek({ notify: on })} />
+          </Row>
+        )}
+        <Field label={t("settings.defaultNickname")} hint={t("settings.defaultNicknameHint")} htmlFor="settings-nickname">
+          <InputGroup>
+            <input id="settings-nickname" type="text" value={settings.defaultNickname} onChange={(e) => updateDefaultNickname(e.target.value)}
+              placeholder={t("settings.nicknamePlaceholder")} maxLength={20} className={field} />
+            <button onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")}
+              className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt transition-colors cursor-pointer">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </InputGroup>
+        </Field>
+      </Section>
+
+      <Section title={t("settings.appearance")}>
+        <Row label={t("settings.colorTheme")}>
+          <ColorSwatches label={t("settings.colorTheme")} testIdPrefix="settings-theme" />
+        </Row>
+        <Row label={t("settings.colorScheme")}>
+          <div role="group" aria-label={t("settings.colorScheme")} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
+            {COLOR_SCHEME_OPTIONS.map((option) => (
+              <button key={option.value} onClick={() => handleColorSchemeChange(option.value)} aria-pressed={settings.colorScheme === option.value}
+                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
+                {option.value === "light" && (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <circle cx="12" cy="12" r="5" strokeWidth="2" />
+                    <path strokeWidth="2" strokeLinecap="round" d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+                  </svg>
+                )}
+                {option.value === "dark" && (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                  </svg>
+                )}
+                {option.value === "system" && (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                )}
+                {t(`settings.colorSchemes.${option.value}` as const)}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row label={t("settings.chatListDensity")}>
+          <div role="group" aria-label={t("settings.chatListDensity")} data-testid="chat-list-density" className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
+            {(["compact", "comfortable"] as const).map((density) => (
+              <button key={density} onClick={() => updateChatListDensity(density)} aria-pressed={settings.chatListDensity === density} data-density={density}
+                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
+                {t(`settings.chatListDensities.${density}` as const)}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row label={t("settings.language")}>
+          <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
+            options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />
+        </Row>
+        <Row label={t("settings.reduceMotion")} hint={t("settings.reduceMotionHint")}>
+          <Switch testId="settings-reduce-motion" label={t("settings.reduceMotion")} checked={settings.reduceMotion} onChange={(on) => updateReduceMotion(on)} />
+        </Row>
+      </Section>
+
+      <Section title={t("settings.notifications")}>
+        <Row label={t("settings.notificationSounds")} hint={t("settings.notificationSoundsDescription")}>
+          <Switch testId="settings-sounds" label={t("settings.notificationSounds")} checked={settings.notifications.soundEnabled} onChange={(on) => updateNotifications({ soundEnabled: on })} />
+        </Row>
+        {CUE_CATEGORIES.map((category) => {
+          const name = t(`settings.cues.${category}` as const), off = !settings.notifications.soundEnabled;
+          return (
+            <Row key={category} label={name} hint={t(`settings.cues.${category}Hint` as const)} testId={`settings-cues-${category}-row`}>
+              <button type="button" data-testid={`settings-cues-${category}-preview`} disabled={off} onClick={() => playSound(CATEGORY_PREVIEW[category])}
+                aria-label={t("settings.cues.preview", { name })} title={t("settings.cues.preview", { name })}
+                className="grid place-items-center w-8 h-8 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" /></svg>
+              </button>
+              <Switch testId={`settings-cues-${category}`} label={name} disabled={off} checked={categoryOn(category, { ...settings.notifications, soundEnabled: true })}
+                onChange={(on) => updateNotifications({ cues: { ...DEFAULT_CUES, ...settings.notifications.cues, [category]: on } })} />
+            </Row>
+          );
+        })}
+        <Row label={t("settings.systemNotifications")} testId="settings-system-notifications-row"
+          hint={<span role="status">{noticePermission === "denied" ? (systemSettings === "macos" ? t("settings.noticesDeniedMac") : systemSettings === "windows" ? t("settings.noticesDeniedWindows") : t("settings.noticesDenied"))
+            : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : noticePermission === "misplaced" ? t("settings.noticesMisplaced") : t("settings.noticesRunning")}</span>}>
+          {noticePermission === "denied" && systemSettings && (
+            <Button data-testid="settings-notification-settings" onClick={() => void openNoticeSettings()}>{t("settings.noticesOpenSettings")}</Button>
+          )}
+          <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />
+        </Row>
+        {canWake && (
+          <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
+            hint={<span role="status">{wakeError || t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint")}</span>}>
+            {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
+            <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
+          </Row>
+        )}
+      </Section>
+
+      <MediaSettings />
+
+      <Section title={t("settings.security")}>
+        <Row label={t("settings.linkPreviews")} hint={t("settings.linkPreviewsHint")} info={t("settings.linkPreviewsInfo")} testId="settings-link-previews-row">
+          <Switch testId="settings-link-previews" label={t("settings.linkPreviews")} checked={settings.linkPreviews} onChange={(on) => updateLinkPreviews(on)} />
+        </Row>
+        <Row label={t("settings.sendTyping")} hint={t("settings.sendTypingHint")} testId="settings-send-typing-row">
+          <Switch testId="settings-send-typing" label={t("settings.sendTyping")} checked={sendTyping} onChange={(on) => void setSendTyping(on).catch(() => {})} />
+        </Row>
+        <Row label={t("settings.publicProfiles")} hint={t("settings.publicProfilesHint")} info={t("settings.publicProfilesInfo")} testId="settings-public-profiles-row">
+          <Switch testId="settings-public-profiles" label={t("settings.publicProfiles")} checked={loadPublicProfiles} onChange={(on) => void setLoadPublicProfiles(on).catch(() => {})} />
+        </Row>
+        <Row label={t("settings.lockScreen")} hint={t("settings.lockScreenDescription")}>
+          {lockOn && (
+            <Button data-testid="settings-lock-now" onClick={() => { lock(); nav.home(); }} className="inline-flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              {t("settings.lockNow")}
+            </Button>
+          )}
+          <Switch testId="settings-lock" label={t("settings.lockScreen")} checked={lockOn} onChange={() => void handleLockToggle()} />
+        </Row>
+        {hasPassword && (
+          <Row label={t("settings.timeout")}>
+            <Select fit aria-label={t("settings.timeout")} data-testid="settings-timeout" value={String(timeoutMinutes)} onChange={(v) => handleTimeoutChange(Number(v))}
+              options={([1, 5, 15, 30, 60] as const).map((m) => ({ value: String(m), label: t(`settings.timeoutOptions.${m}`) }))} />
+          </Row>
+        )}
+        {hasPassword && (
+          <Row label={t("settings.password")}>
+            <Button data-testid="settings-password-edit" aria-expanded={showPasswordForm} onClick={() => (showPasswordForm ? closePasswordForm() : setShowPasswordForm(true))}>
+              {showPasswordForm ? t("common.close") : t("settings.passwordEdit")}
+            </Button>
+          </Row>
+        )}
+        {showPasswordForm && (
+          <Block testId="settings-password-form">
+            {hasPassword && (
+              <label className="block text-sm text-text-secondary">
+                {t("settings.currentPassword")}
+                <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className={`${field} mt-1`} />
+              </label>
+            )}
+            <FieldGrid>
+              <label className="block text-sm text-text-secondary">
+                {t("settings.newPassword")}
+                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`${field} mt-1`} />
+              </label>
+              <label className="block text-sm text-text-secondary">
+                {t("settings.confirmPassword")}
+                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`${field} mt-1`} />
+              </label>
+            </FieldGrid>
+            <ButtonGroup>
+              <Button variant="primary" onClick={() => void handleSetPassword()}>
+                {hasPassword ? t("settings.changePassword") : t("settings.setPassword")}
+              </Button>
+              {hasPassword && <Button variant="danger" onClick={() => void handleRemovePassword()}>{t("settings.removePassword")}</Button>}
+              {!hasPassword && <Button onClick={closePasswordForm}>{t("common.cancel")}</Button>}
+            </ButtonGroup>
+          </Block>
+        )}
+      </Section>
+
+      <Section title={t("settings.data")}>
+        <Row label={t("settings.storageUsed")} value={formatBytes(storageInfo.used)} />
+        <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
+          {confirmDeleteChats ? <>
+            <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
+            <Button onClick={() => setConfirmDeleteChats(false)}>{t("common.cancel")}</Button>
+          </> : (
+            <Button variant="danger" data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => setConfirmDeleteChats(true)}>{t("common.delete")}</Button>
+          )}
+        </Row>
+        <Row label={t("settings.clearAllData")} hint={confirmClearData ? t("settings.clearAllDataConfirm") : t("settings.clearAllDataDescription")} info={t("settings.clearAllDataInfo")}>
+          {confirmClearData ? <>
+            <Button variant="danger" data-testid="clear-all-data-confirm" onClick={() => void clearData()}>{t("common.confirm")}</Button>
+            <Button onClick={() => setConfirmClearData(false)}>{t("common.cancel")}</Button>
+          </> : (
+            <Button variant="danger" data-testid="clear-all-data" onClick={() => setConfirmClearData(true)}>{t("settings.clear")}</Button>
+          )}
+        </Row>
+      </Section>
+
+      {(install === "prompt" || install === "ios") && (
+        <Section title={t("pwa.installTitle")}>
+          {install === "prompt" ? (
+            <Row label={t("pwa.installLabel")} hint={t("pwa.installHint")}>
+              <Button variant="primary" data-testid="install-app" onClick={() => void promptInstall()}>{t("pwa.install")}</Button>
+            </Row>
+          ) : (
+            <Row label={t("pwa.iosLabel")} hint={t("pwa.iosHint")} />
+          )}
+        </Section>
+      )}
+
+      {update.supported && (
+        <Section title={t("updates.title")}>
+          <Row label={t("updates.auto")} hint={t("updates.autoDescription")}>
+            <Switch label={t("updates.auto")} checked={settings.checkForUpdates} onChange={(on) => updateCheckForUpdates(on)} />
+          </Row>
+          <Row
+            label={<span data-testid="update-status">
+              {update.update
+                ? t("updates.available", { version: update.update.version })
+                : update.error
+                  ? t("updates.failed")
+                  : update.lastCheckedAt
+                    ? t("updates.upToDate")
+                    : `${t("settings.version")} ${appVersion}`}
+            </span>}
+            hint={update.lastCheckedAt ? t("updates.lastChecked", { when: new Date(update.lastCheckedAt).toLocaleTimeString() }) : undefined}>
+            {update.update && update.update.apply === "manual" ? (
+              <a {...externalLinkProps(update.downloadUrl)} className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent hover:bg-accent-hover text-on-accent font-semibold">
+                {t("updates.download")}
+              </a>
+            ) : update.update ? (
+              <Button variant="primary" onClick={() => void update.install()} disabled={update.stage === "installing"}>
+                {update.stage === "installing" ? t("updates.installing") : t(update.update.apply === "restart" ? "updates.restart" : "updates.reload")}
+              </Button>
+            ) : (
+              <Button onClick={() => void update.check()} disabled={update.stage === "checking"}>
+                {update.stage === "checking" ? t("updates.checking") : t("updates.checkNow")}
+              </Button>
+            )}
+          </Row>
+        </Section>
+      )}
+
+      {/* Network and identity checks: rarely changed, and the most to read, on a page of their own. */}
+      <div className="bg-surface rounded-xl">
+        <LinkRow testId="settings-advanced" label={t("settings.advanced")} hint={t("settings.advancedHint")} onClick={() => nav.open("/settings/advanced")} />
       </div>
-    </div>
+
+      <Section title={t("settings.about")}>
+        <Row label={t("settings.version")} value={<span className="font-mono">{appVersion}</span>} />
+        <Row label={t("settings.website")} value={
+          <a {...externalLinkProps(APP_WEBSITE)} className="inline-flex items-center gap-1 min-h-10 text-accent hover:text-accent-hover transition-colors">
+            GitHub
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        } />
+        <Row label={t("settings.license")} value={APP_LICENSE} />
+      </Section>
+    </Page>
+  );
+}
+
+/** Settings → Advanced: how this client reaches the network, and how it checks contacts' domain proofs. */
+export function AdvancedSettings() {
+  const { t } = useI18n();
+  return (
+    <Page title={t("settings.advanced")} width="md" testId="settings-advanced-page">
+      <NetworkSettings />
+      <DomainProofSettings />
+    </Page>
   );
 }

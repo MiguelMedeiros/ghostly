@@ -8,7 +8,9 @@ import {
   loadSession,
   markJoinAnnounced,
   saveSession,
+  sessionLinkParams,
 } from "../../../../src/lib/storage";
+import type { LinkParams, LinkPreview } from "@ghostly/core";
 import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../src/lib/types";
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
@@ -28,8 +30,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const [isSending, setIsSending] = useState(false);
   const [isBurned, setIsBurned] = useState(false);
   const [incomingCallSignal, setIncomingCallSignal] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now());
 
+  const profile = params?.profile;
+  const deliveryMode = params?.deliveryMode;
   const seedB64 = params?.seedB64;
   const peerPubKey = params?.peerPubKeyB64;
   const encKeyB64 = params?.encKeyB64;
@@ -42,6 +45,12 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const linkIdRef = useRef(linkId);
   linkIdRef.current = linkId;
   const createdAtRef = useRef(Date.now());
+
+  /** The stored session's keys, participation keys included, else the ones this chat was opened with. */
+  const linkParams = useCallback((): LinkParams => {
+    const stored = sessionId ? loadSession(sessionId) : null;
+    return stored ? sessionLinkParams(stored) : { profile, deliveryMode, seedB64: seedB64!, peerPubKeyZ32: peerPubKey!, encKeyB64: encKeyB64! };
+  }, [sessionId, profile, deliveryMode, seedB64, peerPubKey, encKeyB64]);
 
   const reload = useCallback(() => {
     if (sessionId) setMessages([...(loadSession(sessionId)?.messages ?? [])]);
@@ -58,6 +67,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
       createdAtRef.current = Date.now();
       saveSession({
         id: sessionId,
+        profile,
+        deliveryMode,
         mySeedB64: seedB64,
         peerPubKeyB64: peerPubKey,
         encKeyB64,
@@ -69,8 +80,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
     setIsBurned(false);
     setIncomingCallSignal(null);
     reload();
-    void engine.call("ensureLink", { seedB64, peerPubKeyZ32: peerPubKey, encKeyB64 }).catch(() => {});
-  }, [seedB64, peerPubKey, encKeyB64, sessionId, reload]);
+    void engine.call("ensureLink", linkParams()).catch(() => {});
+  }, [profile, deliveryMode, seedB64, peerPubKey, encKeyB64, sessionId, reload, linkParams]);
 
   useEffect(() => {
     window.addEventListener("session-updated", reload);
@@ -80,33 +91,51 @@ export const useChat: typeof Desktop.useChat = (params) => {
   useEffect(() => {
     if (!linkId) return;
     void engine.call("setActiveLink", { linkId }).catch(() => {});
-    const off = engine.onCallSignal((id, signal) => id === linkId && setIncomingCallSignal(signal));
+    // An offer that arrived before this chat was open (it may be open because of it).
+    const pending = engine.takeCallOffer(linkId);
+    if (pending) setIncomingCallSignal(pending);
+    const off = engine.onCallSignal((id, signal) => {
+      if (id !== linkId) return;
+      engine.takeCallOffer(linkId);
+      setIncomingCallSignal(signal);
+    });
     return () => {
       off();
       void engine.call("setActiveLink", { linkId: null }).catch(() => {});
     };
   }, [linkId]);
 
+  /** `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies). */
   const publish = useCallback(
-    async (message: ChatMessage): Promise<string | null> => {
-      const updated = addMessage(sessionId, message);
-      if (updated) setMessages([...updated.messages]);
-      notifySessionsChanged();
+    async (message: ChatMessage, replyTo?: string): Promise<string | null> => {
+      if (!profile) {
+        const updated = addMessage(sessionId, message);
+        if (updated) setMessages([...updated.messages]);
+        notifySessionsChanged();
+      }
       // Typing can be faster than the peer taking the link on; `ensureLink` is idempotent.
       const id =
         linkIdRef.current ??
         (seedB64 && peerPubKey && encKeyB64
-          ? (await engine.call("ensureLink", { seedB64, peerPubKeyZ32: peerPubKey, encKeyB64 })).linkId
+          ? (await engine.call("ensureLink", linkParams())).linkId
           : undefined);
       if (!id) return "Ghostly is still starting. Try again in a moment.";
-      const { error } = await engine.call("sendMessage", {
+      const { error, refused } = await engine.call("sendMessage", {
         linkId: id,
         text: message.text,
         timestamp: message.timestamp,
+        ...(profile && message.preview && { preview: message.preview }),
+        ...(profile && replyTo && { replyTo }),
       });
+      // Refused: the copy kept here for a legacy chat goes too, so it never shows as sent.
+      if (refused && !profile) {
+        const updated = deleteStoredMessage(sessionId, message.id);
+        if (updated) setMessages([...updated.messages]);
+        notifySessionsChanged();
+      }
       return error;
     },
-    [sessionId, seedB64, peerPubKey, encKeyB64],
+    [profile, sessionId, seedB64, peerPubKey, encKeyB64, linkParams],
   );
 
   // "👋 joined": the joiner announces itself once, the creator answers once.
@@ -124,22 +153,26 @@ export const useChat: typeof Desktop.useChat = (params) => {
     });
   }, [publish]);
 
+  // A paired chat cannot queue this in Pkarr the way a legacy one does, so it
+  // waits for the session to open instead of announcing on mount and losing it.
+  const canAnnounce = !profile || (link?.dataLink === "open" && link?.pairing?.status === "ready");
+
   useEffect(() => {
-    if (!linkId || !sessionId || getInviteCode(sessionId)) return;
+    if (!canAnnounce || !linkId || !sessionId || getInviteCode(sessionId)) return;
     if (hasAnnouncedJoin(sessionId)) return;
     markJoinAnnounced(sessionId);
     announce();
-  }, [linkId, sessionId, announce]);
+  }, [canAnnounce, linkId, sessionId, announce]);
 
   useEffect(() => {
-    if (!linkId || !sessionId || !getInviteCode(sessionId)) return;
+    if (!canAnnounce || !linkId || !sessionId || !getInviteCode(sessionId)) return;
     const peerJoined = messages.some((m) => m.id.startsWith("peer_") && m.systemEvent?.type === "join");
     const welcomed = messages.some((m) => m.id.startsWith("me_") && m.systemEvent?.type === "join");
     if (peerJoined && !welcomed) announce();
-  }, [linkId, sessionId, messages, announce]);
+  }, [canAnnounce, linkId, sessionId, messages, announce]);
 
   const sendMessage = useCallback(
-    async (text: string): Promise<string | null> => {
+    async (text: string, extra?: { preview?: LinkPreview; replyTo?: string }): Promise<string | null> => {
       if (isBurned) return "Chat has been burned";
       const trimmed = text.trim();
       if (!trimmed) return null;
@@ -153,29 +186,29 @@ export const useChat: typeof Desktop.useChat = (params) => {
           sender: "me",
           timestamp,
           nick: nickRef.current,
+          // Only a paired chat carries a preview; a compatibility chat's text goes as it is.
+          ...(profile && extra?.preview && { preview: extra.preview }),
           meta: {
             dhtKey: engine.state?.links.find((l) => l.id === linkIdRef.current)?.myPubKeyZ32 ?? "",
             encryptedPayloadLength: 0,
             dnsRecords: open ? ["webrtc"] : ["_msgs", "_ts", "_ack", ...(nickRef.current ? ["_nick"] : [])],
             packetTimestamp: timestamp,
           },
-        });
+        }, profile ? extra?.replyTo : undefined);
       } catch (error) {
         return error instanceof Error ? error.message : "Failed to send message. Check your connection.";
       } finally {
         setIsSending(false);
       }
     },
-    [isBurned, publish],
+    [isBurned, publish, profile],
   );
 
   const burn = useCallback(() => setIsBurned(true), []);
 
+  // The name this chat's own notices carry. The peer learns the profile's name from the app (`App.tsx`).
   const setNick = useCallback((nick: string) => {
     nickRef.current = nick || undefined;
-    if (engine.state && engine.state.settings.nick !== nick) {
-      void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
-    }
   }, []);
 
   const setCallSignal = useCallback(async (signal: string | null) => {
@@ -208,15 +241,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
     [sessionId],
   );
 
-  // The countdown ring next to the peer's key.
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 200);
-    return () => clearInterval(timer);
-  }, []);
-
   const poll = link?.poll;
   const pollCountdown = {
-    remaining: poll ? Math.max(0, poll.nextAt - now) : 0,
+    remaining: poll ? Math.max(0, poll.nextAt - Date.now()) : 0,
     total: poll?.interval || 1,
     isPolling: poll?.polling ?? true,
   };

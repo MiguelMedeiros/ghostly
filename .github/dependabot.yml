@@ -1,15 +1,24 @@
 # Security updates open on their own (they need "Dependabot security updates"
 # on in the repository settings). The weekly version updates below are grouped
 # so they arrive as a few pull requests, not dozens.
+#
+# Everything targets dev, where work lands; main only holds what is released
+# (CONTRIBUTING.md). Security updates still open against the default branch,
+# which is dev as well.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
     # typescript-eslint does not support TypeScript 7 yet; drop once it does.
     ignore:
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # The Fedimint adapter pins a canary of the web SDK exactly (docs/wisps/2xx-fedimint.md).
+      # The stable 0.1.x (2025-10) is a year older, but semver ranks it above 0.0.0-canary;
+      # drop once a stable release embeds fedimint 0.12 or later.
+      - dependency-name: "@fedimint/*"
     groups:
       npm:
         patterns: ["*"]
@@ -17,6 +26,7 @@ updates:
   - package-ecosystem: npm
     directory: /website
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
     # typescript-eslint does not support TypeScript 7 yet; drop once it does.
     ignore:
       - dependency-name: typescript
@@ -32,6 +42,13 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
+    # src-tauri pins the versions Tauri's wry uses (src/fullscreen.rs takes wry's WebView2
+    # controller). They move with a Tauri update, never on their own: a bump alone breaks
+    # the Windows build.
+    ignore:
+      - dependency-name: webview2-com
+      - dependency-name: windows-core
     groups:
       cargo:
         patterns: ["*"]
@@ -39,9 +56,11 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
     groups:
       actions:
         patterns: ["*"]
   - package-ecosystem: docker
     directories: [/web, /website]
     schedule: { interval: weekly, day: monday }
+    target-branch: dev

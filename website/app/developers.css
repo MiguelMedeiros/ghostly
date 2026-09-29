@@ -1,0 +1,568 @@
+/* /developers: page rules are prefixed dv-. The shared rules further down
+   (.preset, .bgrid-*, .stage-*, .nego-*, .peer-*, .cap-chip, .avail*, .path-code)
+   are also used by BlockGrid, Negotiation and /roadmap. */
+
+/* ── Rhythm: every chapter owns its vertical air ─── */
+.dv-sec {
+  position: relative;
+}
+.dv-sec--compose {
+  padding-block: clamp(72px, 12vh, 128px);
+}
+.dv-sec--negotiate {
+  padding-block: clamp(80px, 16vh, 170px);
+}
+.dv-sec--path {
+  padding-block: clamp(72px, 14vh, 150px);
+}
+.dv-sec--avail {
+  padding-block: clamp(64px, 12vh, 130px);
+}
+.dv-sec--next {
+  padding-block: clamp(56px, 10vh, 110px) clamp(72px, 12vh, 140px);
+}
+/* Phones: the same rhythm at a smaller volume. */
+@media (max-width: 640px) {
+  .dv-sec--path {
+    padding-block: clamp(56px, 9vh, 88px);
+  }
+  .dv-sec--compose,
+  .dv-sec--next {
+    padding-block: clamp(48px, 7vh, 72px);
+  }
+  .dv-sec--negotiate {
+    padding-block: clamp(64px, 10vh, 100px);
+  }
+  .dv-sec--avail {
+    padding-block: clamp(48px, 8vh, 80px);
+  }
+}
+.dv-btn-sm {
+  min-height: 42px;
+  padding: 8px 16px;
+  font-size: 14.5px;
+  border-radius: 12px;
+  gap: 8px;
+}
+.dv-btn-sm svg {
+  width: 18px;
+  height: 18px;
+}
+@keyframes dv-dock {
+  0%,
+  8% {
+    transform: translate(calc(var(--dx) * 1.35), calc(var(--dy) * 1.35 - 40px));
+    opacity: 0;
+  }
+  25%,
+  82% {
+    transform: translate(var(--dx), var(--dy));
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy));
+    opacity: 0;
+  }
+}
+@media (max-width: 1200px) {
+  .dv-hero-actions .btn--primary {
+    padding-inline: 18px;
+  }
+  .dv-btn-sm {
+    padding: 8px 13px;
+    font-size: 14px;
+  }
+}
+@media (max-width: 1000px) and (min-width: 961px) {
+  .dv-hero-actions .btn--primary {
+    padding-inline: 15px;
+  }
+  .dv-btn-sm {
+    padding: 8px 11px;
+    font-size: 13.5px;
+  }
+}
+/* Below 960px the copy would have to squeeze the CTAs; the hero stacks instead. */
+@media (max-width: 960px) {
+  .dv-hero-grid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .dv-art {
+    max-width: 560px;
+    justify-self: center;
+  }
+}
+@media (max-width: 640px) {
+  .dv-hero-actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* ── Compose: the page's one full-bleed band ─────── */
+.dv-band {
+  background: var(--room-hero);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+  isolation: isolate;
+}
+.dv-band::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 42% at 50% 0%, rgba(34, 211, 238, 0.11), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(34, 211, 238, 0.1), transparent 70%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.2) 40%, rgba(0, 0, 0, 0.35));
+}
+.dv-band .bgrid-rows {
+  background: var(--bg-2);
+  border-color: var(--line-2);
+  box-shadow: 0 30px 80px -40px rgba(34, 211, 238, 0.25);
+}
+
+/* Presets (shared by composer and negotiation) */
+.composer-presets,
+.nego-scenarios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.preset {
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+}
+.preset:hover {
+  color: var(--text);
+  border-color: rgba(34, 211, 238, 0.4);
+}
+.preset[aria-checked="true"] {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #031018;
+}
+
+/* Block grid (shared with /roadmap) */
+.composer-blurb {
+  color: var(--muted);
+  font-size: 16px;
+}
+.bgrid {
+  display: grid;
+  gap: 18px;
+}
+.bgrid-controls {
+  display: grid;
+  gap: 14px;
+}
+.bgrid-rows {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.bgrid-row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  border-top: 1px solid var(--line);
+}
+.bgrid-row:first-child {
+  border-top: 0;
+}
+.bgrid-dim {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--c) 5%, transparent);
+  border-right: 1px solid var(--line);
+}
+.bgrid-dim-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--c);
+  flex: none;
+}
+.bgrid-blocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.bgrid-block {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  min-width: 118px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  text-align: left;
+  border: 1px dashed color-mix(in srgb, var(--c) 40%, transparent);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background 0.35s var(--ease),
+    border-color 0.35s,
+    transform 0.35s var(--ease),
+    box-shadow 0.35s,
+    opacity 0.35s;
+  opacity: 0.55;
+}
+.bgrid-block[data-on="true"] {
+  opacity: 1;
+  border: 1px solid color-mix(in srgb, var(--c) 75%, white 5%);
+  background: color-mix(in srgb, var(--c) 22%, #0b121c);
+  box-shadow: 0 8px 22px -12px color-mix(in srgb, var(--c) 70%, transparent);
+  transform: translateY(-2px);
+}
+.bgrid-block:hover {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--c) 80%, white 10%);
+}
+.bgrid-block[aria-expanded="true"] {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.bgrid-name {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.bgrid-block:not([data-on="true"]) .bgrid-name {
+  color: var(--dim);
+}
+.bgrid-level {
+  --l: var(--lvl-research);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--l);
+}
+.bgrid-level::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--l);
+}
+.bgrid-level[data-level="available"] {
+  --l: var(--lvl-available);
+}
+.bgrid-level[data-level="planned"] {
+  --l: var(--lvl-planned);
+}
+.bgrid-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 16px 20px 18px;
+  border-top: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+  background: color-mix(in srgb, var(--c) 7%, var(--surface));
+  animation: detail-in 0.3s var(--ease);
+}
+@keyframes detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bgrid-detail {
+    animation: none;
+  }
+}
+.bgrid-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bgrid-detail h4 {
+  font-size: 18px;
+  font-weight: 700;
+}
+.bgrid-close {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 20px;
+}
+.bgrid-close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.bgrid-detail p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+.bgrid-specs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 14px;
+}
+.bgrid-specs a {
+  color: var(--cyan);
+}
+.bgrid-specs a:hover {
+  text-decoration: underline;
+}
+.bgrid-specs .mono {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.bgrid-hint {
+  font-size: 14px;
+}
+.bgrid-count {
+  white-space: nowrap;
+}
+/* How many pieces each composition lights, on its own button. */
+.bgrid-preset-n {
+  display: inline-block;
+  min-width: 22px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.preset[aria-checked="true"] .bgrid-preset-n {
+  background: rgba(3, 16, 24, 0.16);
+  color: #031018;
+}
+@media (max-width: 760px) {
+  .bgrid-row {
+    grid-template-columns: 1fr;
+  }
+  .bgrid-dim {
+    border-right: 0;
+    padding: 10px 14px 0;
+    background: none;
+  }
+  .bgrid-blocks {
+    padding: 8px 12px 14px;
+  }
+  .bgrid-block {
+    min-width: 0;
+    flex: 1 1 130px;
+  }
+}
+
+/* Stage rail (roadmap map) */
+.stage-rail {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.stage-rail::before {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 15px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--lvl-available), var(--lvl-planned), var(--lvl-research));
+  opacity: 0.45;
+}
+.stage-node {
+  --l: var(--lvl-research);
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 4px;
+  color: var(--dim);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: center;
+}
+.stage-node[data-level="available"] {
+  --l: var(--lvl-available);
+}
+.stage-node[data-level="planned"] {
+  --l: var(--lvl-planned);
+}
+.stage-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--l);
+  background: var(--bg);
+  transition:
+    background 0.3s,
+    box-shadow 0.3s;
+}
+.stage-node[data-passed="true"] {
+  color: var(--text);
+}
+.stage-node[data-passed="true"] .stage-dot {
+  background: var(--l);
+}
+.stage-node[aria-checked="true"] .stage-dot {
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--l) 25%, transparent);
+}
+.stage-play {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--cyan);
+  font-weight: 600;
+  font-size: 14px;
+}
+.stage-play:hover {
+  border-color: var(--cyan);
+}
+@media (max-width: 640px) {
+  .stage-name {
+    font-size: 11.5px;
+  }
+}
+
+/* Negotiation */
+.nego {
+  display: grid;
+  gap: 20px;
+}
+.peer {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  min-width: 0;
+}
+.peer[data-who="boo"] {
+  border-color: rgba(34, 211, 238, 0.3);
+}
+.peer[data-who="casper"] {
+  border-color: rgba(74, 222, 128, 0.3);
+}
+.peer legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 18px;
+  padding-inline: 6px;
+}
+.peer legend svg {
+  filter: none;
+}
+.peer select {
+  appearance: none;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa8bb' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+  color: var(--text);
+  font-size: 15px;
+}
+
+/* Availability */
+.avail-yes {
+  color: var(--lvl-available);
+  font-weight: 700;
+  font-size: 16px;
+}
+.avail-scroll {
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.avail {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 640px;
+  font-size: 14.5px;
+}
+.avail th,
+.avail td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.avail thead th {
+  /* Sticks only when the region itself scrolls (narrow screens); the table
+     never traps the page's wheel scroll. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: var(--surface);
+}
+.avail tbody th {
+  font-weight: 600;
+}
+.avail tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.avail tbody tr:hover {
+  background: rgba(255, 255, 255, 0.015);
+}
+.avail-notes {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.55;
+  list-style: disc;
+  padding-left: 20px;
+}
+
+/* Four cards: one row on a desktop, two by two on a tablet, stacked on a phone. The link sits at the foot of each card. */
+.devnext {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+.devnext-card {
+  padding: 28px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+  align-content: start;
+}
+.devnext-card .link-arrow {
+  align-self: end;
+}
+@media (max-width: 1100px) {
+  .devnext {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .devnext {
+    grid-template-columns: 1fr;
+  }
+}

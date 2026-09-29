@@ -1,0 +1,339 @@
+/* /wisps: a short hero, then the WISPs as layers */
+
+.catalog-hero {
+  padding-block: calc(var(--nav-h) + 48px) 24px;
+  background: radial-gradient(ellipse at 20% 0%, rgba(34, 211, 238, 0.07), transparent 60%);
+}
+.catalog-hero .wrap {
+  display: grid;
+  gap: 16px;
+  max-width: calc(var(--wrap));
+}
+.catalog-hero .wrap {
+  gap: 12px;
+}
+.catalog-hero .lead {
+  max-width: 46em;
+}
+.catalog-next {
+  color: var(--dim);
+  font-size: 14.5px;
+}
+.catalog-next a {
+  color: var(--cyan);
+}
+.catalog-next a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* The map at a glance */
+.wmap {
+  display: grid;
+  gap: 18px;
+  padding-bottom: 56px;
+}
+.wmap-how {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--dim);
+}
+.wmap-demo {
+  display: inline-block;
+  width: 16px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--line-2);
+}
+.wmap-demo--big {
+  width: 28px;
+  flex: none;
+}
+/* The stack: one row per layer, the layer's name in a rail on the left, then one band per family. Each family
+   wears its colour from the roadmap's map (`--c`, set on the layer and on each band); the process tile stays
+   neutral. Everything drawn works in the app today, so the colour says which piece it is, not its level. */
+.wmap-stack {
+  display: grid;
+  gap: 10px;
+}
+.wmap-layer {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 14px;
+}
+.wmap-layer-label {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  border-left: 2px solid var(--c, var(--line-2));
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--c, var(--dim));
+}
+.wmap-bands {
+  display: grid;
+  gap: 6px;
+}
+.wmap-family {
+  scroll-margin-top: calc(var(--nav-h) + 20px);
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 10px 12px 10px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--c, var(--line-2)) 40%, var(--line));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--c, transparent) 10%, var(--bg-2)), var(--bg-2) 70%);
+}
+.wmap-family header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--c, var(--cyan));
+}
+.wmap-family header svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.wmap-family h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.wmap-count {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.wmap-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 6px;
+}
+.wmap-tile-wrap {
+  position: relative;
+  scroll-margin-top: calc(var(--nav-h) + 40px);
+}
+.wmap-tile-wrap--lead {
+  grid-column: span 2;
+}
+/* An old link to a draft (#wisp-401) lands on its tile, and the tile shows it. */
+.wmap-anchor {
+  position: absolute;
+  top: calc(-1 * var(--nav-h) - 40px);
+}
+.wmap-tile-wrap:target .wmap-tile,
+.wmap-tile-wrap:has(.wmap-anchor:target) .wmap-tile {
+  outline: 2px solid var(--c, var(--cyan));
+  outline-offset: 2px;
+}
+.wmap-tile {
+  --l: var(--line-2);
+  display: grid;
+  gap: 2px;
+  height: 100%;
+  min-height: 54px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--l) 55%, transparent);
+  background: color-mix(in srgb, var(--l) 16%, var(--surface));
+  transition:
+    transform 0.2s var(--ease),
+    border-color 0.2s,
+    background 0.2s;
+}
+.wmap-tile:hover,
+.wmap-tile:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--l);
+  background: color-mix(in srgb, var(--l) 26%, var(--surface));
+}
+.wmap-tile[data-level="available"] {
+  --l: var(--c, var(--lvl-available));
+}
+.wmap-num {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--l);
+}
+.wmap-tile[data-level="none"] .wmap-num {
+  color: var(--muted);
+}
+.wmap-name {
+  font-size: 12px;
+  line-height: 1.25;
+  color: var(--text);
+}
+.wmap-tile-wrap--lead .wmap-tile {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.wmap-tile-wrap--lead .wmap-num {
+  font-size: 20px;
+}
+.wmap-tile-wrap--lead .wmap-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+@media (max-width: 860px) {
+  .wmap-layer {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .wmap-layer-label {
+    padding: 4px 0 0 10px;
+  }
+  .wmap-family {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+}
+@media (max-width: 640px) {
+  .wmap-tiles {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  }
+  .wmap-tile-wrap--lead .wmap-num {
+    font-size: 17px;
+  }
+  .wmap-tile-wrap--lead .wmap-tile {
+    gap: 8px;
+  }
+}
+
+/* Glossary: the six words, folded away under the layers */
+.glossary {
+  margin-bottom: 80px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  scroll-margin-top: calc(var(--nav-h) + 16px);
+}
+.glossary summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--dim);
+}
+.glossary-title {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.glossary summary:hover .glossary-title,
+.glossary[open] .glossary-title {
+  color: var(--text);
+}
+.glossary-hint {
+  margin-left: 12px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.glossary[open] .glossary-hint {
+  display: none;
+}
+.glossary-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 28px;
+  margin: 16px 0 4px;
+}
+.gl {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+.gl dt {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+.gl-term {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.gl-gloss {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+/* Each key is drawn the way the protocol loop on /developers draws what it names. */
+.gl-key {
+  --k: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--k) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--k) 15%, transparent);
+  color: var(--text);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gl--wisp .gl-key {
+  --k: var(--cyan);
+  border-color: transparent;
+  background: none;
+  padding-inline: 0;
+  color: var(--cyan);
+}
+.gl--capability .gl-key {
+  --k: var(--violet);
+}
+.gl--adapter .gl-key {
+  --k: var(--sky);
+  border-radius: 999px;
+}
+.gl--profile .gl-key {
+  border: 0;
+  border-bottom: 2px solid var(--sky);
+  border-radius: 0;
+  background: none;
+  padding-inline: 0;
+  color: var(--dim);
+}
+.gl--provider .gl-key {
+  border: 0;
+  background: none;
+  padding-inline: 0;
+  color: var(--amber);
+}
+.gl--provider .gl-key::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--amber);
+  transform: rotate(45deg);
+}
+.gl--plugin .gl-key {
+  border-style: dashed;
+  background: none;
+}
+@media (max-width: 860px) {
+  .glossary-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .glossary-list {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-push-send"
+description = "Enables the push_send command without any pre-configured scope."
+commands.allow = ["push_send"]
+
+[[permission]]
+identifier = "deny-push-send"
+description = "Denies the push_send command without any pre-configured scope."
+commands.deny = ["push_send"]

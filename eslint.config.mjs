@@ -42,6 +42,20 @@ export default tseslint.config(
     rules: { "react-refresh/only-export-components": "off" },
   },
   {
+    // One look and one keyboard for every choice in the app: components/ui/Select.tsx, never a native <select>
+    // (WebKit draws it with the system's gradient and double chevron, and its list ignores the app's theme).
+    files: ["src/**/*.tsx"],
+    ignores: ["src/test/**"],
+    rules: {
+      "no-restricted-syntax": ["error", { selector: "JSXOpeningElement[name.name='select']", message: "Use Select from src/components/ui/Select.tsx." }],
+    },
+  },
+  {
+    // Component tests and their harness are never hot-reloaded.
+    files: ["src/test/**/*.{ts,tsx}", "packages/react/test/**/*.{ts,tsx}"],
+    rules: { "react-refresh/only-export-components": "off" },
+  },
+  {
     // Playwright fixtures call `use()` and take `{}` when they need nothing; neither is React.
     files: ["e2e/**/*.ts"],
     languageOptions: { globals: globals.node },

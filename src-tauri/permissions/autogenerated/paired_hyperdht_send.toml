@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-paired-hyperdht-send"
+description = "Enables the paired_hyperdht_send command without any pre-configured scope."
+commands.allow = ["paired_hyperdht_send"]
+
+[[permission]]
+identifier = "deny-paired-hyperdht-send"
+description = "Denies the paired_hyperdht_send command without any pre-configured scope."
+commands.deny = ["paired_hyperdht_send"]

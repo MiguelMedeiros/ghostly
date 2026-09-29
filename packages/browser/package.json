@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/browser",
   "private": true,
-  "version": "0.4.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "The Ghostly peer for browsers: engine, wallet and the platform layer under the shared UI. Used by the extension and the web app.",
   "exports": {
@@ -9,19 +9,42 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:group-load": "vitest run test/communityLoad.test.ts --reporter=verbose"
   },
   "dependencies": {
-    "@cashu/cashu-ts": "^4.10.2",
-    "@ghostly/core": "*"
+    "@arkade-os/sdk": "0.4.76",
+    "@atproto/jwk-webcrypto": "^0.3.4",
+    "@atproto/oauth-client": "^0.8.7",
+    "@bitcoindevkit/bdk-wallet-web": "0.3.0",
+    "@breeztech/breez-sdk-spark": "0.26.0",
+    "@cashu/cashu-ts": "^4.11.0",
+    "@fedimint/core": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
+    "@fedimint/fedimint-client-wasm-bundler": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
+    "@fedimint/types": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
+    "@ghostly/core": "*",
+    "@hyperswarm/dht-relay": "0.4.3",
+    "@scure/bip39": "2.4.0",
+    "@scure/btc-signer": "2.4.1",
+    "@secondts/bark": "0.25.0",
+    "@synonymdev/pubky": "0.13.0",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.19",
+    "ethers": "6.17.0",
+    "nostr-tools": "2.25.2",
+    "openpgp": "6.3.2",
+    "sodium-javascript": "0.8.0"
   },
   "peerDependencies": {
     "react": "^19.2.4"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
+    "@types/ws": "8.18.1",
+    "fake-indexeddb": "^6.2.5",
+    "hyperdht": "6.34.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2",
+    "ws": "8.21.3"
   }
 }

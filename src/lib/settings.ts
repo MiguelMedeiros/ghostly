@@ -1,8 +1,12 @@
 import { clearChatData } from "@ghostly/browser/shared/idb";
-import { LEGACY_JOIN_PREFIX } from "./storage";
+import { removeFileBytes } from "@ghostly/browser/shared/fileBytes";
+import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
+import { registryKey } from "./profiles";
 
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
+/** How tall the chat list's rows are: `compact` (name and last message) or `comfortable` (and the contact's key). */
+export type ChatListDensity = "compact" | "comfortable";
 export type Language = "en" | "pt" | "es" | "fr" | "it" | "zh" | "ja" | "ar";
 
 // Legacy support
@@ -14,8 +18,18 @@ export interface LockScreenSettings {
   timeoutMinutes: number;
 }
 
+/** The kinds of finer sounds (src/lib/cues.ts), each turned on or off on its own, under the Sounds switch. */
+export const CUE_CATEGORIES = ["payments", "identities", "connection", "chat", "interface"] as const;
+export type CueCategory = (typeof CUE_CATEGORIES)[number];
+export type CueSwitches = Record<CueCategory, boolean>;
+/** Interface sounds (cards, a new wallet or group) are for those who ask for them: off until turned on. */
+export const DEFAULT_CUES: Readonly<CueSwitches> = { payments: true, identities: true, connection: true, chat: true, interface: false };
+
 export interface NotificationSettings {
   soundEnabled: boolean;
+  systemEnabled: boolean;
+  /** Which categories of finer sounds play. Absent (settings from before them): `DEFAULT_CUES`. */
+  cues?: Partial<CueSwitches>;
 }
 
 export interface AppSettings {
@@ -26,19 +40,33 @@ export interface AppSettings {
   lockScreen: LockScreenSettings;
   notifications: NotificationSettings;
   defaultNickname: string;
-  /** The user's own Giphy API key; the key shipped with old builds was retired by Giphy. */
-  giphyApiKey: string;
   /** Turns animations off, on top of the system's own preference. */
   reduceMotion: boolean;
+  chatListDensity: ChatListDensity;
   /**
    * Whether this client may ask, now and then, whether a newer version was
    * published. The question is a request that says this device runs Ghostly,
    * so it is the user's to allow; off, updates are only looked for on demand.
    */
   checkForUpdates: boolean;
+  /**
+   * Link previews (WISP 401 § Link previews): when a message has a link, this app reads the page's title and picture
+   * and sends them with it. Only the sender's app ever contacts the site; off, links go as plain text.
+   */
+  linkPreviews: boolean;
+  /**
+   * Checking this device's other unlocked profiles for new messages (WISP 04 § Checking other profiles): `enabled`
+   * absent follows the platform (on for Desktop, off for the web and the extension); `notify` shows a system notice.
+   */
+  profilePeek?: { enabled?: boolean; notify?: boolean };
+  /** WISP 1000: this profile's random storage space, chosen on first backup. */
+  backupSpace?: string;
+  /** WISP 1002: where backups go, if S3-compatible storage is set up. Never copied into a backup. */
+  backupS3?: import("@ghostly/browser/backup/s3").S3Config | null;
 }
 
-const SETTINGS_KEY = "ghostly_app_settings";
+/** Each local profile keeps its own settings (WISP 04); the default profile keeps the original key. */
+const settingsKey = () => (getStorageProfile() ? `ghostly_${getStorageProfile()}_app_settings` : "ghostly_app_settings");
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark", // Legacy
@@ -52,20 +80,22 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   notifications: {
     soundEnabled: true,
+    systemEnabled: false,
+    cues: { ...DEFAULT_CUES },
   },
   defaultNickname: "",
-  giphyApiKey: "",
   reduceMotion: false,
+  chatListDensity: "compact",
   checkForUpdates: true,
+  linkPreviews: true,
 };
 
-export function loadSettings(getRandomName?: () => string): AppSettings {
+export function loadSettings(): AppSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = localStorage.getItem(settingsKey());
     if (!raw) {
-      const randomNickname = getRandomName ? getRandomName() : "";
-      const initialSettings = { ...DEFAULT_SETTINGS, defaultNickname: randomNickname };
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(initialSettings));
+      const initialSettings = { ...DEFAULT_SETTINGS };
+      localStorage.setItem(settingsKey(), JSON.stringify(initialSettings));
       return initialSettings;
     }
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
@@ -86,8 +116,11 @@ export function loadSettings(getRandomName?: () => string): AppSettings {
       notifications: {
         ...DEFAULT_SETTINGS.notifications,
         ...parsed.notifications,
+        cues: { ...DEFAULT_CUES, ...parsed.notifications?.cues },
       },
       defaultNickname: parsed.defaultNickname ?? DEFAULT_SETTINGS.defaultNickname,
+      chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
+      linkPreviews: parsed.linkPreviews !== false,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -117,22 +150,25 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * Everything this client keeps on the device except the wallet: the
- * localStorage keys and the chats, files and services in the peer's database.
- * The peer forgets the links on its next reconcile; the caller reloads.
+ * Everything this profile keeps on the device except the wallet: its
+ * localStorage keys and the chats, files and services in its peer's database.
+ * Other profiles and the list of profiles stay. The peer forgets the links on
+ * its next reconcile; the caller reloads.
  */
 export async function clearAllData(): Promise<void> {
   const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
+    if (!key || key === registryKey()) continue;
     // The join flags of older versions are not in the namespace, and each one
-    // carries the session id of a chat that existed.
-    if (key?.startsWith("ghostly") || key?.startsWith(LEGACY_JOIN_PREFIX)) {
+    // carries the session id of a chat that existed; they are the default profile's.
+    if (ownsKey(key) || (!getStorageProfile() && key.startsWith(LEGACY_JOIN_PREFIX))) {
       keysToRemove.push(key);
     }
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
   await clearChatData();
+  await removeFileBytes().catch(() => {});
 }
 
 export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";
@@ -142,7 +178,8 @@ export const APP_LICENSE = "MIT";
 
 export function saveSettings(settings: AppSettings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(settingsKey(), JSON.stringify(settings));
+    window.dispatchEvent(new Event("settings-updated"));
   } catch {
     // Storage full or unavailable
   }

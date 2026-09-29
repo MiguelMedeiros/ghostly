@@ -84,6 +84,7 @@ try {
 
   await desk.getByTestId("file-input").setInputFiles(join(here, "..", "..", "hero-banner.png"));
   await phone.getByTestId("file-save").first().waitFor({ timeout: 120_000 });
+  await desk.getByTestId("composer-more").click();
   await desk.getByTestId("payment-button").click();
   await desk.getByTestId("payment-amount").fill("2100");
   await desk.getByPlaceholder("What for? (optional)").fill("pizza 🍕");
@@ -94,18 +95,19 @@ try {
   await shot(phone, "chat");
   console.log("horizontal overflow in chat:", await overflow(phone));
 
-  await phone.getByTitle("Emoji").click();
+  await phone.getByTestId("composer-expressions").click();
   await phone.waitForTimeout(1200);
   await shot(phone, "sheet-emoji");
   await phone.mouse.click(180, 80);
   await phone.getByTestId("composer-more").click();
   await shot(phone, "composer-more");
-  await phone.getByTitle("GIF").click();
-  await phone.getByRole("button", { name: "Retro" }).click();
-  await phone.getByPlaceholder("Search retro GIFs...").fill("ghost");
+  await phone.keyboard.press("Escape");
+  await phone.getByTestId("composer-expressions").click();
+  await phone.getByTestId("expression-tab-gif").click();
+  await phone.getByPlaceholder("Search GIFs").fill("ghost");
   await phone.waitForTimeout(6000);
   await shot(phone, "sheet-gif");
-  await phone.mouse.click(180, 80);
+  await phone.keyboard.press("Escape");
   await phone.getByTestId("composer-more").click();
   await phone.getByTestId("payment-button").click();
   await shot(phone, "sheet-payment");

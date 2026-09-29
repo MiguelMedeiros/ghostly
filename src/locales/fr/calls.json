@@ -1,0 +1,43 @@
+{
+  "accept": "Accepter",
+  "audio": "Appel audio",
+  "camera": "Caméra",
+  "cameraOff": "Caméra désactivée",
+  "connected": "Connecté",
+  "connecting": "Connexion...",
+  "decline": "Refuser",
+  "devices": {
+    "back": "{{name}} est de retour",
+    "lost": "{{name}} débranché. Appareil par défaut utilisé.",
+    "menu": "Appareils",
+    "switchBack": "Revenir"
+  },
+  "duration": "Durée : {{duration}}",
+  "end": "Terminer l'appel",
+  "ended": "Appel terminé",
+  "hangUp": "Raccrocher",
+  "incoming": "Appel entrant",
+  "missed": "Appel manqué",
+  "mute": "Couper le son",
+  "outgoing": "Appel en cours...",
+  "rejected": "Appel rejeté",
+  "selfView": "Glissez pour déplacer, tirez un coin pour redimensionner, double-cliquez pour réinitialiser",
+  "shareScreen": "Partager l'écran",
+  "sharing": {
+    "both": "Vous et {{name}} partagez vos écrans",
+    "peer": "{{name}} partage son écran",
+    "you": "Vous partagez votre écran"
+  },
+  "stopSharing": "Arrêter le partage",
+  "turnCameraOff": "Couper la caméra",
+  "turnCameraOn": "Activer la caméra",
+  "unmute": "Activer le son",
+  "video": "Appel vidéo",
+  "wakeGaveUp": "{{name}} n'a pas ouvert Ghostly.",
+  "waking": "Réveil de {{name}} pour l'appel…",
+  "window": {
+    "chat": "Revenir à la discussion",
+    "full": "Revenir en plein écran",
+    "small": "Garder l'appel dans une petite fenêtre"
+  }
+}

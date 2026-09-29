@@ -1,0 +1,34 @@
+{
+  "hubs": {
+    "auto": "Hub if always on",
+    "badge": "hub",
+    "badgeHint": "Passes the group's messages on to the members it is connected to. It sees who talks when, not what is said.",
+    "choice": "Hub",
+    "exclude": "Never a hub",
+    "pin": "Always a hub"
+  },
+  "menu": {
+    "forget": "Delete from this device",
+    "leave": "Leave group",
+    "members": "Members…",
+    "rotate": "Rotate keys"
+  },
+  "rename": {
+    "action": "Rename",
+    "cancel": "Cancel",
+    "hint": "Every member sees the new name. Older apps keep the name they joined with.",
+    "label": "Group name",
+    "save": "Save"
+  },
+  "typing": {
+    "many": "{{count}} people are typing…",
+    "one": "{{name}} is typing…",
+    "recordingMany": "{{count}} people are recording audio…",
+    "recordingOne": "{{name}} is recording audio…",
+    "recordingTwo": "{{name}} and {{other}} are recording audio…",
+    "thinkingMany": "{{count}} people are thinking…",
+    "thinkingOne": "{{name}} is thinking…",
+    "thinkingTwo": "{{name}} and {{other}} are thinking…",
+    "two": "{{name}} and {{other}} are typing…"
+  }
+}

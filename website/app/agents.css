@@ -1,0 +1,673 @@
+/* /developers/agents: page rules are prefixed ag-; the rest is cli.css (cl-). */
+.ag-hero {
+  padding-block: calc(var(--nav-h) + 56px) 48px;
+}
+.ag-hero-inner {
+  display: grid;
+  gap: 18px;
+  justify-items: start;
+}
+.ag-hero-inner > .lead {
+  max-width: 760px;
+}
+.ag-title {
+  font-size: clamp(40px, 6vw, 72px);
+}
+.ag-note {
+  font-size: 14px;
+}
+
+/* The prompt: a terminal-like box, its Copy button big and first in reading order. */
+.ag-prompt {
+  width: 100%;
+  max-width: 1000px;
+  margin-top: 8px;
+  border-radius: 14px;
+  border: 1px solid var(--line-2);
+  background: #03070c;
+  overflow: hidden;
+  box-shadow:
+    0 50px 110px -44px #000,
+    0 0 90px -34px rgba(34, 211, 238, 0.28);
+}
+.ag-prompt-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 10px 10px 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.ag-prompt-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.btn.ag-copy {
+  min-height: 48px;
+  min-width: 132px;
+  padding: 10px 28px;
+  font-size: 16px;
+  justify-content: center;
+}
+.ag-prompt-text {
+  margin: 0;
+  padding: 20px 24px 24px;
+  max-height: 460px;
+  overflow: auto;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: #cbd5e1;
+  /* Long lines wrap, so the whole prompt reads without scrolling sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* How it works: the detail, quieter than the prompt. */
+.ag-sub {
+  border-top: 0;
+  padding-block: 12px 28px;
+}
+/* The five steps in one row on a laptop. */
+.ag-sub .cl-cmds {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.ag-h3 {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+@media (max-width: 640px) {
+  .ag-hero {
+    padding-block: calc(var(--nav-h) + 32px) 32px;
+  }
+  .ag-prompt-bar {
+    padding-left: 14px;
+  }
+  .btn.ag-copy {
+    min-width: 108px;
+    padding-inline: 20px;
+  }
+  .ag-prompt-text {
+    font-size: 12px;
+    padding: 16px;
+  }
+}
+
+/* ── How it works: the picture that plays its steps (components/agents/AgentSteps.tsx) ──
+   The dots, the stage frame, the captions and Replay are the Developers explainer's (dev-steps.css, psx-); the
+   pieces of the picture are agx-. Each piece is always in the page: `data-on` says whether it shows at the current
+   step, `data-final` whether it is in the finished frame (without scripts and with reduced motion), and the one
+   arriving now (`data-now`) plays its entrance once, `--agx-d` seconds into its step. */
+
+.agx {
+  margin-top: 12px;
+}
+/* The dots come right under the lead here, not tucked under a hero's buttons. */
+@container psx (max-width: 719px) {
+  .agx .psx-steps {
+    margin-top: 0;
+  }
+}
+/* While the steps turn by themselves, the line to the next dot fills over the time left on this one. */
+.agx .psx-steps li[data-fill]::after {
+  content: "";
+  position: absolute;
+  top: 17px;
+  inset-inline-end: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--cyan);
+  transform-origin: left;
+  animation: agx-fill var(--fill, 4s) linear both;
+}
+@container psx (max-width: 719px) {
+  .agx .psx-steps li[data-fill]::after {
+    top: 19px;
+  }
+}
+.agx-controls {
+  justify-content: flex-start;
+}
+/* Until the caption fits beside the picture, it comes first, so the words and the picture share one screen. */
+@container psx (max-width: 1099px) {
+  .agx .psx-grid {
+    grid-template-areas: "steps" "copy" "stage" "controls";
+    gap: 16px;
+  }
+  .agx-controls {
+    justify-content: center;
+  }
+}
+
+/* Future pieces take no room; the finished frame without scripts or with reduced motion. */
+html.js:not(.calm) .agx-stage [data-on="false"],
+html.calm .agx-stage [data-final="false"],
+html:not(.js) .agx-stage [data-final="false"] {
+  display: none;
+}
+/* Nothing plays before the picture is in view: every arriving piece waits on its first frame. */
+.agx:not([data-live]) [data-now],
+.agx:not([data-live]) [data-now] * {
+  animation-play-state: paused !important;
+}
+
+.agx-scene {
+  display: grid;
+  gap: 14px;
+}
+
+/* Casper (your agent) and Boo (you), and the line between them once they are connected. */
+.agx-cast {
+  display: grid;
+  grid-template-columns: auto minmax(24px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+.agx-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.agx-seat {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 58px;
+}
+.agx-seat > *,
+.agx-name > * {
+  grid-area: 1 / 1;
+}
+.agx-name {
+  display: grid;
+}
+.agx-shell-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  color: var(--dim);
+  font-size: 14px;
+}
+.agx-wire {
+  position: relative;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--line-2) 0 6px, transparent 6px 12px);
+}
+.agx-wire-lit {
+  position: absolute;
+  inset: -1px 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #4ade80, var(--cyan));
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.55);
+}
+
+/* The agent's shell on the left, your app on the right; stacked when narrow. Things that travel between them
+   (.agx-fly) cross the gap. */
+.agx-panels {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 28px;
+  container: agx-panels / inline-size;
+}
+.agx-term,
+.agx-app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 264px;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+}
+.agx-term {
+  border-radius: 12px;
+  background: #03070c;
+}
+.agx-app {
+  border-radius: 18px;
+  background: #0a111b;
+}
+.agx-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--dim);
+  font-size: 12px;
+}
+.agx-lights {
+  width: 8px;
+  height: 8px;
+  margin-right: 26px;
+  border-radius: 50%;
+  background: #fb7185;
+  box-shadow:
+    13px 0 #fbbf24,
+    26px 0 #4ade80;
+}
+.agx-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 5px;
+  min-height: 0;
+  padding: 10px 12px 12px;
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.agx-lines > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.agx-cmd {
+  display: flex;
+  gap: 0.6ch;
+}
+.agx-ps {
+  color: #4ade80;
+}
+.agx-typed {
+  flex: 1;
+  min-width: 0;
+}
+.agx-paste {
+  padding: 5px 9px;
+  border-left: 2px solid var(--cyan);
+  border-radius: 4px;
+  background: rgba(34, 211, 238, 0.07);
+  color: var(--muted);
+}
+.agx-paste b {
+  color: var(--text);
+  font-weight: 600;
+}
+.agx-caret {
+  color: var(--cyan);
+}
+.agx-out {
+  color: var(--cyan);
+}
+.agx-json {
+  color: #7a8aa6;
+}
+.agx-untrusted {
+  color: var(--amber);
+  border-radius: 4px;
+  transition:
+    box-shadow var(--dur-slow) var(--ease-enter),
+    background var(--dur-slow) var(--ease-enter);
+}
+/* The safety step: the contact's words, fenced off as data. */
+.agx[data-step="5"] .agx-untrusted,
+html.calm .agx .agx-untrusted,
+html:not(.js) .agx .agx-untrusted {
+  background: rgba(251, 191, 36, 0.1);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.55);
+}
+.agx-guard {
+  color: rgba(251, 191, 36, 0.85);
+}
+.agx-shield {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  width: 44px;
+  height: 44px;
+  filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.45));
+}
+.agx-shield svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: rgba(251, 191, 36, 0.14);
+  stroke: var(--amber);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.agx-shield .agx-shield-lock {
+  fill: none;
+}
+
+.agx-bar--app {
+  display: grid;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.agx-bar--app > * {
+  grid-area: 1 / 1;
+}
+.agx-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agx-head small {
+  display: block;
+  color: #4ade80;
+  font-size: 11px;
+  font-weight: 500;
+}
+.agx-avatar {
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  border-radius: 50%;
+  background: rgba(74, 222, 128, 0.16);
+  color: #4ade80;
+}
+.agx-chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 0;
+  padding: 10px;
+  overflow: hidden;
+}
+.agx-chat > * {
+  margin: 0;
+}
+.agx-chat > .agx-empty {
+  margin-block: auto;
+  align-self: center;
+  color: var(--dim);
+  font-size: 13px;
+}
+.agx-sys {
+  align-self: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.agx-msg {
+  max-width: 86%;
+  padding: 7px 11px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.agx-msg--in {
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+  background: var(--surface-3);
+}
+.agx-msg--out {
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+  background: #005c4b;
+}
+.agx-quote {
+  display: block;
+  margin-bottom: 4px;
+  padding: 2px 8px;
+  border-left: 2px solid var(--cyan);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 12px;
+}
+.agx-typing {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.agx-dots {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+}
+.agx-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: agx-blink 1.2s ease-in-out infinite;
+}
+.agx-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.agx-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* What travels between the two: the invite link, your message, the answer. Only seen on the way. */
+.agx-fly {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+}
+.agx-fly--link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--cyan);
+  border-radius: 999px;
+  background: #0b1622;
+  color: var(--cyan);
+  font-size: 12.5px;
+  white-space: nowrap;
+  box-shadow: 0 0 22px rgba(34, 211, 238, 0.4);
+}
+.agx-fly--link svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.agx-fly--msg,
+.agx-fly--reply {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 16px var(--cyan);
+}
+.agx-fly--reply {
+  background: #4ade80;
+  box-shadow: 0 0 16px #4ade80;
+}
+
+/* Entrances, each once, on the site's curves. */
+.agx-rise[data-now] {
+  animation: agx-rise var(--dur-slow) var(--ease-enter) var(--agx-d, 0s) both;
+}
+.agx-pop[data-now] {
+  animation: agx-pop var(--dur-slow) var(--ease-hop) var(--agx-d, 0s) both;
+}
+.agx-cmd[data-now] {
+  animation: agx-show 0.01s linear var(--agx-d, 0s) both;
+}
+.agx-cmd[data-now] .agx-typed {
+  animation: agx-type 0.7s steps(24, end) var(--agx-d, 0s) both;
+}
+.agx-wire-lit[data-now] {
+  animation: agx-draw var(--dur-slow) var(--ease-move) var(--agx-d, 0s) both;
+}
+.agx-fly[data-now] {
+  animation: agx-fly-x 1s var(--ease-move) var(--agx-d, 0s) both;
+}
+.agx-fly--msg[data-now] {
+  animation-direction: reverse;
+}
+
+@keyframes agx-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes agx-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+@keyframes agx-show {
+  from {
+    visibility: hidden;
+  }
+}
+@keyframes agx-type {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes agx-draw {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes agx-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes agx-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+/* From the middle of the shell to the middle of the app (the columns are 1.35fr and 1fr). */
+@keyframes agx-fly-x {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateX(-21cqi) scale(0.7);
+  }
+  18%,
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateX(29cqi) scale(1);
+  }
+}
+/* Stacked: from the middle of the shell down to the middle of the app. */
+@keyframes agx-fly-y {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateY(-93px) scale(0.7);
+  }
+  18%,
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateY(103px) scale(1);
+  }
+}
+
+/* Narrow: the shell above the app, the ghosts a little smaller. */
+@container psx (max-width: 719px) {
+  .agx-panels {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .agx-term {
+    height: 188px;
+  }
+  .agx-app {
+    height: 168px;
+  }
+  .agx-lines {
+    gap: 4px;
+    font-size: 11.5px;
+  }
+  .agx-fly[data-now] {
+    animation-name: agx-fly-y;
+  }
+  .agx-shield {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+/* Without scripts and with reduced motion: the finished frame, every caption in order, no dots or Replay. */
+html.calm .agx .psx-steps,
+html.calm .agx .agx-controls,
+html:not(.js) .agx .agx-controls {
+  display: none;
+}
+html.calm .agx .psx-copy,
+html:not(.js) .agx .psx-copy {
+  gap: 10px;
+}
+html.calm .agx .psx-card,
+html:not(.js) .agx .psx-card {
+  grid-area: auto;
+  gap: 4px;
+  padding: 12px 16px;
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+}
+
+/* The detail, folded under the picture. */
+.ag-details {
+  padding-block: 8px 12px;
+}
+.ag-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  transition: border-color var(--dur-fast) var(--ease-exit);
+}
+.ag-summary::-webkit-details-marker {
+  display: none;
+}
+.ag-summary::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-base) var(--ease-enter);
+}
+.ag-details[open] > .ag-summary {
+  margin-bottom: 12px;
+}
+.ag-details[open] > .ag-summary::before {
+  transform: rotate(45deg);
+}
+.ag-summary:hover {
+  border-color: rgba(34, 211, 238, 0.5);
+}

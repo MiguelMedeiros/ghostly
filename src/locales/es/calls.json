@@ -1,0 +1,43 @@
+{
+  "accept": "Aceptar",
+  "audio": "Llamada de audio",
+  "camera": "Cámara",
+  "cameraOff": "Cámara apagada",
+  "connected": "Conectado",
+  "connecting": "Conectando...",
+  "decline": "Rechazar",
+  "devices": {
+    "back": "{{name}} ha vuelto",
+    "lost": "{{name}} desconectado. Usando el predeterminado.",
+    "menu": "Dispositivos",
+    "switchBack": "Volver a usarlo"
+  },
+  "duration": "Duración: {{duration}}",
+  "end": "Finalizar llamada",
+  "ended": "Llamada finalizada",
+  "hangUp": "Colgar",
+  "incoming": "Llamada entrante",
+  "missed": "Llamada perdida",
+  "mute": "Silenciar",
+  "outgoing": "Llamando...",
+  "rejected": "Llamada rechazada",
+  "selfView": "Arrastra para mover, tira de una esquina para cambiar el tamaño, doble clic para restablecer",
+  "shareScreen": "Compartir pantalla",
+  "sharing": {
+    "both": "Tú y {{name}} están compartiendo sus pantallas",
+    "peer": "{{name}} está compartiendo su pantalla",
+    "you": "Estás compartiendo tu pantalla"
+  },
+  "stopSharing": "Dejar de compartir",
+  "turnCameraOff": "Apagar cámara",
+  "turnCameraOn": "Encender cámara",
+  "unmute": "Activar sonido",
+  "video": "Videollamada",
+  "wakeGaveUp": "{{name}} no abrió Ghostly.",
+  "waking": "Despertando a {{name}} para la llamada…",
+  "window": {
+    "chat": "Volver al chat",
+    "full": "Volver a pantalla completa",
+    "small": "Mantener la llamada en una ventana pequeña"
+  }
+}

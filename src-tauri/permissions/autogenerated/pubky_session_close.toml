@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pubky-session-close"
+description = "Enables the pubky_session_close command without any pre-configured scope."
+commands.allow = ["pubky_session_close"]
+
+[[permission]]
+identifier = "deny-pubky-session-close"
+description = "Denies the pubky_session_close command without any pre-configured scope."
+commands.deny = ["pubky_session_close"]

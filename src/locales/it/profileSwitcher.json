@@ -1,0 +1,16 @@
+{
+  "add": "Aggiungi un profilo",
+  "current": "profilo attuale",
+  "holdHint": "Oppure tieni premuto Impostazioni nella barra delle schede",
+  "locked": "bloccato",
+  "manage": "Gestisci profili",
+  "new": "nuovi messaggi",
+  "newShort": "Nuovo",
+  "open": "Apri il profilo",
+  "othersNew": "nuovi messaggi in un altro profilo",
+  "othersUnread": "messaggi non letti in un altro profilo",
+  "switchTo": "Passa a {{name}}",
+  "switching": "Apertura di {{name}}…",
+  "title": "Cambia profilo",
+  "unread": "{{count}} non letti"
+}

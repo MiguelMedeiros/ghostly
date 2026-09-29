@@ -1,0 +1,385 @@
+/* Homepage */
+
+/* ── Hero: Act 0 ── */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  align-items: center;
+  padding-block: calc(var(--nav-h) + 24px) 56px;
+  overflow: hidden;
+}
+/* The grid holds still: the network field behind the act is the one thing that drifts. */
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  mask-image: radial-gradient(ellipse at 40% 45%, #000 20%, transparent 70%);
+  opacity: 0.7;
+  animation: none;
+}
+.hero-light {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(520px 520px at 22% 40%, rgba(34, 211, 238, 0.09), transparent 70%),
+    radial-gradient(640px 640px at 68% 55%, rgba(0, 168, 132, 0.07), transparent 70%);
+}
+.hero-inner {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 22px;
+  width: auto;
+  max-width: 640px;
+  margin-inline: var(--inset) auto;
+  padding-inline: 0;
+}
+.hero-title {
+  display: grid;
+  font-size: clamp(48px, 7.2vw, 118px);
+}
+/* The headline leads (a longer rise), the rest follows as one group (shorter, quicker). */
+.hero-line {
+  display: block;
+  animation: hero-rise-lead calc(var(--dur-slow) * 1.25) var(--ease-enter) both;
+}
+.hero-rise {
+  animation: hero-rise var(--dur-slow) var(--ease-enter) both;
+}
+@keyframes hero-rise-lead {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+/* The cue to follow Boo nudges twice once his line has been read, then rests. */
+.hero-cue {
+  display: inline-block;
+  animation: hero-cue 1.4s var(--ease-move) 2 both;
+}
+@keyframes hero-cue {
+  50% {
+    transform: translateY(4px);
+  }
+}
+.hero-lead {
+  max-width: 34em;
+}
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
+.hero-micro {
+  color: var(--dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+.hero-follow {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  font-size: 15px;
+  margin-top: 4px;
+}
+.hero-follow a {
+  padding-block: 12px;
+}
+.hero-skip {
+  color: var(--dim);
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+/* The still Boo stands in for the actor when the act backdrop is off. */
+.hero-still {
+  position: absolute;
+  right: max(24px, calc((100vw - var(--wrap)) / 2 + 80px));
+  top: 50%;
+  transform: translateY(-46%);
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act--static) .hero-still {
+  display: none;
+}
+.bubble {
+  display: inline-block;
+  padding: 9px 16px;
+  border-radius: 18px;
+  font-size: 14px;
+  white-space: nowrap;
+  position: relative;
+}
+.bubble--boo {
+  background: rgba(34, 211, 238, 0.14);
+  color: var(--cyan);
+}
+/* The still bubble is centred over Boo, so its tail points straight down at his head. */
+.bubble--boo::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 7px);
+  top: 100%;
+  border: 7px solid transparent;
+  border-top: 8px solid rgba(34, 211, 238, 0.14);
+  border-bottom: 0;
+}
+@media (max-width: 860px) {
+  .hero {
+    align-items: end;
+    padding-top: calc(var(--nav-h) + 40vh);
+  }
+  .hero-inner {
+    margin-inline: 16px;
+    max-width: none;
+    gap: 14px;
+  }
+  .hero-title {
+    font-size: clamp(40px, 11vw, 48px);
+  }
+  .hero-lead {
+    font-size: 17px;
+  }
+  /* The two ways in, one under the other, the whole column wide. */
+  .hero-actions {
+    display: grid;
+    width: 100%;
+    gap: 10px;
+  }
+  .hero-actions .btn {
+    width: 100%;
+  }
+  .hero-actions .btn:not(.btn--primary) {
+    min-height: 52px;
+  }
+  .hero-micro {
+    gap: 2px 14px;
+  }
+  .hero-skip {
+    display: none;
+  }
+  .hero-still {
+    right: auto;
+    left: 50%;
+    top: calc(var(--nav-h) + 24px);
+    transform: translateX(-50%);
+  }
+}
+/* Phones on their side: no room above the copy, so Boo stands beside it on the right. */
+@media (max-width: 860px) and (orientation: landscape) {
+  .hero {
+    align-items: center;
+    padding-top: calc(var(--nav-h) + 24px);
+  }
+  .hero-inner {
+    margin-inline: 16px 216px;
+  }
+  .hero-still {
+    left: auto;
+    right: 16px;
+    top: calc(var(--nav-h) + 24px);
+    transform: none;
+  }
+  .hero-still .ghost {
+    width: 120px;
+    height: auto;
+  }
+  .hero-still .bubble {
+    white-space: normal;
+    max-width: 184px;
+    text-align: center;
+  }
+}
+
+/* ── Scenes ── */
+.open-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+/* The open chapter's buttons: in the copy panel on wide screens; on phones the sheet
+   keeps only the copy and the layer legend, and the buttons follow the chapter. */
+.open-after {
+  display: grid;
+  gap: 22px;
+  justify-items: start;
+  padding-block: 8px 40px;
+  background: var(--room-open);
+}
+@media (max-width: 860px) {
+  .open-after .open-actions {
+    display: grid;
+    width: 100%;
+    gap: 10px;
+  }
+  .open-after .btn {
+    width: 100%;
+  }
+  .open-sheet-only,
+  .scene-static-extra:has(> .open-sheet-only:only-child) {
+    display: none;
+  }
+}
+@media (min-width: 861px) {
+  .open-after {
+    display: none;
+  }
+}
+/* Phones only (the wide picture names its slabs itself): the layer legend sits in the sheet
+   under the copy, two or three names per row, so the sheet stays about 330px tall and the
+   whole stack of slabs remains in view above it. */
+.open-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+}
+.open-legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.open-legend li span {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c);
+  flex: none;
+}
+
+/* ── Reveal ── */
+.reveal[data-reveal="hidden"] {
+  opacity: 0;
+  transform: translateY(20px);
+}
+.reveal[data-reveal="shown"] {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-slow) var(--ease-enter),
+    transform var(--dur-slow) var(--ease-enter);
+}
+
+/* ── Phones: a story chapter (story/SceneFrame.tsx PhoneChapter) ──
+   The chapter's room runs full-bleed behind it, so chapters part by tone and space, not by frames: the eyebrow, the
+   steps as captions taking turns in one place (as tall as the longest, so nothing moves), the step bars, then one
+   picture, open at the edges. Reduced motion lists every caption over the finished still. */
+@media (max-width: 860px) {
+  .scene--phone {
+    background: var(--chapter-bg);
+    padding-block: 72px 48px;
+  }
+  .scene--phone .scene-static {
+    gap: 0;
+  }
+  .scene--phone .scene-static > .eyebrow {
+    margin-bottom: 18px;
+  }
+  .scene--phone .scene-static-steps {
+    gap: 0;
+  }
+  .scene--phone .scene-static-copy {
+    gap: 10px;
+  }
+  .scene--phone .scene-static-copy .h-scene {
+    font-size: clamp(28px, 7.6vw, 34px);
+  }
+  .scene--phone .scene-static-copy .body {
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  /* The aside under a step waits for the wider page. */
+  .scene--phone .scene-static-copy .note {
+    display: none;
+  }
+  .scene--phone:not([data-calm="true"]) .scene-static-step {
+    grid-area: 1 / 1;
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition:
+      opacity var(--dur-fast) var(--ease-exit),
+      transform var(--dur-fast) var(--ease-exit);
+  }
+  .scene--phone:not([data-calm="true"]) .scene-static-step[data-active="true"] {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+    transition:
+      opacity var(--dur-base) var(--dur-fast) var(--ease-enter),
+      transform var(--dur-base) var(--dur-fast) var(--ease-enter);
+  }
+  .scene--phone[data-calm="true"] .scene-static-steps {
+    gap: 28px;
+  }
+  /* (The film's bars are hidden while a chapter reads as an article; a phone chapter keeps its own.) */
+  .scene.scene--phone .scene-progress {
+    display: flex;
+    margin-top: 10px;
+  }
+  /* Even bars: the one showing is lit, the ones read are dimmer, the rest wait. */
+  .scene--phone .scene-progress button[aria-current="step"]::before {
+    transform: none;
+  }
+  .scene--phone .scene-progress button[data-on="true"]:not([aria-current="step"])::before {
+    opacity: 0.45;
+  }
+  .scene--phone .scene-static-figure {
+    margin-top: 12px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 88%, transparent);
+  }
+  /* The pieces open upward and the ghosts ride the top one: show 40 more units of the stage above them. */
+  .scene--phone[data-chapter="open"] .scene-static-figure {
+    aspect-ratio: 390 / 420;
+  }
+  .scene--phone[data-chapter="open"] .scene-static-figure .stage {
+    margin-top: -20.51%;
+  }
+  .scene--phone .scene-static-extra {
+    padding-top: 4px;
+  }
+  /* Until the page runs, a phone gets the server's film folded into an article: dress it like the chapter it
+     becomes (the room behind it, the first caption over an open picture) so hydrating it changes little. */
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) {
+    background: var(--chapter-bg);
+  }
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) .scene-copy {
+    order: -1;
+  }
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) .scene-step:not(:first-child),
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) .scene-step .note {
+    display: none;
+  }
+  html.js[data-orient="portrait"]:not(.calm) .scene:not(.scene--static) .scene-visual {
+    border: 0;
+    border-radius: 0;
+  }
+}
+/* Upright tablets: the same column, centred, the hero's copy included. */
+@media (min-width: 641px) and (max-width: 860px) {
+  .scene--phone .scene-static {
+    max-width: 560px;
+  }
+}
+@media (min-width: 641px) and (max-width: 860px) and (orientation: portrait) {
+  .hero-inner {
+    max-width: 560px;
+    margin-inline: auto;
+  }
+}

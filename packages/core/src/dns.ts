@@ -1,9 +1,11 @@
 import { concatBytes, utf8Decode, utf8Encode } from "./bytes";
 
 /**
- * Minimal DNS wire codec for Pkarr packets. Ghostly only ever publishes TXT
- * records, so only TXT is encoded. Decoding skips every other record type and
- * understands name compression, which the Rust client (simple-dns) emits.
+ * Minimal DNS wire codec for Pkarr packets. Ghostly publishes TXT records (and,
+ * for a did:dht document that names its gateways, NS). Decoding skips every
+ * other record type and understands name compression, which the Rust client
+ * (simple-dns) emits. `decodeDnsAnswers` hands out any record type raw, for
+ * readers of other people's records (Pubky's `_pubky` and homeserver records, pkdns.ts).
  */
 export interface TxtRecord {
   /** Fully qualified name, e.g. `_msgs.<z32 public key>` */
@@ -12,9 +14,19 @@ export interface TxtRecord {
   ttl: number;
 }
 
+/** A name server record: `host` is the server's name. */
+export interface NsRecord {
+  type: "NS";
+  name: string;
+  host: string;
+  ttl: number;
+}
+
+const TYPE_NS = 2;
 const TYPE_TXT = 16;
 const CLASS_IN = 1;
 const FLAGS_REPLY = 0x8000;
+const FLAG_AUTHORITATIVE = 0x0400;
 const MAX_CHARACTER_STRING = 255;
 const MAX_POINTER_OFFSET = 0x3fff;
 
@@ -62,10 +74,11 @@ function writeName(writer: Writer, name: string, suffixOffsets: Map<string, numb
   writer.u8(0);
 }
 
-export function encodeTxtPacket(records: TxtRecord[]): Uint8Array {
+/** `authoritative` sets the AA flag, which a did:dht packet must carry. */
+export function encodeTxtPacket(records: (TxtRecord | NsRecord)[], options: { authoritative?: boolean } = {}): Uint8Array {
   const writer = new Writer();
   writer.u16(0);
-  writer.u16(FLAGS_REPLY);
+  writer.u16(options.authoritative ? FLAGS_REPLY | FLAG_AUTHORITATIVE : FLAGS_REPLY);
   writer.u16(0);
   writer.u16(records.length);
   writer.u16(0);
@@ -74,6 +87,17 @@ export function encodeTxtPacket(records: TxtRecord[]): Uint8Array {
   const suffixOffsets = new Map<string, number>();
   for (const record of records) {
     writeName(writer, record.name, suffixOffsets);
+    if ("host" in record) {
+      writer.u16(TYPE_NS);
+      writer.u16(CLASS_IN);
+      writer.u32(record.ttl);
+      // The length comes first, so the host is written on its own (uncompressed) and measured.
+      const host = new Writer();
+      writeName(host, record.host, new Map());
+      writer.u16(host.length);
+      writer.push(host.bytes());
+      continue;
+    }
     writer.u16(TYPE_TXT);
     writer.u16(CLASS_IN);
     writer.u32(record.ttl);
@@ -91,7 +115,8 @@ export function encodeTxtPacket(records: TxtRecord[]): Uint8Array {
   return writer.bytes();
 }
 
-function readName(data: Uint8Array, start: number): { name: string; next: number } {
+/** A name at `start` (compressed or not), and where the bytes after it begin. Labels are joined with ".", no trailing dot. */
+export function readDnsName(data: Uint8Array, start: number): { name: string; next: number } {
   const labels: string[] = [];
   let pos = start;
   let next = -1;
@@ -126,12 +151,12 @@ export function decodeTxtPacket(data: Uint8Array): TxtRecord[] {
 
   let pos = 12;
   for (let i = 0; i < questions; i++) {
-    pos = readName(data, pos).next + 4;
+    pos = readDnsName(data, pos).next + 4;
   }
 
   const records: TxtRecord[] = [];
   for (let i = 0; i < answers; i++) {
-    const { name, next } = readName(data, pos);
+    const { name, next } = readDnsName(data, pos);
     pos = next;
     if (pos + 10 > data.length) throw new Error("DNS record out of bounds");
     const type = view.getUint16(pos);
@@ -157,6 +182,40 @@ export function decodeTxtPacket(data: Uint8Array): TxtRecord[] {
       }
     }
     pos = end;
+  }
+  return records;
+}
+
+/** One answer record, undecoded: its rdata starts at `offset` in the packet (names in it may point anywhere before). */
+export interface RawDnsAnswer {
+  name: string;
+  type: number;
+  ttl: number;
+  /** Where the rdata starts in the packet. */
+  offset: number;
+  length: number;
+}
+
+/** Every answer record of a packet, of any type. Names are decompressed; the rdata is left to the caller. */
+export function decodeDnsAnswers(data: Uint8Array): RawDnsAnswer[] {
+  if (data.length < 12) throw new Error("DNS packet too short");
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const questions = view.getUint16(4);
+  const answers = view.getUint16(6);
+  let pos = 12;
+  for (let i = 0; i < questions; i++) pos = readDnsName(data, pos).next + 4;
+  const records: RawDnsAnswer[] = [];
+  for (let i = 0; i < answers; i++) {
+    const { name, next } = readDnsName(data, pos);
+    pos = next;
+    if (pos + 10 > data.length) throw new Error("DNS record out of bounds");
+    const type = view.getUint16(pos);
+    const ttl = view.getUint32(pos + 4);
+    const length = view.getUint16(pos + 8);
+    pos += 10;
+    if (pos + length > data.length) throw new Error("DNS rdata out of bounds");
+    records.push({ name, type, ttl, offset: pos, length });
+    pos += length;
   }
   return records;
 }

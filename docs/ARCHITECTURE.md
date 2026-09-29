@@ -1,72 +1,90 @@
 # Architecture
 
-> Ghostly is not a chat application. It is an ephemeral, identity-addressed peer-to-peer service layer. Chat, voice, video and local web applications are services on top of it, and they exist while you are online.
+Ghost is the small rendezvous and record-exchange primitive; Ghostly is its reference application. Chat, calls, files, payments and shared local web apps compose on top. Live connections exist while peers are online; local history and keys persist on each device.
+
+The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describe the modular boundaries. The wire format is in [PROTOCOL.md](PROTOCOL.md), and how bytes travel is in [TRANSPORTS.md](TRANSPORTS.md).
+
+## At a glance
+
+```
+ Alice                    Mainline DHT (Pkarr)                     Bob
+   │── signed, encrypted record ──▶  rendezvous  ◀── signed, encrypted record ──│
+   │◀══════════ live link: WebRTC · Iroh · HyperDHT (end-to-end encrypted) ═════▶│
+   │               no live path? short texts keep going over the DHT            │
+```
+
+- **Two people meet on the public Mainline DHT** (Pkarr records), then talk directly over WebRTC, Iroh or HyperDHT. If no direct path works, short texts keep flowing over the DHT itself ([the one chat](#the-one-chat)).
+- **Keys:** a fresh key pair per chat, so no key ties your chats together.
+- **Relays are helpers**, not servers that hold your chats. Desktop and the CLI read the DHT directly (the CLI beside the relays); a browser cannot, so the web app and the extension go through public Pkarr relays. A relay that misbehaves is skipped for a while ([circuit breaker per relay](TRANSPORTS.md#circuit-breaker-per-relay)).
+- **Local first:** history, keys and wallets live on the device, optionally behind a password. There is no Ghostly message server and no account ([where state lives](#where-state-lives)).
+- **End to end:** relays and DHT nodes see ciphertext, timing and IP addresses, never what you say ([security model](#security-model)).
 
 ## Repository
 
 | Path | What |
 |---|---|
-| [`packages/core`](../packages/core) | The Ghost protocol in platform-neutral TypeScript: identities, crypto, Pkarr records, service advertisements, WebRTC signaling, DataChannel framing, HTTP over the data link. Shared by every client. |
-| [`packages/react`](../packages/react) | React hooks shared by the clients (`useWebRTC`). |
-| [`src`](../src), [`src-tauri`](../src-tauri) | The UI every client builds, and Ghostly Desktop (Tauri): the same peer in a WebView, with Rust reaching the Mainline DHT directly, fetching shared local apps and hosting viewer windows. |
-| [`packages/browser`](../packages/browser) | The Ghostly peer, in TypeScript, for anything with a WebView or a browser: engine, ecash wallet, IndexedDB, and the platform layer under the shared UI. |
-| [`web`](../web) | Ghostly on the web: that peer in a tab, nothing to install. `docker compose up` serves it. See [WEB.md](WEB.md). |
-| [`extension`](../extension) | Ghostly Browser (Chromium, Manifest V3). Builds the same UI as Desktop (`src/`) on top of a background peer, and reaches the DHT through Pkarr relays. See [BROWSER.md](BROWSER.md). |
-| [`cli`](../cli) | Rust CLI and library for bots. |
+| [`packages/core`](../packages/core) | The protocol in platform-neutral TypeScript: identities, crypto, invites, Pkarr records and relays, DHT delivery, the chat session and its capabilities, transport negotiation, files, payments, groups, identity proofs. Shared by every app |
+| [`packages/browser`](../packages/browser) | The Ghostly peer (`GhostlyNode`): engine, wallets, identities, IndexedDB and file storage, and the platform stand-ins the shared UI is built with. Runs in the web app, the extension and Desktop |
+| [`packages/react`](../packages/react) | React hooks shared by the apps (`useWebRTC`) |
+| [`packages/sdk`](../packages/sdk) | `@ghostlytools/sdk`: adapter contracts, fakes, contract suites, the plugin registry and the protocol library. See [SDK.md](SDK.md) |
+| [`packages/cli`](../packages/cli) | `ghostly`, the engine on Node without a screen, for bots: a daemon, a local socket API and a JSON event stream. See [WISP 11xx](wisps/11xx-headless.md) |
+| [`packages/iroh-web`](../packages/iroh-web) | Iroh compiled to wasm (`@ghostly/iroh-web`), built from `native-transports/iroh-web` |
+| [`src`](../src) | The UI every app builds (React). `src/desktop` holds Desktop's host |
+| [`src-tauri`](../src-tauri) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications, stored media streamed to the player, web push posts, and on Linux the calls' media (webrtc-rs and GStreamer, as WebKitGTK has no WebRTC) |
+| [`web`](../web) | The web app: the peer in a tab, and its service worker (offline shell, share target, wake-up pushes). See [WEB.md](WEB.md) |
+| [`extension`](../extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
+| [`cli`](../cli) | `ghostly-cli`, the older Rust compatibility client for v0.4 chats, no longer shipped from 1.0 (build it from source). Not the npm CLI, which is `packages/cli`. See [cli/README.md](../cli/README.md) |
+| [`native-transports`](../native-transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node), the HyperDHT relay for browsers, the Iroh wasm crate, and a reference push relay for browsers that cannot post a wake-up themselves |
 | [`website`](../website) | ghostly.tools |
+| [`e2e`](../e2e) | End-to-end tests. See [TESTING.md](TESTING.md) |
+| [`examples/sdk-adapter`](../examples/sdk-adapter) | A complete SDK adapter project |
 
-The wire format is specified in [PROTOCOL.md](PROTOCOL.md).
+One peer, three hosts: the web app, the extension and Desktop all build `src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`), which swaps the platform modules for ones backed by the peer. A host (`packages/browser/src/host.ts`) is the small part that differs. The headless CLI (`packages/cli`) hosts the same peer on Node, with no UI.
 
 ## Layers
 
 ```
- services      chat · voice · video · http · …
- data link     WebRTC DataChannel "ghostly/1", peer to peer, DTLS
- discovery     Pkarr signed packets in the Mainline DHT (directly, or through relays)
- identity      one Ed25519 keypair per link + a shared secretbox key
+ services     chat · calls · files · payments · shared apps · groups
+ session      chat session (paired-chat/1): pinned keys, capabilities, ordered frames
+ layer 1      WebRTC · Iroh · HyperDHT        (a stream, when one connects)
+ layer 0      Pkarr records on the Mainline DHT (rendezvous, signaling, DHT text)
+ identity     per-chat rendezvous keys + a participation key per side
 ```
 
-Discovery only helps peers find each other and exchange a WebRTC offer and answer. Application traffic goes over WebRTC. Relays, STUN and TURN are generic connectivity infrastructure: they see ciphertext and hold no Ghostly state. There is no Ghostly server.
+## The one chat
 
-## How It Works
+Every 1:1 chat is the same kind of chat ([WISP 400](wisps/400-chat.md)):
 
-Ghostly uses a clever combination of cryptography and the decentralized web:
+1. **Invite.** One `ghostly1…` bech32m code, or the link `https://ghostly.tools/#ghostly1…` ([WISP 801](wisps/801-invitation-profiles.md)).
+2. **Rendezvous on the DHT.** Both sides publish and read signed Pkarr records. First contact runs on the DHT and on a stream at once; whichever verifies first pins the contact's participation key.
+3. **Upgrade.** The apps rank the transports they share and dial: WebRTC, Iroh or HyperDHT. The first authenticated session makes the chat `live`.
+4. **DHT floor.** With no stream, the chat is `on-dht`: text up to 256 bytes goes over the DHT ([WISP 403](wisps/403-dht-text.md)), longer items wait or are held ([WISP 4xx](wisps/4xx-store-and-forward.md)), and the stream is retried in the background for as long as the app runs.
+5. **DHT only.** Either side can choose it per chat in the connection panel. Both then stay off streams.
 
-| Step | What Happens |
-|------|--------------|
-| **1. Create Chat** | Generate Ed25519 keypairs + 256-bit symmetric key. No server involved! |
-| **2. Share Invite** | URL contains seed + peer pubkey + encryption key. Fragment never leaves the app! |
-| **3. Messages Travel** | Plaintext → Encrypt → DNS TXT → Sign → DHT (XSalsa20-Poly1305 + Ed25519 + BEP44) |
-| **4. Messages Expire** | Stop republishing → TTL countdown (~5h) → Gone forever. No trace remains. |
+Chats made by Ghostly 0.4 are **compatibility chats** ([WISP 402](wisps/402-legacy-chat.md)): they keep their original record profile and offer "Continue in a new chat".
 
-## Tech Stack
+Groups run on top of 1:1 sessions: private groups up to 32 members, carried by hubs past 16 ([group mesh](wisps/9xx-group-mesh.md)) and communities up to 256 ([group community](wisps/9xx-group-community.md)).
 
-- **[Pkarr](https://github.com/pubky/pkarr)** - Public Key Addressable Resource Records
-- **[Mainline DHT](https://en.wikipedia.org/wiki/Mainline_DHT)** - 10M+ nodes, largest P2P network on Earth
-- **NaCl Secretbox** - XSalsa20-Poly1305 authenticated encryption
-- **Ed25519** - Digital signatures for message authenticity
-- **BEP44** - BitTorrent DHT mutable items specification
+## Where state lives
 
-## Message Flow
+| What | Where |
+|---|---|
+| Chats, keys, messages, settings | The device: IndexedDB (web, extension) or the WebView's storage (Desktop). Never published |
+| Files | Origin-private file system in browsers, real files on Desktop |
+| Presence, signals, capability records, DHT text | Pkarr records, short-lived, republished while the app runs |
+| Held items (optional) | The sender's own S3-compatible storage ([WISP 4xx](wisps/4xx-store-and-forward.md)) |
+| Wake-up push subscription (optional, web app) | The browser's push service; each paired contact keeps a copy to wake the app. Never in a backup ([WISP 401](wisps/401-paired-chat.md#wake-up-push)) |
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Sender    │     │  Mainline   │     │  Receiver   │
-│   Device    │────▶│     DHT     │────▶│   Device    │
-└─────────────┘     │  (10M+ nodes)│     └─────────────┘
-                    └─────────────┘
-```
+There is no Ghostly server in the message path. The DHT is not a durable history store.
 
-1. **Encryption**: Message is encrypted with XSalsa20-Poly1305 using shared key
-2. **Signing**: Encrypted payload is signed with Ed25519 private key
-3. **Publishing**: Signed data is published to DHT as BEP44 mutable item
-4. **Resolution**: Receiver queries DHT using sender's public key
-5. **Verification**: Signature is verified with sender's public key
-6. **Decryption**: Message is decrypted with shared symmetric key
+## Security model
 
-## Security Model
+- **End to end.** Records are sealed and signed; streams are authenticated and encrypted (DTLS, QUIC/TLS, Noise). Relays, DHT nodes, STUN and TURN see ciphertext and metadata, never content.
+- **Pinned keys.** The invite pins the inviter's participation key. A different key on a stream is a security rejection that stops the chat on both layers, never a fallback.
+- **Invites are bearer secrets.** Anyone holding a copy can compete for first contact. Share them privately; comparing the displayed code confirms the pin.
+- **No forward secrecy.** A leaked link secret can decrypt records it sealed.
+- **No anonymity.** Keys are per chat, but addresses, timing and relays can correlate activity ([what observers see](TRANSPORTS.md#what-observers-see)).
+- **Expiry is not deletion.** Records expire from the network; contacts, observers and local history may keep copies.
+- **Real money is asked for.** Mainnet spends need an explicit confirmation; wallet secrets are sealed with a device key.
 
-- **End-to-End Encryption**: Only participants with the shared key can read messages
-- **No Central Server**: No single point of failure or surveillance
-- **Ephemeral by Design**: Messages expire after ~5 hours if not republished
-- **Forward Secrecy**: Each chat session uses unique keys
+Reporting a flaw: [SECURITY.md](../SECURITY.md). Past audit fixes: [Security review](SECURITY-REVIEW.md). Source evidence and limits per platform: [wisps/IMPLEMENTATION.md](wisps/IMPLEMENTATION.md).

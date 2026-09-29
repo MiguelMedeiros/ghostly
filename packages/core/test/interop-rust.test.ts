@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { RelayTransport, encrypt, fromBase64Url, identityFromSeedB64, parseLinkRecords } from "../src";
+// covers-gated: cli.interop, core.records, core.relay-client
 
 /**
  * Live interoperability with the Rust implementation, over the real network:

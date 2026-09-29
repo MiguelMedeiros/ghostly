@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CallState } from "../lib/types";
 import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
+import type { CallDevices } from "../hooks/useCallDevices";
+import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
+import { useI18n } from "../contexts/I18nContext";
+import { Menu, MenuItem } from "./Menu";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -14,10 +18,16 @@ interface CallOverlayProps {
   isScreenSharing?: boolean;
   /** Offer the camera button: the call has a video lane our side may send on. */
   canSendVideo?: boolean;
-  /** Offer the share button: that lane, in a browser that can capture the screen. */
+  /** The share button works: that lane, in a browser that can capture the screen. */
   canShareScreen?: boolean;
+  /** The share button shows, turned off, with this reason: the screen could be captured, but this call cannot carry it. */
+  screenShareUnavailable?: string | null;
+  /** Why sharing the screen just failed. */
+  screenShareError?: string | null;
   /** The peer is sending a picture. */
   remoteHasVideo: boolean;
+  /** The peer's picture is its screen. */
+  remoteIsScreenSharing?: boolean;
   callStartedAt: number | null;
   peerName: string;
   onHangUp: () => void;
@@ -29,6 +39,8 @@ interface CallOverlayProps {
   onReturnToChat?: () => void;
   /** Where to hang the call window, so it does not go off screen with its chat. */
   layer?: HTMLElement | null;
+  /** The microphone, camera and speaker menu, where the call can switch them (`useCallDevices`). */
+  devices?: CallDevices | null;
 }
 
 const MINI_KEY = "ghostly_call_mini";
@@ -59,7 +71,10 @@ export function CallOverlay({
   isScreenSharing = false,
   canSendVideo = false,
   canShareScreen = false,
+  screenShareUnavailable = null,
+  screenShareError = null,
   remoteHasVideo,
+  remoteIsScreenSharing = false,
   callStartedAt,
   peerName,
   onHangUp,
@@ -69,7 +84,9 @@ export function CallOverlay({
   pinned = false,
   onReturnToChat,
   layer,
+  devices = null,
 }: CallOverlayProps) {
+  const { t } = useI18n();
   // A shared screen has to be seen whole; a face can be cropped to fill the window.
   const [remoteIsWide, setRemoteIsWide] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -127,6 +144,12 @@ export function CallOverlay({
     }
   }, [remoteStream]);
 
+  // Both elements play the peer's stream, so both go to the chosen speaker.
+  const speaker = devices?.speaker;
+  useEffect(() => {
+    for (const element of [remoteAudioRef.current, remoteVideoRef.current]) void applySpeaker(element, speaker).catch(() => {});
+  }, [speaker, remoteStream]);
+
   useEffect(() => {
     if (callState !== "connected" || !callStartedAt) {
       setDuration(0);
@@ -139,16 +162,23 @@ export function CallOverlay({
   }, [callState, callStartedAt]);
 
   const statusText = {
-    offering: "Calling...",
-    answering: "Connecting...",
-    connecting: "Connecting...",
+    offering: t("calls.outgoing"),
+    answering: t("calls.connecting"),
+    connecting: t("calls.connecting"),
     connected: formatDuration(duration),
     idle: "",
     incoming: "",
-    ended: "Call ended",
+    ended: t("calls.ended"),
   }[callState];
 
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
+  // A screen in place of the camera leaves the camera off, and its button says so.
+  const cameraOn = !isVideoOff && !isScreenSharing;
+  // Sharing is never a surprise, to either side.
+  const sharingNotice = callState !== "connected" ? null
+    : isScreenSharing && remoteIsScreenSharing ? t("calls.sharing.both", { name: peerName })
+    : isScreenSharing ? t("calls.sharing.you")
+    : remoteIsScreenSharing ? t("calls.sharing.peer", { name: peerName }) : null;
 
   // Hung outside the chat, which may be off screen; the call is not.
   return createPortal(
@@ -167,7 +197,7 @@ export function CallOverlay({
       <button
         onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
         className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
-        title={pinned ? "Back to the chat" : mini ? "Back to full screen" : "Keep the call in a small window"}
+        title={pinned ? t("calls.window.chat") : mini ? t("calls.window.full") : t("calls.window.small")}
         data-testid="call-minimize"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -202,9 +232,9 @@ export function CallOverlay({
 
       {/* Status */}
       <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
-        <p className="text-text-muted text-sm">
+        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
-            <span className="text-accent">Audio call</span>
+            <span className="text-accent">{t("calls.audio")}</span>
           )}
           {statusText && (
             <span className={callState === "connected" ? "ml-2" : ""}>
@@ -214,13 +244,29 @@ export function CallOverlay({
         </p>
       </div>
 
+      {sharingNotice && (
+        <p
+          role="status"
+          data-testid="call-sharing"
+          data-self={isScreenSharing}
+          data-peer={remoteIsScreenSharing}
+          className="call-share-notice absolute top-16 max-md:top-[calc(4rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-10 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
+        >
+          <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="2" y="4" width="20" height="13" rx="2" />
+            <path d="M8 21h8M12 17v4" />
+          </svg>
+          <span className="truncate">{sharingNotice}</span>
+        </p>
+      )}
+
       {/* Local video (picture-in-picture) */}
       {!isVideoOff && localStream && (
         <div
           {...selfView.boxProps}
           onDoubleClick={selfView.reset}
           data-testid="call-self-view"
-          title={mini ? undefined : "Drag to move, pull a corner to resize, double-click to reset"}
+          title={mini ? undefined : t("calls.selfView")}
           className={`call-preview absolute rounded-lg overflow-hidden border border-border/50 shadow-lg z-10 bg-black ${
             mini ? "top-4 right-4 w-36 h-28" : "floating"
           }`}
@@ -239,6 +285,16 @@ export function CallOverlay({
         </div>
       )}
 
+      {screenShareError && (
+        <p role="alert" data-testid="share-screen-error"
+          className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
+          {screenShareError}
+        </p>
+      )}
+
+      {/* Where a failed share is explained: that goes first, for its few seconds. */}
+      {devices?.notice && !screenShareError && <DeviceNoticeBar devices={devices} />}
+
       {/* Controls */}
       <div className="call-controls absolute bottom-12 left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
         {/* Mute */}
@@ -249,7 +305,8 @@ export function CallOverlay({
               ? "bg-danger/30 text-danger"
               : "bg-white/10 text-white hover:bg-white/20"
           }`}
-          title={isMuted ? "Unmute" : "Mute"}
+          data-testid="call-mute"
+          title={isMuted ? t("calls.unmute") : t("calls.mute")}
         >
           {isMuted ? (
             <svg
@@ -292,13 +349,14 @@ export function CallOverlay({
           <button
             onClick={onToggleVideo}
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-              isVideoOff
+              !cameraOn
                 ? "bg-danger/30 text-danger"
                 : "bg-white/10 text-white hover:bg-white/20"
             }`}
-            title={isVideoOff ? "Turn camera on" : "Turn camera off"}
+            data-testid="call-camera"
+            title={cameraOn ? t("calls.turnCameraOff") : t("calls.turnCameraOn")}
           >
-            {isVideoOff ? (
+            {!cameraOn ? (
               <svg
                 width="24"
                 height="24"
@@ -330,15 +388,20 @@ export function CallOverlay({
           </button>
         )}
 
-        {/* Screen share */}
-        {canShareScreen && onToggleScreenShare && (
+        {devices && <DeviceMenu devices={devices} />}
+
+        {/* Screen share: in any connected call, voice or video. Where no screen can be captured (phones) it is not here at all. */}
+        {(canShareScreen || screenShareUnavailable) && onToggleScreenShare && (
           <button
             onClick={onToggleScreenShare}
+            disabled={!canShareScreen}
             data-testid="share-screen"
-            className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-              isScreenSharing ? "bg-accent text-[#111b21]" : "bg-white/10 text-white hover:bg-white/20"
+            aria-label={isScreenSharing ? t("calls.stopSharing") : t("calls.shareScreen")}
+            aria-pressed={isScreenSharing}
+            className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+              isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white enabled:hover:bg-white/20"
             }`}
-            title={isScreenSharing ? "Stop sharing your screen" : "Share your screen"}
+            title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ?? t("calls.shareScreen")}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="4" width="20" height="13" rx="2" />
@@ -351,7 +414,8 @@ export function CallOverlay({
         <button
           onClick={onHangUp}
           className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
-          title="End call"
+          data-testid="call-hang-up"
+          title={t("calls.end")}
         >
           <svg
             width="28"
@@ -370,5 +434,82 @@ export function CallOverlay({
       </div>
     </div>,
     layer ?? document.body,
+  );
+}
+
+const DEVICE_KINDS_SHOWN: readonly DeviceKind[] = ["audioinput", "videoinput", "audiooutput"];
+const KIND_NAME = { audioinput: "settings.media.microphone", videoinput: "settings.media.camera", audiooutput: "settings.media.speaker" } as const;
+
+/** The call's device menu: which microphone, camera and speaker, switched without leaving the call. */
+function DeviceMenu({ devices }: { devices: CallDevices }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  const label = t("calls.devices.menu");
+  const kinds = DEVICE_KINDS_SHOWN.filter((kind) => kind !== "audiooutput" || devices.speakers);
+  return (
+    <div ref={anchor} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        data-testid="call-devices"
+        aria-label={label}
+        aria-expanded={open}
+        aria-haspopup="true"
+        title={label}
+        className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${open ? "bg-white/25 text-white" : "bg-white/10 text-white hover:bg-white/20"}`}
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
+          <circle cx="15" cy="6" r="2" />
+          <circle cx="9" cy="12" r="2" />
+          <circle cx="17" cy="18" r="2" />
+        </svg>
+      </button>
+      <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="call-devices-menu" label={label} prefer="up" align="start" portal focusFirst>
+        {kinds.map((kind, i) => {
+          const devicesOfKind = devices.list[kind];
+          if (kind !== "audioinput" && devicesOfKind.length === 0) return null;
+          const options = [{ id: "", label: t("settings.media.systemDefault") }, ...devicesOfKind.map((d, n) => ({ id: d.id, label: d.label || `${t(KIND_NAME[kind])} ${n + 1}` }))];
+          return (
+            <div key={kind} role="group" aria-label={t(KIND_NAME[kind])} className={i > 0 ? "mt-1 pt-1 border-t border-border" : ""}>
+              <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">{t(KIND_NAME[kind])}</p>
+              {options.map((option) => {
+                const chosen = devices.current[kind] === option.id;
+                return (
+                  <MenuItem key={option.id || "default"} testId={`call-device-${kind}`} checked={chosen} data={{ "data-device-id": option.id, "data-chosen": String(chosen) }}
+                    icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={chosen ? "text-accent" : "invisible"}><path d="M5 12l5 5L20 7" /></svg>}
+                    onClick={() => { setOpen(false); if (!chosen) devices.choose(kind, option.id); }}>
+                    {option.label}
+                  </MenuItem>
+                );
+              })}
+            </div>
+          );
+        })}
+      </Menu>
+    </div>
+  );
+}
+
+/** A device went away and the default took over, or the chosen one is back, with the way to switch to it. */
+function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
+  const { t } = useI18n();
+  const notice = devices.notice!;
+  const name = notice.name || t(KIND_NAME[notice.kind]);
+  return (
+    <div role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
+      className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
+      <span className="min-w-0 truncate">{t(notice.type === "lost" ? "calls.devices.lost" : "calls.devices.back", { name })}</span>
+      {notice.type === "back" && (
+        <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
+          className="shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
+          {t("calls.devices.switchBack")}
+        </button>
+      )}
+      <button type="button" onClick={devices.dismiss} aria-label={t("common.close")} title={t("common.close")}
+        className="shrink-0 grid place-items-center w-5 h-5 rounded-full text-white/70 hover:text-white cursor-pointer">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+      </button>
+    </div>
   );
 }

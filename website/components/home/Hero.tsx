@@ -1,0 +1,86 @@
+"use client";
+
+import { useRef } from "react";
+import { motion, useTransform } from "motion/react";
+import { GhostMark, Ghost } from "@/components/ghost/Ghost";
+import { Particles } from "@/components/site/Particles";
+import { useCalm } from "@/lib/useCalm";
+import { HERO } from "@/lib/motion";
+import { usePlayheadProgress } from "@/lib/playhead";
+import { usePortrait } from "./stage";
+import { APP_URL } from "@/content/shell";
+import type { HomeCopy } from "@/content/home";
+
+/**
+ * Act 0: one sentence in the dark and a small ghost asking into it. Boo is the
+ * act's actor. The backdrop draws him at his hero pose and carries him into
+ * the invitation when you scroll; the copy slides away as you leave. Without
+ * scripts, or with reduced motion, a still Boo stands in for the actor.
+ */
+export function Hero({ t }: { t: HomeCopy["hero"] }) {
+  const ref = useRef<HTMLElement>(null);
+  const calm = useCalm();
+  const portrait = usePortrait();
+  const scrollYProgress = usePlayheadProgress(ref, "leaving");
+  // On phones the copy scrolls up under Boo, so it leaves early (poses.ts P.hero holds him until 0.5).
+  // Function form on purpose: motion turns array ranges into native scroll animations fixed at mount.
+  const fade = (v: number) => {
+    const [a, b] = portrait ? [0.05, 0.25] : [0.2, 0.7];
+    return 1 - Math.max(0, Math.min(1, (v - a) / (b - a)));
+  };
+  const y = useTransform(scrollYProgress, (v) => -48 * (1 - fade(v)));
+  const opacity = useTransform(scrollYProgress, fade);
+
+  return (
+    <section ref={ref} className="hero" id="hero">
+      <div className="hero-bg bg-grid" aria-hidden="true" />
+      <div className="hero-light" aria-hidden="true" />
+      <Particles count={14} />
+
+      {/* Only when the act backdrop is not drawing the actor. */}
+      <div className="hero-still" aria-hidden="true">
+        <div className="bubble bubble--boo">{t.booSays}</div>
+        <Ghost who="boo" mood="lonely" look={{ x: 0.6, y: -0.4 }} size={160} float={!calm} />
+      </div>
+
+      <motion.div className="wrap hero-inner" style={calm ? { y: 0, opacity: 1 } : { y, opacity }}>
+        <p className="sr-only">Boo: {t.booSays}</p>
+        {/* The opening (lib/motion.ts HERO): the headline leads, the rest follows as one group, then Boo, then his line. */}
+        <h1 className="h-display hero-title">
+          <span className="hero-line" style={{ animationDelay: `${HERO.headline}s` }}>
+            {t.title1}
+          </span>
+          <span className="hero-line accent" style={{ animationDelay: `${HERO.headline + 0.08}s` }}>
+            {t.title2}
+          </span>
+        </h1>
+        <p className="lead hero-lead hero-rise" style={{ animationDelay: `${HERO.copy}s` }}>
+          {t.lead}
+        </p>
+        <div className="hero-actions hero-rise" style={{ animationDelay: `${HERO.copy + 0.06}s` }}>
+          <a className="btn btn--primary btn--lg" href={APP_URL}>
+            <GhostMark /> {t.open} <span aria-hidden="true">↗</span>
+          </a>
+          <a className="btn" href="#download">
+            {t.download} <span aria-hidden="true">↓</span>
+          </a>
+        </div>
+        <p className="hero-micro caption hero-rise" style={{ animationDelay: `${HERO.copy + 0.12}s` }}>
+          <span>{t.badge}</span>
+          <span>{t.micro}</span>
+        </p>
+        <div className="hero-follow hero-rise" style={{ animationDelay: `${HERO.copy + 0.18}s` }}>
+          <a href="#invite" className="link-arrow">
+            {t.follow}{" "}
+            <span aria-hidden="true" className="hero-cue" style={{ animationDelay: `${HERO.cueAfter}s` }}>
+              ↓
+            </span>
+          </a>
+          <a href="#next" className="hero-skip">
+            {t.skip}
+          </a>
+        </div>
+      </motion.div>
+    </section>
+  );
+}

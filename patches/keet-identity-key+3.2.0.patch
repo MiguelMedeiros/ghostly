@@ -1,0 +1,33 @@
+diff --git a/node_modules/keet-identity-key/lib/keychain.js b/node_modules/keet-identity-key/lib/keychain.js
+index 07ee949..3e3f582 100644
+--- a/node_modules/keet-identity-key/lib/keychain.js
++++ b/node_modules/keet-identity-key/lib/keychain.js
+@@ -2,7 +2,18 @@ const sodium = require('sodium-universal')
+ const c = require('compact-encoding')
+ const assert = require('nanoassert')
+ const b4a = require('b4a')
+-const { HMAC } = require('sodium-hmac')
++const { HMAC: SodiumHMAC } = require('sodium-hmac')
++const { hmac } = require('@noble/hashes/hmac.js')
++const { sha512 } = require('@noble/hashes/sha2.js')
++// sodium-javascript lacks the incremental SHA-512 used by sodium-hmac.
++const HMAC = typeof sodium.crypto_hash_sha512_init === 'function' ? SodiumHMAC : {
++  sha512 (data, key, output) {
++    const digest = hmac(sha512, key, data)
++    output.set(digest)
++    digest.fill(0)
++    return output
++  }
++}
+ const bip39 = require('bip39-mnemonic')
+ 
+ const { sign } = require('./crypto')
+@@ -124,7 +135,7 @@ function encodeDerivationData (key, step) {
+ 
+   c.uint8.encode(state, 0)
+   c.fixed32.encode(state, key)
+-  state.buffer.writeUInt32BE(step, state.start)
++  b4a.writeUInt32BE(state.buffer, step, state.start)
+ 
+   state.buffer[33] |= 0x80
+ 

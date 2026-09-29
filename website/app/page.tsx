@@ -1,41 +1,11 @@
-import { Hero } from "@/components/Hero";
-import { AppPreview } from "@/components/AppPreview";
-import { WhatIs } from "@/components/WhatIs";
-import { ELI5 } from "@/components/ELI5";
-import { HowItWorks } from "@/components/HowItWorks";
-import { Features } from "@/components/Features";
-import { CLISection } from "@/components/CLISection";
-import { ProtocolDeepDive } from "@/components/ProtocolDeepDive";
-import { FAQ } from "@/components/FAQ";
-import { Download } from "@/components/Download";
-import { Footer } from "@/components/Footer";
-import { Navbar } from "@/components/Navbar";
-import { ShareDemo } from "@/components/ShareDemo";
-import { Clients } from "@/components/Clients";
-import { FinePrint } from "@/components/FinePrint";
-import GhostPet from "@/components/GhostPet";
+import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/pageMeta";
+import { HomePage } from "@/components/home/HomePage";
+import { home } from "@/content/home";
+import { latestRelease } from "@/lib/latestRelease";
 
-export default function Home() {
-  return (
-    <>
-      <Navbar />
-      <main>
-        <Hero />
-        <ShareDemo />
-        <Features />
-        <AppPreview />
-        <WhatIs />
-        <ELI5 />
-        <HowItWorks />
-        <Clients />
-        <CLISection />
-        <ProtocolDeepDive />
-        <FinePrint />
-        <FAQ />
-        <Download />
-      </main>
-      <Footer />
-      <GhostPet />
-    </>
-  );
+export const metadata: Metadata = pageMetadata({ title: home.meta.title, description: home.meta.description, path: "/", absolute: true });
+
+export default async function Page() {
+  return <HomePage version={await latestRelease()} />;
 }

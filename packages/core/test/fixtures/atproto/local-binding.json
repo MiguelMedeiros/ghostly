@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "provider": "atproto",
+  "subject": "did:plc:i5eizwh54ions4or7h3h4sof",
+  "key": "7jfgaa9nutjyixzikb7tgmsf9gkwq7iqz498zr1nd5ig1fng4esy",
+  "issuedAt": 1790000000,
+  "expiresAt": 1797776000,
+  "nonce": "AAAAAAAAAAAAAAAAAAAAAA"
+}

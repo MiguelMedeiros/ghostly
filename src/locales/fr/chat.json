@@ -1,0 +1,144 @@
+{
+  "compat": {
+    "continued": "Vous avez invité votre contact dans une nouvelle discussion.",
+    "hint": "Cette discussion a été créée avec un code Ghostly 0.4. Le texte et les appels continuent de fonctionner dans les deux sens ; une nouvelle discussion ajoute les fichiers, les paiements et les messages retenus.",
+    "label": "Discussion de compatibilité · ancien Ghostly",
+    "open": "Ouvrir la nouvelle discussion"
+  },
+  "connecting": "connexion",
+  "deleteMessage": "Supprimer le message",
+  "deleteMessageHint": "Supprimé uniquement ici. Votre contact garde sa copie.",
+  "delivery": {
+    "delivered": "Distribué",
+    "failed": "Non envoyé",
+    "hint": {
+      "delivered": "L'app de votre contact l'a reçu.",
+      "failed": "Non envoyé. Touchez pour renvoyer.",
+      "held": "Gardé pour votre contact jusqu'à ce qu'il soit en ligne.",
+      "queued": "Pas encore d'accusé. Renvoyé automatiquement.",
+      "sending": "En route.",
+      "sent": "Envoyé. Pas encore d'accusé.",
+      "waiting": "Part tout seul quand votre contact est en ligne."
+    },
+    "retry": "Non envoyé. Renvoyer",
+    "sending": "Envoi en cours",
+    "sent": "Envoyé",
+    "waiting": "En attente que votre contact soit en ligne"
+  },
+  "edit": {
+    "cancel": "Annuler la modification",
+    "editing": "Modification"
+  },
+  "forward": {
+    "filesHint": "Les groupes n’acceptent que du texte",
+    "forward": "Transférer",
+    "forwarded": "Transféré",
+    "many": "Transféré de nombreuses fois",
+    "messages": "{{count}} messages",
+    "noChats": "Aucune discussion pour l’instant",
+    "noMatch": "Aucune discussion de ce nom",
+    "pick": "Choisissez-en jusqu’à {{count}}",
+    "search": "Rechercher des discussions",
+    "select": "Sélectionner",
+    "selected": "{{count}} sélectionnés",
+    "send": "Envoyer",
+    "title": "Transférer à…"
+  },
+  "jump": {
+    "bottom": "Aller en bas",
+    "count": "{{count}} nouveaux",
+    "new": "{{count}} nouveaux messages, aller en bas",
+    "newOne": "1 nouveau message, aller en bas"
+  },
+  "lastSeen": "Vu {{time}}",
+  "menu": {
+    "continueNew": "Continuer dans une nouvelle discussion",
+    "hold": "Retenir les messages…",
+    "pin": "Épingler la discussion",
+    "refresh": "Actualiser",
+    "techInfo": "Infos techniques",
+    "unpin": "Désépingler la discussion"
+  },
+  "message": {
+    "cancelSending": "Annuler l'envoi",
+    "copied": "Copié",
+    "copyHint": "Cliquer pour copier",
+    "copyJson": "Tout copier en JSON",
+    "details": "Détails",
+    "detailsClose": "Fermer",
+    "detailsTitle": "Détails du message",
+    "download": "Télécharger",
+    "downloadArriving": "Pas encore reçu",
+    "downloadConverting": "Conversion…",
+    "downloadFailed": "N’est pas arrivé",
+    "downloadMissing": "Absent de cet appareil",
+    "downloadMp3": "Télécharger en MP3",
+    "downloadPreparing": "En préparation",
+    "downloadUnconverted": "Conversion impossible",
+    "edit": "Modifier",
+    "editPending": "Pas encore visible pour votre contact",
+    "editPendingGroup": "Pas encore envoyé au groupe",
+    "edited": "modifié",
+    "editedAt": "Modifié à {{time}}",
+    "keysHint": "Les clés ne sont jamais affichées ici.",
+    "options": "Options du message",
+    "reply": "Répondre",
+    "retry": "Renvoyer"
+  },
+  "offline": "hors ligne",
+  "online": "en ligne",
+  "options": "Options",
+  "pinned": {
+    "bar": "Message épinglé",
+    "info": "Un message épinglé par discussion, vu par tous ses membres. Un nouveau remplace l’ancien. Dans une communauté, seul l’admin épingle.",
+    "notHere": "Absent de cet appareil",
+    "pin": "Épingler",
+    "unpin": "Désépingler"
+  },
+  "reactions": {
+    "chipLabel": "{{emoji}} : {{names}}",
+    "more": "Plus d’emoji",
+    "note": "{{name}} a réagi {{emoji}} à « {{snippet}} »",
+    "noteMine": "Vous avez réagi {{emoji}} à « {{snippet}} »",
+    "notice": "Quelqu’un a réagi à votre message",
+    "react": "Réagir"
+  },
+  "reply": {
+    "cancel": "Annuler la réponse",
+    "deleted": "Message d'origine supprimé",
+    "jump": "Aller au message d'origine",
+    "notHere": "L'original n'est pas dans cette discussion",
+    "replyingTo": "Réponse à {{name}}",
+    "unavailable": "Message d'origine indisponible",
+    "unverified": "Introuvable dans cette discussion",
+    "you": "Vous"
+  },
+  "rich": {
+    "code": "Code",
+    "copied": "Copié",
+    "copy": "Copier",
+    "copyCode": "Copier le code",
+    "localTime": "{{time}} chez vous",
+    "showAll": "Tout afficher",
+    "showLess": "Afficher moins",
+    "spoiler": "Texte masqué. Touchez pour l’afficher",
+    "unshowable": "Impossible d'afficher ce message."
+  },
+  "search": {
+    "close": "Fermer la recherche",
+    "count": "{{current}} sur {{total}}",
+    "info": "Cherche dans les messages et les noms de fichiers gardés sur cet appareil. Rien n'en sort.",
+    "newer": "Résultat plus récent (Maj+Entrée)",
+    "none": "Aucun résultat",
+    "older": "Résultat plus ancien (Entrée)",
+    "open": "Rechercher",
+    "placeholder": "Rechercher dans ce chat"
+  },
+  "send": "Envoyer",
+  "today": "Aujourd'hui",
+  "typeMessage": "Tapez un message...",
+  "typing": "écrit…",
+  "typingRecording": "enregistre un audio…",
+  "typingThinking": "réfléchit…",
+  "yesterday": "Hier"
+}

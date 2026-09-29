@@ -19,11 +19,13 @@ import {
   sanitizeResponseHeaders,
   utf8Decode,
   utf8Encode,
+  viewerResponseHeaders,
   type FrameChannel,
   type LocalFetch,
   type LocalRequest,
 } from "../src";
 import { createChannelPair } from "./helpers";
+// covers: services.http, core.frames, transport.webrtc, payments.chat.frames
 
 describe("local targets", () => {
   it("accepts loopback only", () => {
@@ -143,6 +145,39 @@ describe("header hygiene", () => {
       ["set-cookie", "fix=1; Path=/"],
     ]);
   });
+
+  it("serves a contact's response headers to a viewer only when they are headers: no CR, LF or NUL, a token name", () => {
+    expect(
+      viewerResponseHeaders([
+        ["Content-Type", "text/html"],
+        ["X-Note", "a\r\nSet-Cookie: sid=evil"],
+        ["X-Line", "a\nb"],
+        ["X-Return", "a\rb"],
+        ["X-Nul", "a\u0000b"],
+        ["Bad Name", "x"],
+        ["X-Bad:Name", "x"],
+        ["X-Bad\r\nName", "x"],
+        ["", "x"],
+        ["X-Kept", "fine; really"],
+      ]),
+    ).toEqual([
+      ["Content-Type", "text/html"],
+      ["X-Kept", "fine; really"],
+    ]);
+  });
+
+  it("keeps a contact's cookies on the exact origin they came from, one header per cookie", () => {
+    expect(
+      viewerResponseHeaders([
+        ["Set-Cookie", "sid=1; Domain=peer.invalid; Path=/\r\nother=2; domain = .invalid; HttpOnly\n"],
+        ["X-Domain", "Domain=kept"],
+      ]),
+    ).toEqual([
+      ["Set-Cookie", "sid=1; Path=/"],
+      ["Set-Cookie", "other=2; HttpOnly"],
+      ["X-Domain", "Domain=kept"],
+    ]);
+  });
 });
 
 describe("frames", () => {
@@ -228,6 +263,12 @@ describe("http over the data link", () => {
     };
   }
 
+  /** Byte for byte, at memory speed: toEqual walks a Uint8Array one element at a time (a second per MB, more on CI). */
+  function expectBytes(actual: Uint8Array, expected: Uint8Array) {
+    expect(actual.length).toBe(expected.length);
+    expect(actual.findIndex((byte, i) => byte !== expected[i]), "the first byte that differs").toBe(-1);
+  }
+
   async function* bodyOf(...parts: Uint8Array[]) {
     for (const p of parts) yield p;
   }
@@ -258,12 +299,12 @@ describe("http over the data link", () => {
     const upload = new Uint8Array(200_000).map((_, i) => i % 251);
     const download = new Uint8Array(1_000_000).map((_, i) => i % 241);
     const { client } = setup(async (request) => {
-      expect(request.body).toEqual(upload);
+      expectBytes(request.body!, upload);
       return { status: 201, headers: [], body: bodyOf(download.subarray(0, 300_000), download.subarray(300_000)) };
     });
     const response = await client.request("atlas", { method: "POST", path: "/upload", body: upload });
     expect(response.status).toBe(201);
-    expect(await response.bytes()).toEqual(download);
+    expectBytes(await response.bytes(), download);
   });
 
   it("answers for unknown services, bad paths and bad methods without touching the network", async () => {
@@ -486,5 +527,15 @@ describe("payment frames", () => {
     expect(bad({ e: [["Not An Identifier", "x"]] })).toBeNull();
     expect(bad({ e: [["cashu"]] })).toBeNull();
     expect(bad({ v: "0.00000001" })).not.toBeNull();
+  });
+
+  it("carries versioned Ark requests and receipts without accepting arbitrary paths", () => {
+    const ark = { ...request, e: [["btc-arkade/1", '{"method":"arkade"}']] as [string, string][] };
+    expect(decodeControl(encodeControl(ark))).toEqual(ark);
+    const receipt = { t: "pay" as const, id: "pay-00000001", ts: 2, rid: request.id, v: "1000", u: "sat", memo: undefined, e: ["btc-arkade/1", '{"txid":"example"}'] as [string, string] };
+    expect(decodeControl(encodeControl(receipt))).toEqual(receipt);
+    for (const id of ["btc-arkade/0", "btc-arkade/01", "btc-arkade/1/2", "btc-arkade/", "https://provider", "a".repeat(65)]) {
+      expect(decodeControl(JSON.stringify({ ...ark, e: [[id, "payload"]] }))).toBeNull();
+    }
   });
 });

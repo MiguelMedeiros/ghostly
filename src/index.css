@@ -2,6 +2,10 @@
 
 /* Ghostly Browser builds this UI from another package root; name the sources explicitly. */
 @source "./";
+/* Class names the tests mention are not the app's. One of them (`group-has-[:focus-visible]`, a class a test says a row
+   must not have) made a `:has()` rule anchored on every `.group`, and each message row is one: WebKit then paid for
+   every keystroke in proportion to the chat's length. */
+@source not "./test";
 
 @theme {
   --color-app-bg: var(--theme-app-bg);
@@ -17,11 +21,17 @@
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
   --color-danger: #ea4335;
+  /* Test money's colour, the same in every theme (Real money takes the accent). */
+  --color-test-money: #e0a800;
   --color-text-primary: var(--theme-text-primary);
   --color-text-secondary: var(--theme-text-secondary);
   --color-text-muted: var(--theme-text-muted);
   --color-sent-bg: var(--theme-sent-bg);
   --color-received-bg: var(--theme-received-bg);
+  /* Ink that stays readable on the bubbles, the surfaces and the accent, in every colour theme. */
+  --color-link: var(--theme-link);
+  --color-danger-ink: var(--theme-danger-ink);
+  --color-on-accent: var(--theme-on-accent);
   --color-input-bg: var(--theme-input-bg);
   --color-search-bg: var(--theme-search-bg);
   --color-unread: var(--theme-accent);
@@ -57,6 +67,10 @@
   --theme-accent-dim: #005c4b;
   --theme-accent-hover: #06cf9c;
   --theme-sent-bg: #005c4b;
+  /* Shared by every dark theme: at least 4.5:1 (link) and 3:1 (danger) on each one's bubbles. */
+  --theme-link: #8ad3f6;
+  --theme-danger-ink: #ff9a8f;
+  --theme-on-accent: #111b21;
 }
 
 :root[data-theme="light"],
@@ -83,6 +97,10 @@
   --theme-accent-dim: #dcf8c6;
   --theme-accent-hover: #008f6f;
   --theme-sent-bg: #d9fdd3;
+  /* Shared by every light theme, as for dark. */
+  --theme-link: #026aa0;
+  --theme-danger-ink: #c5221f;
+  --theme-on-accent: #111b21;
 }
 
 /* ============================================
@@ -137,6 +155,7 @@
   --theme-accent-dim: #e8e8e8;
   --theme-accent-hover: #2a2a2a;
   --theme-sent-bg: #e8e8e8;
+  --theme-on-accent: #ffffff;
 }
 
 /* ============================================
@@ -245,6 +264,7 @@
   --theme-accent-dim: #f3e8ff;
   --theme-accent-hover: #6d28d9;
   --theme-sent-bg: #f3e8ff;
+  --theme-on-accent: #ffffff;
 }
 
 html {
@@ -371,6 +391,25 @@ body {
   height: 17px;
 }
 
+/* Who is sharing a screen, and why a share failed: above the controls, where the small window has room. */
+.call-mini .call-share-notice {
+  top: auto;
+  bottom: 54px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.call-mini .call-share-notice svg {
+  width: 12px;
+  height: 12px;
+}
+
+.call-mini .call-share-error {
+  bottom: 78px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
 .call-mini .call-preview {
   top: 8px;
   right: 8px;
@@ -397,9 +436,12 @@ body {
   font-size: 13px;
 }
 
-/* Extra composer actions sit inline on a wide screen and behind a plus on a phone. */
-.composer-more {
-  display: contents;
+/* The header of a right-column page (components/layout/Page.tsx): one 3.5rem line, or two when its
+   controls wrap under the title in a narrow column. The inset is 0 everywhere but under a phone's notch. */
+.page-header {
+  min-height: calc(3.5rem + env(safe-area-inset-top));
+  padding-top: calc(0.5rem + env(safe-area-inset-top));
+  padding-bottom: 0.5rem;
 }
 
 @keyframes sheet-up {
@@ -443,26 +485,6 @@ body {
     padding-bottom: 0.625rem;
   }
 
-  .composer-more {
-    display: none;
-  }
-
-  .composer-more-open {
-    display: flex;
-    position: absolute;
-    bottom: 100%;
-    left: 0;
-    z-index: 40;
-    gap: 4px;
-    margin-bottom: 10px;
-    padding: 4px 6px;
-    border: 1px solid var(--color-border);
-    border-radius: 9999px;
-    background: var(--color-panel-header);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
-    animation: fade-in 0.15s ease-out;
-  }
-
   .sheet-backdrop {
     display: block;
     position: fixed;
@@ -498,17 +520,6 @@ body {
 
   .sheet-padded {
     padding: 0 16px calc(16px + env(safe-area-inset-bottom));
-  }
-
-  .sheet-emoji {
-    background: rgb(21 22 23);
-  }
-
-  .sheet-emoji em-emoji-picker {
-    width: 100%;
-    height: 52dvh;
-    --border-radius: 0;
-    --shadow: none;
   }
 
   .call-top {
@@ -587,6 +598,16 @@ body {
   background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c5c6c8' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
+/*
+ * A chat's message list on a layer of its own. In WebKit (Desktop on the Mac), a long chat left open froze for 300 to
+ * 450 ms every half second or so with no script running (nothing drawn by React, nothing changed in the page), and the
+ * older rows of a long chat coming in cost more with each step; with the list on its own layer both are gone. Not while
+ * a video plays full screen in it: that one is `position: fixed`, and the layer would hold it inside the list.
+ */
+[data-message-list]:not(:has([data-theater])) {
+  will-change: transform;
+}
+
 /* Inline timestamp float (WhatsApp-style) */
 .msg-meta {
   user-select: none;
@@ -597,24 +618,6 @@ body {
   content: '';
   display: table;
   clear: both;
-}
-
-/* emoji-mart theme overrides */
-em-emoji-picker {
-  --em-rgb-background: 32, 44, 51;
-  --em-rgb-input: 42, 57, 66;
-  --em-rgb-color: 233, 237, 239;
-  --em-color-border: rgba(34, 45, 52, 0.8);
-  border-radius: 12px !important;
-  border: 1px solid #222d34 !important;
-}
-
-[data-theme="light"] em-emoji-picker {
-  --em-rgb-background: 255, 255, 255;
-  --em-rgb-input: 240, 242, 245;
-  --em-rgb-color: 17, 27, 33;
-  --em-color-border: rgba(233, 237, 239, 0.8);
-  border: 1px solid #e9edef !important;
 }
 
 /* Ghost "boo!" animation for syncing indicator */
@@ -707,6 +710,20 @@ em-emoji-picker {
 }
 .animate-pop { animation: pop 0.35s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
 
+/* The typing indicator's dots (components/TypingIndicator.tsx): a soft wave, still and fully shown when motion is reduced. */
+.typing-dots { display: inline-flex; align-items: center; gap: 2px; }
+.typing-dots > span { width: 4px; height: 4px; border-radius: 999px; background: currentColor; animation: typing-dot 1.2s ease-in-out infinite; }
+.typing-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots > span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-dot { 0%, 60%, 100% { opacity: 1; transform: none; } 30% { opacity: 0.35; transform: translateY(-2px); } }
+:root[data-reduce-motion="true"] .typing-dots > span { animation: none; }
+@media (prefers-reduced-motion: reduce) { .typing-dots > span { animation: none; } }
+
+/* The message a reply's quote was tapped for, for a moment (src/lib/replies.ts): a tint, not a motion. */
+[data-message-row] { transition: background-color 0.4s ease-out; }
+[data-message-row][data-reply-flash] { background-color: color-mix(in srgb, var(--color-accent) 16%, transparent); }
+[data-message-row][data-reply-flash] [data-message-bubble] { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
 /* The user's choice in Settings, or the system's. */
 :root[data-reduce-motion="true"] *,
 :root[data-reduce-motion="true"] *::before,
@@ -722,3 +739,114 @@ em-emoji-picker {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* AccountBar is desktop-only. Container rules follow the resizable sidebar. */
+.account-footer { container-type: inline-size; }
+/* One even column per place, however many this client shows (Services needs a platform, the wallet a wallet). */
+.account-actions { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 7px 8px; height: 64px; }
+.account-action { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; border-radius: 8px; cursor: pointer; color: var(--theme-text-secondary); }
+.account-action:hover, .account-action[aria-expanded="true"], .account-action[aria-current="page"] { background: var(--theme-surface-hover); color: var(--theme-accent); }
+.account-action:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: -2px; }
+.account-label { font-size: 10px; line-height: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A place's name that would be cut at this width hides with the others; the icon, its tooltip and its name stay. It
+   keeps its line, so the icons stay level. The profile's own name never decides it: a long one ends in "…". */
+.account-actions[data-compact] .account-label { visibility: hidden; }
+/* Something to look at behind an icon (Identities, sats that came in): a dot on its corner, ringed in the bar's color. */
+.nav-dot { --dot-ring: var(--theme-sidebar-bg); position: absolute; top: -2px; right: -3px; width: 9px; height: 9px; border-radius: 999px;
+  background: var(--theme-accent); box-shadow: 0 0 0 2px var(--dot-ring); animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+.nav-dot-tab { --dot-ring: var(--theme-panel-header); }
+/* Test sats only: the same dot, hollow. */
+.nav-dot-test { background: var(--dot-ring); box-shadow: inset 0 0 0 1.5px var(--theme-accent), 0 0 0 2px var(--dot-ring); }
+.nav-dot-inline { display: inline-block; width: 8px; height: 8px; border-radius: 999px; background: var(--theme-accent); flex-shrink: 0; }
+@keyframes nav-dot-in { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .nav-dot { animation: none; } }
+/* Another profile left something unread: a ring around the picture, in the accent. */
+.profile-others-ring { position: absolute; inset: -3px; border-radius: 999px; box-shadow: 0 0 0 2px var(--theme-accent); pointer-events: none;
+  animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+/* Something new seen waiting for another profile (WISP 04 § Checking other profiles): a dot on the ring, not only the ring. */
+.profile-others-new { position: absolute; top: -4px; right: -4px; width: 9px; height: 9px; border-radius: 999px; background: var(--theme-accent);
+  box-shadow: 0 0 0 2px var(--theme-sidebar-bg, var(--theme-panel-header)); pointer-events: none; animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+.profile-switcher-popover { animation: profile-switcher-in 140ms ease-out both; transform-origin: bottom left; }
+.profile-switcher-sheet { animation: profile-switcher-sheet-in 180ms ease-out both; max-height: 80vh; overflow-y: auto; }
+@keyframes profile-switcher-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+/* A Select's list (components/ui/Select.tsx): opens toward where it sits, from its button's edge. */
+.select-list { animation: select-in 120ms ease-out both; transform-origin: top; }
+.select-list[data-placement="top"] { transform-origin: bottom; animation-name: select-in-up; }
+@keyframes select-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+@keyframes select-in-up { from { opacity: 0; transform: translateY(4px) scale(0.98); } }
+:root[data-reduce-motion="true"] .select-list { animation: none; }
+@media (prefers-reduced-motion: reduce) { .select-list { animation: none; } }
+@keyframes profile-switcher-sheet-in { from { transform: translateY(100%); } }
+/* The app restarting as another profile: that profile's picture and name over everything, then out. */
+.profile-switch-splash { animation: profile-switch-in 120ms ease-out both; }
+.profile-switch-splash[data-leaving] { animation: profile-switch-out 180ms ease-in both; }
+@keyframes profile-switch-in { from { opacity: 0; } }
+@keyframes profile-switch-out { to { opacity: 0; } }
+.profile-switch-badge { animation: profile-switch-pulse 1.2s ease-in-out infinite; }
+@keyframes profile-switch-pulse { 50% { transform: scale(0.94); } }
+@media (prefers-reduced-motion: reduce) { .profile-others-ring, .profile-others-new, .profile-switch-badge { animation: none; } }
+.account-action > svg, .account-action > span:first-child { flex-shrink: 0; }
+
+/* Action affordances, without changing text inputs or disabled controls. */
+button:not(:disabled):not([aria-disabled="true"]), summary,
+a[href]:not([aria-disabled="true"]),
+input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled), select:not(:disabled),
+[role="button"]:not(:disabled):not([aria-disabled="true"]), [role="switch"]:not(:disabled):not([aria-disabled="true"]) { cursor: pointer; }
+button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, input[type="radio"]:disabled, select:disabled,
+[role="button"][aria-disabled="true"], [role="switch"][aria-disabled="true"] { cursor: not-allowed; }
+
+/* Shared desktop baseline; the composer can still grow with multiline text. */
+@media (min-width: 768px) {
+  :root { --conversation-footer-height: 60px; --conversation-control-height: 40px; }
+  .account-actions { height: calc(var(--conversation-footer-height) - 1px); }
+  .composer-safe {
+    min-height: var(--conversation-footer-height);
+    border-top: 1px solid var(--theme-border);
+    padding-block: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
+  }
+}
+
+.conversation-pin { transform-origin: center; transition: transform 180ms ease-out; }
+
+/* The desktop header follows the resizable column, not the window width. The logo and the buttons keep at least 8px
+   between them there; wherever the row has room, it spreads them further apart. */
+.sidebar-desktop .sidebar-header { container: chat-sidebar / inline-size; gap: 8px; }
+.sidebar-desktop .sidebar-home { min-width: 40px; min-height: 40px; flex-shrink: 0; }
+/* Connection controls keep native checkbox behavior with an explicit WebKit-safe visual. */
+.connection-switch-row { cursor: pointer; }
+.connection-switch-row:has(input:disabled) { cursor: not-allowed; }
+.connection-switch { position: relative; display: inline-flex; flex-shrink: 0; align-items: center; width: 40px; height: 28px; }
+.connection-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; z-index: 1; }
+.connection-switch-track { width: 40px; height: 24px; border: 1px solid var(--theme-text-secondary); border-radius: 999px; background: var(--theme-surface-hover); transition: background-color 160ms ease, border-color 160ms ease; }
+.connection-switch-track::after { content: ""; display: block; width: 16px; height: 16px; margin: 3px; border-radius: 50%; background: var(--theme-text-primary); transition: transform 160ms ease; }
+.connection-switch input:checked + .connection-switch-track { background: var(--theme-accent); border-color: var(--theme-accent); }
+.connection-switch input:checked + .connection-switch-track::after { transform: translateX(16px); background: var(--theme-panel-header); }
+.connection-switch input:focus-visible + .connection-switch-track { outline: 2px solid var(--theme-accent); outline-offset: 3px; }
+.connection-switch input:disabled + .connection-switch-track { opacity: 0.55; }
+@media (prefers-reduced-motion: reduce) {
+  .connection-switch-track, .connection-switch-track::after { transition: none; }
+}
+@container chat-sidebar (max-width: 340px) {
+  .sidebar-action-label { display: none; }
+  .sidebar-header-action { width: 40px; gap: 0; }
+  /* New and its arrow share one cell; Join fills the other, so both read the same size. */
+  .sidebar-new-split > .sidebar-header-action { width: auto; }
+  [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
+}
+/* The narrowest phones, the same: with their labels, the buttons leave no room for the logo. */
+@media (max-width: 343px) {
+  .sidebar-action-label { display: none; }
+  .sidebar-header-action { width: 40px; gap: 0; }
+  .sidebar-new-split > .sidebar-header-action { width: auto; }
+  [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
+}
+
+/* Which money: "Test money" or "Real money", wherever money moves. Words first; the colour only echoes them. */
+.network-tag{display:inline-block;padding:0 6px;border:1px solid currentColor;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;line-height:1.7;text-transform:uppercase;vertical-align:middle;white-space:nowrap}
+.network-tag[data-network="testnet"]{color:var(--color-test-money)}
+.network-tag[data-network="mainnet"]{color:var(--color-accent)}
+/* In a bubble, half of it is the bubble's own ink: the accent and the yellow alone fall under 3:1 on sent bubbles
+   (the accent on classic's green, the yellow on every light one). The mix keeps the hue and reads at 4:1 or more. */
+.money-ink-mainnet,[data-message-bubble] .network-tag[data-network="mainnet"]{color:color-mix(in oklab,var(--color-accent) 50%,var(--color-text-primary))}
+[data-message-bubble] .network-tag[data-network="testnet"]{color:color-mix(in oklab,var(--color-test-money) 50%,var(--color-text-primary))}
+.payment-back-network{margin-left:8px;font-size:9px}

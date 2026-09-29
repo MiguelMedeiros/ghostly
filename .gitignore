@@ -15,4 +15,24 @@ src-tauri/target
 test-results
 playwright-report
 playwright-report-desktop
+playwright-report-desktop-macos
+playwright-report-compat
 dist-e2e
+
+# Generated native HyperDHT runtime
+/src-tauri/native-runtime/
+
+# The SDK example installs @ghostlytools/sdk from a tarball packed on the spot (scripts/sdk-example.mjs)
+/examples/*/vendor/
+/examples/*/package-lock.json
+
+# Unit test coverage (npm run coverage)
+/coverage/
+
+# The ephemeral test environment (npm run e2e:infra:up) writes its addresses and keys here
+.env.e2e
+playwright-report-matrix
+blob-report-matrix
+
+# npm run test:map:write (the whole test map; generated, see docs/TESTING.md)
+/docs/test-map.md

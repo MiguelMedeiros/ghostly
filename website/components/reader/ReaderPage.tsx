@@ -1,0 +1,269 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import Link from "next/link";
+import GithubSlugger from "github-slugger";
+import { Shell } from "@/components/site/Shell";
+import { LevelBadge } from "@/components/site/Level";
+import { reader } from "@/content/reader";
+import { catalog } from "@/content/catalog";
+import numbering from "@/lib/wisp-numbering.json";
+import type { Reference } from "@/lib/references";
+import { GROUPS, listedWisps, wispByFile, wisps, type Wisp } from "@/lib/wisps";
+import { REPO_URL } from "@/content/shell";
+import { ReferenceMarkdown } from "./Markdown";
+import { WispNav, type WispNavGroup } from "./WispNav";
+import "@/app/reader.css";
+
+/** h2/h3 headings with the same ids the renderer gives them. */
+function outline(body: string) {
+  const slugger = new GithubSlugger();
+  const items: { depth: number; text: string; id: string }[] = [];
+  let fence = false;
+  for (const line of body.split("\n")) {
+    if (/^```/.test(line)) fence = !fence;
+    if (fence) continue;
+    const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!m) continue;
+    // Same plain text the renderer slugs: links keep their label, emphasis and code marks go, underscores stay.
+    const text = m[2].replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*`]/g, "");
+    const id = slugger.slug(text);
+    if (m[1].length === 2 || m[1].length === 3) items.push({ depth: m[1].length, text, id });
+  }
+  return items;
+}
+
+function WispLink({ w }: { w: Wisp }) {
+  return (
+    <Link href={`/wisps/${w.slug}`}>
+      <span className="mono">{w.number}</span> {w.name}
+    </Link>
+  );
+}
+
+export async function ReaderPage({ reference, requested }: { reference: Reference; requested: string }) {
+  const t = reader;
+  const kinds = catalog.kinds;
+  const body = await readFile(path.join(process.cwd(), "public/reference", reference.file), "utf8");
+  const w = wispByFile(reference.file);
+  // The sidebar and the pager walk what works in the app today; a planned draft is read on its own.
+  const order = listedWisps.indexOf(w as Wisp);
+  const prev = w && order > 0 ? listedWisps[order - 1] : undefined;
+  const next = w && order >= 0 && order < listedWisps.length - 1 ? listedWisps[order + 1] : undefined;
+  const toc = outline(body);
+  const deps = ((w?.dependencies ?? []).map((file) => wispByFile(file)).filter(Boolean) as Wisp[]).filter((d) => d.id !== w?.parent);
+  const usedBy = w ? wisps.filter((x) => x.dependencies.includes(w.file) && x.parent !== w.id) : [];
+  const children = w ? wisps.filter((x) => x.parent === w.id) : [];
+  const parent = w?.parent ? wisps.find((x) => x.id === w.parent) : undefined;
+  const moved = requested !== reference.slug;
+  const former = numbering.find((e) => e.file === reference.file && e.oldFile !== e.file);
+  // Old title anchors keep working: the number before renumbering, and the title
+  // before it lost its dash ("#wisp-09--identity-proofs", "#wisp-300--peer-proofs").
+  const name = reference.title.replace(/^WISP\s+[^\s:]+:\s+/, "");
+  const legacyHeadings =
+    w && name !== reference.title
+      ? [...new Set([w.number, ...(former ? [former.oldId] : [])].map((n) => new GithubSlugger().slug(`WISP ${n} \u2014 ${name}`)))]
+      : [];
+  const groups: WispNavGroup[] = GROUPS.map((g) => ({
+    id: g.id,
+    title: g.title,
+    items: listedWisps
+      .filter((x) => x.group === g.id)
+      .map((x) => ({ id: x.id, slug: x.slug, number: x.number, name: x.name, child: Boolean(x.parent), assigned: x.assigned })),
+  })).filter((g) => g.items.length > 0);
+  const sourceUrl = `${REPO_URL}/blob/dev/${reference.sourcePath}`;
+
+  return (
+    <Shell>
+      <div className="wrap reader">
+        <nav className="reader-crumbs" aria-label="Breadcrumb">
+          <Link href={"/developers"}>{t.developers}</Link>
+          <span aria-hidden="true">/</span>
+          <Link href={"/wisps"}>{t.catalog}</Link>
+          <span aria-hidden="true">/</span>
+          <span aria-current="page">{w ? `WISP ${w.number}` : t.reference}</span>
+        </nav>
+
+        <div className="reader-layout">
+          <aside className="reader-side">
+            <Link className="reader-glossary" href={`/wisps#glossary`}>
+              {t.glossary} →
+            </Link>
+            {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
+            <noscript>
+              <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
+            </noscript>
+            <WispNav groups={groups} current={w?.slug} t={{ all: t.all, expandAll: t.expandAll, collapseAll: t.collapseAll }} />
+            <Link className="reader-glossary reader-roadmap" href={"/roadmap"}>
+              {t.roadmap} →
+            </Link>
+          </aside>
+
+          <article className="reader-main">
+            <header className="reader-head">
+              {w && (
+                <p className="reader-number mono" aria-hidden="true">
+                  {w.number}
+                </p>
+              )}
+              <h1>{w ? `${w.name}` : reference.title}</h1>
+              <div className="reader-chips">
+                {w ? (
+                  <>
+                    <span className="chip">{w.status}</span>
+                    <span className="chip">{kinds[w.kind] ?? w.kind}</span>
+                    {!w.assigned && <span className="chip chip--warn">{t.unassigned}</span>}
+                    {w.level && <LevelBadge level={w.level} />}
+                    {w.updated && (
+                      <span className="dim reader-updated">
+                        {t.updated} {w.updated}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="chip">{t.reference}</span>
+                )}
+              </div>
+              <p className="reader-scope">{w ? t.draftNote : t.supportNote}</p>
+              {moved && <p className="reader-moved">{t.moved}</p>}
+            </header>
+
+            {w && (
+              <section className="reader-summary" aria-label={t.inShort}>
+                <h2 className="reader-summary-title mono">{t.inShort}</h2>
+                {w.benefit && <p className="reader-benefit">{w.benefit}</p>}
+                {w.note && <p className="reader-note">{w.note}</p>}
+                {w.notices.map((n) => (
+                  <p key={n} className="reader-notice">
+                    {n}
+                  </p>
+                ))}
+                <dl className="reader-facts">
+                  {w.implementation && (
+                    <div>
+                      <dt>{t.implementation}</dt>
+                      <dd>{w.implementation}</dd>
+                    </div>
+                  )}
+                  {w.feature && (
+                    <div>
+                      <dt>{t.inApp}</dt>
+                      <dd>
+                        <Link href={w.feature.href}>{w.feature.label} →</Link>
+                      </dd>
+                    </div>
+                  )}
+                  {parent && (
+                    <div>
+                      <dt>{t.implementsContract}</dt>
+                      <dd>
+                        <WispLink w={parent} />
+                      </dd>
+                    </div>
+                  )}
+                  {deps.length > 0 && (
+                    <div>
+                      <dt>{t.depends}</dt>
+                      <dd className="reader-links">
+                        {deps.map((d) => (
+                          <WispLink key={d.id} w={d} />
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                  {children.length > 0 && (
+                    <div>
+                      <dt>{t.children}</dt>
+                      <dd className="reader-links">
+                        {children.map((d) => (
+                          <WispLink key={d.id} w={d} />
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                  {usedBy.length > 0 && (
+                    <div>
+                      <dt>{t.usedBy}</dt>
+                      <dd className="reader-links">
+                        {usedBy.map((d) => (
+                          <WispLink key={d.id} w={d} />
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                {w.video && (
+                  <figure className="reader-video">
+                    <figcaption className="mono">{t.video}</figcaption>
+                    <video controls preload="metadata" poster={w.video.poster} src={w.video.src} />
+                    {w.video.chapters && (
+                      <ol>
+                        {w.video.chapters.map((c) => (
+                          <li key={c.at}>
+                            <span className="mono">
+                              {Math.floor(c.at / 60)}:{String(c.at % 60).padStart(2, "0")}
+                            </span>{" "}
+                            {c.title}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </figure>
+                )}
+              </section>
+            )}
+
+            {toc.length > 2 && (
+              <details className="reader-toc" open>
+                <summary>{t.contents}</summary>
+                <ol>
+                  {toc.map((h) => (
+                    <li key={h.id} data-depth={h.depth}>
+                      <a href={`#${h.id}`}>{h.text}</a>
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+
+            <div className="reader-prose" lang="en">
+              {legacyHeadings.map((id) => (
+                <span key={id} id={id} />
+              ))}
+              <ReferenceMarkdown body={body} sourcePath={reference.sourcePath} repoLabel={t.repo} belowTitle />
+            </div>
+
+            <footer className="reader-foot">
+              <div className="reader-source">
+                <a href={sourceUrl}>{t.source} ↗</a>
+                <a href={`/reference/${reference.file}`} download>
+                  {t.download} ↓
+                </a>
+              </div>
+              <nav className="reader-pager" aria-label="Continue reading">
+                {prev && (
+                  <Link href={`/wisps/${prev.slug}`} className="reader-pager-prev">
+                    <small>← {t.prev}</small>
+                    <span>
+                      <span className="mono">{prev.number}</span> {prev.name}
+                    </span>
+                  </Link>
+                )}
+                {next && (
+                  <Link href={`/wisps/${next.slug}`} className="reader-pager-next">
+                    <small>{t.next} →</small>
+                    <span>
+                      <span className="mono">{next.number}</span> {next.name}
+                    </span>
+                  </Link>
+                )}
+              </nav>
+              <Link className="link-arrow" href={"/wisps"}>
+                {t.back}
+              </Link>
+            </footer>
+          </article>
+        </div>
+      </div>
+    </Shell>
+  );
+}

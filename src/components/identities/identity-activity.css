@@ -1,0 +1,35 @@
+/* A contact's chosen identity under their deck (IdentityActivity.tsx): profile, counts, chips, posts. On the panel's
+   surface, in the theme's colours; untrusted text only as plain or safe rich text. */
+.identity-activity{display:grid;gap:10px;min-width:0;padding:12px;border-radius:14px;border:1px solid var(--theme-border);background:var(--theme-surface)}
+.identity-activity-profile{display:flex;align-items:center;gap:10px;min-width:0}
+.identity-activity-avatar{width:44px;height:44px;flex:none;border-radius:12px;object-fit:cover}
+.identity-activity-who{display:grid;min-width:0}
+.identity-activity-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:700;line-height:1.25;color:var(--theme-text-primary)}
+.identity-activity-handle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:1.35;color:var(--theme-accent)}
+.identity-activity-counts{font-size:12px;line-height:1.35;color:var(--theme-text-secondary)}
+.identity-activity-about{margin:0;font-size:12px;line-height:1.45;white-space:pre-line;overflow-wrap:anywhere;color:var(--theme-text-secondary);display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.identity-activity-links{display:flex;flex-wrap:wrap;gap:4px 12px;min-width:0}
+.identity-activity-link{font-size:12px;color:var(--theme-link,var(--theme-accent));text-decoration:none;overflow-wrap:anywhere}
+.identity-activity-link:hover{text-decoration:underline}
+.identity-activity-link:focus-visible,.identity-activity-button:focus-visible,.identity-activity-image-button:focus-visible{outline:2px solid var(--theme-accent);outline-offset:1px}
+.identity-activity-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.identity-activity-chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 9px;border-radius:999px;border:1px solid var(--theme-border);font-size:12px;line-height:1.4;color:var(--theme-text-secondary)}
+.identity-activity-chip[data-accent]{border-color:var(--theme-accent);color:var(--theme-accent)}
+.identity-activity-posts-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.identity-activity-heading{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--theme-text-muted)}
+.identity-activity-posts{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.identity-activity-post{display:grid;gap:6px;min-width:0;padding:8px 10px;border-radius:10px;background:var(--theme-panel-header);border:1px solid var(--theme-border)}
+.identity-activity-post-text{font-size:13px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--theme-text-primary)}
+.identity-activity-post-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;color:var(--theme-text-muted)}
+.identity-activity-images{display:grid;gap:6px}
+.identity-activity-image{display:grid;gap:2px;min-width:0}
+.identity-activity-image-button{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px;padding:0 10px;border-radius:8px;border:1px dashed var(--theme-border);background:none;color:var(--theme-text-secondary);font-size:12px;cursor:pointer;text-align:start}
+.identity-activity-image-button:hover{background:var(--theme-surface-hover)}
+.identity-activity-image-button[aria-disabled=true]{cursor:progress;opacity:.7}
+.identity-activity-image-host{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--theme-text-muted)}
+.identity-activity-image-alt{font-size:11px;line-height:1.35;color:var(--theme-text-muted);overflow-wrap:anywhere}
+.identity-activity-picture{display:block;max-width:100%;height:auto;border-radius:8px}
+.identity-activity-button{justify-self:start;min-height:34px;padding:0 12px;border-radius:10px;border:1px solid var(--theme-border);background:none;color:var(--theme-text-primary);font-size:12px;font-weight:600;cursor:pointer}
+.identity-activity-button:hover{background:var(--theme-surface-hover)}
+.identity-activity-button[aria-disabled=true]{cursor:progress;opacity:.7}
+.identity-activity-note,.identity-activity-source{margin:0;font-size:11px;line-height:1.4;color:var(--theme-text-muted);overflow-wrap:anywhere}

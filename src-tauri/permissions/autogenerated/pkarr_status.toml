@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pkarr-status"
+description = "Enables the pkarr_status command without any pre-configured scope."
+commands.allow = ["pkarr_status"]
+
+[[permission]]
+identifier = "deny-pkarr-status"
+description = "Denies the pkarr_status command without any pre-configured scope."
+commands.deny = ["pkarr_status"]

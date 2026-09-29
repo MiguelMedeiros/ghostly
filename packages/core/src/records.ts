@@ -56,6 +56,21 @@ function record(label: string, value: string): GhostRecord {
 }
 
 /**
+ * The packet an inviter puts under the contact's key before they join, so that their first packet lands
+ * as a newer one under a key the network already knows (seconds faster than a first packet under a
+ * fresh key). It carries no message record, which every link session's own packet does, even empty:
+ * that is how a reader tells it from a contact who is here (or was, and left without a word).
+ */
+export function emptyLinkRecords(): GhostRecord[] {
+  return [record(LABEL.ts, "0")];
+}
+
+/** A packet nobody's link session published (see `emptyLinkRecords`): read as no packet at all. */
+export function isEmptyLinkPacket(batch: ResolvedLink): boolean {
+  return !batch.rawRecordNames.includes(LABEL.msgs);
+}
+
+/**
  * Builds the records for one publish. A Pkarr packet is at most 1000 bytes, so
  * space is handed out by priority: signaling first (it is what gets peers onto
  * WebRTC, where there is no such limit), then the service advertisement, then

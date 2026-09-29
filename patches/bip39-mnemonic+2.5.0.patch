@@ -1,0 +1,22 @@
+diff --git a/node_modules/bip39-mnemonic/index.js b/node_modules/bip39-mnemonic/index.js
+index 541e5e9..a3fb8fe 100644
+--- a/node_modules/bip39-mnemonic/index.js
++++ b/node_modules/bip39-mnemonic/index.js
+@@ -87,6 +87,17 @@ async function mnemonicToSeed (mnemonic, passphrase = '') {
+ 
+   const output = b4a.alloc(64)
+ 
++  // sodium-javascript does not implement this sodium-native extension.
++  // WebCrypto performs the same PBKDF2-HMAC-SHA512 parameters in browsers.
++  if (typeof sodium.extension_pbkdf2_sha512_async !== 'function') {
++    const key = await globalThis.crypto.subtle.importKey('raw', input, 'PBKDF2', false, ['deriveBits'])
++    const bits = await globalThis.crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-512', salt, iterations: 2048 }, key, 512)
++    output.set(new Uint8Array(bits))
++    new Uint8Array(bits).fill(0)
++    input.fill(0)
++    return output
++  }
++
+   await sodium.extension_pbkdf2_sha512_async(
+     output,
+     input,

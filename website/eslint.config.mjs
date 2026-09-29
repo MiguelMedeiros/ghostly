@@ -10,7 +10,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    "screenshot-tool.js",
+    // The app's own deck, copied as it is (scripts/sync-app-deck.mjs): the app's lint checks it.
+    "components/app/**",
   ]),
   {
     rules: {

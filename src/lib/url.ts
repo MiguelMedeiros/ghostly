@@ -1,6 +1,5 @@
-import type { SessionKeys } from "./storage";
-
-const SEPARATOR = "/";
+import { inviteLink, inviteOwnership, readInviteCode, type InviteRefusal, type LinkParams } from "@ghostly/core";
+import { listSessions, type SessionKeys } from "./storage";
 
 /**
  * Where a chat lives in the app: by the id of its stored session. The keys
@@ -11,37 +10,83 @@ export function chatPath(sessionId: string): string {
   return `/chat/${encodeURIComponent(sessionId)}`;
 }
 
-/** `<seed>/<peer public key>/<encryption key>` */
-function parseKeys(code: string): SessionKeys | null {
-  const parts = code.replace(/^\/+/, "").replace(/\/+$/, "").split(SEPARATOR);
-  if (parts.length !== 3 || !parts.every((part) => /^[A-Za-z0-9_\-+=]+$/.test(part))) return null;
-  const [seedB64, peerPubKeyB64, encKeyB64] = parts;
-  return { seedB64, peerPubKeyB64, encKeyB64 };
+/**
+ * The keys a joined invite gives. Never a delivery mode: DHT only is a choice made in a chat (WISP 400), so a
+ * `pair2d/` code joins like any other and the chat upgrades by itself; the inviter's choice arrives in its envelopes.
+ */
+function keysOf(params: LinkParams): SessionKeys {
+  return {
+    seedB64: params.seedB64, peerPubKeyB64: params.peerPubKeyZ32, encKeyB64: params.encKeyB64, profile: params.profile,
+    ...(params.peerParticipationKeyZ32 ? { peerParticipationKeyB64: params.peerParticipationKeyZ32 } : {}),
+  };
+}
+
+/** A `web+ghostly:` link, as the browser hands it over (escaped) or as it was written. */
+const PROTOCOL_LINK = /^\/?web(?:\+|%2B)ghostly(?::|%3A)(?:\/\/|%2F%2F)?/i;
+
+/**
+ * What a `web+ghostly:…` link names, when the address is one. The installed web app registers the scheme
+ * (manifest `protocol_handlers`, `/#%s`), so the browser opens `#web%2Bghostly%3Aghostly1…` with the whole link
+ * escaped in the fragment. Null when the address is not such a link.
+ */
+export function protocolLinkCode(pathname: string): string | null {
+  if (!PROTOCOL_LINK.test(pathname)) return null;
+  const rest = pathname.replace(PROTOCOL_LINK, "");
+  try { return decodeURIComponent(rest); } catch { return rest; }
 }
 
 /**
- * The keys in a route that carries them: an invite link opened in the app, or
- * a chat address from before chats were routed by session id.
+ * The invite a route carries, if it carries one: `/ghostly1…` (the hash of a shared link), `/chat/<code>`, or a
+ * `web+ghostly:` link. Whatever a `web+ghostly:` link holds is read as an invite, so what is not one is refused
+ * and leaves the address like a bad invite does.
  */
-export function parseChatRoute(pathname: string): SessionKeys | null {
-  const match = pathname.match(/^\/chat\/(.+)$/);
-  return match ? parseKeys(match[1]) : null;
+export function inviteRouteCode(pathname: string): string | null {
+  const protocol = protocolLinkCode(pathname);
+  if (protocol !== null) return protocol || "web+ghostly:";
+  return pathname.match(/^\/?(ghostly1[^/]*)$/i)?.[1] ?? pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
 }
 
-/** What someone may paste to join: an invite link, a `/chat/…` path or the bare invite code. */
-export function parseInvite(input: string): SessionKeys | null {
+/** What reading a pasted, scanned or opened invite gave: the keys, or the one reason the UI says. */
+export type InviteInput = { ok: true; keys: SessionKeys } | { ok: false; reason: InviteRefusal };
+
+/**
+ * What someone may paste to join: an invite link (`https://ghostly.tools/#ghostly1…`,
+ * `app.ghostly.tools/#…`, an older `#/chat/…` link), a `/chat/…` path or the bare code.
+ */
+export function readInvite(input: string): InviteInput {
   const trimmed = input.trim();
-  if (!trimmed) return null;
-  try {
-    const hash = new URL(trimmed).hash.replace(/^#/, "");
-    if (hash.startsWith("/chat/")) return parseChatRoute(hash);
-  } catch {
-    // not a URL
-  }
   const idx = trimmed.indexOf("/chat/");
-  if (idx !== -1) return parseChatRoute(trimmed.slice(idx));
-  return parseKeys(trimmed);
+  const reading = readInviteCode(!trimmed.includes("#") && idx !== -1 ? trimmed.slice(idx) : trimmed);
+  return reading.ok ? { ok: true, keys: keysOf(reading.params) } : { ok: false, reason: reading.reason };
 }
+
+/** The keys of an invite, or null when it is refused (`readInvite` says why). */
+export function parseInvite(input: string): SessionKeys | null {
+  const reading = readInvite(input);
+  return reading.ok ? reading.keys : null;
+}
+
+/**
+ * What joining these keys would do in this profile: `own` when the invite is one this profile made (its
+ * chat is `sessionId`: sharing it is the contact's way in, not ours), `joined` when this profile already
+ * joined by it, `new` when it is someone else's, unseen. Another profile's chats on the same app are
+ * stored apart, so its invites are new here: two profiles on one app may chat with each other.
+ */
+export type JoinOutcome = { kind: "own" | "joined"; sessionId: string } | { kind: "new" };
+
+export function classifyInvite(keys: SessionKeys): JoinOutcome {
+  const known = listSessions().map((session) => ({ id: session.id, seedB64: session.mySeedB64, peerPubKeyZ32: session.peerPubKeyB64 }));
+  const ownership = inviteOwnership({ seedB64: keys.seedB64 }, known);
+  return ownership.kind === "new" ? ownership : { kind: ownership.kind, sessionId: ownership.link.id };
+}
+
+/** The message key for each refusal (WISP 801, "Reading an invite"). */
+export const INVITE_REFUSAL_MESSAGE = {
+  typo: "join.typo",
+  update: "join.update",
+  "not-ghostly": "join.notGhostly",
+  damaged: "join.damaged",
+} as const satisfies Record<InviteRefusal, string>;
 
 export function buildInviteCode(
   seedB: string,
@@ -67,5 +112,11 @@ export function buildInviteUrl(
  */
 export function chatRouteSession(pathname: string): string | null {
   const match = pathname.match(/^\/chat\/([^/]+)\/?$/);
-  return match ? decodeURIComponent(match[1]) : null;
+  // A `ghostly1` code is one segment too, but it is keys, never a session id.
+  return match && !/^ghostly1/i.test(match[1]) ? decodeURIComponent(match[1]) : null;
+}
+
+/** What Copy and Share hand over: a `ghostly1` code as its link on ghostly.tools, an older code as it is. */
+export function inviteShareText(code: string): string {
+  return /^ghostly1/i.test(code) ? inviteLink(code) : code;
 }

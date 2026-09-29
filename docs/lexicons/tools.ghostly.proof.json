@@ -1,0 +1,28 @@
+{
+  "lexicon": 1,
+  "id": "tools.ghostly.proof",
+  "description": "A Ghostly identity proof: the account authorizes one Ghostly proof key to present this account to contacts the person chooses, for a period. See https://github.com/MiguelMedeiros/ghostly/blob/dev/docs/wisps/3xx-atproto.md.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "The record key is the proof key the statement authorizes (52 characters of z-base-32), so the record is found and deleted by that key.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["statement", "createdAt"],
+        "properties": {
+          "statement": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "The Ghostly identity statement, exactly as built by identityStatement() (one line, no trailing newline). Its subject is this account's DID."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When the record was written."
+          }
+        }
+      }
+    }
+  }
+}

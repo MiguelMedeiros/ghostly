@@ -1,0 +1,406 @@
+/* "Your space": one composition on violet ink, and the wallet deck as a set piece.
+   Everything here is prefixed sp- so nothing collides with home.css. */
+
+.sp-section {
+  position: relative;
+  padding-block: clamp(88px, 12vw, 160px) clamp(72px, 9vw, 120px);
+  background: var(--room-space);
+  color: var(--text);
+  overflow-x: clip;
+}
+
+/* ── Head: the chapter's one idea ───────────────────
+   The h2 wears .h-display but is capped like the hero's h1 (house precedent),
+   so the chapter never outshouts the film's title. */
+.sp-head {
+  display: grid;
+  gap: 22px;
+  max-width: 1000px;
+  margin-bottom: clamp(48px, 6vw, 84px);
+}
+.sp-head .h-display {
+  font-size: clamp(44px, 7.4vw, 108px);
+  max-width: 12ch;
+}
+.sp-head .lead {
+  max-width: 36em;
+}
+
+/* ── The desk: a window on the left, a rail of features on the right ── */
+.sp-desk {
+  display: grid;
+  grid-template-columns: 58fr 42fr;
+  gap: clamp(28px, 4.5vw, 72px);
+  align-items: start;
+}
+.sp-shot {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+.sp-window {
+  position: relative;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow:
+    0 60px 120px -50px rgba(0, 0, 0, 0.95),
+    0 24px 48px -30px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(255, 255, 255, 0.025) inset,
+    0 0 110px -40px rgba(167, 139, 250, 0.32);
+}
+.sp-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding-inline: 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.sp-window-bar span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.sp-window-body {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background: #081521;
+}
+/* The profile page is the right two thirds of the capture; anchor the crop there. */
+.sp-window-body img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 100% 60%;
+}
+.sp-shot figcaption {
+  text-align: right;
+}
+
+.sp-rail {
+  display: grid;
+  align-content: start;
+}
+.sp-feature {
+  display: grid;
+  gap: 12px;
+  padding-block: clamp(20px, 2.4vw, 30px);
+  border-top: 1px solid var(--line);
+}
+.sp-feature:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.sp-feature:last-child {
+  padding-bottom: 0;
+}
+.sp-feature-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+}
+.sp-feature-head .h-card {
+  flex: 1 1 18ch;
+  text-wrap: balance;
+}
+.sp-feature .body {
+  color: var(--muted);
+  max-width: none;
+}
+/* The honesty note reads as the visual's caption, like the window's provenance line. */
+.sp-note {
+  max-width: 52em;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
+}
+
+/* Profiles: three chips that slide in when the head enters. */
+.sp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-block: 4px;
+}
+.sp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px 6px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c) 32%, transparent);
+  background: color-mix(in srgb, var(--c) 7%, transparent);
+  font-weight: 600;
+  font-size: var(--t-note);
+}
+.sp-avatar {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #0b1622;
+  overflow: hidden;
+}
+.sp-avatar svg {
+  transform: translateY(4px);
+  filter: none;
+}
+.reveal[data-reveal="hidden"] .sp-chip {
+  opacity: 0;
+  transform: translateX(24px);
+}
+.reveal[data-reveal="shown"] .sp-chip {
+  animation: sp-chip-in var(--dur-slow) var(--ease-enter) both;
+  animation-delay: calc(0.2s + var(--i) * var(--stagger) * 2);
+}
+@keyframes sp-chip-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+/* Backup → Storage: two light boxes and an arrow. */
+.sp-flow {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: stretch;
+  margin-block: 2px;
+}
+.sp-box {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+.sp-box strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-note);
+  color: var(--cyan);
+}
+.sp-box--where strong {
+  color: var(--mint);
+}
+.sp-box svg {
+  width: 17px;
+  height: 17px;
+}
+.sp-box ul {
+  display: grid;
+  gap: 3px;
+  font-size: var(--t-micro);
+  line-height: 1.4;
+  color: var(--muted);
+}
+.sp-box li::before {
+  content: "· ";
+  color: var(--dim);
+}
+.sp-arrow {
+  align-self: center;
+  color: var(--dim);
+  font-size: 20px;
+}
+
+/* Themes and languages. */
+.sp-look {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-block: 2px;
+}
+.sp-swatches {
+  display: flex;
+  gap: 8px;
+}
+.sp-swatch {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+}
+.sp-langs {
+  font-size: var(--t-caption);
+  letter-spacing: 0.04em;
+  color: var(--dim);
+}
+
+/* ── Wallet band: full bleed, the deck as an object ── */
+.sp-band {
+  position: relative;
+  margin-top: clamp(88px, 11vw, 150px);
+  margin-inline: calc(50% - 50vw);
+  padding-block: clamp(56px, 7vw, 96px) 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.sp-band-head {
+  display: grid;
+  gap: 16px;
+  justify-items: center;
+  text-align: center;
+  margin-inline: auto;
+  max-width: 760px;
+  margin-bottom: clamp(36px, 5vw, 64px);
+}
+.sp-wallet {
+  position: relative;
+  display: grid;
+  gap: 28px;
+  justify-items: center;
+}
+/* The deck is the app's own (components/app: deck/deck.css, wallet-deck.css, wallet-cards.css). The band is its
+   container, as the page column is in the app: a stack of cards at most 960px wide, the whole width on a phone.
+   These are the app's dark theme values its deck reads. */
+.sp-band {
+  container-type: inline-size;
+}
+.sp-wallet {
+  --theme-border-bright: var(--line-2);
+  --theme-surface-alt: rgba(255, 255, 255, 0.03);
+  --theme-text-secondary: var(--muted);
+  --theme-text-muted: var(--dim);
+  --theme-accent: #00a884;
+}
+.sp-deck-zone {
+  width: 100%;
+}
+/* Before the page runs, the deck's place: about as tall as the stack and its arrows. */
+.sp-deck-placeholder {
+  height: calc(min(340px, (100cqw - 16px) * 0.62) / 1.586 + 63px);
+}
+/* No text under 12px on the site: the card's status and kind, a size up from the app's. */
+.sp-wallet .wallet-deck-card-status {
+  font-size: 12px;
+}
+.sp-wallet .wallet-deck-card-balance {
+  font-size: max(12px, min(13px, calc(var(--card-w) * 0.036)));
+}
+
+/* The chosen card's details: centred text under the deck, a hairline in the card's ink
+   above it. The visible panel is stacked over an invisible copy of every card's text,
+   so the band is as tall as the longest one and nothing below jumps when the chosen
+   card changes. */
+.sp-desc-stack {
+  display: grid;
+  width: 100%;
+}
+.sp-desc-stack > * {
+  grid-area: 1 / 1;
+}
+.sp-desc-sizer {
+  display: grid;
+  visibility: hidden;
+  pointer-events: none;
+}
+.sp-desc-sizer > * {
+  grid-area: 1 / 1;
+}
+.sp-desc {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  text-align: center;
+  padding-inline: 16px;
+  align-content: start;
+}
+.sp-desc::before {
+  content: "";
+  width: 36px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgb(var(--card-rgb, 167, 139, 250));
+  transition: background-color var(--dur-base) var(--ease-move);
+}
+.sp-desc .body {
+  color: var(--muted);
+  max-width: 40em;
+}
+.sp-desc .note {
+  max-width: 44em;
+}
+.sp-noscript {
+  display: grid;
+  gap: 8px;
+  max-width: 60em;
+  margin-inline: auto;
+  padding-inline: 16px;
+  color: var(--muted);
+}
+.sp-testnet {
+  text-align: center;
+  padding-inline: 16px;
+  margin-top: clamp(20px, 3vw, 36px);
+}
+
+/* ── Phone ─────────────────────────────────────────── */
+@media (max-width: 860px) {
+  .sp-head .h-display {
+    font-size: clamp(40px, 11vw, 60px);
+    max-width: none;
+    text-wrap: balance;
+  }
+  .sp-desk {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  .sp-shot {
+    position: static;
+  }
+  /* A phone cannot read a whole desktop window: show the backups and the profiles list. */
+  .sp-window-body {
+    aspect-ratio: 1.56 / 1;
+  }
+  .sp-window-body img {
+    inset: auto -9.7% -4.4% auto;
+    width: 178%;
+    max-width: none;
+    height: auto;
+    object-fit: fill;
+    object-position: 0 0;
+  }
+  .sp-band {
+    margin-top: 80px;
+  }
+  .sp-wallet {
+    gap: 18px;
+  }
+  /* Backup and storage: two short lists side by side, no boxes. */
+  .sp-box {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .sp-flow {
+    gap: 16px;
+  }
+  /* A card's details are its one line; the panel keeps the height of the longest line, not of the longest note. */
+  .sp-desc .note {
+    display: none;
+  }
+}
+
+/* ── Reduced motion: the final frame, at once ─────── */
+@media (prefers-reduced-motion: reduce) {
+  .reveal .sp-chip {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

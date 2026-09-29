@@ -1,0 +1,1 @@
+A Mac's budget of connections (§ Hubs, Budget; § Cost per member, WKWebView): at WKWebView's ceiling a new connection gathers no candidate, so a call and a fresh 1:1 chat did not connect, and with 40 connections the call connected at once; the Desktop app on a Mac gives its groups 40, is a hub only while that fits, and past it opens only its most useful edges (#439).

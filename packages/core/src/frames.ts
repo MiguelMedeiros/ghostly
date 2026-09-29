@@ -130,6 +130,26 @@ export interface PayRequestFrame {
   u: string;
   memo?: string;
   e: WireEndpoint[];
+  /** The `pay-ask` this answers, if any. */
+  a?: string;
+  /**
+   * `mainnet` (real money) or `testnet` (test coins): what pays it. Absent from apps before wallets had their own
+   * network; the endpoints tell then (a test mint, a test chain).
+   */
+  n?: "mainnet" | "testnet";
+}
+
+/** A payer asking to pay: the payee answers with a `pay-req` whose `a` is this id. */
+export interface PayAskFrame {
+  t: "pay-ask";
+  id: string;
+  ts: number;
+  v: string;
+  u: string;
+  m: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark";
+  memo?: string;
+  /** The network the payer will pay from: the payee answers from its wallet of that network. */
+  n?: "mainnet" | "testnet";
 }
 
 /** A payment that travels in band, such as an ecash token. */
@@ -155,6 +175,8 @@ export interface PayResultFrame {
   /** Amount credited, when it differs from what was sent (fees). */
   v?: string;
   err?: string;
+  /** On the payee's own `pay-req`: closed for good, never to be paid (its wallet was removed). */
+  c?: true;
 }
 
 /** Aborts a stream in either direction. */
@@ -172,6 +194,7 @@ export interface PingFrame {
 }
 
 export type ControlFrame =
+  | PayAskFrame
   | HelloFrame
   | ChatFrame
   | CallFrame
@@ -233,7 +256,8 @@ function isEndpoint(value: unknown): value is WireEndpoint {
     Array.isArray(value) &&
     value.length === 2 &&
     typeof value[0] === "string" &&
-    /^[a-z0-9][a-z0-9-]{0,63}$/.test(value[0]) &&
+    value[0].length <= 64 &&
+    /^[a-z0-9][a-z0-9-]*(?:\/[1-9][0-9]*)?$/.test(value[0]) &&
     typeof value[1] === "string" &&
     value[1].length <= 32 * 1024
   );
@@ -241,7 +265,8 @@ function isEndpoint(value: unknown): value is WireEndpoint {
 
 /** Returns null for anything malformed; callers drop the frame. */
 export function decodeControl(text: string): ControlFrame | null {
-  if (text.length > LIMITS.maxControlFrameBytes) return null;
+  // A character is at least one byte: the cheap check first, then the real one.
+  if (text.length > LIMITS.maxControlFrameBytes || utf8Encode(text).length > LIMITS.maxControlFrameBytes) return null;
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -257,10 +282,10 @@ export function decodeControl(text: string): ControlFrame | null {
       return { t: "hello", v: f.v, svc: f.svc, nick: sanitizeNick(f.nick) };
     case "m":
       if (typeof f.ts !== "number" || typeof f.m !== "string") return null;
-      if (f.m.length > LIMITS.maxChatMessageBytes) return null;
+      if (utf8Encode(f.m).length > LIMITS.maxChatMessageBytes) return null;
       return { t: "m", ts: f.ts, m: f.m };
     case "call":
-      if (typeof f.s !== "string" || f.s.length > LIMITS.maxChatMessageBytes) return null;
+      if (typeof f.s !== "string" || utf8Encode(f.s).length > LIMITS.maxChatMessageBytes) return null;
       return { t: "call", s: f.s };
     case "svc":
       return { t: "svc", svc: f.svc };
@@ -283,15 +308,20 @@ export function decodeControl(text: string): ControlFrame | null {
       const memo = typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined;
       if (f.t === "pay-req") {
         if (!Array.isArray(f.e) || f.e.length === 0 || f.e.length > 8 || !f.e.every(isEndpoint)) return null;
-        return { t: "pay-req", id: f.id, ts: f.ts, v: f.v, u: f.u, memo, e: f.e };
+        return { t: "pay-req", id: f.id, ts: f.ts, v: f.v, u: f.u, memo, e: f.e, a: isPayId(f.a) ? f.a : undefined, n: f.n === "mainnet" || f.n === "testnet" ? f.n : undefined };
       }
       if (!isEndpoint(f.e) || (f.rid !== undefined && !isPayId(f.rid))) return null;
       return { t: "pay", id: f.id, ts: f.ts, rid: f.rid, v: f.v, u: f.u, memo, e: f.e };
     }
+    case "pay-ask": {
+      if (!isPayId(f.id) || typeof f.ts !== "number" || !isAmount(f.v) || !isUnit(f.u)) return null;
+      if (f.m !== "arkade" && f.m !== "usdt" && f.m !== "bark" && f.m !== "bitcoin" && f.m !== "fedimint" && f.m !== "spark") return null;
+      return { t: "pay-ask", id: f.id, ts: f.ts, v: f.v, u: f.u, m: f.m, memo: typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined, n: f.n === "mainnet" || f.n === "testnet" ? f.n : undefined };
+    }
     case "pay-res":
       if (!isPayId(f.id) || typeof f.ok !== "boolean") return null;
       if (f.v !== undefined && !isAmount(f.v)) return null;
-      return { t: "pay-res", id: f.id, ok: f.ok, v: f.v, err: typeof f.err === "string" ? f.err.slice(0, 200) : undefined };
+      return { t: "pay-res", id: f.id, ok: f.ok, v: f.v, err: typeof f.err === "string" ? f.err.slice(0, 200) : undefined, ...(f.c === true && !f.ok ? { c: true as const } : {}) };
     case "rst":
       if (!isStreamId(f.id) || (f.d !== "q" && f.d !== "s" && f.d !== "f")) return null;
       return { t: "rst", id: f.id, d: f.d, e: typeof f.e === "string" ? f.e.slice(0, 256) : "" };
@@ -337,6 +367,11 @@ export interface FrameChannel {
   readonly bufferedAmount: number;
   /** Resolves once the send buffer has drained below the low water mark. */
   drained(): Promise<void>;
+  /**
+   * Bytes the channel queues before `send` throws (the native and iroh channels). Absent: it buffers freely, as a
+   * WebRTC data channel does, and a sender only keeps under `LIMITS.sendHighWaterMark`.
+   */
+  readonly sendBudget?: number;
   close(): void;
   onMessage: ((data: string | Uint8Array) => void) | null;
   onClose: (() => void) | null;

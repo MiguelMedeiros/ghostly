@@ -8,7 +8,11 @@ import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
+import { nativeCallSupport } from "./desktop/nativeCalls";
 import { setStorageProfile } from "./lib/storage";
+import { activeProfileId, namespaceOf, setProfileBase } from "./lib/profiles";
+import { loadSettings } from "./lib/settings";
+import { applyDocumentLanguage } from "./lib/documentLanguage";
 
 async function boot() {
   let profile = "";
@@ -17,21 +21,28 @@ async function boot() {
   } catch {
     // running outside Tauri (browser dev) — no profile
   }
+  // GHOSTLY_PROFILE gives this process a space of its own; inside it, the profile chosen in the app (WISP 04).
+  setProfileBase(profile);
+  profile = namespaceOf(activeProfileId());
   // Profiles share the WebView's storage area; each gets its own sessions, database and peer.
   if (profile) {
     setStorageProfile(profile);
     setDatabaseName(`ghostly_${profile}`);
   }
+  // The profile's language on <html> before anything is painted (the I18nProvider keeps it in step from then on).
+  applyDocumentLanguage(loadSettings().language);
 
   const root = createRoot(document.getElementById("root")!);
   await becomeThePeer(`ghostly-peer-${profile}`, () =>
-    root.render(<p style={{ padding: 24, font: "15px system-ui" }}>Ghostly is already running with this profile.</p>),
+    root.render(<p lang="en" style={{ padding: 24, font: "15px system-ui" }}>Ghostly is already running with this profile.</p>),
   );
 
-  const host = createDesktopHost(await getVersion().catch(() => "0.0.0"));
+  const host = createDesktopHost(await getVersion().catch(() => "0.0.0"), await nativeCallSupport());
   setBrowserHost(host);
   startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
+  // The app is exiting (src-tauri main.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
+  addEventListener("ghostly-departing", () => host.announceDeparture());
 
   root.render(
     <StrictMode>

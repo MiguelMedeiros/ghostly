@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeBolt11, findBolt11 } from "../src";
+// covers: payments.bolt11, payments.lightning.invoice-card
 
 // Issued by the public test mint (worthless sats): 2100 sats, no description.
 const TEST_MINT_INVOICE =

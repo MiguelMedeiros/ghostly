@@ -1,0 +1,132 @@
+import numbering from "./wisp-numbering.json";
+import index from "./reference-index.json";
+import { GROUPS, type GroupId } from "./wisp-groups";
+import type { Level } from "./status";
+
+/**
+ * The WISP catalogue, derived from `docs/wisps/numbering.json` (which drafts
+ * exist and their numbers) and the documents themselves (status, dependencies,
+ * implementation line, summary, availability, notes), synced by
+ * `npm run sync:references`. No text about a WISP is written on the site.
+ */
+export type Wisp = {
+  id: string;
+  /** What to print: "401", or "3xx" while a number is not assigned. */
+  number: string;
+  assigned: boolean;
+  kind: string;
+  file: string;
+  slug: string;
+  aliases: string[];
+  /** Title without the "WISP nn:" prefix. */
+  name: string;
+  fullTitle: string;
+  group: GroupId;
+  /** The contract this adapter or profile implements, if any. */
+  parent?: string;
+  status: string;
+  updated?: string;
+  implementation?: string;
+  summary?: string;
+  notices: string[];
+  dependencies: string[];
+  benefit?: string;
+  level: Level | null;
+  note?: string;
+  feature?: { label: string; href: string };
+  video?: { src: string; poster?: string; chapters?: { at: number; title: string }[] };
+};
+
+type IndexEntry = (typeof index)[number] & {
+  status?: string;
+  updated?: string;
+  implementation?: string;
+  summary?: string;
+  documentKind?: string;
+  benefit?: string;
+  level?: string | null;
+  note?: string;
+  feature?: { label: string; href: string };
+  video?: { src: string; poster?: string };
+};
+
+function groupFor(id: string): GroupId {
+  const n = Number(id);
+  const byRange = GROUPS.find((g) => g.ranges.some(([lo, hi]) => n >= lo && n <= hi));
+  return byRange?.id ?? "meet";
+}
+
+const refs = index as IndexEntry[];
+
+const all: Wisp[] = numbering.map((entry) => {
+  const ref = refs.find((r) => r.file === entry.file);
+  const slug = entry.file.replace(/\.md$/, "").toLowerCase();
+  const fullTitle = ref?.title ?? entry.file;
+  const name = fullTitle.replace(/^WISP\s+[^\s:]+(?::|\s+[\u2014-])\s+/, "");
+  return {
+    id: entry.id,
+    number: entry.displayNumber,
+    assigned: entry.numberAssignment !== "unassigned",
+    kind: ref?.documentKind && ref.documentKind !== entry.kind ? entry.kind : entry.kind,
+    file: entry.file,
+    slug,
+    aliases: ref?.aliases ?? [],
+    name,
+    fullTitle,
+    group: groupFor(entry.id),
+    status: ref?.status ?? "Draft",
+    updated: ref?.updated,
+    implementation: ref?.implementation,
+    summary: ref?.summary,
+    notices: ref?.notices ?? [],
+    dependencies: ref?.dependencies ?? [],
+    benefit: ref?.benefit,
+    level: (ref?.level ?? null) as Level | null,
+    note: ref?.note,
+    feature: ref?.feature,
+    video: ref?.video,
+  };
+});
+
+// A family's contract is its round number (100, 200 …); adapters and profiles hang under it.
+for (const w of all) {
+  const n = Number(w.id);
+  if (w.kind === "Contract" || w.kind === "Process" || n < 100) continue;
+  const base = String(Math.floor(n / 100) * 100);
+  if (all.some((c) => c.id === base)) w.parent = base;
+}
+
+/** Narrative order: groups as the story tells them, then by number. */
+export const wisps: Wisp[] = [...all].sort((a, b) => {
+  const ga = GROUPS.findIndex((g) => g.id === a.group);
+  const gb = GROUPS.findIndex((g) => g.id === b.group);
+  if (ga !== gb) return ga - gb;
+  const oa = GROUPS[ga].order?.indexOf(a.id) ?? -1;
+  const ob = GROUPS[gb].order?.indexOf(b.id) ?? -1;
+  if (oa !== ob) return (oa < 0 ? 99 : oa) - (ob < 0 ? 99 : ob);
+  return Number(a.id) - Number(b.id);
+});
+
+/**
+ * What the WISPs page and the reader's sidebar list: the drafts that work in the app today, and the process
+ * document that explains the format. Planned and research drafts are on the roadmap; their pages stay
+ * reachable by their address.
+ */
+export const isListed = (w: Pick<Wisp, "level" | "kind">) => w.level === "available" || w.kind === "Process";
+export const listedWisps = wisps.filter(isListed);
+
+/** How many WISPs the site offers to browse. */
+export const wispCount = listedWisps.length;
+
+export function findWisp(slugOrAlias: string): Wisp | undefined {
+  return wisps.find((w) => w.slug === slugOrAlias || w.aliases.includes(slugOrAlias));
+}
+
+export function wispByFile(file: string): Wisp | undefined {
+  return wisps.find((w) => w.file === file);
+}
+
+export const wispPath = (w: Pick<Wisp, "slug">) => `/wisps/${w.slug}`;
+
+export { GROUPS };
+export type { GroupId };

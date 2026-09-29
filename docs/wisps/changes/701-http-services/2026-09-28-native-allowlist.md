@@ -1,0 +1,1 @@
+Desktop's native local fetch reaches only the loopback addresses (scheme, host and port) the person allowed for the profile in a native dialog: shown when an app is shared, and once on first use for an app shared before this change. The page can remove an address but never add one, and redirects are still never followed. Any other address is refused before a connection is made.

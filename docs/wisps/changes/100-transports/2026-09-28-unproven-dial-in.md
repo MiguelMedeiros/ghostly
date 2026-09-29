@@ -1,0 +1,1 @@
+a connection dialled in on a pinned chat holds no place until it authenticates: it has 15 seconds to do so, a newer dial in takes the place of a replacement still authenticating, and the signaling pace stays as it was until the session is ready.

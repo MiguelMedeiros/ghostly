@@ -2,149 +2,144 @@
 
 We welcome all ghosts, ghouls, and developers! Here's how to haunt our codebase.
 
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
-- Node.js 18+
-- Rust 1.70+
-- [Tauri prerequisites](https://tauri.app/v1/guides/getting-started/prerequisites)
+- Node.js 22.12 or newer (CI uses 22; the CLI workspace needs 22.12)
+- Rust (stable)
+- The [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system, to build Desktop
 
 ### Setup
 
 ```bash
-# Clone the haunted repository
 git clone https://github.com/MiguelMedeiros/ghostly.git
 cd ghostly
-
-# Install dependencies
 npm install
-
-# Start development
 npm run tauri dev
 ```
 
-## Development Commands
+## Branches
 
-```bash
-# Frontend only (Vite)
-npm run dev
+- **`dev`** is where work lands: features and fixes branch off it and come back to it in a pull request.
+- **`main`** is what was released. It moves only for a release (`dev` merged into it with a merge commit, never a squash) or a hotfix.
+- **A hotfix** branches off `main`, is released from there, and `main` is then merged back into `dev`.
 
-# Full app (Tauri + Vite)
-npm run tauri dev
+Releases: [docs/RELEASING.md](docs/RELEASING.md).
 
-# Build for production
-npm run tauri build
+## Commands
 
-# Run linter
-npm run lint
+| Command | What |
+|---|---|
+| `npm run dev` | the shared UI in Vite, no Tauri |
+| `npm run tauri dev` | the Desktop app (Tauri + Vite) |
+| `npm run tauri build` | a Desktop build for production |
+| `npm run build:web` | the web app → `web/dist` |
+| `npm run build:extension` | the extension → `extension/dist` (load it unpacked in `chrome://extensions`) |
+| `npm run lint` / `npm run lint:fix` | ESLint |
+| `npm run typecheck` | TypeScript, every workspace |
+| `npm run test:affected` | before pushing: only what your change can break (unit, lint, typecheck, Rust; the e2e picked with `--port <n>`) |
+| `npm test` | every unit test: `test:packages` (core, browser, sdk, extension, cli) then `test:app` (UI components, matrix, scripts) |
+| `npm run test:ui` | only the UI's component tests ([src/test/README.md](src/test/README.md)) |
+| `npm run test:map` | every feature in `e2e/features.json` has a test, and the file is sorted (`-- --fix` sorts it) |
+| `npm run locales:sort` | sorts the keys of every locale file |
+| `node scripts/changes.mjs` | checks the changelog entries in `changes/` (`--preview` prints the release notes they make) |
+| `npm run test:e2e` | end-to-end: real browsers, the web app and the extension ([e2e/README.md](e2e/README.md)) |
+| `npm run e2e:full` | end-to-end with the gated suites, on a local Docker stack of regtest services |
+| `npm run build && npm run check:desktop-bundle` | Desktop got its Desktop wiring, not a browser stand-in (seconds, runs anywhere) |
 
-# Fix linter issues
-npm run lint:fix
+The website has its own commands in [website/README.md](website/README.md). The testing guide is [docs/TESTING.md](docs/TESTING.md).
 
-# Type checking
-npm run typecheck
-
-# Protocol tests (packages/core)
-npm test
-
-# Browser extension → extension/dist (load it unpacked in chrome://extensions)
-npm run build:extension
-
-# End-to-end: real browsers, the web app and the extension, every feature (see e2e/README.md)
-npm run test:e2e
-
-# End-to-end: the bundled Desktop app, through WebDriver (Linux and Windows only)
-npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop
-
-# Desktop got its Desktop wiring and not a browser stand-in — runs anywhere, takes a second
-npm run build && npm run check:desktop-bundle
-```
-
-## Project Structure
+## Project structure
 
 ```
 ghostly/
 ├── packages/
-│   ├── core/               # The Ghost protocol, shared by every client (TypeScript)
-│   └── react/              # React hooks shared by Desktop and Browser
-├── extension/              # Ghostly Browser (Chromium extension, Manifest V3)
-├── src/                    # Desktop React frontend
-│   ├── components/         # UI components
-│   ├── hooks/              # React hooks (useChat, etc.)
-│   └── pages/              # App pages
-├── src-tauri/              # Rust backend
-│   └── src/                # Tauri commands & Pkarr integration
-├── cli/                    # ghostly-cli source
-├── website/                # ghostly.tools website (Next.js)
-└── ...
+│   ├── core/            # The Ghost protocol, shared by every client (TypeScript)
+│   ├── browser/         # The Ghostly peer: engine, wallets, storage, the platform layer under the UI
+│   ├── react/           # React hooks shared by the clients
+│   ├── sdk/             # @ghostlytools/sdk: adapter contracts for outside authors
+│   ├── cli/             # ghostly (@ghostlytools/cli): the engine on Node for bots (daemon, socket API, events)
+│   └── iroh-web/        # Iroh compiled for browsers (relay only)
+├── src/                 # The shared React UI (Desktop, web app, extension)
+├── src-tauri/           # Desktop's Rust backend
+├── native-transports/   # Iroh and HyperDHT for Desktop, the HyperDHT relay for browsers
+├── extension/           # Ghostly Browser (Chromium extension, Manifest V3)
+├── web/                 # Ghostly on the web (app.ghostly.tools)
+├── cli/                 # ghostly-cli, the older Rust CLI for v0.4 chats (no longer shipped; not the npm package)
+├── e2e/                 # Playwright end-to-end suites and their Docker stack
+├── examples/sdk-adapter # An adapter built outside the app on @ghostlytools/sdk
+├── website/             # ghostly.tools (Next.js)
+└── docs/                # Protocol, WISPs, guides
 ```
 
-## How to Contribute
+## Pull requests
 
-### Reporting Bugs
-
-1. Check if the issue already exists in [Issues](https://github.com/MiguelMedeiros/ghostly/issues)
-2. If not, create a new issue with:
-   - Clear title and description
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Screenshots if applicable
-   - Your OS and app version
-
-### Suggesting Features
-
-Open an issue with the `enhancement` label describing:
-- The problem you're trying to solve
-- Your proposed solution
-- Any alternatives you've considered
-
-### Pull Requests
-
-1. **Fork** the repository
-2. **Create** your feature branch
+1. Branch off `dev` (or fork, and branch off `dev` there):
    ```bash
-   git checkout -b feature/spooky-feature
+   git checkout -b feat/spooky-feature origin/dev
    ```
-3. **Make** your changes
-4. **Test** your changes
+2. Make your change, **with its tests** (below). A change people will notice gets a changelog entry: one file in
+   [`changes/`](changes/README.md), not a line in `CHANGELOG.md`.
+3. Before pushing, run what your change can break:
    ```bash
-   npm run lint
-   npm run typecheck
-   npm run test:e2e
-   npm run check:desktop-bundle
-   npm run tauri dev
+   npm run test:affected -- --port 50310   # unit, lint, typecheck, Rust, and the e2e tagged with the features you touched
    ```
-5. **Commit** with a clear message
-   ```bash
-   git commit -m 'Add some spookiness'
-   ```
-6. **Push** to your branch
-   ```bash
-   git push origin feature/spooky-feature
-   ```
-7. **Open** a Pull Request
+4. Open the pull request against `dev`. A draft early is fine: CI runs on every push. A draft skips the Rust jobs unless it changed Rust, so mark it ready when it is done, which runs everything.
+5. **CI Success** is the one required check on `dev`, and the branch must be up to date with `dev` to merge. When `dev` moves, rebase and push again. Pull requests are squash-merged; with auto-merge on (`gh pr merge --squash --auto`), a green, up-to-date branch merges by itself.
 
-## Code Style
+CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop checks on every pull request ([What CI runs](docs/TESTING.md#what-ci-runs)). The app's e2e suites run before every release and nightly, not on pull requests, so run the specs your change touches yourself (`npm run test:affected -- --port <n>` picks them). Run the whole suites only to reproduce a CI failure.
 
-- **TypeScript/React:** Follow existing patterns, use functional components
-- **Rust:** Follow standard Rust conventions, run `cargo fmt`
-- **Commits:** Use clear, descriptive commit messages
-- **Comments:** Only when necessary to explain *why*, not *what*
+### Tests expected with a feature
 
-## Areas to Contribute
+- **Unit tests** for the logic (Vitest; Rust `#[cfg(test)]` for `src-tauri` and `cli`).
+- **An e2e test** for what a person does or sees (Playwright, `e2e/`).
+- **One line in `e2e/features.json`** for a new feature, in its alphabetical place by id (`npm run test:map -- --fix` sorts the file), and each test says what it covers: `{ tag: ["@feature:<id>"] }` in Playwright, `// covers: <id>` in Vitest and Rust. `npm run test:map` fails in CI on a feature with no test that is not on `e2e/allow-untested.json`.
 
-- **UI/UX improvements**
-- **Performance optimizations**
-- **Documentation**
-- **Bug fixes**
-- **New features**
-- **Tests**
-- **Translations**
+Details: [docs/TESTING.md](docs/TESTING.md).
 
-## Questions?
+### Files many pull requests touch
 
-Feel free to open an issue or reach out!
+Lists that every feature adds to are kept sorted, one entry per line, so two pull requests open at the same time add lines in different places instead of both at the end. Generated files are not committed.
+
+| What | Where it goes | Check |
+|---|---|---|
+| A feature | its line in `e2e/features.json`, at its place by id; its globs in `paths` by glob | `npm run test:map` (`-- --fix` sorts) |
+| A string | `src/locales/<language>/<area>.json`, below | `npm run locales:sort`, the i18n tests |
+| A release note | a file in `changes/` | `node scripts/changes.mjs` |
+| A WISP change | a file in `docs/wisps/changes/<wisp>/` | `npm run sync:references` in `website/` |
+| A Desktop command | its alphabetical place in `src-tauri/src/main.rs` (`commands!`), `src-tauri/build.rs` (`COMMANDS`) and `src-tauri/capabilities/default.json` (`allow-*`) | `cargo test` in `src-tauri` |
+| A CLI command | its alphabetical place in `packages/cli/src/commands/<area>.ts`, and its row in the command table of `packages/cli/README.md` | the CLI's `commands` and `readme` tests |
+
+Not committed, so regenerate them when you need them: `website/lib/*.json` (`npm run sync:references` in `website/`, once after a checkout; its `dev` and `build` do it themselves), `src-tauri/gen/schemas/` (any Desktop build), and the test map (`npm run test:map:write` writes `docs/test-map.md`).
+
+### Text in the app
+
+Every string the app shows goes through `t("area.key")`. Each language is a folder of one file per area of the app, `src/locales/<language>/<area>.json`: add a key to its area's file in all eight languages (English in `en/`, the source). A new area is a new file in every folder, plus its two lines in `src/locales/en/index.ts`, which gives `t()` its types. Keys are sorted in every file: `npm run locales:sort` puts them in order, and the i18n tests fail on a file out of order, on a key missing from a language, and on a placeholder a translation drops.
+
+### Writing docs and site copy
+
+- A change to a WISP (`docs/wisps/`) adds one file to its folder in `docs/wisps/changes/` saying what changed; do not edit a Revision row or a log line. See [WISP 00](docs/wisps/00-process.md#revisions).
+- Keep the README short; details go in `docs/`. A new topic gets its own page there and one link from the README.
+- No em dashes or en dashes (U+2014, U+2013) in `docs/`, `website/`, this file or `SECURITY.md`: use a period, a comma, a colon or parentheses, and a hyphen or "to" in a range. `npm run lint` in `website/` checks the files the site renders (`scripts/check-dashes.mjs`).
+- Short sentences, plain words. Prefer a table or a list to a long paragraph.
+
+## Security
+
+Never open a public issue or pull request about a security flaw before its fix is released. Report it privately through a [GitHub security advisory](https://github.com/MiguelMedeiros/ghostly/security/advisories/new); the fix is prepared in the advisory's private fork. See [SECURITY.md](SECURITY.md).
+
+## Bugs, features and protocol proposals
+
+- **Bugs**: check [Issues](https://github.com/MiguelMedeiros/ghostly/issues) first. Then open one with steps to reproduce, what you expected, what happened, and your OS and app version.
+- **Features**: open an issue with the `enhancement` label: the problem, your proposed solution, the alternatives.
+- **Protocol proposals**: see the [WISP catalogue](docs/wisps/README.md) and the [process draft](docs/wisps/00-process.md). Keep implemented behavior apart from proposed wire formats, and include security and compatibility analysis and an interoperability plan. Draft status does not mean an integration is shipped.
+
+## Code style
+
+- **TypeScript/React**: follow the existing patterns; functional components.
+- **Rust**: `cargo fmt`, and `cargo clippy -- -D warnings` passes.
+- **Commits**: clear and descriptive (`feat(wallet): …`, `fix(chat): …`).
+- **Comments**: only to explain *why*, not *what*.
 
 ---
 

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-file-bytes-room"
+description = "Enables the file_bytes_room command without any pre-configured scope."
+commands.allow = ["file_bytes_room"]
+
+[[permission]]
+identifier = "deny-file-bytes-room"
+description = "Denies the file_bytes_room command without any pre-configured scope."
+commands.deny = ["file_bytes_room"]

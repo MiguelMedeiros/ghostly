@@ -1,0 +1,1 @@
+Pinned message: `pin/1` with `paired-pin` and `paired-pinned` on the live session, the message's id (or empty to unpin) and a number, the highest winning; the pinner says it on each session until confirmed, never on the DHT floor; a receive limit; older apps drop both frames.

@@ -1,0 +1,10 @@
+/*
+ * The invite card (InviteCard.tsx) leaving once the contact has arrived with the invite, and coming back if the
+ * contact is not seen any more. Reduced motion has neither: the card goes and comes at once.
+ */
+.invite-card[data-leaving] { animation: invite-leave 220ms ease-in forwards; pointer-events: none; }
+.invite-card[data-returning] { animation: invite-return 220ms ease-out; }
+@keyframes invite-leave { to { opacity: 0; transform: translateY(6px) scale(0.96); } }
+@keyframes invite-return { from { opacity: 0; transform: translateY(6px) scale(0.96); } }
+@media (prefers-reduced-motion: reduce) { .invite-card { animation: none !important; } }
+:root[data-reduce-motion="true"] .invite-card { animation: none !important; }

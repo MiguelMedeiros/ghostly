@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-pubky-passport"
+description = "Enables the open_pubky_passport command without any pre-configured scope."
+commands.allow = ["open_pubky_passport"]
+
+[[permission]]
+identifier = "deny-open-pubky-passport"
+description = "Denies the open_pubky_passport command without any pre-configured scope."
+commands.deny = ["open_pubky_passport"]

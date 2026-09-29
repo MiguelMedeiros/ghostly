@@ -1,0 +1,1 @@
+The web app's relay budget: 30 requests a minute on pkarr.pubky.org as before, 60 on pkarr.pubky.app, which allows 1000 an address. The door's two admissions a minute were measured with 30 on both relays; the signaling of a third can now go through pkarr.pubky.app once pkarr.pubky.org's minute is spent (#435).

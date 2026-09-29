@@ -1,0 +1,34 @@
+{
+  "hubs": {
+    "auto": "Hub se sempre acceso",
+    "badge": "hub",
+    "badgeHint": "Inoltra i messaggi del gruppo ai membri collegati. Vede chi parla e quando, non cosa viene detto.",
+    "choice": "Hub",
+    "exclude": "Mai hub",
+    "pin": "Sempre hub"
+  },
+  "menu": {
+    "forget": "Elimina da questo dispositivo",
+    "leave": "Esci dal gruppo",
+    "members": "Membri…",
+    "rotate": "Rinnova chiavi"
+  },
+  "rename": {
+    "action": "Rinomina",
+    "cancel": "Annulla",
+    "hint": "Tutti i membri vedono il nuovo nome. Le app più vecchie mantengono il nome con cui sono entrate.",
+    "label": "Nome del gruppo",
+    "save": "Salva"
+  },
+  "typing": {
+    "many": "{{count}} persone stanno scrivendo…",
+    "one": "{{name}} sta scrivendo…",
+    "recordingMany": "{{count}} persone stanno registrando un audio…",
+    "recordingOne": "{{name}} sta registrando un audio…",
+    "recordingTwo": "{{name}} e {{other}} stanno registrando un audio…",
+    "thinkingMany": "{{count}} persone stanno pensando…",
+    "thinkingOne": "{{name}} sta pensando…",
+    "thinkingTwo": "{{name}} e {{other}} stanno pensando…",
+    "two": "{{name}} e {{other}} stanno scrivendo…"
+  }
+}

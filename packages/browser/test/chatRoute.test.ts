@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chatPath, chatRouteSession } from "../../../src/lib/url";
+// covers: calls.route-keep
 
 /**
  * The app keeps a chat loaded by the session id in the address, so that a call

@@ -1,0 +1,32 @@
+# WISP 1001: Local File Storage
+
+| Field | Value |
+|---|---|
+| Candidate number | 1001; pending catalogue acceptance, not an official assignment |
+| Status | Draft |
+| Editors | Ghostly contributors; maintainer review pending |
+| Dependencies | [1000](1000-storage.md), [05](05-backups.md) |
+| Implementation | Experimental: web, desktop and browser extension clients |
+| Summary | The simplest place: a file you keep. No account, no network. |
+| Availability | Available |
+| Notes | Backups only: a file has no address to hand a contact, so it cannot hold messages. |
+
+> This is a review draft. See the [catalogue](README.md) and the [storage contract](1000-storage.md).
+
+## Profile
+
+The simplest place: a file the person keeps. It needs no account, network or credential.
+
+- `put` hands the bundle to the platform's save mechanism (a download in a browser) under the object's file name, `<created>-<random>.ghostly-backup`. The `<space>/backups/` part of the object name is dropped; the person chooses the folder.
+- `get` reads a file the person picks. Any file name is accepted; the envelope decides validity.
+- `list` is not available: the client cannot see the person's folders. Restores always start from a picked file.
+- `remove` is not available.
+
+## Notes
+
+- Where the file goes after saving (a USB stick, a password manager, cloud drive sync) is outside Ghostly, and so is its protection beyond the envelope's encryption.
+- On desktop the file lands in the downloads folder unless the platform asks. Native save dialogs are a planned improvement.
+
+## Revision log
+
+One file per change in [changes/1001-local-storage/](changes/1001-local-storage/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

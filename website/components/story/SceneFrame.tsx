@@ -1,0 +1,412 @@
+"use client";
+
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { animate as tween, motion, motionValue, useInView, useMotionValue, useMotionValueEvent, useTransform, type MotionValue } from "motion/react";
+import { useCalm } from "@/lib/useCalm";
+import { BEAT, DUR, EASE } from "@/lib/motion";
+import { useBeats, usePlayheadProgress } from "@/lib/playhead";
+import { EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
+import { IDENTITY, measureFraming, sameFraming, STILL_LIGHT, stillCamera, type Framing } from "./framing";
+import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
+
+/**
+ * A chapter of the story: a full-bleed stage that holds the screen while its
+ * steps play, with the copy in a floating panel over the picture. Scroll
+ * progress (0…1) drives the picture; the copy steps through. Every step's text
+ * is in the DOM for readers and search. With reduced motion, or without
+ * scripts, the chapter becomes an illustrated article: one still per step.
+ */
+export type SceneStep = { title: string; body: string; note?: string };
+export type CopyAt = "left" | "right" | "bottom-left" | "bottom-right";
+
+type SceneState = {
+  p: MotionValue<number>;
+  step: number;
+  n: number;
+  still: boolean;
+  portrait: boolean;
+  camera: Camera;
+  focus: { x: MotionValue<number>; y: MotionValue<number> };
+};
+const SceneContext = createContext<SceneState | null>(null);
+
+export function useScene(): SceneState {
+  const ctx = useContext(SceneContext);
+  if (!ctx) throw new Error("useScene outside a SceneFrame");
+  return ctx;
+}
+
+/** How long a chapter's picture and copy take to fade in after it pins, and out before the hand-off (fractions of the chapter). */
+const FADE = 0.04;
+
+function hexToRgb(hex: string) {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
+}
+
+/** Camera and focal point for a chapter, from the blocking table. */
+function useBlocking(p: MotionValue<number>, chapter: Chapter, portrait: boolean, calm: boolean) {
+  const b = BLOCKING[orientationOf(portrait)][chapter];
+  const scale = useTransform(p, (v) => (calm ? 1 : valueAt(b.camera, v)));
+  const fx = useTransform(p, (v) => valueAt(b.focus, v)[0]);
+  const fy = useTransform(p, (v) => valueAt(b.focus, v)[1]);
+  return { camera: { scale, fx, fy }, focus: { x: fx, y: fy } };
+}
+
+export function SceneFrame({
+  id,
+  chapter,
+  eyebrow,
+  steps,
+  stills,
+  visual,
+  copyAt = "left",
+  length = 70,
+  label,
+  seams = true,
+  children,
+}: {
+  id: string;
+  chapter: Chapter;
+  eyebrow: string;
+  steps: SceneStep[];
+  /** Progress to freeze each step at, for the static figures. */
+  stills: number[];
+  visual: React.ReactNode;
+  copyAt?: CopyAt;
+  /** Scroll length per step, in viewport heights. */
+  length?: number;
+  label?: string;
+  /** Inside an act the picture and copy fade at both ends so the hand-off happens on the bare backdrop; a chapter on its own keeps them. */
+  seams?: boolean;
+  children?: React.ReactNode;
+}) {
+  const ref = useRef<HTMLElement>(null);
+  const calm = useCalm();
+  const cards = useCards();
+  // The article shape: reduced motion (stills) and touch devices (each still plays its beat once).
+  const article = calm || cards;
+  const portrait = usePortrait();
+  const n = steps.length;
+  const inView = useInView(ref, { margin: "20% 0px 20% 0px" });
+  // The story's playhead, not the raw scroll: every scene, the actors and the copy read the same one (lib/playhead.ts).
+  const scrollYProgress = usePlayheadProgress(ref, "pinned");
+  // The beats a flick must still show and a stop must finish: the picture fading in, each step's action, the
+  // picture fading out. In page pixels, while the chapter holds the screen.
+  useBeats(
+    `scene:${id}`,
+    () => {
+      const el = ref.current;
+      if (article || !el) return null;
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      const travel = Math.max(1, el.offsetHeight - window.innerHeight);
+      const at = (f: number) => top + f * travel;
+      const seen: [number, number] = [top, top + travel];
+      const beats = steps.map((_, i) => ({ from: at(stepAt(i, BEAT.establish, n)), to: at(stepAt(i, BEAT.settle, n)), seen }));
+      return seams ? [{ from: at(0), to: at(FADE), seen }, ...beats, { from: at(EXIT - FADE), to: at(EXIT), seen }] : beats;
+    },
+    [article, n, seams],
+  );
+
+  // Server HTML and the first paint carry the story pose, not the scroll-0 pose.
+  const [p] = useState(() => motionValue(stills[Math.min(1, n - 1)]));
+  const [step, setStep] = useState(1 < n ? 1 : 0);
+  useEffect(() => {
+    if (article) return;
+    const sync = (v: number) => {
+      p.set(v);
+      const next = stepOf(v, n);
+      setStep((prev) => (prev === next ? prev : next));
+    };
+    sync(scrollYProgress.get());
+    return scrollYProgress.on("change", sync);
+  }, [article, n, p, scrollYProgress]);
+
+  const { camera, focus } = useBlocking(p, chapter, portrait, calm);
+
+  // Where the picture goes on this window: clear of the copy panel and on screen (story/framing.ts).
+  const [framing, setFraming] = useState<Framing>(IDENTITY);
+  useEffect(() => {
+    if (article || portrait) {
+      setFraming(IDENTITY);
+      return;
+    }
+    const update = () => {
+      const next = measureFraming(ref.current, chapter);
+      setFraming((prev) => (sameFraming(prev, next) ? prev : next));
+    };
+    update();
+    const panel = ref.current?.querySelector(".scene-copy");
+    const ro = new ResizeObserver(update);
+    if (panel) ro.observe(panel);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [article, portrait, chapter]);
+
+  // The chapter's furniture (its picture and its panel) fades in as the chapter
+  // pins and is gone before the actors start their glide at EXIT, so a hand-off
+  // shows only the backdrop and the two ghosts. While it is invisible it takes
+  // no clicks.
+  const enter = useTransform(p, [0, FADE], [0, 1]);
+  const leave = useTransform(p, [EXIT - FADE, EXIT], [1, 0]);
+  const furniture = useTransform([enter, leave], ([a, b]) => (seams ? Math.min(a as number, b as number) : 1));
+  // The copy rises the last few pixels into place as it fades in, and slips up a little as it leaves.
+  const copyY = useTransform([enter, leave], ([a, b]) => (seams ? 12 * (1 - (a as number)) - 8 * (1 - (b as number)) : 0));
+  const [hidden, setHidden] = useState(false);
+  useMotionValueEvent(furniture, "change", (v) => setHidden(v < 0.05));
+  const state = useMemo<SceneState>(() => ({ p, step, n, still: false, portrait, camera, focus }), [p, step, n, portrait, camera, focus]);
+
+  const jump = (i: number) => {
+    const el = ref.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    const travel = el.offsetHeight - window.innerHeight;
+    window.scrollTo({ top: top + travel * stepAt(i, 0.2, n), behavior: "smooth" });
+  };
+
+  const room = ROOMS[chapter];
+  const style = { "--chapter-bg": room, "--chapter-rgb": hexToRgb(room) } as React.CSSProperties;
+
+  if (article && portrait) {
+    // Phones: one picture per chapter, its steps as captions that take turns (PhoneChapter).
+    return (
+      <PhoneChapter id={id} chapter={chapter} eyebrow={eyebrow} label={label} steps={steps} stills={stills} calm={calm} state={state} style={style} visual={visual}>
+        {children}
+      </PhoneChapter>
+    );
+  }
+
+  if (article) {
+    // An illustrated article: each paragraph with its own frame (a still, or a beat that plays once in view).
+    return (
+      <SceneContext.Provider value={{ ...state, still: true }}>
+      <section ref={ref} id={id} className="scene scene--static" data-chapter={chapter} aria-label={label} style={style}>
+        <div className="wrap scene-static">
+          <h2 className="eyebrow">{eyebrow}</h2>
+          <ol className="scene-static-steps">
+            {steps.map((s, i) => (
+              <li key={i} className="scene-static-step">
+                <div className="scene-static-copy">
+                  <h3 className="h-scene">{s.title}</h3>
+                  <p className="body">{s.body}</p>
+                  {s.note && <p className="note">{s.note}</p>}
+                </div>
+                <StaticFigure state={{ ...state, still: true, step: i }} at={stills[i] ?? stills[stills.length - 1]} from={stepAt(i, 0, n)} play={!calm} chapter={chapter} portrait={portrait}>
+                  {visual}
+                </StaticFigure>
+              </li>
+            ))}
+          </ol>
+          {children && <div className="scene-static-extra">{children}</div>}
+        </div>
+      </section>
+      </SceneContext.Provider>
+    );
+  }
+
+  return (
+    <SceneContext.Provider value={state}>
+      <section
+        ref={ref}
+        id={id}
+        className="scene"
+        data-chapter={chapter}
+        data-inview={inView}
+        data-copy={copyAt}
+        aria-label={label}
+        style={{ ...style, height: `${100 + n * length}svh` }}
+      >
+        <div className="scene-sticky">
+          <motion.div className="scene-visual" aria-hidden="true" style={{ opacity: furniture }}>
+            <StageFramingContext.Provider value={framing}>{visual}</StageFramingContext.Provider>
+          </motion.div>
+          <motion.div className="scene-wash" aria-hidden="true" style={{ opacity: furniture }} />
+          <motion.div className="scene-copy" data-hidden={hidden} style={{ opacity: furniture, y: copyY }}>
+            <h2 className="eyebrow" id={`${id}-eyebrow`}>
+              {eyebrow}
+            </h2>
+            <ol className="scene-steps">
+              {steps.map((s, i) => (
+                <li key={i} className="scene-step" data-active={i === step} aria-current={i === step ? "step" : undefined}>
+                  <h3 className="h-scene">{s.title}</h3>
+                  <p className="body">{s.body}</p>
+                  {s.note && <p className="note">{s.note}</p>}
+                </li>
+              ))}
+            </ol>
+            <div className="scene-progress" role="group" aria-labelledby={`${id}-eyebrow`}>
+              {steps.map((s, i) => (
+                <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => jump(i)}>
+                  <span className="sr-only">
+                    {i + 1}: {s.title}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {children}
+          </motion.div>
+        </div>
+      </section>
+    </SceneContext.Provider>
+  );
+}
+
+/**
+ * One frame of the scene for the article. With `play`, the frame starts at the
+ * step's opening pose and plays through to its still once, when it comes into
+ * view (touch devices); otherwise it is simply the still (reduced motion).
+ */
+function StaticFigure({ state, at, from, play, chapter, portrait, children }: { state: SceneState; at: number; from: number; play: boolean; chapter: Chapter; portrait: boolean; children: React.ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  const p = useMotionValue(play ? Math.min(from, at) : at);
+  const inView = useInView(ref, { amount: 0.55, once: true });
+  useEffect(() => {
+    if (!play || !inView) return;
+    // The beat as a trip: it leaves, travels and lands on the move curve, then holds.
+    const controls = tween(p, at, { duration: DUR.beat, ease: EASE.move });
+    return () => controls.stop();
+  }, [play, inView, at, p]);
+  const b = BLOCKING[orientationOf(portrait)][chapter];
+  // A landscape still is a whole stage in a figure: a slight push lifts the labels, as far as the chapter's picture stays whole (framing.ts).
+  const still = stillCamera(chapter);
+  const scale = useTransform(p, (): number => (portrait ? 1 : still.scale));
+  const fx = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[0] : still.fx));
+  const fy = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[1] : still.fy));
+  // The key light and the gazes stay where they were before the push moved off centre.
+  const lx = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[0] : STILL_LIGHT[0]));
+  const ly = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[1] : STILL_LIGHT[1]));
+  const value = useMemo<SceneState>(() => ({ ...state, p, camera: { scale, fx, fy, light: { x: lx, y: ly } }, focus: { x: lx, y: ly } }), [state, p, scale, fx, fy, lx, ly]);
+  return (
+    <SceneContext.Provider value={value}>
+      <figure ref={ref} className="scene-static-figure" aria-hidden="true">
+        {children}
+      </figure>
+    </SceneContext.Provider>
+  );
+}
+
+/** How long a phone caption stays once its beat has played: time to read it (about four words a second), at least 3 s. */
+function holdFor(s: SceneStep): number {
+  const words = `${s.title} ${s.body}`.split(/\s+/).length;
+  return Math.max(3000, words * 240);
+}
+
+/**
+ * A chapter on a phone: the eyebrow, the steps as captions that take turns in
+ * one place, the step bars, and one picture. Nothing is pinned: while the
+ * picture is on screen it plays the chapter's beats one after the other, each
+ * caption held long enough to read, and stops on the last. A tap on a bar
+ * shows that step (and stops the turns). With reduced motion every caption
+ * reads in order beside the chapter's finished still.
+ */
+function PhoneChapter({
+  id,
+  chapter,
+  eyebrow,
+  label,
+  steps,
+  stills,
+  calm,
+  state,
+  style,
+  visual,
+  children,
+}: {
+  id: string;
+  chapter: Chapter;
+  eyebrow: string;
+  label?: string;
+  steps: SceneStep[];
+  stills: number[];
+  calm: boolean;
+  state: SceneState;
+  style: React.CSSProperties;
+  visual: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  const n = steps.length;
+  const last = n - 1;
+  const figRef = useRef<HTMLElement>(null);
+  const p = useMotionValue(calm ? stills[last] : stepAt(0, 0, n));
+  const [step, setStep] = useState(calm ? last : 0);
+  // The turns run by themselves until the reader picks a step; `take` replays the step already showing.
+  const [auto, setAuto] = useState(true);
+  const [take, setTake] = useState(0);
+  const inView = useInView(figRef, { amount: 0.5 });
+
+  const end = stills[last];
+  useEffect(() => {
+    if (!calm) return;
+    p.set(end);
+    setStep(last);
+  }, [calm, last, p, end]);
+
+  // Play the step's beat while the picture is on screen, then hand over to the next step once its caption is read.
+  // Numbers, not the chapter's arrays: a parent render with equal props must not restart the wait.
+  const to = stills[step] ?? stills[last];
+  const hold = holdFor(steps[step]);
+  useEffect(() => {
+    if (calm || !inView) return;
+    const controls = tween(p, to, { duration: DUR.beat, ease: EASE.move });
+    const timer = auto && step < last ? window.setTimeout(() => setStep((s) => Math.min(last, s + 1)), DUR.beat * 1000 + hold) : 0;
+    return () => {
+      controls.stop();
+      window.clearTimeout(timer);
+    };
+  }, [calm, inView, step, auto, take, last, p, to, hold]);
+
+  const pick = (i: number) => {
+    setAuto(false);
+    // The next step plays on from the picture as it is; any other starts from its own beginning.
+    if (i !== step + 1) p.set(stepAt(i, 0, n));
+    setStep(i);
+    setTake((t) => t + 1);
+  };
+
+  const b = BLOCKING.portrait[chapter];
+  const scale = useTransform(p, (): number => 1);
+  const fx = useTransform(p, (v): number => valueAt(b.focus, v)[0]);
+  const fy = useTransform(p, (v): number => valueAt(b.focus, v)[1]);
+  const value = useMemo<SceneState>(() => ({ ...state, p, step, n, still: true, portrait: true, camera: { scale, fx, fy }, focus: { x: fx, y: fy } }), [state, p, step, n, scale, fx, fy]);
+
+  return (
+    <SceneContext.Provider value={value}>
+      <section id={id} className="scene scene--static scene--phone" data-chapter={chapter} data-calm={calm} aria-label={label} style={style}>
+        <div className="wrap scene-static">
+          <h2 className="eyebrow" id={`${id}-eyebrow`}>
+            {eyebrow}
+          </h2>
+          <ol className="scene-static-steps">
+            {steps.map((s, i) => (
+              <li key={i} className="scene-static-step" data-active={i === step} aria-current={!calm && i === step ? "step" : undefined}>
+                <div className="scene-static-copy">
+                  <h3 className="h-scene">{s.title}</h3>
+                  <p className="body">{s.body}</p>
+                  {s.note && <p className="note">{s.note}</p>}
+                </div>
+              </li>
+            ))}
+          </ol>
+          {!calm && n > 1 && (
+            <div className="scene-progress" role="group" aria-labelledby={`${id}-eyebrow`}>
+              {steps.map((s, i) => (
+                <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => pick(i)}>
+                  <span className="sr-only">
+                    {i + 1}: {s.title}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <figure ref={figRef} className="scene-static-figure" aria-hidden="true">
+            {visual}
+          </figure>
+          {children && <div className="scene-static-extra">{children}</div>}
+        </div>
+      </section>
+    </SceneContext.Provider>
+  );
+}

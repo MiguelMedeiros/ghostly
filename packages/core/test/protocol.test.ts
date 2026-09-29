@@ -28,6 +28,7 @@ import {
   type ServiceAd,
 } from "../src";
 import { RUST_FIXTURE } from "./fixtures";
+// covers: core.crypto, core.records, invite.formats, cli.interop, payments.bitcoin.send, payments.bark.send, payments.targets, payments.chat.frames
 
 describe("identity", () => {
   it("derives the same z-base-32 address as the Rust client", () => {
@@ -220,5 +221,44 @@ describe("link records", () => {
     const link = parse(built.records);
     expect(link.messages).toEqual([]);
     expect(link.services).toBeNull();
+  });
+});
+
+describe("asking to pay", () => {
+  it("round-trips a pay-ask and a request answering it, and refuses what is not one", async () => {
+    const { encodeControl, decodeControl } = await import("../src/frames");
+    const ask = { t: "pay-ask", id: "ask_123456", ts: 1, v: "1000", u: "sat", m: "arkade", memo: "lunch" } as const;
+    expect(decodeControl(encodeControl(ask))).toEqual(ask);
+    const req = decodeControl(JSON.stringify({ t: "pay-req", id: "req_123456", ts: 2, v: "1000", u: "sat", e: [["arkade", "{}"]], a: "ask_123456" }));
+    expect(req).toMatchObject({ t: "pay-req", a: "ask_123456" });
+    expect(decodeControl(JSON.stringify({ t: "pay-req", id: "req_123456", ts: 2, v: "1000", u: "sat", e: [["arkade", "{}"]], a: "<script>" }))).toMatchObject({ a: undefined });
+    for (const bad of [{ ...ask, m: "cashu" }, { ...ask, m: "lightning" }, { ...ask, v: "-1" }, { ...ask, v: "1e9" }, { ...ask, id: "x" }, { ...ask, u: "SAT!" }, { ...ask, ts: "1" }])
+      expect(decodeControl(JSON.stringify(bad)), JSON.stringify(bad)).toBeNull();
+    expect((decodeControl(JSON.stringify({ ...ask, memo: "m".repeat(500) })) as { memo: string }).memo).toHaveLength(140);
+    // Bark (Second's Ark) is its own way of paying, asked for by name.
+    expect(decodeControl(encodeControl({ ...ask, m: "bark" }))).toEqual({ ...ask, m: "bark" });
+    // On-chain Bitcoin too: the answer carries a fresh address of the payee's on-chain source.
+    expect(decodeControl(encodeControl({ ...ask, m: "bitcoin" }))).toEqual({ ...ask, m: "bitcoin" });
+  });
+});
+
+describe("on-chain payment targets", () => {
+  it("are a BTC address of their network, through the on-chain source", async () => {
+    const { validatePaymentTarget, ONCHAIN_PROVIDER } = await import("../src/paymentIntent");
+    const target = { method: "bitcoin", network: "regtest", provider: ONCHAIN_PROVIDER, asset: "BTC", unit: "sat", address: "bcrt1qs758ursh4q9z627kt3pp5yysm78ddny6txaqgw", expiresAt: Date.now() + 60_000 };
+    expect(validatePaymentTarget(target)).toMatchObject({ method: "bitcoin", network: "regtest" });
+    for (const bad of [{ network: "signet" }, { address: "tb1qs758ursh4q9z627kt3pp5yysm78ddny6txaqgw" }, { provider: "https://mempool.space" }, { asset: "USDT" }])
+      expect(() => validatePaymentTarget({ ...target, ...bad }), JSON.stringify(bad)).toThrow();
+  });
+});
+
+describe("Bark payment targets", () => {
+  it("are BTC in sats on Bitcoin, signet or regtest only, and never an Arkade target", async () => {
+    const { validatePaymentTarget } = await import("../src/paymentIntent");
+    const target = { method: "bark", network: "signet", provider: "https://ark.signet.2nd.dev", asset: "BTC", unit: "sat", address: "tark1p…", expiresAt: Date.now() + 60_000 };
+    expect(validatePaymentTarget(target)).toMatchObject({ method: "bark", network: "signet" });
+    expect(validatePaymentTarget({ ...target, network: "regtest", provider: "http://127.0.0.1:44135" })).toMatchObject({ network: "regtest" });
+    for (const bad of [{ network: "mutinynet" }, { network: "cashu-test" }, { asset: "USDT" }, { unit: "token-base" }, { provider: "http://ark.example" }])
+      expect(() => validatePaymentTarget({ ...target, ...bad }), JSON.stringify(bad)).toThrow();
   });
 });

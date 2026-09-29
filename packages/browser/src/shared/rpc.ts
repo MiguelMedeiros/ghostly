@@ -1,47 +1,325 @@
-import type { CashuInspection, EngineState, MessageFile, Settings, StoredMessage } from "./types";
+import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
+import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, TypingKind } from "@ghostly/core";
+import type { LnurlView } from "../engine/paymentAdapters/providers/lightningService";
+import type { ArkConfig } from "../engine/paymentAdapters/arkade";
+import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
+import type { BarkCreate } from "../engine/paymentAdapters/barkWallet";
+import type { BarkConfig } from "../engine/paymentAdapters/bark";
+import type { FedimintFederationView } from "../engine/paymentAdapters/fedimintWallet";
+import type { FederationInfo } from "../engine/paymentAdapters/fedimintSdk";
+import type { SparkCreate } from "../engine/paymentAdapters/sparkWallet";
+import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
+import type { ProfileChoice } from '../profiles/public';
+import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
+import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult, WakeSubscription } from "./types";
+import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
+import type { MessageChanges } from "./messageChanges";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
+  usdtCreate(params:UsdtCreate):void;
+  usdtUnlock(params:{password:string;network?:WalletNetwork}):void;
+  usdtReveal(params:{password?:string;network?:WalletNetwork}):string;
+  usdtLock(params?:{network?:WalletNetwork}):void;
+  usdtRefresh(params?:{network?:WalletNetwork}):void;
+  usdtExportBackup(params:{password:string;network?:WalletNetwork}):string;
+  usdtRestoreBackup(params:{text:string;password:string;network?:WalletNetwork}):void;
+  arkCreate(params: ArkCreate): void;
+  arkUnlock(params: {password:string;network?:WalletNetwork}): void;
+  arkLock(params?: {network?:WalletNetwork}): void;
+  arkBackup(params: {password?:string;network?:WalletNetwork}): {mnemonic:string;config:ArkConfig};
+  arkExportBackup(params:{password:string;network?:WalletNetwork}):string;
+  arkRestoreBackup(params:{text:string;password:string;network?:WalletNetwork}):void;
+  arkRefresh(params?: {network?:WalletNetwork}): void;
+  /** Expired Ark outputs back into the balance; returns the settlement txid. */
+  arkRecover(params?: {network?:WalletNetwork}): string;
+  barkCreate(params: BarkCreate): void;
+  barkBackup(params?: {network?:WalletNetwork}): {mnemonic:string;config:BarkConfig};
+  barkExportBackup(params:{password:string;network?:WalletNetwork}):string;
+  barkRestoreBackup(params:{text:string;password:string;network?:WalletNetwork}):void;
+  barkRefresh(params?: {network?:WalletNetwork}): void;
+  /** On-chain coins of the Bark wallet into Ark; returns the board txid. */
+  barkBoard(params?: {network?:WalletNetwork}): string;
+  /** What an invite code leads to, before joining: the federation's name, guardians, version, network, modules. */
+  fedimintPreview(params: { invite: string; network?:WalletNetwork }): FederationInfo;
+  fedimintJoin(params: { invite: string; recover?: boolean; network?:WalletNetwork }): FedimintFederationView;
+  fedimintLeave(params: { federation: string }): void;
+  fedimintRefresh(params?: { network?:WalletNetwork }): void;
+  /** Out-of-band notes of that federation, to hand over. They come back by themselves if nobody redeems them in a week. */
+  fedimintSpendNotes(params: { federation: string; amount: number; confirmedReal?: boolean }): { notes: string; operation: string };
+  fedimintReceiveNotes(params: { notes: string; network?:WalletNetwork }): { federation: string; amount: number };
+  fedimintInvoice(params: { federation: string; amount: number; memo?: string }): { invoice: string };
+  fedimintTakeBack(params: { federation: string; operation: string }): "canceled" | "taken" | "pending";
+  fedimintBackup(params?: { network?:WalletNetwork }): { mnemonic: string; federations: { id: string; name?: string; invite: string }[] };
+  fedimintExportBackup(params: { password: string; network?:WalletNetwork }): string;
+  fedimintRestoreBackup(params: { text: string; password: string; network?:WalletNetwork }): { joined: number; failed: string[] };
+  fedimintRestorePhrase(params: { mnemonic: string; invites: string[]; network?:WalletNetwork }): { joined: number; failed: string[] };
+  /** A Spark wallet on the chain named (Mainnet with a Breez API key), or a wallet restored from a phrase. */
+  sparkCreate(params: SparkCreate): void;
+  sparkBackup(params?: { network?:WalletNetwork }): { mnemonic: string; network: SparkNetwork };
+  sparkExportBackup(params: { password: string; network?:WalletNetwork }): string;
+  /** `apiKey`: Mainnet's Breez key, not in the file. */
+  sparkRestoreBackup(params: { text: string; password: string; apiKey?: string; network?:WalletNetwork }): void;
+  sparkRefresh(params?: { network?:WalletNetwork }): void;
+  /** A network's Spark wallet becomes its Breez Lightning source too: one seed, one wallet, one balance. */
+  sparkUseForLightning(params?: { network?:WalletNetwork }): void;
+  /** `network`: the card chosen; a target of the other network is refused before anything is prepared. */
+  preparePayment(params: {target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string;network?:WalletNetwork}): PaymentReview;
+  /** `confirmedReal`: a Mainnet review is approved only once the person confirmed it as real money. */
+  approvePayment(params: {id:string;confirmedReal?:true}): PaymentReview;
+  reconcilePayment(params: {id:string}): PaymentReview;
+  cancelPayment(params: {id:string}): PaymentReview;
+
+  refreshPublicProfiles(params: { linkId: string; force?: boolean }): void;
+  choosePublicProfile(params: { linkId: string; choice: ProfileChoice }): void;
+  preparePeerProof(params: { linkId: string; externalKey: string; adapter?: ProofAdapter }): ProofChallenge;
+  submitPeerProof(params: { linkId: string; challenge: ProofChallenge; event: ProofEvidence }): void;
+  withdrawPeerProof(params: { linkId: string; adapter?: ProofAdapter }): void;
+  /** Identities: a fresh proof key and the statement to sign. */
+  beginIdentityProof(params: { provider: string; subject: string; validityDays?: number }): { draftId: string; binding: import("@ghostly/core").IdentityBinding };
+  /** Verifies the evidence (as a contact would) and saves the proof. */
+  completeIdentityProof(params: { draftId: string; evidence: unknown }): import("./types").IdentityProofView;
+  cancelIdentityProof(params: { draftId: string }): void;
+  /** Removes it from the profile and withdraws it from every chat. */
+  removeIdentityProof(params: { id: string }): void;
+  /** Shares it with this contact (now, or when it next connects). */
+  shareIdentityProof(params: { linkId: string; id: string }): void;
+  withdrawIdentityProof(params: { linkId: string; id: string }): void;
+  /** Runs the provider's check again on what the contact shared. */
+  recheckIdentityProof(params: { linkId: string; id: string }): void;
+  /** Only on request: the public name/picture of what the contact shared. */
+  lookupIdentityDisplay(params: { linkId: string; id: string }): void;
+  /**
+   * The public profile of one verified identity (the person's own or a contact's), asked for when its card is on
+   * screen. Does nothing unless the proof is current and verified, Settings → Load public profiles is on and the
+   * network is on; a copy younger than a day is not asked again (`force`: after five minutes).
+   */
+  loadPublicProfile(params: { provider: string; subject: string; force?: boolean }): void;
+  /**
+   * A contact's verified identity's recent posts, when its card is chosen in the chat's identities panel; `more` adds the
+   * next page. Null when the proof is not current and verified, the provider has none, or Load public profiles is off.
+   * Kept in memory for a few minutes, never on disk.
+   */
+  loadPublicPosts(params: { provider: string; subject: string; more?: boolean; force?: boolean }): PublicPostsView | null;
+  /** Who that identity follows and who follows it, as far as it touches the reader's identities and contacts (compared on this device). */
+  loadPublicGraph(params: { provider: string; subject: string; force?: boolean }): PublicGraphView | null;
+  /** One picture of a post already loaded, on the reader's tap. */
+  loadPublicPostImage(params: { provider: string; subject: string; postId: string; index: number }): PublicPostImageView;
+  /** Lists one of the profile's identities in its public DID document (`alsoKnownAs`), or takes it out. */
+  setDidListed(params: { id: string; listed: boolean }): void;
+  /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */
+  nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): void;
+  /** Forgets what was loaded about a contact's key. */
+  nostrForgetContact(params: { linkId: string; subject: string }): void;
+  /** The person's own profile, follows and mute list for one of their proven keys. */
+  nostrLoadOwn(params: { subject: string }): void;
+  /** A key's profile or a note that a message names, on the person's tap, from the person's relays. Not stored. */
+  nostrLookup(params: NostrLookupRequest): NostrLookupResult;
+  /** Publication, step 1: the unsigned event and the notice to confirm. Refused unless publication is on. */
+  nostrDraft(params: NostrDraftRequest): NostrDraft;
+  /** Publication, step 2: the draft, signed by the person's own signer, sent to their relays. */
+  nostrPublish(params: { draftId: string; event: unknown }): NostrPublishResult;
   createLink(): { linkId: string; inviteCode: string };
+  /**
+   * The keys for a new chat, warmed on the network ahead of time when the engine could (see `GhostlyNode.
+   * takeInvite`): the UI keeps `mine` as its side and hands `inviteCode` over, then `ensureLink`s it.
+   */
+  takeInvite(): { mine: LinkParams; inviteCode: string };
   joinLink(params: { inviteCode: string }): { linkId: string };
   /** Makes sure a link with these parameters runs; used by UIs that keep their own session list. */
-  ensureLink(params: { seedB64: string; peerPubKeyZ32: string; encKeyB64: string }): { linkId: string };
+  /** `inviteCode`: the invite this side made and holds (the inviter); absent on the side that joined. */
+  ensureLink(params: LinkParams & { inviteCode?: string }): { linkId: string };
+  confirmPair(params: { linkId: string; code: string }): void;
   pollNow(params: { linkId: string }): void;
   removeLink(params: { linkId: string }): void;
   renameLink(params: { linkId: string; label: string }): void;
   setActiveLink(params: { linkId: string | null }): void;
-  sendMessage(params: { linkId: string; text: string; timestamp?: number }): { error: string | null };
+  /** `refused`: the text was not kept (it cannot be sent this way); any other error leaves it to be sent later. */
+  /** `preview`: a link preview made by this app (WISP 401 § Link previews); checked against the text, dropped if off. */
+  /** `messageId`: the message kept in the chat (absent when nothing was kept). */
+  /** `replyTo`: the id of a message of this chat the text answers (WISP 400 § Replies). */
+  sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): { error: string | null; refused?: boolean; messageId?: string };
+  /**
+   * Edits a text of mine (WISP 400 § Edits): the new text here at once, and to the contact once both sides offer edit/1
+   * on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit. In a group
+   * (`group:<id>`, WISP 9xx § Edits) it goes to the members; `mentions`: members named by the new text beyond those the
+   * message already named.
+   */
+  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[] }): { error: string | null; refused?: boolean; messageId?: string };
+  retryMessage(params: { linkId: string; messageId: string }): void;
+  /**
+   * Reacts to a message (WISP 400 § Reactions): `linkId` a chat's link or `group:<id>`, `messageId` the message's id
+   * here or the id both sides know it by, `emoji` one emoji, or "" to take this side's reaction back. One reaction per
+   * person per message: a new one replaces the old.
+   */
+  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null };
+  /**
+   * Pins a message (WISP 400 § Pinned message), or unpins with `remove`: `linkId` a chat's link or `group:<id>`,
+   * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
+   * community only the admin pins.
+   */
+  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null };
+  /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
+  messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
   deleteMessage(params: { linkId: string; messageId: string }): void;
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
-  exportLinks(): { seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
+  exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
-  sendFile(params: { linkId: string; file: MessageFile; timestamp: number }): void;
+  sendFile(params: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string; forwarded?: number }): Promise<void>;
+  /**
+   * Forwards messages of a chat (or `group:<id>`) to up to 5 chats and groups (WISP 400 § Forwards): new messages of
+   * mine with a hop count, files from the bytes here. Each target says which messages it got and its first problem.
+   */
+  forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): { results: { to: string; messageIds: string[]; error: string | null }[] };
+  /** files/3: answers an offer (`accept`, `decline`), or pauses, resumes or cancels a transfer, either way. */
+  fileAction(params: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void;
+  setDeliveryMode(params: { linkId: string; mode: DeliveryMode }): void;
+  setTransportPreference(params: { linkId: string; preferred: PairedTransport; fallback: boolean }): void;
+  /** One chat's connection from its menu: a transport both sides can use, `auto` for the app's rule, or `dht` for DHT only. */
+  setChatTransport(params: { linkId: string; transport: PairedTransport | "auto" | "dht" }): void;
+  setChatPaymentMethods(params: { linkId: string; methods: Partial<Record<import("@ghostly/core").PaymentMethodName, boolean>>; networks?: Partial<Record<import("@ghostly/core").PaymentMethodName, WalletNetwork[]>> }): void;
+  /** Store-and-forward in one chat (WISP 4xx): accept held items from this contact, and hold items for it while it is away. */
+  setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;
   walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
+  /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
+  walletCreate(params: WalletCreate): WalletInstanceView;
+  /** Removes one wallet, its keys and config; refused while it holds money on this device and `acceptLoss` is not set. */
+  walletRemove(params: WalletRemove): void;
+  /** Testnet only: a small fixed amount from the wallet's own test faucet (the test mint, Sepolia's USDT faucet). */
+  walletTestCoins(params: WalletTestCoins): TestCoinsResult;
+  /**
+   * The app is in front again: chats look now, and dropped ones reconnect at once. `network`: the device is back
+   * online (another network, a VPN): what discovery learnt about failing relays on the old one is forgotten too.
+   */
+  wake(params?: { network?: boolean }): void;
+  /** Looks once at another profile of this device for messages waiting for it (WISP 04 § Checking other profiles): reads only. */
+  peekProfile(params: { profile: string; dbName: string }): import("../engine/profilePeek").PeekResult;
   /** The primary mint is where Lightning invoices are created. */
   walletSetPrimaryMint(params: { url: string }): void;
   walletRemoveMint(params: { url: string }): void;
-  /** A Lightning invoice that, once paid by anyone, lands in the wallet as ecash. */
-  walletReceiveLightning(params: { amount: number }): { quote: string; invoice: string; expiresAt: number | null };
-  walletQuoteInvoice(params: { invoice: string }): { quote: string; mint: string; amount: number; feeReserve: number };
-  walletPayQuote(params: { quote: string; mint: string }): { paid: boolean };
+  /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
+  walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
+  walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
+  /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
+  /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */
+  walletPayQuote(params: { quote: string; mint: string; note?: string; confirmedReal?: true }): { paid: boolean };
+  /** Reads a Lightning address or LNURL and fetches what it asks for. Its domain learns of the request. */
+  lnurlResolve(params: { text: string; network?:WalletNetwork }): LnurlView;
+  /** The invoice for `amount` sats from a resolved address, checked before it is quoted. */
+  lnurlInvoice(params: { id: string; amount: number; comment?: string; network?:WalletNetwork }): { invoice: string; successAction?: LnurlSuccessAction; note: string };
+  /** "I paid it from another wallet": the contact's app looks now. Only its wallet marks the request paid. */
+  checkPayment(params: { linkId: string; paymentId: string }): void;
+  /** Makes a provider a network's Lightning source. `values`: its form; secret fields are sealed, never returned. */
+  /** `card`: a Lightning card of the network (its id); absent, the network's default for receiving. */
+  lightningSetSource(params: { providerId: string; values: Record<string, string>; network?:WalletNetwork; card?: string }): void;
+  lightningClearSource(params?: { network?:WalletNetwork; card?: string }): void;
+  /** Tries a network's Lightning source again now, instead of after the wait between attempts. */
+  lightningRetrySource(params?: { network?:WalletNetwork; card?: string }): void;
+  /** Changes the server of the saved Lightning source (its `changeable` fields), keeping its secrets. */
+  lightningReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork; card?: string }): void;
+  lightningRefresh(params?: { network?:WalletNetwork; card?: string }): void;
+  /** Makes a Lightning card its network's default for receiving. */
+  lightningSetReceive(params: { network: WalletNetwork; card: string }): void;
+  lightningRename(params: { network: WalletNetwork; card: string; name: string }): void;
+  bitcoinSetSource(params: { providerId: string; values: Record<string, string>; network?:WalletNetwork }): void;
+  bitcoinClearSource(params?: { network?:WalletNetwork }): void;
+  bitcoinRetrySource(params?: { network?:WalletNetwork }): void;
+  /** Changes the server of the saved Bitcoin source (a BDK wallet's Esplora), keeping the wallet. */
+  bitcoinReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork }): void;
+  bitcoinReceiveAddress(params?: { network?:WalletNetwork }): string;
+  bitcoinRefresh(params?: { network?:WalletNetwork }): void;
   /** Redeems a token pasted by the user. Only mints the user added are accepted. */
   walletReceiveToken(params: { token: string }): { amount: number };
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
-  walletExport(): { mint: string; token: string; amount: number }[];
-  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
-  payRequest(params: { linkId: string; paymentId: string }): void;
+  walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];
+  /** `confirmedReal`: required on Mainnet (real money), refused without it. */
+  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork; confirmedReal?: true }): { paymentId: string };
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork; card?: string }): { paymentId: string };
+  /** A request any member of a group may pay, once (WISP 9xx § Payments). */
+  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?:WalletNetwork; card?: string }): { paymentId: string };
+  /** The payment composer opened on a member of a community group: their app is asked what ways of paying it takes. */
+  groupPaymentHello(params: { groupId: string; member: string }): void;
+  /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; memo?: string; timestamp: number; network?:WalletNetwork }): { askId: string };
+  /**
+   * `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`.
+   * `confirmedReal`: required for a Mainnet request (real money), refused without it.
+   */
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?:WalletNetwork; confirmedReal?: true; card?: string }): void;
   reclaimPayment(params: { paymentId: string }): void;
   disconnect(params: { linkId: string }): void;
   addService(params: { name: string; target: string }): { serviceId: string };
   removeService(params: { serviceId: string }): void;
   setServiceEnabled(params: { serviceId: string; enabled: boolean }): void;
-  updateSettings(params: { settings: Partial<Settings> }): void;
-  setCallSignal(params: { linkId: string; signal: string | null }): void;
+  setServiceShared(params: { serviceId: string; peerPubKeyZ32: string; shared: boolean }): void;
+  updateSettings(params: { settings: SettingsPatch }): void;
+  setCallSignal(params: { linkId: string; signal: string | null }): Promise<void>;
+  /**
+   * This side is typing in a paired chat (true), or stopped: cleared the text, sent it, left the chat (false). Said
+   * on the live session only, throttled there; nothing is said while Settings `sendTyping` is off. `kind`: what this
+   * side is doing (default typing; recording a voice note; thinking); `status`: a bot's short line (40 characters,
+   * sanitized, a link or markup dropped). A new kind or status goes at once.
+   */
+  setTyping(params: { linkId: string; typing: boolean; kind?: TypingKind; status?: string }): void;
+  /**
+   * The same in a private group: said sealed on its open edges, throttled the same way, nothing while `sendTyping` is
+   * off. Nothing in a community (it does not carry typing yet).
+   */
+  setGroupTyping(params: { groupId: string; typing: boolean; kind?: TypingKind; status?: string }): void;
+  /**
+   * This profile's push subscription (the installed web app, WISP 401 § Wake-up push), or null to stop being woken:
+   * shared with every paired contact whose app offers `wake/1`, under a new token per chat each time it changes.
+   */
+  setWakeSubscription(params: { subscription: WakeSubscription | null }): Promise<void>;
+  /**
+   * A chat muted here (#250) is not woken: its contact is told to forget this side's subscription until it is unmuted,
+   * so no push for it reaches the browser at all (a push that shows nothing counts against the app with some browsers).
+   * A private group's `group:<id>` does the same for every member of it (WISP 9xx · Group Mesh § Wake-up push).
+   */
+  setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
+  /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
+  wakeForCall(params: { linkId: string }): Promise<boolean>;
   setFastPoll(params: { linkId: string; fast: boolean }): void;
+
+  // Private groups (WISP 900, `group-mesh/1`). Group messages arrive as `messages` events under `group:<id>`.
+  /** `profile`: a community (the default: the link is the way in, hundreds of members) or a private mesh of up to 32 contacts. */
+  createGroup(params: { name: string; profile?: "community" | "mesh" }): { groupId: string };
+  /** Invites a contact (a paired chat whose app announced groups) to a group I administer. */
+  inviteToGroup(params: { groupId: string; linkId: string }): void;
+  acceptGroupInvitation(params: { groupId: string }): void;
+  declineGroupInvitation(params: { groupId: string }): void;
+  /** Turns the group's link on (or replaces it with a new one: the old one stops working). Admin only. */
+  enableGroupLink(params: { groupId: string; reset?: boolean }): { link: string };
+  disableGroupLink(params: { groupId: string }): void;
+  /** Joins through a group's link (`group1/…`, or an address carrying it); resolves at once, admission follows. */
+  joinGroupByLink(params: { link: string }): { groupId: string };
+  /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
+  /** `replyTo`: the id of a message of this group the text answers (WISP 9xx § Replies). */
+  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): { error: string | null; messageId?: string };
+  /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
+  groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
+  groupMessages(params: { groupId: string }): StoredMessage[];
+  /**
+   * A page of a chat's or a group's (`group:<id>`) history, oldest first: the latest `limit` (50 by default) messages,
+   * or those before `before` (the id of a message in it, or a time). Reads that page only, however long the chat is.
+   */
+  messagePage(params: { linkId: string; limit?: number; before?: string | number }): MessagePage;
+  leaveGroup(params: { groupId: string }): void;
+  removeGroupMember(params: { groupId: string; key: string }): void;
+  makeGroupAdmin(params: { groupId: string; key: string }): void;
+  setGroupHub(params: { groupId: string; key: string; role: "pin" | "exclude" | null }): void;
+  /** A fresh epoch secret without a membership change. */
+  rotateGroup(params: { groupId: string }): void;
+  /** The admin sets the group's picture (a data URL as `avatarFromFile` makes it), or removes it with null. */
+  setGroupPicture(params: { groupId: string; picture: string | null }): void;
+  /** The admin renames the group (1 to 64 characters, one line); the picture stays. */
+  renameGroup(params: { groupId: string; name: string }): void;
+  /** Forgets the group and its history on this device (leaving first when still in it). */
+  forgetGroup(params: { groupId: string }): void;
 }
 
 /** What the engine implements: any call may be answered asynchronously. */
@@ -66,7 +344,35 @@ export interface RpcResponse {
   error?: string;
 }
 
+/**
+ * The finer sounds the engine can name (src/lib/cues.ts plays them, each in its category of Settings > Notifications
+ * and sounds). On a "cue" event, the only sound of that event; on another event, the sound played instead of the
+ * event's own when its category is on (a mention instead of a message, test coins instead of a coin).
+ */
+export type AttentionCue =
+  | "request" | "failed" | "testcoins"
+  | "shared" | "checked" | "sealed"
+  | "knock" | "switched" | "back"
+  | "downloaded" | "group";
+/** Ephemeral UI feedback, never part of history or the initial snapshot. No private content. */
+export interface AttentionEvent {
+  id: string;
+  /**
+   * "cue": an event that had no sound before the categories; `cue` names it. "reaction": someone reacted to a message
+   * of mine: a quiet notice at most, no sound, no unread count.
+   */
+  type: "message" | "sent" | "coin" | "confirmed" | "cue" | "reaction";
+  at: number;
+  /** The chat the event belongs to (its link id, `group:<id>` for a group), so a page can mute one chat. */
+  linkId?: string;
+  /** A group message that names me (or everyone): it may still notify in a muted group. */
+  mention?: true;
+  cue?: AttentionCue;
+}
 export type EngineEvent =
+  | { kind: "attention"; event: AttentionEvent }
   | { kind: "state"; state: EngineState }
   | { kind: "messages"; linkId: string; messages: StoredMessage[] }
+  /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
+  | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string };

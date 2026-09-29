@@ -1,0 +1,76 @@
+{
+  "name": "@ghostlytools/cli",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Ghostly for bots and terminals: the app's own engine, headless on Node, behind a daemon and a `ghostly` command with JSON output.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MiguelMedeiros/ghostly.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://ghostly.tools/cli",
+  "bugs": "https://github.com/MiguelMedeiros/ghostly/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "ghostly": "./dist/ghostly.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SKILL.md"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@arkade-os/sdk": "0.4.76",
+    "@atproto/jwk-webcrypto": "^0.3.4",
+    "@atproto/oauth-client": "^0.8.7",
+    "@bitcoindevkit/bdk-wallet-web": "0.3.0",
+    "@bitcoinerlab/descriptors-scure": "^3.2.0",
+    "@cashu/cashu-ts": "^4.11.0",
+    "@fedimint/core": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
+    "@fedimint/fedimint-client-wasm-bundler": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
+    "@fedimint/types": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
+    "@hyperswarm/dht-relay": "0.4.3",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "2.4.0",
+    "@scure/base": "2.4.0",
+    "@scure/bip32": "^2.4.0",
+    "@scure/bip39": "2.4.0",
+    "@scure/btc-signer": "2.4.1",
+    "@secondts/bark": "0.25.0",
+    "@synonymdev/pubky": "0.13.0",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.19",
+    "b4a": "1.9.0",
+    "bittorrent-dht": "11.0.12",
+    "ethers": "6.17.0",
+    "eventsource": "^5.1.2",
+    "fake-indexeddb": "6.2.5",
+    "hyperdht": "6.34.0",
+    "keet-identity-key": "3.2.0",
+    "mpg123-decoder": "1.0.3",
+    "node-datachannel": "^0.33.4",
+    "nostr-tools": "2.25.2",
+    "opus-decoder": "0.7.12",
+    "opusscript": "0.1.1"
+  },
+  "devDependencies": {
+    "@ghostly/browser": "*",
+    "@ghostly/core": "*",
+    "@ghostly/iroh-web": "*",
+    "@types/node": "^26.6.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
+}

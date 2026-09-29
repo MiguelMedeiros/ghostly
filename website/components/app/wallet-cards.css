@@ -1,0 +1,12 @@
+/* Copied from src/components/wallet-cards.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
+/* Each wallet's ink, as a class any element can wear: the deck and its cards (wallet-deck.css), the chat's payment
+   composer and a card's turned-over back (payment-composer.css). The nearest one wins, so a card's own ink shows
+   inside a deck that wears the chosen card's. */
+.wallet-card-cashu{--card-rgb:36,211,194}
+.wallet-card-lightning{--card-rgb:243,195,87}
+.wallet-card-arkade{--card-rgb:146,167,255}
+.wallet-card-bark{--card-rgb:255,150,110}
+.wallet-card-spark{--card-rgb:255,214,102}
+.wallet-card-usdt{--card-rgb:62,220,161}
+.wallet-card-bitcoin{--card-rgb:247,147,26}
+.wallet-card-fedimint{--card-rgb:190,140,255}

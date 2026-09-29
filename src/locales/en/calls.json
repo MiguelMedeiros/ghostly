@@ -1,0 +1,43 @@
+{
+  "accept": "Accept",
+  "audio": "Audio call",
+  "camera": "Camera",
+  "cameraOff": "Camera off",
+  "connected": "Connected",
+  "connecting": "Connecting...",
+  "decline": "Decline",
+  "devices": {
+    "back": "{{name}} is back",
+    "lost": "{{name}} disconnected. Using the default.",
+    "menu": "Devices",
+    "switchBack": "Switch back"
+  },
+  "duration": "Duration: {{duration}}",
+  "end": "End call",
+  "ended": "Call ended",
+  "hangUp": "Hang up",
+  "incoming": "Incoming call",
+  "missed": "Missed call",
+  "mute": "Mute",
+  "outgoing": "Calling...",
+  "rejected": "Call rejected",
+  "selfView": "Drag to move, pull a corner to resize, double-click to reset",
+  "shareScreen": "Share screen",
+  "sharing": {
+    "both": "You and {{name}} are sharing your screens",
+    "peer": "{{name}} is sharing their screen",
+    "you": "You're sharing your screen"
+  },
+  "stopSharing": "Stop sharing",
+  "turnCameraOff": "Turn camera off",
+  "turnCameraOn": "Turn camera on",
+  "unmute": "Unmute",
+  "video": "Video call",
+  "wakeGaveUp": "{{name}} did not open Ghostly.",
+  "waking": "Waking {{name}} for the call…",
+  "window": {
+    "chat": "Back to the chat",
+    "full": "Back to full screen",
+    "small": "Keep the call in a small window"
+  }
+}

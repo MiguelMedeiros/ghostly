@@ -8,6 +8,10 @@ import {
   type FrameChannel,
   type ResetFrame,
 } from "./frames";
+import type { WireReply } from "./replies";
+import type { ImageMeta } from "./image";
+import { PLAYABLE_VIDEO, type VideoMeta } from "./video";
+import { PLAYABLE_AUDIO, type VoiceMeta } from "./voice";
 
 /**
  * Files over the data link. A `file` frame announces name, size and type, the
@@ -22,12 +26,22 @@ export interface FileInfo {
   size: number;
   mime: string;
   timestamp: number;
+  /** A voice message: its length and the shape of its sound (files/2 and held items only). */
+  voice?: VoiceMeta;
+  /** A video: its length, size and a small first frame (optional; old apps ignore it). */
+  video?: VideoMeta;
+  /** A picture: its size as it is shown, so its box is laid out before it arrives (optional; old apps ignore it). */
+  image?: ImageMeta;
+  /** The message this file answers (`r`, WISP 401 § Replies): files/2, files/3 and held items; older apps ignore it. */
+  reply?: WireReply;
+  /** How many times it has been forwarded (`fw`, WISP 401 § Forwards): files/2, files/3 and held items; older apps ignore it. */
+  forwarded?: number;
 }
 
 /** Where a platform puts incoming bytes: memory, IndexedDB, disk. */
 export interface FileSink {
   write(chunk: Uint8Array): void | Promise<void>;
-  close(): void | Promise<void>;
+  close(digest?: string): void | Promise<void>;
   abort(): void;
 }
 
@@ -50,16 +64,32 @@ const MAX_NAME_LENGTH = 200;
  */
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
+/**
+ * Names Windows keeps for devices, whatever the case, with any extension, and with spaces before the dot:
+ * "CON", "nul.txt", "COM1 .log" open a device there, not a file.
+ */
+const WINDOWS_DEVICE = /^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])\s*(\.|$)/i;
+
 /** A file name is display text and a download suggestion, never a path. */
 export function sanitizeFileName(name: string): string {
   const visible = name.replace(INVISIBLE, "").replace(/[/\\:]/g, "");
   // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
   const clean = [...visible.replace(/^[\s.]+/, "")].slice(0, MAX_NAME_LENGTH).join("").trim();
+  if (WINDOWS_DEVICE.test(clean)) return [..."_" + clean].slice(0, MAX_NAME_LENGTH).join("");
   return clean || "file";
 }
 
 export function sanitizeMime(mime: string): string {
   return MIME.test(mime) ? mime.toLowerCase() : "application/octet-stream";
+}
+
+/** A size for people: B, KB, MB, GB, TB (powers of 1024), one decimal from KB up. */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024, unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${value.toFixed(1)} ${units[unit]}`;
 }
 
 /** Raster images a UI may show inline. SVG is left out on purpose: it can carry scripts. */
@@ -68,11 +98,12 @@ export const PREVIEWABLE_IMAGE = /^image\/(png|jpe?g|gif|webp)$/;
 /**
  * The type received bytes are served with. The peer picks the announced type,
  * and a blob: URL typed text/html or image/svg+xml would run in the app's
- * origin, so anything but a previewable image is opaque bytes.
+ * origin, so anything but a previewable image or playable audio or video is opaque bytes.
+ * Audio and video keep their type because WebKit will not play what is typed as bytes.
  */
 export function safeBlobType(mime: string): string {
   const clean = sanitizeMime(mime);
-  return PREVIEWABLE_IMAGE.test(clean) ? clean : "application/octet-stream";
+  return PREVIEWABLE_IMAGE.test(clean) || PLAYABLE_AUDIO.test(clean) || PLAYABLE_VIDEO.test(clean) ? clean : "application/octet-stream";
 }
 
 interface Incoming {

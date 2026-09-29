@@ -1,0 +1,80 @@
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { desktopBinary } from "../support/desktop";
+
+/**
+ * What a block needs from outside the test process, and how to tell it is
+ * there. Everything reads the environment `npm run e2e:matrix` loads from
+ * `.env.e2e` (written by the ephemeral environment, e2e/infra) or the gated
+ * variables the single-feature specs already use. Unmet, a block is skipped
+ * with the reason below, never failed.
+ */
+
+const onPath = (tool: string, args: string[] = ["--version"]): boolean => {
+  try {
+    execFileSync(tool, args, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const env = (name: string) => process.env[name] ?? "";
+
+const desktopBuilt = () => {
+  try {
+    return existsSync(desktopBinary());
+  } catch {
+    return false;
+  }
+};
+
+export const REQUIREMENTS: Record<string, { met: () => boolean; missing: string }> = {
+  mint: {
+    met: () => env("E2E_MINT_URL") !== "" || env("MATRIX_NETWORK") === "1",
+    missing: "a Cashu test mint: E2E_MINT_URL (npm run e2e:infra:up), or MATRIX_NETWORK=1 for the public testnut",
+  },
+  s3: {
+    met: () => env("GHOSTLY_S3_ENDPOINT").startsWith("http://127.0.0.1:") && env("GHOSTLY_S3_KEY") !== "" && env("GHOSTLY_S3_SECRET") !== "",
+    missing: "a local S3 server: GHOSTLY_S3_ENDPOINT/KEY/SECRET (npm run e2e:infra:up)",
+  },
+  desktop: {
+    // support/desktop.ts drives the bundled app through tauri-driver, which has a WebDriver to hand it to on
+    // Linux (WebKitWebDriver) and Windows, never on macOS. Its HyperDHT testnet comes from the runtime the
+    // Desktop build installs (scripts/prepare-native-runtime.mjs).
+    met: () =>
+      (process.platform === "linux" || process.platform === "win32") && desktopBuilt() &&
+      (process.env.TAURI_DRIVER ? existsSync(process.env.TAURI_DRIVER) : onPath(process.platform === "win32" ? "where" : "which", ["tauri-driver"])) &&
+      existsSync(join(import.meta.dirname, "..", "..", "native-transports", "hyperdht", "node_modules", "hyperdht", "testnet.js")),
+    missing: "a Desktop peer: Linux or Windows with tauri-driver and a built app (npm run tauri -- build --debug --no-bundle); macOS has no WebDriver for WKWebView, so the nightly Linux job runs these",
+  },
+  lnd: { met: () => env("GHOSTLY_LND_REGTEST") === "1", missing: "the LND regtest stack (GHOSTLY_LND_REGTEST=1)" },
+  cln: { met: () => env("GHOSTLY_CLN_REGTEST") === "1", missing: "the Core Lightning regtest stack (GHOSTLY_CLN_REGTEST=1)" },
+  nwc: { met: () => env("GHOSTLY_NWC_REGTEST") === "1", missing: "the NWC regtest stack (GHOSTLY_NWC_REGTEST=1)" },
+  // Breez's regtest is hosted by Breez and Lightspark, not by e2e/infra, and its faucet asks for a reCAPTCHA:
+  // the block needs a funded counterpart wallet of one's own (as `npm run e2e:full` does).
+  breez: {
+    met: () => env("GHOSTLY_BREEZ_TESTNET") === "1" || env("GHOSTLY_BREEZ_COUNTERPART") !== "",
+    missing: "Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its faucet needs a reCAPTCHA)",
+  },
+  ark: { met: () => env("GHOSTLY_ARK_REGTEST") === "1", missing: "the Arkade regtest stack (GHOSTLY_ARK_REGTEST=1)" },
+  bark: { met: () => env("GHOSTLY_BARK_REGTEST") === "1", missing: "the Bark regtest stack (GHOSTLY_BARK_REGTEST=1)" },
+  bdk: { met: () => env("GHOSTLY_BDK_REGTEST") === "1", missing: "the BDK regtest stack (GHOSTLY_BDK_REGTEST=1)" },
+  bitcoind: { met: () => env("GHOSTLY_BITCOIND_REGTEST") === "1", missing: "a regtest bitcoind (GHOSTLY_BITCOIND_REGTEST=1)" },
+  usdt: { met: () => env("GHOSTLY_USDT_LOCAL") === "1", missing: "the local EVM chain with the test token (GHOSTLY_USDT_LOCAL=1)" },
+  "ssh-keygen": { met: () => onPath("which", ["ssh-keygen"]), missing: "ssh-keygen on PATH" },
+  gpg: { met: () => onPath("gpg") && onPath("gpgconf"), missing: "gpg and gpgconf on PATH" },
+};
+
+const cache = new Map<string, boolean>();
+
+/** The reasons these requirements are not met; empty when they all are. */
+export function unmet(requirements: readonly string[]): string[] {
+  return requirements.flatMap((name) => {
+    const requirement = REQUIREMENTS[name];
+    if (!requirement) throw new Error(`unknown requirement ${name}`);
+    if (!cache.has(name)) cache.set(name, requirement.met());
+    return cache.get(name) ? [] : [requirement.missing];
+  });
+}

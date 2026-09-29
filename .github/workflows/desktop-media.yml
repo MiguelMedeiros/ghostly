@@ -1,0 +1,131 @@
+name: Desktop media streaming
+
+# A video too large for the page plays and seeks in the Desktop app from the stored file, read in ranges from the
+# `ghostly-file` scheme (src-tauri/src/file_stream.rs), in each engine's real WebView under the app's own policy:
+# Linux's WebKitGTK (tauri-driver) and Windows' WebView2 (the app's own test driver), e2e/desktop/video-stream.spec.ts. Each engine
+# handles a custom scheme's ranges its own way, so each one is checked. The macOS WKWebView runs the same check in
+# the required "Desktop on macOS" job (e2e/desktop-macos/video-stream.spec.ts).
+#
+# On pull requests that touch the scheme, the stored files or the video bubble, nightly on dev, and by hand. Not a
+# required check: a cold Windows build takes a while.
+on:
+  pull_request:
+    paths:
+      - "src-tauri/src/file_stream.rs"
+      - "src-tauri/src/file_store.rs"
+      - "src-tauri/tauri.conf.json"
+      - "packages/browser/src/shared/fileBytesNative.ts"
+      - "src/components/video/**"
+      - "e2e/desktop/video-stream.spec.ts"
+      - "e2e/support/{bigVideo,streamCheck,desktop}.ts"
+      - ".github/workflows/desktop-media.yml"
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-media-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stream:
+    name: Desktop video streaming (${{ matrix.name }})
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            name: Linux WebKitGTK
+          - platform: windows-latest
+            name: Windows WebView2
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # GStreamer's headers (calls on Linux, src-tauri/src/native_call) need libunwind-dev, which the
+          # runner image's libunwind-14-dev (LLVM's) blocks.
+          sudo apt-get remove -y libunwind-14-dev || true
+          sudo apt-get update
+          # The GStreamer plugins are WebKitGTK's video decoders: VP9 in plugins-good, H.264 in libav.
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-libav \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache Cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-desktop-media-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-desktop-media-${{ github.repository }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install tauri-driver (Linux)
+        if: runner.os == 'Linux'
+        run: command -v tauri-driver || cargo install tauri-driver --locked
+
+      - name: Build the Desktop app (Linux)
+        if: runner.os == 'Linux'
+        run: npm run tauri -- build --debug --no-bundle
+
+      # Windows is driven through the app's own test driver (a debug-only feature), not tauri-driver: msedgedriver
+      # never attached to the app's WebView2 on the runner ("DevToolsActivePort file doesn't exist").
+      - name: Build the Desktop app with its test driver (Windows)
+        if: runner.os == 'Windows'
+        run: npm run tauri -- build --debug --no-bundle --features e2e-driver
+
+      - name: Play a 100 MB video from the stored file (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npx playwright test -c e2e/playwright.desktop.config.ts video-stream
+
+      - name: Play a 100 MB video from the stored file (Windows)
+        if: runner.os == 'Windows'
+        run: npx playwright test -c e2e/playwright.desktop.config.ts video-stream
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-desktop-media-${{ runner.os }}
+          path: |
+            playwright-report-desktop
+            test-results
+          retention-days: 7

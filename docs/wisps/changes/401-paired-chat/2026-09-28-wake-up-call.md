@@ -1,0 +1,1 @@
+a call to a contact whose web app is closed wakes it first: a call wake-up (`"c":1`, a 60 s time to live, one per 30 s), "Incoming call" on the woken app, and the caller places the call once the chat is live (60 s at most). Groups do not offer `wake/1` yet.

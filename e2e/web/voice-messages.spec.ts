@@ -1,0 +1,309 @@
+import { fileURLToPath } from "node:url";
+import type { Locator, Page } from "@playwright/test";
+import { chat, expect, say, test, type Peer } from "../support/fixtures";
+import { pair } from "../support/paired";
+
+/**
+ * Chromium's fake microphone plays this file on a loop: two seconds of a 220 Hz voice-like tone in
+ * loud and quiet "syllables" (16 kHz mono PCM, generated once), so the waveform has a shape.
+ */
+const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.url));
+
+test.use({
+  launchOptions: {
+    args: [
+      "--disable-features=WebRtcHideLocalIpsWithMdns",
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
+      `--use-file-for-fake-audio-capture=${SAMPLE}`,
+      // Headless has no one to click play first; the tests click anyway, this only keeps it steady under load.
+      "--autoplay-policy=no-user-gesture-required",
+    ],
+  },
+});
+
+const mic = (page: Page) => page.getByTestId("voice-record");
+const voices = (peer: Peer) => chat(peer).getByTestId("voice-bubble");
+
+/** Presses the mic with the mouse, holds it for `ms` and lets go. */
+async function hold(page: Page, ms: number) {
+  const box = (await mic(page).boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+  await page.waitForTimeout(ms);
+  await page.mouse.up();
+}
+
+/**
+ * How far any part of a voice bubble reaches past the message bubble around it, in pixels (0: all inside).
+ * #194's bubble was sized by the window (70vw), so in a 900px Desktop window its mic badge hung outside.
+ */
+const overhang = (bubble: Locator) =>
+  bubble.evaluate((voice) => {
+    const outer = voice.closest("[data-message-bubble]")!.getBoundingClientRect();
+    let worst = 0;
+    for (const part of [voice, ...voice.querySelectorAll("*")]) {
+      const box = part.getBoundingClientRect();
+      if (box.width > 0) worst = Math.max(worst, outer.left - box.left, box.right - outer.right);
+    }
+    return worst;
+  });
+
+/**
+ * Starts keeping every media element the page plays: the voice bubble's `<audio>` is never in the DOM, and the
+ * speed test reads what the engine itself was told (`playbackRate`, `preservesPitch`), not only the label.
+ */
+const watchAudio = (page: Page) =>
+  page.evaluate(() => {
+    const w = window as unknown as { voiceAudio?: HTMLMediaElement[] };
+    if (w.voiceAudio) return;
+    const seen: HTMLMediaElement[] = (w.voiceAudio = []);
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+      if (!seen.includes(this)) seen.push(this);
+      return play.call(this);
+    };
+  });
+
+/** The rate and pitch setting of every media element played since `watchAudio`. */
+const audioRates = (page: Page) =>
+  page.evaluate(() => ((window as unknown as { voiceAudio?: HTMLMediaElement[] }).voiceAudio ?? []).map((audio) => ({ rate: audio.playbackRate, preservesPitch: audio.preservesPitch })));
+
+/** How many different bar heights a waveform has: a flat line has one. */
+const shapes = (bubble: Locator) =>
+  bubble.locator(".voice-wave-base .voice-wave-bar").evaluateAll((bars) => new Set(bars.map((bar) => (bar as HTMLElement).style.height)).size);
+
+test("voice messages: hold to record, the contact plays it", { tag: ["@feature:files.voice.record", "@feature:files.voice.play", "@feature:files.voice.meta", "@feature:files.paired.send"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("voice-alice"), peer("voice-bob")]);
+  await pair(alice, bob);
+
+  // Nothing typed: the mic stands where send was.
+  await expect(alice.page.getByRole("button", { name: "Send message" })).toHaveCount(0);
+  await expect(mic(alice.page)).not.toHaveAttribute("aria-disabled");
+  await hold(alice.page, 2_600);
+  await expect(alice.page.getByTestId("voice-bar")).toHaveCount(0);
+
+  const sent = voices(alice).last();
+  await expect(sent).toBeVisible();
+  await expect(sent.getByTestId("voice-time")).toHaveText(/^0:0[2-3]$/);
+
+  const received = voices(bob).last();
+  await expect(received).toBeVisible({ timeout: 30_000 });
+  await expect(received.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
+  await expect(received).toHaveAttribute("data-played", "false");
+  await expect(received.getByTestId("voice-unplayed")).toBeVisible();
+  // The sender measured the waveform; the receiver draws it as sent, not flat.
+  expect(await shapes(received)).toBeGreaterThan(3);
+  expect(await shapes(received)).toBe(await shapes(sent));
+
+  await received.getByTestId("voice-play").click();
+  await expect(received).toHaveAttribute("data-state", "playing");
+  await expect(received).toHaveAttribute("data-played", "true");
+  await expect(received.getByTestId("voice-speed")).toHaveText("1×");
+  // Real decoding: the clock moves, and the recording plays to its end.
+  await expect(received.getByTestId("voice-time")).toHaveText(/^0:0[1-3]$/);
+  await expect(received).toHaveAttribute("data-state", "idle", { timeout: 15_000 });
+  await expect(received.getByTestId("voice-time")).toHaveText(/^0:0[2-3]$/);
+
+  // Scrubbing: a tap three quarters along the waveform moves the position there.
+  const wave = received.getByTestId("voice-waveform");
+  const box = (await wave.boundingBox())!;
+  await bob.page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  await expect(wave).toHaveAttribute("aria-valuenow", /^[12]$/);
+  await expect(received.getByTestId("voice-time")).toHaveText(/^0:0[12]$/);
+  // It plays on from there (seeking works in a recorder's WebM, which has no index), not from the start.
+  await received.getByTestId("voice-play").click();
+  await expect(received).toHaveAttribute("data-state", "playing");
+  await expect(received.getByTestId("voice-time")).not.toHaveText("0:00");
+  await expect(received).toHaveAttribute("data-state", "idle", { timeout: 5_000 });
+
+  // Inside its bubble at every width, sent and received, with the speed showing: the default Desktop window
+  // (900px, the sidebar beside the chat), a narrow one, and a phone.
+  await received.getByTestId("voice-play").click();
+  await expect(received).toHaveAttribute("data-state", "playing");
+  await received.getByTestId("voice-play").click();
+  await expect(received).toHaveAttribute("data-state", "paused");
+  await expect(received.getByTestId("voice-speed")).toBeVisible();
+  for (const width of [1280, 900, 640, 390]) {
+    for (const [who, bubble] of [[bob, received], [alice, sent]] as const) {
+      await who.page.setViewportSize({ width, height: 800 });
+      await expect.poll(() => overhang(bubble), { message: `${width}px` }).toBeLessThanOrEqual(0.5);
+    }
+  }
+  await bob.page.setViewportSize({ width: 1280, height: 800 });
+
+  // Survives a reload: stored with its description, still played.
+  await bob.page.reload();
+  const again = voices(bob).last();
+  await expect(again).toHaveAttribute("data-played", "true", { timeout: 30_000 });
+  expect(await shapes(again)).toBeGreaterThan(3);
+});
+
+/** The chat's row holding the newest bubble of this kind (a voice message, a file). */
+const rowWith = (peer: Peer, testId: string) => chat(peer).locator("[data-message-row]").filter({ has: peer.page.getByTestId(testId) }).last();
+
+test("voice messages: recorded while replying, it goes as a reply, and so does a file", { tag: ["@feature:files.voice.record", "@feature:chat.replies", "@feature:chat.replies.wire", "@feature:files.paired.send"] }, async ({ peer }) => {
+  // Miguel's voice notes sent while replying arrived with no quote: the recorder sent them without the reply.
+  const [alice, bob] = await Promise.all([peer("voice-reply-alice"), peer("voice-reply-bob")]);
+  await pair(alice, bob);
+  await say(bob, "lunch at noon?");
+  // Its own text, not a quote of it: the replies below hold its words too.
+  const original = chat(alice).locator("[data-message-row]").filter({ has: alice.page.getByTestId("message-text").filter({ hasText: /^lunch at noon\?$/ }) }).last();
+  await expect(original).toBeVisible({ timeout: 30_000 });
+
+  // Alice answers it with a voice message: the bar goes once it is sent.
+  await original.hover();
+  await original.getByTestId("message-reply-action").click();
+  await expect(alice.page.getByTestId("composer-reply").getByTestId("reply-quote-snippet")).toHaveText("lunch at noon?");
+  await expect(mic(alice.page)).not.toHaveAttribute("aria-disabled");
+  await hold(alice.page, 1_600);
+  await expect(alice.page.getByTestId("composer-reply")).toHaveCount(0);
+
+  // Both bubbles quote Bob's message, checked against each side's history.
+  const sent = rowWith(alice, "voice-bubble");
+  await expect(sent.getByTestId("message-quote")).toHaveAttribute("data-state", "found");
+  await expect(sent.getByTestId("reply-quote-snippet")).toHaveText("lunch at noon?");
+  const received = rowWith(bob, "voice-bubble");
+  await expect(received.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
+  await expect(received.getByTestId("message-quote")).toHaveAttribute("data-state", "found");
+  await expect(received.getByTestId("reply-quote-name")).toHaveText("You");
+  await expect(received.getByTestId("reply-quote-snippet")).toHaveText("lunch at noon?");
+
+  // A file from + → Document while replying goes as a reply too.
+  await original.hover();
+  await original.getByTestId("message-reply-action").click();
+  await alice.page.getByTestId("file-input").setInputFiles({ name: "menu.txt", mimeType: "text/plain", buffer: Buffer.from("soup, bread\n") });
+  await expect(alice.page.getByTestId("composer-reply")).toHaveCount(0);
+  await expect(rowWith(alice, "file-bubble").getByTestId("message-quote")).toHaveAttribute("data-state", "found");
+  const file = rowWith(bob, "file-bubble");
+  await expect(file).toContainText("menu.txt", { timeout: 30_000 });
+  await expect(file.getByTestId("message-quote")).toHaveAttribute("data-state", "found");
+  await expect(file.getByTestId("reply-quote-snippet")).toHaveText("lunch at noon?");
+
+  // The next voice message answers nothing.
+  await hold(alice.page, 1_200);
+  await expect(voices(bob)).toHaveCount(2, { timeout: 30_000 });
+  await expect(rowWith(bob, "voice-bubble").getByTestId("message-quote")).toHaveCount(0);
+});
+
+test("voice messages: locked, one click on send sends one message (click to lock, or slide up)", { tag: ["@feature:files.voice.record", "@feature:files.paired.send"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("voice-lock-alice"), peer("voice-lock-bob")]);
+  await pair(alice, bob);
+  const page = alice.page;
+  const bar = page.getByTestId("voice-bar");
+  await expect(mic(page)).not.toHaveAttribute("aria-disabled");
+
+  // A click records hands-free, like WhatsApp Web: the mic is the send button at once.
+  await mic(page).click();
+  const send = page.getByTestId("voice-send");
+  await expect(send).toHaveAccessibleName("Send");
+  await expect(send).toHaveAttribute("title", "Send");
+  await expect(bar).toHaveAttribute("data-phase", "recording");
+  await page.waitForTimeout(1_500);
+  // Miguel had to click send twice: one click is all it takes.
+  await send.click();
+  await expect(bar).toHaveCount(0);
+  await expect(voices(alice)).toHaveCount(1);
+  await expect(voices(bob)).toHaveCount(1, { timeout: 30_000 });
+
+  // Held, then slid up to the lock and let go up there: one click on send again.
+  const box = (await mic(page).boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await expect(bar).toHaveAttribute("data-phase", "recording");
+  await expect(page.getByTestId("voice-lock-hint")).toBeVisible();
+  await page.mouse.move(x, y - 60, { steps: 6 });
+  await page.mouse.move(x, y - 130, { steps: 6 });
+  await expect(bar).toHaveAttribute("data-mode", "locked");
+  await page.mouse.up();
+  await page.waitForTimeout(1_200);
+  await expect(bar).toHaveAttribute("data-mode", "locked");
+  await page.getByTestId("voice-send").click();
+  await expect(bar).toHaveCount(0);
+  await expect(voices(alice)).toHaveCount(2);
+
+  // The contact gets exactly those two, nothing sent twice.
+  await expect(voices(bob)).toHaveCount(2, { timeout: 30_000 });
+  await page.waitForTimeout(2_000);
+  await expect(voices(bob)).toHaveCount(2);
+  await expect(voices(alice)).toHaveCount(2);
+});
+
+test("voice messages: hands-free with a click, pause and preview, Enter, Esc; the next one plays on", { tag: ["@feature:files.voice.record", "@feature:files.voice.autoplay", "@feature:files.voice.play"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("voice-free-alice"), peer("voice-free-bob")]);
+  await pair(alice, bob);
+  const page = alice.page;
+  await expect(mic(page)).not.toHaveAttribute("aria-disabled");
+
+  // A click records hands-free; Esc throws it away.
+  await mic(page).click();
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-mode", "locked");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("voice-bar")).toHaveCount(0);
+
+  // One held, then one hands-free with a pause, a listen and more: two in a row from Alice.
+  await hold(page, 1_600);
+  await expect(voices(alice)).toHaveCount(1);
+  await mic(page).click();
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+  await page.waitForTimeout(1_500);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+  await page.getByTestId("voice-preview").click();
+  await expect(page.getByRole("button", { name: "Pause playback", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await page.waitForTimeout(1_200);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveCount(0);
+  await expect(voices(alice)).toHaveCount(2);
+  // Paused time is not recorded: about 2.7 s, however long the preview took.
+  await expect(voices(alice).last().getByTestId("voice-time")).toHaveText(/^0:0[23]$/);
+
+  await expect(voices(bob)).toHaveCount(2, { timeout: 30_000 });
+  const [first, second] = [voices(bob).first(), voices(bob).last()];
+  await expect(second.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
+  await first.getByTestId("voice-play").click();
+  await expect(first).toHaveAttribute("data-state", "playing");
+  // The first ends, the second follows by itself.
+  await expect(second).toHaveAttribute("data-state", "playing", { timeout: 15_000 });
+  await expect(first).toHaveAttribute("data-state", "idle");
+  await expect(second).toHaveAttribute("data-played", "true");
+
+  // Only one at a time: starting the first again stops the second.
+  await watchAudio(bob.page);
+  await first.getByTestId("voice-play").click();
+  await expect(first).toHaveAttribute("data-state", "playing");
+  await expect(second).toHaveAttribute("data-state", "paused");
+
+  // The speed pill, in the mic's place while it plays or waits mid-way. Paused first: a short recording would
+  // end (and the pill go) between two taps.
+  await first.getByTestId("voice-play").click();
+  await expect(first).toHaveAttribute("data-state", "paused");
+  const pill = first.getByRole("button", { name: "Playback speed 1×" });
+  await expect(pill).toHaveText("1×");
+  await expect(first.getByTestId("voice-mic")).toHaveCount(0);
+  // Shared by every voice message: 1× → 1.5× → 2×, and what the engine plays at, with the pitch kept.
+  await first.getByTestId("voice-speed").click();
+  await expect(first.getByTestId("voice-speed")).toHaveText("1.5×");
+  await expect(second.getByTestId("voice-speed")).toHaveText("1.5×");
+  await first.getByTestId("voice-speed").click();
+  await expect(first.getByRole("button", { name: "Playback speed 2×" })).toHaveText("2×");
+  await expect(second.getByTestId("voice-speed")).toHaveText("2×");
+  await expect.poll(() => audioRates(bob.page)).toEqual([{ rate: 2, preservesPitch: true }]);
+  // It plays on at 2× from where it was, and the next one follows at 2× too.
+  await first.getByTestId("voice-play").click();
+  await expect(second).toHaveAttribute("data-state", "playing", { timeout: 15_000 });
+  await expect.poll(() => audioRates(bob.page)).toEqual([{ rate: 2, preservesPitch: true }, { rate: 2, preservesPitch: true }]);
+  await expect(second).toHaveAttribute("data-state", "idle", { timeout: 15_000 });
+
+  // Remembered on this device: after a reload, the next voice message starts at 2×.
+  await bob.page.reload();
+  const again = voices(bob).first();
+  await expect(again.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
+  await watchAudio(bob.page);
+  await again.getByTestId("voice-play").click();
+  await expect(again.getByTestId("voice-speed")).toHaveText("2×");
+  await expect.poll(() => audioRates(bob.page)).toEqual([{ rate: 2, preservesPitch: true }]);
+});

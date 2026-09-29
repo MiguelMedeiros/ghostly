@@ -1,18 +1,51 @@
+import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
+import { usePeerAvatar, usePeerNick, useShareProfile } from "../hooks/useAvatars";
+import { PeerAvatar } from "../components/Avatar";
+import { AvatarOpener } from "../components/AvatarViewer";
+import { useBackdropDismiss } from "../hooks/useDismiss";
+import { DeleteChatDialog } from "../components/DeleteChatDialog";
+import { createPortal } from "react-dom";
+import { ChatHoldDialog } from "../components/ChatHoldDialog";
+import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
+import { FaceCorner, IdentityStack } from "../components/identities/ContactMarks";
+import { shownContactName, useChosenProfile, useContactFace } from "../components/identities/contactFace";
+import { IdentityShareLine } from "../components/identities/IdentityShareLine";
+import { ChatServicesDialog } from "../components/ChatServicesDialog";
+import { PinIcon } from "../components/PinIcon";
+import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
+import { useI18n } from "../contexts/I18nContext";
+import { InviteCard } from "../components/InviteCard";
+import { ChatConnection } from "../components/ChatConnection";
+import { PairingScene } from "../components/pairing/PairingScene";
+import { usePairingProgress } from "../hooks/usePairingProgress";
+import { contactArrived } from "../lib/pairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { useNavigate, Navigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
+import { leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
+import { useTailFirst } from "../hooks/useTailFirst";
+import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { useWebRTC } from "../hooks/useWebRTC";
+import { useCallDevices } from "../hooks/useCallDevices";
+import { preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { quoteFor, replyIndex, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { replySnippet } from "@ghostly/core";
+import { composerServices } from "../components/composer/servicesRow";
+import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
-import { PollCountdown } from "../components/PollCountdown";
+import { contactStatus } from "../lib/contactStatus";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
+import { CueChat } from "../lib/cues";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
+  isSessionPinned,
+  setSessionPinned,
   markSessionAsRead,
   getInviteCode,
   deleteSession,
@@ -20,9 +53,31 @@ import {
   peerDisplayName,
   updateSessionLabel,
 } from "../lib/storage";
-import { chatPath } from "../lib/url";
-import { parseCallSignal, signalHasVideo } from "@ghostly/core";
+import { chatPath, inviteShareText } from "../lib/url";
+import { continueInNewChat } from "../lib/continueChat";
+import { engine } from "@ghostly/browser/platform/engine";
+import { fileMessageText, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
+import type { WalletNetwork } from "../lib/platform";
+import { useAppNavigation } from "../hooks/useAppNavigation";
+import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
+import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
+import { useWakeCall } from "../hooks/useWakeCall";
+import { useChatLink } from "../hooks/useChatLink";
+import { useTypingSender } from "../hooks/useTyping";
+import { ChatSubtitle } from "../components/TypingIndicator";
+import { TransportLine } from "../components/TransportTimeline";
+import { mergeTimeline } from "../lib/transportEvents";
+import { walletCards } from "../components/walletCardData";
+import { cardOn } from "../lib/chatPayments";
+import { useForwarding } from "../hooks/useForwarding";
+import { useChatSearch } from "../hooks/useChatSearch";
+import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
+import { PinnedBar } from "../components/chat/PinnedBar";
+
+/** What a call captures from: the devices the profile chose, read when it asks. */
+const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
 
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
@@ -35,25 +90,33 @@ interface ChatProps {
   callLayer: HTMLElement | null;
 }
 
+/** A text of mine this chat can edit (WISP 400 § Edits): one the engine sent under its wire id, not a file, a payment or a notice. */
+function editableText(message: ChatMessage): boolean {
+  return message.sender === "me" && !!message.ref && message.id === `me_${message.ref}` && !message.file && !message.paymentId && !message.systemEvent && !message.callEvent;
+}
+
 export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps) {
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
+  const { t, language } = useI18n();
   const { settings } = useSettings();
-  const bottomRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const session = useMemo(() => (sessionId ? loadSession(sessionId) : null), [sessionId]);
+  const sharedNick = useShareProfile() ? settings.defaultNickname : "";
   const params: ChatParams | null = useMemo(
     () =>
       session
         ? {
+            profile: session.profile,
+            deliveryMode: session.deliveryMode,
             sessionId: session.id,
             seedB64: session.mySeedB64,
             peerPubKeyB64: session.peerPubKeyB64,
             encKeyB64: session.encKeyB64,
-            nick: settings.defaultNickname || undefined,
+            nick: sharedNick || undefined,
           }
         : null,
-    [session, settings.defaultNickname],
+    [session, sharedNick],
   );
 
   const {
@@ -71,14 +134,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     addSystemMessage,
     deleteMessage,
     setNick,
-    pollCountdown,
   } = useChat(params);
 
+  // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
-    if (settings.defaultNickname) {
-      setNick(settings.defaultNickname);
-    }
-  }, [settings.defaultNickname, setNick]);
+    setNick(sharedNick);
+  }, [sharedNick, setNick]);
 
   const addCallEventMessage = useCallback(
     (type: CallEventType, hasVideo: boolean, duration?: number) => {
@@ -108,22 +169,31 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     [addSystemMessage],
   );
 
+  const platform = useServicesPlatform();
   const webrtc = useWebRTC({
     incomingCallSignal,
     publishCallSignal: setCallSignal,
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
+    media: platform?.callMedia?.(),
+    // The profile's ICE servers (a TURN relay) serve calls too; a signal on the chat session carries every path.
+    iceServers: engine.state?.settings.iceServers,
+    maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
+    // The microphone and camera this profile chose in Settings → Audio & video.
+    devices: callDevicePreferences,
   });
+  const callDevices = useCallDevices(webrtc);
 
   const callState = webrtc.callState;
   const previousCallState = useRef(callState);
   useEffect(() => {
     const before = previousCallState.current;
     previousCallState.current = callState;
-    if (callState === "incoming") return startRinging("ring");
+    // A muted chat still rings (lib/chatMute.ts, MUTE_SILENCES).
+    if (callState === "incoming") return callRings(sessionId) ? startRinging("ring") : undefined;
     if (callState === "offering") return startRinging("ringback");
     if (callState === "idle" && before !== "idle") playSound("hangup");
-  }, [callState]);
+  }, [callState, sessionId]);
 
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
@@ -137,24 +207,70 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     return signalHasVideo(parseCallSignal(incomingCallSignal));
   })();
 
-  const platform = useServicesPlatform();
+  const paired = session?.profile === "paired-chat/1";
+  // A chat made with a v0.4 code (WISP 402): kept working both ways, never created by this app.
+  const compat = !!session && !paired;
+  const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
+  const pairedReady = deliveryPeer?.pairing?.status === "ready";
+  // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
+  const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? "Calls need a live connection" : deliveryPeer.callsUnavailable) : null;
+  // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
+  const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
+  // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
+  const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? deliveryPeer.pairing.error ?? "This chat stopped: your contact's key changed." : undefined;
+  // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
+  // invite code is forgotten when the contact shows up.
+  const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
+  const muted = useChatMute(sessionId) !== undefined;
+  const pairing = usePairingProgress(paired ? session?.peerPubKeyB64 : undefined, {
+    inviter: createdHere,
+    // A DHT-only chat has no live link to wait for: its messages go over the DHT from the start.
+    enabled: paired && (deliveryPeer?.deliveryMode ?? session?.deliveryMode) !== "dht",
+    createdAt: session?.createdAt,
+    muted: muted && MUTE_SILENCES.connected,
+  });
+  const pairingSceneId = `pairing-${sessionId}`;
+  // Once the contact has arrived with the invite (their packet seen, or past the wait), the invite has done its job:
+  // its card goes and the scene alone tells the rest. It comes back if the state says nobody is there any more.
+  const invitePast = contactArrived(pairing.progress);
   const peerKey = params?.peerPubKeyB64;
+  /** The message the composer answers (WISP 400 § Replies): a paired chat's only. */
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  /**
+   * The reply as it is when something is sent, not as a render's closure saw it: a recording or a sheet of files
+   * started earlier goes with the reply set now. The first thing sent after Reply carries it (a text, a voice note, a
+   * file; of several files, the first), and nothing after it does: a caption after its files does not quote again.
+   */
+  const replyingRef = useRef(replyingTo);
+  replyingRef.current = replyingTo;
+  /** Sent with the reply: the bar goes, unless another message was chosen meanwhile. */
+  const replied = useCallback((answering: ChatMessage) => {
+    if (replyingRef.current === answering) replyingRef.current = null;
+    setReplyingTo(current => current === answering ? null : current);
+  }, [setReplyingTo]);
   const sendFile = useCallback(
-    async (source: File): Promise<string | null> => {
+    async (source: File, voice?: VoiceMeta): Promise<string | null> => {
       if (!platform || !peerKey) return null;
-      if (source.size > platform.maxFileBytes) {
-        return `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).`;
-      }
+      const tooLarge = platform.fileTooLarge ? platform.fileTooLarge(peerKey, source.size)
+        : source.size > platform.maxFileBytes ? `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).` : null;
+      if (tooLarge) return tooLarge;
+      // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
+      const answering = paired ? replyingRef.current : null;
+      const reply = answering ? sentReply(answering) : undefined;
       try {
-        const { timestamp, file } = await platform.sendFile(peerKey, source);
-        addSystemMessage({ id: `me_${timestamp}`, text: `📎 ${file.name}`, sender: "me", timestamp, file });
+        // A video goes with its length, size and first frame, so the contact sees it before it arrives.
+        const video = !voice && isPlayableVideoType(source.type) ? await videoMetaOf(source).catch(() => undefined) : undefined;
+        const { timestamp, file } = await platform.sendFile(peerKey, source, { voice, ...(video && { video }), ...(answering && reply && { replyTo: answering.id }) });
+        // This side's copy quotes it at once, as the engine keeps it: the engine's own row of a file is not copied here.
+        addSystemMessage({ id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, file, ...(reply && { replyTo: reply }) });
+        if (answering) replied(answering);
         window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
         return e instanceof Error ? e.message : String(e);
       }
     },
-    [platform, peerKey, addSystemMessage],
+    [platform, peerKey, paired, addSystemMessage, replied],
   );
 
   /**
@@ -173,11 +289,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
   const pay = useCallback(
-    async (kind: "send" | "request", amount: number, memo: string): Promise<string | null> => {
+    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", network?: WalletNetwork, confirmedReal?: boolean, lightningCard?: string): Promise<string | null> => {
       if (!wallet || !peerKey) return null;
+      // The card's own wallet: the request or the ecash is of its network, a request's invoice of its Lightning card.
+      const onNetwork = network ? wallet.forNetwork(network) : wallet;
+      const card = lightningCard ? onNetwork.forLightning(lightningCard) : onNetwork;
       try {
-        const { timestamp, paymentId } = await wallet[kind](peerKey, amount, memo || undefined);
-        const text = kind === "send" ? `⚡ ${amount.toLocaleString()} sats` : `⚡ Requested ${amount.toLocaleString()} sats`;
+        const { timestamp, paymentId } = await (kind === "request" ? card.request(peerKey, amount, memo || undefined, method) : card.send(peerKey, amount, memo || undefined, confirmedReal));
+        const sats = network === "testnet" ? "test sats" : "sats";
+        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} ${sats}` : `⚡ Requested ${amount.toLocaleString()} ${sats}`;
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
         window.dispatchEvent(new Event("session-updated"));
         return null;
@@ -187,16 +307,44 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     },
     [wallet, peerKey, addSystemMessage],
   );
-  const paySend = useCallback((amount: number, memo: string) => pay("send", amount, memo), [pay]);
-  const payRequest = useCallback((amount: number, memo: string) => pay("request", amount, memo), [pay]);
+  const paySend = useCallback((amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => pay("send", amount, memo, undefined, network, confirmedReal), [pay]);
+  const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", _rail?: unknown, network?: WalletNetwork, lightningCard?: string) => pay("request", amount, memo, method, network, undefined, lightningCard), [pay]);
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [chatLabel, setChatLabel] = useState<string>("");
   const [peerNick, setPeerNick] = useState<string>("");
+  const profileNick = usePeerNick(params?.peerPubKeyB64);
+  // The identity the contact is shown as, when one was chosen and its proof still stands (identities/contactFace.ts).
+  const face = useContactFace(params?.peerPubKeyB64);
+  const peerAvatar = usePeerAvatar(params?.peerPubKeyB64);
+  useChosenProfile(params?.peerPubKeyB64);
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState("");
+  /** Ways of paying are chosen per chat; the ⚡ works while this device allows at least one. */
+  const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
+  // The chat's link as the engine shows it: its transport lines in the timeline.
+  const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
+  // What tells the contact when this side writes (WISP 401 § Typing): 1:1 paired chats only.
+  const onTyping = useTypingSender(paired ? chatLink?.id : undefined, visible);
+  const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : [], paired ? chatLink?.identityTimeline ?? [] : []),
+    [messages, paired, chatLink?.transportLog, chatLink?.identityTimeline]);
+  // Forward, and Select then Forward (WISP 400 § Forwards): texts and files, to other chats and groups.
+  const forwarding = useForwarding(chatLink?.id, messages);
+  // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.
+  const paymentsOn = walletState?.wallets?.length ? walletCards(walletState).some((c) => cardOn(chatPeer ?? undefined, c.rail, c.network)) : !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
+  const [showHold, setShowHold] = useState(false);
+  const [showIdentities, setShowIdentities] = useState(false);
+  /** The card the identities panel opens on: a share tapped in the timeline. */
+  const [identityCard, setIdentityCard] = useState<{ side: "mine" | "theirs"; id: string }>();
+  /** One of mine tapped in the timeline: the composer's picker opens on it. */
+  const [myIdentity, setMyIdentity] = useState<{ id: string; at: number }>();
+  const [showServices, setShowServices] = useState(false);
+  /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
+  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showMute, setShowMute] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -269,28 +417,39 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setConfirmDelete(false);
     setCodeCopied(false);
     setMenuOpen(false);
+    setReplyingTo(null);
+    setEditing(null);
   }, [sessionId]);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    if (menuOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
+  const closeMenu = () => setMenuOpen(false);
+  const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
+  // A long chat draws its last rows first, and the older ones in the moment after (useTailFirst).
+  const rowIds = useMemo(() => timeline.map(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`), [timeline]);
+  const firstRow = useTailFirst(rowIds, sessionId, leftScrolledUp(sessionId));
+  // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
+  // A notice (joined, a call) is not a message to count. Always every message, drawn yet or not; a new list when older
+  // rows come in above, so the view is put back in the same commit, before a scroll can see the rows moved.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
+  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
+  const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible });
+  const search = useChatSearch({ messages, chat: sessionId, active: visible });
+
+  // A chat still pairing opens on its scene, not on the bottom of an empty history.
+  const sceneOn = pairing.scene;
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (sceneOn && messages.length === 0) document.getElementById(pairingSceneId)?.scrollIntoView({ block: "nearest" });
+  }, [sceneOn, messages.length, pairingSceneId]);
 
   // Only what is on screen has been read; a chat kept alive by a call has not.
   useEffect(() => {
     if (visible) markSessionAsRead(sessionId);
   }, [visible, sessionId, messages.length]);
+
+  // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
+  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop;
+  const placeCall = webrtc.startCall;
+  const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -302,32 +461,56 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       deleteSession(params.sessionId);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));
-      navigate("/");
+      nav.home();
     } else {
       setConfirmDelete(true);
     }
   };
 
-  const statusConfig = {
-    connecting: { color: "bg-yellow-500", label: "connecting" },
-    online: { color: "bg-accent", label: "online" },
-    offline: { color: "bg-gray-500", label: "offline" },
-    error: { color: "bg-danger", label: "error" },
-  };
-  const { label: statusLabel } = statusConfig[status];
+  const statusLabel = contactStatus(deliveryPeer, paired, status);
 
-  const truncatedPeerKey = params.peerPubKeyB64.slice(0, 12) + "...";
-  const displayName = chatLabel || peerNick;
-  const isAnonymous = !displayName;
-  const showKeySubtitle = true;
+  const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
+  // What the contact last said on the session wins over a name read out of an older message.
+  const contactNick = profileNick !== undefined ? profileNick : peerNick;
+  // A nickname given here wins, then the chosen identity's name, then the contact's own, then their key.
+  const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params.peerPubKeyB64) }) });
+  const isAnonymous = shown.from === "key";
+  const shownName = shown.name;
+  // A reply's quote and the composer's bar name the author as this chat does.
+  const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? shownName : undefined;
+  // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
+  const react = (messageId: string, emoji: string) => {
+    if (chatLink?.id) void engine.call("react", { linkId: chatLink.id, messageId, emoji }).catch(() => {});
+  };
+  const reactionName = (by: string) => by === "peer" ? shownName : by.slice(0, 8);
+  // The pinned message (WISP 400 § Pinned message): one per chat; the engine keeps it and tells the contact.
+  const pin = paired ? chatLink?.pin : undefined;
+  const pinMessage = (messageId: string | undefined, remove = false) => {
+    if (chatLink?.id) void engine.call("pinMessage", { linkId: chatLink.id, messageId, remove }).catch(() => {});
+  };
+  const replyBar = replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer"), snippet: replySnippet(replyingTo.text),
+    mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined;
+  // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
+  const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-chat-bg">
+    // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
+    <CueChat.Provider value={sessionId}>
+    <div className="chat-pane flex-1 h-full">
+    {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
+    <div data-file-drop className="chat-column relative flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
+      {(wakeCall.waking || wakeCall.gaveUp) && (
+        <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
+          <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
+          {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
+        </div>
+      )}
       {/* Chat Header */}
-      <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
+      <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           <button
-            onClick={() => navigate("/")}
+            onClick={nav.up}
             className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0"
             title="Back"
             data-testid="chat-back"
@@ -336,21 +519,22 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <path d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
-            <span className={`text-sm ${isAnonymous ? "text-text-muted/50" : "text-text-muted"}`}>
-              {(displayName || "A").charAt(0).toUpperCase()}
-            </span>
-            {inviteCode && (
-              <span className="absolute -bottom-0.5 -right-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-[#111b21] z-10 group/star">
+          {/* With a picture, a click opens it large (AvatarViewer.tsx). */}
+          <AvatarOpener src={face?.photo ?? peerAvatar} name={shownName} testId="chat-avatar-open"
+            className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
+            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" />
+            {face && <FaceCorner face={face} />}
+            {inviteCode && !pairedReady && (
+              <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-on-accent z-10 group/star">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                 </svg>
-                <span className="absolute top-1/2 -translate-y-1/2 left-full ml-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
+                <span className="absolute top-1/2 -translate-y-1/2 start-full ms-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
                   You created this chat
                 </span>
               </span>
             )}
-          </div>
+          </AvatarOpener>
           <div className="min-w-0">
             {isEditingLabel ? (
               <input
@@ -368,12 +552,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 maxLength={30}
               />
             ) : (
+              <div className="flex items-center gap-1.5 min-w-0">
               <p
                 onClick={startEditLabel}
                 className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
                 title="Click to set a name"
               >
-                {displayName || "Anonymous"}
+                <bdi data-testid="chat-name">{shownName}</bdi>
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -384,95 +569,40 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="inline ml-1.5 text-text-muted opacity-0 group-hover:opacity-100"
+                    className="inline ms-1.5 text-text-muted opacity-0 group-hover:opacity-100"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
                 )}
               </p>
+              {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
+                footer={face ? `Shown with their ${face.providerName} profile · Ghostly key ${truncatedPeerKey}` : undefined} />}
+              {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
+                className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
+              </div>
             )}
-            <div 
-              className="flex items-center gap-1.5 cursor-help"
-              title={techInfo ? `Status: ${statusLabel}\nYou: ${techInfo.myPubKey}\nPeer: ${techInfo.peerPubKey}` : `Status: ${statusLabel}`}
-            >
-              <PollCountdown
-                remaining={pollCountdown.remaining}
-                total={pollCountdown.total}
-                isPolling={pollCountdown.isPolling}
-                size={14}
-              />
-              {showKeySubtitle && (
-                <span className="text-text-muted/60 text-xs font-mono truncate">
-                  {truncatedPeerKey}
-                </span>
-              )}
-            </div>
+            {/* The contact's key, or "typing…" while they write (presence, not connection). Everything about the
+                connection, pairing included, is the icon beside the calls. */}
+            <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={truncatedPeerKey} />
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {/* Audio call button */}
-          <button
-            onClick={() => webrtc.startCall(false)}
-            disabled={webrtc.callState !== "idle"}
-            className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Audio call"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-            </svg>
-          </button>
-          {/* Screen share: a video call whose picture is the screen. Phones cannot capture theirs. */}
-          {typeof navigator.mediaDevices?.getDisplayMedia === "function" && (
-            <button
-              onClick={() => webrtc.startCall(true, "screen")}
-              disabled={webrtc.callState !== "idle"}
-              className="max-md:hidden p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Share your screen"
-              data-testid="call-screen"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="4" width="20" height="13" rx="2" />
-                <path d="M8 21h8M12 17v4M12 13V8m0 0l-2.5 2.5M12 8l2.5 2.5" />
-              </svg>
-            </button>
-          )}
-          {/* Video call button */}
-          <button
-            onClick={() => webrtc.startCall(true)}
-            disabled={webrtc.callState !== "idle"}
-            className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Video call"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M23 7l-7 5 7 5V7z" />
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </svg>
-          </button>
+          {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
+          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
+            pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
+              ? () => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" }) : undefined } : undefined} />
+          <CallButtons blocked={canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
+            onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
               className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
-              title="Options"
+              title={t("chat.options")}
+              aria-haspopup="true"
+              aria-expanded={menuOpen}
+              data-testid="chat-options"
             >
               <svg
                 width="18"
@@ -489,123 +619,93 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 <circle cx="12" cy="19" r="1" />
               </svg>
             </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-surface-alt border border-border rounded-lg shadow-lg py-1 min-w-[160px] z-50 animate-fade-in">
-                {inviteCode && (
-                  <button
-                    onClick={() => {
-                      handleCopyCode(inviteCode);
-                      setMenuOpen(false);
-                    }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
-                  >
-                    {codeCopied ? (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                      </svg>
-                    )}
-                    {codeCopied ? "Copied!" : "Copy invite code"}
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    forceRefresh();
-                    setMenuOpen(false);
-                  }}
-                  className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="23 4 23 10 17 10" />
-                    <polyline points="1 20 1 14 7 14" />
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
-                    <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
-                  </svg>
-                  Refresh
-                </button>
-                <button
-                  onClick={() => {
-                    setShowTechInfo(true);
-                    setMenuOpen(false);
-                  }}
-                  className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 16v-4" />
-                    <path d="M12 8h.01" />
-                  </svg>
-                  Tech Info
-                </button>
-                <div className="border-t border-border my-1" />
-                {confirmDelete ? (
-                  <div className="px-3 py-2 flex items-center gap-2">
-                    <span className="text-danger text-xs">Delete?</span>
-                    <button
-                      onClick={() => {
-                        handleDelete();
-                        setMenuOpen(false);
-                      }}
-                      className="px-2 py-0.5 bg-danger/20 text-danger border border-danger/30 rounded text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      onClick={() => setConfirmDelete(false)}
-                      className="px-2 py-0.5 bg-surface-hover text-text-muted border border-border rounded text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
-                    >
-                      No
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={handleDelete}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover flex items-center gap-2 transition-colors"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 6h18" />
-                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                    </svg>
-                    Delete chat
-                  </button>
-                )}
-              </div>
-            )}
+            <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
+              <MenuItem onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
+                {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
+              </MenuItem>
+              <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
+              <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
+              {/* Until the contact's session is ready, not just while the card is up: the card goes as soon as the
+                  contact arrives, and this stays the way to copy the invite again until the chat is live. */}
+              {inviteCode && !pairedReady && (
+                <MenuItem testId="chat-copy-invite" onClick={() => { handleCopyCode(inviteShareText(inviteCode)); closeMenu(); }}
+                  icon={codeCopied
+                    ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent"><polyline points="20 6 9 17 4 12" /></svg>
+                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>}>
+                  {codeCopied ? t("common.copied") : t("sidebar.copyInvite")}
+                </MenuItem>
+              )}
+              {paired && platform?.getPeer(params.peerPubKeyB64) && (
+                <MenuItem testId="chat-hold-open" onClick={() => { setShowHold(true); closeMenu(); }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>}>
+                  {t("chat.menu.hold")}
+                </MenuItem>
+              )}
+              {compat && (
+                <MenuItem testId="chat-continue-new" onClick={() => {
+                  closeMenu();
+                  void continueInNewChat(sessionId).then(next => {
+                    if (next) void sendMessage(next.message).finally(() => nav.conversation(chatPath(next.sessionId)));
+                  });
+                }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5" /><path d="M16 19h6m-3-3 3 3-3 3" /></svg>}>
+                  {t("chat.menu.continueNew")}
+                </MenuItem>
+              )}
+              <MenuItem onClick={() => { forceRefresh(); closeMenu(); }}
+                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>}>
+                {t("chat.menu.refresh")}
+              </MenuItem>
+              <MenuItem onClick={() => { setShowTechInfo(true); closeMenu(); }}
+                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>}>
+                {t("chat.menu.techInfo")}
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem danger onClick={() => { setConfirmDelete(true); closeMenu(); }}
+                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
+                {t("sidebar.deleteChat")}
+              </MenuItem>
+            </Menu>
+            <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
           </div>
         </div>
       </div>
 
-      <PeerServices peerPubKey={params.peerPubKeyB64} />
+      <ChatSearchBar search={search} />
+      <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} />
+
+      <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
+
+      {compat && session?.continuedIn && (
+        <div data-testid="compat-continued" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
+          <span>{t("chat.compat.continued")}</span>
+          <button type="button" className="underline text-accent cursor-pointer" onClick={() => nav.conversation(chatPath(session.continuedIn!))}>{t("chat.compat.open")}</button>
+        </div>
+      )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto chat-wallpaper">
-        <div className="max-w-3xl mx-auto py-3">
-          {inviteCode && messages.length === 0 && (
-            <div className="flex items-center justify-center min-h-[120px]">
-              <div className="bg-surface-alt/90 rounded-xl px-5 py-4 text-center max-w-sm space-y-3">
-                <p className="text-text-secondary text-xs">
-                  Share this invite code with your contact to start chatting:
-                </p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-input-bg rounded-lg px-3 py-2 text-[10px] text-text-muted font-mono truncate text-left select-all">
-                    {inviteCode}
-                  </code>
-                  <button
-                    onClick={() => handleCopyCode(inviteCode)}
-                    className="px-3 py-2 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
-                  >
-                    {codeCopied ? "Copied!" : "Copy"}
-                  </button>
-                </div>
-              </div>
-            </div>
+      <div className="relative flex-1 min-h-0 flex flex-col">
+      <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
+        {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
+        <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
+          {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
+            <p data-testid="chat-created" className="mb-3 px-4 text-center text-[11px] text-text-muted">
+              <time dateTime={new Date(session.createdAt).toISOString()}>
+                {t("common.chatCreated", {date: new Intl.DateTimeFormat(language, {dateStyle:"medium", timeStyle:"short"}).format(session.createdAt)})}
+              </time>
+            </p>
           )}
-          {!inviteCode && messages.length === 0 && (
+          {/* The scene and the invite it waits on: side by side where the column has room for both. */}
+          <div className="pairing-invite"><div className="pairing-invite-row">
+          {pairing.scene && pairing.progress && (
+            <PairingScene id={pairingSceneId} progress={pairing.progress} contact={shownName}
+              retry={() => void pairing.retry()} retrying={pairing.retrying} retryError={pairing.retryError} />
+          )}
+          {inviteCode && (
+            <InviteCard code={inviteCode} shown={!pairedReady && !invitePast && messages.length === 0} />
+          )}
+          </div></div>
+          {!inviteCode && !pairing.show && messages.length === 0 && (
             <div className="flex items-center justify-center min-h-[200px]">
               <div className="bg-surface-alt/90 rounded-lg px-4 py-2 text-center">
                 <p className="text-text-muted text-xs">
@@ -614,43 +714,111 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </div>
             </div>
           )}
-          {messages.map((msg) => (
+          {timeline.slice(firstRow).map((row) => row.kind === "transport"
+            ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
+            : row.kind === "identity"
+            ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
+              onOpen={e => {
+                // Theirs: the contact's panel on that card. Mine: the composer's picker on it, where mine are shared.
+                if (e.side === "mine") { setShowIdentities(false); setMyIdentity({ id: e.proof, at: Date.now() }); return; }
+                setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true);
+              }} />
+            : (
             <MessageBubble
-              key={msg.id}
-              message={msg}
+              key={row.message.id}
+              message={row.message}
               peerAck={peerAck}
               peerPubKey={params.peerPubKeyB64}
-              onDelete={() => forgetMessage(msg.id)}
+              peerNick={contactNick}
+              onDelete={() => forgetMessage(row.message.id)}
+              // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
+              onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
+              onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}
+              quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
+              // The same: a compatibility chat has no room for a reaction.
+              onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
+              onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
+              pinned={!!pin && replyTarget(row.message) === pin.id}
+              reactionName={reactionName}
+              highlight={search.highlight(row.message.id)}
+              {...forwarding.rowProps(row.message)}
             />
           ))}
-          <div ref={bottomRef} />
         </div>
       </div>
+      <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
+      </div>
 
-      {/* Input */}
-      <MessageInput
+      {chatPeer?.hold && (chatPeer.hold.outstanding > 0 || chatPeer.hold.error) && (
+        <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border truncate" role="status">
+          {chatPeer.hold.outstanding > 0 && `${chatPeer.hold.outstanding} ${chatPeer.hold.outstanding === 1 ? "item" : "items"} held for ${shownName} · ${(chatPeer.hold.bytes / 1024 / 1024).toFixed(1)} MB of ${Math.round(chatPeer.hold.maxBytes / 1024 / 1024)} MB`}
+          {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
+          {chatPeer.hold.error && <span className="text-danger">{chatPeer.hold.error}</span>}
+        </div>
+      )}
+
+      {/* Input; while messages are chosen, what to do with them. */}
+      {forwarding.bar}
+      {forwarding.dialog}
+      <div className={forwarding.selecting ? "hidden" : "contents"}>
+      <MessageInput draftId={sessionId}
         key={sessionId}
-        onSend={sendMessage}
-        disabled={isSending}
+        // Said to the contact on the live session only; stops when the text goes, the chat is left or the page is hidden.
+        onTyping={paired ? onTyping : undefined}
+        // A paired chat has no mentions; a link preview made in the composer goes with the text, and so does a reply.
+        onSend={async (text, _mentions, extra) => {
+          const answering = replyingRef.current;
+          const error = await sendMessage(text, answering ? { ...extra, replyTo: answering.id } : extra);
+          if (!error && answering) replied(answering);
+          return error;
+        }}
+        reply={replyBar}
+        // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
+        edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
+          onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
+            .catch((e: unknown) => ({ error: e instanceof Error ? e.message : "Could not edit the message" }))).error } : undefined}
+        onEditLast={paired && chatLink ? () => {
+          const last = [...messages].reverse().find(editableText);
+          if (last) { setReplyingTo(null); setEditing(last); }
+        } : undefined}
+        // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
+        disabled={isSending || (paired && (!!chatStop || engine.state?.settings.online === false))}
+        disabledPlaceholder="Message…"
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
-        maxLength={platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
+        softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
+        maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         onSendFile={platform ? sendFile : undefined}
+        fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? "Update both peers to send files" : undefined) : undefined}
+        // The + → Payment row still opens on these: its Accept side is where this chat's ways of paying are chosen.
+        paymentsUnavailable={!paymentsOn ? "Off in this chat: turn a way on in Accept" : chatStop ? chatStop : paired && chatLive && !chatPeer?.capabilities?.payments ? (chatPeer?.capabilities?.networks && !Object.keys(chatPeer.capabilities.networks).length ? "Your contact has no wallet yet" : "Your contact has payments off in this chat, or needs an updated Ghostly") : undefined}
         payments={
-          walletState && walletState.mints.length > 0
-            ? { balance: walletState.balance, onSend: paySend, onRequest: payRequest }
+          walletState && wallet && peerKey
+            ? { balance: walletState.balance, contact: isAnonymous ? undefined : shownName, onSend: paySend, onRequest: payRequest,
+              // Paying needs live: a bearer token never waits in a queue or a hold. A request can wait.
+              sendUnavailable: paired && !chatLive ? "Payments need a live connection" : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined,
+              // Which ways this chat accepts: chosen on the composer's Accept side, for this chat only.
+              onSaveMethods: chatPeer && platform ? ({ methods, networks }) => platform.setChatPaymentMethods(peerKey, methods, networks) : undefined }
             : undefined
         }
+        identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName, open: myIdentity } : undefined}
+        // Made on this device and sent with the text; the contact's app never contacts the site (WISP 401).
+        linkPreviews={paired && settings.linkPreviews}
+        // The apps this contact and you share, chosen per chat: always reachable here, even before anything is shared.
+        services={composerServices(t, platform, params.peerPubKeyB64, shownName, () => setShowServices(true))}
       />
+      </div>
 
       {/* Incoming call notification */}
-      {webrtc.callState === "incoming" && (
+      {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}
+      {webrtc.callState === "incoming" && createPortal(
         <IncomingCallNotification
-          peerName={displayName || "Anonymous"}
+          peerName={shownName}
           hasVideo={incomingHasVideo}
-          onAcceptAudio={() => webrtc.acceptCall(false)}
-          onAcceptVideo={() => webrtc.acceptCall(true)}
+          onAcceptAudio={() => { webrtc.acceptCall(false); if (!visible) nav.conversation(chatPath(sessionId)); }}
+          onAcceptVideo={() => { webrtc.acceptCall(true); if (!visible) nav.conversation(chatPath(sessionId)); }}
           onReject={webrtc.rejectCall}
-        />
+        />,
+        callLayer ?? document.body,
       )}
 
       {/* Active call overlay */}
@@ -661,7 +829,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         <CallOverlay
           layer={callLayer}
           pinned={!visible}
-          onReturnToChat={() => navigate(chatPath(sessionId))}
+          onReturnToChat={() => nav.conversation(chatPath(sessionId))}
           callState={webrtc.callState}
           localStream={webrtc.localStream}
           remoteStream={webrtc.remoteStream}
@@ -670,21 +838,33 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           isScreenSharing={webrtc.isScreenSharing}
           canSendVideo={webrtc.canSendVideo}
           canShareScreen={webrtc.canShareScreen}
+          screenShareUnavailable={webrtc.screenShareUnavailable}
+          screenShareError={webrtc.screenShareError}
           remoteHasVideo={webrtc.remoteHasVideo}
+          remoteIsScreenSharing={webrtc.remoteIsScreenSharing}
           callStartedAt={webrtc.callStartedAt}
-          peerName={displayName || "Anonymous"}
+          peerName={shownName}
           onHangUp={() => webrtc.hangUp()}
           onToggleMute={webrtc.toggleMute}
           onToggleVideo={webrtc.toggleVideo}
           onToggleScreenShare={webrtc.toggleScreenShare}
+          devices={callDevices}
         />
       )}
 
+      {showServices && params && (
+        <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowServices(false)} />
+      )}
+      {showHold && chatPeer && params && platform && (
+        <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
+          onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
+      )}
+      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
       {/* Tech Info Modal */}
       {showTechInfo && techInfo && (
         <div 
           className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in"
-          onClick={() => setShowTechInfo(false)}
+          {...techBackdrop}
         >
           <div 
             className="bg-surface-alt rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in"
@@ -738,6 +918,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         </div>
       )}
     </div>
+    {showIdentities && params && (
+      <ContactIdentitiesPanel key={identityCard ? `${identityCard.side}:${identityCard.id}` : "panel"} peerKey={params.peerPubKeyB64} name={shownName}
+        card={identityCard} onClose={() => setShowIdentities(false)} />
+    )}
+    </div>
+    </CueChat.Provider>
   );
 }
 
@@ -767,13 +953,13 @@ function TechInfoRow({ label, value, mono, copyable }: { label: string; value: s
       {copyable ? (
         <button
           onClick={handleCopy}
-          className={`text-right break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
+          className={`text-end break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
           title="Click to copy"
         >
           {copied ? "Copied!" : value}
         </button>
       ) : (
-        <span className={`text-text-secondary text-right break-all ${mono ? "font-mono" : ""}`}>
+        <span className={`text-text-secondary text-end break-all ${mono ? "font-mono" : ""}`}>
           {value}
         </span>
       )}

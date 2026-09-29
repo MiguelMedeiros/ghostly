@@ -1,0 +1,71 @@
+name: E2E (compatibility)
+
+# The current web app against a real v0.4.0 (e2e/compat/, WISP 402): a v0.4 invite opens a compatibility chat
+# that works both ways and continues in a new chat, and v0.4 refuses a ghostly1 invite. v0.4.0 is built from its
+# tag by scripts/build-compat-web.mjs (the release attaches no web build) and cached, so a run spends its time on
+# the current app's build and two short tests: about 4 minutes.
+# Not on pull requests, like every other app e2e (they run before a release and nightly), and v0.4.0 never
+# changes: what can break it is dev, so it runs nightly on dev, in the E2E workflow (the release gate), and by hand.
+on:
+  schedule:
+    - cron: "53 3 * * *"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "What to test: the tag being released"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    name: Compatibility with v0.4.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A scheduled run tests dev, the default branch; a manual one, the branch it was started on.
+          ref: ${{ inputs.ref || (github.event_name == 'schedule' && 'dev') || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # The built v0.4.0 only: a tag's build never changes, so the key is the tag and the script that builds it.
+      - name: Cache the v0.4.0 build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ghostly/compat
+          key: compat-web-v0.4.0-${{ hashFiles('scripts/build-compat-web.mjs') }}
+
+      # The checkout has no tags; the script fetches v0.4.0 alone when it has to build.
+      - name: Build v0.4.0's web app
+        run: node scripts/build-compat-web.mjs --tag v0.4.0
+
+      - name: The current app with v0.4.0
+        run: npm run test:e2e:compat
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-compat
+          path: |
+            playwright-report-compat
+            test-results/compat
+          retention-days: 14

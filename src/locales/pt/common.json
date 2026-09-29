@@ -1,0 +1,20 @@
+{
+  "anonymous": "Anônimo",
+  "back": "Voltar",
+  "cancel": "Cancelar",
+  "chatCreated": "Conversa criada em {{date}}",
+  "close": "Fechar",
+  "confirm": "Confirmar",
+  "copied": "Copiado!",
+  "copy": "Copiar",
+  "delete": "Excluir",
+  "deleteChatLocal": "Isso exclui a conversa e o histórico deste dispositivo. A cópia do seu contato não é excluída.",
+  "deleteChatTitle": "Excluir conversa?",
+  "error": "Erro",
+  "loading": "Carregando...",
+  "moreInfo": "Mais informações",
+  "save": "Salvar",
+  "success": "Sucesso",
+  "unnamedContact": "Contato · {{key}}",
+  "viewPhoto": "Ver foto de {{name}}"
+}

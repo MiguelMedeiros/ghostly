@@ -1,33 +1,15 @@
 import {
   createContext,
   useContext,
+  useLayoutEffect,
   useMemo,
   type ReactNode,
 } from "react";
 import { useSettings } from "./SettingsContext";
 import type { Language } from "../lib/settings";
+import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
 
-import en from "../locales/en.json";
-import pt from "../locales/pt.json";
-import es from "../locales/es.json";
-import fr from "../locales/fr.json";
-import it from "../locales/it.json";
-import zh from "../locales/zh.json";
-import ja from "../locales/ja.json";
-import ar from "../locales/ar.json";
-
-type TranslationDict = typeof en;
-
-const translations: Record<Language, TranslationDict> = {
-  en,
-  pt,
-  es,
-  fr,
-  it,
-  zh,
-  ja,
-  ar,
-};
+import { locales as translations, type TranslationDict } from "../locales";
 
 type NestedKeyOf<T, K extends string = ""> = T extends object
   ? {
@@ -40,8 +22,11 @@ type NestedKeyOf<T, K extends string = ""> = T extends object
 
 type TranslationKey = NestedKeyOf<TranslationDict>;
 
+/** `t()` as a value: for content worked out outside a component (identities/idCard.ts). */
+export type Translate = (key: TranslationKey, params?: Record<string, string | number>) => string;
+
 interface I18nContextValue {
-  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+  t: Translate;
   language: Language;
   dir: "ltr" | "rtl";
 }
@@ -65,7 +50,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const { settings } = useSettings();
   const language = settings.language;
 
-  const dir = language === "ar" ? "rtl" : "ltr";
+  const dir = textDirection(language);
+
+  // A layout effect: the new language and direction are on <html> before the screen repaints in them.
+  useLayoutEffect(() => {
+    applyDocumentLanguage(language);
+  }, [language]);
 
   const t = useMemo(() => {
     const currentTranslations = translations[language] || translations.en;
@@ -88,6 +78,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       {children}
     </I18nContext.Provider>
   );
+}
+
+/** The translator where there may be no provider (layout primitives rendered on their own): null there. */
+export function useOptionalI18n(): I18nContextValue | null {
+  return useContext(I18nContext);
 }
 
 export function useI18n(): I18nContextValue {

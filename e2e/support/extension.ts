@@ -2,7 +2,7 @@ import { chromium } from "@playwright/test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, openPeer, type Peer } from "./fixtures";
+import { expect, guardArchive, openPeer, type Peer, type PeerOptions } from "./fixtures";
 import { test as base } from "./fixtures";
 
 const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
@@ -27,21 +27,24 @@ function prepareExtension(work: string): string {
 }
 
 type Fixtures = {
-  /** Ghostly Browser in a Chromium profile of its own. */
-  extensionPeer: (name: string) => Promise<Peer>;
+  /** Ghostly Browser in a Chromium profile of its own; `ignoreHTTPSErrors` reaches its offscreen engine too. */
+  extensionPeer: (name: string, options?: { ignoreHTTPSErrors?: boolean; irohRelay?: string }) => Promise<Peer>;
   /** Ghostly on the web, for talking to the extension across hosts. */
-  webPeer: (name: string) => Promise<Peer>;
+  webPeer: (name: string, options?: PeerOptions) => Promise<Peer>;
 };
 
 export const test = base.extend<Fixtures>({
   extensionPeer: async ({ relay }, use) => {
     const work = mkdtempSync(join(tmpdir(), "ghostly-e2e-"));
-    const extensionDir = prepareExtension(work);
+    // Prepared on first use: a test that asks for the fixture but opens no extension needs no build of it.
+    let extensionDir: string | undefined;
     const opened: Peer[] = [];
-    await use(async (name) => {
+    await use(async (name, options = {}) => {
+      extensionDir ??= prepareExtension(work);
       const context = await chromium.launchPersistentContext(join(work, name), {
         channel: "chromium",
         headless: !process.env.HEADED,
+        ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
         viewport: { width: 1280, height: 720 },
         args: [
           `--disable-extensions-except=${extensionDir}`,
@@ -50,8 +53,11 @@ export const test = base.extend<Fixtures>({
           "--use-fake-device-for-media-stream",
           "--use-fake-ui-for-media-stream",
           "--auto-select-desktop-capture-source=Entire screen",
+          // The context option covers pages, not the extension's offscreen document, where its engine runs.
+          ...(options.ignoreHTTPSErrors ? ["--ignore-certificate-errors"] : []),
         ],
       });
+      await guardArchive(context);
       // The update check is the one request that would leave this machine. Answer
       // it with the version that is running, so a test only sees one when it says so.
       const running = JSON.parse(readFileSync(join(dist, "manifest.json"), "utf8")).version;
@@ -67,9 +73,12 @@ export const test = base.extend<Fixtures>({
       const extensionId = new URL(worker.url()).host;
       const page = await context.newPage();
       page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));
-      await page.goto(`chrome-extension://${extensionId}/app.html#/settings`);
+      await page.goto(`chrome-extension://${extensionId}/app.html#/settings/advanced`);
       // The peer lives in an offscreen document, out of reach of request interception: point it at the relay instead.
       await page.getByTestId("network-relays").fill(await relay.listen());
+      // Iroh would reach n0's public relays: a closed port on this machine keeps the suite offline (Iroh then
+      // fails to start, and the extension is WebRTC only, as its specs expect).
+      await page.getByTestId("network-iroh-relays").fill(options.irohRelay ?? "http://127.0.0.1:9/");
       await page.getByTestId("network-save").click();
       await expect(page.getByText("Saved", { exact: true })).toBeVisible();
       await page.goto(`chrome-extension://${extensionId}/app.html#/`);
@@ -87,7 +96,7 @@ export const test = base.extend<Fixtures>({
       headless: !process.env.HEADED,
       args: ["--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
     });
-    await use((name) => openPeer(browser, relay, baseURL!, name));
+    await use((name, options) => openPeer(browser, relay, baseURL!, name, options));
     await browser.close();
   },
 });

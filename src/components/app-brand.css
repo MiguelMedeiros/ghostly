@@ -1,0 +1,6 @@
+/* The logo at the top of the chat list (AppBrand.tsx); its motions are in lib/brandMotion.ts. */
+.app-brand-ghost { transform-origin: 50% 90%; }
+/* Blink and glance in the drawing's own units, around the eyes' own centre. */
+.app-brand-eyes { transform-box: fill-box; transform-origin: center; }
+/* The letters rise with top, not transform: a transform needs inline-block letters, and those lose the word's kerning. */
+.app-brand-letter { position: relative; }

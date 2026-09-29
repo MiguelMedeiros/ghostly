@@ -1,0 +1,144 @@
+{
+  "compat": {
+    "continued": "Invitaste a tu contacto a un chat nuevo.",
+    "hint": "Este chat se creó con un código de Ghostly 0.4. El texto y las llamadas siguen funcionando en ambos sentidos; un chat nuevo añade archivos, pagos y mensajes retenidos.",
+    "label": "Chat de compatibilidad · Ghostly antiguo",
+    "open": "Abrir el chat nuevo"
+  },
+  "connecting": "conectando",
+  "deleteMessage": "Eliminar mensaje",
+  "deleteMessageHint": "Se elimina solo aquí. Tu contacto conserva su copia.",
+  "delivery": {
+    "delivered": "Entregado",
+    "failed": "No enviado",
+    "hint": {
+      "delivered": "La app de tu contacto lo recibió.",
+      "failed": "No enviado. Toca para enviarlo de nuevo.",
+      "held": "Guardado para tu contacto hasta que esté en línea.",
+      "queued": "Aún sin confirmación. Se reenvía solo.",
+      "sending": "En camino.",
+      "sent": "Enviado. Aún sin confirmación.",
+      "waiting": "Se envía solo cuando tu contacto esté en línea."
+    },
+    "retry": "No enviado. Enviar de nuevo",
+    "sending": "Enviando",
+    "sent": "Enviado",
+    "waiting": "Esperando a que tu contacto esté en línea"
+  },
+  "edit": {
+    "cancel": "Cancelar edición",
+    "editing": "Editando"
+  },
+  "forward": {
+    "filesHint": "Los grupos solo aceptan texto",
+    "forward": "Reenviar",
+    "forwarded": "Reenviado",
+    "many": "Reenviado muchas veces",
+    "messages": "{{count}} mensajes",
+    "noChats": "Aún no hay chats",
+    "noMatch": "Ningún chat con ese nombre",
+    "pick": "Elige hasta {{count}}",
+    "search": "Buscar chats",
+    "select": "Seleccionar",
+    "selected": "{{count}} seleccionados",
+    "send": "Enviar",
+    "title": "Reenviar a…"
+  },
+  "jump": {
+    "bottom": "Desplazar al final",
+    "count": "{{count}} nuevos",
+    "new": "{{count}} mensajes nuevos, desplazar al final",
+    "newOne": "1 mensaje nuevo, desplazar al final"
+  },
+  "lastSeen": "Última vez {{time}}",
+  "menu": {
+    "continueNew": "Continuar en un chat nuevo",
+    "hold": "Retener mensajes…",
+    "pin": "Fijar chat",
+    "refresh": "Actualizar",
+    "techInfo": "Información técnica",
+    "unpin": "Dejar de fijar"
+  },
+  "message": {
+    "cancelSending": "Cancelar envío",
+    "copied": "Copiado",
+    "copyHint": "Clic para copiar",
+    "copyJson": "Copiar todo como JSON",
+    "details": "Detalles",
+    "detailsClose": "Cerrar",
+    "detailsTitle": "Detalles del mensaje",
+    "download": "Descargar",
+    "downloadArriving": "Aún no recibido",
+    "downloadConverting": "Convirtiendo…",
+    "downloadFailed": "No llegó",
+    "downloadMissing": "No está en este dispositivo",
+    "downloadMp3": "Descargar como MP3",
+    "downloadPreparing": "Aún en preparación",
+    "downloadUnconverted": "No se pudo convertir",
+    "edit": "Editar",
+    "editPending": "Tu contacto aún no lo ve",
+    "editPendingGroup": "Aún no se envió al grupo",
+    "edited": "editado",
+    "editedAt": "Editado {{time}}",
+    "keysHint": "Las claves nunca se muestran aquí.",
+    "options": "Opciones del mensaje",
+    "reply": "Responder",
+    "retry": "Enviar de nuevo"
+  },
+  "offline": "desconectado",
+  "online": "en línea",
+  "options": "Opciones",
+  "pinned": {
+    "bar": "Mensaje fijado",
+    "info": "Un mensaje fijado por chat, visible para todos en él. Uno nuevo reemplaza al anterior. En una comunidad, solo el admin fija.",
+    "notHere": "No está en este dispositivo",
+    "pin": "Fijar",
+    "unpin": "Desfijar"
+  },
+  "reactions": {
+    "chipLabel": "{{emoji}}: {{names}}",
+    "more": "Más emojis",
+    "note": "{{name}} reaccionó con {{emoji}} a \"{{snippet}}\"",
+    "noteMine": "Reaccionaste con {{emoji}} a \"{{snippet}}\"",
+    "notice": "Alguien reaccionó a tu mensaje",
+    "react": "Reaccionar"
+  },
+  "reply": {
+    "cancel": "Cancelar respuesta",
+    "deleted": "Mensaje original eliminado",
+    "jump": "Ir al mensaje original",
+    "notHere": "El original no está en este chat",
+    "replyingTo": "Respondiendo a {{name}}",
+    "unavailable": "Mensaje original no disponible",
+    "unverified": "No encontrado en este chat",
+    "you": "Tú"
+  },
+  "rich": {
+    "code": "Código",
+    "copied": "Copiado",
+    "copy": "Copiar",
+    "copyCode": "Copiar código",
+    "localTime": "{{time}} en tu hora",
+    "showAll": "Mostrar todo",
+    "showLess": "Mostrar menos",
+    "spoiler": "Texto oculto. Toca para mostrarlo",
+    "unshowable": "No se pudo mostrar este mensaje."
+  },
+  "search": {
+    "close": "Cerrar búsqueda",
+    "count": "{{current}} de {{total}}",
+    "info": "Busca en los mensajes y nombres de archivo guardados en este dispositivo. Nada sale de él.",
+    "newer": "Resultado más reciente (Shift+Enter)",
+    "none": "Sin resultados",
+    "older": "Resultado más antiguo (Enter)",
+    "open": "Buscar",
+    "placeholder": "Buscar en este chat"
+  },
+  "send": "Enviar",
+  "today": "Hoy",
+  "typeMessage": "Escribe un mensaje...",
+  "typing": "escribiendo…",
+  "typingRecording": "grabando audio…",
+  "typingThinking": "pensando…",
+  "yesterday": "Ayer"
+}

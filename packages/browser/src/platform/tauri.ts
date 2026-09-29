@@ -8,3 +8,8 @@ export function invoke(): Promise<never> {
 export async function getVersion(): Promise<string> {
   return getBrowserHost().version;
 }
+
+/** `@tauri-apps/api/event`: no event ever arrives. */
+export async function listen(): Promise<() => void> {
+  return () => {};
+}

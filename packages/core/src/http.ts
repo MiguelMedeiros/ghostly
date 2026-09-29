@@ -179,6 +179,29 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
 }
 
 /**
+ * A contact's response headers as a viewer serves them to the page (the extension's viewer tab, Desktop's viewer
+ * window). The contact's app decides them, and the wire checks only that they are strings, so a header whose name
+ * is not a token or whose value carries CR, LF or NUL is dropped: it could otherwise add headers of its own. Each
+ * `Set-Cookie` stays on the exact origin it came from (no `Domain=`), and one holding several cookies on separate
+ * lines becomes one header per cookie.
+ */
+export function viewerResponseHeaders(headers: HeaderList): HeaderList {
+  const out: HeaderList = [];
+  for (const [name, value] of headers) {
+    if (typeof name !== "string" || typeof value !== "string" || !HEADER_NAME.test(name)) continue;
+    if (name.toLowerCase() === "set-cookie") {
+      for (const cookie of value.split(/\r?\n/)) {
+        const scoped = cookie.replace(/;\s*domain\s*=[^;]*/gi, "");
+        if (scoped.trim() && isCleanHeaderValue(scoped)) out.push([name, scoped]);
+      }
+    } else if (isCleanHeaderValue(value)) {
+      out.push([name, value]);
+    }
+  }
+  return out;
+}
+
+/**
  * Turns `http://localhost:3400/base/x` into `/x` so the client never learns or
  * follows the local address. Null when the location is not on the target origin
  * and under its base path.
@@ -421,6 +444,8 @@ export class HttpHost {
     } catch (error) {
       clearTimeout(timeout);
       if (!this.isCurrent(stream)) return;
+      // Read before end(), which aborts the signal itself.
+      const timedOut = stream.abort.signal.aborted;
       this.end(stream);
       if (headersSent) {
         try {
@@ -428,7 +453,7 @@ export class HttpHost {
         } catch {
           // channel already closed
         }
-      } else if (stream.abort.signal.aborted && (error as Error)?.name === "AbortError") {
+      } else if (timedOut && (error as Error)?.name === "AbortError") {
         this.fail(frame.id, 504, "timeout", "The local service did not answer in time.");
       } else {
         this.fail(frame.id, 502, "unreachable", "The local service is not reachable.");
@@ -597,6 +622,11 @@ export class HttpClient {
         LIMITS.requestTimeoutMs + 5_000,
       );
       request.signal?.addEventListener("abort", () => this.abort(id, new GhostlyHttpError("aborted", "Request aborted")));
+      // Aborted before this point (while it waited for a slot, or before the call): the listener never fires.
+      if (request.signal?.aborted) {
+        this.abort(id, new GhostlyHttpError("aborted", "Request aborted"), false);
+        return;
+      }
 
       try {
         this.channel.send(

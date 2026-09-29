@@ -1,0 +1,1 @@
+Agent turns: `listen --from` and `--group` as an allowlist per listener, and `listen --turns` giving one `agent.turn` event per message received or per group mention, with what the sender controls under `untrusted` (#431).

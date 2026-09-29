@@ -6,6 +6,8 @@ import { publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 export const MAX_DNS_PACKET_BYTES = 1000;
 const SIGNATURE_LENGTH = 64;
 const TIMESTAMP_LENGTH = 8;
+/** The largest relay payload: a 64-byte signature, an 8-byte timestamp and the largest DNS packet (1072 bytes). */
+export const RELAY_PAYLOAD_MAX_BYTES = SIGNATURE_LENGTH + TIMESTAMP_LENGTH + MAX_DNS_PACKET_BYTES;
 
 /** A label relative to the publisher's key, e.g. `_msgs`. */
 export interface GhostRecord {
@@ -55,17 +57,24 @@ export function createRelayPayload(
   records: GhostRecord[],
   timestampMicros: bigint = BigInt(Date.now()) * 1000n,
 ): Uint8Array {
-  const dnsPacket = encodeTxtPacket(toTxtRecords(identity.pubKeyZ32, records));
+  return signRelayPayload(identity, encodeTxtPacket(toTxtRecords(identity.pubKeyZ32, records)), timestampMicros);
+}
+
+/**
+ * Signs a DNS packet exactly as given (its own names and flags) into a relay payload. `seq` is the
+ * BEP44 sequence number: Ghostly's records use microseconds, a did:dht document seconds.
+ */
+export function signRelayPayload(identity: Identity, dnsPacket: Uint8Array, seq: bigint): Uint8Array {
   if (dnsPacket.length > MAX_DNS_PACKET_BYTES) throw new PacketTooLargeError(dnsPacket.length);
 
-  const signature = sign(signable(timestampMicros, dnsPacket), identity.seed);
+  const signature = sign(signable(seq, dnsPacket), identity.seed);
   const timestamp = new Uint8Array(TIMESTAMP_LENGTH);
-  new DataView(timestamp.buffer).setBigUint64(0, timestampMicros);
+  new DataView(timestamp.buffer).setBigUint64(0, seq);
   return concatBytes(signature, timestamp, dnsPacket);
 }
 
-/** Verifies and decodes a relay payload. Throws if the signature does not match. */
-export function parseRelayPayload(pubKeyZ32: string, payload: Uint8Array): SignedPacket {
+/** Checks a relay payload's size and signature. Returns its sequence number and DNS packet, not decoded. */
+export function openRelayPayload(pubKeyZ32: string, payload: Uint8Array): { seq: bigint; dnsPacket: Uint8Array } {
   if (payload.length < SIGNATURE_LENGTH + TIMESTAMP_LENGTH + 12) {
     throw new Error("Relay payload too short");
   }
@@ -74,17 +83,22 @@ export function parseRelayPayload(pubKeyZ32: string, payload: Uint8Array): Signe
   }
   const publicKey = publicKeyFromZ32(pubKeyZ32);
   const signature = payload.subarray(0, SIGNATURE_LENGTH);
-  const timestampMicros = new DataView(
+  const seq = new DataView(
     payload.buffer,
     payload.byteOffset + SIGNATURE_LENGTH,
     TIMESTAMP_LENGTH,
   ).getBigUint64(0);
   const dnsPacket = payload.subarray(SIGNATURE_LENGTH + TIMESTAMP_LENGTH);
 
-  if (!verify(signature, signable(timestampMicros, dnsPacket), publicKey)) {
+  if (!verify(signature, signable(seq, dnsPacket), publicKey)) {
     throw new Error("Invalid signature");
   }
+  return { seq, dnsPacket };
+}
 
+/** Verifies and decodes a relay payload. Throws if the signature does not match. */
+export function parseRelayPayload(pubKeyZ32: string, payload: Uint8Array): SignedPacket {
+  const { seq: timestampMicros, dnsPacket } = openRelayPayload(pubKeyZ32, payload);
   const suffix = `.${pubKeyZ32}`;
   const records = decodeTxtPacket(dnsPacket).map((r) => ({
     label: r.name.endsWith(suffix) ? r.name.slice(0, -suffix.length) : r.name,
@@ -92,4 +106,21 @@ export function parseRelayPayload(pubKeyZ32: string, payload: Uint8Array): Signe
     ttl: r.ttl,
   }));
   return { pubKeyZ32, timestampMicros, records };
+}
+
+/** How far ahead of this clock a packet's time may be and still count as now: clocks drift, not by this much. */
+export const PKARR_FUTURE_SKEW_MS = 10 * 60_000;
+
+/**
+ * The newer of two signed packets of one key. A packet dated further ahead than `PKARR_FUTURE_SKEW_MS` never wins over
+ * one dated now or before: whoever could sign it once (a key several people hold, a clock far off) must not keep every
+ * later packet from being taken. Between two of the same kind, the later time wins; on a tie, `known` stays.
+ */
+export function newerPacket(known: SignedPacket | null | undefined, packet: SignedPacket | null | undefined, now = Date.now()): SignedPacket | null {
+  if (!known) return packet ?? null;
+  if (!packet) return known;
+  const limit = BigInt(now + PKARR_FUTURE_SKEW_MS) * 1000n;
+  const knownAhead = known.timestampMicros > limit, packetAhead = packet.timestampMicros > limit;
+  if (knownAhead !== packetAhead) return knownAhead ? packet : known;
+  return packet.timestampMicros > known.timestampMicros ? packet : known;
 }
