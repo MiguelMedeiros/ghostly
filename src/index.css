@@ -608,6 +608,14 @@ body {
   will-change: transform;
 }
 
+/*
+ * The list's size comes from the chat's column (it is a flex item that scrolls), never from its rows. Said so, a
+ * keystroke that lays the composer out again no longer makes Chromium paint every row of a long chat once more.
+ */
+[data-message-list] {
+  contain: size;
+}
+
 /* Inline timestamp float (WhatsApp-style) */
 .msg-meta {
   user-select: none;
