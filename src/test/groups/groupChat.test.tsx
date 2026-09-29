@@ -293,6 +293,14 @@ describe("GroupChat: history and sending", () => {
     expect(screen.getAllByText(/^~/)).toHaveLength(2);
   });
 
+  it("names an author no longer in the roster by the name the group knew them by", async () => {
+    // Removed, then invited again: a new member key, so their earlier messages' key is not in the roster.
+    const gone = "gone".padEnd(52, "y");
+    openGroup(active({ formerNames: { [gone]: "Carol" } }), [stored({ id: "m1", member: gone, text: "before I left" })]);
+    expect(await screen.findByText("~Carol")).toBeInTheDocument();
+    expect(screen.queryByText("~Member goneyyyy")).not.toBeInTheDocument();
+  });
+
   it("keeps what was stored for an event about someone no longer there", async () => {
     openGroup(active(), [stored({ id: "e1", event: "removed", member: "gone".padEnd(52, "y"), text: "Carol was removed" })]);
     expect(await screen.findByText("Carol was removed")).toBeInTheDocument();
