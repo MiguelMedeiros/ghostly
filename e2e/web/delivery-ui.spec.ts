@@ -109,7 +109,7 @@ test("header connection popover, five desktop destinations and resizing preserve
     await a.page.screenshot({path:testInfo.outputPath(`sidebar-${width}.png`)});
   }
   await openProfilePage(a.page); await expect(a.page.getByTestId("account-nickname")).toBeVisible();
-  await a.page.getByTestId("wallet-chip").click(); await expect(a.page.getByTestId("platform-notice")).toBeVisible();
+  await a.page.getByTestId("wallet-chip").click(); await expect(a.page.getByTestId("wallet")).toBeVisible();
   await a.page.getByTestId("account-services").click(); await expect(a.page.getByText("needs the Ghostly browser extension or desktop app").first()).toBeVisible();
   await a.page.getByTestId("account-settings").click(); await expect(a.page).toHaveURL(/settings/);
 });

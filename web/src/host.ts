@@ -47,7 +47,6 @@ function testReactions(): Pick<NodeOptions, "reactions"> {
  */
 export const webHost = createInPageHost({
   version: __APP_VERSION__,
-  notice: "Beta. Keys and wallet data live in this browser. Pocket money only.",
   features: { shareLocalServices: false, openServices: false, profiles: true },
   // Iroh through a relay (WISP 102): where WebRTC cannot connect, before the chat drops to the DHT.
   node: { ...testPace(), ...testReactions(), irohWeb: testIroh() },
