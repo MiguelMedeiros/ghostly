@@ -172,6 +172,10 @@
   },
   "readNote": "Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go directly to each member; whoever was away gets what they missed from any member who has it (the group's last {{count}} messages) when they meet again.",
   "readNoteCommunity": "Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last {{count}} messages from whoever is there when they return.",
+  "remove": {
+    "body": "They won't get the group's new messages.",
+    "title": "Remove {{name}}?"
+  },
   "rename": {
     "action": "Rename",
     "cancel": "Cancel",
