@@ -45,3 +45,29 @@ test("on an iPhone: a dialog and a sheet stand above the keyboard, and back wher
   await keyboard(page, 0);
   await expect.poll(async () => { const box = (await sheet.boundingBox())!; return Math.round(box.y + box.height); }).toBe(PHONE.height);
 });
+
+for (const phone of [{ width: 402, height: 874, keyboard: 336 }, { width: 375, height: 667, keyboard: 260 }]) {
+  test(`on an iPhone ${phone.width}×${phone.height}: the lock screen's password and Unlock stand above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:settings.lock.startup"] }, async ({ peer }) => {
+    // Centred in the whole screen, the field and Unlock sat under the keyboard (an iPhone 17's Unlock 4px into it, a
+    // small iPhone's field too). At start the app that keeps the visible height is not there until it is unlocked.
+    const { page } = await peer("lock-phone", { mobile: true, viewport: { width: phone.width, height: phone.height } });
+    await page.goto("/#/settings");
+    await page.getByRole("switch", { name: "Lock Screen" }).click();
+    await page.getByLabel("New password", { exact: true }).fill("phone secret");
+    await page.getByLabel("Confirm password", { exact: true }).fill("phone secret");
+    await page.getByRole("button", { name: "Set password" }).click();
+    await expect(page.getByText("Password set successfully")).toBeVisible();
+
+    await iosKeyboard(page);
+    await expect(page.getByText("Ghostly is locked")).toBeVisible();
+    const field = page.getByPlaceholder("Password");
+    await field.focus();
+    await keyboard(page, phone.keyboard);
+    await within(field, phone.height - phone.keyboard);
+    await within(page.getByRole("button", { name: "Unlock" }), phone.height - phone.keyboard);
+
+    await field.fill("phone secret");
+    await page.getByRole("button", { name: "Unlock" }).click();
+    await expect(page.getByText("Ghostly is locked")).toHaveCount(0);
+  });
+}
