@@ -79,7 +79,7 @@ export function MobileTabBar() {
 
   return (
     <>
-      <nav className="shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
+      <nav className="mobile-tabs shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
         {TABS.map((tab) => {
           const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`);
           const dot = tab.path === "/identities" && identityAttention;

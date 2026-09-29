@@ -25,7 +25,9 @@ export function MediaSettings() {
   const [preview, setPreview] = useState(false);
   if (!supported) return null;
 
-  const speaker = canPickSpeaker() && list.audiooutput.length > 0;
+  // Where a speaker can be picked, its row is there from the start, "System default" until the list arrives, as the
+  // microphone's and the camera's are: a row that came with the list would push everything under it down.
+  const speaker = canPickSpeaker();
   // Where calls capture and play outside the page (Linux Desktop), the page cannot hear that microphone or play on
   // that speaker: they are tried where the calls run, when that can.
   const source = deviceSource();

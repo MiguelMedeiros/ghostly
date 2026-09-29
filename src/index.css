@@ -487,6 +487,12 @@ html[data-standalone="true"] {
     font-size: 16px !important;
   }
 
+  /* While typing (a search, a setting), the tab bar would stand on the keyboard in the middle of the screen,
+     taking a third of what it leaves: it goes behind it, as in a native app. */
+  html[data-keyboard="true"] .mobile-tabs {
+    display: none;
+  }
+
   .header-safe {
     height: calc(3.5rem + env(safe-area-inset-top));
     padding-top: env(safe-area-inset-top);
@@ -498,6 +504,15 @@ html[data-standalone="true"] {
 
   html[data-keyboard="true"] .composer-safe {
     padding-bottom: 0.625rem;
+  }
+
+  /* A sheet with the keyboard up stands on the keyboard: no home indicator under it to keep clear of. */
+  html[data-keyboard="true"] .sheet {
+    padding-bottom: 0;
+  }
+
+  html[data-keyboard="true"] .sheet-padded {
+    padding-bottom: 16px;
   }
 
   .sheet-backdrop {
