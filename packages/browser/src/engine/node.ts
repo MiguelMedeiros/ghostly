@@ -914,6 +914,7 @@ export class GhostlyNode implements EngineImplementation {
     storeMessage: message => this.storeMessage(message),
     completeMessage: message => this.completeGroupMessage(message),
     membersChanged: groupId => this.groupMembersChanged(groupId),
+    historyGone: groupId => this.groupHistoryGone(groupId),
     emit: () => this.emitState(),
     communityApp: (groupId, sender, frame) => frame.t === COMMUNITY_REACTION_FRAME ? this.receiveGroupReaction(groupId, sender, frame)
       : frame.t === COMMUNITY_EDIT_FRAME ? this.receiveCommunityEdit(groupId, sender, frame)
@@ -1691,6 +1692,18 @@ export class GhostlyNode implements EngineImplementation {
     const members = this.membership(groupId)?.members;
     if (members && holders.every(key => members.has(key))) return;
     void this.rotateWake().then(() => this.emitState());
+  }
+
+  /**
+   * A group I left or forgot: its history is gone here, and the pages' copy goes too (an empty history, sent in order
+   * with what came before). A page hears only what changes in a history it holds: a community left and joined again
+   * by its link showed its old history under the new messages until a reload (bug hunt r5b, 2026-09-29).
+   */
+  private groupHistoryGone(groupId: string): void {
+    const linkId = `group:${groupId}`;
+    this.newestAt.delete(linkId);
+    this.reactionNotes.delete(linkId);
+    this.events.onMessages(linkId, []);
   }
 
   private async setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
