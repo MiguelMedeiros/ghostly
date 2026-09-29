@@ -132,7 +132,8 @@
     "verifying": "Verifica del file… {{size}}",
     "waitingDone": "In attesa di connessione · {{done}} completato",
     "waitingSize": "In attesa di connessione · {{size}}",
-    "wantsToSend": "{{name}} vuole inviare {{file}} ({{size}})."
+    "wantsToSend": "{{name}} vuole inviare {{file}} ({{size}}).",
+    "yourContact": "il tuo contatto"
   },
   "fileTooLarge": "Questo file è troppo grande (max {{size}}).",
   "filesNeedUpdate": "Aggiorna entrambe le parti per inviare file",

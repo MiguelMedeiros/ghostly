@@ -132,7 +132,8 @@
     "verifying": "جارٍ فحص الملف… {{size}}",
     "waitingDone": "في انتظار الاتصال · اكتمل {{done}}",
     "waitingSize": "في انتظار الاتصال · {{size}}",
-    "wantsToSend": "يريد {{name}} إرسال {{file}} ({{size}})."
+    "wantsToSend": "يريد {{name}} إرسال {{file}} ({{size}}).",
+    "yourContact": "جهة اتصالك"
   },
   "fileTooLarge": "هذا الملف كبير جدًا (الحد الأقصى {{size}}).",
   "filesNeedUpdate": "حدّث الطرفين لإرسال الملفات",
