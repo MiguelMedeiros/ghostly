@@ -720,10 +720,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect((ok(await as(alice, "group", "list")).groups as unknown[]).length).toBeGreaterThanOrEqual(2);
     // A fresh process, in the two groups above: a one-shot for a chat leaves their sessions unstarted.
     // With them, their edges spent the relays' requests of the minute in seconds and the message waited for the next
-    // minute (about 65 s on CI); without, it goes out in a few seconds.
+    // minute (about 65 s on CI); without, it goes out in about 3 s. On this loopback testnet the fresh process's first
+    // HyperDHT dial to Bob can hang until UDX gives up (13 s, twice at worst) before a later dial carries it: about 15 s
+    // in 4 CI runs of 10. 40 s stays well under the minute's wait, and the timeout ends that wait sooner still.
     const started = Date.now();
-    expect(ok(await as(alice, "send", "bob", "from a one-shot", "--wait", "delivered", "--timeout", "30"))).toMatchObject({ delivery: "delivered" });
-    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(ok(await as(alice, "send", "bob", "from a one-shot", "--wait", "delivered", "--timeout", "50"))).toMatchObject({ delivery: "delivered" });
+    expect(Date.now() - started).toBeLessThan(40_000);
     const history = ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { text: string }[];
     expect(history.map((m) => m.text)).toEqual(["from a one-shot"]);
   });
