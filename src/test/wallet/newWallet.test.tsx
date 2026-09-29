@@ -66,6 +66,23 @@ describe("a profile with no wallet yet", () => {
     expect(engine.callsTo("walletCreate").slice(-1)).toEqual([{ type: "usdt", network: "mainnet" }]);
     expect(screen.queryByTestId("wallet-first-error-usdt")).not.toBeInTheDocument();
   });
+
+  it("a first setup that made nothing gives way to a wallet made with New: its card shows, not the setup", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: empty() });
+    engine.on("walletCreate", (params) => {
+      if (params.type !== "arkade") throw new Error(`Could not create the Testnet ${params.type} wallet: unreachable. Nothing was saved; try again.`);
+      engine.update({ wallet: walletView({ ark: arkReady(), offers: offers({ "arkade:testnet": { exists: true } }) }) });
+      return made("arkade", "testnet");
+    });
+    await user.click(await screen.findByTestId("wallet-first-testnet"));
+    expect(await screen.findByTestId("wallet-first-error-usdt")).toBeInTheDocument();
+    await user.click(screen.getByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-type-arkade"));
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("wallet-first")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("tablist", { name: "Testnet wallets" })).getByTestId("wallet-card-arkade-testnet")).toHaveAttribute("aria-selected", "true");
+  });
 });
 
 describe("New, in the header", () => {

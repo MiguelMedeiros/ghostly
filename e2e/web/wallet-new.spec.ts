@@ -27,6 +27,25 @@ test("a new profile has no wallet and says how to start; one choice makes Testne
   await expect(deck.locator("[role=tab]")).toHaveCount(3); // Cashu, Lightning through it, USDT
 });
 
+test("on a phone: a first setup that made nothing gives way to a wallet made with New", { tag: ["@feature:wallet.instances.create", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const alice = await peer("first-fails-phone", { mobile: true, offlineMainnet: true });
+  await useFakeProviders(alice);
+  // The test mint and Sepolia's RPC are down: the first setup makes neither.
+  for (const down of [/^https:\/\/testnut\.cashu\.space\//, /^https:\/\/ethereum-sepolia-rpc\.publicnode\.com/]) await alice.context.route(down, (route) => route.abort("connectionrefused"));
+  await alice.page.getByTestId("mobile-tabs").getByRole("button", { name: "Wallets" }).click();
+  const first = alice.page.getByTestId("wallet-first");
+  await first.getByTestId("wallet-first-testnet").click();
+  await expect(first.getByTestId("wallet-first-error-cashu")).toBeVisible({ timeout: 60_000 });
+  await expect(first.getByTestId("wallet-first-error-usdt")).toBeVisible({ timeout: 60_000 });
+  // A Lightning wallet made with New instead: its card is on the page, chosen, and the setup is gone.
+  await createWallet(alice, "lightning", "testnet", { provider: "fake-lightning", fill: async (form) => {
+    await form.getByLabel("Access token").fill("a-test-token");
+    await form.getByTestId("provider-save").click();
+  } });
+  await expect(first).toHaveCount(0);
+  await expect(alice.page.getByTestId("wallet-card-lightning-testnet")).toBeInViewport();
+});
+
 test("New makes a Testnet kind in one click, checked before its card appears, and says what each Mainnet kind asks for", { tag: ["@feature:wallet.instances.create", "@feature:wallet.fedimint.mainnet"] }, async ({ peer }) => {
   const alice = await peer("new-one-click");
   await createWallet(alice, "cashu", "testnet");
