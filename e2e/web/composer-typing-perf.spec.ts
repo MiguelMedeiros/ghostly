@@ -86,6 +86,39 @@ test("typing in a long chat draws no message rows and costs what it does in a sh
   expect(long.median).toBeLessThan(Math.max(50, short.median * 3));
 });
 
+test("a keystroke in a long chat does not paint its message list again", { tag: ["@feature:app.composer.typing-cost"] }, async ({ peer, browserName }) => {
+  test.skip(browserName !== "chromium", "counts paints in a Chromium trace");
+  test.setTimeout(3 * 60_000);
+  const bob = await peer("paint-bob");
+  await seed(bob.page, [{ label: "Long chat", count: 600 }]);
+  await bob.page.reload();
+  // Still: the connection icon of a chat never paired is an animation, painted every frame.
+  await bob.page.emulateMedia({ reducedMotion: "reduce" });
+  await bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" }).click();
+  await expect(chat(bob).locator("[data-message-row]")).toHaveCount(600);
+  const box = bob.page.getByPlaceholder("Message…");
+  await box.click();
+  await bob.page.waitForTimeout(500);
+
+  const cdp = await bob.context.newCDPSession(bob.page);
+  const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "[data-message-list]" });
+  const { node } = await cdp.send("DOM.describeNode", { nodeId });
+  const events: { name: string; ph: string; args?: { data?: { nodeId?: number } } }[] = [];
+  cdp.on("Tracing.dataCollected", ({ value }) => events.push(...(value as unknown as typeof events)));
+  await cdp.send("Tracing.start", { categories: "devtools.timeline", transferMode: "ReportEvents" });
+  await box.pressSequentially(typed(20), { delay: 60 });
+  await bob.page.waitForTimeout(300);
+  const complete = new Promise(done => cdp.once("Tracing.tracingComplete", done));
+  await cdp.send("Tracing.end");
+  await complete;
+  const paints = events.filter(e => e.name === "Paint" && e.args?.data?.nodeId === node.backendNodeId).length;
+  if (process.env.PERF_LOG) console.log(`composer-typing-perf list paints for 20 keys: ${paints}`);
+  // The list's size is its own (`contain: size`): a keystroke laid the composer's column out again, and Chromium painted
+  // all 600 rows with it, once per key (a 600-row list: 3 ms a key, 30 at 4x).
+  expect(paints).toBeLessThan(5);
+});
+
 /** A paired chat whose contact's typing indicator comes and goes every second, with 600 messages seeded above it. */
 test("a contact's typing indicator coming and going does not draw a long chat again", { tag: ["@feature:app.composer.typing-cost"] }, async ({ peer }) => {
   test.skip(!process.env.PERF_PAIRED, "a measurement: PERF_PAIRED=1 runs it");
