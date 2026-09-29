@@ -109,8 +109,8 @@ for (const [from, to] of [
 for (const [slug, file] of [
   ["security", "main/SECURITY.md"],
   ["contributing", "main/CONTRIBUTING.md"],
-  ["implementation", "dev/docs/wisps/IMPLEMENTATION.md"],
-  ["numbering", "dev/docs/wisps/NUMBERING.md"],
+  ["implementation", "main/docs/wisps/IMPLEMENTATION.md"],
+  ["numbering", "main/docs/wisps/NUMBERING.md"],
 ]) {
   for (const from of [`/wisps/${slug}`, `/developers/wisps/${slug}`]) {
     test(`${from} redirects permanently to ${file} on GitHub`, async ({ request }) => {
