@@ -19,6 +19,8 @@ export interface PeerOptions {
   viewport?: { width: number; height: number };
   /** Emulates a phone: touch, mobile user agent, narrow viewport. */
   mobile?: boolean;
+  /** Says it is another browser (Safari on an iPhone or a Mac, Firefox): for what the app offers by browser. */
+  userAgent?: string;
   /** Trusts any certificate, as a browser trusts a node's that a person has set up properly (self-hosted nodes in tests). */
   ignoreHTTPSErrors?: boolean;
   /** Talks to the public Pkarr relays themselves instead of the test's relay (measurements only: the suite stays offline). */
@@ -77,6 +79,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
     ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
     ...(options.serviceWorkers ? { serviceWorkers: options.serviceWorkers } : {}),
+    ...(options.userAgent ? { userAgent: options.userAgent } : {}),
   });
   await guardArchive(context);
   await guardPublicProfiles(context);

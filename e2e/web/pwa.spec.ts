@@ -143,3 +143,141 @@ test("the app icon's shortcuts: New chat, Scan invite, Wallets", { tag: ["@featu
   await ana.page.goto("/#/wallet");
   await expect(ana.page.getByTestId("wallet")).toBeVisible();
 });
+
+/**
+ * What Chromium does when the app can be installed: `beforeinstallprompt`, whose `prompt()` shows the browser's own
+ * dialog. Here the prompt counts its calls in `window.installPrompts` instead.
+ */
+async function offerInstall(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const event = Object.assign(new Event("beforeinstallprompt", { cancelable: true }), {
+      prompt: () => { (window as { installPrompts?: number }).installPrompts = ((window as { installPrompts?: number }).installPrompts ?? 0) + 1; return Promise.resolve(); },
+      userChoice: Promise.resolve({ outcome: "dismissed" as const }),
+    });
+    dispatchEvent(event);
+  });
+}
+const installPrompts = (page: Page) => page.evaluate(() => (window as { installPrompts?: number }).installPrompts ?? 0);
+
+/** Opens the account menu (the profile switcher over the account bar) and says whether Install app is in it. */
+async function menuOffersInstall(page: Page): Promise<boolean> {
+  await page.getByTestId("account-profile").click();
+  await expect(page.getByTestId("profile-switcher")).toBeVisible();
+  const offered = await page.getByTestId("install-app-menu").isVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("profile-switcher")).toBeHidden();
+  return offered;
+}
+
+const IPHONE_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+const MAC_SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+const MAC_FIREFOX = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0";
+
+test.describe("installing the app", () => {
+  test("Chromium: Install app in the account menu, a hint once there is a chat, and both ask the browser", { tag: ["@feature:app.pwa.install-entry", "@feature:app.pwa.install"] }, async ({ peer }) => {
+    const ana = await peer("Ana");
+    const page = ana.page;
+    // No offer from the browser: nothing to install, nowhere.
+    await expect(page.getByTestId("install-hint")).toBeHidden();
+    expect(await menuOffersInstall(page)).toBe(false);
+
+    await offerInstall(page);
+    expect(await menuOffersInstall(page)).toBe(true);
+    // A first visit with nothing in it yet: no hint.
+    await expect(page.getByTestId("install-hint")).toBeHidden();
+
+    await page.getByTitle("New Chat").click();
+    await expect(page.getByTestId("invite-card")).toBeVisible();
+    await page.goto("/#/");
+    await expect(page.getByTestId("install-hint")).toBeVisible();
+    await page.getByTestId("install-hint-install").click();
+    await expect.poll(() => installPrompts(page)).toBe(1);
+    // It has done its job, whatever the person answered the browser.
+    await expect(page.getByTestId("install-hint")).toBeHidden();
+
+    // The browser offers again later: the menu has it, and asks the browser too.
+    await offerInstall(page);
+    await expect(page.getByTestId("install-hint")).toBeHidden();
+    await page.getByTestId("account-profile").click();
+    await page.getByTestId("install-app-menu").click();
+    await expect(page.getByTestId("profile-switcher")).toBeHidden();
+    await expect.poll(() => installPrompts(page)).toBe(2);
+
+    // Installed: gone from the menu and from Settings.
+    await offerInstall(page);
+    await page.evaluate(() => dispatchEvent(new Event("appinstalled")));
+    expect(await menuOffersInstall(page)).toBe(false);
+    await page.goto("/#/settings");
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+    await expect(page.getByTestId("install-app")).toBeHidden();
+  });
+
+  test("Not now puts the hint away for good; Install stays in Settings", { tag: ["@feature:app.pwa.install-entry"] }, async ({ peer }) => {
+    const ana = await peer("Ana");
+    const page = ana.page;
+    // The second visit, no chat yet: the hint may show.
+    await page.reload();
+    await expect(page.getByTitle("New Chat")).toBeVisible();
+    await offerInstall(page);
+    await expect(page.getByTestId("install-hint")).toBeVisible();
+    await page.getByTestId("install-hint-later").click();
+    await expect(page.getByTestId("install-hint")).toBeHidden();
+
+    await page.reload();
+    await expect(page.getByTitle("New Chat")).toBeVisible();
+    await offerInstall(page);
+    expect(await menuOffersInstall(page)).toBe(true);
+    await expect(page.getByTestId("install-hint")).toBeHidden();
+    await page.goto("/#/settings");
+    await page.getByTestId("install-app").click();
+    await expect.poll(() => installPrompts(page)).toBe(1);
+  });
+
+  // CI has Chromium only: these say they are Safari and Firefox, which is all the app goes by.
+  test("iPhone Safari: Install shows where Add to Home Screen is", { tag: ["@feature:app.pwa.install-entry", "@feature:app.pwa.install"] }, async ({ peer }) => {
+    const ana = await peer("Ana", { mobile: true, userAgent: IPHONE_SAFARI });
+    const page = ana.page;
+    await page.reload();
+    await expect(page.getByTitle("New Chat")).toBeVisible();
+    await expect(page.getByTestId("install-hint")).toBeVisible();
+    await page.getByTestId("install-hint-install").click();
+    const steps = page.getByTestId("install-steps");
+    await expect(steps).toBeVisible();
+    await expect(steps).toHaveAttribute("data-kind", "ios");
+    await expect(steps).toContainText("Add Ghostly to your Home Screen");
+    await expect(steps.getByTestId("install-share-glyph")).toBeVisible();
+    await expect(steps).toContainText("Choose Add to Home Screen.");
+    await steps.getByTestId("install-steps-done").click();
+    await expect(steps).toBeHidden();
+    // Shown once: Safari never says the app was added, so having seen the steps is enough.
+    await expect(page.getByTestId("install-hint")).toBeHidden();
+
+    // Settings still has it, and the same steps.
+    await page.getByTestId("mobile-tab-settings").click();
+    await page.getByTestId("install-app").click();
+    await expect(steps).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(steps).toBeHidden();
+  });
+
+  test("Safari on a Mac: Install app shows File, Add to Dock; Firefox offers nothing", { tag: ["@feature:app.pwa.install-entry"] }, async ({ peer }) => {
+    const ana = await peer("Ana", { userAgent: MAC_SAFARI });
+    await ana.page.getByTestId("account-profile").click();
+    await ana.page.getByTestId("install-app-menu").click();
+    const steps = ana.page.getByTestId("install-steps");
+    await expect(steps).toHaveAttribute("data-kind", "dock");
+    await expect(steps).toContainText("In the menu bar, choose File.");
+    await expect(steps).toContainText("Choose Add to Dock.");
+    await steps.getByTestId("install-steps-done").click();
+    await expect(steps).toBeHidden();
+
+    const bo = await peer("Bo", { userAgent: MAC_FIREFOX });
+    await bo.page.reload();
+    await expect(bo.page.getByTitle("New Chat")).toBeVisible();
+    await expect(bo.page.getByTestId("install-hint")).toBeHidden();
+    expect(await menuOffersInstall(bo.page)).toBe(false);
+    await bo.page.goto("/#/settings");
+    await expect(bo.page.getByTestId("settings-page")).toBeVisible();
+    await expect(bo.page.getByTestId("install-app")).toBeHidden();
+  });
+});
