@@ -4,7 +4,7 @@ import {
   resetInstallPrompt, startInstall, installStepsOpen, watchInstallPrompt,
 } from "../../lib/installPrompt";
 
-// covers: app.pwa.install
+// covers: app.pwa.install, app.pwa.install-entry
 
 afterEach(() => {
   vi.restoreAllMocks();
