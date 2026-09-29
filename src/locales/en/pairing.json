@@ -18,6 +18,7 @@
     "publish": "Could not put your invite on the network. Check your connection.",
     "rejected": "Your contact's app refused the connection.",
     "resolve": "Could not find the invite on the network. It may be old or mistyped.",
+    "taken": "Someone else joined with this invite first. Ask your contact for a new one.",
     "timeout": "Your contact's app did not answer in time.",
     "transport": "No direct link could be opened between your devices.",
     "unknown": "Something went wrong while connecting."

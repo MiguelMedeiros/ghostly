@@ -18,6 +18,7 @@
     "publish": "No se pudo publicar tu invitación en la red. Revisa tu conexión.",
     "rejected": "La app de tu contacto rechazó la conexión.",
     "resolve": "No se encontró la invitación en la red. Puede ser antigua o estar mal copiada.",
+    "taken": "Otra persona se unió antes con esta invitación. Pide una nueva a tu contacto.",
     "timeout": "La app de tu contacto no respondió a tiempo.",
     "transport": "No se pudo abrir un enlace directo entre tus dispositivos.",
     "unknown": "Algo salió mal al conectar."

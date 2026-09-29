@@ -18,6 +18,7 @@
     "publish": "Impossible de publier votre invitation sur le réseau. Vérifiez votre connexion.",
     "rejected": "L’app de votre contact a refusé la connexion.",
     "resolve": "Invitation introuvable sur le réseau. Elle est peut-être ancienne ou mal copiée.",
+    "taken": "Quelqu'un d'autre a rejoint avec cette invitation avant vous. Demandez-en une nouvelle à votre contact.",
     "timeout": "L’app de votre contact n’a pas répondu à temps.",
     "transport": "Aucun lien direct n’a pu être ouvert entre vos appareils.",
     "unknown": "Un problème est survenu pendant la connexion."
