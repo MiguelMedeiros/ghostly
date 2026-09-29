@@ -6,6 +6,7 @@ import { BadgeMark } from "./BadgeMark";
 import { contactBadges } from "./contactBadges";
 import { contactFace, faceCandidates, setFaceChoice, suggestedFace, useFaceChoice, type ContactFace } from "./contactFace";
 import { loadShownProfiles } from "./markTip";
+import { useI18n } from "../../contexts/I18nContext";
 
 const GHOSTLY_VALUE = "ghostly";
 const valueOf = (f: Pick<ContactFace, "provider" | "subject">) => `${f.provider}:${f.subject}`;
@@ -20,6 +21,7 @@ const faceMark = (f: ContactFace, size: number) => <BadgeMark provider={f.provid
  * applied by itself. A nickname given in the chat keeps the name, and the photo still comes from the identity.
  */
 export function ContactFacePicker({ peerKey, received }: { peerKey: string; received: ReceivedIdentityView[] }) {
+  const { t } = useI18n();
   const choice = useFaceChoice(peerKey);
   const candidates = faceCandidates(received);
   const face = contactFace(received, choice);
@@ -33,30 +35,30 @@ export function ContactFacePicker({ peerKey, received }: { peerKey: string; rece
   const lapsed = !!choice && choice !== "none" && !face;
   if (!candidates.length && !lapsed) return null;
   const options = [
-    { value: GHOSTLY_VALUE, label: "Ghostly (none)", description: "Their Ghostly name" },
-    ...candidates.map(c => ({ value: valueOf(c), label: c.name ?? c.providerName, description: `${c.providerName} profile`, icon: faceMark(c, 20) })),
+    { value: GHOSTLY_VALUE, label: t("identities.face.none"), description: t("identities.face.noneHint") },
+    ...candidates.map(c => ({ value: valueOf(c), label: c.name ?? c.providerName, description: t("identities.face.profileOf", { provider: c.providerName }), icon: faceMark(c, 20) })),
   ];
   return (
-    <section className="contact-panel-section" data-testid="contact-face" aria-label="Show as">
-      <h3 className="contact-panel-heading">Show as</h3>
+    <section className="contact-panel-section" data-testid="contact-face" aria-label={t("identities.face.title")}>
+      <h3 className="contact-panel-heading">{t("identities.face.title")}</h3>
       {offer && (
         <button type="button" className="contact-face-offer" data-testid="contact-face-suggest" onClick={() => setFaceChoice(peerKey, { provider: offer.provider, subject: offer.subject })}>
           {faceMark(offer, 28)}
           <span className="min-w-0">
-            <span className="contact-face-offer-title">Use {offer.providerName} name & photo</span>
+            <span className="contact-face-offer-title">{t("identities.face.use", { provider: offer.providerName })}</span>
             {offer.name && <bdi className="contact-face-offer-name">{offer.name}</bdi>}
           </span>
         </button>
       )}
-      <Select<string> aria-label="Show this contact as" data-testid="contact-face-select" value={face ? valueOf(face) : GHOSTLY_VALUE} options={options}
+      <Select<string> aria-label={t("identities.face.selectLabel")} data-testid="contact-face-select" value={face ? valueOf(face) : GHOSTLY_VALUE} options={options}
         onChange={value => {
           const picked = candidates.find(c => valueOf(c) === value);
           setFaceChoice(peerKey, picked ? { provider: picked.provider, subject: picked.subject } : "none");
         }} />
       <p className="contact-panel-note" data-testid="contact-face-hint">
-        {lapsed ? "That profile's proof no longer holds, so their Ghostly name is back."
-          : nickname && face ? `Your nickname “${nickname}” stays; the photo is theirs.`
-            : "Name and photo in your chat list. Only on this device."}
+        {lapsed ? t("identities.face.lapsed")
+          : nickname && face ? t("identities.face.nickname", { nickname })
+            : t("identities.face.hint")}
       </p>
     </section>
   );

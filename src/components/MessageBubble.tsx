@@ -2,7 +2,7 @@ import { publicKeyLabel } from "../lib/publicKeyLabel";
 import React, { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { sameValue } from "../lib/sameValue";
 import { clockTime } from "../lib/time";
-import { useI18n } from "../contexts/I18nContext";
+import { useI18n, type Translate } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { Menu, MenuItem } from "./Menu";
 import { MessageBoundary } from "./MessageBoundary";
@@ -22,7 +22,7 @@ import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile } from "../lib/fileStatus";
 import { useServicesPlatform, useTransfer } from "../hooks/useServicesPlatform";
-import type { ChatFile, ChatMessage } from "../lib/types";
+import type { CallEventType, ChatFile, ChatMessage } from "../lib/types";
 import type { QuoteView } from "../lib/replies";
 import { ReplyQuote } from "./chat/ReplyQuote";
 import { SmileIcon } from "./composer/icons";
@@ -289,6 +289,20 @@ function TailSvg({ side }: { side: "left" | "right" }) {
       </svg>
     </span>
   );
+}
+
+/** A call's line in the timeline, in the person's language: the history keeps it in English, with its kind beside it. */
+function callEventText(t: Translate, type: CallEventType, hasVideo?: boolean): string | undefined {
+  switch (type) {
+    case "call_started": return hasVideo ? t("calls.timeline.videoStarted") : t("calls.timeline.audioStarted");
+    case "call_received": return hasVideo ? t("calls.timeline.videoIncoming") : t("calls.timeline.audioIncoming");
+    case "call_connected": return hasVideo ? t("calls.timeline.videoConnected") : t("calls.timeline.audioConnected");
+    case "call_ended": return hasVideo ? t("calls.timeline.videoEnded") : t("calls.timeline.audioEnded");
+    case "call_missed": return hasVideo ? t("calls.timeline.videoMissed") : t("calls.timeline.audioMissed");
+    case "call_rejected": return hasVideo ? t("calls.timeline.videoDeclined") : t("calls.timeline.audioDeclined");
+    // A kind this version does not know: its stored line as written.
+    default: return undefined;
+  }
 }
 
 function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean }) {
@@ -744,7 +758,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </svg>
           <span>
             <span className="font-mono font-semibold">{pubKeyShort}</span>
-            {" "}joined the chat
+            {" "}{t("chat.joined")}
           </span>
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>
@@ -768,7 +782,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         >
           <CallEventIcon type={type} hasVideo={hasVideo} />
-          <span>{message.text}</span>
+          <span>{callEventText(t, type, hasVideo) ?? message.text}</span>
           {duration !== undefined && duration > 0 && (
             <span className="text-text-muted">({formatDuration(duration)})</span>
           )}
@@ -883,7 +897,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           <div className="clearfix">
             <button type="button" data-testid="image-reveal" onClick={() => setRevealed(true)}
               className="text-sm text-link underline decoration-dotted cursor-pointer break-all text-start">
-              Show picture · {hostOf(message.text.trim())}
+              {t("chat.showPicture", { host: hostOf(message.text.trim()) })}
             </button>
             {timestampEl}
           </div>

@@ -98,7 +98,7 @@ A `did:web` or `did:dht` document can change: a key rotated out, a file or servi
 
 ## References
 
-[WISP 300](300-peer-proofs.md), [W3C DID Core 1.0](https://www.w3.org/TR/did-core/), [did:key](https://w3c-ccg.github.io/did-key-spec/), [did:jwk](https://github.com/quartzjer/did-jwk/blob/main/spec.md), [did:web](https://w3c-ccg.github.io/did-method-web/), [did:dht](https://did-dht.com/), [RFC 7515 (JWS)](https://www.rfc-editor.org/rfc/rfc7515), [RFC 7797](https://www.rfc-editor.org/rfc/rfc7797), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037), [RFC 8812](https://www.rfc-editor.org/rfc/rfc8812), [Multicodec table](https://github.com/multiformats/multicodec/blob/master/table.csv).
+[WISP 300](300-peer-proofs.md), [W3C DID Core 1.0](https://www.w3.org/TR/did-core/), [did:key](https://w3c-ccg.github.io/did-key-spec/), [did:jwk](https://github.com/quartzjer/did-jwk/blob/main/spec.md), [did:web](https://w3c-ccg.github.io/did-method-web/), [did:dht](https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md), [RFC 7515 (JWS)](https://www.rfc-editor.org/rfc/rfc7515), [RFC 7797](https://www.rfc-editor.org/rfc/rfc7797), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037), [RFC 8812](https://www.rfc-editor.org/rfc/rfc8812), [Multicodec table](https://github.com/multiformats/multicodec/blob/master/table.csv).
 
 ## Revision log
 

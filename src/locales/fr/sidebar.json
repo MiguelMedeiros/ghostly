@@ -3,6 +3,14 @@
   "copyInvite": "Copier le code d'invitation",
   "deleteAllChats": "Supprimer toutes les discussions",
   "deleteChat": "Supprimer la discussion",
+  "group": {
+    "adminAnswered": "L'app de l'admin a répondu…",
+    "invitedBy": "Invité par {{contact}} · {{members}}",
+    "invitedByUnknown": "Invité par un contact · {{members}}",
+    "letting": "Un membre vous fait entrer…",
+    "waitingAdmin": "En attente de l'app de l'admin…",
+    "waitingIn": "En attente d'être admis…"
+  },
   "join": "Rejoindre",
   "joinChat": "Rejoindre une conversation",
   "new": "Nouveau",
@@ -21,5 +29,6 @@
   "searchPlaceholder": "Rechercher...",
   "settings": "Paramètres",
   "sharedIdentity": "A partagé une identité",
-  "startChat": "Nouvelle conversation"
+  "startChat": "Nouvelle conversation",
+  "unread": "Messages non lus"
 }

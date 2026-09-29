@@ -4,7 +4,7 @@ import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types"
 import type { ApprovalRequest } from "@ghostly/browser/proofs/contract";
 import { Block, Button, Notice, Row } from "../wallet/ui";
 import { Deck } from "../deck/Deck";
-import { addableProviders, chatsByPeer, contactName, profileSince, providerOf, SHARED_STATUS, useEngineState, useNewProof } from "../../lib/identities";
+import { addableProviders, chatsByPeer, contactName, profileSince, providerOf, sharedStatus, useEngineState, useNewProof } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import type { ChatSession } from "../../lib/types";
@@ -65,7 +65,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
 
   const entries: Entry[] = [
     { id: GHOSTLY, ghostly: true, card: ghostly },
-    ...proofs.map((proof): Entry => ({ id: proof.id, proof, card: idCard(proof, { now, refusedBy: refusedBy(proof.id), revoking: revoking === proof.id }) })),
+    ...proofs.map((proof): Entry => ({ id: proof.id, proof, card: idCard(proof, { now, refusedBy: refusedBy(proof.id), revoking: revoking === proof.id, t }) })),
   ];
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const select = (id: string) => { removeAbort.current?.abort(); setChosen(id); setRemoving(null); setError(""); setRemoval({}); };
@@ -95,9 +95,9 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
 
   return (
     <section className="space-y-3" data-testid="identities-mine">
-      <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">Yours</h2>
+      <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">{t("identities.mine.title")}</h2>
       <Deck<Entry> cards={entries} selected={entry.id} onSelect={select}
-        kind="tabs" panel={PANEL} label="Your identities" name="identity-deck" className="id-deck"
+        kind="tabs" panel={PANEL} label={t("identities.mine.deckLabel")} name="identity-deck" className="id-deck"
         testId={e => (e.ghostly ? "identity-ghostly" : "identity-proof")}
         face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
         mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />} tone={tone} />
@@ -116,7 +116,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
               hint={<>{ghostly.category}<span className="block">{ghostly.shared}{ghostly.issued ? ` · ${ghostly.validity}` : ""}</span></>} />
             <Block>
               <p className="text-xs text-text-muted leading-5">{t("identities.ghostly.explain")} {t("identities.ghostly.keysHint")}</p>
-              {!canAdd && <p className="text-xs text-text-muted">No identity can be added on this device.</p>}
+              {!canAdd && <p className="text-xs text-text-muted">{t("identities.mine.cannotAdd")}</p>}
               <div className="flex flex-wrap items-center gap-3">
                 <Button data-testid="identity-ghostly-edit" onClick={() => nav.open("/profile")}>{t("identities.ghostly.editProfile")}</Button>
               </div>
@@ -134,17 +134,17 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
             <Row leading={<ProviderMark provider={p.provider} subject={card.bound} />}
               label={<span className="flex flex-wrap items-center gap-2"><span>{card.label}</span>
                 <StatusPill ok={card.status === "verified"} warn={card.status === "expiring"} testId="identity-panel-status">{card.statusLabel}</StatusPill></span>}
-              hint={<>{card.category}<span className="block">Issued {card.issued} · {card.validity}</span></>} />
+              hint={<>{card.category}<span className="block">{t("identities.mine.issued", { date: card.issued, validity: card.validity })}</span></>} />
             <Block>
               <code className="block break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="identity-panel-subject">{card.subject}</code>
               <p className="text-xs text-text-muted leading-5">
-                {p.verified.source}. {card.attested ? `${p.verified.attester ?? "The provider"} says this account logged in: that is only as trustworthy as ${p.verified.attester ?? "the provider"}.` : "Only the holder of this key could have made this proof."} Checked when it was made, the way your contacts check it. It does not prove who a person is.
+                {p.verified.source}. {card.attested ? (p.verified.attester ? t("identities.mine.attested", { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
               </p>
-              {card.refusedBy.length > 0 && <p className="text-xs text-danger" data-testid="identity-proof-refused">Not verified by {card.refusedBy.join(", ")}</p>}
+              {card.refusedBy.length > 0 && <p className="text-xs text-danger" data-testid="identity-proof-refused">{t("identities.mine.refusedBy", { names: card.refusedBy.join(", ") })}</p>}
               {(card.status === "expired" || card.status === "expiring") && (
                 <div className="flex flex-wrap items-center gap-3">
-                  <p className="flex-1 min-w-[12rem] text-xs text-text-muted">Add it again to renew it; then remove this one.</p>
-                  {canAdd && onAdd && <Button data-testid="identity-renew" onClick={onAdd}>Add it again</Button>}
+                  <p className="flex-1 min-w-[12rem] text-xs text-text-muted">{t("identities.mine.renewHint")}</p>
+                  {canAdd && onAdd && <Button data-testid="identity-renew" onClick={onAdd}>{t("identities.mine.renew")}</Button>}
                 </div>
               )}
             </Block>
@@ -153,26 +153,26 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
             </Block>}
             <Block testId="identity-panel-sharing">
               <p className="text-xs font-medium text-text-secondary">{card.shared}</p>
-              {sharedIn.length === 0 ? <p className="text-xs text-text-muted">Share it from a chat’s Identities, one contact at a time.</p>
+              {sharedIn.length === 0 ? <p className="text-xs text-text-muted">{t("identities.mine.shareHint")}</p>
                 : sharedIn.map(({ link, status, chat }) => (
                   <div key={link.id} data-testid="identity-shared-chat" className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <p className="flex-[1_1_10rem] min-w-0 text-sm text-text-primary">{nameOf(link)} <span className="text-xs text-text-muted">· {SHARED_STATUS[status]}</span></p>
-                    {chat && <Button onClick={() => nav.conversation(chatPath(chat.id))}>Open chat</Button>}
-                    {status !== "withdrawal-pending" && <Button data-testid="identity-shared-stop" disabled={!!busy} onClick={() => act(link.id, () => engine.call("withdrawIdentityProof", { linkId: link.id, id: p.id }))}>Stop sharing</Button>}
+                    <p className="flex-[1_1_10rem] min-w-0 text-sm text-text-primary">{nameOf(link)} <span className="text-xs text-text-muted">· {sharedStatus(status, t)}</span></p>
+                    {chat && <Button onClick={() => nav.conversation(chatPath(chat.id))}>{t("identities.openChat")}</Button>}
+                    {status !== "withdrawal-pending" && <Button data-testid="identity-shared-stop" disabled={!!busy} onClick={() => act(link.id, () => engine.call("withdrawIdentityProof", { linkId: link.id, id: p.id }))}>{t("identities.stopSharing")}</Button>}
                   </div>
                 ))}
             </Block>
-            <Row label="Remove" hint="Stops sharing it everywhere and publishes a revocation.">
+            <Row label={t("identities.mine.remove")} hint={t("identities.mine.removeHint")}>
               {removing === p.id ? <>
-                <Button variant="danger" data-testid="identity-proof-remove-confirm" disabled={busyHere} onClick={() => remove(p)}>{revoking === p.id ? "Revoking…" : takingDown === p.id ? "Waiting…" : "Remove and stop sharing"}</Button>
-                {removal.failed === p.id && !busyHere && <Button data-testid="identity-proof-remove-anyway" onClick={() => remove(p, false)}>Remove without it</Button>}
-                <Button disabled={revoking === p.id} onClick={() => { removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>Keep</Button>
-              </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>Remove</Button>}
+                <Button variant="danger" data-testid="identity-proof-remove-confirm" disabled={busyHere} onClick={() => remove(p)}>{revoking === p.id ? t("identities.card.revoking") : takingDown === p.id ? t("identities.waiting") : t("identities.mine.removeConfirm")}</Button>
+                {removal.failed === p.id && !busyHere && <Button data-testid="identity-proof-remove-anyway" onClick={() => remove(p, false)}>{t("identities.mine.removeAnyway")}</Button>}
+                <Button disabled={revoking === p.id} onClick={() => { removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>{t("identities.mine.keep")}</Button>
+              </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>{t("identities.mine.remove")}</Button>}
             </Row>
-            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>Contacts you shared it with are told it is no longer shared, and a revocation is published so they can see it even if you never reconnect. A copy they kept cannot be erased.{providerOf(p.provider)?.unpublish ? ` ${providerOf(p.provider)!.unpublish!.description}` : ""}</Notice>
+            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{providerOf(p.provider)?.unpublish ? ` ${providerOf(p.provider)!.unpublish!.description}` : ""}</Notice>
               {approval && takingDown === p.id && <ApprovalPanel request={approval} onCancel={() => removeAbort.current?.abort()} />}
               {removal.progress && busyHere && <Notice testId="identity-proof-remove-progress">{removal.progress}</Notice>}
-              {removal.failed === p.id && !busyHere && <p className="text-xs text-text-muted">What it published could not be taken down. You can remove the proof without it: contacts still see it revoked.</p>}
+              {removal.failed === p.id && !busyHere && <p className="text-xs text-text-muted">{t("identities.mine.takeDownFailed")}</p>}
             </Block>}
           </>;
         })()}

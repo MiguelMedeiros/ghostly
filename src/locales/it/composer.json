@@ -3,6 +3,7 @@
   "camera": "Fotocamera",
   "cameraFailed": "Impossibile avviare la fotocamera.",
   "caption": "Aggiungi una didascalia",
+  "captionTooLong": "Questa didascalia è di {{bytes}} byte UTF-8. La DHT ne consente al massimo {{max}}.",
   "category": {
     "activity": "Attività",
     "flags": "Bandiere",
@@ -15,6 +16,7 @@
     "symbols": "Simboli"
   },
   "closeCamera": "Chiudi fotocamera",
+  "dhtTooLong": "Questo testo è di {{bytes}} byte UTF-8. La DHT ne consente al massimo {{max}}; accorcialo o usa una connessione diretta. La bozza viene conservata.",
   "document": "Documento",
   "dropFiles": "Rilascia per inviare",
   "emoji": "Emoji",
@@ -45,7 +47,11 @@
   "media": "Foto e video",
   "noEmoji": "Nessuna emoji trovata",
   "noGifs": "Nessuna GIF trovata",
+  "overSoft": "Oltre i {{bytes}} byte che porta la DHT: viene inviato quando sei connesso direttamente",
   "payment": "Pagamento",
+  "previewLoading": "Caricamento anteprima di {{host}}…",
+  "previewRemove": "Rimuovi anteprima del link",
+  "previewWithout": "Invia senza anteprima",
   "removeFile": "Rimuovi {{name}}",
   "retake": "Rifai",
   "retry": "Riprova",
@@ -55,10 +61,13 @@
   "send": "Invia",
   "sendCount": "Invia {{count}}",
   "sendFiles": "Invia file",
+  "sendMessage": "Invia messaggio",
   "sendPhoto": "Invia foto",
   "services": "Servizi condivisi",
   "servicesNeedApp": "Richiede l'estensione o l'app desktop di Ghostly",
   "servicesShared": "{{count}} condivisi in questa chat",
   "skinTone": "Tonalità della pelle",
-  "takePhoto": "Scatta una foto"
+  "takePhoto": "Scatta una foto",
+  "tooLong": "È troppo lungo da inviare ({{count}} caratteri, il limite è {{max}}).",
+  "tooLongDht": "È troppo lungo per la DHT. Una volta connessi peer to peer, fatture lunghe e token ecash ci stanno."
 }

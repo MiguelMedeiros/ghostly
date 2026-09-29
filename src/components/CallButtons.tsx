@@ -1,3 +1,5 @@
+import { useI18n } from "../contexts/I18nContext";
+
 interface CallButtonsProps {
   /** Why calls cannot start in this chat right now (the title of both buttons), or null when they can. */
   blocked: string | null;
@@ -11,6 +13,7 @@ interface CallButtonsProps {
  * shared from inside a call, voice or video (CallOverlay).
  */
 export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
+  const { t } = useI18n();
   return (
     <>
       {/* Audio call button */}
@@ -18,8 +21,8 @@ export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
         onClick={() => onCall(false)}
         disabled={!!blocked || busy}
         className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-        title={blocked ?? "Audio call"}
-        aria-label="Audio call"
+        title={blocked ?? t("calls.audio")}
+        aria-label={t("calls.audio")}
         data-testid="call-audio"
       >
         <svg
@@ -40,8 +43,8 @@ export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
         onClick={() => onCall(true)}
         disabled={!!blocked || busy}
         className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-        title={blocked ?? "Video call"}
-        aria-label="Video call"
+        title={blocked ?? t("calls.video")}
+        aria-label={t("calls.video")}
         data-testid="call-video"
       >
         <svg

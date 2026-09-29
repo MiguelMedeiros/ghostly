@@ -6,6 +6,7 @@ import calls from "./calls.json";
 import chat from "./chat.json";
 import common from "./common.json";
 import composer from "./composer.json";
+import connection from "./connection.json";
 import errors from "./errors.json";
 import group from "./group.json";
 import home from "./home.json";
@@ -27,6 +28,7 @@ import share from "./share.json";
 import sidebar from "./sidebar.json";
 import tabs from "./tabs.json";
 import updates from "./updates.json";
+import wallet from "./wallet.json";
 
 export default {
   app,
@@ -34,6 +36,7 @@ export default {
   chat,
   common,
   composer,
+  connection,
   errors,
   group,
   home,
@@ -55,4 +58,5 @@ export default {
   sidebar,
   tabs,
   updates,
+  wallet,
 };

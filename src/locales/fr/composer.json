@@ -3,6 +3,7 @@
   "camera": "Appareil photo",
   "cameraFailed": "Impossible de démarrer l'appareil photo.",
   "caption": "Ajouter une légende",
+  "captionTooLong": "Cette légende fait {{bytes}} octets UTF-8. La DHT en accepte au plus {{max}}.",
   "category": {
     "activity": "Activités",
     "flags": "Drapeaux",
@@ -15,6 +16,7 @@
     "symbols": "Symboles"
   },
   "closeCamera": "Fermer l'appareil photo",
+  "dhtTooLong": "Ce texte fait {{bytes}} octets UTF-8. La DHT en accepte au plus {{max}} ; raccourcissez-le ou utilisez une liaison directe. Votre brouillon est conservé.",
   "document": "Document",
   "dropFiles": "Déposez pour envoyer",
   "emoji": "Emoji",
@@ -45,7 +47,11 @@
   "media": "Photos et vidéos",
   "noEmoji": "Aucun emoji trouvé",
   "noGifs": "Aucun GIF trouvé",
+  "overSoft": "Au-delà des {{bytes}} octets que porte la DHT : il part dès que la liaison directe est là",
   "payment": "Paiement",
+  "previewLoading": "Chargement de l'aperçu de {{host}}…",
+  "previewRemove": "Retirer l'aperçu du lien",
+  "previewWithout": "Envoyer sans aperçu",
   "removeFile": "Retirer {{name}}",
   "retake": "Reprendre",
   "retry": "Réessayer",
@@ -55,10 +61,13 @@
   "send": "Envoyer",
   "sendCount": "Envoyer {{count}}",
   "sendFiles": "Envoyer des fichiers",
+  "sendMessage": "Envoyer le message",
   "sendPhoto": "Envoyer la photo",
   "services": "Services partagés",
   "servicesNeedApp": "Nécessite l'extension ou l'app de bureau Ghostly",
   "servicesShared": "{{count}} partagé(s) dans cette discussion",
   "skinTone": "Teint",
-  "takePhoto": "Prendre une photo"
+  "takePhoto": "Prendre une photo",
+  "tooLong": "C'est trop long pour être envoyé ({{count}} caractères, la limite est {{max}}).",
+  "tooLongDht": "C'est trop long pour la DHT. Une fois connectés en pair à pair, les longues factures et les jetons ecash passent."
 }

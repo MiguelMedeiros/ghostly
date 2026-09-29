@@ -3,6 +3,7 @@ import { previewImageSize, type LinkPreview } from "@ghostly/core";
 import { videoSite } from "../lib/parse/linkPreview";
 import { formatCoordinates, locationIn, mapTiles, mapsUrl, openStreetMapUrl, type Place } from "../lib/parse/location";
 import { externalLinkProps, mapsPlatform } from "../lib/externalLink";
+import { useT } from "../contexts/I18nContext";
 
 const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; } };
 
@@ -58,9 +59,10 @@ function PinIcon({ size = 18 }: { size?: number }) {
 /** The map, from OpenStreetMap's tile server: 2×2 tiles, moved so the place sits in the middle of the frame. */
 function MapTiles({ place }: { place: Place }) {
   const [failed, setFailed] = useState(false);
+  const t = useT();
   const { tiles, point } = useMemo(() => mapTiles(place), [place]);
   const width = 280, height = 150;
-  if (failed) return <p className="text-[12px] text-text-secondary mt-1.5" role="status">The map could not load. Open it in maps instead.</p>;
+  if (failed) return <p className="text-[12px] text-text-secondary mt-1.5" role="status">{t("chat.location.mapFailed")}</p>;
   return (
     <div className="relative mt-1.5 rounded-md overflow-hidden bg-text-primary/5" style={{ width: `min(${width}px, 66vw)`, height }} data-testid="location-map">
       <div className="absolute" style={{ left: `calc(50% - ${point.x}px)`, top: height / 2 - point.y, width: 512, height: 512 }}>
@@ -84,13 +86,14 @@ function MapTiles({ place }: { place: Place }) {
  */
 export function LocationCard({ place }: { place: Place }) {
   const [showMap, setShowMap] = useState(false);
+  const t = useT();
   const open = mapsUrl(place, mapsPlatform());
   return (
     <div data-testid="location-card" className="mt-1.5 mb-1 w-[min(300px,68vw)] rounded-md bg-text-primary/6 border-s-4 border-accent px-2.5 py-2">
       <div className="flex items-start gap-2">
         <span className="text-accent mt-0.5 shrink-0"><PinIcon /></span>
         <span className="min-w-0">
-          <span className="block text-[13.5px] font-semibold leading-snug truncate" data-testid="location-name">{place.name ?? "Location"}</span>
+          <span className="block text-[13.5px] font-semibold leading-snug truncate" data-testid="location-name">{place.name ?? t("chat.location.title")}</span>
           <span className="block text-[12px] text-text-secondary font-mono" data-testid="location-coordinates">{formatCoordinates(place)}</span>
         </span>
       </div>
@@ -98,13 +101,13 @@ export function LocationCard({ place }: { place: Place }) {
         <>
           <button type="button" data-testid="location-show-map" onClick={() => setShowMap(true)}
             className="mt-1.5 text-[12.5px] text-link underline decoration-dotted cursor-pointer">
-            Show map
+            {t("chat.location.showMap")}
           </button>
-          <span className="block text-[11px] text-text-secondary leading-snug">Loads map tiles from OpenStreetMap, which then sees your IP address.</span>
+          <span className="block text-[11px] text-text-secondary leading-snug">{t("chat.location.showMapHint")}</span>
         </>
       )}
       <div className="mt-1.5 flex gap-3 text-[12.5px]">
-        <a {...externalLinkProps(open)} data-testid="location-open" className="text-link underline">Open in maps</a>
+        <a {...externalLinkProps(open)} data-testid="location-open" className="text-link underline">{t("chat.location.open")}</a>
         {open !== openStreetMapUrl(place) && /^https?:/.test(place.source) && hostOf(place.source) !== hostOf(open) && (
           <a {...externalLinkProps(place.source)} className="text-link underline truncate">{hostOf(place.source)}</a>
         )}

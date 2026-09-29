@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { WalletInstanceView, WalletNetwork, WalletOffer, WalletPlatform, WalletType } from "../../lib/platform";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { WalletMark } from "../WalletCards";
-import { MONEY_LABEL } from "../NetworkTag";
+import { moneyLabel } from "../NetworkTag";
+import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { Select } from "../ui/Select";
 import { Button, Notice, input } from "./ui";
 import { NETWORK_NAME, WALLET_NAME } from "./names";
@@ -10,30 +11,31 @@ import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
 import "./new-wallet.css";
 
+type Key = Parameters<Translate>[0];
 /** What each kind of wallet is, in a line, on each network. */
-const ABOUT: Record<WalletType, (network: WalletNetwork) => string> = {
-  cashu: (n) => n === "testnet" ? "Ecash over Lightning, on the public test mint." : "Ecash over Lightning, held at well-audited mints.",
-  lightning: () => "Your own Lightning wallet or node: NWC, LND, Core Lightning and more.",
-  arkade: (n) => n === "testnet" ? "Arkade on Mutinynet: fast, cheap payments off the chain." : "Arkade on Bitcoin: fast, cheap payments off the chain.",
-  bark: (n) => n === "testnet" ? "Second's Ark, on signet." : "Second's Ark on Bitcoin. Second's terms apply; start small.",
-  spark: (n) => n === "testnet" ? "A Spark wallet (Breez), on regtest." : "A Spark wallet (Breez) on Bitcoin, with your Breez API key.",
-  bitcoin: () => "On-chain bitcoin: a BDK wallet, or your own node.",
-  fedimint: () => "Ecash of a federation you join with its invite code.",
-  usdt: (n) => n === "testnet" ? "Test USDT on Sepolia." : "USDT on Ethereum.",
+const ABOUT: Record<WalletType, (network: WalletNetwork) => Key> = {
+  cashu: (n) => n === "testnet" ? "wallet.new.about.cashuTestnet" : "wallet.new.about.cashu",
+  lightning: () => "wallet.new.about.lightning",
+  arkade: (n) => n === "testnet" ? "wallet.new.about.arkadeTestnet" : "wallet.new.about.arkade",
+  bark: (n) => n === "testnet" ? "wallet.new.about.barkTestnet" : "wallet.new.about.bark",
+  spark: (n) => n === "testnet" ? "wallet.new.about.sparkTestnet" : "wallet.new.about.spark",
+  bitcoin: () => "wallet.new.about.bitcoin",
+  fedimint: () => "wallet.new.about.fedimint",
+  usdt: (n) => n === "testnet" ? "wallet.new.about.usdtTestnet" : "wallet.new.about.usdt",
 };
 /**
  * What making each kind does, step by step, as the dialog shows it while it waits: the first step is quick and local,
  * the second waits on the network (the engine checks the server before anything is saved), then Ready.
  */
-const STEPS: Record<WalletType, [string, string]> = {
-  cashu: ["Reaching the mint", "Checking it is a Cashu mint"],
-  lightning: ["Connecting to the source", "Checking its network"],
-  arkade: ["Creating keys", "Reaching the Ark server"],
-  bark: ["Creating keys", "Reaching the Bark server"],
-  spark: ["Creating keys", "Reaching Spark"],
-  bitcoin: ["Connecting to the source", "Checking its network"],
-  fedimint: ["Reading the invite", "Joining the federation"],
-  usdt: ["Creating keys", "Checking the token on its chain"],
+const STEPS: Record<WalletType, [Key, Key]> = {
+  cashu: ["wallet.new.step.reachMint", "wallet.new.step.checkMint"],
+  lightning: ["wallet.new.step.connectSource", "wallet.new.step.checkNetwork"],
+  arkade: ["wallet.new.step.createKeys", "wallet.new.step.reachArk"],
+  bark: ["wallet.new.step.createKeys", "wallet.new.step.reachBark"],
+  spark: ["wallet.new.step.createKeys", "wallet.new.step.reachSpark"],
+  bitcoin: ["wallet.new.step.connectSource", "wallet.new.step.checkNetwork"],
+  fedimint: ["wallet.new.step.readInvite", "wallet.new.step.joinFederation"],
+  usdt: ["wallet.new.step.createKeys", "wallet.new.step.checkToken"],
 };
 /** The deck's order. */
 const TYPES: WalletType[] = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"];
@@ -58,8 +60,14 @@ function actionOf(type: WalletType, offer: WalletOffer | undefined): Action {
   if (offer.exists) return "added";
   return offer.needs === "invite" ? "join" : offer.needs === "provider" ? "connect" : offer.needs === "apiKey" ? "key" : "create";
 }
-const ACTION_LABEL: Record<Action, string> = { create: "Create", key: "Create…", connect: "Connect…", "add-another": "Add another…", join: "Join with invite…", "join-another": "Join another…", added: "Added", off: "Not yet" };
-const BUSY_LABEL: Record<WalletType, string> = { cashu: "Creating…", lightning: "Connecting…", arkade: "Creating…", bark: "Creating…", spark: "Creating…", bitcoin: "Connecting…", fedimint: "Joining…", usdt: "Creating…" };
+const ACTION_LABEL: Record<Action, Key> = {
+  create: "wallet.new.action.create", key: "wallet.new.action.key", connect: "wallet.new.action.connect", "add-another": "wallet.new.action.addAnother",
+  join: "wallet.new.action.join", "join-another": "wallet.new.action.joinAnother", added: "wallet.new.action.added", off: "wallet.new.action.off",
+};
+const BUSY_LABEL: Record<WalletType, Key> = {
+  cashu: "wallet.new.busy.creating", lightning: "wallet.new.busy.connecting", arkade: "wallet.new.busy.creating", bark: "wallet.new.busy.creating",
+  spark: "wallet.new.busy.creating", bitcoin: "wallet.new.busy.connecting", fedimint: "wallet.new.busy.joining", usdt: "wallet.new.busy.creating",
+};
 
 /**
  * Wallets → New: whose money first (Real money on Mainnet, or Test money on Testnet), then a kind of wallet, each a
@@ -77,6 +85,7 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
   onClose: () => void;
   onCreated: (made: WalletInstanceView) => void;
 }) {
+  const { t } = useI18n();
   const dialog = useRef<HTMLDivElement>(null);
   const [network, setNetwork] = useState<WalletNetwork>(initialNetwork);
   const [chosen, setChosen] = useState<WalletType | null>(null);
@@ -128,13 +137,13 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
         className="new-wallet sheet sheet-padded focus:outline-none w-full max-w-xl max-h-[90dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-5 @container">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 id="new-wallet-title" className="text-lg font-semibold text-text-primary">New wallet</h2>
-            <p id="new-wallet-about" className="text-xs text-text-muted mt-1">Each wallet lives on one network. Test coins and real money never mix.</p>
+            <h2 id="new-wallet-title" className="text-lg font-semibold text-text-primary">{t("wallet.new.title")}</h2>
+            <p id="new-wallet-about" className="text-xs text-text-muted mt-1">{t("wallet.new.about.intro")}</p>
           </div>
-          <button type="button" aria-label="Close" onClick={close} disabled={busy} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">×</button>
+          <button type="button" aria-label={t("common.close")} onClick={close} disabled={busy} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">×</button>
         </div>
 
-        <div role="radiogroup" aria-label="Network" data-testid="new-wallet-network" data-network={network} className="grid grid-cols-2 gap-2">
+        <div role="radiogroup" aria-label={t("wallet.new.network")} data-testid="new-wallet-network" data-network={network} className="grid grid-cols-2 gap-2">
           {NETWORKS.map((n) => {
             const on = n === network;
             return (
@@ -143,9 +152,9 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
                 tabIndex={on ? 0 : -1} className="new-wallet-network">
                 <span className="new-wallet-network-dot" aria-hidden="true" />
                 <span className="min-w-0">
-                  <span className="network-tag">{MONEY_LABEL[n]}</span>
+                  <span className="network-tag">{moneyLabel(t, n)}</span>
                   <span className="block text-sm font-semibold text-text-primary mt-1">{NETWORK_NAME[n]}</span>
-                  <span className="block text-[11px] leading-snug text-text-secondary mt-0.5">{n === "mainnet" ? "Bitcoin and dollars you own. Start small." : "Test coins, worth nothing. Try anything."}</span>
+                  <span className="block text-[11px] leading-snug text-text-secondary mt-0.5">{n === "mainnet" ? t("wallet.new.networkHint.mainnet") : t("wallet.new.networkHint.testnet")}</span>
                 </span>
               </button>
             );
@@ -154,36 +163,36 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
 
         {chosen && chosenOffer ? (
           <div className="space-y-3" data-testid="new-wallet-step">
-            <button type="button" data-testid="new-wallet-back" disabled={busy} onClick={() => { setChosen(null); setPhase(null); setApiKey(""); }} className="text-xs text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">← All kinds of wallet</button>
+            <button type="button" data-testid="new-wallet-back" disabled={busy} onClick={() => { setChosen(null); setPhase(null); setApiKey(""); }} className="text-xs text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">{t("wallet.new.back")}</button>
             <div className="flex items-center gap-3">
               <Mark type={chosen} />
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-text-primary">{NETWORK_NAME[network]} {WALLET_NAME[chosen]}</p>
-                <p className="text-xs text-text-secondary">{ABOUT[chosen](network)}</p>
+                <p className="text-sm font-semibold text-text-primary">{t("wallet.new.kindTitle", { network: NETWORK_NAME[network], wallet: WALLET_NAME[chosen] })}</p>
+                <p className="text-xs text-text-secondary">{t(ABOUT[chosen](network))}</p>
               </div>
             </div>
             {chosenOffer.needs === "invite" && (
               <form className="space-y-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void create("fedimint", { invite }); }}>
-                <label className="block text-xs text-text-secondary">Federation invite code
+                <label className="block text-xs text-text-secondary">{t("wallet.new.invite")}
                   <input data-testid="new-wallet-invite" className={`${input} mt-1 font-mono text-xs`} value={invite} placeholder="fed11…" spellCheck={false} autoFocus disabled={busy} onChange={(e) => setInvite(e.target.value)} />
                 </label>
-                <p className="text-[11px] text-text-muted">Joining trusts the federation's guardians with the sats, like a Cashu mint.</p>
-                <Button type="submit" variant="primary" className="w-full" disabled={busy || !invite.trim()} data-testid="new-wallet-create">{busy ? "Joining…" : "Join and create"}</Button>
+                <p className="text-[11px] text-text-muted">{t("wallet.new.inviteHint")}</p>
+                <Button type="submit" variant="primary" className="w-full" disabled={busy || !invite.trim()} data-testid="new-wallet-create">{busy ? t("wallet.new.busy.joining") : t("wallet.new.joinAndCreate")}</Button>
               </form>
             )}
             {chosenOffer.needs === "apiKey" && (
               <form className="space-y-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void create(chosen, { apiKey }); }}>
-                <label className="block text-xs text-text-secondary">Breez API key
+                <label className="block text-xs text-text-secondary">{t("wallet.source.breez.apiKey")}
                   <input data-testid="new-wallet-api-key" className={`${input} mt-1 font-mono text-xs`} type="password" autoComplete="new-password" value={apiKey} spellCheck={false} autoFocus disabled={busy} onChange={(e) => setApiKey(e.target.value)} />
                 </label>
-                <p className="text-[11px] text-text-muted">Mainnet needs one: Breez gives them for free.</p>
-                <Button type="submit" variant="primary" className="w-full" disabled={busy || !apiKey.trim()} data-testid="new-wallet-create">{busy ? "Creating…" : "Create"}</Button>
+                <p className="text-[11px] text-text-muted">{t("wallet.source.breez.mainnetNeedsKey")}</p>
+                <Button type="submit" variant="primary" className="w-full" disabled={busy || !apiKey.trim()} data-testid="new-wallet-create">{busy ? t("wallet.new.busy.creating") : t("wallet.new.action.create")}</Button>
               </form>
             )}
             {chosenOffer.needs === "provider" && (
               <div className="space-y-3" data-testid="new-wallet-provider">
                 {(chosenOffer.providers?.length ?? 0) > 1 && (
-                  <Select aria-label="Source" data-testid="new-wallet-provider-select" value={providerId} disabled={busy} onChange={(id) => { setProviderId(id); setPhase(null); }}
+                  <Select aria-label={t("wallet.source.title")} data-testid="new-wallet-provider-select" value={providerId} disabled={busy} onChange={(id) => { setProviderId(id); setPhase(null); }}
                     options={(chosenOffer.providers ?? []).map((p) => ({ value: p.id, label: p.label }))} />
                 )}
                 {descriptor?.description && <p className="text-xs text-text-secondary">{descriptor.description}</p>}
@@ -193,7 +202,7 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
           </div>
         ) : (
           <div role="group" aria-labelledby="new-wallet-kinds" className="space-y-2">
-            <h3 id="new-wallet-kinds" className="text-xs font-semibold uppercase tracking-wide text-text-muted">Kinds of wallet on {NETWORK_NAME[network]}</h3>
+            <h3 id="new-wallet-kinds" className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("wallet.new.kinds", { network: NETWORK_NAME[network] })}</h3>
             <div className="new-wallet-kinds">
               {TYPES.map((type) => {
                 const o = offer(type), action = actionOf(type, o), mine = phase?.type === type ? phase.state : undefined;
@@ -209,13 +218,13 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
                       <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                         <span className="text-sm font-semibold text-text-primary">{WALLET_NAME[type]}</span>
                         <span className="new-wallet-action" data-testid={`new-wallet-type-${type}-status`} data-kind={mine ?? action}>
-                          {mine === "busy" ? <><span className="new-wallet-spinner" aria-hidden="true" />{BUSY_LABEL[type]}</>
-                            : mine === "done" ? <><Check />Ready</>
-                            : mine === "error" ? "Try again"
-                            : action === "added" ? <><Check />Added</> : ACTION_LABEL[action]}
+                          {mine === "busy" ? <><span className="new-wallet-spinner" aria-hidden="true" />{t(BUSY_LABEL[type])}</>
+                            : mine === "done" ? <><Check />{t("wallet.new.step.ready")}</>
+                            : mine === "error" ? t("wallet.new.tryAgain")
+                            : action === "added" ? <><Check />{t("wallet.new.action.added")}</> : t(ACTION_LABEL[action])}
                         </span>
                       </span>
-                      <span className="block text-xs text-text-secondary mt-1">{action === "off" && o?.reason ? shortReason(o.reason) : ABOUT[type](network)}</span>
+                      <span className="block text-xs text-text-secondary mt-1">{action === "off" && o?.reason ? shortReason(o.reason) : t(ABOUT[type](network))}</span>
                     </span>
                     {mine === "busy" && <span className="new-wallet-shimmer" aria-hidden="true" />}
                   </button>
@@ -229,7 +238,7 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
         {error && (
           <div className="space-y-2" role="alert">
             <Notice tone="error" testId="new-wallet-error">{error.text}</Notice>
-            {!offer(error.type)?.needs && <Button onClick={() => void create(error.type)} data-testid="new-wallet-retry">Try again</Button>}
+            {!offer(error.type)?.needs && <Button onClick={() => void create(error.type)} data-testid="new-wallet-retry">{t("wallet.new.tryAgain")}</Button>}
           </div>
         )}
       </div>
@@ -239,18 +248,20 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
 
 /** The steps of the wallet being made, each done, under way or to come; then Ready. */
 function Progress({ phase, network }: { phase: Phase; network: WalletNetwork }) {
-  const steps = [...STEPS[phase.type], "Ready"];
+  const { t } = useI18n();
+  const steps: Key[] = [...STEPS[phase.type], "wallet.new.step.ready"];
+  const names = { network: NETWORK_NAME[network], wallet: WALLET_NAME[phase.type] };
   const done = phase.state === "done";
   return (
     <div className="new-wallet-progress" role="status" aria-live="polite" data-testid="new-wallet-progress" data-state={phase.state}>
-      <p className="text-xs text-text-secondary">{done ? `Your ${NETWORK_NAME[network]} ${WALLET_NAME[phase.type]} wallet is ready.` : `Making your ${NETWORK_NAME[network]} ${WALLET_NAME[phase.type]} wallet. Nothing is saved until its server answers.`}</p>
+      <p className="text-xs text-text-secondary">{done ? t("wallet.new.ready", names) : t("wallet.new.making", names)}</p>
       <ol className="space-y-1.5 mt-2">
         {steps.map((step, i) => {
           const state = done || i < phase.step ? "done" : i === phase.step ? "active" : "todo";
           return (
             <li key={step} className="flex items-center gap-2 text-sm" data-testid={i === steps.length - 1 ? "new-wallet-ready" : "new-wallet-step"} data-state={state}>
               <span className="new-wallet-step-mark" aria-hidden="true">{state === "done" ? <Check /> : state === "active" ? <span className="new-wallet-spinner" /> : null}</span>
-              <span className={state === "todo" ? "text-text-muted" : "text-text-primary"}>{step}{state === "active" ? "…" : ""}</span>
+              <span className={state === "todo" ? "text-text-muted" : "text-text-primary"}>{state === "active" ? t("wallet.new.stepActive", { step: t(step) }) : t(step)}</span>
             </li>
           );
         })}

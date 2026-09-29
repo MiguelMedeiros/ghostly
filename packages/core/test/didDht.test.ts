@@ -11,7 +11,7 @@ import { MAX_DNS_PACKET_BYTES, PacketTooLargeError } from "../src/pkarr";
 
 // covers: did.dht.document
 
-/** The official vectors (https://did-dht.com/#test-vectors), as the reference implementation keeps them. */
+/** The official vectors (https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md#test-vectors), as the reference implementation keeps them. */
 const vector = <T>(name: string): T => JSON.parse(readFileSync(new URL(`./fixtures/did-dht/${name}.json`, import.meta.url), "utf8")) as T;
 interface VectorRecord { name: string; type: "TXT" | "NS"; ttl: number; rdata: string[] }
 

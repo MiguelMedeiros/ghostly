@@ -1,6 +1,8 @@
 import {formatPaymentAmount} from '@ghostly/core';
 import type {WalletInstanceView, WalletNetwork, WalletPlatform, WalletState} from '../lib/platform';
 import type {WalletCard,WalletRail} from './walletCardTypes';
+import type {Translate} from '../contexts/I18nContext';
+import {english} from '../lib/english';
 export type {ChatRail,WalletCard,WalletRail} from './walletCardTypes';
 export const CASHU_MINT_SOURCE = 'cashu-mint';
 /** The fee limit an on-chain payment starts with, in sats: a small transaction at a few sat/vB. The review shows the real fee. */
@@ -60,13 +62,13 @@ export const cardWallet=(wallet:WalletPlatform,card:Pick<InstanceCard,'network'|
  * The wallets' cards, shared by the wallet page and the chat's payment picker: one per wallet the profile has, each
  * on its network, in the deck's order.
  */
-export function walletCards(state:WalletState,{lightning='cards'}:{lightning?:'cards'|'default'}={}):InstanceCard[] {
+export function walletCards(state:WalletState,{lightning='cards',t=english}:{lightning?:'cards'|'default';t?:Translate}={}):InstanceCard[] {
  return (state.wallets??[]).flatMap(w=>{
-  if(w.type!=='lightning')return [walletCard(w.type,w.network,networkState(state,w.network))];
+  if(w.type!=='lightning')return [walletCard(w.type,w.network,networkState(state,w.network),undefined,t)];
   // The Accept side: one Lightning card per network, the default for receiving (a request's invoice comes from it).
-  if(lightning==='default')return w.receive===false?[]:[walletCard(w.type,w.network,networkState(state,w.network))];
+  if(lightning==='default')return w.receive===false?[]:[walletCard(w.type,w.network,networkState(state,w.network),undefined,t)];
   const card=deckId(w,state)===cardId(w.type,w.network)?undefined:w.card;
-  return [walletCard(w.type,w.network,networkState(state,w.network,w.card),card)];
+  return [walletCard(w.type,w.network,networkState(state,w.network,w.card),card,t)];
  });
 }
 
@@ -84,61 +86,71 @@ export const receivingFirst=<C extends InstanceCard>(cards:C[]):C[]=>{
 /** Real money first, then test money, each network's cards in the deck's order: a deck that mixes both keeps them apart. */
 export const byNetwork=<C extends {network:WalletNetwork}>(cards:C[]):C[]=>[...cards.filter(c=>c.network==='mainnet'),...cards.filter(c=>c.network==='testnet')];
 
-/** What one wallet's card shows, from its network's state. `card`: one Lightning card of several on its network. */
-export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState,card?:string):InstanceCard {
- const unit=satsUnit(network),base={id:cardId(rail,network,card),rail,network,...(card?{card}:{})};
- const cashu=`${Math.max(0,s.balance).toLocaleString()} ${unit}`;
+/**
+ * What one wallet's card shows, from its network's state. `card`: one Lightning card of several on its network. `t`:
+ * the app's language (English without it).
+ */
+export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState,card?:string,t:Translate=english):InstanceCard {
+ const unit=t(network==='testnet'?'wallet.sats.testnet':'wallet.sats.mainnet'),base={id:cardId(rail,network,card),rail,network,...(card?{card}:{})};
+ const sats=(n:number)=>t('wallet.cards.amount',{amount:n.toLocaleString(),unit});
+ const cashu=sats(Math.max(0,s.balance));
+ const ready_=t('wallet.cards.status.ready'),connecting=t('wallet.cards.status.connecting'),experimental=t('wallet.cards.status.experimental'),setUp=t('wallet.cards.status.setUp'),realBitcoin=t('wallet.cards.status.realBitcoin');
  switch(rail) {
-  case 'cashu': return {...base,name:'Cashu',balance:cashu,detail:network==='testnet'?'Ecash · test mints':'Ecash · your mints',status:s.mints.length?'Ready':'Set up',ready:s.mints.length>0};
+  case 'cashu': return {...base,name:'Cashu',balance:cashu,detail:network==='testnet'?t('wallet.cards.detail.cashuTestnet'):t('wallet.cards.detail.cashuMainnet'),status:s.mints.length?ready_:setUp,ready:s.mints.length>0};
   case 'lightning': {
-   const face=lightningCard(s,cashu,unit);
+   const face=lightningCard(t,s,cashu,sats);
    // One of several: its own name, and the network's default for receiving says so.
-   return card?{...base,...face,name:s.lightning?.name||face.name,...(s.lightning?.receive?{tag:'Default',receive:true}:{})}:{...base,...face};
+   return card?{...base,...face,name:s.lightning?.name||face.name,...(s.lightning?.receive?{tag:t('wallet.cards.tag.default'),receive:true}:{})}:{...base,...face};
   }
   case 'arkade': {
    const ark=s.ark,ready=!!ark?.configured&&!ark.locked&&!!ark.address;
    // Ready means it can receive: an Ark wallet that has no address yet (its provider has not answered) is not.
-   return {...base,name:'Ark',balance:ready?`${ark!.balance.toLocaleString()} ${unit}`:ark?.configured&&!ark.automatic?'Locked':'Connecting…',detail:`Arkade · ${ark?.network&&ark.network!=='bitcoin'?ark.network:'Bitcoin'}`,status:ready?'Ready':'Experimental',ready};
+   return {...base,name:'Ark',balance:ready?sats(ark!.balance):ark?.configured&&!ark.automatic?t('wallet.cards.balance.locked'):connecting,detail:`Arkade · ${ark?.network&&ark.network!=='bitcoin'?ark.network:'Bitcoin'}`,status:ready?ready_:experimental,ready};
   }
   case 'bark': {
    const bark=s.bark,ready=!!bark?.configured&&!bark.locked&&!!bark.address;
-   return {...base,name:'Bark',balance:ready?`${bark!.balance.toLocaleString()} ${unit}`:'Connecting…',detail:`Second's Ark · ${bark?.network==='regtest'?'regtest':bark?.network==='bitcoin'||network==='mainnet'?'Bitcoin':'signet'}`,status:ready?(network==='mainnet'?'Real bitcoin':'Ready'):'Experimental',ready};
+   return {...base,name:'Bark',balance:ready?sats(bark!.balance):connecting,detail:t('wallet.cards.detail.bark',{network:bark?.network==='regtest'?'regtest':bark?.network==='bitcoin'||network==='mainnet'?'Bitcoin':'signet'}),status:ready?(network==='mainnet'?realBitcoin:ready_):experimental,ready};
   }
   case 'spark': {
    const spark=s.spark,ready=!!spark?.configured&&!spark.locked&&!!spark.address;
-   return {...base,name:'Spark',balance:ready?`${spark!.balance.toLocaleString()} ${unit}`:spark?.needsKey?'Needs a key':'Connecting…',detail:`Spark · ${network==='testnet'?'regtest':'Bitcoin'}`,status:ready?(network==='testnet'?'Ready':'Real bitcoin'):spark?.needsKey?'Set up':'Experimental',ready};
+   return {...base,name:'Spark',balance:ready?sats(spark!.balance):spark?.needsKey?t('wallet.cards.balance.needsKey'):connecting,detail:`Spark · ${network==='testnet'?'regtest':'Bitcoin'}`,status:ready?(network==='testnet'?ready_:realBitcoin):spark?.needsKey?setUp:experimental,ready};
   }
-  case 'bitcoin': return {...base,...bitcoinCard(s,unit)};
-  case 'fedimint': return {...base,...fedimintCard(s,unit)};
+  case 'bitcoin': return {...base,...bitcoinCard(t,s,sats)};
+  case 'fedimint': return {...base,...fedimintCard(t,s,sats)};
   case 'usdt': {
    const usdt=s.usdt,ready=!!usdt?.configured&&!usdt.locked,test=network==='testnet'||(!!usdt?.chainId&&usdt.chainId!==1);
-   return {...base,name:'USDT',balance:ready?`${formatPaymentAmount(usdt!.balance,usdt!.decimals)} ${test?'TEST-USDT':'USDT'}`:usdt?.configured&&!usdt.automatic?'Locked':'Connecting…',detail:usdt?.chainId===31337?'EVM local · test token':usdt?.chainId===11155111||(!usdt?.chainId&&test)?'Sepolia · test token':'Ethereum · via WDK',status:ready?'Ready':'Experimental',ready};
+   return {...base,name:'USDT',balance:ready?t('wallet.cards.amount',{amount:formatPaymentAmount(usdt!.balance,usdt!.decimals),unit:test?'TEST-USDT':'USDT'}):usdt?.configured&&!usdt.automatic?t('wallet.cards.balance.locked'):connecting,detail:usdt?.chainId===31337?t('wallet.cards.detail.usdtLocal'):usdt?.chainId===11155111||(!usdt?.chainId&&test)?t('wallet.cards.detail.usdtSepolia'):t('wallet.cards.detail.usdtEthereum'),status:ready?ready_:experimental,ready};
   }
  }
 }
 
+/**
+ * A card whose wallet is not set up yet (its status says Set up, or Shared balance with no mint to share): pass the
+ * same `t` the cards were made with, so the comparison is in the same language.
+ */
+export const cardNotSetUp=(card:Pick<WalletCard<string>,'status'>,t:Translate=english)=>card.status===t('wallet.cards.status.setUp')||card.status===t('wallet.cards.status.sharedBalance');
+
 type Face=Omit<WalletCard<string>,'id'|'rail'|'network'>;
 /** Lightning goes through its network's source: the Cashu mints (sharing the Cashu balance) unless another was chosen. */
-function lightningCard(s:WalletState,cashu:string,unit:string):Face {
+function lightningCard(t:Translate,s:WalletState,cashu:string,sats:(n:number)=>string):Face {
  const ln=s.lightning;
- if(!ln||!ln.providerId||ln.providerId===CASHU_MINT_SOURCE)return {name:'Lightning',balance:cashu,detail:'Invoices via Cashu',status:'Shared balance',ready:s.mints.length>0};
+ if(!ln||!ln.providerId||ln.providerId===CASHU_MINT_SOURCE)return {name:'Lightning',balance:cashu,detail:t('wallet.cards.detail.lightningCashu'),status:t('wallet.cards.status.sharedBalance'),ready:s.mints.length>0};
  const ready=ln.status==='ready';
  // Reconnecting: the last balance it read (the status says it is not a fresh one), until it is unavailable.
- const last=ln.status==='connecting'&&ln.balance!==undefined?`${ln.balance.toLocaleString()} ${unit}`:undefined;
- return {name:'Lightning',balance:ready?ln.balance!==undefined?`${ln.balance.toLocaleString()} ${unit}`:'Ready':ln.status==='error'?'Unavailable':last??'Connecting…',detail:`Via ${ln.alias??ln.label??ln.providerId}`,status:ready?'Ready':ln.status==='error'?'Check settings':'Connecting…',ready};
+ const last=ln.status==='connecting'&&ln.balance!==undefined?sats(ln.balance):undefined;
+ return {name:'Lightning',balance:ready?ln.balance!==undefined?sats(ln.balance):t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.balance.unavailable'):last??t('wallet.cards.status.connecting'),detail:t('wallet.cards.detail.lightningVia',{name:ln.alias??ln.label??ln.providerId}),status:ready?t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
 }
 /** Federation ecash: the federations joined on this network, one balance. */
-function fedimintCard(s:WalletState,unit:string):Face {
+function fedimintCard(t:Translate,s:WalletState,sats:(n:number)=>string):Face {
  const fm=s.fedimint,federations=fm?.federations??[],ready=federations.some(f=>f.status==='ready');
- const detail=federations.length===1?federations[0].name??'1 federation':federations.length?`${federations.length} federations`:'Federation ecash';
- if(!federations.length)return {name:'Fedimint',balance:'No federation',detail,status:'Set up',ready:false};
- return {name:'Fedimint',balance:ready?`${(fm!.balance).toLocaleString()} ${unit}`:federations.some(f=>f.status==='error')?'Unavailable':'Connecting…',detail,status:ready?'Ready':'Connecting…',ready};
+ const detail=federations.length===1?federations[0].name??t('wallet.cards.detail.federationOne'):federations.length?t('wallet.cards.detail.federations',{count:federations.length}):t('wallet.cards.detail.federationEcash');
+ if(!federations.length)return {name:'Fedimint',balance:t('wallet.cards.balance.noFederation'),detail,status:t('wallet.cards.status.setUp'),ready:false};
+ return {name:'Fedimint',balance:ready?sats(fm!.balance):federations.some(f=>f.status==='error')?t('wallet.cards.balance.unavailable'):t('wallet.cards.status.connecting'),detail,status:ready?t('wallet.cards.status.ready'):t('wallet.cards.status.connecting'),ready};
 }
 /** On-chain Bitcoin through its network's source; there is none until one is set up. */
-function bitcoinCard(s:WalletState,unit:string):Face {
+function bitcoinCard(t:Translate,s:WalletState,sats:(n:number)=>string):Face {
  const bt=s.bitcoin,ready=bt?.status==='ready';
- const sats=(n:number)=>`${n.toLocaleString()} ${unit}`;
  const last=bt?.status==='connecting'&&bt.balance!==undefined?sats(bt.balance):undefined;
- return {name:'Bitcoin',balance:ready?sats(bt!.balance??0):!bt||bt.status==='none'?'No source':bt.status==='error'?'Unavailable':last??'Connecting…',
-  detail:bt?.providerId?`On-chain · ${bt.alias??bt.label??bt.providerId}`:'On-chain',status:ready?'Ready':!bt||bt.status==='none'?'Set up':bt.status==='error'?'Check settings':'Connecting…',ready};
+ return {name:'Bitcoin',balance:ready?sats(bt!.balance??0):!bt||bt.status==='none'?t('wallet.cards.balance.noSource'):bt.status==='error'?t('wallet.cards.balance.unavailable'):last??t('wallet.cards.status.connecting'),
+  detail:bt?.providerId?t('wallet.cards.detail.onchainVia',{name:bt.alias??bt.label??bt.providerId}):t('wallet.cards.detail.onchain'),status:ready?t('wallet.cards.status.ready'):!bt||bt.status==='none'?t('wallet.cards.status.setUp'):bt.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
 }

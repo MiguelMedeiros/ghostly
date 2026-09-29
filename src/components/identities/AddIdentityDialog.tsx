@@ -13,6 +13,7 @@ import { Select } from "../ui/Select";
 import { SubjectPreviewFacts } from "./SubjectPreview";
 import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
 import { externalLinkProps } from "../../lib/externalLink";
+import { useI18n } from "../../contexts/I18nContext";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const VALIDITY = [7, 30, 90, 180, 365];
@@ -26,6 +27,7 @@ interface Pending { draftId: string; statement: IdentityStatement; instructions?
  * evidence exactly as a contact will before anything is saved.
  */
 export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
   const providers = addableProviders();
   const platform = identityPlatform();
   // Always the picker first, even with one provider: the flow is the same whatever is registered.
@@ -71,7 +73,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     return { draftId, statement: identityStatement(binding) };
   }
   async function complete(draftId: string, evidence: unknown) {
-    setProgress("Checking it the way your contacts will…");
+    setProgress(t("identities.add.checking"));
     await engine.call("completeIdentityProof", { draftId, evidence });
     draft.current = null;
     close();
@@ -90,7 +92,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     if (!provider || !signer) return;
     if (signer.kind === "in-app") {
       await signer.run(ctx, async session => {
-        setProgress("Asking your signer which identity it holds…");
+        setProgress(t("identities.add.askingSigner"));
         const p = await begin(await session.subject());
         ctx.signal.throwIfAborted();
         const evidence = await session.sign(p.statement);
@@ -109,7 +111,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     if (signer.kind === "redirect") {
       // Called synchronously from the click: nothing is awaited before start().
       const evidence = signer.start(pending.statement, ctx);
-      setProgress(`Continue in the ${provider!.label} window…`);
+      setProgress(t("identities.add.continueIn", { provider: provider!.label }));
       const token = await evidence;
       ctx.signal.throwIfAborted();
       await complete(pending.draftId, token);
@@ -122,8 +124,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   const basic = providers.filter(p => !p.advanced), more = providers.filter(p => p.advanced);
   const signerChoice = <>
     {signers.length > 1 && (
-      <label className="block space-y-1 text-xs text-text-muted">Sign with
-        <Select data-testid="add-identity-signer" aria-label="Sign with" value={signer?.id ?? ""} disabled={busy} onChange={id => { setSignerId(id); setError(""); }}
+      <label className="block space-y-1 text-xs text-text-muted">{t("identities.add.signWith")}
+        <Select data-testid="add-identity-signer" aria-label={t("identities.add.signWith")} value={signer?.id ?? ""} disabled={busy} onChange={id => { setSignerId(id); setError(""); }}
           options={signers.map(s => ({ value: s.id, label: s.label }))} />
       </label>
     )}
@@ -136,25 +138,25 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
         className="focus:outline-none w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4 @container">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 id="add-identity-title" className="text-lg font-medium text-text-primary">Add an identity</h2>
-            <p className="text-xs text-text-muted mt-1">Optional. Nothing is shared until you choose a contact in a chat.</p>
+            <h2 id="add-identity-title" className="text-lg font-medium text-text-primary">{t("identities.ghostly.addOne")}</h2>
+            <p className="text-xs text-text-muted mt-1">{t("identities.add.lead")}</p>
           </div>
-          <button type="button" aria-label="Close" onClick={close} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
+          <button type="button" aria-label={t("common.close")} onClick={close} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
         </div>
 
         {!provider ? (
           providers.length ? (
             <div className="space-y-3">
-              {basic.length > 0 && <div role="list" aria-label="Kinds of identity"><FieldGrid min="22rem" max={2}>{basic.map(card)}</FieldGrid></div>}
+              {basic.length > 0 && <div role="list" aria-label={t("identities.add.kinds")}><FieldGrid min="22rem" max={2}>{basic.map(card)}</FieldGrid></div>}
               {more.length > 0 && <AdvancedProviders open={advanced || !basic.length} onToggle={() => setAdvanced(!advanced)} labels={more.map(p => p.label)}>
                 <FieldGrid min="22rem" max={2}>{more.map(card)}</FieldGrid>
               </AdvancedProviders>}
             </div>
-          ) : <Notice>No kind of identity can be added in this app yet.</Notice>
+          ) : <Notice>{t("identities.add.none")}</Notice>
         ) : pending ? (
           <div className="space-y-3">
             <p className="text-sm text-text-primary">{signer?.label}</p>
-            {signer?.kind === "redirect" && <p className="text-sm text-text-secondary">{provider!.label} will ask you to log in. It then vouches for the account to Ghostly with a signed token; your password never reaches Ghostly.</p>}
+            {signer?.kind === "redirect" && <p className="text-sm text-text-secondary">{t("identities.add.redirectHint", { provider: provider!.label })}</p>}
             <ol className="space-y-3 list-decimal pl-5 text-sm text-text-secondary">
               {pending.instructions?.steps.map((step, i) => (
                 <li key={i} className="space-y-2">
@@ -171,8 +173,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               </label>
             )}
             <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={close}>Cancel</Button>
-              <Button variant="primary" data-testid="add-identity-finish" disabled={busy || (signer?.kind === "external-tool" && !pasted.trim())} onClick={finish}>{busy ? (signer?.kind === "redirect" ? "Waiting…" : "Checking…") : signer?.kind === "publish" ? "Check and save" : signer?.kind === "redirect" ? `Continue with ${provider!.label}` : "Verify and save"}</Button>
+              <Button onClick={close}>{t("common.cancel")}</Button>
+              <Button variant="primary" data-testid="add-identity-finish" disabled={busy || (signer?.kind === "external-tool" && !pasted.trim())} onClick={finish}>{busy ? (signer?.kind === "redirect" ? t("identities.waiting") : t("identities.contact.checking")) : signer?.kind === "publish" ? t("identities.add.checkAndSave") : signer?.kind === "redirect" ? t("identities.add.continueWith", { provider: provider!.label }) : t("identities.add.verifyAndSave")}</Button>
             </div>
           </div>
         ) : approval ? (
@@ -181,7 +183,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               <ProviderMark provider={provider.id} />
               <p className="min-w-0 flex-1 text-sm text-text-primary">{provider.label}</p>
             </div>
-            <ApprovalPanel request={approval} onCancel={() => { abort.current?.abort(); setApproval(null); setProgress(""); setError("Cancelled. Nothing was saved."); }} />
+            <ApprovalPanel request={approval} onCancel={() => { abort.current?.abort(); setApproval(null); setProgress(""); setError(t("identities.add.cancelled")); }} />
           </div>
         ) : (
           <div className="space-y-4">
@@ -191,7 +193,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
                 <p className="text-sm text-text-primary">{provider.label}</p>
                 <CategoryPill provider={provider} />
               </div>
-              <Button disabled={busy} onClick={() => { setProvider(null); setError(""); }}>Back</Button>
+              <Button disabled={busy} onClick={() => { setProvider(null); setError(""); }}>{t("common.back")}</Button>
             </div>
             <ProviderAbout provider={provider} testId="add-identity-about" />
             {!previewFirst && signerChoice}
@@ -221,21 +223,21 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             ))}
             {previewFirst && <SubjectPreviewFacts state={preview} />}
             {previewFirst && preview.status === "ok" && signerChoice}
-            <label className="block space-y-1 text-xs text-text-muted">Valid for
-              <Select data-testid="add-identity-validity" aria-label="Valid for" value={String(validity)} disabled={busy} onChange={d => setDays(Number(d))}
-                options={validityOptions.map(d => ({ value: String(d), label: `${d} days` }))} />
+            <label className="block space-y-1 text-xs text-text-muted">{t("identities.add.validFor")}
+              <Select data-testid="add-identity-validity" aria-label={t("identities.add.validFor")} value={String(validity)} disabled={busy} onChange={d => setDays(Number(d))}
+                options={validityOptions.map(d => ({ value: String(d), label: d === 1 ? t("identities.add.dayOne") : t("identities.add.days", { count: d }) }))} />
             </label>
-            <p className="text-xs text-text-muted">{provider.privacy} Sharing the same identity with several contacts lets them know it is the same person.</p>
-            {provider.experimental && <Notice tone="warning">Experimental: not yet tested with every tool.</Notice>}
+            <p className="text-xs text-text-muted">{provider.privacy} {t("identities.add.linkable")}</p>
+            {provider.experimental && <Notice tone="warning">{t("identities.add.experimental")}</Notice>}
             <div className="flex flex-wrap justify-end gap-2">
-              {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError("Cancelled. Nothing was saved."); }}>Cancel</Button>}
+              {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError(t("identities.add.cancelled")); }}>{t("common.cancel")}</Button>}
               <Button variant="primary" data-testid="add-identity-start" disabled={busy || !signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
-                {busy ? "Waiting…" : signer?.action ?? (signer?.kind === "in-app" ? `Sign with ${signer.label.replace(/ \(.*\)$/, "")}` : "Continue")}
+                {busy ? t("identities.waiting") : signer?.action ?? (signer?.kind === "in-app" ? t("identities.add.signWithNamed", { signer: signer.label.replace(/ \(.*\)$/, "") }) : t("identities.add.continue"))}
               </Button>
             </div>
           </div>
         )}
-        {authUrl && <a {...externalLinkProps(authUrl)} className="block text-xs text-accent underline">Open your signer to approve</a>}
+        {authUrl && <a {...externalLinkProps(authUrl)} className="block text-xs text-accent underline">{t("identities.add.openSigner")}</a>}
         {progress && <Notice testId="add-identity-progress">{progress}</Notice>}
         {error && <Notice tone="error" testId="add-identity-error">{error}</Notice>}
       </div>
@@ -245,19 +247,23 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
 
 /** Kinds of identity for people who know what they are (DIDs): folded under "Advanced" so they do not crowd the picker. */
 function AdvancedProviders({ open, onToggle, labels, children }: { open: boolean; onToggle: () => void; labels: string[]; children: React.ReactNode }) {
+  const { t } = useI18n();
   return (
     <div className="space-y-2">
       <button type="button" data-testid="add-identity-advanced" aria-expanded={open} aria-controls="add-identity-advanced-list" onClick={onToggle}
         className="flex items-center gap-1.5 min-h-11 text-xs font-medium text-text-secondary hover:text-text-primary cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? "rotate-90" : ""}`}><path d="m9 6 6 6-6 6" /></svg>
-        Advanced<span className="font-normal text-text-muted">· {labels.join(", ")}</span>
+        {t("identities.add.advanced")}<span className="font-normal text-text-muted">· {labels.join(", ")}</span>
       </button>
-      {open && <div id="add-identity-advanced-list" role="list" aria-label="Advanced kinds of identity">{children}</div>}
+      {open && <div id="add-identity-advanced-list" role="list" aria-label={t("identities.add.advancedKinds")}>{children}</div>}
     </div>
   );
 }
 
-const CategoryPill = ({ provider }: { provider: IdentityProofProvider }) => <StatusPill>{provider.category === "provider-attested" ? "Attested by a provider" : "Your own key"}</StatusPill>;
+function CategoryPill({ provider }: { provider: IdentityProofProvider }) {
+  const { t } = useI18n();
+  return <StatusPill>{provider.category === "provider-attested" ? t("identities.add.attested") : t("identities.card.yourOwnKey")}</StatusPill>;
+}
 
 /**
  * One kind of identity in the picker: its mark, name, category and one line, to be recognized at a glance.
@@ -265,6 +271,7 @@ const CategoryPill = ({ provider }: { provider: IdentityProofProvider }) => <Sta
  */
 function ProviderCard({ provider: p, open, onAbout, onChoose }: { provider: IdentityProofProvider; open: boolean; onAbout: () => void; onChoose: () => void }) {
   const aboutId = `add-identity-about-${p.id}`;
+  const { t } = useI18n();
   return (
     <div role="listitem" data-testid={`add-identity-card-${p.id}`} className="@container rounded-xl border border-border">
       <div className="flex items-stretch">
@@ -283,7 +290,7 @@ function ProviderCard({ provider: p, open, onAbout, onChoose }: { provider: Iden
             )}
           </span>
         </button>
-        <button type="button" data-testid={`add-identity-about-${p.id}`} aria-label={`About ${p.label}`} aria-expanded={open} aria-controls={aboutId} onClick={onAbout}
+        <button type="button" data-testid={`add-identity-about-${p.id}`} aria-label={t("identities.add.about", { provider: p.label })} aria-expanded={open} aria-controls={aboutId} onClick={onAbout}
           className={`grid place-items-center w-11 min-h-11 shrink-0 rounded-r-xl hover:bg-surface-alt cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${open ? "text-accent" : "text-text-muted hover:text-text-primary"}`}>
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
         </button>
@@ -295,6 +302,7 @@ function ProviderCard({ provider: p, open, onAbout, onChoose }: { provider: Iden
 
 /** What a proof of this kind shows, what it does not, and who could have made it. Above the form and behind "About". */
 function ProviderAbout({ provider: p, testId = "identity-about" }: { provider: IdentityProofProvider; testId?: string }) {
+  const { t } = useI18n();
   return (
     <div data-testid={testId} className="space-y-1.5 text-xs">
       <p className="text-text-secondary">{p.description}</p>
@@ -304,17 +312,18 @@ function ProviderAbout({ provider: p, testId = "identity-about" }: { provider: I
           <span>{p.limits}</span>
         </p>
       )}
-      <p className="text-text-muted">{p.category === "provider-attested" ? "A company vouches that you logged in to this account. Your contacts see who vouches." : "Only the holder of this key can make this proof."}</p>
+      <p className="text-text-muted">{p.category === "provider-attested" ? t("identities.add.attestedAbout") : t("identities.add.keyAbout")}</p>
     </div>
   );
 }
 
 function CopyBlock({ text, testId }: { text: string; testId: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
   return (
     <div className="space-y-1.5">
       <code data-testid={testId} className="block break-all select-all whitespace-pre-wrap bg-surface-alt rounded-lg p-2.5 text-xs text-text-primary font-mono">{text}</code>
-      <Button onClick={() => { void navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy"}</Button>
+      <Button onClick={() => { void navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? t("identities.ghostly.copied") : t("common.copy")}</Button>
     </div>
   );
 }

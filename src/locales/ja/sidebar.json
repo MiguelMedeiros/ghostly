@@ -3,6 +3,14 @@
   "copyInvite": "招待コードをコピー",
   "deleteAllChats": "すべてのチャットを削除",
   "deleteChat": "チャットを削除",
+  "group": {
+    "adminAnswered": "管理者のアプリが応答しました…",
+    "invitedBy": "{{contact}} からの招待 · {{members}}",
+    "invitedByUnknown": "連絡先からの招待 · {{members}}",
+    "letting": "メンバーが参加を受け入れています…",
+    "waitingAdmin": "管理者のアプリを待っています…",
+    "waitingIn": "参加の許可を待っています…"
+  },
   "join": "参加",
   "joinChat": "チャットに参加",
   "new": "新規",
@@ -21,5 +29,6 @@
   "searchPlaceholder": "チャットを検索...",
   "settings": "設定",
   "sharedIdentity": "IDを共有しました",
-  "startChat": "新しいチャット"
+  "startChat": "新しいチャット",
+  "unread": "未読メッセージ"
 }

@@ -6,12 +6,16 @@ import { clockTime } from "../../lib/time";
 import { providerLabel, shortSubject, useEngineState } from "../../lib/identities";
 import { idCard, receivedIdCard } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
+import { useI18n, type Translate } from "../../contexts/I18nContext";
 
 const time = clockTime;
 
 /** Where a share stands, as the card's corner shows it. `waiting`: mine, the contact not connected yet. `unanswered`: theirs, never presented. */
 type ShareMark = "verifying" | "verified" | "failed" | "waiting" | "unanswered";
-const MARK_TEXT: Record<ShareMark, string> = { verifying: "Checking", verified: "Verified", failed: "Not verified", waiting: "Waiting", unanswered: "Not checked" };
+const markText = (mark: ShareMark, t: Translate) => ({
+  verifying: t("identities.share.checking"), verified: t("identities.card.verified"), failed: t("identities.share.notVerified"),
+  waiting: t("identities.share.waiting"), unanswered: t("identities.share.notChecked"),
+})[mark];
 
 /** The mark a share wears now: its entry's state, told apart where the entry alone cannot say it. */
 function shareMark(entry: IdentityTimelineEntry, link: Pick<LinkView, "identities"> | undefined, now = Date.now()): ShareMark {
@@ -24,10 +28,11 @@ function shareMark(entry: IdentityTimelineEntry, link: Pick<LinkView, "identitie
 /** The identity as the card shows it: its picture and name when known (a public profile, #297), else its provider's mark and handle. */
 function useShown(entry: IdentityTimelineEntry, link: LinkView | undefined) {
   const state = useEngineState();
+  const { t, language } = useI18n();
   const now = Date.now() / 1000;
   const r = entry.side === "theirs" ? link?.identities?.received.find(x => x.id === entry.proof) : undefined;
   const p = entry.side === "mine" ? state?.identityProofs?.find(x => x.id === entry.proof) : undefined;
-  const card = r ? receivedIdCard(r, now) : p ? idCard(p, { now }) : undefined;
+  const card = r ? receivedIdCard(r, now, t, language) : p ? idCard(p, { now, t }) : undefined;
   const subject = card?.subject ?? entry.subject;
   return {
     label: card?.label ?? providerLabel(entry.provider),
@@ -47,12 +52,13 @@ function useShown(entry: IdentityTimelineEntry, link: LinkView | undefined) {
  */
 export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: IdentityTimelineEntry; link: LinkView | undefined; contact: string; onOpen: (entry: IdentityTimelineEntry) => void }) {
   const shown = useShown(entry, link);
-  const who = entry.side === "mine" ? "You" : contact;
+  const { t } = useI18n();
+  const mine = entry.side === "mine";
   const what = `${shown.label}${shown.short ? ` · ${shown.short}` : ""}`;
   if (entry.kind === "stopped") {
     const text = entry.reason === "revoked"
-      ? `${entry.side === "mine" ? "Your" : `${contact}’s`} ${what} was revoked`
-      : `${who} stopped sharing ${what}`;
+      ? (mine ? t("identities.share.revokedMine", { what }) : t("identities.share.revokedTheirs", { contact, what }))
+      : (mine ? t("identities.share.stoppedMine", { what }) : t("identities.share.stoppedTheirs", { contact, what }));
     return (
       <div className="mb-3.5 flex flex-col items-center px-[63px] max-md:px-2.5" data-testid="identity-share" data-side={entry.side} data-kind="stopped">
         <button type="button" onClick={() => onOpen(entry)}
@@ -65,10 +71,10 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
     );
   }
   const mark = shareMark(entry, link);
-  const title = mark === "failed" && entry.error ? `${MARK_TEXT.failed}: ${entry.error}` : MARK_TEXT[mark];
+  const title = mark === "failed" && entry.error ? t("identities.share.notVerifiedWhy", { error: entry.error }) : markText(mark, t);
   return (
     <div className="mb-3.5 flex flex-col items-center px-[63px] max-md:px-2.5" data-testid="identity-share" data-side={entry.side} data-kind="shared" data-state={mark}>
-      <button type="button" onClick={() => onOpen(entry)} aria-label={`${who} shared ${what} · ${title}`}
+      <button type="button" onClick={() => onOpen(entry)} aria-label={mine ? t("identities.share.sharedMineState", { what, state: title }) : t("identities.share.sharedTheirsState", { contact, what, state: title })}
         className={`flex w-full max-w-[280px] items-center gap-2.5 rounded-xl border border-border bg-surface-alt/90 p-2.5 text-start shadow-sm transition-colors hover:bg-surface-hover ${focus}`}>
         <span className="relative shrink-0">
           {shown.photo
@@ -80,7 +86,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-1.5 text-[11px] text-text-muted">
-            <span className="min-w-0 truncate" data-testid="identity-share-text">{who} shared {shown.label}</span>
+            <span className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.sharedMine", { what: shown.label }) : t("identities.share.sharedTheirs", { contact, what: shown.label })}</span>
             <time dateTime={new Date(entry.at).toISOString()} className="ms-auto shrink-0 text-[10px]">{time(entry.at)}</time>
           </span>
           {shown.name && <span className="block truncate text-sm font-medium text-text-primary" data-testid="identity-share-name">{shown.name}</span>}

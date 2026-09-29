@@ -14,7 +14,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
 import { deliveryShape, useDeliveryWords } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { groupReadAt, memberName } from "../lib/groups";
+import { groupReadAt, groupStatusText, memberName } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
@@ -204,7 +204,7 @@ export function ChatRow(p: ChatRowProps) {
               <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
             </svg>
             <span className="absolute top-1/2 -translate-y-1/2 start-full ms-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
-              You created this chat
+              {t("chat.createdHere")}
             </span>
           </span>
         )}
@@ -231,7 +231,7 @@ export function ChatRow(p: ChatRowProps) {
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} />}
               {previewText(p.lastMessage.text)}
             </span>
-          : <span className="italic text-text-muted">No messages</span>}
+          : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
           {muted && <MutedMark label={t("mute.bell")} />}
           {p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
@@ -273,21 +273,23 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
     setBusy(true);
     try { await engine.call(method, { groupId: group.id }); } catch { /* the row says what state it is in */ } finally { setBusy(false); }
   };
-  const status = invitation ? (invitation.viaLink ? (invitation.admin ? "Joining…" : group.profile === "community" ? (invitation.stage === "answered" ? "A member is letting you in…" : "Waiting to be let in…") : invitation.stage === "answered" ? "The admin's app answered…" : "Waiting for the admin's app…") : invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
-    : group.status !== "active" ? group.statusReason ?? group.status : `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
+  const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
+  const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+      : invitation.accepted ? t("group.chat.joining") : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members: members(invitation.members) }) : t("sidebar.group.invitedByUnknown", { members: members(invitation.members) }))
+    : group.status !== "active" ? group.statusReason ?? (group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
   const reactor = reacted && group.members.find(m => m.key === reacted.by);
-  const note = reacted && reactionNoteText(reacted, reactor ? memberName(reactor) : `Member ${reacted.by.slice(0, 8)}`, t);
+  const note = reacted && reactionNoteText(reacted, reactor ? memberName(reactor, t) : t("group.member.unnamed", { key: reacted.by.slice(0, 8) }), t);
   const size = AVATAR[density];
   return (
-    <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || "A group"} className={rowClass(active, density)}>
+    <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
       <div className="relative shrink-0">
         <GroupAvatar picture={group.picture} size={size} glyph={Math.round(size * 0.46)} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
       </div>
       <div className="flex-1 min-w-0">
         <RowText
-          name={group.name || "A group"}
+          name={group.name || t("group.chat.unnamed")}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
           time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt) : undefined}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
@@ -297,12 +299,12 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
           trailing={unread && <span className="flex items-center gap-1.5">
             {mention && <span data-testid="group-row-mention" data-muted={mentionQuiet || undefined} aria-label={t("mentions.unread")} title={t("mentions.unread")} role="img"
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold leading-none ${mentionQuiet ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>@</span>}
-            <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label="Unread messages" role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
+            <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label={t("sidebar.unread")} role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
           </span>}
         />
         {invitation && !invitation.accepted && <div className="mt-1.5 flex gap-2">
-          <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">Accept</button>
-          <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }} className="rounded-lg px-3 py-1 text-xs text-text-secondary hover:bg-surface-hover disabled:opacity-40">Decline</button>
+          <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("chat.file.accept")}</button>
+          <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }} className="rounded-lg px-3 py-1 text-xs text-text-secondary hover:bg-surface-hover disabled:opacity-40">{t("chat.file.decline")}</button>
         </div>}
       </div>
     </div>

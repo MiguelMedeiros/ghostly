@@ -3,6 +3,7 @@
   "camera": "Camera",
   "cameraFailed": "The camera could not start.",
   "caption": "Add a caption",
+  "captionTooLong": "This caption is {{bytes}} UTF-8 bytes. DHT allows up to {{max}}.",
   "category": {
     "activity": "Activities",
     "flags": "Flags",
@@ -15,6 +16,7 @@
     "symbols": "Symbols"
   },
   "closeCamera": "Close camera",
+  "dhtTooLong": "This text is {{bytes}} UTF-8 bytes. DHT allows up to {{max}}; shorten it or use a live connection. Your draft is kept.",
   "document": "Document",
   "dropFiles": "Drop to send",
   "emoji": "Emoji",
@@ -45,7 +47,11 @@
   "media": "Photos & videos",
   "noEmoji": "No emoji found",
   "noGifs": "No GIFs found",
+  "overSoft": "Over the {{bytes}} bytes the DHT carries: it is sent when you are live",
   "payment": "Payment",
+  "previewLoading": "Loading preview of {{host}}…",
+  "previewRemove": "Remove link preview",
+  "previewWithout": "Send without a preview",
   "removeFile": "Remove {{name}}",
   "retake": "Retake",
   "retry": "Try again",
@@ -55,10 +61,13 @@
   "send": "Send",
   "sendCount": "Send {{count}}",
   "sendFiles": "Send files",
+  "sendMessage": "Send message",
   "sendPhoto": "Send photo",
   "services": "Shared services",
   "servicesNeedApp": "Needs the Ghostly extension or desktop app",
   "servicesShared": "{{count}} shared in this chat",
   "skinTone": "Skin tone",
-  "takePhoto": "Take photo"
+  "takePhoto": "Take photo",
+  "tooLong": "That is too long to send ({{count}} characters, the limit is {{max}}).",
+  "tooLongDht": "That is too long for the DHT. Once you are connected peer to peer, long invoices and ecash tokens fit."
 }
