@@ -510,6 +510,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
         </div>
       )}
+      {/* Our call rang out (RING_MS): it ended by itself, and says why. */}
+      {webrtc.noAnswer && (
+        <div role="status" data-testid="call-no-answer"
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
+          {t("calls.noAnswer")}
+        </div>
+      )}
       {/* Chat Header */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
