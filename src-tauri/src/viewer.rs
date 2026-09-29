@@ -425,7 +425,10 @@ mod tests {
     fn links_open_outside_at_most_once_every_two_seconds() {
         let start = std::time::Instant::now();
         assert!(may_open_now(None, start));
-        assert!(!may_open_now(Some(start), start + Duration::from_millis(1999)));
+        assert!(!may_open_now(
+            Some(start),
+            start + Duration::from_millis(1999)
+        ));
         assert!(may_open_now(Some(start), start + EXTERNAL_LINK_SPACING));
     }
 }
