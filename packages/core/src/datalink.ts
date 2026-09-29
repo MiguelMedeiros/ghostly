@@ -52,6 +52,8 @@ export class DataLink {
   private pc: RTCPeerConnection | null = null;
   private myOfferTs = 0;
   private lastSignalTs = 0;
+  /** The peer's description as this connection was given it: Chrome shows it as `remoteDescription` only once applied. */
+  private remoteSdp: string | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -101,7 +103,8 @@ export class DataLink {
       this.lastSignalTs = signal.ts;
       const pc = this.pc;
       try {
-        await pc.setRemoteDescription({ type: "answer", sdp: buildDataSdp(signal) });
+        this.remoteSdp = buildDataSdp(signal);
+        await pc.setRemoteDescription({ type: "answer", sdp: this.remoteSdp });
         // On a quick path the channel is open before this resolves: never step back from open.
         if (this.pc === pc && this.state === "offering") this.setState("connecting");
       } catch {
@@ -110,9 +113,13 @@ export class DataLink {
     }
   }
 
+  /**
+   * On a quick path the channel opens before setRemoteDescription resolves (see `handleSignal`), when the connection
+   * does not show the answer yet: the one it was given counts, as DTLS already checked the peer against it.
+   */
   get fingerprints(): [string, string] | null {
     const local = this.pc?.localDescription?.sdp;
-    const remote = this.pc?.remoteDescription?.sdp;
+    const remote = this.pc?.remoteDescription?.sdp ?? (this.pc ? this.remoteSdp : null);
     if (!local || !remote) return null;
     try { return [extractRtcParams(local).f.toLowerCase(), extractRtcParams(remote).f.toLowerCase()]; }
     catch { return null; }
@@ -198,6 +205,7 @@ export class DataLink {
     const pc = this.pc;
     this.pc = null;
     this.myOfferTs = 0;
+    this.remoteSdp = null;
     if (!pc) return false;
     pc.close();
     return true;
