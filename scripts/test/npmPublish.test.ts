@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { versionedJson } from "../bump-version.mjs";
 // covers: headless.package
 
 const root = resolve(import.meta.dirname, "../..");
@@ -23,7 +24,7 @@ describe("the CLI on npm", () => {
   });
 
   it("moves with every release: bump-version sets its version with the others", () => {
-    expect(read("scripts/bump-version.mjs")).toContain('"packages/cli/package.json"');
+    expect(versionedJson(root)).toContain("packages/cli/package.json");
     expect(cli.version).toBe(json("package.json").version);
   });
 
