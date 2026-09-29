@@ -33,7 +33,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, forwardedAgain, readForwarded, withRequestOptions, type WireEdit } from "@ghostly/core";
+import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
 import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
@@ -1917,8 +1917,16 @@ export class GhostlyNode implements EngineImplementation {
     }));
   }
 
-  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
-    const { linkId, text } = params;
+  /**
+   * `card`: a bot's status card (WISP 4xx · Status Cards), checked here by the sender's rule; the text is its fallback,
+   * written from the card when none is given. Only the headless runtime and SDKs send one: the app never offers it.
+   */
+  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string; card?: unknown }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+    const { linkId } = params;
+    const card = params.card === undefined ? undefined : GhostlyNode.cardToSend(params.card);
+    if (typeof card === "string") return { error: card, refused: true };
+    const text = card && !(typeof params.text === "string" && params.text.trim()) ? statusCardText(card) : params.text;
+    if (typeof text !== "string") return { error: "Nothing to send", refused: true };
     const live = this.links.get(linkId);
     const trimmed = text.trim();
     // What a compatibility chat's DHT cannot carry is refused before it is kept: it must not show as sent. Whatever
@@ -1936,8 +1944,11 @@ export class GhostlyNode implements EngineImplementation {
       // A reply names a message of this chat, as both sides know it (WISP 400 § Replies); anything else is refused.
       const reply = params.replyTo === undefined ? undefined : await this.replyFor(linkId, params.replyTo);
       if (typeof reply === "string") return { error: reply, refused: true };
+      if (card) return this.sendChatText(live, trimmed, timestamp, undefined, reply, undefined, card);
       return this.sendChatText(live, trimmed, timestamp, params.preview === undefined ? undefined : parseLinkPreview(params.preview, trimmed), reply);
     }
+    // A compatibility chat carries text only (WISP 402).
+    if (card) return { error: "Status cards need a current chat; this compatibility chat sends text only.", refused: true };
     // A compatibility chat's records have no room for a reply (WISP 402): said, rather than sent without it.
     if (params.replyTo !== undefined) return { error: "Replies need a current chat; this compatibility chat sends text only.", refused: true };
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
@@ -1959,7 +1970,7 @@ export class GhostlyNode implements EngineImplementation {
    * both sides allow it; otherwise kept as `waiting` ("Sends when live") and sent by itself, in order, once
    * the chat can carry it. Only what must never wait, or a security stop, is refused.
    */
-  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview, reply?: MessageReply, forwarded?: number): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview, reply?: MessageReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { link } = live, linkId = live.stored.id;
     if (!link) return { error: "You are offline" };
     const bytes = new TextEncoder().encode(trimmed).length;
@@ -1972,7 +1983,8 @@ export class GhostlyNode implements EngineImplementation {
     const delivery = link.isDataLinkOpen ? "stream" : link.textDelivery === "dht" ? "dht" : "unavailable";
     // Not live: the contact's app may be closed. Wake it, if it shared how; it then connects and takes this message.
     if (delivery !== "stream") this.wakePeer(live);
-    const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }) };
+    // A card rides with the row; the DHT floor and a hold carry its text alone (WISP 4xx · Status Cards).
+    const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }), ...(card && { card }) };
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
       if (!validationError) {
@@ -2034,6 +2046,12 @@ export class GhostlyNode implements EngineImplementation {
     return message.replyTo && pairedWireReply(message.replyTo);
   }
 
+  /** A status card a caller asks to send, by the sender's rule (WISP 4xx · Status Cards), or why it cannot go. */
+  private static cardToSend(raw: unknown): StatusCard | string {
+    const checked = checkStatusCard(raw);
+    return "error" in checked ? `Status card: ${checked.error}` : checked.card;
+  }
+
   /**
    * A chat stopped by a security rejection (a stream authenticated a participation key other than the pinned one):
    * nothing goes until the person acts. Another key on the DHT or the link's signals is ignored instead (WISP 400).
@@ -2048,11 +2066,18 @@ export class GhostlyNode implements EngineImplementation {
    * (`editsFor`) once the chat is live and both sides offer edit/1. Only texts, at most `MAX_EDITS_PER_MESSAGE` times each,
    * and never empty (deleting is for that). What an edit says is checked like a message: its length, its preview.
    */
-  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[] }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  async editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: unknown }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId } = params;
     const refuse = (error: string) => ({ error, refused: true });
+    // A card's update (WISP 4xx · Status Cards): the whole new card, and its fallback text unless one is given.
+    const card = params.card === undefined ? undefined : GhostlyNode.cardToSend(params.card);
+    if (typeof card === "string") return refuse(card);
+    if (card && !(typeof params.text === "string" && params.text.trim())) params = { ...params, text: statusCardText(card) };
     // A group's (WISP 9xx § Edits): said to its members, with the mentions the new text keeps or adds.
-    if (typeof linkId === "string" && linkId.startsWith("group:")) return this.groupEdits.edit(linkId.slice("group:".length), params.messageId, params.text, Array.isArray(params.mentions) ? params.mentions : []);
+    if (typeof linkId === "string" && linkId.startsWith("group:")) {
+      const mentions = Array.isArray(params.mentions) ? params.mentions : [];
+      return card ? this.groupEdits.edit(linkId.slice("group:".length), params.messageId, params.text, mentions, card) : this.groupEdits.edit(linkId.slice("group:".length), params.messageId, params.text, mentions);
+    }
     const live = this.links.get(linkId);
     if (!live) return refuse("No such chat");
     if (!live.stored.profile) return refuse("Editing needs a current chat; this compatibility chat cannot edit.");
@@ -2066,12 +2091,13 @@ export class GhostlyNode implements EngineImplementation {
     if (new TextEncoder().encode(text).length > LIMITS.maxChatMessageBytes) return refuse(`Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`);
     const stop = this.chatStopped(live);
     if (stop) return { error: stop };
-    const preview = params.preview === undefined ? undefined : parseLinkPreview(params.preview, text);
-    if (text === message.text && (preview?.u ?? "") === (message.preview?.u ?? "")) return { error: null, messageId: message.id };
-    const seq = (message.edit?.seq ?? 0) + 1;
-    if (seq > MAX_EDITS_PER_MESSAGE) return refuse(`This message was edited ${MAX_EDITS_PER_MESSAGE} times, the most one takes.`);
-    const edited = withEdit(message, { seq, at: Date.now(), text, preview, pending: true });
-    await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview }));
+    const preview = card || params.preview === undefined ? undefined : parseLinkPreview(params.preview, text);
+    if (text === message.text && (preview?.u ?? "") === (message.preview?.u ?? "") && JSON.stringify(card ?? null) === JSON.stringify(message.card ?? null)) return { error: null, messageId: message.id };
+    // A message with a card takes more edits: a bot updates a long task often (WISP 4xx · Status Cards).
+    const seq = (message.edit?.seq ?? 0) + 1, most = card ? STATUS_CARD_LIMITS.edits : MAX_EDITS_PER_MESSAGE;
+    if (seq > most) return refuse(`This message was edited ${most} times, the most one takes.`);
+    const edited = withEdit(message, { seq, at: Date.now(), text, preview, card, pending: true });
+    await db.patchMessage(linkId, message.id, () => ({ text: edited.text, edit: edited.edit, preview: edited.preview, card: edited.card }));
     await this.messagesChanged(linkId, [message.id]);
     void this.editsFor(linkId).flush().catch(() => {});
     return { error: null, messageId: message.id };
@@ -2098,8 +2124,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!takesPeerEdit(message, edit.m) || (message.edit?.seq ?? 0) >= edit.e) return;
     const updated = await db.patchMessage(linkId, message.id, current => {
       if (!takesPeerEdit(current, edit.m) || (current.edit?.seq ?? 0) >= edit.e) return null;
-      const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, preview: edit.pv });
-      return { text: next.text, edit: next.edit, preview: next.preview };
+      const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, preview: edit.pv, card: edit.sc });
+      return { text: next.text, edit: next.edit, preview: next.preview, card: next.card };
     });
     if (updated) await this.messagesChanged(linkId, [message.id]);
   }
@@ -2196,7 +2222,8 @@ export class GhostlyNode implements EngineImplementation {
         // The path as it is when the message goes: the details keep it, whatever the session does after.
         const at = Date.now(), snapshot = pathSnapshot(live, message.via);
         const reply = GhostlyNode.wireReply(message);
-        const error = message.forwarded ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply, message.forwarded)
+        const error = message.card ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply, message.forwarded, message.card)
+          : message.forwarded ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply, message.forwarded)
           : reply ? await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview, reply)
           : await link.sendMessage(message.text, message.timestamp, message.wireId, ...(message.preview ? [message.preview] : []));
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
@@ -2274,7 +2301,7 @@ export class GhostlyNode implements EngineImplementation {
     const wire: MessageDetails["wire"] = snapshot.path === "dht" ? { frame: "_dm envelope", protocol: "dht-text/1", plaintextBytes, ...(dht && { wireBytes: dht.packetBytes }) }
       : snapshot.path === "legacy-dht" ? { frame: "_msgs record", protocol: "legacy/1", plaintextBytes }
       : snapshot.path === "legacy-datalink" ? { frame: "m", protocol: "legacy/1", plaintextBytes }
-      : { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(pairedMessageFrame(message.wireId ?? "", message.timestamp, message.text, message.preview, GhostlyNode.wireReply(message))).length };
+      : { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(pairedMessageFrame(message.wireId ?? "", message.timestamp, message.text, message.preview, GhostlyNode.wireReply(message), message.forwarded, message.card)).length };
     return this.noteDetails(linkId, message.id, details => ({ ...withSend(details, send), ...(!error && { sentAt: at, wire }),
       ...(dht && { dht: { seq: dht.seq, issued: dht.issued, expires: dht.expires, packetBytes: dht.packetBytes, nonce: dht.nonce, recordKey: dht.recordKey, records: dht.records } }) }));
   }
@@ -2290,7 +2317,7 @@ export class GhostlyNode implements EngineImplementation {
         ...(batch && { dht: { issued: batch.packetTimestamp, records: batch.rawRecordNames } }) };
     }
     if (!paired) return { wire: { frame: "m", protocol: "legacy/1", plaintextBytes } };
-    return { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(pairedMessageFrame(message.id ?? "", message.timestamp, message.text, message.preview)).length } };
+    return { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(pairedMessageFrame(message.id ?? "", message.timestamp, message.text, message.preview, undefined, message.forwarded, message.card)).length } };
   }
 
   /** A held item's fate, on its message: stored for the contact (with the item's place in the mailbox), failed, or picked up. */
@@ -2796,13 +2823,18 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.settings.online) throw new Error("Go online to join a group");
     return { groupId: await this.groups.joinByLink(link) };
   }
-  async sendGroupMessage({ groupId, text, mentions, replyTo }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): Promise<{ error: string | null; messageId?: string }> {
+  async sendGroupMessage({ groupId, text: given, mentions, replyTo, card: raw }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: unknown }): Promise<{ error: string | null; messageId?: string }> {
+    // A bot's status card (WISP 4xx · Status Cards), its fallback text written from it unless one is given.
+    const card = raw === undefined ? undefined : GhostlyNode.cardToSend(raw);
+    if (typeof card === "string") return { error: card };
+    const text = card && !(typeof given === "string" && given.trim()) ? statusCardText(card) : given;
     if (typeof text !== "string") return { error: "Nothing to send" };
     // A reply names a message of this group, by its author's member key (WISP 9xx § Replies).
     const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);
     if (typeof reply === "string") return { error: reply };
     const named = Array.isArray(mentions) ? mentions : [];
-    const sent = await this.groups.send(groupId, text, named, reply && { i: reply.id, s: reply.snippet, f: reply.member! });
+    const wireReply = reply && { i: reply.id, s: reply.snippet, f: reply.member! };
+    const sent = card ? await this.groups.send(groupId, text, named, wireReply, undefined, card) : await this.groups.send(groupId, text, named, wireReply);
     // Members it names whose apps are closed are woken (WISP 9xx · Group Mesh § Wake-up push).
     if (!sent.error) this.wakeMentioned(groupId, text, named);
     return sent;
@@ -4174,6 +4206,8 @@ export class GhostlyNode implements EngineImplementation {
       editSupport: !GhostlyNode.testNoEdit(),
       // 1:1 chats only: a group's pin goes in its own frames.
       pinSupport: true,
+      // 1:1 chats only: a group's card rides in its own boxes, and its members' apps take a card's edits or drop them.
+      statusCardSupport: true,
       // 1:1 chats only, as typing: a wake-up names a chat, and a group edge is none.
       wakeSupport: true,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
@@ -4381,6 +4415,7 @@ export class GhostlyNode implements EngineImplementation {
             ...(message.preview && { preview: message.preview }),
             ...(stored.profile && message.reply && { replyTo: receivedPairedReply(message.reply) }),
             ...(stored.profile && message.forwarded && { forwarded: message.forwarded }),
+            ...(stored.profile && message.card && { card: message.card }),
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
@@ -4625,9 +4660,14 @@ export class GhostlyNode implements EngineImplementation {
     if (!(await db.hasMessage(message.linkId, message.id))) return this.storeMessage(message);
     const whole = await this.resolveReply(message);
     const added: Partial<StoredMessage> = { ...(whole.mentions && { mentions: whole.mentions }), ...(whole.mentioned && { mentioned: true }),
-      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }) };
+      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }), ...(whole.card && { card: whole.card }) };
     if (!Object.keys(added).length) return;
-    const patched = await db.patchMessage(message.linkId, message.id, stored => stored.member === message.member && stored.sender === message.sender ? added : null);
+    // A card belongs to its version: an edit taken meanwhile keeps its own.
+    const patched = await db.patchMessage(message.linkId, message.id, stored => {
+      if (stored.member !== message.member || stored.sender !== message.sender) return null;
+      const { card: _card, ...rest } = added;
+      return stored.edit ? rest : added;
+    });
     if (!patched) return;
     await this.messagesChanged(message.linkId, [message.id]);
     this.emitState();

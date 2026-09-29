@@ -1,6 +1,6 @@
 import {
-  EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, RateWindow, carryMentions, mentionsMember, receivedTimestamp, utf8Encode,
-  type GroupEdit, type GroupMention,
+  EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, RateWindow, STATUS_CARD_LIMITS, carryMentions, mentionsMember, receivedTimestamp, utf8Encode,
+  type GroupEdit, type GroupMention, type StatusCard,
 } from "@ghostly/core";
 import { canEditInGroup, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import type { StoredMessage } from "../shared/types";
@@ -58,9 +58,10 @@ export class GroupEdits {
 
   /**
    * Edits a text of mine in a group: the new text here at once, and to the group as soon as the pace allows. Mentions
-   * the message had stay where their words still are; `added` are those picked while editing.
+   * the message had stay where their words still are; `added` are those picked while editing. `card`: the status card
+   * of the new version, already checked (WISP 4xx · Status Cards); a card message then takes `STATUS_CARD_LIMITS.edits`.
    */
-  async edit(groupId: string, messageId: string, raw: string, added: readonly GroupMention[] = []): Promise<GroupEditResult> {
+  async edit(groupId: string, messageId: string, raw: string, added: readonly GroupMention[] = [], card?: StatusCard): Promise<GroupEditResult> {
     const refuse = (error: string) => ({ error, refused: true });
     const membership = this.host.membership(groupId);
     if (!membership) return refuse("You are not in this group");
@@ -74,13 +75,13 @@ export class GroupEdits {
     if (utf8Encode(text).length > GROUP_EDIT_TEXT_BYTES) return refuse(`Message exceeds ${GROUP_EDIT_TEXT_BYTES} UTF-8 bytes.`);
     // Everyone: a private group's admin only (the group checks it against the admin of the message's epoch again).
     const mentions = carryMentions(message, text, Array.isArray(added) ? added : [], !membership.community && !!membership.admin);
-    if (text === message.text && JSON.stringify(mentions) === JSON.stringify(message.mentions ?? [])) return { error: null, messageId };
-    const seq = (message.edit?.seq ?? 0) + 1;
-    if (seq > MAX_EDITS_PER_MESSAGE) return refuse(`This message was edited ${MAX_EDITS_PER_MESSAGE} times, the most one takes.`);
+    if (text === message.text && JSON.stringify(mentions) === JSON.stringify(message.mentions ?? []) && JSON.stringify(card ?? null) === JSON.stringify(message.card ?? null)) return { error: null, messageId };
+    const seq = (message.edit?.seq ?? 0) + 1, most = card ? STATUS_CARD_LIMITS.edits : MAX_EDITS_PER_MESSAGE;
+    if (seq > most) return refuse(`This message was edited ${most} times, the most one takes.`);
     const at = this.now();
     await this.host.patch(chat, messageId, current => {
-      const next = withEdit(current, { seq, at, text, pending: true });
-      return { text: next.text, edit: next.edit, mentions: mentions.length ? mentions : undefined };
+      const next = withEdit(current, { seq, at, text, card, pending: true });
+      return { text: next.text, edit: next.edit, card: next.card, mentions: mentions.length ? mentions : undefined };
     });
     await this.host.changed(chat, messageId);
     // One pass: said now when the pace allows (then it is no longer pending), else a timer says it later.
@@ -111,7 +112,7 @@ export class GroupEdits {
       // Not said for as long as a message is tried: given up on, the text stays as it is here.
       if (now - edit.at >= RESEND_POLICY.windowMs) { await this.settle(chat, message.id, edit.seq); continue; }
       if (!pace.take()) { retry = Math.min(retry, pace.wait()); break; }
-      const error = await this.host.send(groupId, { id: message.id, e: edit.seq, ts: edit.at, m: message.text, ...(message.mentions?.length && { k: message.mentions }) });
+      const error = await this.host.send(groupId, { id: message.id, e: edit.seq, ts: edit.at, m: message.text, ...(message.mentions?.length && { k: message.mentions }), ...(message.card && { sc: message.card }) });
       if (error) { retry = Math.min(retry, RETRY_MS); continue; }
       await this.settle(chat, message.id, edit.seq);
     }
@@ -163,9 +164,9 @@ export class GroupEdits {
     if ((message.edit?.seq ?? 0) >= edit.e) return "stale";
     const updated = await this.host.patch(chat, message.id, current => {
       if (!takes(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
-      const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m });
+      const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, card: edit.sc });
       // Who it names now shows as such; an edit that names me is never a new mention (no sound, no @ in the list).
-      return { text: next.text, edit: next.edit, mentions: edit.k?.length ? edit.k : undefined, mentioned: mentionsMember(edit.k, me) ? true : undefined };
+      return { text: next.text, edit: next.edit, card: next.card, mentions: edit.k?.length ? edit.k : undefined, mentioned: mentionsMember(edit.k, me) ? true : undefined };
     });
     if (!updated) return "stale";
     await this.host.changed(chat, message.id);
@@ -178,7 +179,7 @@ export class GroupEdits {
       .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
       .sort((a, b) => b.edit!.at - a.edit!.at).slice(0, GROUP_EDIT_RESEND).reverse();
     // One that cannot go (its epoch's key is gone) does not hold the others back.
-    for (const m of mine) await this.host.send(groupId, { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }) }, to);
+    for (const m of mine) await this.host.send(groupId, { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) }, to);
   }
 
   forget(groupId: string): void {

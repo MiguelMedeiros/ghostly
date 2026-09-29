@@ -137,7 +137,7 @@ With every chat running this profile, reads multiply by the number of chats. The
 
 ## What never enters this path
 
-Financial envelopes, files, pictures, calls and service bodies never enter this path; Cashu bearer tokens are refused as text. A short pasted Lightning invoice can fit as text, but publishing it starts no payment. A contact whose capability record lacks `dht-text/1` receives nothing on this path: the sender queues for layer 1 instead ([03](03-capabilities.md#layer-0-capability-record)).
+Financial envelopes, files, pictures, calls and service bodies never enter this path; Cashu bearer tokens are refused as text. A status card ([4xx · Status Cards](4xx-status-cards.md), revision 2026-09-29) never does either: a card's first message may go here as its fallback text when it fits, and its updates wait for the live session. A short pasted Lightning invoice can fit as text, but publishing it starts no payment. A contact whose capability record lacks `dht-text/1` receives nothing on this path: the sender queues for layer 1 instead ([03](03-capabilities.md#layer-0-capability-record)).
 
 ## Runtime and conformance
 

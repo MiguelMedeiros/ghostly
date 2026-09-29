@@ -160,6 +160,16 @@ A forwarded text ([400](400-chat.md#forwards), revision 0.11) carries `fw`, its 
 
 It counts 16 bytes against the text's 16 KiB. A `fw` that does not hold is left out and the text kept. Apps from before ignore it.
 
+## Status cards
+
+A bot's status card ([4xx · Status Cards](4xx-status-cards.md), revision 2026-09-29) rides inside the sealed payload beside the text, which is its fallback, so the author's signature covers it:
+
+```
+{ "text", "m"?: [ … ], "r"?: { … }, "fw"?, "sc"?: { "kind", "id", … }, "nick"? }
+```
+
+It counts its bytes against the text's 16 KiB. The `edit` application frame carries the card of its version as `sc`, and with one its `v` may go up to **5,000**; a `v` past 100 without a card is dropped. A card that does not hold is left out and the text kept. Apps from before ignore it, and drop an edit numbered past 100.
+
 ## Reactions
 
 A reaction ([400](400-chat.md#reactions), revision 0.8) is an application frame of the group, sealed and signed like any payload, so every member (and every hub) carries it and a member who was away gets it with the catch-up:

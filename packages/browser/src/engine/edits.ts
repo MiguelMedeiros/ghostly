@@ -107,7 +107,7 @@ export class EditQueue {
       if (pace > 0) { next = Math.min(next, now + pace); break; }
       if (!this.pace.take()) break;
       const receiptMs = typeof this.deps.receiptMs === "function" ? this.deps.receiptMs() : this.deps.receiptMs ?? 20_000;
-      const error = await this.deps.send({ id: message.wireId!, e: edit.seq, ts: edit.at, m: message.text, ...(message.preview && { pv: message.preview }) }, message);
+      const error = await this.deps.send({ id: message.wireId!, e: edit.seq, ts: edit.at, m: message.text, ...(message.preview && { pv: message.preview }), ...(message.card && { sc: message.card }) }, message);
       // This one cannot go now (too long for the DHT, its message not confirmed yet): the others still may.
       if (error) continue;
       this.sent.set(message.id, { seq: edit.seq, at: now, attempts: (last?.seq === edit.seq ? last.attempts : 0) + 1, receiptMs });
