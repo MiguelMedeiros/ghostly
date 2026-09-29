@@ -455,7 +455,10 @@ native/mobile payments.
 
 The apps make a new profile's Mainnet wallets by themselves (Cashu, USDT), but never in an automated browser
 (`navigator.webdriver`), the extension's `--mode e2e` build or the Desktop e2e build (bundle id `tools.ghostly.e2e`):
-every spec starts with no wallet, as before. `localStorage["ghostly-test-wallet-setup"] = "on"` (before the app
+every spec starts with no wallet, as before. The Linux Desktop e2e runs the real bundle id, so every Desktop launcher
+(`support/desktop.ts`, `desktopMac.ts`, `streamCheck.ts`) also sets `GHOSTLY_E2E=1`, which the app reads through Rust
+(`under_test`). `openDesktop` also checks that the WebView reports `navigator.webdriver` and fails before any test
+when it doesn't. `localStorage["ghostly-test-wallet-setup"] = "on"` (before the app
 loads, `beforeOpen` in `openPeer`) turns it on, which `web/wallet-first-run.spec.ts` does against the suite's own
 mint (`mockMainnetMints`) and a stubbed Ethereum RPC (`support/ethereum.ts`). Every `peer` also refuses the real
 Mainnet mints, Ethereum RPC and Esplora servers that got past a spec's stubs, and the automatic `mainnetGuard`

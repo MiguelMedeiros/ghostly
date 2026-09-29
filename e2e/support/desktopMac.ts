@@ -275,6 +275,8 @@ export async function openMacDesktop(options: MacDesktopOptions): Promise<MacDes
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
+      // Never a new profile's default Mainnet wallets (#682), as the e2e bundle id already says.
+      GHOSTLY_E2E: "1",
       GHOSTLY_PROFILE: options.profile ?? `e2e-${options.name}`,
       GHOSTLY_E2E_DRIVER: String(options.port),
       GHOSTLY_E2E_DRIVER_TOKEN: token,

@@ -152,7 +152,9 @@ export async function openDriven(env: Record<string, string> = {}): Promise<{ ap
   const log: string[] = [];
   const child = spawn(desktopBinary(), [], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, GHOSTLY_PROFILE: "e2e-stream", GHOSTLY_E2E_DRIVER: String(port), GHOSTLY_E2E_DRIVER_TOKEN: token, ...env },
+    // GHOSTLY_E2E: never a new profile's default Mainnet wallets (#682). This driver sets no navigator.webdriver, and
+    // the build has the real bundle id.
+    env: { ...process.env, GHOSTLY_E2E: "1", GHOSTLY_PROFILE: "e2e-stream", GHOSTLY_E2E_DRIVER: String(port), GHOSTLY_E2E_DRIVER_TOKEN: token, ...env },
   });
   for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
   let exited: number | null | undefined;

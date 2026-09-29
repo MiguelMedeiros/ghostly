@@ -91,6 +91,7 @@ macro_rules! commands {
             commands::resolve_records,
             commands::service_respond,
             commands::set_pkarr_relays,
+            commands::under_test,
             commands::updater_can_install,
             file_store::file_bytes_append,
             file_store::file_bytes_close,

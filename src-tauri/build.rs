@@ -86,6 +86,7 @@ const COMMANDS: &[&str] = &[
     "service_respond",
     "set_pkarr_relays",
     "share_text",
+    "under_test",
     "updater_can_install",
 ];
 
