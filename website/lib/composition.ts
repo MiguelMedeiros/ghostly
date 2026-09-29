@@ -107,7 +107,7 @@ export const BLOCKS: Block[] = [
   b("nostr", "identity", "Nostr", ["301-nostr"], "A Nostr proof through a NIP-07 extension or a NIP-46 signer: a proof, not a transport."),
   b("proofkinds", "identity", `Domain${D}OpenPGP${D}SSH${D}Bitcoin`, ["3xx-domain", "3xx-openpgp", "3xx-ssh", "3xx-bitcoin"], "Self-custodied proofs made once with your own tools: a DNS record, gpg, ssh-keygen, a wallet's BIP-322 signature."),
   b("oidc", "identity", "OpenID accounts", ["3xx-oidc-proofs"], "An account at Google, Microsoft, Apple, GitLab or Twitch, attested by that provider. Built, and offered once Ghostly's OAuth clients are registered."),
-  b("atproto", "identity", "Bluesky / AT Protocol", ["3xx-atproto"], "A Bluesky (or any AT Protocol) account: approved once on your own server, published as one record in your repository, checked by contacts without logging in. Built; offered once the website's client document is live."),
+  b("atproto", "identity", "Bluesky / AT Protocol", ["3xx-atproto"], "A Bluesky (or any AT Protocol) account: approved once on your own server, published as one record in your repository, checked by contacts without logging in."),
   b("social", "identity", "Nostr social", ["3xx-nostr-social"], "Behind a verified Nostr proof: a contact's profile, follows and notes, loaded when you ask. Publishing is off until you turn it on, and each post is confirmed."),
   b("pubprofiles", "identity", "Public profiles", [], "A verified Nostr, Pubky or Bluesky identity shows its public name, picture and bio on its card, and a contact can be shown by it.", ["public-profiles"], "candidate-profile"),
   b("did", "identity", "DIDs", ["3xx-did-dht", "3xx-did"], "Every profile has a did:dht of its own, listing an identity only if you switch it on; and a DID you control (did:key, did:jwk, did:dht, did:web) is proven like any identity."),
@@ -129,8 +129,7 @@ export const BLOCKS: Block[] = [
 
   // SDK, apps & catalogs
   b("sdk", "ecosystem", "@ghostlytools/sdk", [], "Write a wallet source or an identity proof outside the app, test it with the contract suites, and it joins the pickers as a plugin: no registry line. From the repository, not on npm.", ["sdk"], "candidate-sdk-and-manifests"),
-  // release-1.0: "Not on npm yet." becomes "npm install -g @ghostlytools/cli."
-  b("headless", "ecosystem", "Headless CLI", ["11xx-headless"], "`ghostly`: the app's own engine on Node for bots, driven through a daemon, a local socket and a JSON event stream. Spending real money needs --confirm-real. Not on npm yet: @ghostlytools/cli from 1.0."),
+  b("headless", "ecosystem", "Headless CLI", ["11xx-headless"], "`ghostly`: the app's own engine on Node for bots, driven through a daemon, a local socket and a JSON event stream. Spending real money needs --confirm-real. npm install -g @ghostlytools/cli."),
   b("sandbox", "ecosystem", "Plugin sandbox", [], "A plugin host that gives each plugin only the permissions you grant it. Being considered, not planned.", ["adapter-roadmap"], "candidate-plugin-sandbox"),
   b("apps", "ecosystem", "Apps & catalogs", [], "Mini-apps, games and independent catalogs, possibly with indexers.", ["adapter-roadmap"], "candidate-mini-apps-and-games"),
   b("os", "ecosystem", "Self-hosted runtime", [], "An always-on personal node, even a Raspberry Pi, running your Ghostly.", ["adapter-roadmap"], "candidate-self-hosted-24h"),

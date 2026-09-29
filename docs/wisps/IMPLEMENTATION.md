@@ -80,7 +80,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull req
 | [Bitcoin address · 3xx planned](3xx-bitcoin.md) | Bitcoin Address Proof | Draft | Experimental provider `bitcoin`: BIP-322 2.0.0 and legacy P2PKH, verified locally |
 | [SSH · 3xx planned](3xx-ssh.md) | SSH keys | Draft | Experimental `ssh`, `ssh-github`, `ssh-gitlab` providers |
 | [OpenID Connect · 3xx planned](3xx-oidc-proofs.md) | Provider-attested identity (OpenID Connect) | Draft | Built and tested against a test issuer (#92); blocked on Ghostly's OAuth client registrations, so no provider is offered |
-| [AT Protocol · 3xx planned](3xx-atproto.md) | AT Protocol identity (Bluesky) | Draft | Provider `atproto` (#248), e2e against a local PDS; a real server needs its client-metadata file live on ghostly.tools |
+| [AT Protocol · 3xx planned](3xx-atproto.md) | AT Protocol identity (Bluesky) | Draft | Provider `atproto` (#248), e2e against a local PDS; its client-metadata file is live on ghostly.tools |
 | [DID · 3xx planned](3xx-did.md) | Decentralized identifiers (did:key, did:jwk, did:dht, did:web) | Draft | Experimental provider `did` (#249), under Advanced in the picker |
 | [400](400-chat.md) | Chat Messaging | Draft | One chat on two layers in every new chat: DHT first contact and floor, live link, self-upgrade, DHT only per chat (#209, #229); replies (#347), reactions (#354), edits (#351), lists, quotes, headings and links in the text (#370), forwards to other chats and groups (#404) |
 | [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, Iroh, HyperDHT; files, payments, calls (`calls/1`) and shared apps (`services/1`) while live; typing, recording or a bot's status (`typing/1`, #344, #361), reactions (`react/1`, #354), edits (`edit/1`, #351), replies on texts and files (#347, #359), forwards (`fw`, #404), a goodbye on the way out (`paired-bye`, #369), a wake-up push for a closed web app (`wake/1`, #394) |
@@ -155,7 +155,7 @@ A proposal only. Every entry stays Draft until Miguel decides. "Stable 1.0" mean
 | 3xx Bitcoin address | Experimental | Identity provider |
 | 3xx SSH | Experimental | Identity provider |
 | 3xx OpenID Connect | Experimental | Blocked on OAuth client registrations |
-| 3xx AT Protocol | Experimental | Blocked on the client-metadata file going live |
+| 3xx AT Protocol | Experimental | Identity provider; client metadata live on ghostly.tools |
 | 3xx DID | Experimental | Advanced provider |
 | 400 Chat Messaging | Stable 1.0 | The one chat |
 | 401 Chat Session | Stable 1.0 | Layer 1 of every chat |

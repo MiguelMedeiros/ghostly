@@ -7,10 +7,10 @@
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
-| Implementation | Experimental: `packages/cli` (`@ghostlytools/cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is published from 1.0 |
+| Implementation | Experimental: `packages/cli` (`@ghostlytools/cli`, command `ghostly`), phases 1 to 5; on npm since 1.0 (`npm install -g @ghostlytools/cli`) |
 | Summary | Run Ghostly headless for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares. |
 | Availability | Available |
-| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions, forwards), private and community groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. On npm from 1.0; no Bark wallet, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
+| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions, forwards), private and community groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. On npm as `@ghostlytools/cli`; no Bark wallet, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 

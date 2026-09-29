@@ -1,0 +1,1 @@
+Available: `https://ghostly.tools/oauth/client-metadata.json` answers since the 1.0 website deploy, so real AT Protocol servers find Ghostly's client and the app offers Bluesky proofs. The Implementation and Notes rows no longer wait for it. Nothing in the contract changed.

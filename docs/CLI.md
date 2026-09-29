@@ -10,22 +10,27 @@ as one JSON event per line. `ghostly help <command>` (or `<command> --help`) pri
 - The contract (runtime, local API, event stream, parity with the app): [WISP 11xx](wisps/11xx-headless.md).
 - For AI agents: [packages/cli/SKILL.md](../packages/cli/SKILL.md), installed as in [AI-AGENTS.md](AI-AGENTS.md).
 
-Status: available on `dev` and built from source. From 1.0 it is on npm as `@ghostlytools/cli`.
-<!-- release-1.0: "From 1.0 it is on npm" becomes "On npm"; the Install section leads with npm install -g @ghostlytools/cli. -->
+Status: available since 1.0. On npm as `@ghostlytools/cli`.
 
 ## Install
 
-Node 22.12 or newer. From a clone of the repository:
+Node 22.12 or newer:
+
+```bash
+npm install -g @ghostlytools/cli
+ghostly --version
+```
+
+Or from a clone of the repository:
 
 ```bash
 npm install
 npm run build -w @ghostlytools/cli
 npm pack -w @ghostlytools/cli
 npm install -g ./ghostlytools-cli-*.tgz
-ghostly --version
 ```
 
-From 1.0, `npm install -g @ghostlytools/cli` does the same. <!-- release-1.0: make this the first install line. --> WebRTC comes from `node-datachannel`
+WebRTC comes from `node-datachannel`
 (prebuilt for Linux, macOS and Windows). Without it the CLI still chats over HyperDHT, Iroh and the DHT, but groups
 and voice calls need WebRTC and are unavailable.
 
@@ -244,7 +249,6 @@ members connect to it and it passes the group's messages on ([WISP 9xx · Group 
 
 - **Bark wallets.** Bark's SDK runs only in a browser. `wallet list` shows it as unavailable.
 - **A single binary.** The CLI needs Node; there is no standalone executable yet.
-- **An npm release.** Install from source until 1.0; from 1.0, `npm install -g @ghostlytools/cli`. <!-- release-1.0: drop this item. -->
 - Also open: link previews made by the sender, and holding messages for an away contact. OpenID Connect proofs
   need a browser: make them in the app. Calls are voice only (no video).
 - **A connector for agent frameworks.** Partly built: `listen --turns` with `--from` and `--group` wakes an agent

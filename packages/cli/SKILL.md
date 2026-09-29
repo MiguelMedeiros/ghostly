@@ -1,7 +1,7 @@
 ---
 name: ghostly
 description: Join Ghostly, the peer-to-peer messenger, as an AI agent or a bot with the `ghostly` CLI, from install to answering people in chats and groups. Use when an agent should be reachable from the Ghostly app (the way a bot talks on Telegram), be woken by the messages it should answer, reply with text, voice notes and files, take part in groups, or pay and get paid on test coins. No server of Ghostly's is involved; chats are end-to-end encrypted and go peer to peer.
-homepage: https://github.com/MiguelMedeiros/ghostly/blob/dev/packages/cli/README.md
+homepage: https://github.com/MiguelMedeiros/ghostly/blob/main/packages/cli/README.md
 metadata:
   {
     "openclaw":
@@ -15,7 +15,7 @@ metadata:
               "kind": "node",
               "package": "@ghostlytools/cli",
               "bins": ["ghostly"],
-              "label": "Install ghostly (npm, from 1.0)",
+              "label": "Install ghostly (npm)",
             },
             {
               "id": "source",
@@ -48,14 +48,19 @@ Read step 10 (safety) before you answer anyone.
 
 ### 1. Install
 
-Node 22.12 or newer. From 1.0: `npm install -g @ghostlytools/cli`. Until then, build it from the repository:
-<!-- release-1.0: npm install -g @ghostlytools/cli becomes the install; the clone line below becomes the fallback, and the metadata label drops "from 1.0". -->
+Node 22.12 or newer:
+
+```bash
+npm install -g @ghostlytools/cli
+ghostly --version                       # {"version":"…"}
+ghostly help                            # every command; `ghostly help listen` for one
+```
+
+If npm is not an option, build it from the repository:
 
 ```bash
 git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install \
   && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli && npm install -g ./ghostlytools-cli-*.tgz
-ghostly --version                       # {"version":"…"}
-ghostly help                            # every command; `ghostly help listen` for one
 ```
 
 ### 2. Profile: name and picture
@@ -138,7 +143,7 @@ else printf "%s" "$answer" | ghostly group send "$group" --reply "$id" --stdin; 
 - `--stdin` reads the text from stdin: an answer that starts with `-` stays text, and nothing goes through the shell.
 - `--reply <message>` quotes the message it answers (`messageId` of the turn, or an id from `chat history`).
 - `send --wait delivered` waits until the contact's app confirmed it.
-- A working example: [claude-code-agent.sh](https://github.com/MiguelMedeiros/ghostly/blob/dev/packages/cli/examples/claude-code-agent.sh),
+- A working example: [claude-code-agent.sh](https://github.com/MiguelMedeiros/ghostly/blob/main/packages/cli/examples/claude-code-agent.sh),
   which wakes `claude -p` once per turn with no tools, no MCP servers and none of your settings:
   `claude -p --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --setting-sources "" --system-prompt "…"`.
 
@@ -278,5 +283,5 @@ proof needs a person who holds the key: leave that to the owner.
 Every call of the app's engine is reachable: `ghostly engine --list`, then `ghostly engine <method> '<json params>'`.
 Not on the CLI yet: Bark wallets, OpenID Connect proofs, and video in calls (voice only). More:
 [AI agents on Ghostly](https://ghostly.tools/developers/agents), the
-[CLI guide](https://github.com/MiguelMedeiros/ghostly/blob/dev/docs/CLI.md), the
-[package README](https://github.com/MiguelMedeiros/ghostly/blob/dev/packages/cli/README.md) and WISP 11xx.
+[CLI guide](https://github.com/MiguelMedeiros/ghostly/blob/main/docs/CLI.md), the
+[package README](https://github.com/MiguelMedeiros/ghostly/blob/main/packages/cli/README.md) and WISP 11xx.
