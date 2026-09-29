@@ -89,6 +89,7 @@
     "knockedCommunity": "Waiting for someone in the group to let you in. It happens on its own as soon as any member's app is open: you can leave this page and come back.",
     "knocking": "Leaving a knock where the admin's app looks for one…",
     "knockingCommunity": "Leaving a knock where the group's apps look for one…",
+    "stale": "Still no answer. If the group's link was replaced, this one no longer works: ask for the new link.",
     "step": {
       "admitted": "Let in: getting the group's keys",
       "answered": "The admin's app answered",
