@@ -199,6 +199,50 @@
     "wrongChain": "Sua carteira Bitcoin {{network}} está em {{chain}}; este endereço é para {{target}}.",
     "wrongToken": "Este link pede outro token que não o USDT da sua carteira: não é pago daqui."
   },
+  "group": {
+    "bitcoinOnchain": "Bitcoin on-chain",
+    "chooseOne": "Escolha um membro para enviar",
+    "describe": {
+      "cashu": "Peça ecash de um mint que você usa. O primeiro membro cujo ecash chegar paga; quem vier depois recebe o seu de volta.",
+      "lightning": "Peça com uma fatura Lightning. Qualquer membro pode pagá-la, uma vez: uma fatura não pode ser paga duas vezes.",
+      "other": "Só Cashu ou Lightning para o grupo todo."
+    },
+    "everyone": "Pedir ao grupo",
+    "everyoneHint": "Qualquer pessoa do grupo pode pagar, uma vez",
+    "formerMember": "Um ex-membro",
+    "formerMemberObject": "um ex-membro",
+    "hint": {
+      "community": "O pagamento é selado para vocês dois: o grupo o repassa sem ler, e quem estiver fora o recebe ao voltar. Todos veem quem pagou quem e quanto.",
+      "mesh": "O pagamento vai só entre vocês dois; todos no grupo veem quem pagou quem e quanto."
+    },
+    "listSeparator": ", ",
+    "sendUnavailable": "Um pedido ao grupo é pago por um membro; para pagar alguém, escolha essa pessoa",
+    "status": {
+      "claimedPaid": "{{names}} pagou · aguardando a carteira de {{to}}",
+      "closed": "Fechado",
+      "paid": "Pago",
+      "paidBy": "Pago por {{name}}",
+      "saysPaid": "{{names}} diz que pagou · aguardando a carteira de {{to}}",
+      "sent": "Enviado · aguardando {{name}}",
+      "takenBack": "Devolvido",
+      "waiting": "Aguardando pagamento"
+    },
+    "testUsdt": "USDT de teste",
+    "theGroup": "o grupo",
+    "title": {
+      "asked": "{{to}} pediu a {{from}}",
+      "askedGroup": "{{to}} pediu ao grupo",
+      "paying": "{{from}} está pagando {{to}}",
+      "sent": "{{from}} enviou para {{to}}"
+    },
+    "why": {
+      "noPayments": "O app dessa pessoa não aceita pagamentos em grupos (precisa de atualização), ou ela desativou todas as formas",
+      "noWay": "Não aceita nenhuma forma de pagamento que você permite",
+      "unreachable": "Fora de alcance agora"
+    },
+    "you": "Você",
+    "youObject": "você"
+  },
   "invoice": {
     "anyAmount": "Qualquer valor",
     "checking": "Verificando…",
