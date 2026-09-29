@@ -152,7 +152,7 @@ import { db } from "./db";
 import { Groups, meshEdgeIntervals } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
-import { Reactions, groupReactionsToResend, latestReaction } from "./reactions";
+import { Reactions, groupReactionsToResend, latestReaction, noteAfterChange } from "./reactions";
 import { mayPinIn, myPin, pinView, pinnedRow } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
@@ -3288,11 +3288,14 @@ export class GhostlyNode implements EngineImplementation {
    */
   async walletReceiveLightning({ amount, via, network, card }: { amount: number; via?: "cashu"; network?: WalletNetwork; card?: string }) {
     const n = this.net(network);
+    // A new invoice is money the wallet now waits for: removing it must say so at once, not after something else changed.
     if (via === "cashu") {
       const quote = await this.wallet.receiveLightning(amount, undefined, n);
+      this.awaitingSoon();
       return { quote: quote.quote, invoice: quote.invoice, expiresAt: quote.expiresAt, source: CASHU_MINT_SOURCE };
     }
     const created = await (await this.lightningCard(n, card)).createInvoice(amount);
+    this.awaitingSoon();
     return { quote: created.paymentHash, invoice: created.invoice, expiresAt: created.expiresAt, paymentHash: created.paymentHash, source: created.source };
   }
 
@@ -4522,6 +4525,13 @@ export class GhostlyNode implements EngineImplementation {
    * the whole history. A host that takes whole histories only (no `onMessageChanges`) gets the whole history, as before.
    */
   private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
+    // The chat list's reaction line quotes its message: an edit of that message changes the quote too.
+    const reacted = this.reactionNotes.get(linkId);
+    if (reacted?.message && ids.includes(reacted.message)) {
+      const row = await db.getMessage(linkId, reacted.message);
+      const fresh = row && noteAfterChange(reacted, row);
+      if (fresh) { this.reactionNotes.set(linkId, fresh); this.emitState(); }
+    }
     const onChanges = this.events.onMessageChanges;
     if (!onChanges) return this.events.onMessages(linkId, await db.getMessages(linkId));
     const unique = [...new Set(ids)];

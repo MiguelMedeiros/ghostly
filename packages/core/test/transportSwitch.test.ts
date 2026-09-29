@@ -6,13 +6,13 @@ function peers(options: { waits?: boolean } = {}) {
   const policies: Omit<TransportPolicy, "revision" | "intent">[] = [0, 1].map(() => ({ preferred: "webrtc/1", fallback: true,
     available: ["webrtc/1", "iroh/1", "hyperdht/1"], descriptors: { "iroh/1": "iroh", "hyperdht/1": "hyper" } }));
   const queue: { side: number; frame: Record<string, unknown> }[] = [];
-  const state = [vi.fn(), vi.fn()], prepare = [vi.fn(), vi.fn()], cancel = [vi.fn(), vi.fn()], unreached = [vi.fn(), vi.fn()];
+  const state = [vi.fn(), vi.fn()], prepare = [vi.fn(), vi.fn()], cancel = [vi.fn(), vi.fn()], unreached = [vi.fn(), vi.fn()], kept = [vi.fn(), vi.fn()];
   const switches = [0, 1].map(i => new TransportSwitch({ key: String(i), peerKey: String(1-i),
     policy: () => structuredClone(policies[i]), send: frame => queue.push({side: 1-i, frame: frame as Record<string, unknown>}),
-    peer: vi.fn(), state: state[i], prepare: prepare[i], cancel: cancel[i], timeoutMs: 100, ...(options.waits ? { unreached: unreached[i] } : {}) }));
+    peer: vi.fn(), state: state[i], prepare: prepare[i], cancel: cancel[i], kept: kept[i], timeoutMs: 100, ...(options.waits ? { unreached: unreached[i] } : {}) }));
   const flush = () => { let steps = 0; while (queue.length) { if (++steps > 100) throw new Error("Negotiation loop"); const {side, frame} = queue.shift()!; switches[side].handle(frame); } };
   switches.forEach(s => s.begin("session-1", "webrtc/1")); flush();
-  return { policies, queue, state, prepare, cancel, unreached, switches, flush };
+  return { policies, queue, state, prepare, cancel, unreached, kept, switches, flush };
 }
 afterEach(() => vi.useRealTimers());
 it.each([0, 1])("lets endpoint %s propose with no creator privilege", side => {
@@ -190,4 +190,52 @@ it("tries a target kept on a fallback again, and waits for one the other side do
   expect(w.prepare.every(s => !s.mock.calls.length)).toBe(true);
   expect(w.switches[0].wanted()).toEqual({ transport: "hyperdht/1", by: "contact" });
   w.switches.forEach(s => s.stop());
+});
+it.each([0, 1])("plans a choice made on side %s while another move was dialling, once that move fails (WISP 100)", side => {
+  const h = peers({ waits: true }); h.policies[1].preferred = "hyperdht/1";
+  h.switches[1].changed(); h.flush();
+  // The coordinator dials HyperDHT (`go` sent): a newer choice cannot cut in, it waits for that move to end.
+  expect(h.prepare[0]).toHaveBeenCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["hyperdht/1"]) }), true);
+  h.policies[side].preferred = "iroh/1"; h.switches[side].changed(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  // The HyperDHT move fails (here its time ran out: the chat was busy). Iroh is what both policies want now: planned
+  // at once, not left waiting with nothing to try it until someone chooses again.
+  h.switches[0].fail("Transport change timed out."); h.flush();
+  expect(h.switches.map(s => s.wanted()?.transport)).toEqual(["iroh/1", "iroh/1"]);
+  expect(h.switches.every(s => s.pending?.choices[0] === "iroh/1")).toBe(true);
+  expect(h.prepare[0]).toHaveBeenLastCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["iroh/1"]) }), true);
+  h.switches.forEach(s => s.stop());
+});
+it("does not plan a failed move again by itself when nothing changed since (the owner's retry pace does)", () => {
+  const h = peers({ waits: true }); h.policies[1].preferred = "hyperdht/1"; h.policies[1].fallback = false;
+  h.switches[1].changed(); h.flush();
+  h.switches[0].fail("hyperdht/1 unreachable"); h.flush();
+  expect(h.prepare[0]).toHaveBeenCalledTimes(1);
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  h.switches.forEach(s => s.stop());
+});
+it.each([0, 1])("a move that lands on a fallback choice leaves its target unreached on both sides, chosen on side %s (WISP 100)", side => {
+  const h = peers({ waits: true });
+  h.switches.forEach(s => s.begin("session-2", "iroh/1", true)); h.flush();
+  h.policies[side].preferred = "hyperdht/1"; h.switches[side].changed(); h.flush();
+  const plan = h.prepare[0].mock.lastCall![0] as SwitchPlan;
+  expect(plan.choices[0]).toBe("hyperdht/1");
+  expect(plan.choices).toContain("webrtc/1");
+  // HyperDHT did not connect; WebRTC, ranked before the Iroh the chat was on, did: the session moved there.
+  h.switches.forEach(s => s.begin("session-3", "webrtc/1", true)); h.flush();
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  // Both still want HyperDHT, and both are told it was not reached: the owner waits for it and tries it again,
+  // as when a fallback keeps the chat where it was. Before, nothing said so, and nothing tried it again.
+  expect(h.switches.map(s => s.wanted()?.transport)).toEqual(["hyperdht/1", "hyperdht/1"]);
+  h.kept.forEach(k => expect(k).toHaveBeenCalledWith("hyperdht/1"));
+  h.switches[0].again(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  h.switches.forEach(s => s.stop());
+});
+it("a move that lands on its target is no fallback: nothing is left unreached", () => {
+  const h = peers({ waits: true }); h.policies[1].preferred = "iroh/1"; h.switches[1].changed(); h.flush();
+  h.switches.forEach(s => s.begin("session-2", "iroh/1", true)); h.flush();
+  h.kept.forEach(k => expect(k).not.toHaveBeenCalled());
+  expect(h.switches.map(s => s.wanted()?.transport)).toEqual(["iroh/1", "iroh/1"]);
+  h.switches.forEach(s => s.stop());
 });

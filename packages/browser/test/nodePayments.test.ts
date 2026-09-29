@@ -341,6 +341,23 @@ describe("the Cashu wallet and Lightning", () => {
     expect((await db.getSettings()).mints).toEqual(["https://b.example"]);
   });
 
+  it("an invoice made on Receive is at once among what the wallet waits for, so removing the wallet lists it", async () => {
+    const { node } = track(engine());
+    node["settings"].mints = [TEST_MINT];
+    await node["refreshWallet"]();
+    expect(node["walletView"].networks?.testnet.awaiting).toEqual([]);
+    const quotes: unknown[] = [];
+    const invoice = fakeInvoice(30, new Uint8Array(32).fill(5));
+    vi.spyOn(node["wallet"], "quotes").mockImplementation(async () => quotes as never);
+    vi.spyOn(node["wallet"], "receiveLightning").mockImplementation(async () => {
+      const quote = { quote: "q30", mint: TEST_MINT, amount: 30, invoice, createdAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
+      quotes.push(quote);
+      return quote as never;
+    });
+    await node.walletReceiveLightning({ amount: 30, via: "cashu", network: "testnet" });
+    await vi.waitFor(() => expect(node["walletView"].networks?.testnet.awaiting).toEqual([{ type: "cashu", kind: "invoice", amount: 30 }]));
+  });
+
   it("the Cashu card goes to the mints; everything else to the Lightning source of its network", async () => {
     const { node, lightning } = track(engine());
     await node.lightningSetSource({ providerId: "fake-lightning", values: { token: "t" }, network: "testnet" });
