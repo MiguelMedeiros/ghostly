@@ -47,6 +47,9 @@ const type = async (text: string) => { fireEvent.change(field(), { target: { val
 
 let scrolledTo: string[];
 const last = () => scrolledTo[scrolledTo.length - 1];
+// New words jump to their newest match in a task of its own, queued once the render with those words commits; on a
+// busy runner that commit can land after `type`'s settle is over.
+const jumpedTo = (id: string) => vi.waitFor(() => expect(last()).toBe(id));
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   draws.text = 0;
@@ -89,9 +92,10 @@ describe("search inside a chat", () => {
     await type("message 29");
     // "Message 29" and "Message 290" to "Message 299".
     expect(count()).toBe("1 of 11");
-    expect(last()).toBe("m299");
+    await jumpedTo("m299");
     expect(row("m299")).toHaveAttribute("data-reply-flash");
-    expect(marked()).toHaveLength(11);
+    // "Message 29" is among the older rows, drawn a step at a time after the newest (useTailFirst).
+    await vi.waitFor(() => expect(marked()).toHaveLength(11));
     expect(marked().every(text => text === "Message 29")).toBe(true);
 
     fireEvent.keyDown(field(), { key: "Enter" });
@@ -118,12 +122,12 @@ describe("search inside a chat", () => {
     ctrlF();
     await type("CAFE");
     expect(count()).toBe("1 of 1");
-    expect(last()).toBe("cafe");
+    await jumpedTo("cafe");
     expect(marked()).toEqual(["Café"]);
 
     await type("relatorio");
     expect(count()).toBe("1 of 1");
-    expect(last()).toBe("doc");
+    await jumpedTo("doc");
     expect(marked()).toEqual(["Relatório"]);
 
     await type("nowhere to be found");
