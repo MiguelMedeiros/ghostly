@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, guardArchive, openPeer, type Peer, type PeerOptions } from "./fixtures";
 import { test as base } from "./fixtures";
-import { mintStandIn, type MintStandIn } from "./mint";
+import { MAINNET_MINTS, mintStandIn, type MintStandIn } from "./mint";
 import { LocalRelay } from "./relay";
 
 const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
@@ -47,7 +47,10 @@ export const test = base.extend<Fixtures>({
       const standIn = await (mint ??= mintStandIn());
       // The engine starts on the public Pkarr relays, before the settings below point it at the test's relay: to the
       // browser they do not exist, so nothing reaches them meanwhile.
-      const rules = [...standIn?.rules ?? [], ...LocalRelay.hosts.map((host) => `MAP ${host} ~NOTFOUND`)];
+      // The real Mainnet mints and Ethereum RPC do not exist for it either: the extension never makes a new profile's
+      // Mainnet wallets under test, and if it ever did, nothing would reach real money's servers.
+      const mainnet = [...MAINNET_MINTS.map((mint) => new URL(mint).hostname), "ethereum.publicnode.com"];
+      const rules = [...standIn?.rules ?? [], ...[...LocalRelay.hosts, ...mainnet].map((host) => `MAP ${host} ~NOTFOUND`)];
       const context = await chromium.launchPersistentContext(join(work, name), {
         channel: "chromium",
         headless: !process.env.HEADED,

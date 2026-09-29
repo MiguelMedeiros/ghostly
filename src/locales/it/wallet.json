@@ -534,6 +534,13 @@
     "mainnet": "sats",
     "testnet": "sats di prova"
   },
+  "setup": {
+    "failed": "{{wallet}}: {{reason}}",
+    "progress": "Creo i tuoi portafogli Mainnet…",
+    "retry": "Riprova {{wallet}}",
+    "skip": "Salta",
+    "title": "Non ancora creati. Ghostly riprova al prossimo avvio."
+  },
   "source": {
     "available": "{{count}} disponibili…",
     "backToMints": "Torna alle mint Cashu",

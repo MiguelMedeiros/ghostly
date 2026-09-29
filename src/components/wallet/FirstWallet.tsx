@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { WalletNetwork, WalletPlatform, WalletType } from "../../lib/platform";
+import type { WalletNetwork, WalletOffer, WalletPlatform, WalletType } from "../../lib/platform";
+import { DEFAULT_WALLETS } from "@ghostly/browser/engine/walletSetup";
 import { useI18n } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { WalletMark } from "../WalletCards";
@@ -8,14 +9,22 @@ import { WALLET_NAME as NAME } from "./names";
 
 /** What the first setup makes: payments over Lightning (Cashu) and a dollar token, each ready in one click. */
 const FIRST: WalletType[] = ["cashu", "usdt"];
+/**
+ * On Mainnet, the wallets a new profile gets by itself: these two, and Bitcoin on-chain where a Mainnet on-chain wallet
+ * is made in one click here (not yet: until then it is skipped, as the setup skips it). Testnet: these two.
+ */
+const firstKinds = (network: WalletNetwork, offers: WalletOffer[] = []): WalletType[] => network === "testnet" ? FIRST
+  : DEFAULT_WALLETS.filter((type) => FIRST.includes(type) || offers.some((o) => o.type === type && o.network === network && o.available && !o.needs));
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * A profile with no wallet yet: not a dead end. One choice, the network, and the first wallets are made: Cashu over
  * Lightning and USDT, each checked before its card appears. Any other kind is one click away under New.
  */
-export function FirstWallet({ wallet, onNew, onStart, onMade }: {
+export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
   wallet: WalletPlatform;
+  /** What New can make: Mainnet's Bitcoin on-chain joins the first wallets where it is made in one click. */
+  offers?: WalletOffer[];
   onNew: () => void;
   /** The setup began: the page keeps this in view until it ends, though the first card may already be there. */
   onStart: () => void;
@@ -26,7 +35,7 @@ export function FirstWallet({ wallet, onNew, onStart, onMade }: {
   const [made, setMade] = useState<string[]>([]);
   const [failed, setFailed] = useState<{ type: WalletType; network: WalletNetwork; text: string }[]>([]);
 
-  const start = async (network: WalletNetwork, types: WalletType[] = FIRST) => {
+  const start = async (network: WalletNetwork, types: WalletType[] = firstKinds(network, offers)) => {
     setBusy(network); setFailed([]); onStart();
     const done: string[] = [], problems: typeof failed = [];
     // One after the other: each is whole or not there at all, and a failure says which.

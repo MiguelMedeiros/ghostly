@@ -13,6 +13,7 @@ import { UsdtWalletPanel } from "../components/UsdtWalletPanel";
 import { BitcoinWalletPanel } from "../components/BitcoinWalletPanel";
 import { NewWalletDialog } from "../components/wallet/NewWalletDialog";
 import { FirstWallet } from "../components/wallet/FirstWallet";
+import { WalletSetupStatus } from "../components/wallet/WalletSetupStatus";
 import { RemoveWalletSection } from "../components/wallet/RemoveWallet";
 import { TestCoins } from "../components/wallet/TestCoins";
 import { BackupReminder } from "../components/wallet/BackupReminder";
@@ -163,8 +164,9 @@ export function Wallet() {
     )}>
       <div ref={page} className="space-y-6">
         {platform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-yellow-500 text-xs" data-testid="platform-notice">{platform.notice}</p>}
-        {!wallet || !state ? <p className="text-text-muted text-sm">{t("wallet.page.unavailable")}</p> : !cards.length || firstRun ? (
-          <FirstWallet wallet={wallet} onNew={() => setCreating("testnet")} onStart={() => setFirstRun(true)} onMade={(id) => { setFirstRun(false); select(id); setDealt(id); }} />
+        {wallet && state?.setup && <WalletSetupStatus wallet={wallet} setup={state.setup} showProgress={!cards.length} />}
+        {!wallet || !state ? <p className="text-text-muted text-sm">{t("wallet.page.unavailable")}</p> : (!cards.length && state.setup?.running && !firstRun) ? null : !cards.length || firstRun ? (
+          <FirstWallet wallet={wallet} offers={state.offers} onNew={() => setCreating("testnet")} onStart={() => setFirstRun(true)} onMade={(id) => { setFirstRun(false); select(id); setDealt(id); }} />
         ) : <>
           <NetworkTabs network={network} counts={{ mainnet: cards.filter((c) => c.network === "mainnet").length, testnet: cards.filter((c) => c.network === "testnet").length }}
             onChange={(n) => { setFocusPanel(false); show(n); }} label={t("wallet.page.networks")} testId="wallet-networks" tabTestId="wallet-network" idPrefix="wallet-network-tab" controls="wallet-network-panel" />
@@ -193,7 +195,7 @@ export function Wallet() {
         </>}
       </div>
       {creating && wallet && state && (
-        <NewWalletDialog wallet={wallet} offers={state.offers ?? []} initialNetwork={creating}
+        <NewWalletDialog wallet={wallet} offers={state.offers ?? []} setupFailed={state.setup?.failed} initialNetwork={creating}
           onClose={() => setCreating(null)} onCreated={created} />
       )}
     </Page>

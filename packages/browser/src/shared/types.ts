@@ -629,7 +629,26 @@ export interface TestCoinsResult {
   pending?: boolean;
 }
 
+/**
+ * The first-run wallet setup of a new profile: the Mainnet kinds still to make, and why the last try at each failed.
+ * Kept in the settings. Absent on a profile from before it, which is never set up by itself.
+ */
+export interface WalletSetupRecord {
+  /** Kinds not made yet, tried again at each start. A kind with no Mainnet wallet here yet (on-chain) waits quietly. */
+  left: WalletType[];
+  /** Why the last try failed, per kind still left. */
+  failed?: Partial<Record<WalletType, string>>;
+}
+
+/** What the Wallet page shows of the first-run setup: whether it runs now, and each kind it could not make. */
+export interface WalletSetupView {
+  running: boolean;
+  failed: { type: WalletType; network: WalletNetwork; reason: string }[];
+}
+
 export interface WalletView {
+  /** The first-run setup, while it runs or has a kind it could not make; absent otherwise. */
+  setup?: WalletSetupView;
   /** Both networks' wallets, open side by side. The flat fields below are Mainnet's, for a caller naming no network. */
   networks?: Record<WalletNetwork, NetworkWalletsView>;
   /** The wallets this profile has, in the deck's order. */
@@ -1016,6 +1035,8 @@ export interface Settings {
    * page; never copied into a backup.
    */
   holdStorage?: { s3: S3Config; space: string } | null;
+  /** The first-run wallet setup (see `WalletSetupRecord`). Only the engine writes it: a settings patch cannot. */
+  walletSetup?: WalletSetupRecord;
   /**
    * This profile's push subscription (the installed web app, WISP 401 § Wake-up push): shared with each paired
    * contact whose app offers `wake/1`, so it can wake this app while it is closed. Absent: not woken.

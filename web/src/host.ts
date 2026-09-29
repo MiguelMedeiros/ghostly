@@ -6,6 +6,7 @@ import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
 import { atprotoPopupWindow } from "@ghostly/browser/proofs/atproto/popup";
 import { DHT_POLL_INTERVALS, RelayTransport } from "@ghostly/core";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
+import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 
 /**
  * Tests only: `localStorage["ghostly-test-pace"] = "desktop"` makes this page's peer discover the way the
@@ -49,7 +50,8 @@ export const webHost = createInPageHost({
   version: __APP_VERSION__,
   features: { shareLocalServices: false, openServices: false, profiles: true },
   // Iroh through a relay (WISP 102): where WebRTC cannot connect, before the chat drops to the DHT.
-  node: { ...testPace(), ...testReactions(), irohWeb: testIroh() },
+  // A new profile gets its default Mainnet wallets, never under test (see defaultWalletsAllowed).
+  node: { ...testPace(), ...testReactions(), irohWeb: testIroh(), defaultWallets: defaultWalletsAllowed() },
 
   /**
    * The deployed build says what it is in `/version.json`, on this origin and

@@ -90,6 +90,8 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     create: (params) => engine.call("walletCreate", params),
     remove: (params) => engine.call("walletRemove", params),
     testCoins: (params) => engine.call("walletTestCoins", params),
+    setupRetry: (type) => engine.call("walletSetupRetry", { type }),
+    setupDismiss: (type) => engine.call("walletSetupDismiss", { type }),
     usdtCreate:params=>engine.call("usdtCreate",params),
     usdtUnlock:password=>engine.call("usdtUnlock",{password,...(network?{network}:{})}),
     usdtReveal:password=>engine.call("usdtReveal",{password,...(network?{network}:{})}),
