@@ -152,7 +152,7 @@ import { db } from "./db";
 import { Groups, meshEdgeIntervals } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
-import { Reactions, latestReaction } from "./reactions";
+import { Reactions, groupReactionsToResend, latestReaction } from "./reactions";
 import { mayPinIn, myPin, pinView, pinnedRow } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
@@ -2832,10 +2832,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** An edge of a private group opened: the member hears my latest reactions again, in case it missed them. */
   private async resendGroupReactions(groupId: string, linkId: string): Promise<void> {
-    const mine = (await db.getMessages(`group:${groupId}`)).flatMap(m => {
-      const r = m.reactions?.me, id = replyRef(m, true);
-      return r && id ? [{ id, e: r.e, n: r.n }] : [];
-    }).sort((a, b) => b.n - a.n).slice(0, REACTION_LIMITS.pending).reverse();
+    const mine = groupReactionsToResend(await db.getMessages(`group:${groupId}`), REACTION_LIMITS.pending);
     for (const reaction of mine) { try { this.links.get(linkId)?.link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }
   }
 

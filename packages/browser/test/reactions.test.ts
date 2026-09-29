@@ -301,3 +301,29 @@ describe("the reactions store", () => {
     expect(out).toMatchObject({ reaction: { id: "A".repeat(22), n: 5_001 } });
   });
 });
+
+describe("a private group's edge that opens", () => {
+  it("hears my reactions of this membership again, not those from before I was removed and invited back", async () => {
+    // Removed, then invited back: my member key is new, and the reaction I made under the old one is on its row still.
+    // Said again under the new key, every member would show it twice (Bug hunter, 2026-09-29).
+    const g = `rejoin-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const row = (fields: Partial<StoredMessage>): StoredMessage => ({ linkId: chat, id: "x", text: "", sender: "peer", timestamp: 1, via: "datalink", ...fields });
+    for (const message of [
+      row({ id: "event:1:joined:1000", event: "joined", text: "You joined.", timestamp: 1_000 }),
+      row({ id: "admin:1:0", member: "admin", text: "hello group", timestamp: 1_500, reactions: { me: { e: "👍", n: 2_000, at: 2_000 } } }),
+      row({ id: "event:4:removed:3000", event: "removed", text: "You were removed from this group", timestamp: 3_000 }),
+      row({ id: "event:5:joined:4000", event: "joined", text: "You joined.", timestamp: 4_000 }),
+      row({ id: "admin:5:0", member: "admin", text: "welcome back", timestamp: 4_500, reactions: { me: { e: "🎉", n: 5_000, at: 5_000 } } }),
+      row({ id: "event:5:joined:4600", event: "joined", member: "carol", text: "Carol joined", timestamp: 4_600 }),
+    ]) await db.addMessage(message);
+    cleanup.push(async () => { for (const m of await db.getMessages(chat)) await db.deleteMessage(chat, m.id); });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as { links: Map<string, unknown>; groups: { signReaction(): object }; resendGroupReactions(groupId: string, linkId: string): Promise<void> };
+    const sent: Record<string, unknown>[] = [];
+    inner.links.set("edge", { link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.push(frame); } } });
+    vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
+    await inner.resendGroupReactions(g, "edge");
+    expect(sent.map(frame => [frame.id, frame.e])).toEqual([["admin:5:0", "🎉"]]);
+  });
+});
