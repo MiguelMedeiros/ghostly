@@ -1,10 +1,9 @@
 import { useId, useState } from "react";
 import { transportEventText, transportLineDetails, transportLineText, type TransportEntry, type TransportEvent } from "../lib/transportEvents";
 import { focus } from "../lib/connection";
-import { clockTime } from "../lib/time";
+import { clockTime, formatAt } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
 
-const when = (at: number) => new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
 
 /**
  * One change of the chat's live transport: a small centred line, not a bubble. Tapping it shows the details.
@@ -29,7 +28,7 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
       {open && (
         <dl id={`${id}-details`} data-testid="transport-line-details"
           className="mt-1 grid w-full max-w-sm grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg border border-border bg-surface-alt/90 px-3 py-2 text-[11px] text-text-secondary">
-          {transportLineDetails(entry, contact, when, t).map(row => (
+          {transportLineDetails(entry, contact, (at) => formatAt(at, { dateStyle: "medium", timeStyle: "medium" }, language), t).map(row => (
             <div key={row.label} className="contents">
               <dt className="text-text-muted">{row.label}</dt>
               <dd className="min-w-0 break-words text-text-primary">{row.value}</dd>
@@ -61,12 +60,12 @@ const HISTORY_SHOWN = 20;
  */
 export function ConnectionHistory({ events, contact }: { events: readonly TransportEvent[]; contact: string }) {
   const [all, setAll] = useState(false);
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const newest = [...events].reverse(), shown = all ? newest : newest.slice(0, HISTORY_SHOWN);
   const day = new Date().toDateString();
   const stamp = (at: number) => new Date(at).toDateString() === day
-    ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    : new Date(at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    ? formatAt(at, { hour: "2-digit", minute: "2-digit", second: "2-digit" }, language)
+    : formatAt(at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }, language);
   return (
     <details className="mt-2 border-t border-border pt-1 text-[11px]" data-testid="connection-history">
       <summary className={`w-fit cursor-pointer rounded-md py-2 pr-2 text-text-secondary ${focus}`}>{t("connection.history.title", { count: events.length })}</summary>

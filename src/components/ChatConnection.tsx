@@ -7,6 +7,7 @@ import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
+import { clockTime, formatAt } from "../lib/time";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { PairingGlyph } from "./pairing/PairingGlyph";
 import { usePairingWords } from "./pairing/words";
@@ -65,14 +66,15 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
   const preferred = link?.preferredTransport ?? "webrtc/1";
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const clock = (at: number) => clockTime(at, language);
   const contact = link?.peerNick || t("pairing.contact");
   // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may
   // carry the chat meanwhile (Fallback off), so it is on the DHT; otherwise it stays live where it is.
   const wait = !dht ? link?.transportWait : undefined, waitOff = !!wait && !wait.live;
-  const waitText = wait ? transportWaitText(wait, contact, undefined, t) : undefined;
+  const waitText = wait ? transportWaitText(wait, contact, clock, t) : undefined;
   // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT only.
-  const notLive = paired && pinned && !dht && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, undefined, t) : undefined;
+  const notLive = paired && pinned && !dht && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
   const words = usePairingWords();
   // A first pairing on its way: its stage names the connection until the chat is live, on the DHT or failed.
   const progress = paired ? pairing?.progress : undefined, stage = progress?.stage;
@@ -215,7 +217,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
               <dt>{t("connection.detail.transport")}</dt><dd className="min-w-0 text-text-primary">{summary.name}</dd>
               {summary.relays && <><dt>{t("connection.panel.path")}</dt><dd data-testid="connection-relayed" className="min-w-0 text-text-primary break-words">{summary.relays.length ? t("connection.panel.relayedVia", { relays: summary.relays.join(", ") }) : t("connection.panel.relayed")}</dd></>}
               {summary.rttMs !== undefined && <><dt>{t("connection.detail.roundTrip")}</dt><dd className="text-text-primary">{t("connection.ms", { ms: summary.rttMs })}</dd></>}
-              {summary.since !== undefined && <><dt>{t("connection.panel.liveSince")}</dt><dd className="text-text-primary">{new Date(summary.since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ({lasting(Date.now() - summary.since, t)})</dd></>}
+              {summary.since !== undefined && <><dt>{t("connection.panel.liveSince")}</dt><dd className="text-text-primary">{clock(summary.since)} ({lasting(Date.now() - summary.since, t)})</dd></>}
               <dt>{t("connection.detail.why")}</dt><dd className="min-w-0 break-words text-text-primary">{summary.why}</dd>
             </dl>}
             <DiscoveryHealth status={state?.transport?.discovery} />
@@ -238,7 +240,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
               </>}
             </div>}
             {link?.dhtDelivery?.foreignKeySeenAt && <p data-testid="connection-foreign-key">
-              {t("connection.panel.foreignKey", { time: new Date(link.dhtDelivery.foreignKeySeenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}
+              {t("connection.panel.foreignKey", { time: clock(link.dhtDelivery.foreignKeySeenAt) })}
             </p>}
             <dl data-testid="connection-keys" className="space-y-1">
               {keyOfMine && <KeyRow label={t("connection.panel.keyYou")} value={keyOfMine} testId="connection-key-you" />}
@@ -253,7 +255,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
               <p>{t("connection.panel.dhtText", { bytes: link?.dhtDelivery?.maxTextBytes ?? 256 })}</p>
               <p className="mt-1">{t("connection.panel.dhtAvailability")}</p>
               {!link?.dhtDelivery?.authenticated && <p className="mt-1">{t("connection.panel.dhtUnauthenticated")}</p>}
-              {link?.dhtDelivery?.pendingUntil && <p className="mt-1">{t("connection.panel.receiptPending", { time: new Date(link.dhtDelivery.pendingUntil).toLocaleTimeString() })}</p>}
+              {link?.dhtDelivery?.pendingUntil && <p className="mt-1">{t("connection.panel.receiptPending", { time: formatAt(link.dhtDelivery.pendingUntil, { timeStyle: "medium" }, language) })}</p>}
             </div>}
           </div>
         </details>
