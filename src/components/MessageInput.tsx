@@ -173,6 +173,18 @@ export function MessageInput({
     textareaRef.current?.focus();
   }, []);
 
+  // Disabled for a moment under the caret (a 1:1 chat's send under way): the browser takes the focus from a disabled
+  // field and never gives it back, so the next message went nowhere. It comes back unless something else took it.
+  const focusedWhenDisabled = useRef(false);
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    if (disabled) { focusedWhenDisabled.current = !!input && document.activeElement === input; return; }
+    if (!focusedWhenDisabled.current) return;
+    focusedWhenDisabled.current = false;
+    const active = document.activeElement;
+    if (input && (!active || active === document.body || active === input)) input.focus({ preventScroll: true });
+  }, [disabled]);
+
   // Answering a message: the words go in the field at once, as in WhatsApp.
   const replyKey = reply?.key;
   useEffect(() => {
