@@ -83,10 +83,11 @@ function expectSealed(text: string, words: string[], format: string): void {
 // A failure must not keep the phrase on disk: no trace, screenshot or video of these pages.
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
-test.describe("wallet backups", { tag: "@network" }, () => {
+// @network: a Testnet Ark or USDT wallet is made on Mutinynet or a Sepolia RPC. The Mainnet ones here are answered locally.
+test.describe("wallet backups", () => {
   test.describe.configure({ retries: 2 });
 
-  test("Ark: the phrase shows on request, and the backup file is sealed", { tag: ["@feature:wallet.ark.backup", "@feature:wallet.instances.create"] }, async ({ peer }) => {
+  test("Ark: the phrase shows on request, and the backup file is sealed", { tag: ["@network", "@feature:wallet.ark.backup", "@feature:wallet.instances.create"] }, async ({ peer }) => {
     const alice = await peer("ark-backup");
     const panel = await ready(alice, "arkade");
     const words = await phraseWords(panel, "ark");
@@ -97,7 +98,7 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     expect((await phraseWords(panel, "ark")).join(" ") === words.join(" "), "the same phrase").toBe(true);
   });
 
-  test("USDT: the phrase shows on request, and the backup file is sealed", { tag: ["@feature:wallet.usdt.backup", "@feature:wallet.instances.create"] }, async ({ peer }) => {
+  test("USDT: the phrase shows on request, and the backup file is sealed", { tag: ["@network", "@feature:wallet.usdt.backup", "@feature:wallet.instances.create"] }, async ({ peer }) => {
     const alice = await peer("usdt-backup");
     const panel = await ready(alice, "usdt");
     const words = await phraseWords(panel, "usdt");
@@ -107,7 +108,7 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     expect((await phraseWords(panel, "usdt")).join(" ") === words.join(" "), "the same phrase").toBe(true);
   });
 
-  test("the two wallets have phrases of their own", { tag: ["@feature:wallet.usdt.backup", "@feature:wallet.ark.backup"] }, async ({ peer }) => {
+  test("the two wallets have phrases of their own", { tag: ["@network", "@feature:wallet.usdt.backup", "@feature:wallet.ark.backup"] }, async ({ peer }) => {
     const alice = await peer("two-phrases");
     const ark = await phraseWords(await ready(alice, "arkade"), "ark");
     const usdt = await phraseWords(await ready(alice, "usdt"), "usdt");
@@ -141,7 +142,7 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     await expect(panel.getByTestId("ark-address")).toHaveText(/^\s*ark1/);
   });
 
-  test("a Testnet Ark wallet's boarding address is a test network's", { tag: ["@feature:wallet.ark.boarding"] }, async ({ peer }) => {
+  test("a Testnet Ark wallet's boarding address is a test network's", { tag: ["@network", "@feature:wallet.ark.boarding"] }, async ({ peer }) => {
     const alice = await peer("ark-boarding-testnet");
     const panel = await ready(alice, "arkade");
     await panel.getByRole("radiogroup", { name: "Receive on" }).getByRole("radio", { name: "Bitcoin on-chain" }).click();

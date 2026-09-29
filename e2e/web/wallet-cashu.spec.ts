@@ -20,7 +20,7 @@ async function showCashu(p: Peer) {
   return p.page;
 }
 
-test("Send refuses text that is neither a Lightning invoice nor an address, and says so", { tag: ["@network", "@feature:wallet.cashu.pay-invoice"] }, async ({ peer }) => {
+test("Send refuses text that is neither a Lightning invoice nor an address, and says so", { tag: ["@feature:wallet.cashu.pay-invoice"] }, async ({ peer }) => {
   const page = await cashu(await peer("cashu-send"));
   await page.getByTestId("wallet-send").click();
   const input = page.getByTestId("wallet-pay-input");
@@ -44,7 +44,7 @@ test("Send refuses text that is neither a Lightning invoice nor an address, and 
   await expect(page.getByRole("button", { name: "Redeem ecash token" })).toBeEnabled();
 });
 
-test("a mint that is not a mint is refused with a reason, and nothing is added", { tag: ["@network", "@feature:wallet.cashu.mint.add"] }, async ({ peer }) => {
+test("a mint that is not a mint is refused with a reason, and nothing is added", { tag: ["@feature:wallet.cashu.mint.add"] }, async ({ peer }) => {
   const alice = await peer("cashu-mints");
   let reached = 0;
   await alice.context.route(`${UNREACHABLE}/**`, (route) => { reached++; return route.abort("namenotresolved"); });
@@ -79,7 +79,7 @@ test("a mint that is not a mint is refused with a reason, and nothing is added",
 });
 
 // An unreachable mint is refused with a reason that names it, not the browser's "Failed to fetch".
-test("an unreachable mint is refused with a reason a person can act on", { tag: ["@network", "@feature:wallet.cashu.mint.add"] }, async ({ peer }) => {
+test("an unreachable mint is refused with a reason a person can act on", { tag: ["@feature:wallet.cashu.mint.add"] }, async ({ peer }) => {
   const alice = await peer("cashu-mint-reason");
   await alice.context.route(`${UNREACHABLE}/**`, (route) => route.abort("namenotresolved"));
   const page = await cashu(alice);
@@ -89,7 +89,7 @@ test("an unreachable mint is refused with a reason a person can act on", { tag: 
   await expect(page.getByTestId("wallet-error")).not.toHaveText(/^Failed to fetch$/);
 });
 
-test("the Lightning card pays invoices and addresses, not tokens, and its settings lead to the Cashu card", { tag: ["@network", "@feature:wallet.lightning.card", "@feature:wallet.lightning.sources"] }, async ({ peer }) => {
+test("the Lightning card pays invoices and addresses, not tokens, and its settings lead to the Cashu card", { tag: ["@feature:wallet.lightning.card", "@feature:wallet.lightning.sources"] }, async ({ peer }) => {
   const alice = await peer("lightning-card");
   await useTestnet(alice);
   await openWallet(alice, "lightning-testnet");
@@ -112,7 +112,7 @@ test("the Lightning card pays invoices and addresses, not tokens, and its settin
   await expect(page.getByRole("button", { name: "Cashu settings" })).toHaveCount(0);
 });
 
-test.describe("test sats", { tag: "@network" }, () => {
+test.describe("test sats", () => {
   test.describe.configure({ retries: 2 });
 
   test("a Testnet and a Mainnet Cashu wallet side by side: each its own mints and balance, no switch, and Mainnet stays untouched", { tag: ["@feature:wallet.mode", "@feature:wallet.instances.networks", "@feature:wallet.cashu.test-sats", "@feature:wallet.test-coins", "@feature:wallet.cashu.receive-lightning"] }, async ({ peer }) => {

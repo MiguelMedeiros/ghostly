@@ -70,7 +70,7 @@ test("an empty Testnet wallet goes on one confirm, and is still gone after a rel
   await expect(page.getByTestId("new-wallet-type-bitcoin-status")).toHaveText("Connect…");
 });
 
-test("an invoice just made on Receive is listed when removing the wallet, before anything else changed", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+test("an invoice just made on Receive is listed when removing the wallet, before anything else changed", { tag: ["@feature:wallet.instances.remove"] }, async ({ peer }) => {
   const alice = await peer("remove-receive");
   await useTestnet(alice);
   const page = alice.page;
@@ -85,7 +85,7 @@ test("an invoice just made on Receive is listed when removing the wallet, before
   await expect(dialog.getByTestId("wallet-remove-confirm")).toBeDisabled();
 });
 
-test("a funded wallet says how much and on which network, offers its ecash, and goes only once the loss is confirmed", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+test("a funded wallet says how much and on which network, offers its ecash, and goes only once the loss is confirmed", { tag: ["@feature:wallet.instances.remove"] }, async ({ peer }) => {
   const alice = await peer("remove-funded");
   await mockMainnetMints(alice.context);
   await createWallet(alice, "cashu", "testnet");
@@ -122,7 +122,7 @@ test("a funded wallet says how much and on which network, offers its ecash, and 
   await expect(page.getByTestId("wallet-network-mainnet-empty")).toBeVisible();
 });
 
-test("a wallet holding nothing with an open chat request lists it, asks in words, and the request closes on both sides", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+test("a wallet holding nothing with an open chat request lists it, asks in words, and the request closes on both sides", { tag: ["@feature:wallet.instances.remove"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("remove-request-a"), peer("remove-request-b")]);
   for (const p of [alice, bob]) await useTestnet(p);
   await link(alice, bob);
