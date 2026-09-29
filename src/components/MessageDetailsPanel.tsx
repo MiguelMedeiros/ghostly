@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { MessageDetailsView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { buildDetails, type DetailRow } from "../lib/messageDetails";
 import type { ChatMessage } from "../lib/types";
@@ -31,6 +31,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
   const [view, setView] = useState<MessageDetailsView | null | undefined>(undefined);
   const [copiedAll, setCopiedAll] = useState(false);
   useOutsideDismiss(ref, true, onClose);
+  useTabTrap(ref);
 
   useEffect(() => {
     let live = true;
