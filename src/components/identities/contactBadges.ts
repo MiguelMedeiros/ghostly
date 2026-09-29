@@ -1,6 +1,8 @@
 import type { ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { providerIcon } from "./ProviderIcons";
 import { currentStatus, expiringSoon, providerLabel, shortSubject, useEngineState } from "../../lib/identities";
+import { english } from "../../lib/english";
+import type { Translate } from "../../contexts/I18nContext";
 
 /**
  * A contact's identities as small marks: beside their name in the chat list and a group's member list (verified only,
@@ -72,26 +74,28 @@ export function ago(seconds: number, now = Date.now() / 1000, language?: string)
   return rtf.format(Math.round(d / 86400), "day");
 }
 
-const STATE_WORDS: Record<BadgeState, (r: ReceivedIdentityView, now: number) => string> = {
-  verified: (r, now) => `verified ${ago(r.checkedAt, now)}`,
-  expiring: (r, now) => `verified ${ago(r.checkedAt, now)}, expires ${ago(r.expiresAt, now)}`,
-  revoked: (r, now) => `revoked by its owner, seen ${ago(r.checkedAt, now)}`,
-  failed: (r, now) => `check failed ${ago(r.checkedAt, now)}`,
-  expired: (r, now) => `expired ${ago(r.expiresAt, now)}`,
-};
+/** A mark's state in words, in the interface's language ("verified 2 h ago"). */
+function stateWords(state: BadgeState, r: ReceivedIdentityView, now: number, t: Translate, language?: string): string {
+  const when = (seconds: number) => ago(seconds, now, language);
+  if (state === "verified") return t("identities.badge.verified", { time: when(r.checkedAt) });
+  if (state === "expiring") return t("identities.badge.expiring", { time: when(r.checkedAt), expires: when(r.expiresAt) });
+  if (state === "revoked") return t("identities.badge.revoked", { time: when(r.checkedAt) });
+  if (state === "failed") return t("identities.badge.failed", { time: when(r.checkedAt) });
+  return t("identities.badge.expired", { time: when(r.expiresAt) });
+}
 
 /**
  * A contact's identities as marks, the ones that have one, in BADGE_ORDER; with `good`, only those still vouched for
- * (verified or expiring). Among equals, good before the rest.
+ * (verified or expiring). Among equals, good before the rest. `t` and `language`: the words of their labels (English by default).
  */
-export function contactBadges(received: ReceivedIdentityView[] | undefined, { good = false, now = Date.now() / 1000 } = {}): Badge[] {
+export function contactBadges(received: ReceivedIdentityView[] | undefined, { good = false, now = Date.now() / 1000, t = english, language }: { good?: boolean; now?: number; t?: Translate; language?: string } = {}): Badge[] {
   const badges: (Badge & { rank: number; i: number })[] = [];
   (received ?? []).forEach((r, i) => {
     const state = badgeState(r, now);
     if (!state || (good && !isGood(state))) return;
     // A public profile's name, while the proof still vouches for it: "Nostr: npub1…yz (Alice) · verified 2 h ago".
     const profile = isGood(state) && r.publicProfile?.found ? r.publicProfile : undefined;
-    const providerName = providerLabel(r.provider), short = shortSubject(r.provider, r.verified.subject), stateText = STATE_WORDS[state](r, now);
+    const providerName = providerLabel(r.provider), short = shortSubject(r.provider, r.verified.subject), stateText = stateWords(state, r, now, t, language);
     const label = `${providerName}: ${short}${profile?.name ? ` (${profile.name})` : ""} · ${stateText}`;
     const photo = profile?.avatar?.startsWith("data:image/") ? profile.avatar : undefined;
     const about = profile ? { ...(profile.name ? { name: profile.name } : {}), ...(profile.handle ? { handle: profile.handle } : {}), ...(profile.hosts?.length ? { hosts: profile.hosts } : {}) } : {};

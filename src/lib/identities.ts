@@ -9,6 +9,8 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { currentProfile } from "./profiles";
 import { getPrefix, listSessions } from "./storage";
 import type { ChatSession } from "./types";
+import { english } from "./english";
+import type { Translate } from "../contexts/I18nContext";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -54,28 +56,39 @@ export const shortSubject = (provider: string, subject: string) => {
   const p = identityProvider(provider);
   try { return p?.subject.short?.(subject) ?? subject; } catch { return subject; }
 };
-export const categoryLabel = (id: string, attester?: string) =>
-  identityProvider(id)?.category === "provider-attested" ? `Attested by ${attester ?? "the provider"}` : "Their own key";
+/** Who stands behind a proof: "Attested by accounts.google.com", or the holder's own key (`mine`: "Your own key"). */
+export const categoryLabel = (id: string, attester?: string, t: Translate = english, mine = false) =>
+  identityProvider(id)?.category === "provider-attested"
+    ? (attester ? t("identities.card.attestedBy", { attester }) : t("identities.card.attestedByProvider"))
+    : mine ? t("identities.card.yourOwnKey") : t("identities.card.theirOwnKey");
 
 export const date = (seconds: number) => new Date(seconds * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 export const dateTime = (seconds: number) => new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-export const RECEIVED_STATUS: Record<IdentityStatus, string> = {
-  verified: "Verified",
-  expired: "Expired",
-  withdrawn: "No longer shared",
-  revoked: "Revoked by its owner",
-  unconfirmed: "Could not be confirmed",
-  "previous-key": "From a previous key",
-};
-export const SHARED_STATUS: Record<SharedIdentity["status"], string> = {
-  queued: "Shared when you next connect",
-  pending: "Waiting for your contact",
-  accepted: "Shared · verified by your contact",
-  rejected: "Not verified by your contact",
-  "withdrawal-pending": "Stopping…",
-  withdrawn: "Not shared",
-};
+/** A contact's identity as this app last checked it, in words. */
+export function receivedStatus(status: IdentityStatus, t: Translate = english): string {
+  switch (status) {
+    case "verified": return t("identities.status.verified");
+    case "expired": return t("identities.status.expired");
+    case "withdrawn": return t("identities.status.withdrawn");
+    case "revoked": return t("identities.status.revoked");
+    case "unconfirmed": return t("identities.status.unconfirmed");
+    case "previous-key": return t("identities.status.previousKey");
+  }
+  return status;
+}
+/** Where one of my identities stands in a chat, in words. */
+export function sharedStatus(status: SharedIdentity["status"], t: Translate = english): string {
+  switch (status) {
+    case "queued": return t("identities.shared.queued");
+    case "pending": return t("identities.shared.pending");
+    case "accepted": return t("identities.shared.accepted");
+    case "rejected": return t("identities.shared.rejected");
+    case "withdrawal-pending": return t("identities.shared.stopping");
+    case "withdrawn": return t("identities.shared.notShared");
+  }
+  return status;
+}
 
 /** The engine's status, with expiry applied at render time: an expired proof is never shown as verified. */
 export const currentStatus = (r: ReceivedIdentityView, now = Date.now() / 1000): IdentityStatus =>

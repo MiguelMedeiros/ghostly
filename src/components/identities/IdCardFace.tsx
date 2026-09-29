@@ -1,5 +1,6 @@
 import { useRef } from "react";
-import { useI18n } from "../../contexts/I18nContext";
+import { useI18n, useOptionalI18n } from "../../contexts/I18nContext";
+import { english } from "../../lib/english";
 import { usePublicProfileRequest } from "../../hooks/usePublicProfileRequest";
 import { providerIcon } from "./ProviderIcons";
 import { ProviderMark } from "./ProviderMark";
@@ -38,11 +39,13 @@ export function IdCardMark({ provider, subject }: { provider?: string; subject?:
  */
 export function IdCardFace({ card, after, shared }: { card: IdCardContent; after?: boolean; shared?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
+  // Also drawn on its own (a test of the card): English then.
+  const t = useOptionalI18n()?.t ?? english;
   usePublicProfileRequest(ref, card.lookup);
   return (
     <span ref={ref} className="id-card-face" data-deck="face" data-profile={card.profile?.found ? "found" : undefined} data-after={after || undefined} data-status={card.status} data-shared={shared || undefined}>
       <span className="id-card-band">
-        <span className="id-card-issuer">Ghostly<span className="id-card-issuer-kind"> · Identity</span></span>
+        <span className="id-card-issuer">Ghostly<span className="id-card-issuer-kind"> · {t("identities.card.kind")}</span></span>
         <span className="id-card-status" data-testid={card.status === "expiring" ? "identity-proof-expiring" : undefined}><StatusIcon status={card.status} /><span className="id-card-status-text">{card.statusLabel}</span></span>
         <span className="id-card-mark-end" aria-hidden="true">{shared && <span className="id-card-check id-card-check-small">{CHECK}</span>}<ProviderMark provider={card.provider} subject={card.bound} small /></span>
       </span>
@@ -51,7 +54,7 @@ export function IdCardFace({ card, after, shared }: { card: IdCardContent; after
           : card.monogram ? <><span className="id-card-monogram" data-testid="id-card-monogram">{card.monogram}</span><span className="id-card-photo-badge"><ProviderMark provider={card.provider} subject={card.bound} small /></span></>
             : <ProviderMark provider={card.provider} subject={card.bound} />}
         {/* Shared in this chat: a check seal on the photo's corner, which shows on every card of a stack. */}
-        {shared && <span className="id-card-check" data-testid="id-card-shared" title="Shared">{CHECK}</span>}
+        {shared && <span className="id-card-check" data-testid="id-card-shared" title={t("identities.card.shared")}>{CHECK}</span>}
       </span>
       <span className="id-card-fields">
         <span className="id-card-provider">{card.label}</span>
@@ -77,7 +80,7 @@ export function AddIdCardFace({ first, providers = [] }: { first: boolean; provi
   const { t } = useI18n();
   return (
     <span className="id-card-face id-card-blank" data-deck="face">
-      <span className="id-card-band"><span className="id-card-issuer">Ghostly<span className="id-card-issuer-kind"> · Identity</span></span></span>
+      <span className="id-card-band"><span className="id-card-issuer">Ghostly<span className="id-card-issuer-kind"> · {t("identities.card.kind")}</span></span></span>
       <span className="id-card-photo" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg></span>
       <span className="id-card-fields">
         <span className="id-card-provider">{first ? t("identities.ghostly.addOne") : t("identities.ghostly.addAnother")}</span>
