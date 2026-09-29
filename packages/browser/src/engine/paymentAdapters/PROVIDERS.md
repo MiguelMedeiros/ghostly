@@ -45,7 +45,7 @@ per-network sources, the source picker and config form, the Lightning journal an
 on-chain review/approve/reconcile flow. A provider is one module and one line.
 
 A provider written **outside the app** needs no line here: it is a plugin registered through the SDK
-(`@ghostly/sdk`, `registerAdapters` or `GHOSTLY_PLUGINS` at build time), listed after the built-ins
+(`@ghostlytools/sdk`, `registerAdapters` or `GHOSTLY_PLUGINS` at build time), listed after the built-ins
 under the same platform and network rules. See [docs/SDK.md](../../../../../docs/SDK.md) and
 `packages/browser/src/plugins/registry.ts`; the contracts, fakes and contract suites below are what it
 exports.

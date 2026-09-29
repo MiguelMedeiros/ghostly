@@ -6,7 +6,7 @@ negotiation, files, payments, groups and identity proofs.
 
 - Wire format: [docs/PROTOCOL.md](../../docs/PROTOCOL.md) and the [WISPs](../../docs/wisps/README.md).
 - Where it sits: [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
-- Outside authors get it through `@ghostly/sdk` (`@ghostly/sdk/core`), see [docs/SDK.md](../../docs/SDK.md).
+- Outside authors get it through `@ghostlytools/sdk` (`@ghostlytools/sdk/core`), see [docs/SDK.md](../../docs/SDK.md).
 
 ```bash
 npm test -w @ghostly/core                  # unit tests

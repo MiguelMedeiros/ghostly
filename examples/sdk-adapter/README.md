@@ -1,15 +1,15 @@
-# Example adapters, built with `@ghostly/sdk`
+# Example adapters, built with `@ghostlytools/sdk`
 
 A Lightning source ("Paper Lightning": sats on paper, in memory, regtest) and an identity proof
 ("Schnorr key": a BIP-340 signature over the statement), written against the SDK alone. This project is
-not part of the workspace: it installs `@ghostly/sdk` from a tarball, the way anyone outside the
+not part of the workspace: it installs `@ghostlytools/sdk` from a tarball, the way anyone outside the
 repository would.
 
 ```bash
 npm run test:sdk-example       # from the repository root: packs the SDK, installs it here, runs the checks
 ```
 
-Or by hand: `npm pack --workspace @ghostly/sdk --pack-destination examples/sdk-adapter/vendor`, rename the
+Or by hand: `npm pack --workspace @ghostlytools/sdk --pack-destination examples/sdk-adapter/vendor`, rename the
 tarball to `vendor/ghostly-sdk.tgz`, then `npm install && npm test` here.
 
 To see the adapters in the app, build it with the plugin compiled in:

@@ -22,7 +22,7 @@ const FAKES = [
 ];
 const TESTING = [...FAKES, "describeLightningProvider", "describeOnchainProvider", "describeIdentityProof"];
 
-describe("@ghostly/sdk", () => {
+describe("@ghostlytools/sdk", () => {
   it("exports exactly the documented surface", () => {
     expect(Object.keys(sdk).sort()).toEqual([...SURFACE].sort());
     expect(Object.keys(fakes).sort()).toEqual([...FAKES].sort());

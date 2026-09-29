@@ -26,7 +26,7 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`packages/core`](../packages/core) | The protocol in platform-neutral TypeScript: identities, crypto, invites, Pkarr records and relays, DHT delivery, the chat session and its capabilities, transport negotiation, files, payments, groups, identity proofs. Shared by every app |
 | [`packages/browser`](../packages/browser) | The Ghostly peer (`GhostlyNode`): engine, wallets, identities, IndexedDB and file storage, and the platform stand-ins the shared UI is built with. Runs in the web app, the extension and Desktop |
 | [`packages/react`](../packages/react) | React hooks shared by the apps (`useWebRTC`) |
-| [`packages/sdk`](../packages/sdk) | `@ghostly/sdk`: adapter contracts, fakes, contract suites, the plugin registry and the protocol library. See [SDK.md](SDK.md) |
+| [`packages/sdk`](../packages/sdk) | `@ghostlytools/sdk`: adapter contracts, fakes, contract suites, the plugin registry and the protocol library. See [SDK.md](SDK.md) |
 | [`packages/cli`](../packages/cli) | `ghostly`, the engine on Node without a screen, for bots: a daemon, a local socket API and a JSON event stream. See [WISP 11xx](wisps/11xx-headless.md) |
 | [`packages/iroh-web`](../packages/iroh-web) | Iroh compiled to wasm (`@ghostly/iroh-web`), built from `native-transports/iroh-web` |
 | [`src`](../src) | The UI every app builds (React). `src/desktop` holds Desktop's host |

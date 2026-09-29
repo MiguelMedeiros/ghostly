@@ -1,16 +1,16 @@
 # Ghostly SDK: build a wallet source, an identity proof or a client outside the app
 
-`@ghostly/sdk` (`packages/sdk`) is what someone building *for* Ghostly needs, without reading its
+`@ghostlytools/sdk` (`packages/sdk`) is what someone building *for* Ghostly needs, without reading its
 internals: the adapter contracts, the fakes and contract test suites the app tests itself with, the
 plugin registry, and the protocol library for a minimal client. The app imports the very same code;
 the package is a build of it, not a copy.
 
 | Entry point | What is in it | Needs |
 |---|---|---|
-| `@ghostly/sdk` | the `LightningProvider` / `OnchainProvider` contracts and descriptors, `NothingSpentError`; the `IdentityProofProvider` contract, its signers and `verifyIdentity`; `registerAdapters` and the plugin type; the transport and record contracts | nothing |
-| `@ghostly/sdk/fakes` | the fake sources (`FakeLightningProvider`, `FakeOnchainProvider`, `fakeInvoice`, `fakeAddress`) and fake identities (`fakeKey`, `fakeAccount`, `fakeRecord`) | nothing |
-| `@ghostly/sdk/testing` | the fakes plus the contract suites: `describeLightningProvider`, `describeOnchainProvider`, `describeIdentityProof` | vitest (peer) |
-| `@ghostly/sdk/core` | the whole protocol library (`packages/core`): identities and records, invites, Pkarr rendezvous, the data link and its frames, paired sessions and capabilities, payments, identity proofs | nothing |
+| `@ghostlytools/sdk` | the `LightningProvider` / `OnchainProvider` contracts and descriptors, `NothingSpentError`; the `IdentityProofProvider` contract, its signers and `verifyIdentity`; `registerAdapters` and the plugin type; the transport and record contracts | nothing |
+| `@ghostlytools/sdk/fakes` | the fake sources (`FakeLightningProvider`, `FakeOnchainProvider`, `fakeInvoice`, `fakeAddress`) and fake identities (`fakeKey`, `fakeAccount`, `fakeRecord`) | nothing |
+| `@ghostlytools/sdk/testing` | the fakes plus the contract suites: `describeLightningProvider`, `describeOnchainProvider`, `describeIdentityProof` | vitest (peer) |
+| `@ghostlytools/sdk/core` | the whole protocol library (`packages/core`): identities and records, invites, Pkarr rendezvous, the data link and its frames, paired sessions and capabilities, payments, identity proofs | nothing |
 
 The vocabulary is the [adapter roadmap](wisps/ADAPTER-ROADMAP.md)'s: a **WISP** is a contract; a
 **capability** is what a running client advertises; an **adapter** implements a contract with a
@@ -19,12 +19,12 @@ operation; a **plugin** packages adapters for distribution. This SDK is for adap
 
 ## Getting it
 
-The package is not on npm, and a package named `@ghostly/sdk` there is not this one. Pack it from a checkout and install the tarball:
+The package is not on npm yet. Pack it from a checkout and install the tarball:
 
 ```bash
 npm ci
-npm pack --workspace @ghostly/sdk --pack-destination /tmp/ghostly-sdk    # builds it first
-cd your-adapter && npm install /tmp/ghostly-sdk/ghostly-sdk-*.tgz
+npm pack --workspace @ghostlytools/sdk --pack-destination /tmp/ghostly-sdk    # builds it first
+cd your-adapter && npm install /tmp/ghostly-sdk/ghostlytools-sdk-*.tgz
 ```
 
 [`examples/sdk-adapter`](../examples/sdk-adapter) is a complete project that does exactly this: a
@@ -60,7 +60,7 @@ the picker and its form, the Lightning journal, the on-chain
 review/approve/reconcile flow, reconciliation of lost answers.
 
 ```ts
-import { NothingSpentError, type LightningProvider, type LightningProviderDescriptor } from "@ghostly/sdk";
+import { NothingSpentError, type LightningProvider, type LightningProviderDescriptor } from "@ghostlytools/sdk";
 
 class MyLightning implements LightningProvider {
   readonly capabilities = { receive: true, send: true, balance: true, lookup: true };
@@ -139,7 +139,7 @@ and withdrawing per contact, replay protection, storage, expiry, re-checks and t
 app's: the UI renders every provider from its descriptor.
 
 ```ts
-import type { IdentityProofProvider } from "@ghostly/sdk";
+import type { IdentityProofProvider } from "@ghostlytools/sdk";
 
 export const myKey: IdentityProofProvider<{ sig: string }> = {
   id: "my-key", label: "My key", category: "self-custodied",
@@ -181,7 +181,7 @@ format are in `packages/browser/src/proofs/PROOFS.md` and [WISP 300](wisps/300-p
 A plugin is a plain object naming its adapters:
 
 ```ts
-import { SDK_API, type GhostlyAdapterPlugin } from "@ghostly/sdk";
+import { SDK_API, type GhostlyAdapterPlugin } from "@ghostlytools/sdk";
 
 const plugin: GhostlyAdapterPlugin = { id: "my-adapters", version: "1.0.0", sdk: SDK_API, lightning: [myLightning], identities: [myKey] };
 export default plugin;
@@ -192,7 +192,7 @@ test fakes), both under the same platform and network rules:
 
 - **At build time.** `GHOSTLY_PLUGINS=path/to/plugin.ts npm run build:web` (comma-separated paths from
   the repository root, each default-exporting a plugin) compiles them into the web app, the extension
-  or Desktop. Inside the app, `@ghostly/sdk` resolves to the app's own source, so the plugin and the
+  or Desktop. Inside the app, `@ghostlytools/sdk` resolves to the app's own source, so the plugin and the
   engine share one copy of everything. This is how the e2e build carries the example.
 - **At run time.** Code already running in the engine's realm calls `registerAdapters(plugin)`; the
   pickers update at once, and the function returned unregisters. On the web and on Desktop that realm
@@ -218,20 +218,20 @@ and the transport identifiers are a closed set negotiated on the wire (`TRANSPOR
 needs a WISP and an app change, not a plugin. There is no registration for transports yet; this
 section says so rather than pretend.
 
-A **minimal client** that implements only the WISP contracts it needs uses `@ghostly/sdk/core`: the
+A **minimal client** that implements only the WISP contracts it needs uses `@ghostlytools/sdk/core`: the
 protocol library the apps and the CLI are built on. It follows the WISP drafts it implements, and
 [PROTOCOL.md](PROTOCOL.md) describes the wire.
 
 ## Testing
 
-- **Contract suites** (`@ghostly/sdk/testing`): every adapter runs the suite of its kind against
+- **Contract suites** (`@ghostlytools/sdk/testing`): every adapter runs the suite of its kind against
   itself, with a harness that knows how to make things happen on its network (a fake, a regtest
   counterpart, a stubbed network). `describeLightningProvider` / `describeOnchainProvider` take a
   harness with the provider, its `network`, optionally its `descriptor` (checked too), and how to pay
   its invoice or fund it; `describeIdentityProof` takes the provider, a `subject` you control,
   `prove`, `proveAsOther`, a stubbed `fetch` and `revoke` for re-checks. The suites are the ones in
   `packages/browser`, moved into the source so the app and you run the same file.
-- **Fakes** (`@ghostly/sdk/fakes`): in-memory regtest sats and test identities that hold nothing and
+- **Fakes** (`@ghostlytools/sdk/fakes`): in-memory regtest sats and test identities that hold nothing and
   reach nothing, to drive your tests without a network.
 - **Real networks**: gate on an environment variable (`GHOSTLY_<NAME>_REGTEST=1`), skip otherwise,
   never real funds, never a real account, never print a secret.
@@ -249,7 +249,7 @@ protocol library the apps and the CLI are built on. It follows the WISP drafts i
   `packages/sdk/test/surface.test.ts`: a name that leaves is a breaking change. Type shapes are
   documented in their TSDoc; there is no generated reference yet, the declarations shipped in the
   package are it.
-- `@ghostly/sdk/core` follows the WISP drafts (`docs/wisps`): a Draft may change, minor by minor,
+- `@ghostlytools/sdk/core` follows the WISP drafts (`docs/wisps`): a Draft may change, minor by minor,
   until it is Final. Wire capability names and versions never change silently.
 - Not stable, not exported: the engine, storage, the UI, the built-in providers' modules.
 

@@ -128,7 +128,7 @@ export const BLOCKS: Block[] = [
   b("mls", "groups", "MLS", [], "Group encryption by the MLS standard, for groups larger than the mesh or members who renew their own keys. Being considered, not planned.", ["adapter-roadmap"], "candidate-mls-group-encryption"),
 
   // SDK, apps & catalogs
-  b("sdk", "ecosystem", "@ghostly/sdk", [], "Write a wallet source or an identity proof outside the app, test it with the contract suites, and it joins the pickers as a plugin: no registry line. From the repository, not on npm.", ["sdk"], "candidate-sdk-and-manifests"),
+  b("sdk", "ecosystem", "@ghostlytools/sdk", [], "Write a wallet source or an identity proof outside the app, test it with the contract suites, and it joins the pickers as a plugin: no registry line. From the repository, not on npm.", ["sdk"], "candidate-sdk-and-manifests"),
   // release-1.0: "Not on npm yet." becomes "npm install -g @ghostlytools/cli."
   b("headless", "ecosystem", "Headless CLI", ["11xx-headless"], "`ghostly`: the app's own engine on Node for bots, driven through a daemon, a local socket and a JSON event stream. Spending real money needs --confirm-real. Not on npm yet: @ghostlytools/cli from 1.0."),
   b("sandbox", "ecosystem", "Plugin sandbox", [], "A plugin host that gives each plugin only the permissions you grant it. Being considered, not planned.", ["adapter-roadmap"], "candidate-plugin-sandbox"),

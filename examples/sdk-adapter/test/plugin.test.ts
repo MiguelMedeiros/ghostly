@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { pluginProblems, registerAdapters, registeredIdentityProviders, registeredLightningProviders, registeredPlugins, resetAdapterRegistry, SDK_API } from "@ghostly/sdk";
+import { pluginProblems, registerAdapters, registeredIdentityProviders, registeredLightningProviders, registeredPlugins, resetAdapterRegistry, SDK_API } from "@ghostlytools/sdk";
 import plugin from "../src/index";
 // covers: sdk.registry
 

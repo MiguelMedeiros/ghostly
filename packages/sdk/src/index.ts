@@ -1,5 +1,5 @@
 /**
- * @ghostly/sdk: what someone building for Ghostly needs, and nothing of the app's internals.
+ * @ghostlytools/sdk: what someone building for Ghostly needs, and nothing of the app's internals.
  *
  *  - Wallet sources: the `LightningProvider` and `OnchainProvider` contracts, their descriptors, the
  *    money-safety error (`NothingSpentError`) and the descriptor checks.
@@ -7,7 +7,7 @@
  *  - Plugins: `registerAdapters`, the one way an adapter written outside the app gets into it.
  *  - Transports and records: the contracts a transport or a minimal client implements (from the core).
  *
- * Fakes and contract test suites: `@ghostly/sdk/testing`. The whole protocol library: `@ghostly/sdk/core`.
+ * Fakes and contract test suites: `@ghostlytools/sdk/testing`. The whole protocol library: `@ghostlytools/sdk/core`.
  * Read docs/SDK.md first: the rules about money and secrets are not optional.
  */
 

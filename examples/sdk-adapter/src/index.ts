@@ -1,4 +1,4 @@
-import { SDK_API, type GhostlyAdapterPlugin } from "@ghostly/sdk";
+import { SDK_API, type GhostlyAdapterPlugin } from "@ghostlytools/sdk";
 import { exampleSchnorr } from "./identity";
 import { paperLightning } from "./lightning";
 

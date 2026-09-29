@@ -11,14 +11,14 @@ const sdk = (path: string) => resolve(here, "../sdk/src", path);
 export const repositoryRoot = resolve(here, "../..");
 
 /**
- * Inside the app, `@ghostly/sdk` is its source: a plugin bundled with the app shares one copy of the
+ * Inside the app, `@ghostlytools/sdk` is its source: a plugin bundled with the app shares one copy of the
  * contracts and the registry with the engine, whatever its `node_modules` holds.
  */
 const SDK_MODULES = new Map([
-  ["@ghostly/sdk", sdk("index.ts")],
-  ["@ghostly/sdk/fakes", sdk("fakes.ts")],
-  ["@ghostly/sdk/testing", sdk("testing.ts")],
-  ["@ghostly/sdk/core", sdk("core.ts")],
+  ["@ghostlytools/sdk", sdk("index.ts")],
+  ["@ghostlytools/sdk/fakes", sdk("fakes.ts")],
+  ["@ghostlytools/sdk/testing", sdk("testing.ts")],
+  ["@ghostlytools/sdk/core", sdk("core.ts")],
 ]);
 
 /**
