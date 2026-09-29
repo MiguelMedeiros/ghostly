@@ -3,6 +3,14 @@
   "copyInvite": "نسخ رمز الدعوة",
   "deleteAllChats": "حذف جميع المحادثات",
   "deleteChat": "حذف المحادثة",
+  "group": {
+    "adminAnswered": "أجاب تطبيق المشرف…",
+    "invitedBy": "دعاك {{contact}} · {{members}}",
+    "invitedByUnknown": "دعتك جهة اتصال · {{members}}",
+    "letting": "أحد الأعضاء يسمح لك بالدخول…",
+    "waitingAdmin": "في انتظار تطبيق المشرف…",
+    "waitingIn": "في انتظار السماح لك بالدخول…"
+  },
   "join": "انضمام",
   "joinChat": "الانضمام إلى محادثة",
   "new": "جديد",
@@ -21,5 +29,6 @@
   "searchPlaceholder": "بحث في المحادثات...",
   "settings": "الإعدادات",
   "sharedIdentity": "شارك هوية",
-  "startChat": "محادثة جديدة"
+  "startChat": "محادثة جديدة",
+  "unread": "رسائل غير مقروءة"
 }
