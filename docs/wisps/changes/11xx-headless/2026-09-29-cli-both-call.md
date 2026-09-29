@@ -1,0 +1,1 @@
+Calls: when both sides call at once, the CLI applies WISP 601's "Both call at once" rule. A call that lost ends with the new `call.ended` reason `crossed`, and the contact's call rings next (`call.incoming`).

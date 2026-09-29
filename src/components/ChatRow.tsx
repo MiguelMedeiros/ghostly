@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
@@ -28,6 +28,8 @@ import type { ChatMessage } from "../lib/types";
  */
 
 const AVATAR = { compact: 46, comfortable: 52 } as const;
+/** How long a group invitation's row says why its answer did not go. */
+export const REFUSAL_SHOWN_MS = 8000;
 const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" } as const;
 
 /** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
@@ -269,9 +271,22 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   // An unread message that names me: "@" beside the dot, in the accent unless the mute keeps mentions quiet too.
   const mention = unread && (group.lastMentionAt ?? 0) > groupReadAt(group.id);
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
+  // Why the last answer did not go, for a few seconds: Accept needs the inviter's chat live, which takes a moment after
+  // the app opens, and a click that did nothing and said nothing looked broken.
+  const [refused, setRefused] = useState<string | null>(null);
+  useEffect(() => {
+    if (!refused) return;
+    const timer = setTimeout(() => setRefused(null), REFUSAL_SHOWN_MS);
+    return () => clearTimeout(timer);
+  }, [refused]);
   const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
     setBusy(true);
-    try { await engine.call(method, { groupId: group.id }); } catch { /* the row says what state it is in */ } finally { setBusy(false); }
+    setRefused(null);
+    try { await engine.call(method, { groupId: group.id }); } catch (error) {
+      const away = /not connected/i.test(error instanceof Error ? error.message : String(error));
+      setRefused(!away ? t("sidebar.group.answerFailed")
+        : invitation?.contact ? t("sidebar.group.inviterAway", { contact: invitation.contact }) : t("sidebar.group.inviterAwayUnknown"));
+    } finally { setBusy(false); }
   };
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
   const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
@@ -306,6 +321,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
           <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("chat.file.accept")}</button>
           <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }} className="rounded-lg px-3 py-1 text-xs text-text-secondary hover:bg-surface-hover disabled:opacity-40">{t("chat.file.decline")}</button>
         </div>}
+        {invitation && refused && <p role="status" data-testid="group-answer-refused" className="mt-1 text-xs text-danger">{refused}</p>}
       </div>
     </div>
   );

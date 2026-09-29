@@ -218,8 +218,9 @@ export function MessageInput({
     // Not while editing: the draft is the one kept aside.
     if (draftId && !editing) { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); }
     // Text put in by the app (an emoji, an edit, a share): the field fits it. A keystroke was fitted already.
+    // Emptied by the app (an edit ended, saved or not) after it grew: back to one line.
     const input=textareaRef.current;
-    if(input && text) fitFieldHeight(input);
+    if(input && (text || input.style.height)) fitFieldHeight(input);
   }, [draftId,text,editing]);
 
   // An emoji goes in where the caret was; the caret stays after it.

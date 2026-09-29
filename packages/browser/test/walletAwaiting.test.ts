@@ -44,6 +44,18 @@ describe("what a wallet still waits for", () => {
     expect(read({ quotes: [{ ...unnamed[0], paid: true }], payments: [request({ id: "r2", invoice: "lnbc-q2" })] })).toEqual([{ type: "cashu", kind: "paid", amount: 50_000, paymentId: "r2" }]);
   });
 
+  it("a request of ours paid in ecash leaves its invoice open at the mint, and that invoice waits for nothing", () => {
+    const paidRequest = request({ id: "r1", invoice: "lnbc-q1", mints: [REAL], state: "settled" });
+    // Named on the quote, or tied by the invoice alone; on a Lightning card too. A Receive invoice still counts.
+    expect(read({ quotes: [quote({ quote: "q1", paymentId: "r1" }), quote({ quote: "receive", amount: 30 })], payments: [paidRequest] }))
+      .toEqual([{ type: "cashu", kind: "invoice", amount: 30 }]);
+    expect(read({ quotes: [quote({ quote: "q1" })], payments: [paidRequest] })).toEqual([]);
+    expect(read({ lightningSource: "lnd", lightningOps: [op({ paymentHash: "h1", paymentId: "r2" })], payments: [request({ id: "r2", invoice: "lnbc-h1", state: "settled" })] })).toEqual([]);
+    // A request closed unpaid keeps its invoice listed: someone may still pay it.
+    expect(read({ quotes: [quote({ quote: "q1", paymentId: "r1" })], payments: [{ ...paidRequest, state: "pending", closed: true }] }))
+      .toEqual([{ type: "cashu", kind: "invoice", amount: 50_000, paymentId: "r1" }]);
+  });
+
   it("a request counts for the one wallet it can be paid through: an invoice of another Lightning source with Cashu mints is lost with neither", () => {
     const lightningOps = [op({ paymentHash: "h1", paymentId: "r1", amount: 50_000 })];
     expect(read({ lightningOps, lightningSource: "lnd", payments: [request({ id: "r1", invoice: "lnbc-h1", mints: [REAL] })] })).toEqual([]);
