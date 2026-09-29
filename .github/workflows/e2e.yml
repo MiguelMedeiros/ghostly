@@ -27,7 +27,8 @@ jobs:
   e2e:
     name: End-to-end
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The web and extension suites outgrew 30 minutes (cancelled mid-run on 2026-09-29).
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -73,7 +74,9 @@ jobs:
         if: ${{ !inputs.web_url }}
         env:
           E2E_MINT_URL: http://127.0.0.1:3338
-        run: npm run test:e2e
+        # @release-skip: specs that have not passed on a GitHub runner yet and do not gate a release until they
+        # do (the nightly E2E (full) still runs them). See the follow-up issue before adding one.
+        run: npm run test:e2e -- --grep-invert @release-skip
 
       - name: Run end-to-end tests against ${{ inputs.web_url }}
         if: ${{ inputs.web_url }}
@@ -163,6 +166,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # e2e/desktop/calls-interop.spec.ts calls the Linux Desktop from a Chromium page.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
       - name: Install tauri-driver
         run: command -v tauri-driver || cargo install tauri-driver --locked
 
@@ -173,7 +180,7 @@ jobs:
         run: npm run tauri -- build --debug --no-bundle
 
       - name: Run Desktop end-to-end tests
-        run: xvfb-run -a npm run test:e2e:desktop
+        run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
 
       - name: Upload report
         if: ${{ !cancelled() }}

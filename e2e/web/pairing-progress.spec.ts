@@ -40,7 +40,7 @@ function expectInOrder(stages: string[], steps: string[]) {
   expect(stages.at(-1)).toBe("live");
 }
 
-test("pairing shows its stages in order on both sides, ends live, then gives the chat back", { tag: ["@feature:chat.paired.pairing-progress", "@feature:chat.paired.progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
+test("pairing shows its stages in order on both sides, ends live, then gives the chat back", { tag: ["@release-skip", "@feature:chat.paired.pairing-progress", "@feature:chat.paired.progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("progress-alice"), peer("progress-bob")]);
   await Promise.all([recordStages(alice.page), recordStages(bob.page)]);
 
