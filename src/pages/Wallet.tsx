@@ -56,7 +56,7 @@ export function Wallet() {
   const platform = useServicesPlatform();
   const wallet = platform?.wallet;
   const state = wallet?.getState();
-  const cards = state ? walletCards(state) : [];
+  const cards = state ? walletCards(state, { t }) : [];
   // The tab chosen on this visit; before that, the one shown last on this device while it has wallets (another
   // profile may have none there), else real money when there is some, else test money.
   const [tab, setTab] = useState<WalletNetwork | null>(null);

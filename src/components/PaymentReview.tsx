@@ -1,8 +1,12 @@
 import {useState} from 'react';
 import {formatPaymentAmount,walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform} from '../lib/platform';
-import {NetworkTag,satsOf} from './NetworkTag';
+import {useI18n} from '../contexts/I18nContext';
+import {NetworkTag,satsIn} from './NetworkTag';
 import {ConfirmRealMoney} from './ConfirmRealMoney';
+
+/** A payment's state as the review shows it, in the app's language (the English is the state itself). */
+const STATE_KEY={pending:'payments.review.states.pending',submitted:'payments.review.states.submitted',settled:'payments.review.states.settled',failed:'payments.review.states.failed',unknown:'payments.review.states.unknown',cancelled:'payments.review.states.cancelled',confirmed:'payments.review.states.confirmed'} as const;
 
 /**
  * A payment before it goes out, and its status after: the amount, the fee, the destination, and which money it is.
@@ -12,36 +16,39 @@ import {ConfirmRealMoney} from './ConfirmRealMoney';
  * one that failed, or whose outcome is not known, stays here with its error.
  */
 export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void}) {
+ const {t}=useI18n();
  const [saved,setReview]=useState(initial),[busy,setBusy]=useState(false),[error,setError]=useState(''),[confirming,setConfirming]=useState(false);
  const review=wallet.getState()?.intents?.find(i=>i.id===saved.id)??saved;
  const token=review.method==='usdt';
- const network=walletNetworkOf(review.network),real=network==='mainnet',unit=token?review.asset:satsOf(network);
+ const network=walletNetworkOf(review.network),real=network==='mainnet',unit=token?review.asset:satsIn(t,network);
  const shown=token?formatPaymentAmount(review.amount,review.decimals):review.amount.toLocaleString();
- const run=async(action:()=>Promise<Review>):Promise<Review|null>=>{setBusy(true);setError('');try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?e.message:'Could not update this payment. Check its saved status.');return null;}finally{setBusy(false);}};
+ const run=async(action:()=>Promise<Review>):Promise<Review|null>=>{setBusy(true);setError('');try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?e.message:t('payments.review.error.update'));return null;}finally{setBusy(false);}};
  // Only the real-money step says so: the engine refuses a Mainnet approval without it.
  const approve=()=>void run(()=>wallet.approvePayment(review.id,real)).then(next=>{setConfirming(false);if(next&&(next.state==='submitted'||next.state==='settled'))onSent?.();});
  const button='rounded-lg px-3 py-2 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40';
- return <section aria-label="Payment review" className="rounded-xl border border-border p-3 space-y-3" data-testid="payment-review" data-network={network}>
-  <h3 className="text-text-primary text-sm font-semibold flex items-center gap-2 flex-wrap">{review.state==='pending'?'Review payment':'Payment status'}<NetworkTag network={network} testId="review-network"/></h3>
+ const status=token&&review.state==='settled'?'confirmed':review.state;
+ const blocks=review.evm?.confirmations??2;
+ return <section aria-label={t('payments.review.label')} className="rounded-xl border border-border p-3 space-y-3" data-testid="payment-review" data-network={network}>
+  <h3 className="text-text-primary text-sm font-semibold flex items-center gap-2 flex-wrap">{review.state==='pending'?t('payments.review.title.pending'):t('payments.review.title.status')}<NetworkTag network={network} testId="review-network"/></h3>
   <p className="text-xl font-semibold text-text-primary">{shown} <span className="text-xs font-normal">{unit}</span></p>
   <p className="text-xs text-text-secondary">{review.method} · {review.network} · {review.asset}</p>
-  <p className="text-xs text-text-secondary" data-testid="review-money">{real?'Real money: it leaves your wallet once you confirm.':'Test money: these coins are worth nothing outside the test network.'}</p>
+  <p className="text-xs text-text-secondary" data-testid="review-money">{real?t('payments.review.money.mainnet'):t('payments.review.money.testnet')}</p>
   <dl className="text-xs text-text-secondary space-y-2 break-all">
-   <div><dt className="text-text-muted">Destination</dt><dd className="font-mono">{review.address}</dd></div>
-   <div><dt className="text-text-muted">{token?'Maximum gas / your limit':'Fee / maximum'}</dt><dd>{token?`${formatPaymentAmount(review.fee,18)} / ${formatPaymentAmount(review.feeCap,18)} ETH`:`${review.fee} / ${review.feeCap} ${unit}`}</dd></div>
-   {!token&&<div><dt className="text-text-muted">Total</dt><dd>{(review.amount+review.fee).toLocaleString()} {unit}</dd></div>}
-   <div><dt className="text-text-muted">Status</dt><dd aria-live="polite" data-testid="review-status">{token&&review.state==='settled'?'confirmed':review.state}</dd></div>
+   <div><dt className="text-text-muted">{t('payments.review.destination')}</dt><dd className="font-mono">{review.address}</dd></div>
+   <div><dt className="text-text-muted">{token?t('payments.review.gasLimit'):t('payments.review.fee')}</dt><dd>{token?`${formatPaymentAmount(review.fee,18)} / ${formatPaymentAmount(review.feeCap,18)} ETH`:`${review.fee} / ${review.feeCap} ${unit}`}</dd></div>
+   {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{(review.amount+review.fee).toLocaleString()} {unit}</dd></div>}
+   <div><dt className="text-text-muted">{t('payments.review.status')}</dt><dd aria-live="polite" data-testid="review-status">{status in STATE_KEY?t(STATE_KEY[status as keyof typeof STATE_KEY]):status}</dd></div>
   </dl>
-  <details className="text-xs text-text-secondary"><summary className="cursor-pointer text-text-muted">Payment details</summary><dl className="space-y-2 pt-2 break-all"><div><dt>Payee</dt><dd>{review.payee}</dd></div><div><dt>Provider</dt><dd>{review.provider}</dd></div><div><dt>Expires</dt><dd>{new Date(review.expiresAt).toLocaleString()}</dd></div>{token&&<><div><dt>Token / chain</dt><dd>{review.token} · {review.chainId} · {review.decimals} decimals</dd></div><div><dt>Gas limit / nonce</dt><dd>{review.evm?.gasLimit} / {review.evm?.nonce}</dd></div><div><dt>Maximum / priority fee per gas (wei)</dt><dd>{review.evm?.maxFeePerGas} / {review.evm?.maxPriorityFeePerGas}</dd></div></>}{review.txid&&<div><dt>Transaction</dt><dd>{review.txid}</dd></div>}</dl></details>
-  {token&&<p className="text-[11px] text-text-muted">{review.asset==='TEST-USDT'?'Local test token, not Tether-issued USDT. ':''}Gas is paid separately in ETH and may exceed a small payment's value. Confirmed after {review.evm?.confirmations??2} blocks.</p>}
-  {review.method==='arkade'&&<p className="text-[11px] text-text-muted">{real?'Real bitcoin. ':'Test funds only. '}Ark confirmation is off-chain.</p>}
-  {review.method==='bark'&&<p className="text-[11px] text-text-muted">Sent over Second's Ark server, off-chain. Only an address of that same server can be paid.</p>}
-  {review.method==='spark'&&<p className="text-[11px] text-text-muted" data-testid="review-spark-note">{review.network==='bitcoin'?'Real bitcoin. ':'Regtest: test sats, worthless. '}Spark to Spark, off-chain: final once Spark's operators sign the transfer. Checking it never sends a second one.</p>}
-  {review.method==='bitcoin'&&<p className="text-[11px] text-text-muted">An on-chain transaction, signed for exactly this review. Settled after one confirmation; checking it never sends a second one.</p>}
-  {review.method==='fedimint'&&<p className="text-[11px] text-text-muted">Ecash notes of this federation go to your contact: they are the money until your contact redeems them. If they never do, take them back (they also come back by themselves after a week).</p>}
-  {review.method==='cashu'&&<p className="text-[11px] text-text-muted">The selected mint holds the backing funds. Confirmation requires token redemption at that mint.</p>}
+  <details className="text-xs text-text-secondary"><summary className="cursor-pointer text-text-muted">{t('payments.review.details')}</summary><dl className="space-y-2 pt-2 break-all"><div><dt>{t('payments.review.payee')}</dt><dd>{review.payee}</dd></div><div><dt>{t('payments.review.provider')}</dt><dd>{review.provider}</dd></div><div><dt>{t('payments.review.expires')}</dt><dd>{new Date(review.expiresAt).toLocaleString()}</dd></div>{token&&<><div><dt>{t('payments.review.tokenChain')}</dt><dd>{t('payments.review.tokenChainValue',{token:review.token??'',chain:review.chainId??'',decimals:review.decimals??''})}</dd></div><div><dt>{t('payments.review.gasNonce')}</dt><dd>{review.evm?.gasLimit} / {review.evm?.nonce}</dd></div><div><dt>{t('payments.review.feePerGas')}</dt><dd>{review.evm?.maxFeePerGas} / {review.evm?.maxPriorityFeePerGas}</dd></div></>}{review.txid&&<div><dt>{t('payments.review.transaction')}</dt><dd>{review.txid}</dd></div>}</dl></details>
+  {token&&<p className="text-[11px] text-text-muted">{review.asset==='TEST-USDT'?t('payments.review.note.usdtTest',{blocks}):t('payments.review.note.usdt',{blocks})}</p>}
+  {review.method==='arkade'&&<p className="text-[11px] text-text-muted">{real?t('payments.review.note.arkReal'):t('payments.review.note.arkTest')}</p>}
+  {review.method==='bark'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.bark')}</p>}
+  {review.method==='spark'&&<p className="text-[11px] text-text-muted" data-testid="review-spark-note">{review.network==='bitcoin'?t('payments.review.note.sparkReal'):t('payments.review.note.sparkTest')}</p>}
+  {review.method==='bitcoin'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.bitcoin')}</p>}
+  {review.method==='fedimint'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.fedimint')}</p>}
+  {review.method==='cashu'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.cashu')}</p>}
   {review.error&&<p className="text-xs text-danger">{review.error}</p>}{error&&<p role="alert" className="text-xs text-danger">{error}</p>}
   {review.state==='pending'&&confirming&&<ConfirmRealMoney what={`${shown} ${unit}`} busy={busy} onSend={approve} onBack={()=>setConfirming(false)}/>}
-  <div className="flex gap-2 flex-wrap">{review.state==='pending'?<>{!confirming&&<button className={`${button} !bg-accent !text-on-accent`} data-testid="review-approve" disabled={busy} onClick={()=>real?setConfirming(true):approve()}>Approve payment</button>}<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.cancelPayment(review.id))}>Cancel</button></>:<>{['submitted','unknown'].includes(review.state)&&<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.reconcilePayment(review.id))}>Check existing payment</button>}<button className={button} onClick={onClose}>Close</button></>}</div>
+  <div className="flex gap-2 flex-wrap">{review.state==='pending'?<>{!confirming&&<button className={`${button} !bg-accent !text-on-accent`} data-testid="review-approve" disabled={busy} onClick={()=>real?setConfirming(true):approve()}>{t('payments.review.approve')}</button>}<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.cancelPayment(review.id))}>{t('common.cancel')}</button></>:<>{['submitted','unknown'].includes(review.state)&&<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.reconcilePayment(review.id))}>{t('payments.review.check')}</button>}<button className={button} onClick={onClose}>{t('common.close')}</button></>}</div>
  </section>;
 }
