@@ -172,6 +172,10 @@
   },
   "readNote": "Chaque membre du groupe peut lire tout ce qui est envoyé tant qu'il en fait partie. Une personne retirée garde ce qu'elle a déjà reçu et ne peut pas lire la suite ; une personne arrivée plus tard ne peut pas lire ce qui précède. Les messages vont directement à chaque membre ; qui était absent reçoit ce qu'il a manqué de n'importe quel membre qui l'a (les {{count}} derniers messages du groupe) quand ils se retrouvent.",
   "readNoteCommunity": "Toute personne ayant le lien du groupe peut le rejoindre, et n'importe quel membre peut faire entrer quelqu'un. Chaque membre peut lire tout ce qui est envoyé tant qu'il en fait partie ; une personne retirée ne peut pas lire la suite, une personne arrivée plus tard ne peut pas lire ce qui précède. Les membres absents reçoivent les {{count}} derniers messages de ceux qui sont là à leur retour.",
+  "remove": {
+    "body": "Cette personne ne recevra plus les nouveaux messages du groupe.",
+    "title": "Retirer {{name}} ?"
+  },
   "rename": {
     "action": "Renommer",
     "cancel": "Annuler",

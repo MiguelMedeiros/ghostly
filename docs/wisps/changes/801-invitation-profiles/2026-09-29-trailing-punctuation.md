@@ -1,0 +1,1 @@
+An invite copied from the end of a sentence now reads: an input refused as it is that ends in `.`, `,`, `)` or `!` is read once more without them, and taken only when that reads. Otherwise the first refusal stands, so a typo is still reported as a typo. No wire format or code changed.

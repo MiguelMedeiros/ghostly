@@ -143,6 +143,17 @@ describe("keeping links and chats in step", () => {
     expect(engine.calls).toContainEqual(["removeLink", { linkId: "fresh" }]);
   });
 
+  it("drops at once the link of a chat deleted here, however new: the app stops answering for it", async () => {
+    imported();
+    storage.saveSession(session({ id: "s1", peerPubKeyB64: "p-fresh" }));
+    await start([link({ id: "fresh", peerPubKeyZ32: "p-fresh", createdAt: 1_000_000 })]);
+    expect(engine.calls.filter(([m]) => m === "removeLink")).toEqual([]);
+    storage.deleteSession("s1");
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.calls).toContainEqual(["removeLink", { linkId: "fresh" }]);
+  });
+
   it("keeps a link whose chat still exists, and takes its delivery mode", async () => {
     imported();
     storage.saveSession(session({ deliveryMode: "stream" }));

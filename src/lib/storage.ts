@@ -179,9 +179,20 @@ export function deleteMessage(
   return session;
 }
 
+/**
+ * The chats deleted on this page, by the contact's link key. Session sync gives a link with no chat 15 s before it
+ * drops it (a chat the engine just made may not be mirrored yet); a chat the person deleted is not one of those, so
+ * its link goes at once and the app stops answering for it (receipts included).
+ */
+const deletedPeers = new Set<string>();
+export function wasDeleted(peerPubKeyB64: string): boolean {
+  return deletedPeers.has(peerPubKeyB64);
+}
+
 export function deleteSession(sessionId: string): void {
   // The name and photo chosen for the contact (identities/contactFace.ts) go with their last chat.
   const peer = loadSession(sessionId)?.peerPubKeyB64;
+  if (peer) deletedPeers.add(peer);
   const lastOfPeer = !!peer && !listSessions().some(s => s.id !== sessionId && s.peerPubKeyB64 === peer);
   for (const key of [
     ...(lastOfPeer ? [`${getPrefix()}face_${peer}`] : []),

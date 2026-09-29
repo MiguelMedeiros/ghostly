@@ -1,11 +1,11 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { createInterface } from "node:readline";
 import type { Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
 import { createProfile, profilePaths } from "../src/profiles";
-import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
+import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.cli
 
 /** A daemon started before an upgrade: commands say so, and `daemon restart` runs the new code. */
@@ -65,6 +65,16 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const listed = await ghostly(["--home", dir, "chat", "list"], { env });
     expect(ok(listed)).toEqual({ chats: [] });
     expect(listed.stderr).toBe("");
+  });
+
+  it("daemon --detach on a profile another process holds says busy and names that process", async () => {
+    const held = home("held");
+    createProfile(held, "default");
+    // This test's own process stands in for a one-shot command that opened the profile in process.
+    writeFileSync(profilePaths(held, "default").lock, String(process.pid));
+    const started = await ghostly(["--home", held, "daemon", "--detach"], { env });
+    expect(error(started, "busy", 1).message).toContain(`in use by process ${process.pid}`);
+    expect(started.json.error).toMatchObject({ details: { pid: process.pid } });
   });
 
   it("a daemon whose terminal closes (SIGHUP) stops cleanly and frees its profile", async () => {
