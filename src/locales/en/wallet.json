@@ -534,6 +534,12 @@
     "mainnet": "sats",
     "testnet": "test sats"
   },
+  "setup": {
+    "progress": "Setting up your Mainnet wallets…",
+    "retry": "Try {{wallet}} again",
+    "skip": "Skip",
+    "title": "Not made yet. Ghostly tries again at its next start."
+  },
   "source": {
     "available": "{{count}} available…",
     "backToMints": "Back to Cashu mints",

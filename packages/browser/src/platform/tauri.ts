@@ -9,6 +9,11 @@ export async function getVersion(): Promise<string> {
   return getBrowserHost().version;
 }
 
+/** No bundle id outside Tauri. */
+export async function getIdentifier(): Promise<string> {
+  return "";
+}
+
 /** `@tauri-apps/api/event`: no event ever arrives. */
 export async function listen(): Promise<() => void> {
   return () => {};

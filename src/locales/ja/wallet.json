@@ -534,6 +534,12 @@
     "mainnet": "sats",
     "testnet": "テスト sats"
   },
+  "setup": {
+    "progress": "Mainnet のウォレットを作成しています…",
+    "retry": "{{wallet}} を再試行",
+    "skip": "スキップ",
+    "title": "まだ作成できていません。次回の起動時にもう一度試します。"
+  },
   "source": {
     "available": "{{count}} 件利用可能…",
     "backToMints": "Cashu のミントに戻す",

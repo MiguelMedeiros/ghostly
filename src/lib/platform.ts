@@ -9,8 +9,8 @@ import type { FedimintFederationView, FedimintWalletView } from "@ghostly/browse
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { SparkCreate, SparkWalletView } from "@ghostly/browser/engine/paymentAdapters/sparkWallet";
 import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
-import type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletTestCoins, WalletType } from "@ghostly/browser/shared/types";
-export type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletTestCoins, WalletType, WalletNetwork };
+import type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletSetupView, WalletTestCoins, WalletType } from "@ghostly/browser/shared/types";
+export type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletSetupView, WalletTestCoins, WalletType, WalletNetwork };
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
@@ -167,6 +167,8 @@ export interface WalletState {
   wallets?: WalletInstanceView[];
   /** What New can make on each network, and why not where it cannot. */
   offers?: WalletOffer[];
+  /** A new profile's first-run setup of its default Mainnet wallets: while it runs, and what it could not make. */
+  setup?: WalletSetupView;
   ark?: ArkWalletView;
   bark?: BarkWalletView;
   fedimint?: FedimintWalletView;
@@ -266,6 +268,10 @@ export interface WalletPlatform {
   remove(params: WalletRemove): Promise<void>;
   /** "Get test coins" (Testnet only): a small fixed amount from the wallet's own test faucet, pressed for on purpose. */
   testCoins(params: WalletTestCoins): Promise<TestCoinsResult>;
+  /** The first-run setup tries again to make a default Mainnet wallet it could not make. */
+  setupRetry(type: WalletType): Promise<void>;
+  /** The first-run setup leaves a default Mainnet wallet unmade from now on. */
+  setupDismiss(type: WalletType): Promise<void>;
   usdtCreate(params:UsdtCreate):Promise<void>;
   usdtUnlock(password:string):Promise<void>;
   /** The recovery phrase; a wallet that opens by itself needs no password. */

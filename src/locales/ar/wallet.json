@@ -534,6 +534,12 @@
     "mainnet": "sats",
     "testnet": "sats تجريبية"
   },
+  "setup": {
+    "progress": "جارٍ إنشاء محافظ Mainnet الخاصة بك…",
+    "retry": "أعد محاولة {{wallet}}",
+    "skip": "تخطَّ",
+    "title": "لم تُنشأ بعد. سيحاول Ghostly مجددًا عند تشغيله التالي."
+  },
   "source": {
     "available": "{{count}} متاحة…",
     "backToMints": "العودة إلى منصات سك Cashu",
