@@ -8,6 +8,7 @@ import { useI18n } from "../contexts/I18nContext";
 // versions link to the index until their corresponding release is verified.
 const publishedReleases: Record<string, string> = {
   "0.4.0": "https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.4.0",
+  "1.0.0": "https://github.com/MiguelMedeiros/ghostly/releases/tag/v1.0.0",
 };
 
 export function HomeProjectLinks() {

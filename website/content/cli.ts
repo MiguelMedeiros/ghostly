@@ -3,17 +3,13 @@ import type { Level } from "@/lib/status";
 /**
  * /cli: the headless `ghostly` (@ghostlytools/cli, packages/cli, WISP 11xx). Short on
  * purpose: a pitch, the install line, four commands, a bot and links. The long
- * version is docs/CLI.md. Checked against packages/cli on `dev`.
+ * version is docs/CLI.md. Checked against packages/cli on `main`.
  */
 
-const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/dev";
+const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/main";
 
-/**
- * One line: builds the package from a clone and installs it (it is not on npm before 1.0).
- * release-1.0: INSTALL becomes "npm install -g @ghostlytools/cli", and install.hint below drops "until 1.0".
- */
-export const INSTALL =
-  "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli && npm install -g ./ghostlytools-cli-*.tgz";
+/** One line: installs the package from npm. */
+export const INSTALL = "npm install -g @ghostlytools/cli";
 
 /** A session, as the terminal in the hero shows it. Output shapes from packages/cli/README.md. */
 export const SESSION = `$ ghostly daemon --detach
@@ -55,7 +51,7 @@ const SCOPE: { level: Level; key: string }[] = [
   { level: "available", key: "ids" },
   { level: "available", key: "services" },
   { level: "available", key: "calls" },
-  { level: "planned", key: "npm" },
+  { level: "available", key: "npm" },
   { level: "planned", key: "dht" },
   { level: "planned", key: "wallets" },
   { level: "planned", key: "binary" },
@@ -77,7 +73,7 @@ export const cli = {
   },
   install: {
     title: "Install",
-    hint: "Node 22.12 or newer. Built from source until 1.0; from 1.0, npm install -g @ghostlytools/cli.",
+    hint: "Node 22.12 or newer. The command is ghostly.",
     copy: "Copy",
     copied: "Copied",
   },
@@ -107,7 +103,7 @@ export const cli = {
       ids: "Identity proofs",
       services: "Shared web apps",
       calls: "Voice calls, the audio handed to your program",
-      npm: "An npm release",
+      npm: "On npm as @ghostlytools/cli",
       dht: "Reading the DHT directly (relays for now)",
       wallets: "Bark wallets",
       binary: "A single binary, without Node",
