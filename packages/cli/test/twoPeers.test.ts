@@ -506,7 +506,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       }
       expect(peer.services.map((s) => s.id)).toContain(service);
       const opened = ok(await as(bob, "service", "open", "alice", service));
-      // As a browser: the link's host name (`<random>.localhost`, which Node's resolver does not know), its cookie, then the page.
+      // As a browser: the link's host name (`<random>.localhost`, which Node's resolver may not know), its cookie, then the page.
       const link = new URL(opened.url as string);
       expect(link.hostname).toMatch(/^[0-9a-f]{32}\.localhost$/);
       const visit = (path: string, cookie?: string) => new Promise<{ status: number; cookie: string; body: string }>((resolve, reject) => {

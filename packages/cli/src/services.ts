@@ -36,6 +36,8 @@ export const nodeLocalFetch: LocalFetch = async (request) => {
 /** Contact services open on loopback ports, by `<peer>/<service>`, while this process runs. */
 const open = new Map<string, OpenedService>();
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+/** Cookie names an opened service may set and have passed back (browsers keep about 180 per host). */
+const MAX_COOKIE_NAMES = 256;
 
 /**
  * The cookie that shows a browser was given this service's link here. It is this machine's, never the contact's:
@@ -75,18 +77,16 @@ export function hostOnlyCookie(value: string): string | null {
   return value.split(";").filter((part, i) => i === 0 || !/^\s*domain\s*(=|$)/i.test(part)).join(";");
 }
 
-/** A cookie's value in a `Cookie` header, by name. */
-function cookieValue(header: string | undefined, name: string): string | null {
-  for (const pair of (header ?? "").split(";")) {
+/** A cookie's values in a `Cookie` header, by name (a page may set another by the same name on a narrower path). */
+function cookieValues(header: string | undefined, name: string): string[] {
+  return (header ?? "").split(";").flatMap((pair) => {
     const at = pair.indexOf("=");
-    if (at > 0 && pair.slice(0, at).trim() === name) return pair.slice(at + 1).trim();
-  }
-  return null;
+    return at > 0 && pair.slice(0, at).trim() === name ? [pair.slice(at + 1).trim()] : [];
+  });
 }
 
-function sameSecret(a: string | null, b: string): boolean {
-  if (a === null || a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+function sameSecret(a: string, b: string): boolean {
+  return a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
 /** How an opened service reaches the contact's app: the engine's `request` for that contact and service. */
@@ -123,7 +123,7 @@ export async function openServiceServer(send: ServiceSend, port = 0): Promise<Op
       if (!sameSecret(path.slice(OPEN_PATH.length), token)) return plain(response, 404, "Not found");
       return plain(response, 303, "", { location: "/", "referrer-policy": "no-referrer", "set-cookie": `${OPEN_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax` });
     }
-    if (!sameSecret(cookieValue(request.headers.cookie, OPEN_COOKIE), token)) return plain(response, 404, "Not found");
+    if (!cookieValues(request.headers.cookie, OPEN_COOKIE).some((value) => sameSecret(value, token))) return plain(response, 404, "Not found");
     const chunks: Buffer[] = [];
     let size = 0, refused = false;
     request.on("data", (chunk: Buffer) => {
@@ -163,7 +163,7 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
       if (lower === "set-cookie") {
         const cookie = hostOnlyCookie(value);
         if (!cookie) continue;
-        cookies.add(setCookieName(cookie)!);
+        if (cookies.size < MAX_COOKIE_NAMES) cookies.add(setCookieName(cookie)!);
         out[lower] = [...((out[lower] as string[] | undefined) ?? []), cookie];
       } else out[lower] = value;
     }

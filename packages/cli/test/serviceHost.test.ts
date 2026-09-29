@@ -86,7 +86,9 @@ describe("an opened service's host and link", () => {
     expect((await get(service, "/.ghostly-open/")).status).toBe(404);
     expect(asked).toBe(0);
     expect((await get(service, "/", { host: service.host.toUpperCase(), cookie })).status).toBe(200);
-    expect(asked).toBe(1);
+    // A cookie of the same name the page set on a narrower path comes first; the real one still counts.
+    expect((await get(service, "/app/", { cookie: `${OPEN_COOKIE}=x; ${cookie}` })).status).toBe(200);
+    expect(asked).toBe(2);
   });
 
   it("keeps the service's cookies on its own host: Domain is dropped, and this machine's cookie cannot be set", async () => {
