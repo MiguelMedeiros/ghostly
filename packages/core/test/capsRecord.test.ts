@@ -337,7 +337,8 @@ describe("capability record: publishing and reading", () => {
     vi.useFakeTimers();
     const { link, a, b } = pair(), { transport } = exchange();
     const aCreds: PairingCredentials = { seedB64: a.seedB64, peerKey: b.pubKeyZ32 }, bCreds: PairingCredentials = { seedB64: b.seedB64, peerKey: a.pubKeyZ32 };
-    let aContent = content({ descriptors: {} }), bContent = content();
+    let aContent = content({ descriptors: {} });
+    const bContent = content();
     const published: number[] = [];
     const aSide = new CapsExchange({ params: link.mine, credentials: aCreds, transport, local: () => aContent, save: async () => {}, published: rev => published.push(rev) });
     const changed = vi.fn();
