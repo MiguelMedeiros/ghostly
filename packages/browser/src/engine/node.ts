@@ -262,11 +262,12 @@ const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 export const removalTiming = { claimMs: 30_000 };
 
 /** Why a removal needs the person's confirmation: what it holds, what it still waits for, and what confirming means. */
+/** `label`: what goes, as a noun ("Testnet Cashu wallet", "Testnet Lightning card “Home”"). */
 function lossRefusal(label: string, removal: WalletRemoval): string {
   const { held, awaiting } = removal;
-  const holds = held === "unknown" ? `Ghostly could not read what the ${label} wallet holds.` : held.empty ? "" : `The ${label} wallet holds ${held.text}.`;
+  const holds = held === "unknown" ? `Ghostly could not read what the ${label} holds.` : held.empty ? "" : `The ${label} holds ${held.text}.`;
   const listed = awaiting.slice(0, 3).map((i) => i.text.charAt(0).toLowerCase() + i.text.slice(1)).join("; ") + (awaiting.length > 3 ? `; and ${awaiting.length - 3} more` : "");
-  const waits = awaiting.length ? `${holds ? " It" : `The ${label} wallet`} still waits for money: ${listed}.` : "";
+  const waits = awaiting.length ? `${holds ? " It" : `The ${label}`} still waits for money: ${listed}.` : "";
   const lost = holds && awaiting.length
     ? `${held === "unknown" ? "anything in it becomes" : "they become"} unreachable without its backup, and that what is paid to it afterwards is lost,`
     : holds ? `${held === "unknown" ? "anything in it becomes" : "they become"} unreachable without its backup`
@@ -3128,8 +3129,9 @@ export class GhostlyNode implements EngineImplementation {
     // A Lightning card: the one named, else the network's default for receiving (a caller from before cards).
     const card = type === "lightning" ? asked ?? this.lightnings[network].receivingId : undefined;
     const lightningName = card !== undefined ? this.walletView.networks?.[network].lightnings?.find((c) => c.card === card)?.name : undefined;
-    const label = lightningName ? `${networkLabel(network)} Lightning card “${lightningName}”` : `${networkLabel(network)} ${WALLET_NAMES[type]}`;
-    if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network && (card === undefined || w.card === card))) throw new Error(`There is no ${label} wallet to remove`);
+    // What goes, as a noun: a card is a card, not "the … card wallet".
+    const label = lightningName ? `${networkLabel(network)} Lightning card “${lightningName}”` : `${networkLabel(network)} ${WALLET_NAMES[type]} wallet`;
+    if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network && (card === undefined || w.card === card))) throw new Error(`There is no ${label} to remove`);
     const first = walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents, card);
     if (first.comesWith) throw new Error(`Lightning through the Cashu mints comes with your ${networkLabel(network)} Cashu wallet: remove that wallet to remove it`);
     // Ecash minted now is counted in what it holds, not deleted with its invoice.
@@ -3139,7 +3141,7 @@ export class GhostlyNode implements EngineImplementation {
     if (removalRisksFunds(removal) && acceptLoss !== true) throw new Error(lossRefusal(label, removal));
     // Its open requests close first, while the chats still carry payment frames: once its last wallet goes, a chat
     // may have no way of paying left, and the contact would never hear of it.
-    for (const item of removal.awaiting) if (item.kind === "request" && item.paymentId) await this.closeRequest(item.paymentId, `you removed the ${label} wallet it was paid to`).catch(() => {});
+    for (const item of removal.awaiting) if (item.kind === "request" && item.paymentId) await this.closeRequest(item.paymentId, `you removed the ${label} it was paid to`).catch(() => {});
     try {
       if (type === "cashu") {
         const mints = this.networkMints(network);

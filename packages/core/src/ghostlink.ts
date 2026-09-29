@@ -693,6 +693,8 @@ export class GhostLink {
           // Held back by the relays' request budget: nothing failed, and the session sends it when the budget frees a request.
           if (result.waiting) return;
           if (result.error) { this.tracker?.failed("publish", true, result.error); return; }
+          // An offer or answer the relays held back (their budget, an outage) has its whole attempt from when it went out.
+          if (result.signalOut) this.dataLink.signalWentOut();
           this.tracker?.published();
           this.publishRecovered();
         },
@@ -747,7 +749,9 @@ export class GhostLink {
           void this.session.setRtcSignal(signed, !!options.params.profile).catch(report);
         } catch (error) { report(error); throw error; }
       },
-      setFastPoll: (fast) => this.session.setFastPoll(fast),
+      // An offer to a saved contact: its answer may be a while (the contact may still hold this app's old session),
+      // so the look for it slows after its first seconds (`OFFER_FAST_MS`). A first pairing looks fast throughout.
+      setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
         const plan = this.switcher.pending;

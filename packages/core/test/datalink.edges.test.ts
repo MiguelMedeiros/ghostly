@@ -123,7 +123,7 @@ describe("DataLink handshake", () => {
 
     await a.dl.connect();
     expect(a.dl.state).toBe("offering");
-    expect(a.options.setFastPoll).toHaveBeenLastCalledWith(true);
+    expect(a.options.setFastPoll).toHaveBeenLastCalledWith(true, true);
     const offer = parseRtcSignal(a.lastSignal())!;
     expect(offer).toMatchObject({ t: "o", ts: NOW, s: "actpass", c: ["h,192.168.1.2,50000"] });
     expect(a.pc().channel.label).toBe(DATA_CHANNEL_LABEL);
@@ -323,6 +323,21 @@ describe("DataLink failures and teardown", () => {
     vi.advanceTimersByTime(1);
     expect(a.dl.state).toBe("idle");
     expect(a.options.onClose).not.toHaveBeenCalled();
+  });
+
+  it("gives an offer the relays held back its whole attempt from when it went out", async () => {
+    const a = link("aaaa", "bbbb");
+    await a.dl.connect();
+    // The relays were down: the offer reached them 60 s after it was made.
+    vi.advanceTimersByTime(60_000);
+    a.dl.signalWentOut();
+    vi.advanceTimersByTime(CONNECT_TIMEOUT_MS - 1);
+    expect(a.dl.state).toBe("offering");
+    vi.advanceTimersByTime(1);
+    expect(a.dl.state).toBe("idle");
+    // Nothing to extend once the attempt is over, or before one began.
+    a.dl.signalWentOut();
+    expect(a.dl.state).toBe("idle");
   });
 
   it("does not time out a connection that opened", async () => {

@@ -8,6 +8,8 @@ interface Asker { background: boolean; group: boolean; urgent: boolean; door: bo
 const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
+/** A group's edge looking fast for a signal (`GROUP_BURST_MS`). */
+const isGroupUrgentRead = (who: Asker): boolean => who.group && who.urgent && !who.write && !who.background;
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
 
@@ -62,6 +64,16 @@ export const WRITE_FIRST_MS = 5_000;
  * kept for any chat starved a new group's edges.
  */
 export const CHAT_RESERVE = 10;
+/**
+ * Groups' urgent reads (their edges looking fast for a signal) take at most a quarter of a relay's minute in any this
+ * long, so that they never spend it in a burst. An app back after a restart has every edge offering and looking fast at
+ * once; the members at the other end answer only once they notice its old sessions went (about 20 s with
+ * node-datachannel). On the default relays the edges spent the groups' share of the minute in those seconds, and read
+ * nothing for 40 s more: a private group's edges were live again 75 to 110 s after a restart (bug hunt r5a, 2026-09-29).
+ */
+export const GROUP_BURST_MS = 15_000;
+/** …and never fewer than one link polling fast (every 2 s) reads in that time: one edge alone is never held back. */
+export const GROUP_BURST_ONE_LINK = 8;
 /**
  * While a link polls fast (an `urgent` read: its peer, or the peer's offer or answer, is due any moment) within this
  * long, background requests (a community's periodic looks) are held to `BACKGROUND_WHILE_SIGNALING` a minute on each
@@ -137,6 +149,8 @@ export class RelayTransport implements PkarrTransport {
   private cursor = 0;
   private readonly spent = new Map<string, number[]>();
   private readonly spentBackground = new Map<string, number[]>();
+  /** Groups' urgent reads on each relay in the last `GROUP_BURST_MS`. */
+  private readonly spentGroupUrgent = new Map<string, number[]>();
   /** When a link's write was last refused on each relay (`chat <relay>`, `group <relay>`), while it waits for the budget. */
   private readonly writeWaiting = new Map<string, number>();
   /** When the budget last refused a 1:1 chat's request on each relay: for the next minute, groups leave it `CHAT_RESERVE`. */
@@ -453,6 +467,7 @@ export class RelayTransport implements PkarrTransport {
     if (writer) this.writeWaiting.delete(`${writer} ${relay}`);
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
+    if (isGroupUrgentRead(who)) this.spentGroupUrgent.get(relay)!.push(now);
     return true;
   }
 
@@ -478,6 +493,13 @@ export class RelayTransport implements PkarrTransport {
       // community door's bell does not: the links it signals for are often the ones its last admission opened.
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
       if (signaling > 0 && !who.door) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
+    }
+    // Groups' urgent reads: their share of the minute spread over it (`GROUP_BURST_MS`).
+    const burst = (this.spentGroupUrgent.get(relay) ?? []).filter((at) => now - at < GROUP_BURST_MS);
+    this.spentGroupUrgent.set(relay, burst);
+    if (isGroupUrgentRead(who)) {
+      const most = Math.max(GROUP_BURST_ONE_LINK, Math.floor(limit * GROUP_BURST_MS / 60_000));
+      if (burst.length >= most) wait = Math.max(wait, burst[burst.length - most] + GROUP_BURST_MS - now);
     }
     if (who.group) {
       const reserved = Math.max(this.chatRefused.get(relay) ?? -Infinity, this.chatUrgentAt) + 60_000 - now;
