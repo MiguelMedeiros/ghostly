@@ -1853,7 +1853,7 @@ export class GhostlyNode implements EngineImplementation {
     const { link } = live, linkId = live.stored.id;
     if (!link) return { error: "You are offline" };
     const bytes = new TextEncoder().encode(trimmed).length;
-    if (bytes > LIMITS.maxChatMessageBytes) return { error: `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.` };
+    if (bytes > LIMITS.maxChatMessageBytes) return { error: `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`, refused: true };
     const stop = this.chatStopped(live);
     if (stop) return { error: stop };
     // Someone else used the invite first: the contact reads nothing of this side's, so nothing waits to go either.

@@ -18,6 +18,7 @@ const TX_LABEL = {
   "ecash-in": "Received ecash",
   "ecash-out": "Sent ecash",
   reclaimed: "Took a payment back",
+  fee: "Fee of a failed payment",
 } as const;
 
 /**
