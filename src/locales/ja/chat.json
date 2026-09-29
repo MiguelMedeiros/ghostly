@@ -242,6 +242,20 @@
     "pin": "ピン留め",
     "unpin": "ピン留めを解除"
   },
+  "preview": {
+    "arkAddress": "Ark アドレス",
+    "bitcoinAddress": "₿ Bitcoin アドレス",
+    "ecash": "⚡ Ecash",
+    "invoice": "⚡ Lightning 請求書",
+    "invoiceSats": "⚡ Lightning 請求書 · {{amount}} sats",
+    "lightningAddress": "Lightning アドレス",
+    "lightningOffer": "⚡ Lightning オファー",
+    "realMoney": "本物のお金",
+    "sats": "{{amount}} sats",
+    "testMoney": "テスト用のお金",
+    "testSats": "{{amount}} テスト sats",
+    "usdtAddress": "USDT アドレス"
+  },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",
     "more": "その他の絵文字",

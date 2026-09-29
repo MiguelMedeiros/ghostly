@@ -170,6 +170,26 @@ describe("DataLink handshake", () => {
     expect(a.states).toEqual(["offering", "open"]);
   });
 
+  // Chrome shows the answer as `remoteDescription` only once setRemoteDescription resolves, and on a quick local path the
+  // channel's open event can come first. The paired handshake binds to both fingerprints: without the remote one there,
+  // the channel was closed as it opened, and a join through a link waited 20 s for the next dial (2026-09-29).
+  it("an offerer whose channel opens before the answer shows as applied has both fingerprints", async () => {
+    const a = link("aaaa", "bbbb", pc => {
+      const apply = pc.setRemoteDescription.bind(pc);
+      pc.setRemoteDescription = async description => { pc.channel.open(); await apply(description); };
+    });
+    const b = link("bbbb", "aaaa");
+    const atOpen: ([string, string] | null)[] = [];
+    a.options.onOpen.mockImplementation(() => void atOpen.push(a.dl.fingerprints));
+    await a.dl.connect();
+    vi.advanceTimersByTime(1);
+    await b.dl.handleSignal(a.lastSignal());
+    await a.dl.handleSignal(b.lastSignal());
+    expect(a.dl.state).toBe("open");
+    expect(atOpen).toEqual([a.dl.fingerprints]);
+    expect(b.dl.fingerprints).toEqual([...a.dl.fingerprints!].reverse());
+  });
+
   it("does not offer again while already busy", async () => {
     const a = link("aaaa", "bbbb");
     await a.dl.connect();
