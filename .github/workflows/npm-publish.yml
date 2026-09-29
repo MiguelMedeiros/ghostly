@@ -1,6 +1,7 @@
 name: Publish npm
 
-# The headless CLI (packages/cli) goes to npm as `ghostly-cli` once its release
+# The headless CLI (packages/cli) goes to npm as `@ghostlytools/cli` (the npm
+# organization `ghostlytools`; the command is `ghostly`) once its release
 # is published: a person publishing the draft (docs/RELEASING.md, step 4)
 # starts this workflow. A security autorelease publishes its release with the
 # workflow token, which starts nothing, so security-autorelease.yml dispatches
@@ -11,6 +12,9 @@ name: Publish npm
 # only lets a package that already exists trust a workflow, so the very first
 # publish uses the NPM_TOKEN repository secret; once the package is on npm and
 # trusts this workflow, delete that secret. See docs/RELEASING.md.
+#
+# A scoped package is private by default: `--access public` here and
+# `publishConfig.access` in packages/cli/package.json both make it public.
 
 on:
   release:
@@ -31,7 +35,7 @@ concurrency:
 
 jobs:
   publish:
-    name: ghostly-cli to npm
+    name: "@ghostlytools/cli to npm"
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -63,8 +67,8 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if npm view "ghostly-cli@$version" version >/dev/null 2>&1; then
-            echo "ghostly-cli@$version is already on npm." >> "$GITHUB_STEP_SUMMARY"
+          if npm view "@ghostlytools/cli@$version" version >/dev/null 2>&1; then
+            echo "@ghostlytools/cli@$version is already on npm." >> "$GITHUB_STEP_SUMMARY"
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
@@ -76,16 +80,16 @@ jobs:
 
       - name: Build
         if: steps.version.outputs.published == 'false'
-        run: npm run build -w ghostly-cli
+        run: npm run build -w @ghostlytools/cli
 
       - name: Publish
         if: steps.version.outputs.published == 'false'
         env:
           # Only for the first publish (see the top of this file); empty afterwards, and npm uses OIDC.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --workspace ghostly-cli --provenance --access public
+        run: npm publish --workspace @ghostlytools/cli --provenance --access public
 
-      # What a person gets from `npm install -g ghostly-cli`: the registry can take a moment to serve a new version.
+      # What a person gets from `npm install -g @ghostlytools/cli`: the registry can take a moment to serve a new version.
       - name: Installs and runs from npm
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -93,10 +97,10 @@ jobs:
           set -euo pipefail
           cd "$(mktemp -d)"
           for attempt in $(seq 1 12); do
-            if npm install --no-audit --no-fund --prefer-online "ghostly-cli@$VERSION"; then break; fi
-            if [[ "$attempt" == 12 ]]; then echo "::error::ghostly-cli@$VERSION does not install from npm"; exit 1; fi
+            if npm install --no-audit --no-fund --prefer-online "@ghostlytools/cli@$VERSION"; then break; fi
+            if [[ "$attempt" == 12 ]]; then echo "::error::@ghostlytools/cli@$VERSION does not install from npm"; exit 1; fi
             sleep 20
           done
           node_modules/.bin/ghostly --version | tee version.json
           node -e "process.exit(require('./version.json').version === process.env.VERSION ? 0 : 1)"
-          echo "ghostly-cli@$VERSION: https://www.npmjs.com/package/ghostly-cli/v/$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "@ghostlytools/cli@$VERSION: https://www.npmjs.com/package/@ghostlytools/cli/v/$VERSION" >> "$GITHUB_STEP_SUMMARY"

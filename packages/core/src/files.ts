@@ -64,11 +64,18 @@ const MAX_NAME_LENGTH = 200;
  */
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
+/**
+ * Names Windows keeps for devices, whatever the case, with any extension, and with spaces before the dot:
+ * "CON", "nul.txt", "COM1 .log" open a device there, not a file.
+ */
+const WINDOWS_DEVICE = /^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])\s*(\.|$)/i;
+
 /** A file name is display text and a download suggestion, never a path. */
 export function sanitizeFileName(name: string): string {
   const visible = name.replace(INVISIBLE, "").replace(/[/\\:]/g, "");
   // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
   const clean = [...visible.replace(/^[\s.]+/, "")].slice(0, MAX_NAME_LENGTH).join("").trim();
+  if (WINDOWS_DEVICE.test(clean)) return [..."_" + clean].slice(0, MAX_NAME_LENGTH).join("");
   return clean || "file";
 }
 

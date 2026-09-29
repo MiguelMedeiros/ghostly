@@ -3,6 +3,7 @@ import { GhostLink, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink } from "../src/invite";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession } from "../src/groupSession";
+import { MESSAGE_CLOCK_SKEW_MS } from "../src/messageTime";
 import { PIN_CAPABILITY, SessionCapabilities } from "../src/pairedCapabilities";
 import {
   GROUP_PIN_FRAME, PIN_FRAME, PIN_LIMITS, PINNED_FRAME, mayPin, nextPinNumber, parsePinFrame, parsePinnedFrame, pinFrame, pinIsNewer, pinnedFrame, readPin,
@@ -53,6 +54,35 @@ describe("the last pin wins", () => {
   });
 });
 
+describe("a pin numbered far ahead of the clock", () => {
+  const now = 1_790_000_000_000;
+
+  it("is refused, so nobody is left without a higher number to pin or unpin with", () => {
+    // Taken, it would make every next number 2^53: not a safe integer, refused by every receiver, the pin frozen.
+    expect(readPin({ id: ID, n: Number.MAX_SAFE_INTEGER }, now)).toBeNull();
+    expect(parsePinFrame({ t: PIN_FRAME, id: ID, n: Number.MAX_SAFE_INTEGER })).toBeNull();
+    expect(readPin({ id: ID, n: now + MESSAGE_CLOCK_SKEW_MS + 1 }, now)).toBeNull();
+    // Clocks drift: a number a few minutes ahead is taken.
+    expect(readPin({ id: ID, n: now + MESSAGE_CLOCK_SKEW_MS }, now)).toEqual({ id: ID, n: now + MESSAGE_CLOCK_SKEW_MS });
+  });
+
+  it("kept before receivers checked it, counts as none: any pin replaces it, and the next number is the clock", () => {
+    const frozen: WirePin = { id: ID, n: Number.MAX_SAFE_INTEGER };
+    const unpin: WirePin = { id: "", n: nextPinNumber(frozen.n, now) };
+    expect(unpin.n).toBe(now);
+    expect(Number.isSafeInteger(unpin.n)).toBe(true);
+    expect(pinIsNewer(frozen, unpin, now)).toBe(true);
+    expect(readPin(unpin, now)).toEqual(unpin);
+    // What another side makes next goes past the unpin, as before.
+    expect(pinIsNewer(unpin, { id: ID, n: nextPinNumber(unpin.n, now) }, now)).toBe(true);
+  });
+
+  it("the next number never passes the largest safe integer", () => {
+    expect(nextPinNumber(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+    expect(Number.isSafeInteger(nextPinNumber(2 ** 53, now))).toBe(true);
+  });
+});
+
 describe("who may pin in a group", () => {
   it("any member of a private group; only the admin of a community", () => {
     expect(mayPin("mesh", "bob", "alice")).toBe(true);
@@ -95,6 +125,12 @@ describe("a private group's signed pin", () => {
     expect(bob.signedPin({ ...frame, k: bob.myKey })).toBeNull();
     expect(bob.signedPin({ ...frame, g: "other" })).toBeNull();
     expect(bob.signedPin({ ...frame, k: createIdentity().pubKeyZ32 })).toBeNull();
+  });
+
+  it("refuses one numbered far ahead of the clock, even signed by a member", async () => {
+    const { alice, bob } = await duo();
+    expect(bob.signedPin(alice.pinFrame({ id: "x:0:1", n: Number.MAX_SAFE_INTEGER }))).toBeNull();
+    expect(bob.signedPin(alice.pinFrame({ id: "x:0:1", n: Date.now() }))).not.toBeNull();
   });
 
   it("an older member's session drops it: nothing taken, nothing passed on", async () => {
@@ -201,6 +237,16 @@ describe("pins on a paired session (pin/1)", () => {
     expect(a.link.sendPin({ id: "", n: 3 })).toBeNull();
     await vi.waitFor(() => expect(a.receipts).toEqual([2, 3]));
     expect(b.pins).toEqual([{ id: ID, n: 2 }, { id: "", n: 3 }]);
+  });
+
+  it("a pin numbered far ahead of the clock is neither taken nor confirmed", async () => {
+    const { a, b } = pair();
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsPins && b.link.supportsPins).toBe(true));
+    expect(a.link.sendPin({ id: ID, n: Number.MAX_SAFE_INTEGER })).toBeNull();
+    expect(a.link.sendPin({ id: "", n: 3 })).toBeNull();
+    await vi.waitFor(() => expect(a.receipts).toEqual([3]));
+    expect(b.pins).toEqual([{ id: "", n: 3 }]);
   });
 
   it("an app that does not offer pin/1 (an older one) gets nothing, and what it sends is not taken", async () => {

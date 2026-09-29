@@ -58,8 +58,8 @@ webkit2gtk = "2"
 
 # The window follows WebView2 in and out of full screen (src/fullscreen.rs): the versions Tauri's wry uses.
 [target.'cfg(windows)'.dependencies]
-webview2-com = "0.39"
-windows-core = "0.100"
+webview2-com = "0.38"
+windows-core = "0.61"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The quarantine mark on a file saved from a chat (src/file_store.rs): setxattr.

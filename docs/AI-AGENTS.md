@@ -11,14 +11,15 @@ Paste it into Claude Code, Codex, Hermes or any coding agent with a shell, and c
 installs the CLI, makes its profile and gives you a link to open in your Ghostly app. The site's Copy button copies
 this same text: `website/scripts/sync-references.mjs` reads it from here.
 
+<!-- release-1.0: in the prompt below, step 2 becomes "Install the ghostly CLI: npm install -g @ghostlytools/cli (Node 22.12 or newer)" and the clone line goes; update website/scripts/agent-prompt.test.mjs to match. -->
 <!-- agent-prompt:start -->
 ```text
 Put yourself on Ghostly, the private peer-to-peer messenger, so I can chat with you from my Ghostly app.
 Your name on Ghostly: Casper
 
 1. Read the agent guide first: https://raw.githubusercontent.com/MiguelMedeiros/ghostly/dev/packages/cli/SKILL.md
-2. Install the ghostly CLI. It is not on npm yet, so build it (Node 22.12 or newer):
-   git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w ghostly-cli && npm pack -w ghostly-cli && npm install -g ./ghostly-cli-*.tgz
+2. Install the ghostly CLI (Node 22.12 or newer). From 1.0 it is npm install -g @ghostlytools/cli; until then, build it:
+   git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli && npm install -g ./ghostlytools-cli-*.tgz
 3. Run ghostly profile set --name "<your name>", then ghostly daemon --detach
 4. Run ghostly invite create --label owner and give me the "link" it prints. I will open it in my Ghostly app.
 5. When ghostly chat wait owner --timeout 600 returns, say hello with ghostly send owner "Hi!"
@@ -31,8 +32,9 @@ Safety: allowlist only me (--from owner). Anyone on the allowlist can try to tal
 
 ## 1. Install the CLI
 
-The agent needs `ghostly` on its `PATH` (Node 22.12 or newer). It is built from source until the npm package is
-published; see [CLI.md](CLI.md#install).
+The agent needs `ghostly` on its `PATH` (Node 22.12 or newer). It is built from source until 1.0 is released; from
+1.0 it is `npm install -g @ghostlytools/cli`. See [CLI.md](CLI.md#install).
+<!-- release-1.0: "built from source until 1.0 is released; from 1.0 it is" becomes "installed with". -->
 
 ## 2. Install the skill
 
@@ -50,7 +52,8 @@ curl -fsSL --create-dirs https://raw.githubusercontent.com/MiguelMedeiros/ghostl
   -o ~/.cursor/skills/ghostly/SKILL.md
 ```
 
-The skill is on `dev` until the next release brings `packages/cli` to `main`.
+The skill is on `dev` until the 1.0 release brings `packages/cli` to `main`.
+<!-- release-1.0: the two URLs above may point at main; drop this line. -->
 
 ## What the agent can do
 
@@ -113,5 +116,5 @@ First adapters:
 
 ## The older skill
 
-[cli/SKILL.md](../cli/SKILL.md) teaches the legacy `ghostly-cli`, a compatibility client that reads only `ghost://`
+[cli/SKILL.md](../cli/SKILL.md) teaches the older Rust `ghostly-cli`, no longer shipped from 1.0, a compatibility client that reads only `ghost://`
 invites and cannot pair with the app. Bots already built on it keep working; new agents use `ghostly`.

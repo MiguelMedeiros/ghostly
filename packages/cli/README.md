@@ -8,23 +8,24 @@ is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md). A guided t
 > Status: phases 1 to 5 (profiles, pictures and backups, invites, one chat, private and community groups with their
 > admin tools and hubs, the event stream, hooks and agent turns, wallets and payments, files and voice notes, identity
 > proofs, shared web apps, voice calls, typing, replies, edits, reactions and forwards, Pkarr over the Mainline DHT;
-> an npm package, not yet published); every engine call is already
+> the npm package `@ghostlytools/cli`, published from 1.0); every engine call is already
 > reachable through `ghostly engine <method>`. The older Rust `ghostly-cli` (the `cli/` folder) stays as the
-> compatibility client for v0.4 chats.
+> compatibility client for v0.4 chats; it is not this package, and from 1.0 the release no longer ships it.
 
 ## Install
 
-The package is ready for npm but not published yet. From this repository:
+From 1.0: `npm install -g @ghostlytools/cli`. Until then, from this repository:
+<!-- release-1.0: "From 1.0:" becomes "Install:", and "Until then, from this repository" becomes "Or from this repository". -->
 
 ```bash
 npm install
-npm run build -w ghostly-cli
-npm pack -w ghostly-cli              # ghostly-cli-<version>.tgz: the bundle, its WebAssembly, README and SKILL.md
-npm install -g ./ghostly-cli-*.tgz    # the `ghostly` command, with its dependencies from npm
+npm run build -w @ghostlytools/cli
+npm pack -w @ghostlytools/cli              # ghostlytools-cli-<version>.tgz: the bundle, its WebAssembly, README and SKILL.md
+npm install -g ./ghostlytools-cli-*.tgz    # the `ghostly` command, with its dependencies from npm
 ghostly --version
 ```
 
-Once published: `npm install -g ghostly-cli`. Node 22.12 or newer. WebRTC comes from `node-datachannel` (a native
+Node 22.12 or newer. WebRTC comes from `node-datachannel` (a native
 module with prebuilt binaries for Linux, macOS and Windows); without it the CLI still runs, over HyperDHT, Iroh and
 the DHT, and groups are unavailable.
 
@@ -132,7 +133,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
 | `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
 | `service add <name> <http://127.0.0.1:port>`, `service share <service> <chat> [--off]`, `service list`, `service remove\|enable` | Share a web app on this machine, per contact |
-| `service peer <chat>`, `service open <chat> <service> [--port p]`, `service close <chat> <service>` | A contact's app on a loopback port here (daemon) |
+| `service peer <chat>`, `service open <chat> <service> [--port p]`, `service close <chat> <service>` | A contact's app on a loopback port here (daemon). `url` is a link for your browser, `http://<random>.localhost:<port>/.ghostly-open/<token>`: it sets the service's cookie and shows the app on a host name of its own; any other host name, or a request without that cookie, gets 404. Chrome, Edge and curl reach `*.localhost` names by themselves; Safari and Node's `fetch` on macOS may not (add the name to `/etc/hosts` for them) |
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
 | `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a new kind or status shows at once; a message to the chat or `--stop` ends it |
@@ -225,7 +226,9 @@ Spark, BDK, Fedimint and USDT run as in the app. One does not yet: **Bark** (its
 federation=<id>` (`engine fedimintPreview '{"invite":"fed1…"}'` shows the id first). Its client runs in a worker
 thread, with one database file per federation in the profile's `fedimint/` folder. No wallet is made by itself: a bot has exactly the wallets it created. A Cashu test mint's invoice (from
 `wallet receive`) is credited once its payer vouches for it in a chat, as in the app (a test mint says every invoice
-is paid); on a real mint, the mint's answer decides.
+is paid); on a real mint, the mint's answer decides. A Testnet wallet pays a Bitcoin (`lnbc`) invoice only through
+the public test mint, as in the app: a mint on this machine may have real sats behind it. A local test mint with a fake
+Lightning backend (a regtest or e2e stack) is declared with `GHOSTLY_TEST_MINTS=<url,…>`.
 
 ### Secrets
 
@@ -396,7 +399,7 @@ turns WebRTC off. A daemon offers to be a hub of the private groups past 16 memb
 
 ## Tests
 
-`npm test -w ghostly-cli` builds the CLI and runs the unit tests and a two-bot end-to-end test on loopback (a Pkarr
+`npm test -w @ghostlytools/cli` builds the CLI and runs the unit tests and a two-bot end-to-end test on loopback (a Pkarr
 relay in the test process and a HyperDHT testnet), a voice call between them included.
 `e2e/web/headless-chat.spec.ts` puts a bot and the web app in one chat; `e2e/web/headless-call.spec.ts` has them
 call each other, with a tone each way.

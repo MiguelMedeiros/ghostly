@@ -1,6 +1,6 @@
 import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
-  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
+  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
   communityMessageId, type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Roster,
 } from "@ghostly/core";
@@ -251,7 +251,7 @@ export class Communities {
       const live = this.live.get(group.id);
       const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
       if (group.joining && (!live || live.session.status === "lost")) {
-        return [{ ...base, name: group.joining.name || live?.session.name || "", isAdmin: false, members: [], canSend: false,
+        return [{ ...base, name: groupName(group.joining.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false,
           invitation: { linkId: group.joining.linkId, contact: "", admin: group.joining.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group) } }];
       }
       if (!live) return [];
@@ -871,7 +871,7 @@ export class Communities {
         if (joining.inviter && joining.inviter !== frame.admin && this.now() - (joining.invitedAt ?? 0) < ENTRY_LINGER_MS) return;
         joining.invitedAt = this.now();
         joining.inviter = frame.admin;
-        joining.name = typeof frame.name === "string" ? frame.name.slice(0, 48) : joining.name;
+        joining.name = groupName(frame.name) ?? joining.name;
         joining.pieces = [];
         traceJoin(g, "invite.received");
         await this.store.putGroup(group);

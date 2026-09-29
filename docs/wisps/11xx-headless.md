@@ -7,10 +7,10 @@
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
-| Implementation | Experimental: `packages/cli` (`ghostly-cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is not published |
+| Implementation | Experimental: `packages/cli` (`@ghostlytools/cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is published from 1.0 |
 | Summary | Run Ghostly headless for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares. |
 | Availability | Available |
-| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions, forwards), private and community groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark wallet, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
+| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions, forwards), private and community groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. On npm from 1.0; no Bark wallet, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -55,7 +55,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 ## Local control API
 
-**Transport.** A Unix domain socket at `<profile>/daemon.sock`, created 0600 inside the 0700 profile folder: only the account that owns the profile can connect. When that path is longer than a socket path may be (104 bytes on macOS), the socket is `/tmp/ghostly-<hash of the folder>/daemon.sock`, still 0600, in a 0700 folder the daemon refuses when another user made it or may enter it; a client connects only to a socket its own user owns. There is no TCP listener. On Windows a named pipe takes its place (untested).
+**Transport.** A Unix domain socket at `<profile>/daemon.sock`, created 0600 inside the 0700 profile folder: only the account that owns the profile can connect. The daemon makes the profile folder 0700 again before it listens (a folder opened up is closed; a link, or another user's folder, is refused) and makes the socket under a 077 umask. When that path is longer than a socket path may be (104 bytes on macOS), the socket is `/tmp/ghostly-<hash of the folder>/daemon.sock`, still 0600, in a 0700 folder the daemon refuses when another user made it or may enter it; a client connects only to a socket its own user owns. There is no TCP listener. On Windows a named pipe takes its place (untested).
 
 **Framing.** Newline-delimited JSON, one object per line, UTF-8, at most 16 MiB per line.
 
@@ -95,7 +95,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 - A file message carries its file on `message.received` and `message.sent`: `message.file` is `{id, name, size, mime, voice?, image?}`, a voice note's `voice` is `{duration, peaks?}` (milliseconds, the 0-255 bars), and a picture's `image` is `{width, height}`, its size as shown when its sender sent one. Before [#358](https://github.com/MiguelMedeiros/ghostly/pull/358) it was `voice: true`; the value is still truthy for a bot that tests it. `identity.received`, `identity.status`, `identity.approval`, `identity.progress`.
 - Which messages were reported is kept in the profile's own store (a database of the CLI's beside the engine's): a restart reports only what is new, a message that arrived while no process derived events (a crash) is reported at the next start, and a profile's first start reports none of the history it already had.
 - As the app's chat screen does, the side that joined says `👋 <name> joined` once the chat first goes live and the other side answers once; each is said once per chat, across restarts.
-- Hooks: `listen --exec "<command>"` runs the command once per event, in order, with the event on its stdin; `listen --webhook <url>` POSTs each event to a local bridge (loopback only); `listen --cursor <file>` records the last event handled (the acknowledgement), and a restarted listener resumes after it. With no daemon running, `listen` becomes the daemon, socket included, so a hook can answer with `ghostly send`.
+- Hooks: `listen --exec "<command>"` runs the command once per event, in order, with the event on its stdin; `listen --webhook <url>` POSTs each event to a local bridge (loopback only); `listen --cursor <file>` records the last event handled (the acknowledgement), and a restarted listener resumes after it. A step that fails on one event (the output, the allowlist's lookup, the cursor file) is said on stderr and that event is passed; the ones after it are still handled. With no daemon running, `listen` becomes the daemon, socket included, so a hook can answer with `ghostly send`.
 - Agent turns (#431): `listen --from <chat|key>` and `--group <group>` (each repeatable) are an allowlist per listener, not profile state: any other chat's or group's event never reaches `--exec`, `--webhook` or stdout, and the cursor moves past it. `listen --turns` gives one `agent.turn` event per message received and per group message that mentions the profile, with the source event's `seq`, a stable `id` (`agent.turn:<source id>`), the chat or group and member, the `messageId` to reply to, and everything the sender controls (text, name, quoted line, file name) under `untrusted` only. The daemon's socket gives every event (`events.subscribe`) with no allowlist yet.
 
 ### Staying off the direct link
@@ -160,7 +160,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Payments | Mainnet spends only with `--confirm-real`; cross-network refusal | Phase 2: every spending command refuses Mainnet without it (exit 5), and `pay` never infers Mainnet from an invoice (test mints issue `lnbc` invoices) |
 | Identities | Add proofs that need no browser (SSH, OpenPGP, Bitcoin address with the tool; domain and DID by a published record; Nostr over NIP-46 and other in-app signers with their fields); list; share and withdraw per contact; a contact's identities, checks and re-checks; public profiles (`settings set publicProfiles`) | Phase 3b |
 | Identities | Proofs that need a browser or an approval app | Phase 3b for in-app signers that wait on a link or a code (reported as `identity.approval` events and printed); OpenID Connect (a browser popup) is app only |
-| Services | Share a loopback web app with a contact; list what a contact shares; open one as a local port | Phase 3b: loopback only, redirects handed back rather than followed (as the Desktop's Rust fetch), granted per contact. An opened service answers only a `Host` of 127.0.0.1, localhost or [::1] on its port, and passes on only the cookies that service set itself (#466, #479) |
+| Services | Share a loopback web app with a contact; list what a contact shares; open one as a local port | Phase 3b: loopback only, redirects handed back rather than followed (as the Desktop's Rust fetch), granted per contact. An opened service has a host name of its own, `http://<random>.localhost:<port>/`, and answers no other `Host` (404), so its cookies and storage are apart from every other app on this machine. `service open` gives a link that hands the browser an HttpOnly cookie and goes on to `/`; a request without that cookie gets 404, so someone else on this machine who finds the port cannot use it. The contact's `Set-Cookie` loses its `Domain`, only the cookies that service set go on to the contact, and its answer streams through (32 MiB at most; one cut short ends the response) (#466, #479, #560) |
 | Calls | Voice: place, answer, decline, hang up, auto-answer; the audio to and from a program | Phase 5 ([#350](https://github.com/MiguelMedeiros/ghostly/pull/350)), see [Calls](#calls) |
 | Calls | Video, screen sharing | Not applicable: a video call is answered as a voice call |
 | Settings | Pkarr relays, Iroh relays, HyperDHT relay, ICE servers, public profiles, sharing the profile's name | Phase 1 through `settings set` and `profile set` |
@@ -217,9 +217,9 @@ Checked on 2026-09-26 by creating each Testnet wallet in a headless profile:
 
 No wallet is made by itself on Node (`automaticWallets` is off): a bot has only the wallets it created, and none on Mainnet unless asked.
 
-## The Rust `ghostly-cli`
+## The older Rust `ghostly-cli`
 
-It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md)): older DHT records, no `ghostly1` codes, no chat sessions. Its commands and its SKILL.md keep working for the bots that use them. New bots use `ghostly`. The Rust client is marked legacy in the docs; removing it is a separate decision, announced before it happens.
+It is not the npm package `@ghostlytools/cli`. It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md)): older DHT records, no `ghostly1` codes, no chat sessions. Its commands and its SKILL.md keep working for the bots that use them. New bots use `ghostly`. From 1.0 the release no longer ships its binaries: bots on it build it from `cli/`. The docs call it the older Rust CLI; removing it is a separate decision, announced before it happens.
 
 ## Security considerations
 

@@ -43,6 +43,12 @@ updates:
     directory: /
     schedule: { interval: weekly, day: monday }
     target-branch: dev
+    # src-tauri pins the versions Tauri's wry uses (src/fullscreen.rs takes wry's WebView2
+    # controller). They move with a Tauri update, never on their own: a bump alone breaks
+    # the Windows build.
+    ignore:
+      - dependency-name: webview2-com
+      - dependency-name: windows-core
     groups:
       cargo:
         patterns: ["*"]

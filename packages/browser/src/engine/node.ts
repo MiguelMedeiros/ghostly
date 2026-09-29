@@ -42,8 +42,8 @@ import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, parseCommunityEdit } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
-import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, wireReaction, type WireReaction } from "@ghostly/core";
-import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
+import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
+import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
@@ -141,7 +141,7 @@ import { WALLET_TYPES } from "../shared/types";
 import type { WakeSubscription } from "../shared/types";
 import type { MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
-import { canEdit, takesPeerEdit, withEdit } from "../shared/edits";
+import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { EditBuffer, EditQueue } from "./edits";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { walletAwaiting } from "./walletAwaiting";
@@ -1950,6 +1950,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!message || !canEdit(message)) return refuse("Only your own text messages can be edited");
     const text = params.text.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
+    if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
     if (new TextEncoder().encode(text).length > LIMITS.maxChatMessageBytes) return refuse(`Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`);
     const stop = this.chatStopped(live);
     if (stop) return { error: stop };
@@ -1982,9 +1983,9 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The contact's edit on its message here, when it is newer than what shows. Not a new message: no sound, no unread, no move. */
   private async applyPeerEdit(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
-    if (!takesPeerEdit(message) || (message.edit?.seq ?? 0) >= edit.e) return;
+    if (!takesPeerEdit(message, edit.m) || (message.edit?.seq ?? 0) >= edit.e) return;
     const updated = await db.patchMessage(linkId, message.id, current => {
-      if (!takesPeerEdit(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
+      if (!takesPeerEdit(current, edit.m) || (current.edit?.seq ?? 0) >= edit.e) return null;
       const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, preview: edit.pv });
       return { text: next.text, edit: next.edit, preview: next.preview };
     });
@@ -2900,6 +2901,8 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId), pin = live?.stored.pinOut;
     clearTimeout(this.pinTimers.get(linkId));
     this.pinTimers.delete(linkId);
+    // One whose number is no longer a safe integer (made past a pin no receiver takes now) is never taken: not said again.
+    if (pin && !validReactionNumber(pin.n)) { void this.pinReceipt(linkId, pin.n); return; }
     if (!pin || !live.link?.supportsPins || live.link.sendPin(pin)) return;
     this.pinTimers.set(linkId, setTimeout(() => this.flushPin(linkId), PIN_LIMITS.resendMs));
   }
@@ -2937,7 +2940,8 @@ export class GhostlyNode implements EngineImplementation {
   /** A private group's pin, as its pinner signed it, over the edge to `member`; nothing when it is down (said when it opens). */
   private sendGroupPinFrame(groupId: string, member: string): void {
     const pin = this.groups.pinOf(groupId), edge = this.groupEdges(groupId).get(member);
-    if (!pin?.k || !pin.sig || !edge || this.groups.isCommunityGroup(groupId)) return;
+    // One whose number does not hold counts as none: no member takes it.
+    if (!pin?.k || !pin.sig || !edge || this.groups.isCommunityGroup(groupId) || !pinNumberHolds(pin.n)) return;
     const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
     try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ }
   }
@@ -3395,7 +3399,15 @@ export class GhostlyNode implements EngineImplementation {
   }
   fedimintLeave(params: { federation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).leave(params.federation); }
   async fedimintRefresh(params?: { network?: WalletNetwork }) { for (const network of params?.network ? [params.network] : WALLET_NETWORKS) await this.fedimintWallets[network].refresh(); }
-  async fedimintSpendNotes(params: { federation: string; amount: number }) { const { notes, operationId } = await (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).spendNotes(params.federation, params.amount); return { notes, operation: operationId }; }
+  /** `confirmedReal`: notes of a Mainnet federation are real money, handed over as text; without it they are refused. */
+  async fedimintSpendNotes(params: { federation: string; amount: number; confirmedReal?: boolean }) {
+    const wallet = this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet;
+    // Mainnet when the wallet is, or when the federation itself says Bitcoin: either one is real money.
+    const network = wallet.network === "mainnet" || wallet.federation(params.federation)?.network === "bitcoin" ? "mainnet" : wallet.network;
+    assertConfirmedReal(network, params.confirmedReal);
+    const { notes, operationId } = await wallet.spendNotes(params.federation, params.amount);
+    return { notes, operation: operationId };
+  }
   /** Pasted notes go to the wallet that joined their federation, whichever network it is on. */
   async fedimintReceiveNotes(params: { notes: string; network?: WalletNetwork }) {
     for (const network of WALLET_NETWORKS) {

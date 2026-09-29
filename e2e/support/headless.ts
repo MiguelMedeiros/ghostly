@@ -17,7 +17,7 @@ let built = false;
 
 export function buildHeadless(): void {
   if (built) return;
-  execFileSync("npm", ["run", "build", "-w", "ghostly-cli"], { cwd: ROOT, stdio: "ignore" });
+  execFileSync("npm", ["run", "build", "-w", "@ghostlytools/cli"], { cwd: ROOT, stdio: "ignore" });
   built = true;
 }
 

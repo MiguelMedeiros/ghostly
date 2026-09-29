@@ -1,16 +1,19 @@
 import type { Level } from "@/lib/status";
 
 /**
- * /cli: the headless `ghostly` (ghostly-cli, packages/cli, WISP 11xx). Short on
+ * /cli: the headless `ghostly` (@ghostlytools/cli, packages/cli, WISP 11xx). Short on
  * purpose: a pitch, the install line, four commands, a bot and links. The long
  * version is docs/CLI.md. Checked against packages/cli on `dev`.
  */
 
 const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/dev";
 
-/** One line: builds the package from a clone and installs it (it is not on npm yet). */
+/**
+ * One line: builds the package from a clone and installs it (it is not on npm before 1.0).
+ * release-1.0: INSTALL becomes "npm install -g @ghostlytools/cli", and install.hint below drops "until 1.0".
+ */
 export const INSTALL =
-  "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w ghostly-cli && npm pack -w ghostly-cli && npm install -g ./ghostly-cli-*.tgz";
+  "git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli && npm install -g ./ghostlytools-cli-*.tgz";
 
 /** A session, as the terminal in the hero shows it. Output shapes from packages/cli/README.md. */
 export const SESSION = `$ ghostly daemon --detach
@@ -74,7 +77,7 @@ export const cli = {
   },
   install: {
     title: "Install",
-    hint: "Node 22.12 or newer. Built from source until the npm package is published.",
+    hint: "Node 22.12 or newer. Built from source until 1.0; from 1.0, npm install -g @ghostlytools/cli.",
     copy: "Copy",
     copied: "Copied",
   },
@@ -119,7 +122,7 @@ export const cli = {
   },
   legacy: {
     title: "Looking for ghostly-cli?",
-    body: "The older Rust ghostly-cli is the compatibility client for v0.4 chats. It reads only ghost:// invites and cannot pair with the app. From 1.0 it is no longer a release download: bots built on it build it from the repository.",
+    body: "The older Rust ghostly-cli is the compatibility client for v0.4 chats. It is not the npm package @ghostlytools/cli, reads only ghost:// invites and cannot pair with the app. From 1.0 it is no longer a release download: bots built on it build it from the repository.",
     link: "ghostly-cli",
   },
 };

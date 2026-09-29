@@ -282,7 +282,7 @@ pub fn open_web_link(url: String) -> Result<(), String> {
     launch(&url)
 }
 
-fn is_web_link(url: &str) -> bool {
+pub(crate) fn is_web_link(url: &str) -> bool {
     let Ok(parsed) = reqwest::Url::parse(url) else {
         return false;
     };

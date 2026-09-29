@@ -13,6 +13,11 @@ export const EDIT_HISTORY_MAX_BYTES = 64 * 1024;
 /** The notice an app sends when a chat first goes live (useChat): shown as a line, never edited. */
 const JOIN_NOTICE = /^👋 (?:.+ )?joined$/;
 
+/** Whether a text reads as a join notice: the chat shows it as a line and takes the contact's name from it. */
+export function isJoinNotice(text: string): boolean {
+  return JOIN_NOTICE.test(text);
+}
+
 /** A text of mine in a 1:1 chat that has gone or is going to the contact: not a file, a payment, a notice or a group line. */
 export function canEdit(message: Pick<StoredMessage, "sender" | "linkId" | "wireId" | "file" | "paymentId" | "event" | "groupPay" | "text">): boolean {
   return message.sender === "me" && !!message.wireId && !message.linkId.startsWith("group:") && !message.file && !message.paymentId
@@ -28,9 +33,13 @@ export function canEditInGroup(message: Pick<StoredMessage, "sender" | "linkId" 
     && !message.event && !message.groupPay;
 }
 
-/** A text of the contact's that an edit may change (the same kinds, from the other side). */
-export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "paymentId" | "event" | "groupPay" | "text">): boolean {
-  return message.sender === "peer" && !message.file && !message.paymentId && !message.event && !message.groupPay && !JOIN_NOTICE.test(message.text);
+/**
+ * A text of the contact's that an edit may change (the same kinds, from the other side), into `text` when it is given:
+ * never into a join notice, which would read as a line of the chat's and rename the contact.
+ */
+export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "paymentId" | "event" | "groupPay" | "text">, text?: string): boolean {
+  return message.sender === "peer" && !message.file && !message.paymentId && !message.event && !message.groupPay && !JOIN_NOTICE.test(message.text)
+    && (text === undefined || !JOIN_NOTICE.test(text));
 }
 
 /**
