@@ -31,8 +31,10 @@ function Pairing({ inviter = true, createdAt, muted, onShow }: { inviter?: boole
   </>;
 }
 
-// A link in each state the engine shows before the contract field lands, from a fresh invite to live.
-const fresh = { dataLink: "idle", peerOnline: false, status: "connecting", pairing: pairing({ status: "connecting" }) } as Partial<LinkView>;
+// A link in each state the engine shows before the contract field lands, from a fresh invite to live. `unstarted`: the
+// engine has the chat but has not started its link yet (it is still being saved), so nothing is published.
+const unstarted = { dataLink: "idle", peerOnline: false, status: "offline" } as Partial<LinkView>;
+const fresh ={ dataLink: "idle", peerOnline: false, status: "connecting", pairing: pairing({ status: "connecting" }) } as Partial<LinkView>;
 const published = { ...fresh, status: "online" } as Partial<LinkView>;
 const knocked = { ...published, peerOnline: true } as Partial<LinkView>;
 const signaling = { ...knocked, dataLink: "answering" } as Partial<LinkView>;
@@ -52,6 +54,8 @@ describe("the stage, read off today's link fields", () => {
   it.each<[string, Partial<LinkView> | undefined, "inviter" | "joiner", string]>([
     ["no link yet, inviter", undefined, "inviter", "publishing"],
     ["no link yet, joiner", undefined, "joiner", "resolving"],
+    ["link not started yet, inviter", unstarted, "inviter", "publishing"],
+    ["link not started yet, joiner", unstarted, "joiner", "resolving"],
     ["first poll pending, inviter", fresh, "inviter", "publishing"],
     ["published, nobody yet", published, "inviter", "waiting"],
     ["the contact's packet seen by the inviter", knocked, "inviter", "answering"],
@@ -91,11 +95,12 @@ describe("the inviter's scene", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
     const { engine } = renderApp(<Pairing inviter />);
     const seen: [string | null, string | null | undefined, string | undefined][] = [];
-    for (const link of [fresh, published, knocked, connecting, live]) {
+    for (const link of [unstarted, fresh, published, knocked, connecting, live]) {
       show(link, engine);
       seen.push([label(), currentStep(), scene()!.dataset.stage]);
     }
     expect(seen).toEqual([
+      ["Putting your invite on the network…", "publishing", "publishing"],
       ["Putting your invite on the network…", "publishing", "publishing"],
       ["Waiting for your contact to open the invite", "waiting", "waiting"],
       ["Your contact knocked. Answering…", "answering", "answering"],

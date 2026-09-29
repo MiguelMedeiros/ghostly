@@ -156,6 +156,41 @@ describe("placing a call", () => {
     expect(devices.liveTracks()).toEqual([]);
     expect(call.publishedKinds()).toEqual(["o", null]);
   });
+
+  it("a connected call whose contact went away (a closed tab, a reload) ends with its line, as a hang-up does", async () => {
+    const call = renderCall();
+    const { stream, pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    act(() => { vi.advanceTimersByTime(4000); });
+
+    act(() => pc.setIceState("failed"));
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_ended", false, 4000);
+
+    // The next call is a call of its own: connected again, ended once more.
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => FakePeerConnection.instances[1].setIceState("connected"));
+    act(() => call.result.current.hangUp());
+    expect(call.addCallEventMessage.mock.calls.map(([type]) => type).filter((t) => t === "call_connected" || t === "call_ended")).toEqual(["call_connected", "call_ended", "call_connected", "call_ended"]);
+  });
+
+  it("a call that never connected and fails ends with no line", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("failed"));
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+  });
 });
 
 describe("both calling at once", () => {

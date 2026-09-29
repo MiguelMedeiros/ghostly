@@ -6,6 +6,7 @@ import { shortcutLabel, type OtherProfile, type useProfileGlances } from "../hoo
 import { THEME_COLOR, switchProfile, themeOf } from "../lib/profiles";
 import { ProfileBadge } from "./ProfileBadge";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { InstallMenuItem } from "./InstallApp";
 
 const LockIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
@@ -13,7 +14,8 @@ const LockIcon = () => (
 
 /**
  * The switcher itself: the active profile on top in its colors, which opens the Profile page; the others
- * below with their picture, what they left unread and whether something new waits for them, one tap each; then Add a profile and Manage profiles.
+ * below with their picture, what they left unread and whether something new waits for them, one tap each; then Add a profile and Manage profiles,
+ * and Install app while the web app can be installed.
  * A popover over the account bar on a wide screen, a sheet from the bottom on a phone. Arrow keys, Home/End,
  * Enter; Escape closes.
  */
@@ -124,6 +126,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
         </span>
         {t("profileSwitcher.manage")}
       </button>
+      <InstallMenuItem onClose={() => onClose(false)} className={`${itemClass} min-h-11 py-1.5 text-sm text-text-secondary`} />
     </div>
   );
 

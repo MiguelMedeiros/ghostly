@@ -63,7 +63,8 @@ export function deriveStage(link: LinkView | undefined, role: PairingRole, onlin
   if (link.dataLink === "offering" || link.dataLink === "answering") return { stage: "answering", detail };
   if (role === "inviter") {
     if (link.peerOnline || pair?.peerKey) return { stage: "answering", detail };
-    return { stage: link.status === "connecting" ? "publishing" : "waiting", detail };
+    // `offline` is a link the engine has not started yet (a new chat still being saved): nothing is published.
+    return { stage: link.status === "connecting" || link.status === "offline" ? "publishing" : "waiting", detail };
   }
   return { stage: link.peerOnline ? "knocking" : "resolving", detail };
 }
