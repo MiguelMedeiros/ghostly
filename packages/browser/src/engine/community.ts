@@ -405,6 +405,17 @@ export class Communities {
     return s.entryKey ? encodeCommunityLink({ g: groupId, host: s.entryKey }) : "";
   }
 
+  /**
+   * A join through the link that no member answered yet, given up: listed as an invitation, it is declined as one.
+   * A member trying to get back in (its session lost) leaves instead, which keeps nothing either.
+   */
+  async decline(groupId: string): Promise<void> {
+    const group = this.stored.get(groupId), live = this.live.get(groupId);
+    if (!group?.joining || (live && live.session.status !== "lost")) throw new Error("No invitation to decline");
+    if (live) throw new Error("You were in this group: leave it to stop trying to get back in");
+    await this.forget(groupId);
+  }
+
   async forget(groupId: string): Promise<void> {
     const live = this.live.get(groupId);
     if (live?.hub) await this.publishBeacon(groupId, live, this.now(), false).catch(() => {});

@@ -1231,24 +1231,24 @@ describe("DHT-only delivery", () => {
     expect((credentials as { verifiedPeerKey?: string }).verifiedPeerKey).toBe(credentials.peerKey);
   });
 
-  it("a fresh link packet from a DHT-only contact is it leaving DHT-only: its mailbox is read at once and at the DHT pace for a while, once per packet", async () => {
+  it("a fresh link packet from a DHT-only contact is it leaving DHT-only: its mailbox is read at once, once per packet", async () => {
     const { link } = dhtLink(createIdentity().pubKeyZ32);
-    const inner = link as unknown as { dht: { expect(ms?: number): void; state: { peerMode?: string } }; peerMayHaveLeftDht(p: object): void };
-    const read = vi.spyOn(inner.dht, "expect").mockImplementation(() => {});
+    const inner = link as unknown as { dht: { refresh(): void; state: { peerMode?: string } }; peerMayHaveLeftDht(p: object): void };
+    const refresh = vi.spyOn(inner.dht, "refresh").mockImplementation(() => {});
     const packet = (age: number) => ({ online: true, lastPacketAt: Date.now() - age, services: [] });
     inner.peerMayHaveLeftDht(packet(0));
-    expect(read, "the contact is not known to be DHT-only").not.toHaveBeenCalled();
+    expect(refresh, "the contact is not known to be DHT-only").not.toHaveBeenCalled();
     inner.dht.state.peerMode = "dht";
     inner.peerMayHaveLeftDht(packet(5 * 60_000));
-    expect(read, "an old packet, from before it went DHT-only").not.toHaveBeenCalled();
+    expect(refresh, "an old packet, from before it went DHT-only").not.toHaveBeenCalled();
     inner.peerMayHaveLeftDht({ ...packet(0), online: false, services: null });
-    expect(read, "a packet that advertises nothing (a DHT-only app publishes one when it wakes)").not.toHaveBeenCalled();
+    expect(refresh, "a packet that advertises nothing (a DHT-only app publishes one when it wakes)").not.toHaveBeenCalled();
     const fresh = packet(1_000);
     inner.peerMayHaveLeftDht(fresh);
     inner.peerMayHaveLeftDht(fresh);
-    expect(read).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledOnce();
     await link.setDeliveryMode("dht");
     inner.peerMayHaveLeftDht(packet(0));
-    expect(read, "this side is DHT-only itself").toHaveBeenCalledOnce();
+    expect(refresh, "this side is DHT-only itself").toHaveBeenCalledOnce();
   });
 });
