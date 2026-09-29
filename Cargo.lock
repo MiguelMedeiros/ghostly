@@ -2190,7 +2190,7 @@ dependencies = [
 
 [[package]]
 name = "ghostly"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "arboard",
  "async-trait",
@@ -2239,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "ghostly-cli"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.23.1",
  "clap",
