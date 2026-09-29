@@ -11,6 +11,7 @@ import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
 import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
+import type { BackupReminders } from "./backupReminder";
 import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
@@ -654,6 +655,8 @@ export interface WalletView {
   /** Newest first. */
   history: WalletTx[];
   feesPaid: number;
+  /** Each Mainnet wallet's backup reminder, by wallet id: the page works out which asks now (`backupDue`). */
+  backupReminders?: BackupReminders;
 }
 
 export interface StoredMessage {
@@ -1040,6 +1043,8 @@ export interface Settings {
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
    */
   pushRelay?: string;
+  /** The backup reminder of each Mainnet wallet (see `shared/backupReminder`). Only the engine writes it: a settings patch cannot. */
+  backupReminders?: BackupReminders;
 }
 
 /** A browser push subscription and the VAPID key pair it was made with. */

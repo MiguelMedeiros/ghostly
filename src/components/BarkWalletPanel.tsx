@@ -75,7 +75,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
   {bark?.error && ready && <Notice tone="warning">{bark.error}</Notice>}
 
   {(ready || stuck) && <Section title={t("wallet.panel.settings")} testId="bark-settings">
-   {backupNow && real && ready && <Block><Notice tone="warning" testId="bark-backup-now">{t("wallet.bark.backupNow")}</Notice></Block>}
+   {backupNow && real && ready && !bark.balance && <Block><Notice tone="warning" testId="bark-backup-now">{t("wallet.bark.backupNow")}</Notice></Block>}
    {real ? <Row label={t("wallet.panel.network")} hint={t("wallet.bark.networkReal")}><span className="text-sm text-text-secondary" data-testid="bark-network">Bitcoin</span></Row>
    : <Row label={t("wallet.panel.network")} hint={stuck ? t("wallet.bark.serverStuck") : canReplace ? t("wallet.panel.testNetworks") : t("wallet.panel.onlyEmpty")}>
     <Segmented label={t("wallet.bark.networkLabel")} value={network} disabled={busy || !canReplace} options={TEST_NETWORKS.map(value => ({ value, label: NETWORKS[value].label }))} onChange={next => void run(() => use(next))} />

@@ -24,7 +24,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "lightningClearSource", "lightningRetrySource", "lightningReconfigureSource", "lightningRefresh",
   "lightningSetReceive", "lightningRename", "bitcoinSetSource", "bitcoinClearSource", "bitcoinRetrySource",
   "bitcoinReconfigureSource", "bitcoinReceiveAddress", "bitcoinRefresh", "walletReceiveToken", "walletInspectCashu",
-  "walletExport", "sendPayment", "requestPayment", "requestGroupPayment", "groupPaymentHello", "askToPay",
+  "walletExport", "walletBackupReminder", "sendPayment", "requestPayment", "requestGroupPayment", "groupPaymentHello", "askToPay",
   "payRequest", "reclaimPayment", "disconnect", "addService", "removeService", "setServiceEnabled",
   "setServiceShared", "updateSettings", "setCallSignal", "setTyping", "setWakeSubscription", "setWakeMuted", "wakeForCall", "setFastPoll", "createGroup", "inviteToGroup",
   "acceptGroupInvitation", "declineGroupInvitation", "enableGroupLink", "disableGroupLink", "joinGroupByLink",

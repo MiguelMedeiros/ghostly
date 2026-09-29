@@ -35,6 +35,20 @@
     "restorePhrase": "Restaurar desde la frase",
     "show": "Mostrar"
   },
+  "backupReminder": {
+    "body": "Haz una copia para no perderlo si pierdes este dispositivo.",
+    "go": {
+      "phrase": "Ver frase de recuperación",
+      "profile": "Copiar el perfil"
+    },
+    "info": {
+      "phrase": "La frase de recuperación restaura esta billetera en cualquier dispositivo. Anótala y guárdala sin conexión. Quien la tenga puede gastar el dinero.",
+      "profile": "Cashu no tiene frase de recuperación. Una copia del perfil guarda tu ecash tal como está al hacerla, así que haz otra cuando recibas más."
+    },
+    "label": "falta una copia",
+    "later": "Más tarde",
+    "title": "Tienes dinero real en {{wallet}}"
+  },
   "bark": {
     "addressNote": "Desde una billetera Bark en el mismo servidor. Una billetera Arkade no puede pagarla.",
     "approve": "Nada sale antes de que lo apruebes. Solo direcciones Bark de este mismo servidor.",

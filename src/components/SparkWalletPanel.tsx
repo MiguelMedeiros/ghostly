@@ -17,7 +17,7 @@ const when = (at: number) => new Date(at).toLocaleString(undefined, { dateStyle:
  * Spark: wallet to wallet, instant and off-chain, through the Breez SDK. Its address is the wallet's identity, the
  * same every time; a chat request is paid on a Spark invoice made for it instead.
  */
-export function SparkWalletPanel({ wallet, state }: { wallet: WalletPlatform; state: WalletState }) {
+export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet: WalletPlatform; state: WalletState; backupNow?: boolean }) {
  const spark = state.spark;
  const { t } = useI18n();
  const { busy, error, run } = useRun();
@@ -87,7 +87,7 @@ export function SparkWalletPanel({ wallet, state }: { wallet: WalletPlatform; st
     {breezIsLightning ? <span className="text-sm text-text-secondary" data-testid="spark-lightning-on">{t("wallet.panel.inUse")}</span>
      : <Button data-testid="spark-use-lightning" disabled={busy} onClick={() => void run(() => wallet.sparkUseForLightning())}>{t("wallet.spark.useForLightning")}</Button>}
    </Row>}
-   <BackupRows name="Spark" busy={busy} run={run} canReplace={canReplace}
+   <BackupRows name="Spark" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow}
     reveal={async () => (await wallet.sparkBackup()).mnemonic} exportBackup={pw => wallet.sparkExportBackup(pw)}
     restorePhrase={mnemonic => wallet.sparkCreate({ network, mnemonic })} restoreFile={(text, pw) => wallet.sparkRestoreBackup(text, pw)} />
    <Block><Notice>{t("wallet.spark.phraseNote")}</Notice></Block>

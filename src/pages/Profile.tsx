@@ -44,7 +44,10 @@ export function Profile() {
   const identityAttention = useIdentityAttention();
   const [name, setName] = useState(current.name);
   // "Add a profile" in the account switcher lands here with the form open.
-  const wantsNew = !!(useLocation().state as { newProfile?: boolean } | null)?.newProfile;
+  const asked = useLocation().state as { newProfile?: boolean; backupProfile?: boolean } | null;
+  const wantsNew = !!asked?.newProfile;
+  // The wallet's backup reminder (Cashu has no phrase) lands here with the profile's Back up open.
+  const wantsBackup = !!asked?.backupProfile;
   const [creating, setCreating] = useState(wantsNew), [newName, setNewName] = useState("");
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
@@ -101,7 +104,7 @@ export function Profile() {
         <LinkRow label="Settings" onClick={() => nav.open("/settings")} />
       </Section>
 
-      <ProfileBackups canSwitch={canSwitch} />
+      <ProfileBackups canSwitch={canSwitch} openBackup={wantsBackup} />
 
       <Section title="Profiles" testId="profile-list">
         {all.map((entry) => (

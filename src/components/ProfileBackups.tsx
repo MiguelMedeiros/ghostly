@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { S3Store, type S3Config } from "@ghostly/browser/backup/s3";
 import { backupName, newSpace, type StoredBackup } from "@ghostly/browser/backup/storage";
 import { useSettings } from "../contexts/SettingsContext";
@@ -6,6 +6,7 @@ import { createProfileBackup, restoreProfileBackup } from "../lib/profileBackup"
 import { switchProfile } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Select } from "./ui/Select";
 import { ButtonGroup, FieldGrid, InputGroup, Truncate } from "./layout";
 
@@ -17,10 +18,20 @@ type Open = "none" | "backup" | "restore" | "s3";
  * Backups of the whole profile (WISP 05) to a file or S3-compatible storage (WISP 1000). A restore always
  * becomes a new profile, then Ghostly switches to it.
  */
-export function ProfileBackups({ canSwitch }: { canSwitch: boolean }) {
+export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: boolean; openBackup?: boolean }) {
   const { settings, updateBackupStorage } = useSettings();
   const { busy, error, setError, run } = useRun();
-  const [open, setOpen] = useState<Open>("none");
+  const wallet = useServicesPlatform()?.wallet;
+  // `openBackup`: the wallet's backup reminder led here. Back up is open, and its passphrase takes the focus.
+  const [open, setOpen] = useState<Open>(openBackup ? "backup" : "none");
+  const first = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!openBackup) return;
+    setOpen("backup");
+    const el = first.current;
+    el?.scrollIntoView?.({ block: "center" });
+    el?.focus({ preventScroll: true });
+  }, [openBackup]);
   const [passphrase, setPassphrase] = useState(""), [confirm, setConfirm] = useState("");
   const [done, setDone] = useState("");
   const [from, setFrom] = useState<"file" | "s3">("file");
@@ -44,6 +55,8 @@ export function ProfileBackups({ canSwitch }: { canSwitch: boolean }) {
       setDone(`Downloaded · ${size(bytes.length)}`);
     }
     setPassphrase(""); setConfirm("");
+    // A copy of everything now: a wallet's backup reminder that asked for it is over.
+    await wallet?.backupReminder({ event: "profile" }).catch(() => {});
   });
   const restore = () => run(async () => {
     const text = from === "file" ? file : new TextDecoder().decode(await s3!.get(picked));
@@ -59,7 +72,7 @@ export function ProfileBackups({ canSwitch }: { canSwitch: boolean }) {
       {open === "backup" && (
         <Block>
           <FieldGrid>
-            <input data-testid="backup-passphrase" type="password" autoComplete="new-password" className={input} placeholder="Passphrase (12+)" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
+            <input ref={first} data-testid="backup-passphrase" type="password" autoComplete="new-password" className={input} placeholder="Passphrase (12+)" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
             <input data-testid="backup-confirm" type="password" autoComplete="new-password" className={input} placeholder="Repeat" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
           </FieldGrid>
           <ButtonGroup>

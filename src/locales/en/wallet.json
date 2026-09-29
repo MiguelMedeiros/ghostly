@@ -35,6 +35,20 @@
     "restorePhrase": "Restore from phrase",
     "show": "Show"
   },
+  "backupReminder": {
+    "body": "Back it up so you don't lose it if this device is lost.",
+    "go": {
+      "phrase": "Show recovery phrase",
+      "profile": "Back up profile"
+    },
+    "info": {
+      "phrase": "The recovery phrase brings this wallet back on any device. Write it down and keep it offline. Anyone who has it can spend the money.",
+      "profile": "Cashu has no recovery phrase. A profile backup keeps your ecash as it is when you make it, so make a new one after you receive more."
+    },
+    "label": "backup needed",
+    "later": "Later",
+    "title": "You have real money in {{wallet}}"
+  },
   "bark": {
     "addressNote": "From a Bark wallet on the same server. An Arkade wallet cannot pay it.",
     "approve": "Nothing leaves before you approve. Only Bark addresses of this same server.",

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { paymentUri } from "@ghostly/core";
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { WalletPlatform, WalletState } from "../lib/platform";
@@ -55,7 +55,7 @@ function FederationFacts({ info, testId }: { info: Pick<FederationInfo, "federat
  * Federations joined with an invite code, and their ecash. Receive: an invoice paid through the federation's
  * gateway, or notes someone handed over. Send: notes to hand over (they come back if nobody redeems them).
  */
-export function FedimintWalletPanel({ wallet, state }: { wallet: WalletPlatform; state: WalletState }) {
+export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wallet: WalletPlatform; state: WalletState; backupNow?: boolean }) {
   const fm = state.fedimint;
   const { t } = useI18n();
   const { busy, error, setError, run } = useRun();
@@ -73,6 +73,14 @@ export function FedimintWalletPanel({ wallet, state }: { wallet: WalletPlatform;
   const ready = current?.status === "ready";
   const lnSource = state.lightning?.providerId === "fedimint";
   const [confirming, setConfirming] = useState(false);
+  // The backup reminder's button leads here: the recovery phrase's Show takes the focus.
+  const showPhrase = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const el = showPhrase.current;
+    if (!backupNow || !el) return;
+    el.scrollIntoView?.({ block: "center" });
+    el.focus({ preventScroll: true });
+  }, [backupNow]);
   // Real money when the federation says Bitcoin or this is the Mainnet wallet (the engine's rule too).
   const real = current?.network === "bitcoin" || state.mode === "mainnet";
   const spend = (confirmedReal: boolean) => { const id = current!.id; void run(async () => setNotesOut({ ...(await wallet.fedimintSpendNotes(id, Number(amount), confirmedReal || undefined)), federation: id })).finally(() => setConfirming(false)); };
@@ -152,7 +160,7 @@ export function FedimintWalletPanel({ wallet, state }: { wallet: WalletPlatform;
         </Row>}
         <Row label={t("wallet.fedimint.leave")} hint={t("wallet.fedimint.leaveHint")}><Button data-testid="fedimint-leave" disabled={busy || current.balance > 0} onClick={() => void run(() => wallet.fedimintLeave(current.id))}>{t("wallet.fedimint.leave")}</Button></Row>
       </>}
-      <Row label={t("wallet.fedimint.phrase")} hint={t("wallet.fedimint.phraseHint")}><Button disabled={busy} onClick={() => shownPhrase ? setShownPhrase("") : void run(async () => setShownPhrase((await wallet.fedimintBackup()).mnemonic))}>{shownPhrase ? t("wallet.fedimint.hide") : t("wallet.fedimint.show")}</Button></Row>
+      <Row label={t("wallet.fedimint.phrase")} hint={t("wallet.fedimint.phraseHint")}><Button ref={showPhrase} disabled={busy} onClick={() => shownPhrase ? setShownPhrase("") : void run(async () => setShownPhrase((await wallet.fedimintBackup()).mnemonic))}>{shownPhrase ? t("wallet.fedimint.hide") : t("wallet.fedimint.show")}</Button></Row>
       {shownPhrase && <Block><p className="select-all text-sm font-mono text-text-primary break-words" data-testid="fedimint-recovery">{shownPhrase}</p></Block>}
       <Row label={t("wallet.fedimint.backup")} hint={t("wallet.fedimint.backupHint")}><Button onClick={() => setOpen(open === "backup" ? "none" : "backup")}>{open === "backup" ? t("common.cancel") : t("wallet.fedimint.download")}</Button></Row>
       {open === "backup" && <Block>

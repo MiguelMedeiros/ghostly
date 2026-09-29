@@ -35,6 +35,20 @@
     "restorePhrase": "从短语恢复",
     "show": "显示"
   },
+  "backupReminder": {
+    "body": "请备份，以免设备丢失时损失这笔钱。",
+    "go": {
+      "phrase": "查看恢复短语",
+      "profile": "备份个人资料"
+    },
+    "info": {
+      "phrase": "恢复短语可在任何设备上恢复此钱包。请抄写下来并离线保存。任何拿到它的人都能花掉这笔钱。",
+      "profile": "Cashu 没有恢复短语。个人资料备份保存的是备份时的 ecash，所以收到更多后请再备份一次。"
+    },
+    "label": "需要备份",
+    "later": "稍后",
+    "title": "{{wallet}} 中有真钱"
+  },
   "bark": {
     "addressNote": "来自同一服务器上的 Bark 钱包。Arkade 钱包无法向其付款。",
     "approve": "你批准之前，什么都不会发出。仅限同一服务器的 Bark 地址。",
