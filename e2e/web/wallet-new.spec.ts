@@ -117,3 +117,22 @@ test("two people pay on the same network; a card of a network the contact has no
   await openWallet(bob, "cashu-mainnet");
   await expect.poll(async () => (await panelBalance(bob).innerText()).trim()).toMatch(/^0\s*sats/);
 });
+
+test("on a phone: a kind that could not be made says why on its own card, not only under the fold", { tag: ["@feature:wallet.instances.create", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const phone = { width: 390, height: 844 };
+  const alice = await peer("new-fails-phone", { mobile: true, viewport: phone, offlineMainnet: true });
+  // The test mint is down.
+  await alice.context.route(/^https:\/\/testnut\.cashu\.space\//, (route) => route.abort("connectionrefused"));
+  await alice.page.getByTestId("mobile-tabs").getByRole("button", { name: "Wallets" }).click();
+  await alice.page.getByTestId("wallet-add").click();
+  const sheet = alice.page.getByTestId("new-wallet");
+  await sheet.getByRole("radio", { name: "Testnet" }).click();
+  const cashu = sheet.getByTestId("new-wallet-type-cashu");
+  await cashu.click();
+  await expect(cashu).toHaveAttribute("data-state", "error", { timeout: 60_000 });
+  // The whole message is under the eight kinds, below the bottom of the screen; the card says why in a line.
+  const reason = sheet.getByTestId("new-wallet-type-cashu-reason");
+  await expect(reason).toHaveText("Could not reach testnut.cashu.space.");
+  const box = (await reason.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(phone.height);
+});
