@@ -152,7 +152,7 @@ import { db } from "./db";
 import { Groups, meshEdgeIntervals } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
-import { Reactions, groupReactionsToResend, latestReaction } from "./reactions";
+import { Reactions, groupReactionsToResend, latestReaction, noteAfterChange } from "./reactions";
 import { mayPinIn, myPin, pinView, pinnedRow } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
@@ -4521,6 +4521,13 @@ export class GhostlyNode implements EngineImplementation {
    * the whole history. A host that takes whole histories only (no `onMessageChanges`) gets the whole history, as before.
    */
   private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
+    // The chat list's reaction line quotes its message: an edit of that message changes the quote too.
+    const reacted = this.reactionNotes.get(linkId);
+    if (reacted?.message && ids.includes(reacted.message)) {
+      const row = await db.getMessage(linkId, reacted.message);
+      const fresh = row && noteAfterChange(reacted, row);
+      if (fresh) { this.reactionNotes.set(linkId, fresh); this.emitState(); }
+    }
     const onChanges = this.events.onMessageChanges;
     if (!onChanges) return this.events.onMessages(linkId, await db.getMessages(linkId));
     const unique = [...new Set(ids)];

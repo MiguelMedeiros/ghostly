@@ -44,7 +44,13 @@ export function latestReaction(messages: readonly StoredMessage[]): ReactionNote
 }
 
 function note(message: StoredMessage, by: string, emoji: string, at: number): ReactionNote {
-  return { at, by, emoji, snippet: replySnippet(message.text), mine: message.sender === "me" };
+  return { at, by, emoji, snippet: replySnippet(message.text), mine: message.sender === "me", message: message.id };
+}
+
+/** The note again after its message changed (an edit): its line is the message's text now. Undefined when nothing changed. */
+export function noteAfterChange(current: ReactionNote, message: StoredMessage): ReactionNote | undefined {
+  const snippet = replySnippet(message.text);
+  return snippet === current.snippet ? undefined : { ...current, snippet };
 }
 
 /**
