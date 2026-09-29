@@ -355,6 +355,12 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   return pid;
 }
 
+/** Throws busy, with its pid, when a process other than `except` holds the profile. */
+function heldBy(g: Globals, except?: number): void {
+  const owner = lockOwner(g.paths);
+  if (owner !== null && owner !== except) throw new CliError("busy", `Profile ${g.profile} is in use by process ${owner}`, { pid: owner });
+}
+
 function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
@@ -363,6 +369,8 @@ function processAlive(pid: number): boolean {
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
   if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  // A one-shot command (or a listen) that opened the profile in process holds it: the child would only log that.
+  heldBy(g);
   const log = openSync(g.paths.log, "a", 0o600);
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log] });
   child.unref();
@@ -373,7 +381,10 @@ async function startDetached(g: Globals, seconds: number) {
     await new Promise((resolve) => setTimeout(resolve, 200));
     client = await connectDaemon(g.paths.socket, 500);
   }
-  if (!client) throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
+  if (!client) {
+    heldBy(g, child.pid); // another process took the profile between the check and the child's start
+    throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
+  }
   client.close();
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
 }
