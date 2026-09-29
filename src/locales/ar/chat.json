@@ -126,6 +126,7 @@
     "queuedHere": "في انتظار دوره · اكتمل {{done}}",
     "queuedThere": "في قائمة انتظار {{name}} · اكتمل {{done}}",
     "resendHint": "يعرضه مرة أخرى. يتابع مما لدى جهة اتصالك بالفعل.",
+    "restoring": "جارٍ التحميل… · {{size}}",
     "resume": "استئناف",
     "roomDevice": "{{size}} متاحة على هذا الجهاز",
     "stalled": "متوقف · {{progress}}",

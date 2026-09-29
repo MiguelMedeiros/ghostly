@@ -1410,6 +1410,11 @@ export interface EngineState {
   services: ServiceView[];
   /** Transfers since the peer started, by file id. */
   transfers: Record<string, FileTransferView>;
+  /**
+   * The kept transfers are back in `transfers`. False for the first moments after a start: a file with no transfer
+   * yet may still be moving, not finished.
+   */
+  transfersRestored?: boolean;
   wallet: WalletView;
   payments: Record<string, PaymentView>;
   /** This profile's identity proofs. */

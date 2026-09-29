@@ -126,6 +126,7 @@
     "queuedHere": "Aguardando a vez · {{done}} concluído",
     "queuedThere": "Na fila de {{name}} · {{done}} concluído",
     "resendHint": "Oferece de novo. Continua do que seu contato já tem.",
+    "restoring": "Carregando… · {{size}}",
     "resume": "Continuar",
     "roomDevice": "{{size}} livres neste aparelho",
     "stalled": "Parado · {{progress}}",

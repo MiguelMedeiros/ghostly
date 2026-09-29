@@ -82,6 +82,7 @@ export function engineState(patch: StatePatch = {}): EngineState {
     links: [],
     services: [],
     transfers: {},
+    transfersRestored: true,
     wallet: walletView(),
     payments: {},
     identityProofs: [],
