@@ -27,6 +27,8 @@ mod pubky_session;
 mod push_send;
 mod records;
 mod share;
+#[cfg(target_os = "linux")]
+mod single_instance;
 #[cfg(test)]
 mod test_support;
 mod types;
@@ -165,9 +167,15 @@ fn paste_source() -> clipboard::PasteSource {
 }
 
 fn main() {
+    let context = tauri::generate_context!();
+    let builder = tauri::Builder::default();
+    // Launched again on the same profile, it brings the running window forward and exits here, before its peer.
+    #[cfg(target_os = "linux")]
+    let builder = single_instance::register(builder, &context.config().identifier);
+
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
-    tauri::Builder::default()
+    builder
         // Updating is always the user's doing: the plugin only looks and downloads
         // when the UI asks, and the release it takes has to carry our signature.
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -248,7 +256,7 @@ fn main() {
             }
         })
         .invoke_handler(only_main(commands!()))
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while running tauri application")
         .run(on_run_event);
 }
