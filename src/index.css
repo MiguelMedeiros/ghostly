@@ -282,6 +282,10 @@ body {
 
 #root {
   @apply h-screen flex overflow-hidden;
+  /* A phone on its side: the notch or Dynamic Island is at one end (viewport-fit=cover lets the page under it). */
+  box-sizing: border-box;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 /* An app opened from the iPhone home screen (iOS 26): with nothing in the page's flow (the body is fixed on
