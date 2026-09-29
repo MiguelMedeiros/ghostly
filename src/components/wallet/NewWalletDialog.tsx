@@ -47,6 +47,11 @@ const READY_MS = 650;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** Why a kind is not there yet, in one line: the reason's first sentence. */
 const shortReason = (reason: string) => reason.split(/(?<=\.)\s/)[0];
+/**
+ * Why making a kind failed, in a line for its card: the engine's reason without "Could not create the … wallet:" in
+ * front, its first sentence ("Could not reach testnut.cashu.space."). The whole message stays below the kinds.
+ */
+const failedBecause = (text: string) => shortReason(text.replace(/^Could not create the .+? wallet: /, ""));
 
 type Phase = { type: WalletType; state: "busy" | "done" | "error"; step: number; text?: string; made?: WalletInstanceView };
 type Action = "create" | "key" | "connect" | "add-another" | "join" | "join-another" | "added" | "off";
@@ -224,7 +229,10 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
                             : action === "added" ? <><Check />{t("wallet.new.action.added")}</> : t(ACTION_LABEL[action])}
                         </span>
                       </span>
-                      <span className="block text-xs text-text-secondary mt-1">{action === "off" && o?.reason ? shortReason(o.reason) : t(ABOUT[type](network))}</span>
+                      {/* A failure says why on the card itself: on a phone the sheet scrolls, and the message under the kinds is out of sight. */}
+                      {mine === "error" && phase?.text
+                        ? <span className="block text-xs text-danger mt-1" data-testid={`new-wallet-type-${type}-reason`}>{failedBecause(phase.text)}</span>
+                        : <span className="block text-xs text-text-secondary mt-1">{action === "off" && o?.reason ? shortReason(o.reason) : t(ABOUT[type](network))}</span>}
                     </span>
                     {mine === "busy" && <span className="new-wallet-shimmer" aria-hidden="true" />}
                   </button>

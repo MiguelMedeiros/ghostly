@@ -355,6 +355,8 @@ describe("the picker, while a wallet is made", () => {
     await finish(new Error("Could not create the Testnet USDT wallet: RPC unavailable. Nothing was saved; try again."));
     expect(screen.getByTestId("new-wallet-type-usdt")).toHaveAttribute("data-state", "error");
     expect(screen.getByTestId("new-wallet-type-usdt-status")).toHaveTextContent("Try again");
+    // Why, on the card itself, in a line: on a phone the message under the kinds is below the fold.
+    expect(screen.getByTestId("new-wallet-type-usdt-reason")).toHaveTextContent(/^RPC unavailable\.$/);
     expect(screen.getAllByTestId("new-wallet-error")).toHaveLength(1);
     expect(screen.getByTestId("new-wallet-error")).toHaveTextContent("RPC unavailable. Nothing was saved; try again.");
     expect(screen.queryByTestId("new-wallet-progress")).not.toBeInTheDocument();
@@ -366,6 +368,7 @@ describe("the picker, while a wallet is made", () => {
     await user.click(screen.getByTestId("new-wallet-type-usdt"));
     expect(screen.getByTestId("new-wallet-type-usdt")).toHaveAttribute("data-state", "busy");
     expect(screen.queryByTestId("new-wallet-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("new-wallet-type-usdt-reason")).not.toBeInTheDocument();
     await again(made("usdt", "testnet"));
     expect(engine.callsTo("walletCreate")).toEqual([{ type: "usdt", network: "testnet" }, { type: "usdt", network: "testnet" }]);
   });
