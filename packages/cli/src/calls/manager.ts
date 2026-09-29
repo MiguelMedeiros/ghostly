@@ -101,6 +101,8 @@ export class CallManager {
 
   /** A signal the contact's app sent in a chat (the engine's `call-signal`). */
   onSignal(chat: string, json: string): void {
+    // A stopping daemon takes no call, and its own have been hung up (`stopAll`): nothing here is heard any more.
+    if (this.stopping) return;
     const signal = parseCallSignal(json, this.now);
     if (!signal) return;
     if (signal.ts <= (this.lastSignal.get(chat) ?? 0)) return;
