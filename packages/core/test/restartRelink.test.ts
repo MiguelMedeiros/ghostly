@@ -49,8 +49,11 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
   };
 }
 
-/** `endpointAfterMs`: the native endpoint starts this long after the link (a Desktop's Iroh can take seconds). */
-function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, kind: Kind, dhtState: DhtDeliveryState, wasLive = false, endpointAfterMs?: number): App {
+/**
+ * `endpointAfterMs`: the native endpoint starts this long after the link (a Desktop's Iroh can take seconds).
+ * `chosen`: the person chose the native transport in the chat's Connection menu, and the chat was live on it.
+ */
+function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, kind: Kind, dhtState: DhtDeliveryState, wasLive = false, endpointAfterMs?: number, chosen = false): App {
   const app = { name, side, dhtState, requests: [] } as unknown as App;
   const native = kind === "webrtc" ? undefined : kind === "webrtc+hyperdht" ? "hyperdht/1" as const : "iroh/1" as const;
   const peerNative = native === "hyperdht/1" ? { publicKey: `${contact.name}:hyperdht/1` } : { id: `${contact.name}:iroh/1`, relay: "https://relay.test./", addresses: [] };
@@ -61,10 +64,11 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
     pairing: { credentials: { seedB64: side.seedB64, peerKey: peerKeyOf(contact.side) }, pinPeer: async () => {}, trustOnFirstUse: true },
     dht: { state: dhtState, save: async state => { app.dhtState = state; } },
     native: native
-      ? { peerDescriptors: { [native]: peerNative }, peerTransports: [...(rtcToo ? ["webrtc/1" as const] : []), native], peerFallback: true, automatic: true }
+      ? { peerDescriptors: { [native]: peerNative }, peerTransports: [...(rtcToo ? ["webrtc/1" as const] : []), native], peerFallback: true,
+        ...(chosen ? { preferred: native, automatic: false } : { automatic: true }) }
       : { peerTransports: ["webrtc/1"], peerFallback: true, automatic: true },
     // What the app was live on when it quit: WebRTC wherever the app has it (it ranks first).
-    ...(wasLive ? { resume: rtcToo ? "webrtc/1" as const : "iroh/1" as const } : {}),
+    ...(wasLive ? { resume: chosen && native ? native : rtcToo ? "webrtc/1" as const : "iroh/1" as const } : {}),
     transport: counted(world.pkarr, app),
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
@@ -291,6 +295,24 @@ describe("a restart whose WebRTC answer the relays' budget holds back", () => {
     expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(15_000);
     expect(result.transport).toBe("hyperdht/1");
     expect(result.dialFailures).toBe(0);
+  }, 240_000);
+
+  it("two apps that restart together with HyperDHT chosen are live on it soon after the contact's endpoint is up", async () => {
+    // Found with two headless CLIs (bug hunt r3a): both chose HyperDHT and restarted together. The lower key knocked on
+    // HyperDHT first, as its choice, while the other's endpoint was still starting (PEER_NOT_FOUND); then it offered
+    // WebRTC, and the HyperDHT that failed first was never dialled again in that attempt: live after the other app read
+    // the offer (30 s) or after the offer's attempt timeout (90 s).
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    // A HyperDHT lookup for an endpoint not announced yet answers PEER_NOT_FOUND in about a second and a half.
+    world.native.dialFailMs = 1_500;
+    const made = invitationWhere("inviter");
+    const low = startApp(world, "low", made.inviter, { side: made.joiner, name: "high" }, "webrtc+hyperdht", emptyDhtDeliveryState(), true, undefined, true);
+    // The app that stopped second heard the other go: it was not live when it quit, and does not knock.
+    const high = startApp(world, "high", made.joiner, { side: made.inviter, name: "low" }, "webrtc+hyperdht", emptyDhtDeliveryState(), false, 6_000, true);
+    high.heldUntil = Date.now() + BUDGET_HELD_MS;
+    const liveMs = await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen, 150_000);
+    expect(liveMs, "from the restart to live on both sides").toBeLessThanOrEqual(15_000);
+    expect((low.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport).toBe("hyperdht/1");
   }, 240_000);
 
   it("a relayed transport ranked after WebRTC waits for a contact reading in the background first", async () => {

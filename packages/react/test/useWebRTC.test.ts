@@ -2,7 +2,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
-import { RESTART_GRACE_MS } from "../src/useWebRTC";
+import { NO_ANSWER_SHOWN_MS, RESTART_GRACE_MS, RING_MS } from "../src/useWebRTC";
 
 // covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.screen-share, calls.upgrade
 
@@ -140,6 +140,40 @@ describe("placing a call", () => {
 
     act(() => { vi.advanceTimersByTime(5000); });
     expect(call.publishedKinds()).toEqual(["o", "h", null]);
+  });
+
+  it("a call nobody answers hangs up after RING_MS and says \"No answer\" for a while", async () => {
+    const call = renderCall();
+    const { stream, pc } = await offered(call);
+
+    act(() => { vi.advanceTimersByTime(RING_MS - 1); });
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.result.current.noAnswer).toBe(false);
+    act(() => { vi.advanceTimersByTime(1); });
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.noAnswer).toBe(true);
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
+    expect(pc.close).toHaveBeenCalledOnce();
+    expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
+    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+
+    act(() => { vi.advanceTimersByTime(NO_ANSWER_SHOWN_MS); });
+    expect(call.result.current.noAnswer).toBe(false);
+  });
+
+  it("an answered call does not ring out", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+
+    act(() => { vi.advanceTimersByTime(RING_MS * 2); });
+
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.result.current.noAnswer).toBe(false);
+    expect(call.publishedKinds()).toEqual(["o"]);
   });
 
   it("the peer hanging up a connected call ends it here without a hang-up of our own", async () => {
@@ -326,8 +360,40 @@ describe("answering a call", () => {
     expect(call.result.current.callState).toBe("idle");
     expect(call.publishedKinds()).toEqual([null]);
     expect(devices.getUserMedia).not.toHaveBeenCalled();
-    // It never connected, so there is no "call ended" line in the chat.
+    // It never connected, so there is no "call ended" line in the chat: a missed call instead.
     expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_missed", false);
+  });
+
+  it("stops ringing on its own after RING_MS, with a missed call and nothing sent", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    expect(call.result.current.callState).toBe("incoming");
+
+    act(() => { vi.advanceTimersByTime(RING_MS - 1); });
+    expect(call.result.current.callState).toBe("incoming");
+    act(() => { vi.advanceTimersByTime(1); });
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_missed", false);
+    expect(call.publishedKinds()).not.toContain("h");
+    expect(call.fastPoll()).toBe(false);
+    // The caller's hang-up, arriving later, adds no second line.
+    call.receive(remote.hangUp(Date.now()));
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_missed")).toHaveLength(1);
+  });
+
+  it("an answered call is not missed when RING_MS passes", async () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    act(() => { void call.result.current.acceptCall(false); });
+    devices.userMedia[0].grant();
+    await settle();
+
+    act(() => { vi.advanceTimersByTime(RING_MS); });
+
+    expect(call.result.current.callState).toBe("connecting");
+    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_missed", expect.anything());
   });
 
   it("an accept clicked twice asks for the microphone once", async () => {

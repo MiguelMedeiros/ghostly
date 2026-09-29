@@ -37,6 +37,16 @@ export function useViewportHeight() {
       document.documentElement.dataset.keyboard = String(keyboard);
       // iOS scrolls the page to reveal the focused input; the shell already fits.
       if (window.scrollY !== 0) window.scrollTo(0, 0);
+      if (keyboard) requestAnimationFrame(reveal);
+    };
+    // The keyboard opens after the field has the focus, and the page the field is in only gets shorter then: a
+    // field low on it (a setting, a form in a page) stays where it was, under the keyboard. Once the shell has
+    // its new height, it is brought into what is left, and only then: nothing moves for a field already in view.
+    const reveal = () => {
+      const field = document.activeElement;
+      if (!(field instanceof HTMLElement) || !field.matches("input, textarea, select, [contenteditable]")) return;
+      const box = field.getBoundingClientRect();
+      if (box.top < 0 || box.bottom > viewport.height) field.scrollIntoView({ block: "center" });
     };
     update();
     viewport.addEventListener("resize", update);
