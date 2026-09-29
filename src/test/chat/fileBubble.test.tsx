@@ -47,6 +47,11 @@ describe("what a file's status line says", () => {
   ])("%s", (_, transfer, text) => {
     expect(fileStatus(f, transfer, "Ana", false)).toBe(text);
   });
+  it("a contact with no name is \"your contact\", in lower case mid-sentence", () => {
+    expect(fileStatus(f, t({ stage: "paused", pausedBy: "peer" }), undefined, false)).toBe("Paused by your contact · 62% of 4.2 GB");
+    expect(fileStatus(f, t({ stage: "asking", direction: "out", transferred: 0 }), undefined, false)).toBe("Waiting for your contact to accept · 4.2 GB");
+    expect(fileStatus(f, t({ stage: "queued", direction: "out" }), undefined, false)).toBe("Queued by your contact · 62% done");
+  });
   it("time left reads in minutes and hours", () => {
     expect(timeLeft(30)).toBe("less than a minute left");
     expect(timeLeft(125 * 60)).toBe("2 h 5 min left");
@@ -64,6 +69,16 @@ describe("FileBubble: files/3", () => {
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([{ linkId: "chat1", fileId: "chat1-in-abc", action: "accept" }]));
     fireEvent.click(screen.getByTestId("file-decline"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
+  });
+
+  it("a contact with no name: \"your contact\" mid-sentence, \"Your contact\" to start one", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: { "chat1-out-p": { state: "transferring", stage: "paused", pausedBy: "peer", direction: "out", transferred: GB, size: 4.2 * GB } } });
+    const sent = renderApp(<FileBubble file={file({ id: "chat1-out-p" })} />);
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Paused by your contact · 23% of 4.2 GB");
+    sent.unmount();
+    fakeEngine.update({ transfers: { "chat1-in-abc": { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB } } });
+    renderApp(<FileBubble file={file()} />);
+    expect(screen.getByTestId("file-offer")).toHaveTextContent("Your contact wants to send movie.mkv (4.2 GB).");
   });
 
   it("an offer larger than the room here cannot be accepted", () => {

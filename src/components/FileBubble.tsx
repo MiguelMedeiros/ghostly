@@ -106,7 +106,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
     setLoaded({ url, ok: true });
   };
 
-  const status = fileStatus(file, transfer, peerName, missing, t);
+  const status = fileStatus(file, transfer, named, missing, t);
   const moving = transfer?.state === "transferring";
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";

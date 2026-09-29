@@ -132,7 +132,8 @@
     "verifying": "正在检查文件… {{size}}",
     "waitingDone": "等待连接 · 已完成 {{done}}",
     "waitingSize": "等待连接 · {{size}}",
-    "wantsToSend": "{{name}} 想发送 {{file}}（{{size}}）。"
+    "wantsToSend": "{{name}} 想发送 {{file}}（{{size}}）。",
+    "yourContact": "你的联系人"
   },
   "fileTooLarge": "文件过大（最大 {{size}}）。",
   "filesNeedUpdate": "双方都需更新才能发送文件",

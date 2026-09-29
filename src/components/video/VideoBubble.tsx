@@ -208,7 +208,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
-  const status = moving || failed ? fileStatus(file, transfer, peerName, false, t) : null;
+  const status = moving || failed ? fileStatus(file, transfer, named, false, t) : null;
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
   const reason = actionError || (failed ? transfer.error : undefined);
   const again = (action: () => Promise<unknown>) => {
