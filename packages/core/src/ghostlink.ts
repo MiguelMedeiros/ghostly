@@ -514,6 +514,8 @@ export class GhostLink {
   private lastAttempt?: LiveAttempt;
   /** The transport the chat waits for (WISP 100): attempts that failed in a row, the last error, the next retry. */
   private waiting: { transport: PairedTransport; failures: number; told?: boolean; error?: string; retryAt?: number; timer?: ReturnType<typeof setTimeout> } | null = null;
+  /** Why the target of the switch this side dialled did not connect, when a later choice may still carry the chat. */
+  private switchMissed?: { transport: PairedTransport; reason: string };
   private paired: PairedSession | null = null;
   private pairedPending = new Map<string, number>();
   private httpHost: HttpHost | null = null;
@@ -824,7 +826,9 @@ export class GhostLink {
       prepare: (plan, dial) => { if (dial) void this.prepareSwitch(plan); },
       cancel: () => this.cancelCandidate(),
       kept: (target, reason) => {
-        // The chat stayed live on a fallback: said once per choice (a row), then tried again quietly.
+        // The chat stayed live on a fallback, or moved to one: said once per choice (a row), then tried again quietly.
+        // Moved: why the target did not connect is known on the side that dialled it (`prepareSwitch`).
+        reason ??= this.switchMissed?.transport === target ? this.switchMissed.reason : undefined;
         if (this.unreached(target, reason)) options.events?.onTransportSwitchFailed?.(target, reason);
       },
       unreached: (target, reason) => { this.unreached(target, reason); },
@@ -2268,6 +2272,7 @@ export class GhostLink {
   private async prepareSwitch(plan: SwitchPlan): Promise<void> {
     const epoch = ++this.candidateEpoch;
     let lastError: unknown;
+    this.switchMissed = undefined;
     for (const transport of plan.choices) {
       if (epoch !== this.candidateEpoch || this.switcher.pending !== plan || this.stopped) return;
       if (this.paired?.state.transport === transport) {
@@ -2293,6 +2298,7 @@ export class GhostLink {
         return;
       } catch (error) {
         lastError = error;
+        if (transport === plan.choices[0]) this.switchMissed = { transport, reason: error instanceof Error ? error.message : String(error) };
         if (epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
         const candidate = this.candidate; this.candidate = null;
         candidate?.session.stop(); candidate?.reject(new Error("Candidate failed")); candidate?.channel.close();
