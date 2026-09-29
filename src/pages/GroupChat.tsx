@@ -331,7 +331,7 @@ export function GroupChat() {
             <div className="flex min-w-0 items-center gap-1.5">
               <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</p>
             </div>
-            <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer max-w-[60vw]">
+            <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer">
               {/* Who is typing while it lasts, in place of the member count, as a 1:1 chat's header does. */}
               <span role="status" aria-live="polite">{typers.length ? <GroupTypingText testId="group-typing" typers={typers} /> : subtitle}</span>
             </button>
