@@ -74,7 +74,9 @@ jobs:
         if: ${{ !inputs.web_url }}
         env:
           E2E_MINT_URL: http://127.0.0.1:3338
-        run: npm run test:e2e
+        # @release-skip: specs that have not passed on a GitHub runner yet and do not gate a release until they
+        # do (the nightly E2E (full) still runs them). See the follow-up issue before adding one.
+        run: npm run test:e2e -- --grep-invert @release-skip
 
       - name: Run end-to-end tests against ${{ inputs.web_url }}
         if: ${{ inputs.web_url }}
@@ -178,7 +180,7 @@ jobs:
         run: npm run tauri -- build --debug --no-bundle
 
       - name: Run Desktop end-to-end tests
-        run: xvfb-run -a npm run test:e2e:desktop
+        run: xvfb-run -a npm run test:e2e:desktop -- --grep-invert @release-skip
 
       - name: Upload report
         if: ${{ !cancelled() }}
