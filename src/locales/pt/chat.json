@@ -130,6 +130,7 @@
     "roomDevice": "{{size}} livres neste aparelho",
     "stalled": "Parado · {{progress}}",
     "verifying": "Verificando o arquivo… {{size}}",
+    "viewPicture": "Ver {{name}}",
     "waitingDone": "Aguardando conexão · {{done}} concluído",
     "waitingSize": "Aguardando conexão · {{size}}",
     "wantsToSend": "{{name}} quer enviar {{file}} ({{size}}).",
