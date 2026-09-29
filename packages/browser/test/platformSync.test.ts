@@ -400,3 +400,24 @@ describe("the contact's own name", () => {
     expect(storage.loadSession("s1")!.nick).toBe("Casper");
   });
 });
+
+describe("another page of the app", () => {
+  const stored = (key: string | null) => Object.assign(new Event("storage"), { key });
+
+  it("a chat another tab wrote tells this page's chats to read again; other keys do not", async () => {
+    imported();
+    await start([]);
+    const before = changes;
+    // The extension's second tab mirrored a message into this chat first: this page's mirror adds nothing.
+    window.dispatchEvent(stored(`${storage.getPrefix()}s1`));
+    expect(changes).toBe(before + 1);
+    // Storage cleared everywhere.
+    window.dispatchEvent(stored(null));
+    expect(changes).toBe(before + 2);
+    // A setting, another profile's chat, a key of another app: not this page's chats.
+    window.dispatchEvent(stored(`${storage.getPrefix()}app_settings`));
+    window.dispatchEvent(stored(`${storage.getPrefix()}abcdefghij_s1`));
+    window.dispatchEvent(stored("gb-sessions-imported"));
+    expect(changes).toBe(before + 2);
+  });
+});

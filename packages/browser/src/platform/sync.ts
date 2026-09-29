@@ -6,6 +6,7 @@ import {
   forgetInviteCode,
   getInviteCode,
   getPrefix,
+  isSessionKey,
   listSessions,
   loadSession,
   peerDisplayName,
@@ -280,5 +281,11 @@ export function startSessionSync(): void {
   });
   // Deleting a chat only touches localStorage; notice it without waiting for the peer to speak.
   window.addEventListener("session-updated", () => void reconcile());
+  // Another page of this app (a second tab of the extension, whose pages share one peer) wrote a chat: what it
+  // mirrored first is already stored, so this page's mirror adds nothing and would never tell its chat to read again.
+  // A chat cleared (`key` null: storage cleared) counts too.
+  window.addEventListener("storage", (event: StorageEvent) => {
+    if (event.key === null || isSessionKey(event.key)) notifySessionsChanged();
+  });
   setInterval(() => void reconcile(), 5_000);
 }
