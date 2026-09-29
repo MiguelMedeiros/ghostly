@@ -42,7 +42,8 @@ function write(key: string, value: string): void {
   try { localStorage.setItem(key, value); } catch { /* not remembered */ }
 }
 
-function standalone(): boolean {
+/** Running as the installed app: its own window, or opened from the iPhone or iPad home screen. */
+export function isStandalone(): boolean {
   try {
     return matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
   } catch {
@@ -90,7 +91,7 @@ export function watchInstallPrompt(target: Window = window): void {
 
 export function installState(): InstallState {
   if (!watching) return "none";
-  if (justInstalled || standalone()) return "installed";
+  if (justInstalled || isStandalone()) return "installed";
   if (deferred) return "prompt";
   if (isAppleMobile()) return "ios";
   return isMacSafari() ? "dock" : "none";
