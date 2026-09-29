@@ -27,7 +27,24 @@ export function ensureMiner() {
     try { cli("loadwallet", "miner"); } catch { try { cli("createwallet", "miner"); } catch { cli("loadwallet", "miner"); } }
   }
   if (Number(miner("getbalance")) < 50) mine(height() < 200 ? 200 : 101);
+  freshTip();
 }
+
+/** How old the tip may be before `freshTip` mines: under LND's two hours (btcwallet's `isCurrentDelta`). */
+export const TIP_MAX_AGE_S = 60 * 60;
+
+/**
+ * A chain nobody mined on for a while has an old tip, and a Lightning node (LND) then reports `synced_to_chain: false`
+ * until a new block lands: every suite waiting for it to sync before mining anything timed out. One block, only when
+ * the tip is older than `TIP_MAX_AGE_S`: other sessions share the chain, and one block moves nothing of theirs.
+ */
+export function freshTip(now = Date.now(), tip = tipTime, mineOne = () => mine(1)) {
+  if (now / 1000 - tip() > TIP_MAX_AGE_S) { mineOne(); return true; }
+  return false;
+}
+
+/** The tip's block time, in seconds. */
+export const tipTime = () => Number(JSON.parse(cli("getblockheader", cli("getbestblockhash"))).time);
 
 /** Pays `sats` to an address from the miner; returns the txid (unconfirmed: mine to confirm it). */
 export const pay = (address, sats) => miner("sendtoaddress", address, (sats / 1e8).toFixed(8));
