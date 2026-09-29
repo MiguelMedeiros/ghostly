@@ -209,7 +209,8 @@ export function attachDesktopLogs(name: string, home: string): void {
   for (const file of find(home)) void base.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
 }
 
-const homeEnv = (dir: string): Record<string, string> => {
+/** The environment that puts an app's storage under `dir` (`DesktopOptions.home`), for an app a test starts itself. */
+export const homeEnv = (dir: string): Record<string, string> => {
   const env = { HOME: dir, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), XDG_CACHE_HOME: join(dir, "cache") };
   for (const path of Object.values(env)) mkdirSync(path, { recursive: true });
   return env;
