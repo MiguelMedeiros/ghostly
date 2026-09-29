@@ -139,6 +139,7 @@ import type {
 } from "../shared/types";
 import { WALLET_TYPES } from "../shared/types";
 import type { WakeSubscription } from "../shared/types";
+import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, type BackupReminders } from "../shared/backupReminder";
 import type { MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
 import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
@@ -1071,6 +1072,47 @@ export class GhostlyNode implements EngineImplementation {
       }
     }
     this.walletFeedbackReady = true;
+    await this.observeBackups();
+    this.emitState();
+  }
+
+  /** Whether this profile's settings are read: before that, a reminder saved would write the defaults over them. */
+  private backupsLoaded = false;
+  /** The backup reminders (shared/backupReminder): what the Mainnet balances change in them, saved when they do. */
+  private async observeBackups(): Promise<void> {
+    if (this.backupsLoaded) {
+      const view = this.walletView;
+      const { records, changed } = observeBalances(this.settings.backupReminders ?? {}, mainnetBalances(view.wallets ?? [], view.networks?.mainnet), Date.now());
+      if (changed) await this.saveBackups(records);
+    }
+    this.walletView = { ...this.walletView, backupReminders: this.settings.backupReminders ?? {} };
+  }
+  private async saveBackups(records: BackupReminders): Promise<void> {
+    this.settings = { ...this.settings, backupReminders: records };
+    this.walletView = { ...this.walletView, backupReminders: records };
+    await db.putSettings(this.settings);
+  }
+  /** A wallet's phrase shown or its backup file made (once it answered): a copy of it exists, its reminder is over. */
+  private async copied<T>(type: WalletType, network: WalletNetwork | undefined, work: () => T | Promise<T>): Promise<T> {
+    const result = await work();
+    const net = this.net(network);
+    if (net === "mainnet" && this.backupsLoaded) {
+      await this.saveBackups(markBackedUp(this.settings.backupReminders ?? {}, { kind: "phrase", id: `${type}:${net}` }, Date.now()));
+      this.emitState();
+    }
+    return result;
+  }
+
+  /** The backup reminder's "Later" on one Mainnet wallet, or a profile backup just made (see `EngineApi`). */
+  async walletBackupReminder(params: { event: "later"; wallet: string } | { event: "profile" }): Promise<void> {
+    const records = this.settings.backupReminders ?? {}, now = Date.now();
+    if (params?.event === "profile") await this.saveBackups(markBackedUp(records, { kind: "profile" }, now));
+    else if (params?.event === "later" && typeof params.wallet === "string") {
+      const view = this.walletView;
+      const held = mainnetBalances(view.wallets ?? [], view.networks?.mainnet).find((b) => b.id === params.wallet);
+      if (!held) throw new Error("There is no such Mainnet wallet");
+      await this.saveBackups(putOff(records, held.id, held.balance, now));
+    } else throw new Error("Unknown backup reminder event");
     this.emitState();
   }
   private async pollPaymentStatus():Promise<void> {
@@ -1093,6 +1135,7 @@ export class GhostlyNode implements EngineImplementation {
     this.relays?.setRelays(this.settings.relays);
     this.configureDirect();
     this.services = await db.getServices();
+    this.backupsLoaded = true;
     await this.identities.load();
     this.identities.start();
     await this.did.load();
@@ -3160,6 +3203,9 @@ export class GhostlyNode implements EngineImplementation {
     }
     // Another Lightning card of the network still takes what the chats accept on it.
     if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network)) await this.forgetChatNetwork(type as PaymentMethodName, network);
+    // Its backup reminder goes with it: another wallet of the kind has its own phrase, and asks again.
+    const reminders = this.settings.backupReminders;
+    if (reminders && type !== "lightning" && `${type}:${network}` in reminders) { await this.saveBackups(forgetWallet(reminders, `${type}:${network}`)); this.emitState(); }
   }
 
   /**
@@ -3403,22 +3449,22 @@ export class GhostlyNode implements EngineImplementation {
   // and so its network.
   usdtCreate(params: Parameters<EngineApi["usdtCreate"]>[0]) { return this.usdtWallets[usdtMode(params.network)].create(params); }
   usdtUnlock(params: { password: string; network?: WalletNetwork }) { return this.usdtWallets[this.net(params.network)].unlock(params.password); }
-  usdtReveal(params: { password?: string; network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].reveal(params?.password); }
+  usdtReveal(params: { password?: string; network?: WalletNetwork }) { return this.copied("usdt", params?.network, () => this.usdtWallets[this.net(params?.network)].reveal(params?.password)); }
   usdtLock(params?: { network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].lock(); }
   usdtRefresh(params?: { network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].refresh(); }
-  usdtExportBackup(params: { password: string; network?: WalletNetwork }) { return this.usdtWallets[this.net(params.network)].exportBackup(params.password); }
+  usdtExportBackup(params: { password: string; network?: WalletNetwork }) { return this.copied("usdt", params.network, () => this.usdtWallets[this.net(params.network)].exportBackup(params.password)); }
   async usdtRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.usdtWallets, params.network, (w) => w.restoreBackup(params.text, params.password)); await wallet.ensureReady(); }
   arkCreate(params: Parameters<EngineApi["arkCreate"]>[0]) { return this.arkWallets[arkMode(params.network)].create(params); }
   arkUnlock(params: { password: string; network?: WalletNetwork }) { return this.arkWallets[this.net(params.network)].unlock(params.password); }
   arkLock(params?: { network?: WalletNetwork }) { return this.arkWallets[this.net(params?.network)].lock(); }
-  arkBackup(params: { password?: string; network?: WalletNetwork }) { return this.arkWallets[this.net(params?.network)].backup(params?.password); }
-  arkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.arkWallets[this.net(params.network)].exportBackup(params.password); }
+  arkBackup(params: { password?: string; network?: WalletNetwork }) { return this.copied("arkade", params?.network, () => this.arkWallets[this.net(params?.network)].backup(params?.password)); }
+  arkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.copied("arkade", params.network, () => this.arkWallets[this.net(params.network)].exportBackup(params.password)); }
   async arkRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.arkWallets, params.network, (w) => w.restoreBackup(params.text, params.password)); await wallet.ensureReady(); }
   arkRefresh(params?: { network?: WalletNetwork }) { return this.arkWallets[this.net(params?.network)].refresh(); }
   arkRecover(params?: { network?: WalletNetwork }) { return this.arkWallets[this.net(params?.network)].recover(); }
   barkCreate(params: Parameters<EngineApi["barkCreate"]>[0]) { return this.barkWallets[barkMode(params.network)].create(params); }
-  barkBackup(params?: { network?: WalletNetwork }) { return this.barkWallets[this.net(params?.network)].backup(); }
-  barkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.barkWallets[this.net(params.network)].exportBackup(params.password); }
+  barkBackup(params?: { network?: WalletNetwork }) { return this.copied("bark", params?.network, () => this.barkWallets[this.net(params?.network)].backup()); }
+  barkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.copied("bark", params.network, () => this.barkWallets[this.net(params.network)].exportBackup(params.password)); }
   async barkRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.barkWallets, params.network, (w) => w.restoreBackup(params.text, params.password)); await wallet.ensureReady(); }
   barkRefresh(params?: { network?: WalletNetwork }) { return this.barkWallets[this.net(params?.network)].refresh(); }
   barkBoard(params?: { network?: WalletNetwork }) { return this.barkWallets[this.net(params?.network)].board(); }
@@ -3450,14 +3496,14 @@ export class GhostlyNode implements EngineImplementation {
   }
   fedimintInvoice(params: { federation: string; amount: number; memo?: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).createInvoice(params.federation, params.amount, params.memo ?? "").then(({ invoice }) => ({ invoice })); }
   fedimintTakeBack(params: { federation: string; operation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).takeBack(params.federation, params.operation); }
-  fedimintBackup(params?: { network?: WalletNetwork }) { return this.fedimintWallets[this.net(params?.network)].backup(); }
-  fedimintExportBackup(params: { password: string; network?: WalletNetwork }) { return this.fedimintWallets[this.net(params.network)].exportBackup(params.password); }
+  fedimintBackup(params?: { network?: WalletNetwork }) { return this.copied("fedimint", params?.network, () => this.fedimintWallets[this.net(params?.network)].backup()); }
+  fedimintExportBackup(params: { password: string; network?: WalletNetwork }) { return this.copied("fedimint", params.network, () => this.fedimintWallets[this.net(params.network)].exportBackup(params.password)); }
   async fedimintRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { return (await this.restoreInto(this.fedimintWallets, params.network, (w) => w.restoreBackup(params.text, params.password))).result; }
   fedimintRestorePhrase(params: { mnemonic: string; invites: string[]; network?: WalletNetwork }) { return this.fedimintWallets[this.net(params.network)].restorePhrase(params.mnemonic, params.invites); }
   /** A Spark wallet on the chain named (Mainnet with a Breez API key), or one restored from a phrase. */
   async sparkCreate(params: Parameters<EngineApi["sparkCreate"]>[0]) { await this.sparkWallets[sparkMode(params.network)].create(params); }
-  async sparkBackup(params?: { network?: WalletNetwork }) { const { mnemonic, network } = await this.sparkWallets[this.net(params?.network)].backup(); return { mnemonic, network }; }
-  sparkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.sparkWallets[this.net(params.network)].exportBackup(params.password); }
+  async sparkBackup(params?: { network?: WalletNetwork }) { const { mnemonic, network } = await this.copied("spark", params?.network, () => this.sparkWallets[this.net(params?.network)].backup()); return { mnemonic, network }; }
+  sparkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.copied("spark", params.network, () => this.sparkWallets[this.net(params.network)].exportBackup(params.password)); }
   async sparkRestoreBackup(params: { text: string; password: string; apiKey?: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.sparkWallets, params.network, (w) => w.restoreBackup(params.text, params.password, params.apiKey)); await wallet.ensureReady(); }
   sparkRefresh(params?: { network?: WalletNetwork }) { return this.sparkWallets[this.net(params?.network)].refresh(); }
   /**
@@ -3645,6 +3691,8 @@ export class GhostlyNode implements EngineImplementation {
   async updateSettings({ settings: patch }: { settings: SettingsPatch }): Promise<void> {
     const { nostr, ...rest } = patch;
     const settings: Partial<Settings> = rest;
+    // The backup reminders are the engine's: only a wallet's backup, a profile backup or "Later" changes them.
+    delete settings.backupReminders;
     const wasOnline = this.settings.online;
     // Checked before anything changes: a relay list with no relay, or a TURN server a browser rejects,
     // would leave this peer unreachable or without WebRTC.

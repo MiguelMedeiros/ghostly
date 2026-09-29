@@ -15,6 +15,10 @@ import { NewWalletDialog } from "../components/wallet/NewWalletDialog";
 import { FirstWallet } from "../components/wallet/FirstWallet";
 import { RemoveWalletSection } from "../components/wallet/RemoveWallet";
 import { TestCoins } from "../components/wallet/TestCoins";
+import { BackupReminder } from "../components/wallet/BackupReminder";
+import { useBackupDue } from "../hooks/useBackupDue";
+import { useAppNavigation } from "../hooks/useAppNavigation";
+import type { BackupDue } from "@ghostly/browser/shared/backupReminder";
 import { NETWORK_NAME } from "../components/wallet/names";
 import { dealCard } from "../components/wallet/motion";
 import { Button } from "../components/wallet/ui";
@@ -134,6 +138,20 @@ export function Wallet() {
     setBackup(backupFirst(made) ? id : null);
     setDealt(id);
   };
+  // The backup reminder: the first Mainnet wallet with real money and no copy yet. Its button leads to the copy it
+  // needs: the wallet's own backup rows (its recovery phrase), or for Cashu the profile's backups.
+  const due = useBackupDue()[0];
+  const nav = useAppNavigation();
+  const [puttingOff, setPuttingOff] = useState(false);
+  const backUp = (d: BackupDue) => {
+    if (d.backup === "profile") { nav.open("/profile", { backupProfile: true }); return; }
+    select(d.id, false);
+    setBackup(d.id);
+  };
+  const later = (d: BackupDue) => {
+    setPuttingOff(true);
+    void wallet?.backupReminder({ event: "later", wallet: d.id }).catch(() => {}).finally(() => setPuttingOff(false));
+  };
   /** After a removal: the next card of the same network; with none left the tab stays, saying so. */
   const removed = (id: string) => {
     const next = shown.find((c) => c.id !== id);
@@ -151,6 +169,7 @@ export function Wallet() {
           <NetworkTabs network={network} counts={{ mainnet: cards.filter((c) => c.network === "mainnet").length, testnet: cards.filter((c) => c.network === "testnet").length }}
             onChange={(n) => { setFocusPanel(false); show(n); }} label={t("wallet.page.networks")} testId="wallet-networks" tabTestId="wallet-network" idPrefix="wallet-network-tab" controls="wallet-network-panel" />
           <div role="tabpanel" id="wallet-network-panel" aria-labelledby={`wallet-network-tab-${network}`} data-testid="wallet-network-panel" data-network={network} className="space-y-6">
+            {due && <BackupReminder key={due.id} due={due} busy={puttingOff} onBackUp={() => backUp(due)} onLater={() => later(due)} />}
             <div key={network} className="wallet-network-view space-y-3" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
               <p className="text-xs text-text-muted" data-testid="wallet-network-about">{t(network === "mainnet" ? "wallet.page.about.mainnet" : "wallet.page.about.testnet")}</p>
               {selected ? <WalletDeck network={network} cards={shown} selected={selected.id} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (
@@ -189,11 +208,11 @@ function WalletPanel({ id, wallet, state, focus, backup, onOpen }: { id: string;
   const scoped = cardWallet(wallet, card), shown = networkState(state, network, card.card);
   switch (rail) {
     case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} onOpenCashu={() => onOpen(cardId("cashu", network))} focusAmount={focus} />;
-    case "arkade": return <ArkWalletPanel key={id} wallet={scoped} state={shown} />;
+    case "arkade": return <ArkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
     case "bark": return <BarkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
-    case "spark": return <SparkWalletPanel key={id} wallet={scoped} state={shown} />;
-    case "usdt": return <UsdtWalletPanel key={id} wallet={scoped} state={shown} />;
+    case "spark": return <SparkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
+    case "usdt": return <UsdtWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
     case "bitcoin": return <BitcoinWalletPanel key={id} wallet={scoped} state={shown} />;
-    case "fedimint": return <FedimintWalletPanel key={id} wallet={scoped} state={shown} />;
+    case "fedimint": return <FedimintWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
   }
 }

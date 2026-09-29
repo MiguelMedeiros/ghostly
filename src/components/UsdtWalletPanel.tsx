@@ -13,7 +13,7 @@ const RPC:Record<Network,string>={ethereum:'https://ethereum.publicnode.com',sep
 const TOKEN:Record<Network,string>={ethereum:ETHEREUM_USDT,sepolia:SEPOLIA_TEST_USDT,'evm-local':''};
 /** Where a network's USDT lives, for the chains with a name (a local chain is "this local chain", in words). */
 const PLACE:Record<Exclude<Network,'evm-local'>,string>={ethereum:'Ethereum',sepolia:'Sepolia'};
-export function UsdtWalletPanel({wallet,state}:{wallet:WalletPlatform;state:WalletState}) {
+export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPlatform;state:WalletState;backupNow?:boolean}) {
  const usdt=state.usdt;
  const {t}=useI18n();
  const {busy,error,run}=useRun();
@@ -70,7 +70,7 @@ export function UsdtWalletPanel({wallet,state}:{wallet:WalletPlatform;state:Wall
    </Block>}
    {ready&&<><Row label={t('wallet.usdt.rpcProvider')} hint={<><Truncate className="font-mono">{usdt.provider??''}</Truncate>{t('wallet.usdt.seesAddress')}</>}/>
    <Row label={t('wallet.usdt.token')} hint={<><Truncate className="font-mono">{usdt.token??''}</Truncate>{t(usdt.chainId===1?'wallet.usdt.decimalsFreeze':'wallet.usdt.decimals',{count:String(usdt.decimals)})}</>}/>
-   <BackupRows name="USDT" busy={busy} run={run} canReplace={canReplace}
+   <BackupRows name="USDT" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow}
     reveal={()=>wallet.usdtReveal()} exportBackup={pw=>wallet.usdtExportBackup(pw)}
     restorePhrase={mnemonic=>use(network,{provider:usdt.provider,token:usdt.token,mnemonic})} restoreFile={(text,pw)=>wallet.usdtRestoreBackup(text,pw)}/></>}
   </Section>}

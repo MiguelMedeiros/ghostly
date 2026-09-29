@@ -35,6 +35,20 @@
     "restorePhrase": "Restaurar da frase",
     "show": "Mostrar"
   },
+  "backupReminder": {
+    "body": "Faça um backup para não perdê-lo se este aparelho se perder.",
+    "go": {
+      "phrase": "Ver frase de recuperação",
+      "profile": "Fazer backup do perfil"
+    },
+    "info": {
+      "phrase": "A frase de recuperação traz esta carteira de volta em qualquer aparelho. Anote e guarde offline. Quem a tiver pode gastar o dinheiro.",
+      "profile": "Cashu não tem frase de recuperação. Um backup do perfil guarda seu ecash como está no momento, então faça outro depois de receber mais."
+    },
+    "label": "backup pendente",
+    "later": "Depois",
+    "title": "Você tem dinheiro real em {{wallet}}"
+  },
   "bark": {
     "addressNote": "De uma carteira Bark no mesmo servidor. Uma carteira Arkade não pode pagá-lo.",
     "approve": "Nada sai antes da sua aprovação. Só endereços Bark deste mesmo servidor.",

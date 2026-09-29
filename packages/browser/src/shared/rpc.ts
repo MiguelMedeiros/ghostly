@@ -236,6 +236,11 @@ export interface EngineApi {
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];
+  /**
+   * The backup reminder (shared/backupReminder): `later` puts one Mainnet wallet's off (`wallet`: its id); `profile`
+   * says a profile backup of this profile was just made. A phrase shown or a backup file made is seen by the engine.
+   */
+  walletBackupReminder(params: { event: "later"; wallet: string } | { event: "profile" }): void;
   /** `confirmedReal`: required on Mainnet (real money), refused without it. */
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork; confirmedReal?: true }): { paymentId: string };
   requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork; card?: string }): { paymentId: string };

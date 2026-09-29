@@ -14,6 +14,7 @@ export type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceV
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
+import type { BackupReminders } from "@ghostly/browser/shared/backupReminder";
 import type { DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
 import type { ChatFile } from "./types";
 
@@ -186,6 +187,8 @@ export interface WalletState {
   /** Newest first. */
   history: WalletTransaction[];
   feesPaid: number;
+  /** Each Mainnet wallet's backup reminder, by wallet id (`backupDue` says which asks now). */
+  backupReminders?: BackupReminders;
 }
 
 export interface ChatPayment {
@@ -361,6 +364,8 @@ export interface WalletPlatform {
   /** Null when the text is neither an ecash token nor a Cashu payment request. */
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;
+  /** The backup reminder: "Later" on one Mainnet wallet's (its id), or a profile backup was just made. */
+  backupReminder(event: { event: "later"; wallet: string } | { event: "profile" }): Promise<void>;
   /** `confirmedReal`: required on Mainnet, as for `payQuote`. */
   send(peerPubKeyZ32: string, amount: number, memo?: string, confirmedReal?: boolean): Promise<{ timestamp: number; paymentId: string }>;
   /** `rail`: a request carrying only ecash, or only an invoice. */

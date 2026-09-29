@@ -35,6 +35,20 @@
     "restorePhrase": "Restaurer depuis la phrase",
     "show": "Afficher"
   },
+  "backupReminder": {
+    "body": "Sauvegardez-le pour ne pas le perdre si vous perdez cet appareil.",
+    "go": {
+      "phrase": "Voir la phrase de récupération",
+      "profile": "Sauvegarder le profil"
+    },
+    "info": {
+      "phrase": "La phrase de récupération restaure ce portefeuille sur n'importe quel appareil. Notez-la et gardez-la hors ligne. Qui la possède peut dépenser l'argent.",
+      "profile": "Cashu n'a pas de phrase de récupération. Une sauvegarde du profil garde votre ecash tel qu'il est au moment de la faire : refaites-en une après avoir reçu plus."
+    },
+    "label": "sauvegarde à faire",
+    "later": "Plus tard",
+    "title": "Vous avez de l'argent réel dans {{wallet}}"
+  },
   "bark": {
     "addressNote": "Depuis un portefeuille Bark sur le même serveur. Un portefeuille Arkade ne peut pas la payer.",
     "approve": "Rien ne part avant votre accord. Seulement des adresses Bark de ce même serveur.",

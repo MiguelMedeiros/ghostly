@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { unseenSatsLabel, useUnseenSats } from "../hooks/useUnseenSats";
 import { UnseenSatsDot } from "./UnseenSatsDot";
+import { useBackupDue } from "../hooks/useBackupDue";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { useLocation } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
@@ -54,6 +55,8 @@ export function AccountBar() {
   // The balance is not shown here (the Wallet page and its cards have it). What came in while the wallet was closed
   // is a dot on the icon, filled for real sats, hollow for test sats; how many is in the tooltip and the name.
   const unseen = useUnseenSats();
+  // A Mainnet wallet's backup reminder asks: a dot too, and its name says so.
+  const backupDue = useBackupDue().length > 0;
   // The Profile place wears the profile's name (renamed or switched, it follows); "Profile" only for a profile with none.
   const profile = useCurrentProfile();
   const profileName = profile.name || t("tabs.profile");
@@ -93,7 +96,7 @@ export function AccountBar() {
   const glances = useProfileGlances();
   const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? "Online" : "Offline"}${
     canSwitch && glances.othersFresh ? `, ${t("profileSwitcher.othersNew")}` : canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
-  const walletLabel = unseenSatsLabel(t("tabs.wallets"), unseen);
+  const walletLabel = `${unseenSatsLabel(t("tabs.wallets"), unseen)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}`;
 
   return (
     <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar">
@@ -142,7 +145,7 @@ export function AccountBar() {
               <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 7H5a2 2 0 0 1 0-4h13v4 M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1 M21 11h-5v6h5"/><path d="M18 14h.01"/>
               </svg>
-              <UnseenSatsDot unseen={unseen} />
+              <UnseenSatsDot unseen={unseen} backup={backupDue} />
             </span>
             <span className="account-label">{t("tabs.wallets")}</span>
           </button>

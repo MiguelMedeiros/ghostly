@@ -35,6 +35,20 @@
     "restorePhrase": "Ripristina dalla frase",
     "show": "Mostra"
   },
+  "backupReminder": {
+    "body": "Fai un backup per non perderlo se perdi questo dispositivo.",
+    "go": {
+      "phrase": "Mostra frase di recupero",
+      "profile": "Backup del profilo"
+    },
+    "info": {
+      "phrase": "La frase di recupero ripristina questo portafoglio su qualsiasi dispositivo. Scrivila e conservala offline. Chi la possiede può spendere il denaro.",
+      "profile": "Cashu non ha una frase di recupero. Un backup del profilo conserva il tuo ecash com'è quando lo fai, quindi rifallo dopo aver ricevuto altro."
+    },
+    "label": "backup da fare",
+    "later": "Più tardi",
+    "title": "Hai denaro reale in {{wallet}}"
+  },
   "bark": {
     "addressNote": "Da un portafoglio Bark sullo stesso server. Un portafoglio Arkade non può pagarlo.",
     "approve": "Non parte nulla prima della tua approvazione. Solo indirizzi Bark di questo stesso server.",

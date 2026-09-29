@@ -172,6 +172,7 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
     inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
     exportTokens: () => engine.call("walletExport", on),
+    backupReminder: (event) => engine.call("walletBackupReminder", event),
     async send(peerPubKeyZ32, amount, memo, confirmedReal) {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
