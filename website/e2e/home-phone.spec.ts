@@ -44,8 +44,11 @@ for (const width of [360, 390, 430]) {
 
 test("the hero's two ways in fill the column, each an easy tap", async ({ page }) => {
   await page.goto("/", { waitUntil: "networkidle" });
+  // Measured once the hero's opening has risen: while `.hero-actions` is still at opacity 0 a button has no box.
+  const actions = page.locator(".hero-actions");
+  await actions.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   const column = (await page.locator(".hero-inner").boundingBox())!;
-  const buttons = page.locator(".hero-actions .btn");
+  const buttons = actions.locator(".btn");
   await expect(buttons).toHaveCount(2);
   for (const b of await buttons.all()) {
     const box = (await b.boundingBox())!;
@@ -74,7 +77,12 @@ test("every chapter is one open picture with its steps taking turns", async ({ p
 test("a chapter's next step comes by itself, and a tap on a bar shows that step", async ({ page }) => {
   await page.goto("/", { waitUntil: "networkidle" });
   const section = page.locator("#agree");
-  await section.evaluate((e) => e.scrollIntoView({ block: "start", behavior: "instant" }));
+  // The turns run while the picture is at least half on screen. On a slow CPU the page above still grows after the
+  // first scroll (the chapter ended up 475px lower, its picture 16% seen), so scroll again until it is.
+  await expect(async () => {
+    await section.evaluate((e) => e.scrollIntoView({ block: "start", behavior: "instant" }));
+    await expect(section.locator(".scene-static-figure")).toBeInViewport({ ratio: 0.5, timeout: 1000 });
+  }).toPass();
   const active = section.locator('.scene-static-step[data-active="true"]');
   await expect(active).toHaveCount(1);
   await expect(active.locator(".h-scene")).toHaveText(/Each side says/);
