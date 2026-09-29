@@ -261,7 +261,7 @@ export function ChatRow(p: ChatRowProps) {
 
 /** A group (private or community), or an invitation to one, in the chat list. */
 export function GroupRow({ group, active, density, onOpen }: { group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [busy, setBusy] = useState(false);
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const invitation = group.invitation;
@@ -291,7 +291,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
         <RowText
           name={group.name || t("group.chat.unnamed")}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
-          time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt) : undefined}
+          time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language) : undefined}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
           status={muted && <MutedMark label={t("mute.bell")} />}
           timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}

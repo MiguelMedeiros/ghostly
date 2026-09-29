@@ -4,7 +4,6 @@ import { focus } from "../lib/connection";
 import { clockTime } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
 
-const time = clockTime;
 const when = (at: number) => new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
 
 /**
@@ -15,7 +14,7 @@ const when = (at: number) => new Date(at).toLocaleString([], { dateStyle: "mediu
 export function TransportLine({ entry, contact, earlier = [] }: { entry: TransportEntry; contact: string; earlier?: readonly TransportEntry[] }) {
   const [open, setOpen] = useState(false);
   const id = useId();
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const warn = entry.kind === "failed" || entry.kind === "lost" || (entry.kind === "flapping" && !entry.live);
   return (
     <div className="mb-3.5 flex flex-col items-center px-[63px] max-md:px-2.5" data-testid="transport-line" data-kind={entry.kind}>
@@ -25,7 +24,7 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
         <span className="min-w-0 break-words" data-testid="transport-line-text">{transportLineText(entry, contact, t)}</span>
         {earlier.length > 0 && <span className="shrink-0 text-[10px] text-text-muted" data-testid="transport-line-earlier-count"
           aria-label={earlier.length === 1 ? t("connection.history.earlierOne") : t("connection.history.earlierMany", { count: earlier.length })}>+{earlier.length}</span>}
-        <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{time(entry.at)}</time>
+        <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{clockTime(entry.at, language)}</time>
       </button>
       {open && (
         <dl id={`${id}-details`} data-testid="transport-line-details"
@@ -42,7 +41,7 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
               <span>{earlier.length === 1 ? t("connection.history.moreOne") : t("connection.history.moreMany", { count: earlier.length })}</span>
               <ul className="mt-0.5 space-y-0.5 text-text-secondary" data-testid="transport-line-earlier">
                 {[...earlier].reverse().map(e => <li key={e.id} className="break-words">
-                  <time dateTime={new Date(e.at).toISOString()} className="text-text-muted">{time(e.at)}</time> <span>{transportLineText(e, contact, t)}</span>
+                  <time dateTime={new Date(e.at).toISOString()} className="text-text-muted">{clockTime(e.at, language)}</time> <span>{transportLineText(e, contact, t)}</span>
                 </li>)}
               </ul>
             </dd>

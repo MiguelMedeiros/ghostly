@@ -49,6 +49,7 @@
   "noGifs": "GIF が見つかりません",
   "overSoft": "DHT で送れる {{bytes}} バイトを超えています。直接接続されると送信されます",
   "payment": "支払い",
+  "placeholder": "メッセージ…",
   "previewLoading": "{{host}} のプレビューを読み込み中…",
   "previewRemove": "リンクのプレビューを削除",
   "previewWithout": "プレビューなしで送信",

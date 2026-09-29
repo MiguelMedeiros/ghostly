@@ -49,6 +49,7 @@
   "noGifs": "未找到 GIF",
   "overSoft": "超过 DHT 可承载的 {{bytes}} 字节：直连后发送",
   "payment": "付款",
+  "placeholder": "消息…",
   "previewLoading": "正在加载 {{host}} 的预览…",
   "previewRemove": "移除链接预览",
   "previewWithout": "不带预览发送",

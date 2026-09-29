@@ -47,7 +47,7 @@ export function Sidebar() {
   const nav = useAppNavigation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const isMobile = useIsMobile();
   const density = useSettings().settings.chatListDensity;
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -280,7 +280,7 @@ export function Sidebar() {
               lastMessage={lastMsg}
               note={(session.lastReaction?.at ?? 0) > Math.max(lastMsg?.timestamp ?? 0, session.identitySharedAt ?? 0) ? reactionNoteText(session.lastReaction!, peerLabel, t)
                 : (session.identitySharedAt ?? 0) > (lastMsg?.timestamp ?? 0) ? t("sidebar.sharedIdentity") : undefined}
-              time={formatListTime(session.lastSyncAt ?? session.createdAt)}
+              time={formatListTime(session.lastSyncAt ?? session.createdAt, undefined, language)}
               unread={unread}
               pinned={isSessionPinned(session.id)}
               syncing={syncingSessions.has(session.id)}
