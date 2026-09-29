@@ -291,7 +291,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
         <RowText
           name={group.name || t("group.chat.unnamed")}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
-          time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language) : undefined}
+          time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
           status={muted && <MutedMark label={t("mute.bell")} />}
           timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}

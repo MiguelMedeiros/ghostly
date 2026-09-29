@@ -178,6 +178,12 @@
   },
   "keyChanged": "Este chat se detuvo: la clave de tu contacto cambió.",
   "lastSeen": "Última vez {{time}}",
+  "listTime": {
+    "days": "{{count}} d",
+    "hours": "{{count}} h",
+    "minutes": "{{count}} min",
+    "now": "ahora"
+  },
   "location": {
     "mapFailed": "No se pudo cargar el mapa. Ábrelo en mapas.",
     "open": "Abrir en mapas",
