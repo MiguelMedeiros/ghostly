@@ -13,6 +13,7 @@ import {
   setSessionPeerNick,
   storedSession,
   updateSessionLabel,
+  wasDeleted,
   type SessionCache,
 } from "../../../../src/lib/storage";
 import type { ChatMessage, ChatSession } from "../../../../src/lib/types";
@@ -258,7 +259,8 @@ async function reconcile(): Promise<void> {
   for (const link of state.links) {
     if (peers.has(link.peerPubKeyZ32)) continue;
     later = true;
-    if (Date.now() - link.createdAt < FORGET_AFTER_MS) continue;
+    // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
+    if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
   }
   if (!later && !renamed) settled = { state, sessions };
