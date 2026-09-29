@@ -247,7 +247,10 @@ describe("a member of a private group killed and back, with a chat and an edge t
     report({ scenario: "mesh-member-back", order, groups, noticeMs, edgesMs, chatsMs, share });
     // Dev (eacaf6a6), from the restart: 62.6 s in every case (18.6 s with one group noticed after 20 s); the restarted
     // app's edges had spent the groups' share of both relays before the answers came, and with 45 s of fast looks its
-    // chats too. Now: 18.6, 18.6, 26.6, 42.6 and 42.6 s, a few seconds after the others notice.
+    // chats too. Now: 18.6, 18.6, 26.6, 42.6 and 42.6 s, a few seconds after the others notice. With reads in turn per
+    // key (#689) the first case is 26.6 s: one edge's read fell one past the groups' burst at 18 s, and the chats' reserve,
+    // kept a minute after they were live, held it until the startup's requests aged out (66.6 s) until the reserve went
+    // per chat. Two groups noticed after 30 or 40 s: 66.6 s on dev and now, the whole minute spent (not a case here).
     expect(edgesMs, "every edge live again").toBeLessThanOrEqual(noticeMs + 12_000);
   }, 600_000);
 });

@@ -606,6 +606,39 @@ describe("relay transport: a chat before its groups", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("gives a chat's reserve back once the chat reads its contact at a slow pace again (it is live)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const log: { at: number }[] = [];
+      // The contacts have published nothing yet (404); the edge's member has.
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL) => {
+        log.push({ at: Date.now() });
+        return String(input).endsWith(id.pubKeyZ32) ? new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit) : new Response(null, { status: 404 });
+      }) as typeof fetch });
+      const group = withRequestOptions(relay, { group: true });
+      const start = Date.now(), contact = createIdentity().pubKeyZ32, other = createIdentity().pubKeyZ32;
+      // Two chats watch fast for their contacts; the edges' reads stop short of the reserve.
+      await relay.resolve(contact, { urgent: true });
+      await relay.resolve(other, { urgent: true });
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) { vi.setSystemTime(start + i * 100); await group.resolve(id.pubKeyZ32).catch(() => {}); }
+      expect(log).toHaveLength(REQUESTS_PER_MINUTE - CHAT_RESERVE);
+      // One chat is live (it reads at the connected pace, a background read): the other still waits, the reserve holds.
+      vi.setSystemTime(start + 20_000);
+      await relay.resolve(contact, { background: true });
+      vi.setSystemTime(start + 30_000);
+      await group.resolve(id.pubKeyZ32);
+      // A group's own background read of a key is no chat going live.
+      await group.resolve(other, { background: true }).catch(() => {});
+      await group.resolve(id.pubKeyZ32);
+      expect(log).toHaveLength(REQUESTS_PER_MINUTE - CHAT_RESERVE + 1);
+      // Both live: the edges take the rest of the minute at once. Dev: nothing until a minute after the chats' last fast
+      // read.
+      await relay.resolve(other, { background: true });
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32).catch(() => {});
+      expect(log).toHaveLength(REQUESTS_PER_MINUTE);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("does not keep a reserve for a chat that is not waiting for anything", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
