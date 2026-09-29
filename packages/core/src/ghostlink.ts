@@ -77,6 +77,11 @@ export const CROSSED_WAIT_MS = 3_000;
  */
 export const CROSSED_FRESH_MS = 10_000;
 /**
+ * A dial the contact made while its mailbox, as last read here, said DHT-only waits this long for the read that says
+ * it left (the mailbox is read at the DHT pace meanwhile), then closes.
+ */
+export const BLOCKED_DIAL_WAIT_MS = 10_000;
+/**
  * A connection dialled in on a pinned chat must authenticate within this long, or it closes. Anyone who read the
  * endpoint from the record can dial it: until it proves the pinned key it holds no place a person waits on.
  */
@@ -690,7 +695,7 @@ export class GhostLink {
           // Going away: an answer now would pair the contact with a connection about to die, and it would wait on it.
           if (this.leaving) return;
           // Seen once only: kept, and answered as soon as nothing blocks the stream any more.
-          if (this.streamBlocked) { this.heldSignal = signal; return; }
+          if (this.streamBlocked) { this.heldSignal = signal; this.peerDialsFromDht(signal); return; }
           this.handleRtcSignal(signal);
         },
         onDiscoveryError: error => events.onDiscoveryError?.(error),
@@ -885,19 +890,40 @@ export class GhostLink {
     const held = this.heldSignal;
     this.heldSignal = null;
     if (held) this.handleRtcSignal(held);
+    const parked = this.blockedDial;
+    if (parked) { this.blockedDial = null; clearTimeout(parked.timer); parked.channel.onClose = null; this.takeDialIn(parked.channel, parked.binding); }
   }
 
   /**
    * A DHT-only contact runs no link session, so it does not advertise itself on the link's key: a fresh
    * packet there that does is it leaving DHT-only. Its mailbox, which says so, is read now rather than at
-   * the next poll.
+   * the next poll, and at the DHT pace for a while after: the link packet can reach a relay before the
+   * envelope saying so does (back from `chat disconnect --hold`), and a read that still finds DHT-only
+   * would otherwise keep the chat off a live link until the next background read, 30 s on.
    */
   private peerMayHaveLeftDht(presence: PeerPresence): void {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht" || !presence.online) return;
     if (Date.now() - presence.lastPacketAt >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
     this.leftDhtSeenFor = presence.lastPacketAt;
     traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presence.lastPacketAt });
-    this.dht.refresh();
+    this.dht.expect(EXPECT_PEER_MS);
+  }
+
+  /**
+   * The contact dials (a WebRTC offer signed by its pinned key, or a connection on a native endpoint) while its
+   * mailbox last said DHT-only: it has left, and the envelope saying so is on its way. The offer's packet often has no
+   * room for the presence `peerMayHaveLeftDht` looks at, so the mailbox is read now and at the DHT pace for a while
+   * here too. The offer is kept and answered, and the dial taken, once that read unblocks the stream. False when
+   * something else blocks it (this side is DHT-only, the contact is not pinned, or the offer is not the contact's).
+   */
+  private peerDialsFromDht(signal?: string): boolean {
+    if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht") return false;
+    const credentials = this.options.pairing?.credentials;
+    if (!credentials?.peerKey) return false;
+    if (signal !== undefined && !verifyPairedSignal(signal, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, credentials.peerKey, true)) return false;
+    traceLink(this.myPubKeyZ32, "peer-dials", { signal: signal !== undefined });
+    this.dht.expect(EXPECT_PEER_MS);
+    return true;
   }
 
   get isDataLinkOpen(): boolean {
@@ -1071,6 +1097,7 @@ export class GhostLink {
   disconnect(): void {
     this.closeRetired();
     this.dropCrossed();
+    this.dropBlockedDial();
     this.switcher.stop(); this.cancelCandidate();
     this.transitionTarget = this.transitionError = undefined;
     this.connectionEpoch++;
@@ -1323,17 +1350,7 @@ export class GhostLink {
     this.endpoints.set(endpoint.transport, endpoint);
     endpoint.onConnection = ({ channel, binding }) => {
       traceLink(this.myPubKeyZ32, "dialed-in", { transport: binding.transport, held: !!this.channel, dialing: this.dialing });
-      if (this.streamBlocked) { channel.close(); return; }
-      this.dialedIn.add(channel);
-      const plan = this.switcher.pending;
-      if (this.channel && plan?.choices.includes(binding.transport)) {
-        void this.attachCandidate(channel, binding, plan).catch(() => {}); return;
-      }
-      if (this.channel && Date.now() < this.switchAllowedUntil) { this.switchAllowedUntil = 0; this.disconnect(); }
-      if (this.stopped || this.leaving || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
-      if (this.channel) { this.attachReplacement(channel, binding); return; }
-      if (this.dialing && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32 && this.options.pairing?.credentials.peerKey) { this.parkCrossed(channel, binding); return; }
-      this.attach(channel, binding);
+      this.takeDialIn(channel, binding);
     };
     endpoint.onUnavailable = () => {
       if (this.endpoints.get(endpoint.transport) !== endpoint) return;
@@ -1348,6 +1365,42 @@ export class GhostLink {
     this.advertiseTransports();
     if (this.resuming === endpoint.transport) void this.knock(endpoint.transport);
     else this.joinRace(endpoint.transport);
+  }
+
+  /** A connection the contact dialled on one of this side's native endpoints. */
+  private takeDialIn(channel: FrameChannel, binding: NativeBinding): void {
+    if (this.streamBlocked) {
+      // Only the contact's mailbox blocks it, and a dial says the contact left DHT-only: the connection waits for the
+      // read that says so. Closed, it would end the contact's whole attempt, and its next only after a backoff.
+      if (this.peerDialsFromDht()) this.parkBlockedDial(channel, binding);
+      else channel.close();
+      return;
+    }
+    this.dialedIn.add(channel);
+    const plan = this.switcher.pending;
+    if (this.channel && plan?.choices.includes(binding.transport)) {
+      void this.attachCandidate(channel, binding, plan).catch(() => {}); return;
+    }
+    if (this.channel && Date.now() < this.switchAllowedUntil) { this.switchAllowedUntil = 0; this.disconnect(); }
+    if (this.stopped || this.leaving || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
+    if (this.channel) { this.attachReplacement(channel, binding); return; }
+    if (this.dialing && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32 && this.options.pairing?.credentials.peerKey) { this.parkCrossed(channel, binding); return; }
+    this.attach(channel, binding);
+  }
+
+  /** A dial that came in while the contact's mailbox still said DHT-only, kept for the read that clears it (`BLOCKED_DIAL_WAIT_MS`). */
+  private blockedDial: { channel: FrameChannel; binding: NativeBinding; timer: ReturnType<typeof setTimeout> } | null = null;
+  private parkBlockedDial(channel: FrameChannel, binding: NativeBinding): void {
+    this.dropBlockedDial();
+    traceLink(this.myPubKeyZ32, "dial-waits-mailbox", { transport: binding.transport });
+    const timer = setTimeout(() => { if (this.blockedDial?.channel === channel) this.dropBlockedDial(); }, BLOCKED_DIAL_WAIT_MS);
+    channel.onClose = () => { if (this.blockedDial?.channel === channel) { clearTimeout(timer); this.blockedDial = null; } };
+    this.blockedDial = { channel, binding, timer };
+  }
+  private dropBlockedDial(): void {
+    const parked = this.blockedDial;
+    if (!parked) return;
+    this.blockedDial = null; clearTimeout(parked.timer); parked.channel.close();
   }
 
   /**
