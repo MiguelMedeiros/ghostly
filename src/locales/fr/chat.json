@@ -178,6 +178,12 @@
   },
   "keyChanged": "Cette discussion s'est arrêtée : la clé de votre contact a changé.",
   "lastSeen": "Vu {{time}}",
+  "listTime": {
+    "days": "{{count}} j",
+    "hours": "{{count}} h",
+    "minutes": "{{count}} min",
+    "now": "maintenant"
+  },
   "location": {
     "mapFailed": "La carte n'a pas pu se charger. Ouvrez-la dans Plans.",
     "open": "Ouvrir dans Plans",

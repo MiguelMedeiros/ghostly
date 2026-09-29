@@ -178,6 +178,12 @@
   },
   "keyChanged": "このチャットは停止しました。相手の鍵が変わりました。",
   "lastSeen": "最終オンライン {{time}}",
+  "listTime": {
+    "days": "{{count}}日",
+    "hours": "{{count}}時間",
+    "minutes": "{{count}}分",
+    "now": "今"
+  },
   "location": {
     "mapFailed": "地図を読み込めませんでした。地図アプリで開いてください。",
     "open": "地図で開く",

@@ -4,6 +4,8 @@ import { Sidebar } from "../../components/Sidebar";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { formatListTime, previewText } from "../../lib/chatList";
+import { locales as translations } from "../../locales";
+import { translateWith } from "../../locales/translate";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { isSessionPinned, saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
@@ -198,6 +200,12 @@ describe("the list's words", () => {
     expect(formatListTime(NOW - 59 * 60_000, NOW)).toBe("59m");
     expect(formatListTime(NOW - 23 * 3_600_000, NOW)).toBe("23h");
     expect(formatListTime(NOW - 6 * 86_400_000, NOW)).toBe("6d");
+    // In the interface's language, not English: short words the list's column holds.
+    const pt = translateWith(translations.pt);
+    expect(formatListTime(NOW - 10_000, NOW, "pt", pt)).toBe("agora");
+    expect(formatListTime(NOW - 59 * 60_000, NOW, "pt", pt)).toBe("59 min");
+    expect(formatListTime(NOW - 23 * 3_600_000, NOW, "ja", translateWith(translations.ja))).toBe("23時間");
+    expect(formatListTime(NOW - 6 * 86_400_000, NOW, "fr", translateWith(translations.fr))).toBe("6 j");
     expect(formatListTime(NOW - 30 * 86_400_000, NOW)).not.toMatch(/^\d+[mhd]$/);
   });
 
