@@ -5,8 +5,11 @@
   "deleteChat": "حذف المحادثة",
   "group": {
     "adminAnswered": "أجاب تطبيق المشرف…",
+    "answerFailed": "لم ينجح ذلك. حاول مرة أخرى.",
     "invitedBy": "دعاك {{contact}} · {{members}}",
     "invitedByUnknown": "دعتك جهة اتصال · {{members}}",
+    "inviterAway": "{{contact}} غير متصل بعد. حاول مرة أخرى بعد لحظة.",
+    "inviterAwayUnknown": "جهة الاتصال التي دعتك غير متصلة بعد. حاول مرة أخرى بعد لحظة.",
     "letting": "أحد الأعضاء يسمح لك بالدخول…",
     "waitingAdmin": "في انتظار تطبيق المشرف…",
     "waitingIn": "في انتظار السماح لك بالدخول…"
