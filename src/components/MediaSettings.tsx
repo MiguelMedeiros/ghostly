@@ -33,7 +33,9 @@ export function MediaSettings() {
   const plays = !source || !!source.testSpeaker;
   return (
     <Section title={t("settings.media.title")} testId="settings-media">
-      {!list.named && (
+      {/* Names are the page's own browser's to give. A device source names its devices itself: no row that shows
+          while its list is on the way and then goes, moving everything under it. */}
+      {!source && !list.named && (
         <Row label={t("settings.media.names")} hint={t("settings.media.namesHint")} testId="settings-media-names">
           <Button data-testid="settings-media-allow" onClick={() => void allowNames()}>{t("settings.media.allow")}</Button>
         </Row>
