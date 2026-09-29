@@ -136,6 +136,8 @@ export function useWebRTC({
   /** Whether the call negotiated a video lane we may send on, camera or screen. */
   const [videoLaneOpen, setVideoLaneOpen] = useState(false);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
+  /** When the call connected, for the length of a call that ends where no state is at hand (a connection that failed). */
+  const callStartedAtRef = useRef<number | null>(null);
   /** Why the last attempt to share the screen failed, for a few seconds. */
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
 
@@ -230,6 +232,7 @@ export function useWebRTC({
     pictureBeforeShareRef.current = null;
     setScreenShareError(null);
     setCallStartedAt(null);
+    callStartedAtRef.current = null;
   }, [setPicture, setScreenShareError, clearRestartGrace]);
 
   /** The lane is open once both sides have described it and our half may send. */
@@ -262,7 +265,8 @@ export function useWebRTC({
     const connectedNow = () => {
       updateCallState("connected");
       refreshVideoLane();
-      setCallStartedAt(Date.now());
+      callStartedAtRef.current = Date.now();
+      setCallStartedAt(callStartedAtRef.current);
       setFastPoll(false);
       if (!callConnectedEventFiredRef.current) {
         callConnectedEventFiredRef.current = true;
@@ -280,6 +284,13 @@ export function useWebRTC({
     };
 
     const giveUp = () => {
+      // A connected call whose contact went away (a closed tab, a reload, a lost network) ends as a hang-up ends it:
+      // with its line and its length in the chat. One that never connected says nothing more.
+      if (callConnectedEventFiredRef.current) {
+        const started = callStartedAtRef.current;
+        addCallEventMessage?.("call_ended", callHadVideoRef.current, started ? Date.now() - started : undefined);
+        callConnectedEventFiredRef.current = false;
+      }
       cleanupConnection();
       updateCallState("idle");
       publishCallSignal(null);
