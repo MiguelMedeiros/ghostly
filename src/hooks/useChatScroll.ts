@@ -257,8 +257,14 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   useEffect(() => {
     const el = listEl;
     if (!el) return;
+    const sizeOf = () => `${el.clientWidth}x${el.clientHeight}`;
+    /** The list's size at its last scroll event. */
+    let lastSize = sizeOf();
     const onScroll = () => {
       if (hidden(el)) return;
+      const size = sizeOf();
+      const resized = size !== lastSize;
+      lastSize = size;
       // Not moved since it was last set or seen: content grew or shrank under the view, and no hand scrolled it.
       if (Math.abs(el.scrollTop - lastTop.current) < 1) { settle(); return; }
       if (jumping.current) {
@@ -275,6 +281,10 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       // instant). Nothing reports that, and the view would stay short of the last message: back to the bottom.
       const hand = pressed.current || performance.now() - handAt.current < HAND_MS;
       if (atBottom.current && !hand && d <= NEAR_BOTTOM_PX) { following.current = false; settle(); return; }
+      // The list itself changed size (a phone turned on its side, a window resized): the browser moved it to keep what
+      // was on screen, before the resize reaches `settle`. Not a hand's: at the bottom it stays there, scrolled up it
+      // stays on its message.
+      if (resized && !pressed.current) { settle(); return; }
       lastTop.current = el.scrollTop;
       // A hand moved it: where the chat was left no longer matters.
       pending.current = null;

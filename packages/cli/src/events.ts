@@ -313,7 +313,9 @@ export class EventHub {
   private messages(chat: string, messages: readonly StoredMessage[], deleted?: readonly string[]): void {
     const known = this.seenOf(chat);
     const group = chat.startsWith("group:") ? chat.slice(6) : null;
-    const quiet = this.firstRun && !this.baselined;
+    // A group's whole history, empty: I left or forgot the group and its history went with it (a group joined again
+    // starts from nothing). Nobody deleted a message: its rows are forgotten here without a `group.deleted` each.
+    const quiet = (this.firstRun && !this.baselined) || (!!group && !deleted && messages.length === 0);
     const changes: [string, string | null][] = [];
     const present = new Set<string>();
     this.reactions(chat, group, messages, quiet);

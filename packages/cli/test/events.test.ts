@@ -163,6 +163,15 @@ describe("the event stream", () => {
     expect(events[0]).toMatchObject({ group: "g1", message: { member: "k1", mentioned: true, mentions: [{ key: "me", offset: 0, length: 3 }] } });
   });
 
+  it("a group left (its history gone, sent empty) deletes nothing it reports, and a message there after a new join is new", async () => {
+    const { h, events } = await hub("left.jsonl");
+    h.baseline(state([], [{ id: "g1", members: [] }]), new Map([["group:g1", []]]));
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [message("group:g1", "x", { member: "k1" })] });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [] });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "y", { member: "k1" })], deleted: [] });
+    expect(events.map((e) => e.id)).toEqual(["group.message:g1:x", "group.message:g1:y"]);
+  });
+
   it("says when the journal no longer holds what a listener asks for", async () => {
     const { h } = await hub("d.jsonl");
     const lines = [5, 6].map((seq) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 })).join("\n") + "\n";
