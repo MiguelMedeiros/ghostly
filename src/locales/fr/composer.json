@@ -49,6 +49,7 @@
   "noGifs": "Aucun GIF trouvé",
   "overSoft": "Au-delà des {{bytes}} octets que porte la DHT : il part dès que la liaison directe est là",
   "payment": "Paiement",
+  "placeholder": "Message…",
   "previewLoading": "Chargement de l'aperçu de {{host}}…",
   "previewRemove": "Retirer l'aperçu du lien",
   "previewWithout": "Envoyer sans aperçu",

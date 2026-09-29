@@ -49,6 +49,7 @@
   "noGifs": "لم يُعثر على صور GIF",
   "overSoft": "يتجاوز {{bytes}} بايت التي تحملها DHT: يُرسل عند الاتصال المباشر",
   "payment": "دفع",
+  "placeholder": "رسالة…",
   "previewLoading": "جارٍ تحميل معاينة {{host}}…",
   "previewRemove": "إزالة معاينة الرابط",
   "previewWithout": "إرسال دون معاينة",

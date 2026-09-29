@@ -112,7 +112,7 @@ export function MessageInput({
   draftId,
   onSend,
   disabled,
-  disabledPlaceholder = "Message…",
+  disabledPlaceholder,
   maxLength = DEFAULT_MAX,
   maxBytes,
   softBytes,
@@ -598,7 +598,7 @@ export function MessageInput({
               onSelect={picker.onCaret}
               {...picker.inputProps}
               onFocus={() => { setShowMenu(false); setShowIdentities(false); if (phone) setShowPanel(false); }}
-              placeholder={disabled ? disabledPlaceholder : "Message…"}
+              placeholder={disabled ? disabledPlaceholder ?? t("composer.placeholder") : t("composer.placeholder")}
               disabled={disabled}
               rows={1}
               className="composer-textarea"

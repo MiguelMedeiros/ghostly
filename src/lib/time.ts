@@ -8,15 +8,21 @@ export function ago(seconds: number, now = Date.now() / 1000): string {
   return new Date(seconds * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-let clock: Intl.DateTimeFormat | undefined;
+import { languageTag } from "./documentLanguage";
+import type { Language } from "./settings";
+
+const clocks = new Map<string, Intl.DateTimeFormat>();
 
 /**
- * A time of day as this device writes it ("14:05", "2:05 PM"), exactly as `toLocaleTimeString([], { hour, minute })`
- * does, with one formatter for all: each `toLocaleTimeString` call builds its own, and a long chat has thousands.
+ * A time of day ("14:05", "2:05 PM", "٢:٠٥ م") in the app's language when one is given, else as this device writes it,
+ * with one formatter per language for all: each `toLocaleTimeString` call builds its own, and a long chat has thousands.
  */
-export function clockTime(at: number): string {
+export function clockTime(at: number, language?: Language): string {
+  const locale = language ? languageTag(language) : [];
   // No date holds it (a peer can send any number): "Invalid Date" as before, where the formatter would throw.
-  if (!(Math.abs(at) <= 8.64e15)) return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  clock ??= new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" });
+  if (!(Math.abs(at) <= 8.64e15)) return new Date(at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  const key = language ? languageTag(language) : "";
+  let clock = clocks.get(key);
+  if (!clock) { clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }); clocks.set(key, clock); }
   return clock.format(at);
 }

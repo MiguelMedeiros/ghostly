@@ -49,6 +49,7 @@
   "noGifs": "No GIFs found",
   "overSoft": "Over the {{bytes}} bytes the DHT carries: it is sent when you are live",
   "payment": "Payment",
+  "placeholder": "Message…",
   "previewLoading": "Loading preview of {{host}}…",
   "previewRemove": "Remove link preview",
   "previewWithout": "Send without a preview",
