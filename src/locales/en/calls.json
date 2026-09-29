@@ -24,6 +24,7 @@
   "missed": "Missed call",
   "mute": "Mute",
   "needLive": "Calls need a live connection",
+  "noAnswer": "No answer",
   "outgoing": "Calling...",
   "rejected": "Call rejected",
   "selfView": "Drag to move, pull a corner to resize, double-click to reset",
