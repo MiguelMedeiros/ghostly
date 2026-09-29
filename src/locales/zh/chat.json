@@ -242,6 +242,20 @@
     "pin": "置顶",
     "unpin": "取消置顶"
   },
+  "preview": {
+    "arkAddress": "Ark 地址",
+    "bitcoinAddress": "₿ 比特币地址",
+    "ecash": "⚡ Ecash",
+    "invoice": "⚡ Lightning 发票",
+    "invoiceSats": "⚡ Lightning 发票 · {{amount}} sats",
+    "lightningAddress": "Lightning 地址",
+    "lightningOffer": "⚡ Lightning 报价",
+    "realMoney": "真实资金",
+    "sats": "{{amount}} sats",
+    "testMoney": "测试资金",
+    "testSats": "{{amount}} 测试 sats",
+    "usdtAddress": "USDT 地址"
+  },
   "reactions": {
     "chipLabel": "{{emoji}}：{{names}}",
     "more": "更多表情",

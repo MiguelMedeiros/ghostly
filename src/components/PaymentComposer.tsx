@@ -48,6 +48,8 @@ interface PaymentComposerProps {
   describe?: (rail: ChatRail) => string;
   /** Why no card can pay or request here now (the contact takes no payments in this chat): Accept still opens. */
   payUnavailable?: string;
+  /** `payUnavailable` is about the contact's side (no wallet, payments off there): the card's face says "Not accepted". */
+  payUnavailableContact?: boolean;
   /**
    * A chat's own ways of paying: with this, the composer has an Accept side beside Pay, where they are chosen, and
    * Pay shows only the cards this chat has on. Without it (a group) every card shows, and one off here says so.
@@ -76,7 +78,7 @@ const CASHU_FEE_CAP = 10;
  * written, then Request or Send. Each card is one wallet on one network; every send still stops at a review, and a
  * card is offered only where the contact has a wallet of its network.
  */
-export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = onClose, reviewContext, contact, rails, sendUnavailable, onBack, describe, payUnavailable, onSaveMethods }: PaymentComposerProps) {
+export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = onClose, reviewContext, contact, rails, sendUnavailable, onBack, describe, payUnavailable, payUnavailableContact, onSaveMethods }: PaymentComposerProps) {
   const { t } = useI18n();
   const nav = useAppNavigation();
   const wallet = reviewContext?.wallet;
@@ -91,8 +93,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
    */
   const blockedBy = (card: InstanceCard): { why: string; contact?: boolean } | undefined => {
     // A card with nothing to connect to yet (no mint, no source) says so; one on its way says where it is ("Ark is connecting…").
-    // The chat's own reason comes in English from its page; one about the contact starts with "Your contact".
-    if (payUnavailable) return { why: payUnavailable, contact: payUnavailable.startsWith("Your contact") };
+    // The chat's own reason, in the person's language; its page says whether it is about the contact.
+    if (payUnavailable) return { why: payUnavailable, contact: !!payUnavailableContact };
     if (rails && !rails.includes(card.rail)) return { why: t("payments.composer.unavailable.notHere", { card: card.name }) };
     if (!card.ready) return { why: cardNotSetUp(card, t) ? t("payments.composer.unavailable.notSetUp", { card: card.name }) : t("payments.composer.unavailable.status", { card: card.name, status: card.balance.toLowerCase() }) };
     if (peer && !cardOn(peer, card.rail, card.network)) return { why: t("payments.composer.unavailable.offHere", { card: networkName(card) }) };
