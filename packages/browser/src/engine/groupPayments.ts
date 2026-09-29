@@ -1,5 +1,6 @@
 import { MEMBER_KEY } from "@ghostly/core";
 import { isWorthlessMint } from "../shared/mints";
+import { paymentWireId } from "../shared/paymentIds";
 import type { GroupPayFrame, GroupPayNote, GroupPayRail, PaymentView, StoredMessage } from "../shared/types";
 
 /**
@@ -100,7 +101,7 @@ const testOf = (p: PaymentView): boolean => p.target
  * or nothing to say yet). `all` is every desk record, to find a request's payments and whether this device paid it.
  */
 export function authoredNote(p: PaymentView, at: Placement, all: readonly PaymentView[], current?: GroupPayNote, memberOf: (linkId: string) => string | undefined = () => undefined): GroupPayFrame | null {
-  const base = { t: "group-pay" as const, g: at.groupId, id: p.id, v: String(p.amount), u: p.unit, d: p.target?.method === "usdt" ? p.target.decimals ?? 6 : 0, r: railOf(p),
+  const base = { t: "group-pay" as const, g: at.groupId, id: paymentWireId(p.id), v: String(p.amount), u: p.unit, d: p.target?.method === "usdt" ? p.target.decimals ?? 6 : 0, r: railOf(p),
     ...(testOf(p) ? { x: 1 as const } : {}), ...(p.memo ? { m: p.memo.slice(0, 140) } : {}), ...(p.ask ? { a: 1 as const } : {}), ts: p.createdAt };
   if (p.kind === "request" && p.direction === "out") {
     // Mine to be paid: open until paid, and who paid it when my wallet knows (ecash comes in on the payer's edge).
@@ -192,7 +193,7 @@ export class GroupPayments {
       const at = this.placement(p, membership);
       if (!at) continue;
       const notes = await this.load(at.groupId);
-      const current = notes.get(p.id);
+      const current = notes.get(paymentWireId(p.id));
       const frame = authoredNote(p, at, all, current, linkId => this.host.edgeOf(linkId)?.member);
       if (!frame || JSON.stringify(frame) === JSON.stringify(current?.mine)) continue;
       const merged = mergeGroupPay(current, frame, at.me, membership(at.groupId)!.members) ?? current;

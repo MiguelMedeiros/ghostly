@@ -19,8 +19,8 @@ import {
   type SwapPreview,
 } from "@cashu/cashu-ts";
 import { STORES, openDb, store, transact, wrap } from "../shared/idb";
-import type { PaymentReview, WalletNetwork } from "@ghostly/core";
-import { isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
+import { decodeBolt11, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
   MintInfoView,
@@ -594,7 +594,13 @@ export class CashuWallet {
   /** What paying this invoice would cost, from the first mint that can afford it. */
   async quoteInvoice(invoice: string, network?: WalletNetwork): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
     let lastError: unknown = new Error("Add a mint in Settings first");
-    for (const mint of this.getMints(network)) {
+    let mints = this.getMints(network);
+    // A Bitcoin invoice may be real money: test sats pay one only through a mint whose Lightning is known to be fake.
+    if (decodeBolt11(invoice.trim())?.network === "bitcoin" && mints.some((mint) => mintNetwork(mint) === "testnet")) {
+      mints = mints.filter((mint) => mintNetwork(mint) === "mainnet" || fakesLightning(mint));
+      if (!mints.length) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
+    }
+    for (const mint of mints) {
       try {
         const wallet = await this.wallet(mint);
         const quote = await wallet.createMeltQuoteBolt11(invoice.trim());

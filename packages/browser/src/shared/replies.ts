@@ -1,4 +1,5 @@
 import { replySnippet, type WireReply } from "@ghostly/core";
+import { paymentWireId } from "./paymentIds";
 import type { MessageReply, StoredMessage } from "./types";
 
 /*
@@ -32,7 +33,7 @@ export interface ReplyTarget {
 export function replyRef(message: ReplyTarget, group = message.linkId?.startsWith(GROUP_LINK) ?? false): string | undefined {
   if (message.ref) return message.ref;
   if (group) return message.paymentId || message.event || message.groupPay || !message.id.includes(":") ? undefined : message.id;
-  if (message.paymentId) return message.paymentId;
+  if (message.paymentId) return paymentWireId(message.paymentId);
   if (message.wireId && WIRE_ID.test(message.wireId)) return message.wireId;
   const out = message.file?.id.match(/-out-([A-Za-z0-9_-]{8,64})$/);
   if (out) return out[1];

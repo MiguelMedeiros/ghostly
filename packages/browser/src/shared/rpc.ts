@@ -47,7 +47,7 @@ export interface EngineApi {
   fedimintLeave(params: { federation: string }): void;
   fedimintRefresh(params?: { network?:WalletNetwork }): void;
   /** Out-of-band notes of that federation, to hand over. They come back by themselves if nobody redeems them in a week. */
-  fedimintSpendNotes(params: { federation: string; amount: number }): { notes: string; operation: string };
+  fedimintSpendNotes(params: { federation: string; amount: number; confirmedReal?: boolean }): { notes: string; operation: string };
   fedimintReceiveNotes(params: { notes: string; network?:WalletNetwork }): { federation: string; amount: number };
   fedimintInvoice(params: { federation: string; amount: number; memo?: string }): { invoice: string };
   fedimintTakeBack(params: { federation: string; operation: string }): "canceled" | "taken" | "pending";

@@ -3395,7 +3395,15 @@ export class GhostlyNode implements EngineImplementation {
   }
   fedimintLeave(params: { federation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).leave(params.federation); }
   async fedimintRefresh(params?: { network?: WalletNetwork }) { for (const network of params?.network ? [params.network] : WALLET_NETWORKS) await this.fedimintWallets[network].refresh(); }
-  async fedimintSpendNotes(params: { federation: string; amount: number }) { const { notes, operationId } = await (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).spendNotes(params.federation, params.amount); return { notes, operation: operationId }; }
+  /** `confirmedReal`: notes of a Mainnet federation are real money, handed over as text; without it they are refused. */
+  async fedimintSpendNotes(params: { federation: string; amount: number; confirmedReal?: boolean }) {
+    const wallet = this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet;
+    // Mainnet when the wallet is, or when the federation itself says Bitcoin: either one is real money.
+    const network = wallet.network === "mainnet" || wallet.federation(params.federation)?.network === "bitcoin" ? "mainnet" : wallet.network;
+    assertConfirmedReal(network, params.confirmedReal);
+    const { notes, operationId } = await wallet.spendNotes(params.federation, params.amount);
+    return { notes, operation: operationId };
+  }
   /** Pasted notes go to the wallet that joined their federation, whichever network it is on. */
   async fedimintReceiveNotes(params: { notes: string; network?: WalletNetwork }) {
     for (const network of WALLET_NETWORKS) {

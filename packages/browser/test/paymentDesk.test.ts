@@ -9,6 +9,8 @@ import type { UsdtWallet } from "../src/engine/paymentAdapters/usdtWallet";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
 import type { StoredMessage, StoredPayment } from "../src/shared/types";
 import { resetDb, rows, seed } from "./fakes";
+import { paymentAlias, paymentWireId } from "../src/shared/paymentIds";
+import { replyRef } from "../src/shared/replies";
 // covers: payments.cashu.send, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.chat.methods, payments.chat.refused, payments.external, payments.arkade.request, payments.bark.send, payments.bitcoin.send, payments.usdt.send, delivery.hold.request, chat.waiting
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
@@ -223,6 +225,42 @@ describe("requests we send", () => {
     await expect(desk.request({ linkId: "l", amount: 1, timestamp: 2, method: "usdt" })).rejects.toThrow("Both peers need USDT");
     link.supportsArkPayments = false;
     await expect(desk.request({ linkId: "l", amount: 1, timestamp: 2, method: "arkade" })).rejects.toThrow("Both peers need the Ark payment capability");
+  });
+});
+
+describe("two contacts' requests under one id", () => {
+  // A group's members all see a request made to the group: one of them can send its own under the same id.
+  const request = (memo: string, amount = "100"): PaymentRequest => ({ id: "shared-id-1", timestamp: 5, amount: { value: amount, asset: "sat" }, memo, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([MINT])]], network: "mainnet" });
+
+  it("the copy that came first neither replaces nor hides the real one; each is paid and answered on its own", async () => {
+    const { desk, sent, state, host } = setup();
+    await desk.start();
+    await desk.onPaymentRequest("edge-b", request("the copy", "500"));
+    await desk.onPaymentRequest("edge-a", request("the real one"));
+    // Sent again by its own contact: kept once.
+    await desk.onPaymentRequest("edge-a", request("the real one"));
+    expect(rows<StoredPayment>("payments").map((p) => [p.id, p.linkId, p.memo, p.amount])).toEqual([
+      ["shared-id-1", "edge-b", "the copy", 500], ["shared-id-1.edge-a", "edge-a", "the real one", 100]]);
+    expect(host.storeMessage.mock.calls.map(([m]) => [m.linkId, m.paymentId])).toEqual([["edge-b", "shared-id-1"], ["edge-a", "shared-id-1.edge-a"]]);
+    // The bubble replies by the id both sides know.
+    expect(replyRef({ id: "peer_5", linkId: "edge-a", paymentId: "shared-id-1.edge-a" })).toBe("shared-id-1");
+
+    // Paying the real one pays it, named on the wire as its contact named it.
+    await desk.payRequest({ linkId: "edge-a", paymentId: "shared-id-1.edge-a", confirmedReal: true });
+    expect(sent.filter((s) => s.kind === "pay").map((s) => [s.frame.requestId, s.frame.amount])).toEqual([["shared-id-1", { value: "100", asset: "sat" }]]);
+    expect(desk.records().find((p) => p.kind === "payment")).toMatchObject({ linkId: "edge-a", requestId: "shared-id-1.edge-a" });
+    // Each contact's word settles its own request only.
+    await desk.onPaymentResult("edge-a", { id: "shared-id-1", ok: true });
+    expect(state("shared-id-1.edge-a")?.state).toBe("settled");
+    expect(state("shared-id-1")?.state).toBe("pending");
+    await desk.onPaymentResult("edge-c", { id: "shared-id-1", ok: true });
+    expect(state("shared-id-1")?.state, "a third contact names neither").toBe("pending");
+  });
+
+  it("a payment id is never an alias: a contact cannot name another's record by its local key", () => {
+    expect(paymentAlias("shared-id-1", "edge-a")).not.toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(paymentWireId(paymentAlias("shared-id-1", "cpay:g:k.x"))).toBe("shared-id-1");
+    expect(paymentWireId("plain-id-12")).toBe("plain-id-12");
   });
 });
 
