@@ -4,6 +4,7 @@ import type { RpcRequest } from "@ghostly/browser/shared/rpc";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { UI_PORT, type EngineStatus, type HttpRequestReply, type RuntimeMessage } from "./messages";
 import { activeNamespace, databaseFor, peerLockFor } from "./profile";
+import { fromOwnPage } from "./shared/sender";
 
 /**
  * The offscreen document is the Ghostly peer. Service workers have no
@@ -37,8 +38,13 @@ const server = new Promise<EngineServer>((resolve) => {
   });
 });
 
+// Only the extension's own pages and its worker are heard, on a port or in a message (`fromOwnPage`).
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== UI_PORT) return;
+  if (!fromOwnPage(port.sender)) {
+    port.disconnect();
+    return;
+  }
   const client: EngineClientSink = { post: (message) => port.postMessage(message) };
   // Listeners go on at once, so nothing a page sends while the peer waits for its lock is lost.
   withPeer((s) => s.attach(client));
@@ -74,8 +80,8 @@ let stopping: Promise<void> | null = null;
 /** Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. */
 const stopPeer = () => (stopping ??= (running ? running.node.shutdown() : server.then((s) => s.node.shutdown())).catch(() => {}));
 
-chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
-  if (message?.target !== "engine") return false;
+chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+  if (message?.target !== "engine" || !fromOwnPage(sender)) return false;
   if (message.type === "ping") {
     // Which profile runs, and which one the registry names now: they differ once a page switched.
     void server.then((s) => s.ready).then(() => sendResponse({ profile, active: activeNamespace() } satisfies EngineStatus));
