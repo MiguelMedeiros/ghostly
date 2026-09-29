@@ -61,6 +61,13 @@ test("a proof in its last days puts a dot on Identities, in the bar and in the p
   await expect(page.getByRole("heading", { name: "Identities" })).toBeVisible();
   await page.getByTestId("identities-new").click();
   const add = page.getByTestId("add-identity");
+  // A sheet from the bottom edge, as New wallet is: not a card whose last 16 px sit over the tab bar.
+  await expect(async () => {
+    const [sheet, bar, height] = await Promise.all([add.boundingBox(), page.getByTestId("mobile-tabs").boundingBox(), page.evaluate(() => innerHeight)]);
+    expect(Math.round(sheet!.y + sheet!.height)).toBe(height);
+    expect(sheet!.width).toBe(page.viewportSize()!.width);
+    expect(sheet!.y + sheet!.height).toBeGreaterThanOrEqual(bar!.y + bar!.height);
+  }).toPass({ timeout: 10_000 });
   await add.getByTestId("add-identity-nostr").click();
   await choose(add.getByTestId("add-identity-validity"), "7");
   await add.getByTestId("add-identity-start").click();
