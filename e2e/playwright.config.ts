@@ -13,8 +13,9 @@ const { ATPROTO_TEST_PLC } = await import("./support/atproto");
 /**
  * End-to-end tests for Ghostly: real browsers, the shipped build, no servers.
  * Peers find each other through a Pkarr relay that lives in the test process
- * (see support/relay.ts), so nothing here needs the network except the tests
- * tagged @network (the public Cashu test mint, the public relays).
+ * (see support/relay.ts), and the wallets use a local mint when E2E_MINT_URL is
+ * set (support/mint.ts), so nothing here needs the network except the tests
+ * tagged @network (public chain servers, Breez's regtest; see README.md).
  *
  *   npm run e2e                       # everything, against a fresh build of the web app
  *   npm run e2e -- --grep-invert @network

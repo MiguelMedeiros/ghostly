@@ -699,6 +699,9 @@ describe("the reviewed Cashu adapter", () => {
       executeReviewedCashu: vi.fn(async () => "cashuBfresh"),
       reviewedCashuSpent: vi.fn(async () => false),
       recoverReviewedCashu: vi.fn(async (): Promise<string | undefined> => "cashuBrecovered"),
+      // The mint has not proved the swap never happened: reconcile keeps waiting.
+      reviewedCashuNeverSwapped: vi.fn(async () => false),
+      releaseReviewedCashu: vi.fn(async () => {}),
     };
     const order: string[] = [];
     const publish = vi.fn(async (_review: PaymentReview, token: string) => { order.push(`publish ${token}`); });
@@ -730,14 +733,15 @@ describe("the reviewed Cashu adapter", () => {
 
   it("reconciling repeats the very same token, never a new one, and nothing once it was taken", async () => {
     const { cashu, wallet, publish } = adapter();
-    expect(await cashu.reconcile(review(cashuTarget()), { ...prepared, token: "cashuBkept" })).toEqual({ settled: false });
+    const persist = vi.fn(async () => {});
+    expect(await cashu.reconcile(review(cashuTarget()), { ...prepared, token: "cashuBkept" }, persist)).toEqual({ settled: false });
     expect(publish).toHaveBeenLastCalledWith(expect.anything(), "cashuBkept");
-    await cashu.reconcile(review(cashuTarget()), prepared);
+    await cashu.reconcile(review(cashuTarget()), prepared, persist);
     expect(publish).toHaveBeenLastCalledWith(expect.anything(), "cashuBrecovered");
     wallet.recoverReviewedCashu.mockResolvedValueOnce(undefined);
-    await cashu.reconcile(review(cashuTarget()), prepared);
+    await cashu.reconcile(review(cashuTarget()), prepared, persist);
     wallet.reviewedCashuSpent.mockResolvedValue(true);
-    expect(await cashu.reconcile(review(cashuTarget()), { ...prepared, token: "cashuBkept" })).toEqual({ settled: true });
+    expect(await cashu.reconcile(review(cashuTarget()), { ...prepared, token: "cashuBkept" }, persist)).toEqual({ settled: true });
     expect(publish).toHaveBeenCalledTimes(2);
     expect(wallet.executeReviewedCashu).not.toHaveBeenCalled();
   });

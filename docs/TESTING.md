@@ -29,7 +29,7 @@ test("two people chat", { tag: ["@feature:chat.paired.pair", "@feature:chat.pair
 test("LND pays a chat request", { tag: ["@feature:wallet.lightning.lnd.pay", "@gated"] }, async ({ peer }) => { … });
 ```
 
-- `@gated`: the test runs only when its infrastructure is there (`GHOSTLY_*_REGTEST`, `GHOSTLY_S3_*`, …; `test.skip` otherwise). It counts in the Gated column, not in its client's. `@network` alone (the Cashu mint, which CI runs) is not gated.
+- `@gated`: the test runs only when its infrastructure is there (`GHOSTLY_*_REGTEST`, `GHOSTLY_S3_*`, …; `test.skip` otherwise). It counts in the Gated column, not in its client's. `@network` alone is not gated: the test needs a service on the Internet (a public chain server, Breez's regtest), so the release gate leaves it out and the nightly `E2E (full)` runs it.
 - The folder decides the client: `e2e/web/` web, `e2e/extension/` extension, `e2e/desktop/` desktop. A spec elsewhere (a combination matrix, say) names its clients with `@client:web`, `@client:extension`, `@client:desktop` in the same tag array.
 - Tags are plain string literals in `tag: [...]`: the check reads them without running Playwright. `npx playwright test --grep @feature:chat.paired.send` runs every test of one feature.
 

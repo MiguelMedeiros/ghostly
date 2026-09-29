@@ -8,7 +8,7 @@ import { strangerInvoice } from "../support/bolt11";
  * Mainnet runs against the suite's own mint (mockMainnetMints), whose sats are worthless.
  */
 
-test("the Cashu card's Pay on Mainnet asks once more in words; Back pays nothing, Send real money pays", { tag: ["@network", "@feature:payments.mainnet-confirm", "@feature:wallet.cashu.pay-invoice"] }, async ({ peer }) => {
+test("the Cashu card's Pay on Mainnet asks once more in words; Back pays nothing, Send real money pays", { tag: ["@feature:payments.mainnet-confirm", "@feature:wallet.cashu.pay-invoice"] }, async ({ peer }) => {
   const alice = await peer("real-confirm");
   await mockMainnetMints(alice.context);
   await createWallet(alice, "cashu", "mainnet");

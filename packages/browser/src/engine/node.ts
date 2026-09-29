@@ -531,7 +531,11 @@ export class GhostlyNode implements EngineImplementation {
     method:"cashu",
     prepare:(target,amount,feeCap)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).prepare(target,amount,feeCap),
     execute:(review,prepared,persist)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).execute(review,prepared as CashuPrepared,persist),
-    reconcile:(review,prepared)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).reconcile(review,prepared as CashuPrepared),
+    // With the intent's own save: a payment that never reached the mint is marked abandoned before its sats come back.
+    reconcile:(review,prepared,persist)=>{
+      if(!persist)throw new Error("A Cashu payment is reconciled with its intent saved");
+      return new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).reconcile(review,prepared as CashuPrepared,persist);
+    },
   }], (review) => {
     if (review.state === "settled") this.feedback("confirmed", review.id);
     if (review.state === "failed") this.cueFeedback({ cue: "failed", key: review.id }, this.chatOf(review.linkId));
@@ -3508,6 +3512,11 @@ export class GhostlyNode implements EngineImplementation {
     if(intent?.review.linkId) {
       const link=this.paymentLink(intent.review.linkId);
       if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
+      // A request closed or paid meanwhile says so first: the contact may have turned that way of paying off because of it.
+      if (intent.review.requestId) {
+        const request = this.desk.payment(intent.review.requestId);
+        if (!request || request.state !== "pending" || request.lightningPending) throw new Error("This request is no longer awaiting payment. Check its status before spending.");
+      }
       if(intent.review.method==="usdt" && !link.supportsUsdtPayments)throw new Error("Reconnect a peer supporting USDT before approving");
       if(intent.review.method==="bark" && !link.supportsBarkPayments)throw new Error("Reconnect a peer supporting Bark before approving");
       if(intent.review.method==="bitcoin" && !link.supportsBitcoinPayments)throw new Error("Reconnect a peer taking on-chain Bitcoin before approving");
@@ -3515,10 +3524,6 @@ export class GhostlyNode implements EngineImplementation {
       if(intent.review.method==="spark" && !link.supportsSparkPayments)throw new Error("Reconnect a peer taking Spark before approving");
       if(intent.review.method==="cashu" && !link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
       await link.requirePaymentSupport();
-      if (intent.review.requestId) {
-        const request = this.desk.payment(intent.review.requestId);
-        if (!request || request.state !== "pending" || request.lightningPending) throw new Error("This request is no longer awaiting payment. Check its status before spending.");
-      }
     }
     const review=await this.paymentCoordinator.approve(params.id);
     await this.desk.confirmReviewedCashu(review);

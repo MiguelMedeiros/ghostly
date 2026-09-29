@@ -105,15 +105,19 @@ export class TransportSwitch {
    * Otherwise it is a fresh session (a reconnect after a drop): a plan still pending from the old one did not happen,
    * and what the old one kept or gave up on does not bind this one. Both sides agree again from their policies, so
    * the chat ends on the same transport whichever side dialled.
+   * A plan that landed on a fallback choice (its target did not connect, a later choice did) is a target not reached,
+   * as when the current transport is kept: its owner waits for it and tries it again (WISP 100).
    */
   begin(context: string, actual: PairedTransport, migrated = false): void {
-    this.settled = migrated && this.plan ? this.signature(this.plan.local, this.plan.remote) : "";
+    const landed = migrated ? this.plan : null;
+    this.settled = landed ? this.signature(landed.local, landed.remote) : "";
     if (!migrated) this.failed = "";
     // A choice made while apart is a choice now: above the contact's last intent, as one made on a session would be.
     if (this.apart) { this.intent = Math.max(this.intent, this.lastRemote?.intent ?? 0) + 1; this.apart = false; }
     this.clearPlan();
     this.context = context; this.actual = actual;
     this.options.state(); this.announce();
+    if (landed && landed.choices[0] !== actual) this.options.kept?.(landed.choices[0]);
   }
   /** `automatic`: no choice of this side's any more; the contact's explicit one wins, and without one the
    * current transport is kept while it is allowed. */

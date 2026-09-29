@@ -73,7 +73,7 @@ test("a Mainnet Cashu wallet (mints mocked) wears no Testnet tag, beside a Testn
   await expect(mainnet).not.toContainText("test sats");
 });
 
-test("two people pay on the same network; a card of a network the contact has no wallet on is not offered", { tag: ["@network", "@feature:wallet.instances.networks", "@feature:payments.chat.networks", "@feature:payments.cashu.send"] }, async ({ peer }) => {
+test("two people pay on the same network; a card of a network the contact has no wallet on is not offered", { tag: ["@feature:wallet.instances.networks", "@feature:payments.chat.networks", "@feature:payments.cashu.send"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("net-alice"), peer("net-bob")]);
   await mockMainnetMints(bob.context);
   await createWallet(alice, "cashu", "testnet");
