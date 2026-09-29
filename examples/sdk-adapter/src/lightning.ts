@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { decodeBolt11, NothingSpentError, type InvoiceStatus, type LightningInvoice, type LightningPayResult, type LightningPaymentRef, type LightningPaymentStatus, type LightningProvider, type LightningProviderDescriptor, type ProviderSettings } from "@ghostly/sdk";
-import { fakeInvoice } from "@ghostly/sdk/fakes";
+import { decodeBolt11, NothingSpentError, type InvoiceStatus, type LightningInvoice, type LightningPayResult, type LightningPaymentRef, type LightningPaymentStatus, type LightningProvider, type LightningProviderDescriptor, type ProviderSettings } from "@ghostlytools/sdk";
+import { fakeInvoice } from "@ghostlytools/sdk/fakes";
 
 /**
  * "Paper Lightning": a Lightning source that keeps its sats on paper, in memory, on regtest. It

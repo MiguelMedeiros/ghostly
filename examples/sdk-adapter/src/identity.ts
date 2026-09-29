@@ -1,5 +1,5 @@
 import { schnorr } from "@noble/curves/secp256k1.js";
-import type { IdentityProofProvider, IdentityStatement } from "@ghostly/sdk";
+import type { IdentityProofProvider, IdentityStatement } from "@ghostlytools/sdk";
 
 /**
  * "Schnorr key": proves control of a BIP-340 key (an x-only secp256k1 public key, 64 hex characters)

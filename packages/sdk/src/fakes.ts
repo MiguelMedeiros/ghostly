@@ -1,5 +1,5 @@
 /**
- * @ghostly/sdk/fakes: the fake adapters the app itself tests with, usable at run time (no vitest):
+ * @ghostlytools/sdk/fakes: the fake adapters the app itself tests with, usable at run time (no vitest):
  * in-memory regtest sats and test identities that hold nothing and reach nothing.
  */
 export {

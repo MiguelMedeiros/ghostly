@@ -67,7 +67,7 @@ Ghostly identity proof v1: I control nostr:3bf0c63fcb93463407af97a5e5ee64fa883d1
   the same text; verifiers never parse the text, they rebuild it from the binding they received.
 
 A provider written **outside the app** needs no line in the registry: it is a plugin registered through
-the SDK (`@ghostly/sdk`, `registerAdapters` or `GHOSTLY_PLUGINS` at build time), listed after the
+the SDK (`@ghostlytools/sdk`, `registerAdapters` or `GHOSTLY_PLUGINS` at build time), listed after the
 built-ins. See [docs/SDK.md](../../../../docs/SDK.md) and `packages/browser/src/plugins/registry.ts`.
 
 ## Adding a provider

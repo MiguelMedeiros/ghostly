@@ -3,13 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "A wallet source and an identity proof for Ghostly, written against @ghostly/sdk alone: the example of an adapter built outside the app.",
+  "description": "A wallet source and an identity proof for Ghostly, written against @ghostlytools/sdk alone: the example of an adapter built outside the app.",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ghostly/sdk": "file:vendor/ghostly-sdk.tgz",
+    "@ghostlytools/sdk": "file:vendor/ghostly-sdk.tgz",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0"
   },

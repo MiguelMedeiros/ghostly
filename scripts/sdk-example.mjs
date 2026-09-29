@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The "independently authored adapter" gate, run the way an outside author would: pack @ghostly/sdk
+ * The "independently authored adapter" gate, run the way an outside author would: pack @ghostlytools/sdk
  * into a tarball, install that tarball into examples/sdk-adapter (a project that is not part of the
  * workspace), and run the example's type check and tests, contract suites included.
  *
@@ -19,7 +19,7 @@ const run = (cwd, file, args) => execFileSync(file, args, { cwd, stdio: "inherit
 rmSync(vendor, { recursive: true, force: true });
 mkdirSync(vendor, { recursive: true });
 // `prepack` builds the package first.
-run(root, "npm", ["pack", "--workspace", "@ghostly/sdk", "--pack-destination", vendor]);
+run(root, "npm", ["pack", "--workspace", "@ghostlytools/sdk", "--pack-destination", vendor]);
 const packed = readdirSync(vendor).find((name) => name.endsWith(".tgz"));
 if (!packed) throw new Error("npm pack produced no tarball");
 renameSync(join(vendor, packed), join(vendor, "ghostly-sdk.tgz"));
@@ -27,7 +27,7 @@ console.log(`\nPacked ${packed} → examples/sdk-adapter/vendor/ghostly-sdk.tgz\
 
 // A fresh install every time: the tarball's integrity changes with every build, and a lockfile left by
 // the last run would keep the old package.
-rmSync(join(example, "node_modules/@ghostly"), { recursive: true, force: true });
+rmSync(join(example, "node_modules/@ghostlytools"), { recursive: true, force: true });
 rmSync(join(example, "package-lock.json"), { force: true });
 run(example, "npm", ["install", "--no-audit", "--no-fund"]);
 run(example, "npm", ["run", "typecheck"]);

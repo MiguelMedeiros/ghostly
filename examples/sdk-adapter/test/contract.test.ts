@@ -1,6 +1,6 @@
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { describeIdentityProof, describeLightningProvider, fakeInvoice } from "@ghostly/sdk/testing";
+import { describeIdentityProof, describeLightningProvider, fakeInvoice } from "@ghostlytools/sdk/testing";
 import { exampleSchnorr, schnorrSign, schnorrSubject } from "../src/identity";
 import { PaperLightning, paperLightning } from "../src/lightning";
 // covers: sdk.package, wallet.lightning.provider-contract, proofs.contract
