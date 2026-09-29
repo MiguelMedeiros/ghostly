@@ -210,6 +210,32 @@ describe("FileBubble: files/3", () => {
     }
   });
 
+  it("right after a start, a file whose transfer is not restored yet does not look finished", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["part"], { type: "application/octet-stream" }));
+    // The engine is up (its wallets starting) but has not put its kept transfers back: nothing is known of the file.
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<FileBubble file={file({ size: 80 })} peerName="Ana" />);
+    const bubble = screen.getByTestId("file-bubble");
+    expect(bubble).toHaveAttribute("data-stage", "restoring");
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Loading… · 80 B");
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByTestId("file-save")).toBeNull();
+    // Restored: it is still arriving, with its controls.
+    act(() => fakeEngine.update({ transfersRestored: true, transfers: { "chat1-in-abc": { state: "transferring", direction: "in", transferred: 4, size: 80 } } }));
+    expect(bubble).toHaveAttribute("data-stage", "transferring");
+    expect(screen.getByTestId("file-cancel")).toBeInTheDocument();
+  });
+
+  it("a file from history is shown finished once the transfers are restored with none for it", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["x".repeat(80)], { type: "application/octet-stream" }));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<FileBubble file={file({ size: 80 })} peerName="Ana" />);
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Loading…");
+    act(() => fakeEngine.update({ transfersRestored: true }));
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^80 B$/);
+    expect(await screen.findByTestId("file-save")).toBeInTheDocument();
+  });
+
   it("a file still arriving when the app starts is not offered to save once its transfer shows it moving", async () => {
     vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["part"], { type: "application/octet-stream" }));
     // Just started: the chat is drawn before its transfers are restored, and what is stored is a part of the file.

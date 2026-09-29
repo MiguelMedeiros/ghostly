@@ -23,5 +23,7 @@ export function useTransfer(fileId?: string) {
     return last.current;
   }, [fileId]);
   const transfer = useSyncExternalStore(subscribe, snapshot);
-  return { platform: servicesPlatform, transfer };
+  // No transfer yet is not "finished" while the engine is still putting its kept transfers back after a start.
+  const restoring = useSyncExternalStore(subscribe, () => !!fileId && servicesPlatform?.transfersRestored?.() === false);
+  return { platform: servicesPlatform, transfer, restoring: restoring && transfer === null };
 }
