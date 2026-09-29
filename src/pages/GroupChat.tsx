@@ -109,16 +109,23 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: text.slice(0, -gone.length) });
-    const fixed = FIXED_EVENTS.get(text as never);
+    const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }
   const name = memberName(member, t);
   if (message.event === "joined") return t("group.event.joined", { name });
   if (message.event === "admin") return member.me ? t("group.event.adminYou") : t("group.event.admin", { name });
-  if (message.event === "picture") return text.endsWith("removed the group's picture") ? t("group.event.pictureRemoved", { name }) : t("group.event.pictureChanged", { name });
+  if (message.event === "picture") {
+    const removed = text.endsWith("removed the group's picture");
+    if (member.me) return removed ? t("group.event.pictureRemovedYou") : t("group.event.pictureChangedYou");
+    return removed ? t("group.event.pictureRemoved", { name }) : t("group.event.pictureChanged", { name });
+  }
   const marker = " renamed the group to “";
   const renamed = message.event === "renamed" ? text.indexOf(marker) : -1;
-  if (renamed >= 0 && text.endsWith("”")) return t("group.event.renamed", { name, group: text.slice(renamed + marker.length, -1) });
+  if (renamed >= 0 && text.endsWith("”")) {
+    const group = text.slice(renamed + marker.length, -1);
+    return member.me ? t("group.event.renamedYou", { group }) : t("group.event.renamed", { name, group });
+  }
   return text;
 }
 

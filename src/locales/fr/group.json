@@ -59,9 +59,12 @@
     "gone": "{{name}} n'est plus membre",
     "joined": "{{name}} a rejoint le groupe",
     "pictureChanged": "{{name}} a changé la photo du groupe",
+    "pictureChangedYou": "Vous avez changé la photo du groupe",
     "pictureRemoved": "{{name}} a retiré la photo du groupe",
+    "pictureRemovedYou": "Vous avez retiré la photo du groupe",
     "removed": "Vous avez été retiré de ce groupe",
     "renamed": "{{name}} a renommé le groupe en « {{group}} »",
+    "renamedYou": "Vous avez renommé le groupe en « {{group}} »",
     "rotated": "Clés renouvelées : une nouvelle époque",
     "youJoined": "Vous avez rejoint le groupe."
   },

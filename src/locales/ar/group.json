@@ -59,9 +59,12 @@
     "gone": "لم يعد {{name}} عضوًا",
     "joined": "انضم {{name}}",
     "pictureChanged": "غيّر {{name}} صورة المجموعة",
+    "pictureChangedYou": "غيّرت صورة المجموعة",
     "pictureRemoved": "أزال {{name}} صورة المجموعة",
+    "pictureRemovedYou": "أزلت صورة المجموعة",
     "removed": "تمت إزالتك من هذه المجموعة",
     "renamed": "غيّر {{name}} اسم المجموعة إلى «{{group}}»",
+    "renamedYou": "غيّرت اسم المجموعة إلى «{{group}}»",
     "rotated": "جُدّدت المفاتيح: حقبة جديدة",
     "youJoined": "انضممت."
   },

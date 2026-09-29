@@ -59,9 +59,12 @@
     "gone": "{{name}} 已不再是成员",
     "joined": "{{name}} 已加入",
     "pictureChanged": "{{name}} 更换了群组头像",
+    "pictureChangedYou": "你更换了群组头像",
     "pictureRemoved": "{{name}} 移除了群组头像",
+    "pictureRemovedYou": "你移除了群组头像",
     "removed": "你已被移出此群组",
     "renamed": "{{name}} 将群组重命名为“{{group}}”",
+    "renamedYou": "你将群组重命名为“{{group}}”",
     "rotated": "密钥已轮换：新的纪元",
     "youJoined": "你已加入。"
   },

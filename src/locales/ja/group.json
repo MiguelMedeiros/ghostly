@@ -59,9 +59,12 @@
     "gone": "{{name}} はメンバーではなくなりました",
     "joined": "{{name}} が参加しました",
     "pictureChanged": "{{name}} がグループの写真を変更しました",
+    "pictureChangedYou": "グループの写真を変更しました",
     "pictureRemoved": "{{name}} がグループの写真を削除しました",
+    "pictureRemovedYou": "グループの写真を削除しました",
     "removed": "このグループから削除されました",
     "renamed": "{{name}} がグループ名を「{{group}}」に変更しました",
+    "renamedYou": "グループ名を「{{group}}」に変更しました",
     "rotated": "鍵を更新しました: 新しいエポック",
     "youJoined": "参加しました。"
   },
