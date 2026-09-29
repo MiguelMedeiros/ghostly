@@ -269,10 +269,41 @@ async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number): Prom
   }
 }
 
-export const test = base.extend<{ app: DesktopApp }>({
-  app: async ({}, use) => {
-    const { app, stop } = await openDesktop();
-    await use(app);
-    await stop();
+/** What the page showed when a test failed: where it was, and its text. */
+async function attachPage(app: DesktopApp): Promise<void> {
+  const page = await app.execute<string>(`return location.href + "\\n\\n" + document.body.innerText.slice(0, 8000);`).catch((error) => `No page: ${(error as Error).message}`);
+  await base.info().attach("page.txt", { body: page, contentType: "text/plain" });
+}
+
+/**
+ * `app`: one Desktop app with a home of its own, on a network that never leaves the machine: a local Pkarr relay
+ * (GHOSTLY_PKARR_RELAYS), a HyperDHT testnet and a Mainline DHT testnet (GHOSTLY_PKARR_DHT_BOOTSTRAP). Without
+ * these the app reads and writes the public relays and joins the public Mainline DHT over UDP, and every test
+ * shared the machine's own HOME. A failed test gets the app's ghostly.log and what its page showed.
+ */
+export const test = base.extend<{ app: DesktopApp }, { network: Record<string, string> }>({
+  network: [async ({}, use) => {
+    const [{ desktopNetwork }, { LocalRelay }, { mainlineTestnet }] = await Promise.all([
+      import("../matrix/desktop"), import("./relay"), import("./mainlineTestnet"),
+    ]);
+    const relay = new LocalRelay();
+    // The first Mainline testnet of a run compiles its example (cargo): minutes, once per worker.
+    const [network, dht] = await Promise.all([desktopNetwork(relay), mainlineTestnet()]);
+    await use({ ...network.env, GHOSTLY_PKARR_DHT_BOOTSTRAP: dht.bootstrap });
+    dht.close();
+    await network.close();
+    relay.close();
+  }, { scope: "worker", timeout: 10 * 60_000 }],
+  app: async ({ network }, use, testInfo) => {
+    const home = desktopHome("app");
+    try {
+      const { app, stop } = await openDesktop({ home: home.dir, env: network });
+      await use(app);
+      if (testInfo.status !== testInfo.expectedStatus) await attachPage(app);
+      await stop();
+      attachDesktopLogs("app", home.dir);
+    } finally {
+      home.remove();
+    }
   },
 });
