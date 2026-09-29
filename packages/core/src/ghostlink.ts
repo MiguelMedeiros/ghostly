@@ -677,8 +677,9 @@ export class GhostLink {
       lastSeenTimestamp: options.lastSeenTimestamp,
       pollIntervals: options.pollIntervals,
       getServices: options.getServices,
-      // A joiner dials the moment it sees the inviter: its offer goes in its first packet.
-      firstPublish: options.firstPublish ?? (this.tracker && options.pairingProgress?.role === "joiner" ? "after-first-poll" : "at-start"),
+      // A joiner dials the moment it sees the inviter, and an app back after a restart (`resume`) the moment it reads its
+      // contact: its offer goes in its first packet, not in a second one right behind its presence.
+      firstPublish: options.firstPublish ?? ((this.tracker && options.pairingProgress?.role === "joiner") || this.resuming ? "after-first-poll" : "at-start"),
       events: {
         // The first look decided nothing to dial: say we are here now (a dial says it with its offer).
         onFirstPoll: () => { if (!this.dialing) this.session.ensureAdvertised(); },

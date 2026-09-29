@@ -201,7 +201,7 @@ describe("a new group edge next to a community's background looks, on one relay"
  * On the CLI (more publishes at start than here) one group was enough: edges live 75 to 110 s after the restart.
  */
 describe("a member of a private group killed and back, with a chat and an edge to each other member", () => {
-  const cases = (process.env.MESH_BACK_CASES ?? "lower:2:20000,higher:2:20000,lower:2:25000,lower:1:40000,higher:1:40000").split(",").map(c => {
+  const cases = (process.env.MESH_BACK_CASES ?? "lower:2:20000,higher:2:20000,lower:2:25000,lower:1:40000,higher:1:40000,lower:2:30000,lower:2:40000,higher:2:40000").split(",").map(c => {
     const [order, groups, noticeMs] = c.split(":");
     return { order: order as "lower" | "higher", groups: Number(groups), noticeMs: Number(noticeMs) };
   });
@@ -244,7 +244,12 @@ describe("a member of a private group killed and back, with a chat and an edge t
       return all().every(l => l.isDataLinkOpen);
     }, 240_000);
     const share = relays.share("c2", startedAt, 60_000, { edges: c.filter(l => l.kind === "edge").map(l => l.peer), chats: chats.map(l => l.peer) });
-    report({ scenario: "mesh-member-back", order, groups, noticeMs, edgesMs, chatsMs, share });
+    // …and on each relay: its writes and its reads in that minute, next to the relay's share (30 and 60).
+    const perRelay = Object.fromEntries(relays.hosts.map(host => {
+      const mine = relays.requests.filter(r => r.who === "c2" && r.host === host && r.at >= startedAt && r.at < startedAt + 60_000);
+      return [host, { put: mine.filter(r => r.method === "PUT").length, get: mine.filter(r => r.method === "GET").length }];
+    }));
+    report({ scenario: "mesh-member-back", order, groups, noticeMs, edgesMs, chatsMs, share, perRelay });
     // Dev (eacaf6a6), from the restart: 62.6 s in every case (18.6 s with one group noticed after 20 s); the restarted
     // app's edges had spent the groups' share of both relays before the answers came, and with 45 s of fast looks its
     // chats too. Now: 18.6, 18.6, 26.6, 42.6 and 42.6 s, a few seconds after the others notice. With reads in turn per
