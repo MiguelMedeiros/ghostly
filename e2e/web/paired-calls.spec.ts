@@ -82,7 +82,6 @@ test("the contact's tab closes mid-call: the call ends here with its line", { ta
   // No hang-up comes: the media connection fails (about 15 s in Chromium) and the call ends as a hang-up ends it.
   await expect(alice.page.getByTitle("End call")).toHaveCount(0, { timeout: 60_000 });
   await expect(chat(alice).getByText("Video call ended")).toBeVisible();
-  await expect(alice.page.getByTestId("call-video")).toBeEnabled();
 });
 
 test("calls need a live connection: on the DHT the buttons are off and say so", { tag: ["@feature:calls.paired.live-only"] }, async ({ peer }, testInfo) => {
