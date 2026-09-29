@@ -46,7 +46,7 @@ type Has = { iroh?: "relay-only" | "relay-later" | "direct"; hyperdht?: boolean 
  * happened on the DHT) and neither has a session to remember. No WebRTC on either side: the contact's cannot reach
  * the Desktop's WKWebView here, and the node runs where there is none.
  */
-async function setup({ appDials, app, contact: has }: { appDials: boolean; app: Has; contact: Has }) {
+async function setup({ appDials, app, contact: has, stored }: { appDials: boolean; app: Has; contact: Has; stored?: { preferredTransport: PairedTransport } }) {
   const net = new FakeNativeNet();
   const pkarr = memoryPkarr();
   let invitation = createLink();
@@ -54,7 +54,7 @@ async function setup({ appDials, app, contact: has }: { appDials: boolean; app: 
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
   const id = `not-live-${crypto.randomUUID()}`;
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
-  await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1, pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32 });
+  await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1, pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, ...stored });
   const appEndpoints = {
     ...(app.iroh ? { "iroh/1": net.endpoint("iroh/1", "app", app.iroh) } : {}),
     ...(app.hyperdht ? { "hyperdht/1": net.endpoint("hyperdht/1", "app", "direct") } : {}),
@@ -179,5 +179,23 @@ describe("a choice made while the chat is not live", () => {
     s.net.unreachable.delete("hyperdht/1");
     await until(() => expect(liveOn(s)).toEqual(["ready", "hyperdht/1", "ready", "hyperdht/1"]), 240_000);
     expect([s.view().transportWait, s.contact.transportWait]).toEqual([undefined, undefined]);
+  }, 60_000);
+
+  it("kept from before the app started, begins its first session as a choice, so the chat moves there once it connects", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    // Found with two headless CLIs: one chose HyperDHT, both restarted, the other dialled WebRTC first, and the chat
+    // stayed there with nothing waited for: the choice was kept on disk, but no longer a switch intent.
+    const s = await setup({ appDials: false, app: { iroh: "direct", hyperdht: true }, contact: { iroh: "direct", hyperdht: true },
+      stored: { preferredTransport: "hyperdht/1" } });
+    s.net.unreachable.add("hyperdht/1");
+    await until(() => expect(liveOn(s)).toEqual(["ready", "iroh/1", "ready", "iroh/1"]), 240_000);
+    await until(() => expect(s.view().transportWait).toMatchObject({ transport: "hyperdht/1", by: "you", live: "iroh/1" }), 60_000);
+    expect(s.contact.transportWait).toMatchObject({ transport: "hyperdht/1", by: "contact", live: "iroh/1" });
+    s.net.unreachable.delete("hyperdht/1");
+    await until(() => expect(liveOn(s)).toEqual(["ready", "hyperdht/1", "ready", "hyperdht/1"]), 240_000);
+    expect([s.view().transportWait, s.contact.transportWait]).toEqual([undefined, undefined]);
+    // Not a new choice: the contact is told of it at most once, and this side's timeline gets no row for it.
+    expect(s.contactHeard.filter(t => t === "hyperdht/1").length).toBeLessThanOrEqual(1);
+    expect(lines(s.view()).filter(l => l[0] === "chose")).toEqual([]);
   }, 60_000);
 });

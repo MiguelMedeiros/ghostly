@@ -829,6 +829,11 @@ export class GhostLink {
       },
       unreached: (target, reason) => { this.unreached(target, reason); },
     });
+    // A transport chosen before this link started (the owner says `automatic: false`: kept from a run before a
+    // restart) is still a choice (WISP 100, "A choice made while not live"): the first session begins with it as a
+    // switch intent. Without it both sides' intents start at none, and the chat stays wherever the first dial landed,
+    // waiting for nothing. A `preferred` alone is only where to dial first.
+    if (options.native?.automatic === false) this.switcher.choseApart();
   }
 
   get myPubKeyZ32(): string {
