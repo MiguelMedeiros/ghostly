@@ -73,7 +73,7 @@ test("every row of the chat, group and New menus is one line and whole, in every
       const at = `${language} at ${viewport.width}px`;
       const sheet = viewport === PHONE ? "sheet" : "popover";
 
-      // The chat's ⋮: Pin, Mute notifications, Hold messages, Refresh, Tech Info, Delete.
+      // The chat's ⋮: Pin, Mute notifications, Search, Hold messages, Refresh, Tech Info, Delete.
       // Not in it: the connection (the header's connection control has it), Payments (the composer's + → Payment),
       // Identities (the contact's marks in the header, e2e/web/contact-identities.spec.ts) and Services (the
       // composer's + → Shared services).
@@ -81,21 +81,23 @@ test("every row of the chat, group and New menus is one line and whole, in every
       await page.getByTestId("chat-options").click();
       const chatMenu = page.getByTestId("chat-options-menu");
       await expect(chatMenu).toHaveAttribute("data-menu", sheet);
+      await expect(chatMenu.getByTestId("chat-search-open")).toBeVisible();
       await expect(chatMenu.getByTestId("chat-hold-open")).toBeVisible();
       await expect(chatMenu.getByTestId("chat-connection-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-payments-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-identities-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-services-open")).toHaveCount(0);
-      await oneLineEach(chatMenu, 6, `chat menu, ${at}`);
+      await oneLineEach(chatMenu, 7, `chat menu, ${at}`);
       if (language !== "ar") await page.screenshot({ path: testInfo.outputPath(`chat-menu-${language}-${viewport.width}.png`) });
       await close(page, chatMenu);
 
-      // The group's ⋮: Members, Mute notifications, Rotate keys, Leave group, Delete from this device.
+      // The group's ⋮: Members, Mute notifications, Search, Rotate keys, Leave group, Delete from this device.
       await go(groupHash);
       await page.getByTestId("group-options").click();
       const groupMenu = page.getByTestId("group-options-menu");
       await expect(groupMenu).toHaveAttribute("data-menu", sheet);
-      await oneLineEach(groupMenu, 5, `group menu, ${at}`);
+      await expect(groupMenu.getByTestId("chat-search-open")).toBeVisible();
+      await oneLineEach(groupMenu, 6, `group menu, ${at}`);
       await close(page, groupMenu);
 
       // New ▾: Chat and Group, each with a line saying what it is.
