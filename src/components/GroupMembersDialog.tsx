@@ -8,6 +8,7 @@ import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, groupStatusText, memberName } from "../lib/groups";
 import { agoIn } from "../lib/relativeTime";
 import { GroupLinkPanel } from "./GroupLinkPanel";
+import { RemoveMemberDialog } from "./RemoveMemberDialog";
 import { GroupAvatar } from "./GroupAvatar";
 import { AvatarOpener } from "./AvatarViewer";
 import { useContactFaces } from "./identities/contactFace";
@@ -36,6 +37,8 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
   const faces = useContactFaces();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  /** The member whose Remove was pressed, asked about before anything happens. */
+  const [removing, setRemoving] = useState<GroupMemberView | null>(null);
   useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
   const live = state?.groups.find(g => g.id === group.id) ?? group;
   const run = async (key: string, action: () => Promise<unknown>) => {
@@ -120,7 +123,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
             onChange={role => void run(m.key, () => engine.call("setGroupHub", { groupId: live.id, key: m.key, role: role === "auto" ? null : role }))} />}
           <button disabled={busy !== null} onClick={() => void run(m.key, () => engine.call("makeGroupAdmin", { groupId: live.id, key: m.key }))} data-testid="group-make-admin"
             className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">{t("group.members.makeAdmin")}</button>
-          <button disabled={busy !== null} onClick={() => void run(m.key, () => engine.call("removeGroupMember", { groupId: live.id, key: m.key }))} data-testid="group-remove-member"
+          <button disabled={busy !== null} onClick={() => setRemoving(m)} data-testid="group-remove-member"
             className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
         </>}
       </li>)}
@@ -142,6 +145,8 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
       </ul>
     </div>}
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    {removing && <RemoveMemberDialog name={memberName(removing, t)} onClose={() => setRemoving(null)}
+      onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);
 }
