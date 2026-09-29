@@ -457,6 +457,11 @@ export interface ServicesPlatform {
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   retryFile?(fileId: string): Promise<void>;
   getTransfer(fileId: string): FileTransferState | null;
+  /**
+   * False for the first moments after the app starts, until the engine has its kept transfers back: until then a
+   * file with no transfer may still be moving. Where left out, `getTransfer` always knows.
+   */
+  transfersRestored?(): boolean;
   /** files/3: answers an offer, or pauses, resumes, cancels, sends again or asks again for a transfer. */
   fileAction?(fileId: string, action: FileAction): Promise<void>;
   /** Why a file of this size cannot go to this contact now, or null when it can (checked before sending). */

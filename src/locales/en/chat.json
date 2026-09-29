@@ -126,6 +126,7 @@
     "queuedHere": "Waiting its turn · {{done}} done",
     "queuedThere": "Queued by {{name}} · {{done}} done",
     "resendHint": "Offers it again. It goes on from what your contact already has.",
+    "restoring": "Loading… · {{size}}",
     "resume": "Resume",
     "roomDevice": "{{size}} free on this device",
     "stalled": "Not moving · {{progress}}",

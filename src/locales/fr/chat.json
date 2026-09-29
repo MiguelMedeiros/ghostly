@@ -126,6 +126,7 @@
     "queuedHere": "En attente de son tour · {{done}} fait",
     "queuedThere": "En file chez {{name}} · {{done}} fait",
     "resendHint": "Le propose à nouveau. Reprend à partir de ce que votre contact a déjà.",
+    "restoring": "Chargement… · {{size}}",
     "resume": "Reprendre",
     "roomDevice": "{{size}} libres sur cet appareil",
     "stalled": "Bloqué · {{progress}}",

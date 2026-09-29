@@ -126,6 +126,7 @@
     "queuedHere": "排队中 · 已完成 {{done}}",
     "queuedThere": "{{name}} 处排队中 · 已完成 {{done}}",
     "resendHint": "重新提供。会从联系人已有的部分继续。",
+    "restoring": "正在加载… · {{size}}",
     "resume": "继续",
     "roomDevice": "此设备剩余 {{size}}",
     "stalled": "未在传输 · {{progress}}",
