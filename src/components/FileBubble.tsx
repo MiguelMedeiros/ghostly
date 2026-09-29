@@ -20,7 +20,6 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const { platform, transfer } = useTransfer(file.id);
   /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
-  const blobUrl = preview?.id === file.id ? preview.url : null;
   const picture = PREVIEWABLE_IMAGE.test(file.mime);
   /** A picture's size found here (its first bytes, or as it loaded), when its sender said none or said wrong. */
   const [found, setFound] = useState<{ id: string; size: ImageMeta } | null>(null);
@@ -45,6 +44,14 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   // The sender holds its bytes from the start: its preview shows at once, not after the transfer. A received file is
   // read once it is all here. A small file can be announced before its transfer shows up: look again once it has.
   const readable = settled || file.id.includes("-out-");
+  // Only while it is readable: a received file read before its transfer showed up (the app had just started) was a
+  // part of it. Once the transfer shows it moving again that part is dropped, and read anew when it is all here.
+  const blobUrl = preview?.id === file.id && readable ? preview.url : null;
+  useEffect(() => {
+    if (readable) return;
+    setPreview(null);
+    setSaveOnly(false);
+  }, [readable]);
   useEffect(() => {
     if (!platform || !readable || blobUrl) return;
     let cancelled = false;
