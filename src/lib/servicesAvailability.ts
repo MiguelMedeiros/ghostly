@@ -1,4 +1,5 @@
 import type { PeerLinkState } from "./platform";
+import { englishT, type Translate } from "../locales/translate";
 
 /** Why apps cannot travel in this chat right now, as a kind (`servicesUnavailable` says it in words). */
 export type ServicesBlock = "not-live" | "contact-older" | "contact-cannot";
@@ -15,11 +16,11 @@ export function servicesBlock(peer: PeerLinkState | null | undefined): ServicesB
  * Why apps cannot travel in this chat right now, if they cannot. A paired chat carries them over its live
  * session, once both apps offer `services/1`; an older chat has its own rules and says nothing here.
  */
-export function servicesUnavailable(peer: PeerLinkState | null | undefined, name: string): string | null {
+export function servicesUnavailable(peer: PeerLinkState | null | undefined, name: string, tr: Translate = englishT): string | null {
   switch (servicesBlock(peer)) {
-    case "not-live": return "Shared services open while you are connected live.";
-    case "contact-older": return `${name} needs an updated Ghostly to open shared services.`;
-    case "contact-cannot": return `${name}'s app cannot open or share apps (the web app cannot reach local apps).`;
+    case "not-live": return tr("chat.services.notLive");
+    case "contact-older": return tr("chat.services.contactOlder", { name });
+    case "contact-cannot": return tr("chat.services.contactCannot", { name });
     default: return null;
   }
 }

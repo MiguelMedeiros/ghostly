@@ -3,6 +3,7 @@
   "camera": "相机",
   "cameraFailed": "无法启动相机。",
   "caption": "添加说明",
+  "captionTooLong": "此说明为 {{bytes}} 字节（UTF-8）。DHT 最多允许 {{max}} 字节。",
   "category": {
     "activity": "活动",
     "flags": "旗帜",
@@ -15,6 +16,7 @@
     "symbols": "符号"
   },
   "closeCamera": "关闭相机",
+  "dhtTooLong": "此文字为 {{bytes}} 字节（UTF-8）。DHT 最多允许 {{max}} 字节；请缩短或使用直连。草稿已保留。",
   "document": "文档",
   "dropFiles": "拖放到此处发送",
   "emoji": "表情",
@@ -45,7 +47,11 @@
   "media": "照片和视频",
   "noEmoji": "未找到表情",
   "noGifs": "未找到 GIF",
+  "overSoft": "超过 DHT 可承载的 {{bytes}} 字节：直连后发送",
   "payment": "付款",
+  "previewLoading": "正在加载 {{host}} 的预览…",
+  "previewRemove": "移除链接预览",
+  "previewWithout": "不带预览发送",
   "removeFile": "移除 {{name}}",
   "retake": "重拍",
   "retry": "重试",
@@ -55,10 +61,13 @@
   "send": "发送",
   "sendCount": "发送 {{count}} 个",
   "sendFiles": "发送文件",
+  "sendMessage": "发送消息",
   "sendPhoto": "发送照片",
   "services": "共享服务",
   "servicesNeedApp": "需要 Ghostly 浏览器扩展或桌面应用",
   "servicesShared": "此聊天中已分享 {{count}} 个",
   "skinTone": "肤色",
-  "takePhoto": "拍照"
+  "takePhoto": "拍照",
+  "tooLong": "内容过长，无法发送（{{count}} 个字符，上限为 {{max}}）。",
+  "tooLongDht": "对 DHT 来说太长了。建立点对点连接后，长发票和 ecash 代币都能发送。"
 }

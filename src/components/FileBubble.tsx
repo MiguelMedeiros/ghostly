@@ -8,12 +8,15 @@ import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sam
 import type { FileAction } from "../lib/platform";
 import { Highlight } from "./chat/ChatSearch";
 import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
+import { useT } from "../contexts/I18nContext";
 import type { ChatFile } from "../lib/types";
 
 const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
 /** A file in the chat: progress while it travels, then a preview (images) and a way to save it. */
-export function FileBubble({ file, peerName = "Your contact", highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
+export function FileBubble({ file, peerName: named, highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
+  const t = useT();
+  const peerName = named ?? t("pairing.contact");
   const { platform, transfer } = useTransfer(file.id);
   /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
@@ -96,14 +99,14 @@ export function FileBubble({ file, peerName = "Your contact", highlight }: { fil
     setLoaded({ url, ok: true });
   };
 
-  const status = fileStatus(file, transfer, peerName, missing);
+  const status = fileStatus(file, transfer, peerName, missing, t);
   const moving = transfer?.state === "transferring";
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
   const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
   const canRetry = canRetryFile(file, transfer, platform);
-  const stuck = platform?.fileAction ? stalledAction(transfer) : null;
+  const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
   const reason = actionError || (failed ? transfer.error : undefined);
@@ -128,7 +131,7 @@ export function FileBubble({ file, peerName = "Your contact", highlight }: { fil
       )}
       <div className="flex items-center gap-3 px-2 py-1.5">
         {canRetry ? (
-          <RoundRetry danger busy={busy} testId="file-retry" label="Send again" hint="Not sent. Send it again."
+          <RoundRetry danger busy={busy} testId="file-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")}
             onClick={() => again(() => platform!.retryFile!(file.id))} />
         ) : stuck ? (
           <RoundRetry busy={busy} testId={`file-${stuck.action}`} label={stuck.label} hint={stuck.hint}
@@ -158,7 +161,8 @@ export function FileBubble({ file, peerName = "Your contact", highlight }: { fil
             role="button"
             data-testid="file-save"
             className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
-            title="Save"
+            title={t("common.save")}
+            aria-label={t("common.save")}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -171,25 +175,25 @@ export function FileBubble({ file, peerName = "Your contact", highlight }: { fil
       {offered && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
           <p className="text-[12px] m-0 mb-1">
-            {peerName} wants to send {file.name} ({formatFileSize(file.size)}).
+            {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size) })}
           </p>
           {typeof transfer.room === "number" && (
             <p className={`text-[11px] m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="file-room">
-              {transfer.room < file.size ? `Not enough space: ${formatFileSize(transfer.room)} free on this device` : `${formatFileSize(transfer.room)} free on this device`}
+              {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room) })}
             </p>
           )}
           <div className="flex gap-2">
             <button type="button" className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50"
-              data-testid="file-accept" disabled={typeof transfer.room === "number" && transfer.room < file.size} onClick={() => act("accept")}>Accept</button>
-            <button type="button" className="text-xs px-3 py-1 rounded-full bg-black/20 text-inherit border-none cursor-pointer" data-testid="file-decline" onClick={() => act("decline")}>Decline</button>
+              data-testid="file-accept" disabled={typeof transfer.room === "number" && transfer.room < file.size} onClick={() => act("accept")}>{t("chat.file.accept")}</button>
+            <button type="button" className="text-xs px-3 py-1 rounded-full bg-black/20 text-inherit border-none cursor-pointer" data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
         </div>
       )}
       {(controls && !offered) && (
         <div className="flex gap-1.5 px-2 pb-1">
-          {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>Pause</button>}
-          {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>Resume</button>}
-          <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>Cancel</button>
+          {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
+          {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
+          <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
       {reason && why && <WhyText id={whyId} testId="file-why-text">{reason}</WhyText>}

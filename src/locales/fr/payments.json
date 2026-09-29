@@ -199,6 +199,50 @@
     "wrongChain": "Votre portefeuille Bitcoin {{network}} est sur {{chain}} ; cette adresse est pour {{target}}.",
     "wrongToken": "Ce lien demande un autre jeton que l'USDT de votre portefeuille : il n'est pas payé d'ici."
   },
+  "group": {
+    "bitcoinOnchain": "Bitcoin on-chain",
+    "chooseOne": "Choisissez un membre à qui envoyer",
+    "describe": {
+      "cashu": "Demandez de l’ecash d’un mint que vous utilisez. Le premier membre dont l’ecash arrive paie ; les suivants récupèrent le leur.",
+      "lightning": "Demandez avec une facture Lightning. N’importe quel membre peut la payer, une fois : une facture ne se paie pas deux fois.",
+      "other": "Seulement Cashu ou Lightning pour tout le groupe."
+    },
+    "everyone": "Demander au groupe",
+    "everyoneHint": "N’importe qui dans le groupe peut la payer, une fois",
+    "formerMember": "Un ancien membre",
+    "formerMemberObject": "un ancien membre",
+    "hint": {
+      "community": "Le paiement est scellé pour vous deux : le groupe le transmet sans le lire, et un absent le reçoit à son retour. Tout le monde voit qui a payé qui et combien.",
+      "mesh": "Le paiement ne passe qu’entre vous deux ; tout le groupe voit qui a payé qui et combien."
+    },
+    "listSeparator": ", ",
+    "sendUnavailable": "Une demande au groupe est payée par un membre ; pour payer quelqu’un, choisissez-le",
+    "status": {
+      "claimedPaid": "{{names}} a payé · en attente du portefeuille de {{to}}",
+      "closed": "Fermé",
+      "paid": "Payé",
+      "paidBy": "Payé par {{name}}",
+      "saysPaid": "{{names}} dit avoir payé · en attente du portefeuille de {{to}}",
+      "sent": "Envoyé · en attente de {{name}}",
+      "takenBack": "Repris",
+      "waiting": "En attente du paiement"
+    },
+    "testUsdt": "USDT de test",
+    "theGroup": "le groupe",
+    "title": {
+      "asked": "{{to}} a demandé à {{from}}",
+      "askedGroup": "{{to}} a demandé au groupe",
+      "paying": "{{from}} paie {{to}}",
+      "sent": "{{from}} a envoyé à {{to}}"
+    },
+    "why": {
+      "noPayments": "Son app n’accepte pas les paiements en groupe (mise à jour nécessaire), ou tous les moyens sont désactivés",
+      "noWay": "N’accepte aucun moyen de paiement que vous autorisez",
+      "unreachable": "Injoignable pour l’instant"
+    },
+    "you": "Vous",
+    "youObject": "vous"
+  },
   "invoice": {
     "anyAmount": "Montant libre",
     "checking": "Vérification…",

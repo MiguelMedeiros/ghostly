@@ -3,6 +3,7 @@
   "camera": "カメラ",
   "cameraFailed": "カメラを起動できませんでした。",
   "caption": "キャプションを追加",
+  "captionTooLong": "このキャプションは {{bytes}} バイト（UTF-8）です。DHT は最大 {{max}} バイトまでです。",
   "category": {
     "activity": "アクティビティ",
     "flags": "旗",
@@ -15,6 +16,7 @@
     "symbols": "記号"
   },
   "closeCamera": "カメラを閉じる",
+  "dhtTooLong": "このテキストは {{bytes}} バイト（UTF-8）です。DHT は最大 {{max}} バイトまでです。短くするか直接接続を使ってください。下書きは残っています。",
   "document": "書類",
   "dropFiles": "ドロップして送信",
   "emoji": "絵文字",
@@ -45,7 +47,11 @@
   "media": "写真と動画",
   "noEmoji": "絵文字が見つかりません",
   "noGifs": "GIF が見つかりません",
+  "overSoft": "DHT で送れる {{bytes}} バイトを超えています。直接接続されると送信されます",
   "payment": "支払い",
+  "previewLoading": "{{host}} のプレビューを読み込み中…",
+  "previewRemove": "リンクのプレビューを削除",
+  "previewWithout": "プレビューなしで送信",
   "removeFile": "{{name}} を削除",
   "retake": "撮り直す",
   "retry": "もう一度試す",
@@ -55,10 +61,13 @@
   "send": "送信",
   "sendCount": "{{count}} 件を送信",
   "sendFiles": "ファイルを送信",
+  "sendMessage": "メッセージを送信",
   "sendPhoto": "写真を送信",
   "services": "共有サービス",
   "servicesNeedApp": "Ghostly の拡張機能またはデスクトップアプリが必要です",
   "servicesShared": "このチャットで {{count}} 件共有中",
   "skinTone": "肌の色",
-  "takePhoto": "写真を撮る"
+  "takePhoto": "写真を撮る",
+  "tooLong": "長すぎて送信できません（{{count}} 文字、上限は {{max}}）。",
+  "tooLongDht": "DHT には長すぎます。P2P で接続されれば、長い請求書や ecash トークンも送れます。"
 }

@@ -11,6 +11,7 @@ import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/videoPlayer";
 import { localPoster, posterUrl } from "../../lib/videoPoster";
 import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
+import { useT } from "../../contexts/I18nContext";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "missing" | "not-yet";
@@ -24,7 +25,9 @@ const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-blac
  * screen). One video or voice message plays at a time; a video scrolled out of view stops and lets go of its
  * bytes, and starts again from there. A type this device does not play offers the file instead.
  */
-export function VideoBubble({ file, sender, peerName = "Your contact" }: { file: ChatFile; sender: "me" | "peer"; peerName?: string }) {
+export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile; sender: "me" | "peer"; peerName?: string }) {
+  const t = useT();
+  const peerName = named ?? t("pairing.contact");
   const { platform, transfer } = useTransfer(file.id);
   const ready = transfer === null || transfer.state === "done";
   const [playable] = useState(() => canPlayVideo(file.mime));
@@ -203,9 +206,9 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
   const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
   const canRetry = canRetryFile(file, transfer, platform);
-  const stuck = platform?.fileAction ? stalledAction(transfer) : null;
+  const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
-  const status = moving || failed ? fileStatus(file, transfer, peerName, false) : null;
+  const status = moving || failed ? fileStatus(file, transfer, peerName, false, t) : null;
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
   const reason = actionError || (failed ? transfer.error : undefined);
   const again = (action: () => Promise<unknown>) => {
@@ -218,11 +221,11 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
   const canPlay = playable && (ready || (sender === "me" && transfer?.stage !== "preparing" && transfer?.state !== "failed"));
   const showRing = moving && !offered && !(sender === "me" && canPlay);
 
-  const problemText = problem === "unsupported" ? `This device can't play this video (${formatOf(file.mime)}). Download it to watch.`
-    : problem === "too-large" ? "Too large to play here. Download it to watch."
-    : problem === "missing" ? "No longer available"
-    : problem === "not-yet" ? "It plays once it has been sent."
-    : !playable && ready ? `This device can't play this video (${formatOf(file.mime)}). Download it to watch.`
+  const problemText = problem === "unsupported" ? t("chat.video.cantPlay", { format: formatOf(file.mime) })
+    : problem === "too-large" ? t("chat.video.tooLarge")
+    : problem === "missing" ? t("chat.file.gone")
+    : problem === "not-yet" ? t("chat.media.notYet")
+    : !playable && ready ? t("chat.video.cantPlay", { format: formatOf(file.mime) })
     : null;
 
   return (
@@ -259,8 +262,8 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
               <button
                 type="button"
                 data-testid="video-fullscreen"
-                aria-label={theater ? "Exit full screen" : "Full screen"}
-                title={theater ? "Exit full screen" : "Full screen"}
+                aria-label={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
+                title={theater ? t("chat.video.exitFullScreen") : t("chat.video.fullScreen")}
                 aria-pressed={theater}
                 onClick={() => setTheater(!theater)}
                 className="absolute top-[6px] end-[6px] w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center border-none cursor-pointer"
@@ -291,9 +294,9 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
                     className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
                   >
                     <DownloadIcon size={18} />
-                    Download {formatFileSize(file.size)}
+                    {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
                   </button>
-                  <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">Decline</button>
+                  <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>
                 </>
               ) : showRing ? (
                 <ProgressRing percent={percent} paused={transfer?.stage === "paused" || transfer?.stage === "waiting" || !!transfer?.stalled} />
@@ -301,7 +304,7 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
                 <button
                   type="button"
                   data-testid="video-play"
-                  aria-label="Play video"
+                  aria-label={t("chat.video.play")}
                   disabled={phase === "loading"}
                   onClick={(event) => { focusOnStart.current = event.detail === 0; void play(); }}
                   className="w-14 h-14 rounded-full bg-black/55 hover:bg-black/70 text-white flex items-center justify-center border-none cursor-pointer disabled:opacity-60 disabled:cursor-default"
@@ -320,8 +323,8 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
               <button
                 type="button"
                 data-testid="video-save"
-                title="Save"
-                aria-label="Save video"
+                title={t("common.save")}
+                aria-label={t("chat.video.save")}
                 onClick={save}
                 className="absolute top-[6px] end-[6px] w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center border-none cursor-pointer"
               >
@@ -333,13 +336,13 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
       </div>
       {offered && typeof transfer.room === "number" && (
         <p className={`text-[11px] m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="video-room">
-          {noRoom ? `Not enough space: ${formatFileSize(transfer.room)} free` : `${peerName} wants to send it · ${formatFileSize(transfer.room)} free`}
+          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room) })}
         </p>
       )}
       {(status || canRetry || stuck) && !offered && (
         <div className="flex items-center gap-2 mt-1 px-1">
           {canRetry ? (
-            <RoundRetry danger busy={busy} testId="video-retry" label="Send again" hint="Not sent. Send it again."
+            <RoundRetry danger busy={busy} testId="video-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")}
               onClick={() => again(() => platform!.retryFile!(file.id))} />
           ) : stuck ? (
             <RoundRetry busy={busy} testId={`video-${stuck.action}`} label={stuck.label} hint={stuck.hint}
@@ -355,9 +358,9 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
       )}
       {controls && !offered && (
         <div className="flex gap-1.5 mt-1 px-1">
-          {canPause && <button type="button" className={linkButton} data-testid="video-pause-transfer" onClick={() => act("pause")}>Pause</button>}
-          {pausedHere && <button type="button" className={linkButton} data-testid="video-resume-transfer" onClick={() => act("resume")}>Resume</button>}
-          <button type="button" className={linkButton} data-testid="video-cancel" onClick={() => act("cancel")}>Cancel</button>
+          {canPause && <button type="button" className={linkButton} data-testid="video-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
+          {pausedHere && <button type="button" className={linkButton} data-testid="video-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
+          <button type="button" className={linkButton} data-testid="video-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
       {reason && why && <WhyText id={whyId} testId="video-why-text">{reason}</WhyText>}
@@ -365,7 +368,7 @@ export function VideoBubble({ file, sender, peerName = "Your contact" }: { file:
         <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="video-problem">
           {problemText}{" "}
           {(problem === "unsupported" || problem === "too-large" || (!playable && ready)) && (
-            <button type="button" data-testid="video-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer text-[12px]">Download</button>
+            <button type="button" data-testid="video-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer text-[12px]">{t("chat.message.download")}</button>
           )}
         </p>
       )}
@@ -394,9 +397,10 @@ function Spinner() {
 
 /** How much of it is here, around its percentage. */
 function ProgressRing({ percent, paused }: { percent: number; paused: boolean }) {
+  const t = useT();
   const radius = 22, circumference = 2 * Math.PI * radius;
   return (
-    <div className="relative w-14 h-14 rounded-full bg-black/55 text-white flex items-center justify-center" data-testid="video-progress" role="progressbar" aria-label="Arriving" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+    <div className="relative w-14 h-14 rounded-full bg-black/55 text-white flex items-center justify-center" data-testid="video-progress" role="progressbar" aria-label={t("chat.video.arriving")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
       <svg width="56" height="56" viewBox="0 0 56 56" className="absolute inset-0 -rotate-90" aria-hidden="true">
         <circle cx="28" cy="28" r={radius} fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
         <circle cx="28" cy="28" r={radius} fill="none" stroke="currentColor" strokeOpacity={paused ? 0.5 : 1} strokeWidth="3" strokeLinecap="round"

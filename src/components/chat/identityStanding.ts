@@ -8,14 +8,14 @@ import { chatsByPeer, contactName } from "../../lib/identities";
  * state (verified, expiring, revoked, failed, expired); a good one wins over the rest.
  */
 export type IdentityStanding =
-  | { kind: "own"; label: string }
+  | { kind: "own"; label: string; of: "did" | "proof" }
   | { kind: "contact"; state: BadgeState; who: string }
   | { kind: "none" };
 
 export function identityStanding(state: EngineState | null | undefined, provider: string, subject: string, peerPubKey?: string): IdentityStanding {
   if (!state) return { kind: "none" };
-  if (provider === "did" && state.did?.id === subject) return { kind: "own", label: "Your Ghostly DID" };
-  if (state.identityProofs.some(p => p.provider === provider && p.subject === subject)) return { kind: "own", label: "Your identity" };
+  if (provider === "did" && state.did?.id === subject) return { kind: "own", label: "Your Ghostly DID", of: "did" };
+  if (state.identityProofs.some(p => p.provider === provider && p.subject === subject)) return { kind: "own", label: "Your identity", of: "proof" };
   const chats = chatsByPeer();
   const links = [...state.links].sort((a, b) => Number(b.peerPubKeyZ32 === peerPubKey) - Number(a.peerPubKeyZ32 === peerPubKey));
   let best: { state: BadgeState; who: string } | undefined;

@@ -3,6 +3,14 @@
   "copyInvite": "Copy invite code",
   "deleteAllChats": "Delete all chats",
   "deleteChat": "Delete chat",
+  "group": {
+    "adminAnswered": "The admin's app answered…",
+    "invitedBy": "Invited by {{contact}} · {{members}}",
+    "invitedByUnknown": "Invited by a contact · {{members}}",
+    "letting": "A member is letting you in…",
+    "waitingAdmin": "Waiting for the admin's app…",
+    "waitingIn": "Waiting to be let in…"
+  },
   "join": "Join",
   "joinChat": "Join chat",
   "new": "New",
@@ -21,5 +29,6 @@
   "searchPlaceholder": "Search chats...",
   "settings": "Settings",
   "sharedIdentity": "Shared an identity",
-  "startChat": "New chat"
+  "startChat": "New chat",
+  "unread": "Unread messages"
 }

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, guardArchive, openPeer, type Peer, type PeerOptions } from "./fixtures";
 import { test as base } from "./fixtures";
+import { mintStandIn, type MintStandIn } from "./mint";
 
 const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
 
@@ -39,8 +40,10 @@ export const test = base.extend<Fixtures>({
     // Prepared on first use: a test that asks for the fixture but opens no extension needs no build of it.
     let extensionDir: string | undefined;
     const opened: Peer[] = [];
+    let mint: Promise<MintStandIn | undefined> | undefined;
     await use(async (name, options = {}) => {
       extensionDir ??= prepareExtension(work);
+      const mintArgs = (await (mint ??= mintStandIn()))?.args ?? [];
       const context = await chromium.launchPersistentContext(join(work, name), {
         channel: "chromium",
         headless: !process.env.HEADED,
@@ -55,6 +58,8 @@ export const test = base.extend<Fixtures>({
           "--auto-select-desktop-capture-source=Entire screen",
           // The context option covers pages, not the extension's offscreen document, where its engine runs.
           ...(options.ignoreHTTPSErrors ? ["--ignore-certificate-errors"] : []),
+          // Its engine's requests to the public test mint are out of reach of `context.route` too: see mintStandIn.
+          ...mintArgs,
         ],
       });
       await guardArchive(context);
@@ -88,6 +93,7 @@ export const test = base.extend<Fixtures>({
       return peer;
     });
     for (const peer of opened) await peer.context.close().catch(() => {});
+    await (await mint)?.close();
     rmSync(work, { recursive: true, force: true });
   },
   webPeer: async ({ relay, baseURL }, use) => {

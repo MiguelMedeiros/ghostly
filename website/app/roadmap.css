@@ -309,6 +309,10 @@
 .rm-cand-body > * + * {
   margin-top: 0.6em;
 }
+/* A source path in a candidate's text breaks where it must on a phone. */
+.rm-cand-body code {
+  overflow-wrap: anywhere;
+}
 .rm-cand-body strong {
   color: var(--text);
 }

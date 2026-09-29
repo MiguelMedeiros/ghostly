@@ -3,6 +3,14 @@
   "copyInvite": "复制邀请码",
   "deleteAllChats": "删除所有聊天",
   "deleteChat": "删除聊天",
+  "group": {
+    "adminAnswered": "管理员的应用已回应…",
+    "invitedBy": "由 {{contact}} 邀请 · {{members}}",
+    "invitedByUnknown": "由一位联系人邀请 · {{members}}",
+    "letting": "有成员正在让你加入…",
+    "waitingAdmin": "正在等待管理员的应用…",
+    "waitingIn": "等待被允许加入…"
+  },
   "join": "加入",
   "joinChat": "加入聊天",
   "new": "新建",
@@ -21,5 +29,6 @@
   "searchPlaceholder": "搜索聊天...",
   "settings": "设置",
   "sharedIdentity": "分享了一个身份",
-  "startChat": "新聊天"
+  "startChat": "新聊天",
+  "unread": "未读消息"
 }

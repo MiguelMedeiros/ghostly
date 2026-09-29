@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
-import { useOptionalI18n } from "../../contexts/I18nContext";
+import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
@@ -28,7 +28,9 @@ const pill = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 b
  * go of its bytes and goes on from where it was. A large one asks first ("Download 40.0 MB"); one this device
  * does not play offers Download.
  */
-export function AudioBubble({ file, sender, peerName = "Your contact", highlight }: { file: ChatFile; sender: "me" | "peer"; peerName?: string; highlight?: string }) {
+export function AudioBubble({ file, sender, peerName: named, highlight }: { file: ChatFile; sender: "me" | "peer"; peerName?: string; highlight?: string }) {
+  const t = useT();
+  const peerName = named ?? t("pairing.contact");
   const platform = useServicesPlatform();
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
   const transfer = platform?.getTransfer(file.id) ?? null;
@@ -169,9 +171,9 @@ export function AudioBubble({ file, sender, peerName = "Your contact", highlight
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
   const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
   const canRetry = canRetryFile(file, transfer, platform);
-  const stuck = platform?.fileAction ? stalledAction(transfer) : null;
+  const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
-  const status = (moving && !offered) || failed ? fileStatus(file, transfer, peerName, false) : null;
+  const status = (moving && !offered) || failed ? fileStatus(file, transfer, peerName, false, t) : null;
   const reason = actionError || (failed ? transfer.error : undefined);
   // One sent from here can be listened to while it goes, once it has been copied.
   const canPlay = playable && (ready || (sender === "me" && transfer?.stage !== "preparing" && !failed));
@@ -179,17 +181,17 @@ export function AudioBubble({ file, sender, peerName = "Your contact", highlight
   const active = state === "playing" || state === "paused" || position > 0;
   const known = duration > 0;
 
-  const problemText = problem === "unsupported" || (!playable && ready) ? `This device can't play this audio (${audioFormat(file.mime)}). Download it to listen.`
-    : problem === "too-large" ? "Too large to play here. Download it to listen."
-    : problem === "missing" ? "No longer available"
-    : problem === "not-yet" ? "It plays once it has been sent."
+  const problemText = problem === "unsupported" || (!playable && ready) ? t("chat.audio.cantPlay", { format: audioFormat(file.mime) })
+    : problem === "too-large" ? t("chat.audio.tooLarge")
+    : problem === "missing" ? t("chat.file.gone")
+    : problem === "not-yet" ? t("chat.media.notYet")
     : null;
 
   return (
     <div className="w-[300px] max-w-full pt-1" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
       <div className="flex items-center gap-2">
         {canRetry ? (
-          <RoundRetry danger busy={busy} testId="audio-retry" label="Send again" hint="Not sent. Send it again." onClick={() => again(() => platform!.retryFile!(file.id))} />
+          <RoundRetry danger busy={busy} testId="audio-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")} onClick={() => again(() => platform!.retryFile!(file.id))} />
         ) : stuck ? (
           <RoundRetry busy={busy} testId={`audio-${stuck.action}`} label={stuck.label} hint={stuck.hint} onClick={() => again(() => platform!.fileAction!(file.id, stuck.action))} />
         ) : (
@@ -198,7 +200,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact", highlight
               ref={playRef}
               type="button"
               data-testid="audio-play"
-              aria-label={state === "playing" ? "Pause audio" : "Play audio"}
+              aria-label={state === "playing" ? t("chat.audio.pause") : t("chat.audio.play")}
               disabled={!canPlay || !!problem || state === "loading"}
               onClick={() => (state === "playing" ? pause() : void play())}
               className="w-9 h-9 flex items-center justify-center rounded-full bg-black/20 border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/30"
@@ -217,7 +219,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact", highlight
           <input
             type="range"
             data-testid="audio-seek"
-            aria-label="Position in audio"
+            aria-label={t("chat.audio.position")}
             aria-valuetext={`${formatVideoDuration(position * 1000)} of ${formatVideoDuration(duration * 1000)}`}
             min={0}
             max={known ? duration : 1}
@@ -237,7 +239,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact", highlight
           </div>
         </div>
         {ready && (
-          <button type="button" data-testid="audio-save" title="Save" aria-label="Save audio" onClick={save}
+          <button type="button" data-testid="audio-save" title={t("common.save")} aria-label={t("chat.audio.save")} onClick={save}
             className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit border-none cursor-pointer">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
@@ -250,22 +252,22 @@ export function AudioBubble({ file, sender, peerName = "Your contact", highlight
           <div className="flex items-center gap-2">
             <button type="button" data-testid="audio-accept" disabled={noRoom} onClick={() => act("accept")}
               className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50 disabled:cursor-default">
-              Download {formatFileSize(file.size)}
+              {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
             </button>
-            <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>Decline</button>
+            <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>
           </div>
           {typeof transfer.room === "number" && (
             <p className={`text-[11px] m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="audio-room">
-              {noRoom ? `Not enough space: ${formatFileSize(transfer.room)} free` : `${peerName} wants to send it · ${formatFileSize(transfer.room)} free`}
+              {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room) })}
             </p>
           )}
         </div>
       )}
       {controls && !offered && (
         <div className="flex gap-1.5 mt-1 px-1">
-          {canPause && <button type="button" className={pill} data-testid="audio-pause-transfer" onClick={() => act("pause")}>Pause</button>}
-          {pausedHere && <button type="button" className={pill} data-testid="audio-resume-transfer" onClick={() => act("resume")}>Resume</button>}
-          <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>Cancel</button>
+          {canPause && <button type="button" className={pill} data-testid="audio-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
+          {pausedHere && <button type="button" className={pill} data-testid="audio-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
+          <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
       {reason && why && <WhyText id={whyId} testId="audio-why-text">{reason}</WhyText>}
@@ -273,7 +275,7 @@ export function AudioBubble({ file, sender, peerName = "Your contact", highlight
         <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="audio-problem">
           {problemText}{" "}
           {(problem === "unsupported" || problem === "too-large" || (!playable && ready)) && (
-            <button type="button" data-testid="audio-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer text-[12px]">Download</button>
+            <button type="button" data-testid="audio-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer text-[12px]">{t("chat.message.download")}</button>
           )}
         </p>
       )}

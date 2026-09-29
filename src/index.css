@@ -391,6 +391,13 @@ body {
   height: 17px;
 }
 
+/* Five buttons (Share screen too, in a narrow browser window) keep their round shape: less room between them. */
+@media (max-width: 480px) {
+  .call-controls:has(> :nth-child(5)) {
+    gap: 0.5rem;
+  }
+}
+
 /* Who is sharing a screen, and why a share failed: above the controls, where the small window has room. */
 .call-mini .call-share-notice {
   top: auto;

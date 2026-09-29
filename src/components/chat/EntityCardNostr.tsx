@@ -7,6 +7,7 @@ import { useEngineState } from "../../lib/identities";
 import { ago } from "../../lib/nostr";
 import { ProviderMark } from "../identities/ProviderMark";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
+import { useT } from "../../contexts/I18nContext";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const shortCode = (code: string) => (code.length > 24 ? `${code.slice(0, 14)}…${code.slice(-6)}` : code);
@@ -24,6 +25,7 @@ const relayNames = (relays: readonly string[]) => relays.map(r => r.replace(/^ws
  */
 export function NostrEntityCard({ code, pointer }: { code: string; pointer: NostrPointer }) {
   const state = useEngineState();
+  const t = useT();
   const relays = state?.nostr.settings.relays ?? [];
   const [result, setResult] = useState(() => loaded.get(keyOf(pointer)));
   const [busy, setBusy] = useState(false);
@@ -44,32 +46,32 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
   const p = result?.profile, note = result?.note;
   const title = profile
     ? p?.name ?? shortNpub(pointer.pubkey)
-    : note ? `Note by ${shortNpub(note.author)}` : "A note on Nostr";
+    : note ? t("chat.entity.noteBy", { author: shortNpub(note.author) }) : t("chat.entity.aNote");
   const subtitle = profile ? (p?.handle ? `@${p.handle} · ${shortNpub(pointer.pubkey)}` : p?.name ? shortNpub(pointer.pubkey) : undefined) : undefined;
 
   return (
     <EntityCardFrame testId="entity-nostr" data={{ "data-type": pointer.type, "data-loaded": result ? "true" : undefined }}
-      label={profile ? "Nostr profile" : "Nostr note"} mark={<ProviderMark provider="nostr" />}
+      label={profile ? t("chat.entity.nostrProfile") : t("chat.entity.nostrNote")} mark={<ProviderMark provider="nostr" />}
       title={<span data-testid="entity-nostr-title">{title}</span>}
       subtitle={subtitle ?? <span className="font-mono" title={code}>{shortCode(code)}</span>}>
-      {result && !result.found && <p className="m-0" data-testid="entity-nostr-none">{profile ? "No profile published under this key on your relays." : "Your relays do not have this note."}</p>}
+      {result && !result.found && <p className="m-0" data-testid="entity-nostr-none">{profile ? t("chat.entity.noProfile") : t("chat.entity.noNote")}</p>}
       {p && <>
         {p.avatar && <img src={p.avatar} alt="" data-testid="entity-nostr-avatar" className="h-10 w-10 rounded-full object-cover" />}
         {p.about && <p data-testid="entity-nostr-about" className="m-0 line-clamp-4 whitespace-pre-wrap break-words text-text-primary">{p.about}</p>}
-        {p.nip05 && <p className="m-0"><span className="break-all">{p.nip05}</span> <span className="text-text-primary/65">(NIP-05, as they wrote it, not checked)</span></p>}
+        {p.nip05 && <p className="m-0"><span className="break-all">{p.nip05}</span> <span className="text-text-primary/65">{t("chat.entity.nip05")}</span></p>}
       </>}
       {note && (note.muted
-        ? <p className="m-0" data-testid="entity-nostr-muted">Hidden by your Nostr mute list.</p>
+        ? <p className="m-0" data-testid="entity-nostr-muted">{t("chat.entity.muted")}</p>
         : <p data-testid="entity-nostr-note" className="m-0 line-clamp-6 whitespace-pre-wrap break-words text-text-primary">{note.content}</p>)}
-      {note && <p className="m-0 text-text-primary/65">{ago(note.createdAt)}{note.reply ? " · a reply" : ""}</p>}
+      {note && <p className="m-0 text-text-primary/65">{ago(note.createdAt)}{note.reply ? ` · ${t("chat.entity.aReply")}` : ""}</p>}
       {result
-        ? <p className="m-0 text-[11px] text-text-primary/65" data-testid="entity-nostr-source">From {relayNames(result.relays)} {ago(result.fetchedAt)}. Self-described by the key that signed it.</p>
+        ? <p className="m-0 text-[11px] text-text-primary/65" data-testid="entity-nostr-source">{t("chat.entity.nostrSource", { relays: relayNames(result.relays), when: ago(result.fetchedAt) })}</p>
         : <p className="m-0 text-[11px] text-text-primary/65" data-testid="entity-nostr-where">
-          Loading asks your relays ({relayNames(relays)}), which learn your IP address and this {profile ? "key" : "note"}.
-          {pointer.relays.length > 0 && " The relays this code names are not asked."}
+          {profile ? t("chat.entity.loadKeyHint", { relays: relayNames(relays) }) : t("chat.entity.loadNoteHint", { relays: relayNames(relays) })}
+          {pointer.relays.length > 0 && ` ${t("chat.entity.codeRelays")}`}
         </p>}
       <button type="button" data-testid="entity-nostr-load" disabled={busy} className={cardQuiet} onClick={() => void load()}>
-        {busy ? "Loading…" : result ? "Refresh" : profile ? "Load profile" : "Load note"}
+        {busy ? t("chat.entity.loading") : result ? t("chat.menu.refresh") : profile ? t("chat.entity.loadProfile") : t("chat.entity.loadNote")}
       </button>
       {error && <p role="alert" data-testid="entity-nostr-error" className="m-0 text-danger-ink">{error}</p>}
     </EntityCardFrame>

@@ -199,6 +199,50 @@
     "wrongChain": "Your {{network}} Bitcoin wallet is on {{chain}}; this address is for {{target}}.",
     "wrongToken": "This link asks for another token than your wallet's USDT: not paid from here."
   },
+  "group": {
+    "bitcoinOnchain": "Bitcoin on-chain",
+    "chooseOne": "Choose one member to send to",
+    "describe": {
+      "cashu": "Request ecash from a mint you use. The first member whose ecash arrives pays it; anyone later gets theirs back.",
+      "lightning": "Request with one Lightning invoice. Any member may pay it, once: an invoice cannot be paid twice.",
+      "other": "Only Cashu or Lightning for the whole group."
+    },
+    "everyone": "Request from the group",
+    "everyoneHint": "Anyone in the group may pay it, once",
+    "formerMember": "A former member",
+    "formerMemberObject": "a former member",
+    "hint": {
+      "community": "The payment is sealed to the two of you: the group passes it on without reading it, and someone away gets it when they are back. Everyone sees who paid whom and how much.",
+      "mesh": "The payment goes only between the two of you; everyone in the group sees who paid whom and how much."
+    },
+    "listSeparator": ", ",
+    "sendUnavailable": "A request to the group is paid by one member; to pay someone, choose them instead",
+    "status": {
+      "claimedPaid": "{{names}} paid · waiting for {{to}}'s wallet",
+      "closed": "Closed",
+      "paid": "Paid",
+      "paidBy": "Paid by {{name}}",
+      "saysPaid": "{{names}} says they paid · waiting for {{to}}'s wallet",
+      "sent": "Sent · waiting for {{name}}",
+      "takenBack": "Taken back",
+      "waiting": "Waiting for payment"
+    },
+    "testUsdt": "test USDT",
+    "theGroup": "the group",
+    "title": {
+      "asked": "{{to}} asked {{from}}",
+      "askedGroup": "{{to}} asked the group",
+      "paying": "{{from}} is paying {{to}}",
+      "sent": "{{from}} sent {{to}}"
+    },
+    "why": {
+      "noPayments": "Their app takes no payments in groups (it needs an update), or they turned every way off",
+      "noWay": "They take no way of paying you allow",
+      "unreachable": "Not reachable right now"
+    },
+    "you": "You",
+    "youObject": "you"
+  },
   "invoice": {
     "anyAmount": "Any amount",
     "checking": "Checking…",
