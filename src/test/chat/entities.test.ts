@@ -121,3 +121,24 @@ describe("findEntities: a message with several", () => {
     expect(findEntities("the ghostly1 thing, did: nothing, npub1 is short, pk: none")).toEqual([]);
   });
 });
+
+describe("findEntities: hostile text", () => {
+  const { inviteCode } = createChatInvite();
+
+  it("reads only a short address before the code's #: past that, the card is for the bare code", () => {
+    const long = `https://ghostly.tools/${"a".repeat(300)}#${inviteCode}`;
+    expect(findEntities(long)).toMatchObject([{ kind: "invite", code: inviteCode, text: inviteCode, start: long.length - inviteCode.length }]);
+    const entry = encodeGroupEntryLink({ g: groupId(), host: z32() });
+    const longJoin = `https://app.ghostly.tools/${"b".repeat(300)}#/join/${entry}`;
+    expect(findEntities(longJoin)).toMatchObject([{ kind: "group", link: entry, text: entry }]);
+  });
+
+  it("scans a message of addresses with no # in time that grows with its length, not its square", () => {
+    for (const unit of ["https://", "http://group1/", "https:///"]) {
+      const text = unit.repeat(Math.ceil(20_000 / unit.length));
+      const started = performance.now();
+      expect(findEntities(text)).toEqual([]);
+      expect(performance.now() - started).toBeLessThan(25);
+    }
+  });
+});
