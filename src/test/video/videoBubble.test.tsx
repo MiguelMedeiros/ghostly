@@ -153,6 +153,10 @@ describe("a video in the chat", () => {
     const url = player.getAttribute("src");
     player.currentTime = 7;
     act(() => seen!([{ isIntersecting: false }]));
+    // Out of view for a moment (a phone turned on its side): it goes on playing.
+    expect(screen.getByTestId("video-player")).toBe(player);
+    // Out of view for good: it stops.
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 1600)));
     expect(screen.queryByTestId("video-player")).toBeNull();
     expect(pause.mock.contexts).toContain(player);
     expect(revoke).toHaveBeenCalledWith(url);

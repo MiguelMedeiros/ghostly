@@ -439,6 +439,7 @@ export class Communities {
     this.lastMentionAt.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
+    this.host.historyGone?.(groupId);
     this.host.emit();
   }
 

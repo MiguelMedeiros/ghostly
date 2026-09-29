@@ -63,6 +63,11 @@ export interface GroupsHost {
   completeMessage?(message: StoredMessage): Promise<void>;
   /** A private group's roster or my status in it changed, or I forgot it. */
   membersChanged?(groupId: string): void;
+  /**
+   * The group's history was deleted (I left or forgot it): the pages drop their copy too. They hear only what changes
+   * in a history they hold, so a group joined again showed the old one under what came after, until a reload.
+   */
+  historyGone?(groupId: string): void;
   emit(): void;
   /** My name, for community groups, where it travels (encrypted) with my messages. */
   myNick?(): string | undefined;
@@ -506,6 +511,7 @@ export class Groups {
     this.lastMentionAt.delete(groupId);
     await this.store.deleteGroup(groupId);
     await this.store.putGroup(group);
+    this.host.historyGone?.(groupId);
     for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
     this.host.emit();
     await session.leave();
@@ -575,6 +581,7 @@ export class Groups {
     this.hereActed.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
+    this.host.historyGone?.(groupId);
     this.host.membersChanged?.(groupId);
     this.host.emit();
   }
