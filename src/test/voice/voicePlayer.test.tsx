@@ -5,6 +5,7 @@ import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { lookup } from "../i18n/locales";
 import { audio, endPlayback, installFakeAudio } from "./fakeMedia";
 
 // covers: files.voice.play, files.voice.autoplay, files.large.resend, files.large.request
@@ -181,7 +182,10 @@ describe("a voice message in the chat", () => {
     renderApp(<MessageBubble message={voice()} peerPubKey="peer" />, { language });
     fireEvent.click(screen.getByTestId("voice-play"));
     await flush();
-    expect(screen.getByRole("button", { name: `Playback speed ${label}` })).toHaveTextContent(label);
+    const speed = screen.getByTestId("voice-speed");
+    expect(speed).toHaveTextContent(label);
+    // Named in the app language too, around the same number.
+    expect(speed).toHaveAccessibleName(lookup(language, "chat.voice.speed")!.replace("{{speed}}", label));
   });
 
   it("takes the mic's place while it plays, is a button the keyboard can use, and hands focus back to play when it goes", async () => {

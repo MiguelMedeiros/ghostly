@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
-import { useOptionalI18n } from "../../contexts/I18nContext";
+import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
@@ -43,7 +43,9 @@ function describeFailure(what: string, error: unknown): string {
  * received — a mark until it has been listened to. The bytes are read only when it first
  * plays; the waveform was measured by the sender, so nothing is decoded to draw it.
  */
-export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
+export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
+  const t = useT();
+  const peerName = named ?? t("pairing.contact");
   const { platform, transfer } = useTransfer(file.id);
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
   const ready = transfer === null || transfer.state === "done";
@@ -99,8 +101,8 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     setProblem(message);
   }, []);
   const cannotPlayHere = useCallback(
-    () => giveUp(`This device can't play this recording (${formatOf(file.mime)}). Save it to play it elsewhere.`),
-    [giveUp, file.mime],
+    () => giveUp(t("chat.voice.cantPlay", { format: formatOf(file.mime) })),
+    [giveUp, file.mime, t],
   );
 
   const showProgress = useCallback((at: number) => {
@@ -136,7 +138,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     if (audioRef.current) return Promise.resolve(audioRef.current);
     loadingRef.current ??= (async () => {
       const blob = await platform?.getFile(file.id);
-      if (!blob) { setProblem("No longer available"); return null; }
+      if (!blob) { setProblem(t("chat.file.gone")); return null; }
       blobRef.current = blob;
       const audio = new Audio();
       audio.preload = "auto";
@@ -170,7 +172,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
         stopFrames();
         releasePlayback(file.id);
         setState("idle");
-        giveUp("Could not play this recording.");
+        giveUp(t("chat.voice.couldNotPlay"));
       });
       const speaker = followSpeaker(audio);
       speakerRef.current = speaker.stop;
@@ -179,7 +181,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
       return audio;
     })().finally(() => { loadingRef.current = null; });
     return loadingRef.current;
-  }, [platform, file.id, file.mime, seconds, showProgress, report, giveUp, cannotPlayHere, switchToDecoded]);
+  }, [platform, file.id, file.mime, seconds, showProgress, report, giveUp, cannotPlayHere, switchToDecoded, t]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -206,7 +208,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
           // Refused as it is: its type may still decode through Web Audio.
           const decodedAlready = decodedRef.current;
           if (!decodedAlready && (await switchToDecoded(audio))) continue;
-          if (decodedAlready) giveUp("Could not play this recording.");
+          if (decodedAlready) giveUp(t("chat.voice.couldNotPlay"));
           else cannotPlayHere();
           return false;
         }
@@ -214,7 +216,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     } finally {
       startingRef.current = false;
     }
-  }, [report, switchToDecoded, cannotPlayHere, giveUp]);
+  }, [report, switchToDecoded, cannotPlayHere, giveUp, t]);
 
   const play = useCallback(async () => {
     if (!ready) return;
@@ -234,8 +236,8 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     followAudio();
     // The lock screen and media keys drive the one playing now (through `mediaRef`, always this render's functions).
     claimMediaSession(file.id, {
-      title: "Voice message",
-      artist: sender === "me" ? "You" : peerName,
+      title: t("chat.voice.message"),
+      artist: sender === "me" ? t("chat.reply.you") : peerName,
       play: () => mediaRef.current?.play(),
       pause: () => mediaRef.current?.pause(),
       seekTo: (at) => mediaRef.current?.seekTo(at),
@@ -243,7 +245,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     });
     mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
     if (sender === "peer" && !played) { markVoicePlayed(file.id); setPlayed(true); }
-  }, [ready, file.id, load, seconds, showProgress, start, followAudio, sender, played, peerName]);
+  }, [ready, file.id, load, seconds, showProgress, start, followAudio, sender, played, peerName, t]);
 
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause }), [file.id, play, pause]);
   useEffect(() => onVoiceRate((next) => {
@@ -297,10 +299,10 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
   const unplayed = sender === "peer" && !played;
   let status: string | null = null;
   // Where it stands, as a file says it: "Waiting for connection", "Not moving", never a bare 0% that looks alive.
-  if (transfer?.state === "transferring" || transfer?.state === "failed") status = fileStatus(file, transfer, peerName, false);
+  if (transfer?.state === "transferring" || transfer?.state === "failed") status = fileStatus(file, transfer, peerName, false, t);
   // One of mine that has not started for want of a connection: the clock beside the time says it.
   if (sender === "me" && transfer?.state === "transferring" && transfer.stage === "waiting" && transfer.transferred === 0) status = null;
-  const stuck = platform?.fileAction ? stalledAction(transfer) : null;
+  const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
   const canRetry = canRetryFile(file, transfer, platform);
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
@@ -329,7 +331,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
     >
       <div className="flex items-center gap-1.5">
         {canRetry ? (
-          <RoundRetry danger busy={busy} testId="voice-retry" label="Send again" hint="Not sent. Send it again."
+          <RoundRetry danger busy={busy} testId="voice-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")}
             onClick={() => run(() => platform!.retryFile!(file.id))} />
         ) : stuck ? (
           <RoundRetry busy={busy} testId={`voice-${stuck.action}`} label={stuck.label} hint={stuck.hint}
@@ -340,7 +342,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
               ref={playRef}
               type="button"
               data-testid="voice-play"
-              aria-label={state === "playing" ? "Pause voice message" : "Play voice message"}
+              aria-label={state === "playing" ? t("chat.voice.pause") : t("chat.voice.play")}
               disabled={!ready || state === "loading"}
               onClick={() => (state === "playing" ? pause() : void play())}
               className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/15"
@@ -361,7 +363,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
             knob
             role="slider"
             tabIndex={ready ? 0 : -1}
-            aria-label="Position in voice message"
+            aria-label={t("chat.voice.position")}
             aria-valuemin={0}
             aria-valuemax={Math.round(seconds)}
             aria-valuenow={Math.round(position)}
@@ -387,7 +389,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
                 className={`shrink-0 ${unplayed ? "text-accent-hover" : ""}`}
                 data-testid={unplayed ? "voice-unplayed" : "voice-mic"}
                 role="img"
-                aria-label={unplayed ? "Voice message, not played yet" : "Voice message"}
+                aria-label={unplayed ? t("chat.voice.unplayed") : t("chat.voice.message")}
               >
                 <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
               </svg>
@@ -403,7 +405,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
       {problem && (
         <p className="text-[12px] text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
-          {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">Save</a>}
+          {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
       )}
       {reason && why && <WhyText id={whyId} testId="voice-why-text">{reason}</WhyText>}
@@ -417,6 +419,7 @@ export function VoiceBubble({ file, sender, peerName = "Your contact" }: { file:
  * the keyboard goes back to play rather than to the page.
  */
 export function SpeedPill({ rate, locale, onGone }: { rate: number; locale: string; onGone: () => void }) {
+  const t = useT();
   const ref = useRef<HTMLButtonElement>(null);
   const goneRef = useRef(onGone);
   goneRef.current = onGone;
@@ -432,7 +435,7 @@ export function SpeedPill({ rate, locale, onGone }: { rate: number; locale: stri
       type="button"
       data-testid="voice-speed"
       data-rate={rate}
-      aria-label={`Playback speed ${label}`}
+      aria-label={t("chat.voice.speed", { speed: label })}
       onClick={() => nextVoiceRate()}
       // The pill is as tall as the line it sits on; its touch area reaches a little past it.
       className="relative shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums before:content-[''] before:absolute before:-inset-x-1 before:-inset-y-1"

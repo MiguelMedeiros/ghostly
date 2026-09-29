@@ -239,7 +239,7 @@ export function MessageInput({
     if (!text.trim() || disabled) return;
     if (sending.current) { if (!edit) again.current = true; return; }
     const bytes = new TextEncoder().encode(text.trim()).length;
-    if (maxBytes && bytes > maxBytes) { showToast(`This text is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}; shorten it or use a live connection. Your draft is kept.`); return; }
+    if (maxBytes && bytes > maxBytes) { showToast(t("composer.dhtTooLong", { bytes, max: maxBytes })); return; }
     const found = confirmed ? null : findSecret(text);
     if (found) { setSecret({ finding: found }); return; }
     sending.current = true;
@@ -311,8 +311,8 @@ export function MessageInput({
     } else if (value.length - text.length > 1) {
       showToast(
         maxLength > DEFAULT_MAX
-          ? `That is too long to send (${value.length.toLocaleString()} characters, the limit is ${maxLength.toLocaleString()}).`
-          : "That is too long for the DHT. Once you are connected peer to peer, long invoices and ecash tokens fit.",
+          ? t("composer.tooLong", { count: value.length.toLocaleString(), max: maxLength.toLocaleString() })
+          : t("composer.tooLongDht"),
       );
     }
     if (textareaRef.current) fitFieldHeight(textareaRef.current);
@@ -412,7 +412,7 @@ export function MessageInput({
   const sendCaption = async (caption: string, confirmed = false) => {
     if (!caption) return;
     const bytes = new TextEncoder().encode(caption).length;
-    if (maxBytes && bytes > maxBytes) { showToast(`This caption is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}.`); return; }
+    if (maxBytes && bytes > maxBytes) { showToast(t("composer.captionTooLong", { bytes, max: maxBytes })); return; }
     const found = confirmed ? null : findSecret(caption);
     if (found) { setSecret({ finding: found, caption }); return; }
     const err = await onSend(caption);
@@ -554,6 +554,7 @@ export function MessageInput({
                 setToast(null);
                 if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
               }}
+              aria-label={t("common.close")}
               className="text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none shrink-0"
             >
               &times;
@@ -600,14 +601,14 @@ export function MessageInput({
               className="composer-textarea"
             />
             {softBytes && !maxBytes && bytes > softBytes - 60 && (
-              <span data-testid="dht-byte-count" title={overSoft ? `Over the ${softBytes} bytes the DHT carries: it is sent when you are live` : undefined}
-                className={`absolute right-2.5 bottom-1 text-[10px] ${overSoft ? "text-amber-500" : "text-text-muted"}`}>
+              <span data-testid="dht-byte-count" title={overSoft ? t("composer.overSoft", { bytes: softBytes }) : undefined}
+                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-amber-500" : "text-text-muted"}`}>
                 {bytes} / {softBytes} B
               </span>
             )}
             {!(softBytes && !maxBytes) && remaining < 100 && (
               <span
-                className={`absolute right-2.5 bottom-1 text-[10px] ${remaining < 50 ? "text-danger" : "text-text-muted"}`}
+                className={`absolute end-2.5 bottom-1 text-[10px] ${remaining < 50 ? "text-danger" : "text-text-muted"}`}
               >
                 {remaining}{maxBytes ? " B" : ""}
               </span>
@@ -626,7 +627,7 @@ export function MessageInput({
             onActiveChange={(active) => { if (active) closeAll(); onTyping?.(active, "recording"); }}
           />
         ) : <button
-          aria-label="Send message"
+          aria-label={t("composer.sendMessage")}
           onClick={() => handleSubmit()}
           disabled={disabled || !text.trim()}
           className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
