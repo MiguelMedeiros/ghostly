@@ -27,7 +27,8 @@ jobs:
   e2e:
     name: End-to-end
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The web and extension suites outgrew 30 minutes (cancelled mid-run on 2026-09-29).
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -162,6 +163,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # e2e/desktop/calls-interop.spec.ts calls the Linux Desktop from a Chromium page.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Install tauri-driver
         run: command -v tauri-driver || cargo install tauri-driver --locked
