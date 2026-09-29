@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { MobileTabBar } from "./components/MobileTabBar";
+import { InstallSteps } from "./components/InstallApp";
 import { Chat } from "./pages/Chat";
 import { chatRouteSession } from "./lib/url";
 import { listSessions } from "./lib/storage";
@@ -176,6 +177,7 @@ export function App() {
             <Outlet />
           </div>
         )}
+        <InstallSteps />
       </div>
     );
   }
@@ -195,6 +197,7 @@ export function App() {
         </div>
       )}
       {!inChat && !inGroup && <MobileTabBar />}
+      <InstallSteps />
     </div>
   );
 }
