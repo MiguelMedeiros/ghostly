@@ -1,9 +1,10 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { connectDaemon } from "../src/client";
+import { serve, type Host } from "../src/host";
 import { ownSocket, privateFolder } from "../src/privateFolder";
 import { profilePaths } from "../src/profiles";
 // covers: headless.daemon
@@ -47,5 +48,28 @@ describe.skipIf(process.platform === "win32")("sockets outside the profile", () 
     symlinkSync(socket, link);
     expect(ownSocket(link)).toBe(false);
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+});
+
+/** The profile's own folder, where its socket usually is: owner-only before the daemon listens in it. */
+describe.skipIf(process.platform === "win32")("the daemon's socket in the profile's folder", () => {
+  const hostAt = (dir: string) => ({ ctx: { runtime: { paths: { dir, socket: join(dir, "daemon.sock") } } } }) as unknown as Host;
+
+  it("a profile folder anyone else may enter is closed before the socket is made; the socket is 0600", async () => {
+    const dir = join(root, "profile-open");
+    mkdirSync(dir);
+    chmodSync(dir, 0o755);
+    const served = await serve(hostAt(dir));
+    try {
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(statSync(join(dir, "daemon.sock")).mode & 0o777).toBe(0o600);
+    } finally { await served.close(); }
+  });
+
+  it("a profile folder that is a link is refused", async () => {
+    const target = join(root, "profile-target");
+    mkdirSync(target, { mode: 0o700 });
+    symlinkSync(target, join(root, "profile-link"));
+    await expect(serve(hostAt(join(root, "profile-link")))).rejects.toThrow(/not a folder of this user's/);
   });
 });

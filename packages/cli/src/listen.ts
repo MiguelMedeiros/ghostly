@@ -165,11 +165,15 @@ async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
   return false;
 }
 
-/** A handler that takes events in order, one at a time. */
+/**
+ * A handler that takes events in order, one at a time. A step that throws (the output closed, the allowlist's lookup,
+ * the cursor's disk) is said on stderr and passed: the cursor moves on and the next event is handled.
+ */
 export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => void {
   const webhook = options.webhook ? checkWebhook(options.webhook) : null;
   let chain = Promise.resolve();
   return (event) => {
+    const seq = event.seq, type = event.type;
     chain = chain.then(async () => {
       const skip = () => { if (options.cursor) writeCursor(options.cursor, event.seq); };
       if (!matches(event, options.types)) return skip();
@@ -187,6 +191,11 @@ export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => v
       if (webhook && !(await post(webhook, event))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
       // A failed handler still moves the cursor: one poisonous event must not stop the stream. The failure is on stderr.
       if (options.cursor) writeCursor(options.cursor, event.seq);
+    }).catch((error: unknown) => {
+      try {
+        process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        if (options.cursor) writeCursor(options.cursor, seq);
+      } catch { /* the next event moves the cursor */ }
     });
   };
 }
