@@ -356,6 +356,7 @@ with no framing:
 | `missed` | An incoming call stopped ringing unanswered (the contact gave up, or its offer went stale after 120 s) |
 | `rejected` | The contact declined this side's call |
 | `unanswered` | This side's call rang 60 s with no answer |
+| `crossed` | Both sides called at once and the contact's call came first: it rings here instead (`call.incoming` follows) |
 | `failed` | The media did not connect within 30 s, or dropped |
 | `stopped` | The daemon stopped (its calls are hung up first) |
 
