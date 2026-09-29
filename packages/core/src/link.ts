@@ -52,6 +52,19 @@ export const RELAY_POLL_INTERVALS: PollIntervals = {
 /** Signaling that has not finished by then is not going to; stop polling fast. */
 const FAST_POLL_MAX_MS = 45_000;
 /**
+ * An offer to a saved contact (a chat, a group's edge) is looked at fast for an answer this long after it went out,
+ * then less often (`OFFER_STEP_MAX_MS`) for the rest of its window. A contact that is there answers within seconds;
+ * one that still holds the session this app had before it restarted answers only once that session goes (about 20 s
+ * with node-datachannel, 45 s where liveness finds out). An app back with several chats and edges, each looking every
+ * 2 s meanwhile, spent the relays' minute in those seconds and could not read the answers when they came: a group's
+ * edges were live again 75 and 110 s after a restart (bug hunt r5a, 2026-09-29).
+ */
+export const OFFER_FAST_MS = 10_000;
+/** The longest wait between looks for an answer to an offer, once it has been out `OFFER_FAST_MS`. */
+export const OFFER_STEP_MAX_MS = 8_000;
+/** An offer to a saved contact is looked at for an answer as long as its attempt lasts (`CONNECT_TIMEOUT_MS`), not 45 s. */
+export const OFFER_LOOK_MS = 90_000;
+/**
  * How long a link looks fast when its peer, or the peer's offer, is due any moment. The peer that
  * dials does so as soon as it sees the other one here, and its offer lands in its packet a moment
  * after its presence did: without this the side that answers left the offer to a background poll
@@ -106,7 +119,8 @@ export interface LinkSessionEvents {
    * A publish finished: how long it took, and whether it carried an `_rtc` signal. `error` when it failed; `waiting`
    * when the relays' request budget held it back (nothing went out, and it goes again once the budget frees a request).
    */
-  onPublish?(result: { ms: number; rtc: boolean; error?: string; waiting?: boolean }): void;
+  /** `signalOut`: this publish is the first to carry the current `_rtc` signal (an offer or an answer went out now). */
+  onPublish?(result: { ms: number; rtc: boolean; error?: string; waiting?: boolean; signalOut?: boolean }): void;
   /** The first read of the peer's key is done (with `firstPublish: "after-first-poll"`, what to publish is decided now). */
   onFirstPoll?(): void;
 }
@@ -165,6 +179,8 @@ export class LinkSession {
   private readonly startedAt = Date.now();
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
+  /** An offer to a saved contact is out: from then on its fast window looks less often (`OFFER_FAST_MS`); 0 for none. */
+  private fastStepsAfter = 0;
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
   private watchUntil = 0;
@@ -266,8 +282,13 @@ export class LinkSession {
     if (active) this.pollNow();
   }
 
-  setFastPoll(fast: boolean): void {
-    this.fastPollUntil = fast ? Date.now() + FAST_POLL_MAX_MS : 0;
+  /**
+   * Signaling in progress: look fast. `offer`: this side's offer to a saved contact, whose answer may be a while
+   * (`OFFER_FAST_MS`): fast at first, then less often.
+   */
+  setFastPoll(fast: boolean, offer = false): void {
+    this.fastPollUntil = fast ? Date.now() + (offer ? OFFER_LOOK_MS : FAST_POLL_MAX_MS) : 0;
+    this.fastStepsAfter = fast && offer ? Date.now() + OFFER_FAST_MS : 0;
     if (fast) this.pollNow();
   }
 
@@ -278,7 +299,10 @@ export class LinkSession {
   expectPeer(): void {
     const until = Date.now() + EXPECT_PEER_MS;
     this.expectUntil = Math.max(this.expectUntil, until);
-    if (until <= this.fastPollUntil) return;
+    // Due now: an offer of mine that was looking less often looks fast again, as long as this window.
+    const stepping = this.fastStepsAfter > 0 && Date.now() >= this.fastStepsAfter;
+    if (this.fastStepsAfter) this.fastStepsAfter = Math.max(this.fastStepsAfter, until);
+    if (until <= this.fastPollUntil) { if (stepping) this.pollNow(); return; }
     this.fastPollUntil = until;
     this.pollNow();
   }
@@ -383,6 +407,9 @@ export class LinkSession {
     const pace = this.pace();
     const interval = this.intervals[pace];
     const since = Date.now() - this.expectUntil;
+    // An offer out a while: 4, 4, 8 s… between looks (on the relays), as long as its window lasts.
+    const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
+    if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX_MS, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
@@ -465,15 +492,18 @@ export class LinkSession {
     this.lastPublishedAt = Date.now();
     // Signaling's fast window counts from when its signal went out: one the relays' budget held back for most of the
     // window (an offer held 50 s) would otherwise have its answer read at the background pace (2026-09-27).
-    if (rtcSignal && rtcSignal !== this.rtcSignalOut && this.fastPollUntil > 0) {
-      const lapsed = this.fastPollUntil <= Date.now();
-      this.fastPollUntil = Math.max(this.fastPollUntil, Date.now() + FAST_POLL_MAX_MS);
+    const signalOut = !!rtcSignal && rtcSignal !== this.rtcSignalOut;
+    if (signalOut && this.fastPollUntil > 0) {
+      const lapsed = this.fastPollUntil <= Date.now() || (this.fastStepsAfter > 0 && this.fastStepsAfter <= Date.now());
+      this.fastPollUntil = Math.max(this.fastPollUntil, Date.now() + (this.fastStepsAfter ? OFFER_LOOK_MS : FAST_POLL_MAX_MS));
+      // An offer's first seconds of fast looks count from then too.
+      if (this.fastStepsAfter) this.fastStepsAfter = Date.now() + OFFER_FAST_MS;
       // Its next look was put off to a slower pace: it comes at the fast one now.
       if (lapsed) this.pollNow();
     }
     this.rtcSignalOut = rtcSignal;
     traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, advertise });
-    this.events.onPublish?.({ ms, rtc: !!rtcSignal });
+    this.events.onPublish?.({ ms, rtc: !!rtcSignal, ...(signalOut && { signalOut }) });
     this.discoveryResult("publish");
     return built.keptMessages;
   }

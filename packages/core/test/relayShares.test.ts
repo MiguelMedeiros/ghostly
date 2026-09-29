@@ -194,6 +194,65 @@ describe("a new group edge next to a community's background looks, on one relay"
 });
 
 /**
+ * A member of a private group is killed and starts again (bug hunt r5a, 2026-09-29, three CLIs on the public relays): it
+ * has a chat and an edge (or two, in two groups) with each of the two others. Back, every link offers at once and looks
+ * for an answer, but the others hold the dead sessions until their connections go (`noticeMs` from the kill: about 20 s
+ * with node-datachannel, 45 s where liveness finds out). Case `order:groups:noticeMs`; `MESH_BACK_CASES` runs others.
+ * On the CLI (more publishes at start than here) one group was enough: edges live 75 to 110 s after the restart.
+ */
+describe("a member of a private group killed and back, with a chat and an edge to each other member", () => {
+  const cases = (process.env.MESH_BACK_CASES ?? "lower:2:20000,higher:2:20000,lower:2:25000,lower:1:40000,higher:1:40000").split(",").map(c => {
+    const [order, groups, noticeMs] = c.split(":");
+    return { order: order as "lower" | "higher", groups: Number(groups), noticeMs: Number(noticeMs) };
+  });
+  it.each(cases)("its key the $order on the edges, $groups group(s), its end noticed after $noticeMs ms: every edge live soon after", async ({ order, groups, noticeMs }) => {
+    // The default relays and their shares: 30 requests a minute on one, 60 on the other.
+    const relays = new MemoryRelays(["pkarr.pubky.org", "pkarr.pubky.app"]);
+    const groupsOf = (t: PkarrTransport) => withRequestOptions(t, { group: true });
+    // Per pair of members: their chat, and an edge per group. On the edges C dials when its key is the lower one (the
+    // "inviter" side dials in `invitationWhere`); C is always the first of a pair it is in.
+    const pair = () => ({ chat: invitationWhere("inviter"), edges: Array.from({ length: groups }, () => invitationWhere(order === "lower" ? "inviter" : "joiner")) });
+    const withA = pair(), withB = pair(), ab = pair();
+    const dhts = new Map<string, { state: DhtDeliveryState }>();
+    const dht = (side: Side) => { if (!dhts.has(side.seedB64)) dhts.set(side.seedB64, { state: emptyDhtDeliveryState() }); return dhts.get(side.seedB64)!; };
+    const ends = (made: { inviter: Side; joiner: Side }, first: boolean) => first ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const openAll = (owner: string, t: PkarrTransport, pairs: [ReturnType<typeof pair>, boolean][], resume = false) => pairs.flatMap(([p, first]) => {
+      const [me, peer] = ends(p.chat, first);
+      return [{ kind: "chat", peer: me.params.peerPubKeyZ32, link: open(owner, t, me, peer, { dht: dht(me), resume }) },
+        ...p.edges.map(e => ends(e, first)).map(([me, peer]) => ({ kind: "edge", peer: me.params.peerPubKeyZ32, link: open(owner, groupsOf(t), me, peer, { resume }) }))];
+    });
+    const startC = (t: PkarrTransport, resume: boolean) => openAll("c", t, [[withA, true], [withB, true]], resume);
+    let c = startC(relays.transport("c"), false);
+    const a = openAll("a", relays.transport("a"), [[withA, false], [ab, true]]);
+    const b = openAll("b", relays.transport("b"), [[withB, false], [ab, false]]);
+    const all = () => [...a, ...b, ...c].map(l => l.link);
+    expect(await until(() => all().every(l => l.isDataLinkOpen), 240_000), "all live at first").toBeLessThan(Infinity);
+    await run(70_000);
+
+    // Killed: nothing said. The others' connections to it notice once its consent checks go unanswered (about 20 s with
+    // node-datachannel; liveness gives up after 45 s where nothing says so).
+    killRtc("c", noticeMs);
+    await Promise.all(c.map(l => l.link.stop(false)));
+    await run(2_500);
+    // Back, a fresh process with its own budget: every link was live when it quit.
+    c = startC(relays.transport("c2"), true);
+    const startedAt = Date.now();
+    const chats = c.filter(l => l.kind === "chat");
+    let chatsMs = Infinity;
+    const edgesMs = await until(() => {
+      if (chatsMs === Infinity && chats.every(l => l.link.isDataLinkOpen)) chatsMs = Date.now() - startedAt;
+      return all().every(l => l.isDataLinkOpen);
+    }, 240_000);
+    const share = relays.share("c2", startedAt, 60_000, { edges: c.filter(l => l.kind === "edge").map(l => l.peer), chats: chats.map(l => l.peer) });
+    report({ scenario: "mesh-member-back", order, groups, noticeMs, edgesMs, chatsMs, share });
+    // Dev (eacaf6a6), from the restart: 62.6 s in every case (18.6 s with one group noticed after 20 s); the restarted
+    // app's edges had spent the groups' share of both relays before the answers came, and with 45 s of fast looks its
+    // chats too. Now: 18.6, 18.6, 26.6, 42.6 and 42.6 s, a few seconds after the others notice.
+    expect(edgesMs, "every edge live again").toBeLessThanOrEqual(noticeMs + 12_000);
+  }, 600_000);
+});
+
+/**
  * Cause 3. The side that answers looks fast for 30 s from the dialer's fresh packet (`EXPECT_PEER_MS`). The dialer's
  * offer held back by its budget can land just after: on dev the answerer read it at its next background poll, 30 s on.
  */
