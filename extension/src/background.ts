@@ -1,5 +1,6 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode } from "@ghostly/core";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage } from "./messages";
+import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate } from "./updates";
 
@@ -85,19 +86,7 @@ chrome.action.onClicked.addListener(async () => {
   }
 });
 
-/**
- * Only the extension's own pages are heard. No web page or other extension can reach this listener
- * (there is no `externally_connectable`), and this check keeps it that way if one ever is added.
- */
-function fromOwnPage(sender: chrome.runtime.MessageSender): boolean {
-  if (sender.id !== chrome.runtime.id || typeof sender.url !== "string") return false;
-  try {
-    return new URL(sender.url).origin === new URL(chrome.runtime.getURL("")).origin;
-  } catch {
-    return false;
-  }
-}
-
+// Only the extension's own pages are heard (`fromOwnPage`).
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   if (message?.target !== "background" || !fromOwnPage(sender)) return false;
   if (message.type === "ensure-engine") {
@@ -212,15 +201,6 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string): Promise<voi
   await chrome.tabs.update(tab.id, { url });
 }
 
-/** A peer's `Set-Cookie` may not widen a cookie beyond the exact origin it came from. */
-function withoutCookieDomain(name: string, value: string): string {
-  if (name.toLowerCase() !== "set-cookie") return value;
-  return value
-    .split("\n")
-    .map((cookie) => cookie.replace(/;\s*domain\s*=[^;]*/gi, ""))
-    .join("\n");
-}
-
 function errorPage(title: string, detail: string): string {
   const escape = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
   return `<!doctype html><meta charset="utf-8"><title>Ghostly</title>
@@ -276,7 +256,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: reply.headers.map(([name, value]) => ({ name, value: withoutCookieDomain(name, value) })),
+      responseHeaders: viewerResponseHeaders(reply.headers).map(([name, value]) => ({ name, value })),
       body: reply.bodyB64,
     });
     return;

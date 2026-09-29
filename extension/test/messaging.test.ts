@@ -304,8 +304,30 @@ describe("viewer tabs", () => {
       ]);
     const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.invalid/` });
     expect(answer.params.responseHeaders).toEqual([
-      { name: "Set-Cookie", value: "sid=1; Path=/\nother=2; path=/; HttpOnly" },
+      { name: "Set-Cookie", value: "sid=1; Path=/" },
+      { name: "Set-Cookie", value: "other=2; path=/; HttpOnly" },
       { name: "X-Domain", value: "Domain=kept" },
+    ]);
+  });
+
+  it("drops a peer's header that could add headers of its own: CR, LF or NUL in the value, or a name that is no token", async () => {
+    const tabId = await openViewer(world);
+    engineControl().respond = async () =>
+      okResponse("", 200, [
+        ["Content-Type", "text/html"],
+        ["X-Note", "a\r\nSet-Cookie: sid=evil; Domain=.invalid"],
+        ["X-Line", "a\nb"],
+        ["X-Return", "a\rb"],
+        ["X-Nul", "a\u0000b"],
+        ["Bad Name", "x"],
+        ["X-Bad:Name", "x"],
+        ["", "x"],
+        ["X-Kept", "fine; really"],
+      ]);
+    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.invalid/` });
+    expect(answer.params.responseHeaders).toEqual([
+      { name: "Content-Type", value: "text/html" },
+      { name: "X-Kept", value: "fine; really" },
     ]);
   });
 
@@ -425,6 +447,50 @@ describe("the debugger stays on the tabs the worker opened", () => {
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
     expect(world.callsTo("offscreen.createDocument")).toEqual([]);
+  });
+});
+
+describe("the offscreen peer hears only the extension", () => {
+  const strangers: [string, chrome.runtime.MessageSender][] = [
+    ["another extension", { id: "abcdefghijklmnopabcdefghijklmnop", url: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/page.html" }],
+    ["a web page", { url: "https://evil.example/" }],
+    ["a web page claiming the extension's id", { id: "nbedaagicniejlmfcncndfjcejaidbcf", url: "https://evil.example/" }],
+    ["a sender with no url", { id: "nbedaagicniejlmfcncndfjcejaidbcf" }],
+  ];
+
+  it.each(strangers)("answers no message from %s", async (_, sender) => {
+    await send({ target: "background", type: "ensure-engine" });
+    const before = engine().shutdowns;
+    for (const message of [
+      { target: "engine", type: "http-request", peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null },
+      { target: "engine", type: "ping" },
+      { target: "engine", type: "stop" },
+    ]) {
+      await expect(world.sendMessageFrom(sender, message)).rejects.toThrow("message port closed");
+    }
+    await settle();
+    expect(engine().requests).toEqual([]);
+    expect(engine().shutdowns).toBe(before);
+  });
+
+  it.each(strangers)("closes a 'ui' port from %s without attaching it", async (_, sender) => {
+    await send({ target: "background", type: "ensure-engine" });
+    const port = world.connectFrom(sender, "ui");
+    let closed = false;
+    port.onDisconnect.addListener(() => (closed = true));
+    port.postMessage({ id: 1, method: "exportIdentity", params: [] });
+    await settle();
+    expect(closed).toBe(true);
+    expect(engine().attached).toEqual([]);
+    expect(engine().handled).toEqual([]);
+  });
+
+  it("still hears the worker and the app's own pages", async () => {
+    await send({ target: "background", type: "ensure-engine" });
+    world.connectFrom({ id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("app.html") }, "ui");
+    expect(engine().attached).toHaveLength(1);
+    const status = await world.sendMessageFrom({ id: world.chrome.runtime.id, url: world.chrome.runtime.getURL("background.js") }, { target: "engine", type: "ping" });
+    expect(status).toMatchObject({ profile: expect.any(String) });
   });
 });
 

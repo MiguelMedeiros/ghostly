@@ -2,7 +2,7 @@ import {
   EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, RateWindow, carryMentions, mentionsMember, receivedTimestamp, utf8Encode,
   type GroupEdit, type GroupMention,
 } from "@ghostly/core";
-import { canEditInGroup, takesPeerEdit, withEdit } from "../shared/edits";
+import { canEditInGroup, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import type { StoredMessage } from "../shared/types";
 import { EditBuffer } from "./edits";
 import { RESEND_POLICY } from "./outbox";
@@ -70,6 +70,7 @@ export class GroupEdits {
     if (!message || !canEditInGroup(message)) return refuse("Only your own text messages can be edited");
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
+    if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
     if (utf8Encode(text).length > GROUP_EDIT_TEXT_BYTES) return refuse(`Message exceeds ${GROUP_EDIT_TEXT_BYTES} UTF-8 bytes.`);
     // Everyone: a private group's admin only (the group checks it against the admin of the message's epoch again).
     const mentions = carryMentions(message, text, Array.isArray(added) ? added : [], !membership.community && !!membership.admin);
@@ -157,7 +158,7 @@ export class GroupEdits {
   }
 
   private async apply(chat: string, me: string, sender: string, message: StoredMessage, edit: GroupEdit): Promise<"applied" | "stale" | "dropped"> {
-    const takes = (m: StoredMessage) => takesPeerEdit(m) && m.member === sender;
+    const takes = (m: StoredMessage) => takesPeerEdit(m, edit.m) && m.member === sender;
     if (!takes(message)) return "dropped";
     if ((message.edit?.seq ?? 0) >= edit.e) return "stale";
     const updated = await this.host.patch(chat, message.id, current => {

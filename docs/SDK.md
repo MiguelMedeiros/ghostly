@@ -19,7 +19,7 @@ operation; a **plugin** packages adapters for distribution. This SDK is for adap
 
 ## Getting it
 
-The package is not on npm yet. Pack it from a checkout and install the tarball:
+The package is not on npm, and a package named `@ghostly/sdk` there is not this one. Pack it from a checkout and install the tarball:
 
 ```bash
 npm ci

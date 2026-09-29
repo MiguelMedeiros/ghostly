@@ -18,6 +18,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // HTTPS only, for a year once a browser has seen the site (Cloudflare serves it over HTTPS and adds no HSTS itself).
+  async headers() {
+    return [{ source: "/:path*", headers: [{ key: "Strict-Transport-Security", value: "max-age=31536000" }] }];
+  },
   // Every old address lands in one hop, its #anchor riding along:
   // - The WISPs page is /wisps. It was /developers/wisps, and before that /developers/catalog.
   // - The protocol guide at /docs is gone: the WISPs page is the one place for the protocol.

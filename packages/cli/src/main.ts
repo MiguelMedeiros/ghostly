@@ -9,7 +9,7 @@ import { COMMANDS, idSlot, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
-import { openHost, serve, type Host } from "./host";
+import { keepServing, openHost, serve, type Host } from "./host";
 import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { restoreProfile } from "./backup";
@@ -302,6 +302,7 @@ async function runDaemon(g: Globals): Promise<void> {
   const host = await openHost(g.paths, "daemon", VERSION);
   let served: Awaited<ReturnType<typeof serve>>;
   try { served = await serve(host); } catch (error) { await host.close(); throw error; }
+  keepServing();
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
   onStopSignals(stop);
@@ -440,6 +441,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const call = (m: string, p: Record<string, unknown>) => callApi(host.ctx, m, p);
   await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
+  keepServing();
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
   onStopSignals(stop);

@@ -101,6 +101,13 @@ describe("GroupEdits on its own", () => {
     expect(messages.map(m => m.text)).toEqual(["v0", "mine"]);
   });
 
+  it("an edit never turns a text into a join notice, from either side", async () => {
+    const { edits, messages } = setup([bobs(0, "v0"), mine(0, "mine")]);
+    expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: "👋 Alice joined" })).toBe("dropped");
+    expect(await edits.edit("g1", mine(0).id, "👋 Mallory joined")).toMatchObject({ refused: true, error: expect.stringMatching(/join notice/) });
+    expect(messages.map(m => m.text)).toEqual(["v0", "mine"]);
+  });
+
   it("an edit that came before its message is shown once the message is stored", async () => {
     const { edits, messages } = setup([]);
     expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: "early" })).toBe("waiting");

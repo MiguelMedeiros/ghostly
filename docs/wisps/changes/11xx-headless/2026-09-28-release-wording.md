@@ -1,0 +1,1 @@
+The npm package `@ghostlytools/cli` is published from 1.0 (the Implementation and Notes rows say so), and the section on the Rust `ghostly-cli` calls it the older Rust CLI, says it is not the npm package and that from 1.0 the release no longer ships its binaries. Nothing in the contract changed.

@@ -8,6 +8,7 @@
   "offline": "Sin conexión",
   "offlineHint": "Tus chats están aquí. Nada sale hasta que vuelvas a estar en línea.",
   "shareFiles": "{{count}} archivos",
+  "shareFrom": "Viene de otra app o sitio web. No se envía nada hasta que lo envíes.",
   "shareHint": "Elige un chat. Lo revisas y lo envías allí.",
   "shareNoChats": "Aún no hay chats. Empieza uno y vuelve a compartir.",
   "shareNone": "No se compartió nada, o ya se recogió.",

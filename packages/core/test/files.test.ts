@@ -160,6 +160,17 @@ describe("file transfer", () => {
     expect(sanitizeFileName("😀".repeat(300))).toBe("😀".repeat(200));
   });
 
+  it("renames a Windows device name, in any case and with any extension", () => {
+    for (const name of ["CON", "con.txt", "Nul .txt", "aux", "PRN.tar.gz", "COM1", "com9.log", "LPT1.txt", "lpt9", "COM¹.txt", "CONIN$", "conout$.txt"]) {
+      expect(sanitizeFileName(name)).toBe("_" + name);
+    }
+    expect(sanitizeFileName(" nul.txt")).toBe("_nul.txt");
+    expect(sanitizeFileName("CON." + "x".repeat(300))).toHaveLength(200);
+    for (const name of ["CONSOLE.txt", "console", "COM10.txt", "LPT.txt", "nullable.js", "auxiliary", "my con.txt"]) {
+      expect(sanitizeFileName(name)).toBe(name);
+    }
+  });
+
   it("does not let whitespace hide a leading dot", () => {
     expect(sanitizeFileName(" .bashrc")).toBe("bashrc");
     expect(sanitizeFileName(" . .profile ")).toBe("profile");

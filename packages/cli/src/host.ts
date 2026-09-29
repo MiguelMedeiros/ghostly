@@ -9,7 +9,7 @@ import { CallManager } from "./calls/manager";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { resumeHolds } from "./holds";
-import { privateFolder } from "./privateFolder";
+import { ownFolder, privateFolder } from "./privateFolder";
 import { acquireLock, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 
@@ -86,7 +86,11 @@ export interface Served {
 export async function serve(host: Host): Promise<Served> {
   const { ctx } = host;
   const path = ctx.runtime.paths.socket;
-  if (process.platform !== "win32" && dirname(path) !== ctx.runtime.paths.dir) privateFolder(dirname(path), "the daemon will not put its socket there");
+  // The folder is owner-only before the socket is in it: nobody else can reach the socket in the moment before its chmod.
+  if (process.platform !== "win32") {
+    if (dirname(path) !== ctx.runtime.paths.dir) privateFolder(dirname(path), "the daemon will not put its socket there");
+    else ownFolder(ctx.runtime.paths.dir, "the daemon will not put its socket there");
+  }
   // A socket file left by a daemon that died: the lock says nobody holds the profile, so it is stale.
   if (existsSync(path)) rmSync(path, { force: true });
   const sockets = new Set<Socket>();
@@ -97,7 +101,9 @@ export async function serve(host: Host): Promise<Served> {
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(path, () => { server.off("error", reject); resolve(); });
+    // The socket file is made owner-only (the bind happens within listen), then chmod'ed below as well.
+    const umask = ownerOnlyUmask();
+    try { server.listen(path, () => { server.off("error", reject); resolve(); }); } finally { umask?.(); }
   });
   if (process.platform !== "win32") chmodSync(path, 0o600);
   let closing: Promise<void> | null = null;
@@ -109,6 +115,30 @@ export async function serve(host: Host): Promise<Served> {
       setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 500).unref();
     })),
   };
+}
+
+let guarded = false;
+
+/**
+ * A daemon says an error nobody caught (with its stack, on stderr: the daemon's log when detached) and keeps serving:
+ * one request gone wrong must not take the profile offline. One-shot commands do not call this; they still fail loudly.
+ */
+export function keepServing(proc: Pick<NodeJS.Process, "on"> = process, write: (text: string) => void = (text) => { process.stderr.write(text); }): void {
+  if (proc === process) { if (guarded) return; guarded = true; }
+  const log = (what: string) => (error: unknown) => {
+    try { write(`ghostly: ${what}, the daemon keeps serving: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); } catch { /* stderr is gone */ }
+  };
+  proc.on("unhandledRejection", log("unhandled rejection"));
+  proc.on("uncaughtException", log("uncaught exception"));
+}
+
+/** Sets a 077 umask; the function it returns puts the old one back. Null where there is none (Windows, a worker). */
+function ownerOnlyUmask(): (() => void) | null {
+  if (process.platform === "win32") return null;
+  try {
+    const old = process.umask(0o077);
+    return () => { process.umask(old); };
+  } catch { return null; }
 }
 
 function connection(ctx: ApiContext, socket: Socket): void {

@@ -240,6 +240,23 @@ describe("group name, group-mesh/1", () => {
     expect(mesh.names.filter(n => n.at === carol.myKey).map(n => n.name)).toEqual(["Book club", null, "Admin says", null]);
   });
 
+  it("the name a welcome or an invitation says is cleaned as a rename's: no invisible, direction-changing or line-breaking text", async () => {
+    const alice = new GroupSession(GroupSession.create("Ghosts"), { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} });
+    const join = async (welcomeName: unknown, inviteName: string) => {
+      const seed = createIdentity().seedB64;
+      const welcome = await alice.admit(identityFromSeedB64(seed).pubKeyZ32);
+      const last = { ...welcome[welcome.length - 1], name: welcomeName };
+      const joined = GroupSession.join({ name: inviteName, admin: alice.myKey }, welcome.slice(0, -1), last, seed);
+      if ("error" in joined) throw new Error(joined.error);
+      return joined.state.name;
+    };
+    expect(await join("Pay‮txt.exe​\nnow", "Ghosts")).toBe("Paytxt.exe now");
+    // A welcome name with nothing to show falls back to the invitation's, cleaned too, never as it came.
+    expect(await join("‮​", "Invited⁦\n\nname")).toBe("Invited name");
+    expect(await join(7, "​")).toBe("Group");
+    expect(await join("x".repeat(65), "Ghosts")).toBe("Ghosts");
+  });
+
   it("a member away at the rename, or on an app from before names or metadata, shows the name once back or updated", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Ghosts"));
@@ -281,6 +298,26 @@ describe("group name, group-mesh/1", () => {
     await bob.rename("Reading club");
     await mesh.settle();
     expect([alice.name, carol.name]).toEqual(["Reading club", "Reading club"]);
+  });
+
+  it("an admin who signed the highest revision there is cannot leave the next admin unable to rename", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
+    const aliceSeed = identityFromSeedB64(alice.state.seedB64).seed;
+    const top = handMade(carol, aliceSeed, alice.myKey, encodeGroupMetaBody({ name: "Mine" }), { r: Number.MAX_SAFE_INTEGER });
+    for (const member of [bob, carol]) await member.handle(alice.myKey, clone(top));
+    expect([bob.name, carol.name]).toEqual(["Mine", "Mine"]);
+    await alice.transferAdmin(bob.myKey);
+    await mesh.settle();
+    expect(carol.state.meta!.by).toBe(bob.myKey);
+    await bob.rename("Reading club");
+    await mesh.settle();
+    expect([bob.name, carol.name]).toEqual(["Reading club", "Reading club"]);
+    // Under one epoch the revision still counts up.
+    await bob.rename("Book club");
+    await mesh.settle();
+    expect(carol.name).toBe("Book club");
   });
 });
 
@@ -401,9 +438,41 @@ describe("group picture, group-community/1", () => {
     expect(await s.handle(alice.session.myKey, clone(wrapGroupMeta(stale, s.topHash, now, true)))).toBe(false);
     expect(s.picture).toBe(RED);
   });
+
+  it("an admin who signed the highest revision there is cannot leave the next admin unable to change it", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    const s = carol.session, key = epochKeys(fromBase64Url(s.state.secrets[s.topHash]), s.id, s.epoch).message;
+    const aliceSeed = identityFromSeedB64(alice.session.state.seedB64).seed;
+    const top = wrapGroupMeta(signGroupMeta({ g: s.id, e: s.epoch, h: s.topHash, r: Number.MAX_SAFE_INTEGER, ts: 1 }, encodeGroupMetaBody({ pic: RED }), aliceSeed, alice.session.myKey), s.topHash, key, true);
+    for (const member of [bob, carol]) expect(await member.session.handle(alice.session.myKey, clone(top))).toBe(true);
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    await bob.session.setPicture(BLUE);
+    await net.settle();
+    expect([bob.session.picture, carol.session.picture]).toEqual([BLUE, BLUE]);
+  });
 });
 
 describe("group name, group-community/1", () => {
+  it("the name a welcome says is cleaned as a rename's", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const seedB64 = createIdentity().seedB64;
+    const frames = await alice.session.admit(identityFromSeedB64(seedB64).pubKeyZ32);
+    const join = (name: unknown) => {
+      const welcome = { ...clone(frames[frames.length - 1]), name };
+      const joined = CommunitySession.join({ g: alice.session.id, host: alice.session.entryKey }, clone(frames.slice(0, -1)), welcome, seedB64);
+      if ("error" in joined) throw new Error(joined.error);
+      return joined.state.name;
+    };
+    expect(join("Book‮​\nclub")).toBe("Book club");
+    expect(join("⁧")).toBe("Group");
+  });
+
   it("the admin renames it beside the picture; someone let in while the admin is away gets both; a member's rename is refused", async () => {
     const net = new Net();
     const alice = net.create("alice");
