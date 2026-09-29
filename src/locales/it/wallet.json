@@ -535,6 +535,7 @@
     "testnet": "sats di prova"
   },
   "setup": {
+    "failed": "{{wallet}}: {{reason}}",
     "progress": "Creo i tuoi portafogli Mainnet…",
     "retry": "Riprova {{wallet}}",
     "skip": "Salta",

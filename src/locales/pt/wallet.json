@@ -535,6 +535,7 @@
     "testnet": "sats de teste"
   },
   "setup": {
+    "failed": "{{wallet}}: {{reason}}",
     "progress": "Criando suas carteiras na Mainnet…",
     "retry": "Tentar {{wallet}} de novo",
     "skip": "Pular",

@@ -535,6 +535,7 @@
     "testnet": "テスト sats"
   },
   "setup": {
+    "failed": "{{wallet}}：{{reason}}",
     "progress": "Mainnet のウォレットを作成しています…",
     "retry": "{{wallet}} を再試行",
     "skip": "スキップ",

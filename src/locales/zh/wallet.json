@@ -535,6 +535,7 @@
     "testnet": "测试 sats"
   },
   "setup": {
+    "failed": "{{wallet}}：{{reason}}",
     "progress": "正在创建你的 Mainnet 钱包…",
     "retry": "重试 {{wallet}}",
     "skip": "跳过",

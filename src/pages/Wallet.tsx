@@ -195,7 +195,7 @@ export function Wallet() {
         </>}
       </div>
       {creating && wallet && state && (
-        <NewWalletDialog wallet={wallet} offers={state.offers ?? []} initialNetwork={creating}
+        <NewWalletDialog wallet={wallet} offers={state.offers ?? []} setupFailed={state.setup?.failed} initialNetwork={creating}
           onClose={() => setCreating(null)} onCreated={created} />
       )}
     </Page>

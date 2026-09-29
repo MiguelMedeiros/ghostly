@@ -52,8 +52,14 @@ test("a wallet that could not be made says why on the Wallet page, and Try again
   await openWallet(alice);
   await expect(walletCard(page, "usdt-mainnet")).toBeVisible({ timeout: 60_000 });
   const error = page.getByTestId("wallet-setup-error-cashu");
-  await expect(error).toContainText("Could not create the Mainnet Cashu wallet", { timeout: 60_000 });
+  await expect(error).toContainText("Mainnet Cashu:", { timeout: 60_000 });
   await expect(page.getByTestId("wallet-setup")).toContainText("Ghostly tries again at its next start");
+  // New says so too, on the Cashu card of Mainnet.
+  await page.getByTestId("wallet-add").click();
+  await page.getByTestId("new-wallet-network-mainnet").click();
+  await expect(page.getByTestId("new-wallet-type-cashu-reason")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("new-wallet")).toHaveCount(0);
 
   // The mints answer again (the suite's own, in their place): Try again makes it, and the notice goes.
   await mockMainnetMints(alice.context);

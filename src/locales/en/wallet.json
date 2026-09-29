@@ -535,6 +535,7 @@
     "testnet": "test sats"
   },
   "setup": {
+    "failed": "{{wallet}}: {{reason}}",
     "progress": "Setting up your Mainnet wallets…",
     "retry": "Try {{wallet}} again",
     "skip": "Skip",

@@ -535,6 +535,7 @@
     "testnet": "sats de prueba"
   },
   "setup": {
+    "failed": "{{wallet}}: {{reason}}",
     "progress": "Creando tus billeteras de Mainnet…",
     "retry": "Reintentar {{wallet}}",
     "skip": "Omitir",

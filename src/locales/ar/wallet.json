@@ -535,6 +535,7 @@
     "testnet": "sats تجريبية"
   },
   "setup": {
+    "failed": "{{wallet}}: {{reason}}",
     "progress": "جارٍ إنشاء محافظ Mainnet الخاصة بك…",
     "retry": "أعد محاولة {{wallet}}",
     "skip": "تخطَّ",

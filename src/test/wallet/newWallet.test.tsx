@@ -112,6 +112,12 @@ describe("a new profile's Mainnet wallets, made by themselves", () => {
     expect(engine.callsTo("walletSetupRetry")).toEqual([{ type: "usdt" }]);
     await user.click(screen.getByTestId("wallet-setup-skip-usdt"));
     expect(engine.callsTo("walletSetupDismiss")).toEqual([{ type: "usdt" }]);
+    // New says why on that kind's Mainnet card too.
+    await user.click(screen.getByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-network-mainnet"));
+    expect(screen.getByTestId("new-wallet-type-usdt-reason")).toHaveTextContent("RPC unavailable.");
+    await user.click(screen.getByTestId("new-wallet-network-testnet"));
+    expect(screen.queryByTestId("new-wallet-type-usdt-reason")).not.toBeInTheDocument();
   });
 });
 
