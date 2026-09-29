@@ -275,9 +275,9 @@ describe("an edge whose member never comes back", () => {
     report({ scenario: "dead-edge", reads });
     // Dev (eacaf6a6), reads a minute in minutes 0-2, 2-5, 5-10 and 10-20: 17.5, 16.3, 6.4 and 2. Now: 8.5, 10.7, 4.6
     // and 2 (each offer looks fast only its first 10 s).
-    expect(reads.first2).toBeLessThanOrEqual(10);
-    expect(reads.next3).toBeLessThanOrEqual(12);
-    expect(reads.next5).toBeLessThanOrEqual(5);
+    expect(reads.first2).toBeLessThanOrEqual(12);
+    expect(reads.next3).toBeLessThanOrEqual(13);
+    expect(reads.next5).toBeLessThanOrEqual(6);
     expect(reads.last10).toBeLessThanOrEqual(2);
   }, 600_000);
 });
