@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult, WakeSubscription } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 
@@ -190,6 +190,10 @@ export interface EngineApi {
   walletRemove(params: WalletRemove): void;
   /** Testnet only: a small fixed amount from the wallet's own test faucet (the test mint, Sepolia's USDT faucet). */
   walletTestCoins(params: WalletTestCoins): TestCoinsResult;
+  /** The first-run setup tries again to make this default Mainnet wallet (one it could not make). */
+  walletSetupRetry(params: { type: WalletType }): void;
+  /** The first-run setup leaves this default Mainnet wallet unmade from now on. */
+  walletSetupDismiss(params: { type: WalletType }): void;
   /**
    * The app is in front again: chats look now, and dropped ones reconnect at once. `network`: the device is back
    * online (another network, a VPN): what discovery learnt about failing relays on the old one is forgotten too.

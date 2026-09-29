@@ -19,7 +19,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "pollNow", "removeLink", "renameLink", "setActiveLink", "sendMessage", "editMessage", "retryMessage", "react", "pinMessage", "messageDetails",
   "deleteMessage", "exportLinks", "sendFile", "forwardMessages", "fileAction", "setDeliveryMode", "setTransportPreference",
   "setChatTransport", "setChatPaymentMethods", "setChatHold", "connect", "walletAddMint", "walletCreate",
-  "walletRemove", "walletTestCoins", "wake", "peekProfile", "walletSetPrimaryMint", "walletRemoveMint", "walletReceiveLightning",
+  "walletRemove", "walletTestCoins", "walletSetupRetry", "walletSetupDismiss", "wake", "peekProfile", "walletSetPrimaryMint", "walletRemoveMint", "walletReceiveLightning",
   "walletQuoteInvoice", "walletPayQuote", "lnurlResolve", "lnurlInvoice", "checkPayment", "lightningSetSource",
   "lightningClearSource", "lightningRetrySource", "lightningReconfigureSource", "lightningRefresh",
   "lightningSetReceive", "lightningRename", "bitcoinSetSource", "bitcoinClearSource", "bitcoinRetrySource",

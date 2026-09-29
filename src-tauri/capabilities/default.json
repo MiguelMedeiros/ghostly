@@ -95,6 +95,7 @@
     "allow-service-respond",
     "allow-set-pkarr-relays",
     "allow-share-text",
+    "allow-under-test",
     "allow-updater-can-install"
   ]
 }

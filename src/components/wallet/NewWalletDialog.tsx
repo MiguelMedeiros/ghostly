@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { WalletInstanceView, WalletNetwork, WalletOffer, WalletPlatform, WalletType } from "../../lib/platform";
+import type { WalletInstanceView, WalletNetwork, WalletOffer, WalletPlatform, WalletSetupView, WalletType } from "../../lib/platform";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { WalletMark } from "../WalletCards";
 import { moneyLabel } from "../NetworkTag";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { Select } from "../ui/Select";
 import { Button, Notice, input } from "./ui";
-import { NETWORK_NAME, WALLET_NAME } from "./names";
+import { NETWORK_NAME, WALLET_NAME, failedBecause, shortReason } from "./names";
 import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
 import "./new-wallet.css";
@@ -45,13 +45,6 @@ const FIRST_STEP_MS = 700;
 /** How long Ready shows before the dialog closes and the new card is dealt into its deck. */
 const READY_MS = 650;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-/** Why a kind is not there yet, in one line: the reason's first sentence. */
-const shortReason = (reason: string) => reason.split(/(?<=\.)\s/)[0];
-/**
- * Why making a kind failed, in a line for its card: the engine's reason without "Could not create the … wallet:" in
- * front, its first sentence ("Could not reach testnut.cashu.space."). The whole message stays below the kinds.
- */
-const failedBecause = (text: string) => shortReason(text.replace(/^Could not create the .+? wallet: /, ""));
 
 type Phase = { type: WalletType; state: "busy" | "done" | "error"; step: number; text?: string; made?: WalletInstanceView };
 type Action = "create" | "key" | "connect" | "add-another" | "join" | "join-another" | "added" | "off";
@@ -83,9 +76,11 @@ const BUSY_LABEL: Record<WalletType, Key> = {
  * too) and `onCreated` shows the wallet: the page selects its card, and a wallet to back up opens on its backup rows.
  * Focus then goes to what the page chose, not back to New. On a phone it is a sheet.
  */
-export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", onClose, onCreated }: {
+export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwork = "testnet", onClose, onCreated }: {
   wallet: WalletPlatform;
   offers: WalletOffer[];
+  /** The kinds the first-run setup could not make: each says why on its card (Create makes it, and the setup forgets it). */
+  setupFailed?: WalletSetupView["failed"];
   initialNetwork?: WalletNetwork;
   onClose: () => void;
   onCreated: (made: WalletInstanceView) => void;
@@ -110,6 +105,7 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
   useDialogFocus(dialog, close, () => !finished.current);
   const backdrop = useBackdropDismiss(close);
   const offer = (type: WalletType) => offers.find((o) => o.type === type && o.network === network);
+  const setupFailure = (type: WalletType) => setupFailed.find((f) => f.type === type && f.network === network)?.reason;
 
   const create = async (type: WalletType, extra: { invite?: string; apiKey?: string; providerId?: string; values?: Record<string, string> } = {}) => {
     if (busy) return;
@@ -230,8 +226,9 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
                         </span>
                       </span>
                       {/* A failure says why on the card itself: on a phone the sheet scrolls, and the message under the kinds is out of sight. */}
-                      {mine === "error" && phase?.text
-                        ? <span className="block text-xs text-danger mt-1" data-testid={`new-wallet-type-${type}-reason`}>{failedBecause(phase.text)}</span>
+                      {/* So does a kind the first-run setup could not make, until it is tried here. */}
+                      {(mine === "error" && phase?.text) || (!mine && action === "create" && setupFailure(type))
+                        ? <span className="block text-xs text-danger mt-1" data-testid={`new-wallet-type-${type}-reason`}>{failedBecause(mine === "error" && phase?.text ? phase.text : setupFailure(type)!)}</span>
                         : <span className="block text-xs text-text-secondary mt-1">{action === "off" && o?.reason ? shortReason(o.reason) : t(ABOUT[type](network))}</span>}
                     </span>
                     {mine === "busy" && <span className="new-wallet-shimmer" aria-hidden="true" />}
