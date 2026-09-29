@@ -171,6 +171,14 @@ export class TransportSwitch {
     if (this.plan) this.failed = this.signature(this.plan.local, this.plan.remote);
     this.send({ t: "paired-switch-failed", id: this.plan?.id });
     this.clearPlan(); this.options.cancel(); this.unreached(target, error, error);
+    this.replanIfMoved();
+  }
+  /**
+   * A choice made while a move was dialling could not cut in (WISP 100): once that move failed, it is planned at once.
+   * Policies that are still the failed plan's are not planned again here; the owner's retry pace does that.
+   */
+  private replanIfMoved(): void {
+    if (this.context && this.remote && this.failed && this.signature(this.local(), this.remote) !== this.failed) this.reconcile();
   }
   /** Waiting for `target`, not failed, where the owner says why; an error state for an owner that does not. */
   private unreached(target: PairedTransport | undefined, error: string, reason?: string): void {
@@ -252,7 +260,8 @@ export class TransportSwitch {
       const target = this.plan.choices[0];
       this.failed = this.signature(this.plan.local, this.plan.remote);
       this.clearPlan(); this.options.cancel();
-      this.unreached(target, "The transport change failed. Retry or choose another transport."); return true;
+      this.unreached(target, "The transport change failed. Retry or choose another transport.");
+      this.replanIfMoved(); return true;
     }
     if (frame.t === "paired-switch-keep") {
       if (this.actual && this.plan.choices.includes(this.actual)) {
