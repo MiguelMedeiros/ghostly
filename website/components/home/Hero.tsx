@@ -7,7 +7,7 @@ import { Particles } from "@/components/site/Particles";
 import { useCalm } from "@/lib/useCalm";
 import { HERO } from "@/lib/motion";
 import { usePlayheadProgress } from "@/lib/playhead";
-import { usePortrait } from "./stage";
+import { useCards } from "./stage";
 import { APP_URL } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
 
@@ -15,19 +15,17 @@ import type { HomeCopy } from "@/content/home";
  * Act 0: one sentence in the dark and a small ghost asking into it. Boo is the
  * act's actor. The backdrop draws him at his hero pose and carries him into
  * the invitation when you scroll; the copy slides away as you leave. Without
- * scripts, or with reduced motion, a still Boo stands in for the actor.
+ * scripts, with reduced motion, or on a phone (the story as cards), a still Boo
+ * stands in for the actor and the copy scrolls like any other: nothing is drawn
+ * over it, so the two ways in stay whole and tappable while they are on screen.
  */
 export function Hero({ t }: { t: HomeCopy["hero"] }) {
   const ref = useRef<HTMLElement>(null);
   const calm = useCalm();
-  const portrait = usePortrait();
+  const cards = useCards();
   const scrollYProgress = usePlayheadProgress(ref, "leaving");
-  // On phones the copy scrolls up under Boo, so it leaves early (poses.ts P.hero holds him until 0.5).
   // Function form on purpose: motion turns array ranges into native scroll animations fixed at mount.
-  const fade = (v: number) => {
-    const [a, b] = portrait ? [0.05, 0.25] : [0.2, 0.7];
-    return 1 - Math.max(0, Math.min(1, (v - a) / (b - a)));
-  };
+  const fade = (v: number) => 1 - Math.max(0, Math.min(1, (v - 0.2) / 0.5));
   const y = useTransform(scrollYProgress, (v) => -48 * (1 - fade(v)));
   const opacity = useTransform(scrollYProgress, fade);
 
@@ -43,7 +41,7 @@ export function Hero({ t }: { t: HomeCopy["hero"] }) {
         <Ghost who="boo" mood="lonely" look={{ x: 0.6, y: -0.4 }} size={160} float={!calm} />
       </div>
 
-      <motion.div className="wrap hero-inner" style={calm ? { y: 0, opacity: 1 } : { y, opacity }}>
+      <motion.div className="wrap hero-inner" style={calm || cards ? { y: 0, opacity: 1 } : { y, opacity }}>
         <p className="sr-only">Boo: {t.booSays}</p>
         {/* The opening (lib/motion.ts HERO): the headline leads, the rest follows as one group, then Boo, then his line. */}
         <h1 className="h-display hero-title">
