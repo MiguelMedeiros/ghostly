@@ -1,5 +1,6 @@
 {
   "copy": "Copia invito",
   "copyFailed": "Impossibile copiare. Riprova o condividi l’invito.",
-  "shareFailed": "Impossibile condividere. Copia l’invito."
+  "shareFailed": "Impossibile condividere. Copia l’invito.",
+  "title": "Invita il tuo contatto"
 }

@@ -4,7 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../../hooks/useDismiss";
 import { useCopyKey } from "../../hooks/useCopyKey";
-import { addableProviders, daysLeft, date, expiringSoon, providerLabel, SHARED_STATUS, useEngineState, useNewProof } from "../../lib/identities";
+import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineState, useNewProof } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "../ComposerSheet";
 import { Deck } from "../deck/Deck";
@@ -40,9 +40,17 @@ type Ghostly = Extract<Entry, { ghostly: true }>;
 /** How long the back says it is done before the card turns face up again, wearing (or no longer) the seal. */
 export const DONE_MS = 1200;
 
+/**
+ * What the contact sees, as a sentence: "Alice sees your OpenPGP key …9F04 4120, your own key, valid until …". One
+ * sentence per case, so each language orders it its own way; the category and validity are the card's own words.
+ */
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
-/** The identity as a sentence says it: "your OpenPGP key …9F04 4120", "your domain example.com". */
-const spoken = (card: IdCardContent) => `your ${card.attested ? "account" : card.provider === "domain" ? "domain" : card.label} ${card.short}`;
+function seesLine(card: IdCardContent, contact: string, on: boolean, t: Translate): string {
+  const params = { contact, label: card.label, short: card.short, category: lower(card.category), validity: lower(card.validity) };
+  if (card.attested) return on ? t("identities.picker.seesAccount", params) : t("identities.picker.willSeeAccount", params);
+  if (card.provider === "domain") return on ? t("identities.picker.seesDomain", params) : t("identities.picker.willSeeDomain", params);
+  return on ? t("identities.picker.sees", params) : t("identities.picker.willSee", params);
+}
 
 /**
  * Which of this profile's identities this chat's contact sees, step for step as the payment picker pays: the
@@ -62,6 +70,7 @@ export function ComposerIdentityPicker({ peerKey, contact, initial, onClose, onS
   anchorRef?: RefObject<HTMLElement | null>;
 }) {
   const nav = useAppNavigation();
+  const { t } = useI18n();
   const [adding, setAdding] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   // While an identity is being added, its dialog is the one on top: a click in it does not close the picker.
@@ -73,7 +82,7 @@ export function ComposerIdentityPicker({ peerKey, contact, initial, onClose, onS
   }, [anchorRef]);
   return <IdentityPicker peerKey={peerKey} contact={contact} initial={initial} onManage={() => { onClose(); nav.open("/identities"); }} onAdding={setAdding} onShared={onShared ?? onClose} head focusOnOpen
     frame={({ side, tone }, children) => (
-      <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-label="Your identities" data-testid="composer-identities" data-side={side}
+      <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-label={t("identities.mine.deckLabel")} data-testid="composer-identities" data-side={side}
         className={`composer-identities ${tone} focus:outline-none max-h-[70dvh] overflow-y-auto`}>{children}</ComposerSheet>
     )} />;
 }
@@ -146,8 +155,8 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   const proofs = mine.map((proof): Proof => {
     const shared = ids?.shared.find(s => s.id === proof.id);
     const on = isOn(shared);
-    const card = idCard(proof, { now, refusedBy: on && shared?.status === "rejected" ? [contact] : [] });
-    return { id: proof.id, proof, on, card: { ...card, shared: on ? `Shared with ${contact}` : `Not shared with ${contact}` } };
+    const card = idCard(proof, { now, refusedBy: on && shared?.status === "rejected" ? [contact] : [], t });
+    return { id: proof.id, proof, on, card: { ...card, shared: on ? t("identities.ghostly.sharedWith", { contact }) : t("identities.picker.notSharedWith", { contact }) } };
   });
   /** The other identities the contact sees now: what "Share only this" on the Ghostly card takes back. */
   const others = proofs.filter(p => p.on);
@@ -162,10 +171,10 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   /** Why this identity cannot be shared here now. Stopping is always possible; the Ghostly identity is always seen. */
   const why = (e: Entry) => {
     if (e.add || e.ghostly || e.on) return undefined;
-    if (expired(e)) return `Expired ${date(e.proof.expiresAt)}`;
-    if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return `${contact}’s app cannot verify ${providerLabel(e.proof.provider)} yet`;
-    if (unsupported) return `${contact}’s app cannot receive identities yet`;
-    if (!ids) return "Connect to this contact first";
+    if (expired(e)) return t("identities.card.expiredOn", { date: date(e.proof.expiresAt) });
+    if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return t("identities.picker.cannotVerify", { contact, provider: providerLabel(e.proof.provider) });
+    if (unsupported) return t("identities.picker.cannotReceive", { contact });
+    if (!ids) return t("identities.picker.connectFirst");
     return undefined;
   };
   const select = (id: string) => { setChosen(id); setError(""); };
@@ -192,35 +201,35 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
         front={<IdCardFace card={showing.card} shared={showing.on} />}
         back={showing.ghostly
           ? <GhostlyBack t={t} card={showing.card} contact={contact} others={others.length} busy={busy} done={done} error={error} actionRef={actionRef} onShareOnly={shareOnlyGhostly} onCards={backToCards} />
-          : <IdentityBack entry={showing} contact={contact} now={now} busy={busy} stopping={stopping} done={done} error={error} actionRef={actionRef}
+          : <IdentityBack t={t} entry={showing} contact={contact} now={now} busy={busy} stopping={stopping} done={done} error={error} actionRef={actionRef}
             status={ids?.shared.find(s => s.id === showing.id)} onShare={() => toggle(showing.proof, false)} onStop={() => toggle(showing.proof, true)} onCards={backToCards} />} />
       : <>
-        {head && <ComposerSheetHead title="Your identities" who={`shown to ${contact} only`} />}
+        {head && <ComposerSheetHead title={t("identities.mine.deckLabel")} who={t("identities.picker.shownTo", { contact })} />}
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={use}
-          kind="radios" label="Your identities" name="composer-identity-deck" className="id-deck" size={{ max: 250, share: .62 }}
+          kind="radios" label={t("identities.mine.deckLabel")} name="composer-identity-deck" className="id-deck" size={{ max: 250, share: .62 }}
           testId={e => (e.add ? "composer-identity-add" : e.ghostly ? "composer-identity-ghostly" : "composer-identity")} blocked={why}
           face={(e, { after }) => (e.add ? <AddIdCardFace first={mine.length === 0} providers={providers} /> : <IdCardFace card={e.card} after={after} shared={e.on} />)}
           mark={e => <IdCardMark provider={e.add ? undefined : e.card.provider} subject={e.add ? undefined : e.card.bound} />}
           tone={tone} />
         {entry.add ? <>
           <p className="composer-sheet-hint" data-testid={mine.length === 0 ? "composer-identities-empty" : undefined}>
-            {mine.length === 0 ? `${t("identities.ghostly.noOthers")} ` : ""}{canAdd ? t("identities.ghostly.addHint") : "No identity can be added on this device."}
+            {mine.length === 0 ? `${t("identities.ghostly.noOthers")} ` : ""}{canAdd ? t("identities.ghostly.addHint") : t("identities.mine.cannotAdd")}
           </p>
           {canAdd && <button type="button" data-testid="composer-identities-add" className="composer-sheet-action" onClick={() => setAdding(true)}>{mine.length === 0 ? t("identities.ghostly.addOne") : t("identities.ghostly.addAnother")}<ForwardArrow /></button>}
         </> : <>
           <p className="composer-sheet-hint" data-testid="composer-identity-hint" data-blocked={blocked ? true : undefined}>
             {blocked ?? (entry.ghostly
               ? t("identities.ghostly.hintSees", { contact, name: entry.card.name ?? "", key: entry.card.short })
-              : `${contact} ${entry.on ? "sees" : "will see"} ${spoken(entry.card)}, ${lower(entry.card.category)}, ${lower(entry.card.validity)}.`)}
+              : seesLine(entry.card, contact, entry.on, t))}
           </p>
           {expired(entry)
-            ? <button type="button" data-testid="composer-identity-use" data-action="manage" className="composer-sheet-action" onClick={manage}>Manage<ForwardArrow /></button>
+            ? <button type="button" data-testid="composer-identity-use" data-action="manage" className="composer-sheet-action" onClick={manage}>{t("identities.picker.manage")}<ForwardArrow /></button>
             : <button type="button" data-testid="composer-identity-use" className="composer-sheet-action" disabled={!!blocked} onClick={() => use(entry.id)}>
-              Use {entry.card.attested ? "this account" : entry.card.label}<ForwardArrow />
+              {entry.card.attested ? t("identities.picker.useAccount") : t("identities.picker.use", { label: entry.card.label })}<ForwardArrow />
             </button>}
         </>}
         {ids?.error && <p role="alert" className="px-1 m-0 text-xs text-danger" data-testid="composer-identities-error">{ids.error}</p>}
-        {mine.length > 0 && <button type="button" data-testid="composer-identities-manage" onClick={manage} className="composer-identities-manage">Manage identities</button>}
+        {mine.length > 0 && <button type="button" data-testid="composer-identities-manage" onClick={manage} className="composer-identities-manage">{t("identities.picker.manageAll")}</button>}
       </>}
     </div>)
   );
@@ -240,8 +249,8 @@ function GhostlyBack({ t, card, contact, others, busy, done, error, actionRef, o
   return (
     <div className="id-card-back" data-testid="composer-identity-back" data-ghostly="true">
       <div className="id-card-back-band">
-        {!done && <FlipTurnButton testId="composer-identity-change-card" label="Choose another identity" onClick={onCards} />}
-        <span className="id-card-back-title">What {contact} sees</span>
+        {!done && <FlipTurnButton testId="composer-identity-change-card" label={t("identities.picker.chooseAnother")} onClick={onCards} />}
+        <span className="id-card-back-title">{t("identities.picker.whatSees", { contact })}</span>
       </div>
       <div className="id-card-back-body">
         <div className="id-card-back-sees" data-testid="composer-identity-sees">
@@ -279,8 +288,8 @@ function GhostlyBack({ t, card, contact, others, busy, done, error, actionRef, o
  * The chosen identity's card, turned over: what the contact sees (its mark, the identity, who stands behind it and
  * until when), where it stands in this chat, and Share or Stop sharing. Once done, a line saying so in its place.
  */
-function IdentityBack({ entry, contact, now, busy, stopping, done, error, status, actionRef, onShare, onStop, onCards }: {
-  entry: Proof; contact: string; now: number; busy: string; stopping: boolean; done: "shared" | "stopped" | "only" | null; error: string; status?: Shared;
+function IdentityBack({ t, entry, contact, now, busy, stopping, done, error, status, actionRef, onShare, onStop, onCards }: {
+  t: Translate; entry: Proof; contact: string; now: number; busy: string; stopping: boolean; done: "shared" | "stopped" | "only" | null; error: string; status?: Shared;
   actionRef: RefObject<HTMLButtonElement | null>; onShare: () => void; onStop: () => void; onCards: () => void;
 }) {
   const { proof: p, card, on } = entry;
@@ -288,15 +297,18 @@ function IdentityBack({ entry, contact, now, busy, stopping, done, error, status
   const retry = on && status?.status === "rejected";
   /** The main action stops the share. */
   const stops = on && !retry;
-  const state = status && status.status !== "withdrawn" ? `${SHARED_STATUS[status.status]}${status.status === "rejected" && status.error ? `: ${status.error}` : ""}` : "Not shared";
-  const warn = p.expiresAt > now && expiringSoon(p, now) ? `Expires in ${daysLeft(p.expiresAt, now)} ${daysLeft(p.expiresAt, now) === 1 ? "day" : "days"}` : "";
+  const state = status && status.status !== "withdrawn"
+    ? (status.status === "rejected" && status.error ? t("identities.picker.rejectedWhy", { status: sharedStatus(status.status, t), error: status.error }) : sharedStatus(status.status, t))
+    : t("identities.shared.notShared");
+  const days = daysLeft(p.expiresAt, now);
+  const warn = p.expiresAt > now && expiringSoon(p, now) ? (days === 1 ? t("identities.card.expiresInOne") : t("identities.card.expiresIn", { count: days })) : "";
   const tone = status?.status === "rejected" ? "text-danger" : status?.status === "accepted" && on ? "text-accent" : undefined;
   const working = busy === p.id;
   return (
     <div className="id-card-back" data-testid="composer-identity-back">
       <div className="id-card-back-band">
-        {!done && <FlipTurnButton testId="composer-identity-change-card" label="Choose another identity" onClick={onCards} />}
-        <span className="id-card-back-title">What {contact} sees</span>
+        {!done && <FlipTurnButton testId="composer-identity-change-card" label={t("identities.picker.chooseAnother")} onClick={onCards} />}
+        <span className="id-card-back-title">{t("identities.picker.whatSees", { contact })}</span>
       </div>
       <div className="id-card-back-body">
         <div className="id-card-back-sees" data-testid="composer-identity-sees">
@@ -315,15 +327,15 @@ function IdentityBack({ entry, contact, now, busy, stopping, done, error, status
         </p>}
         {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          {done === "shared" ? `Shared with ${contact}` : `${contact} no longer sees it`}
+          {done === "shared" ? t("identities.ghostly.sharedWith", { contact }) : t("identities.picker.noLongerSees", { contact })}
         </p> : <>
           {/* While a call runs the button stays focusable (a disabled button would drop the keyboard's focus). */}
           <button ref={actionRef} type="button" data-testid="composer-identity-share" data-variant={stops ? "secondary" : undefined} className="composer-sheet-action"
             aria-disabled={!!busy || undefined} aria-busy={(working && stopping === stops) || undefined} onClick={stops ? onStop : onShare}>
-            {working && stopping === stops ? (stops ? "Stopping…" : "Sharing…") : stops ? "Stop sharing" : retry ? <>Share again<ForwardArrow /></> : <>Share with {contact}<ForwardArrow /></>}
+            {working && stopping === stops ? (stops ? t("identities.ghostly.stopping") : t("identities.picker.sharing")) : stops ? t("identities.stopSharing") : retry ? <>{t("identities.picker.shareAgain")}<ForwardArrow /></> : <>{t("identities.picker.shareWith", { contact })}<ForwardArrow /></>}
           </button>
-          {retry ? <button type="button" data-testid="composer-identity-stop" className="composer-identities-manage" aria-disabled={!!busy || undefined} aria-busy={(working && stopping) || undefined} onClick={onStop}>{working && stopping ? "Stopping…" : "Stop sharing"}</button>
-            : on && <p className="id-card-back-note">Stopping tells {contact}; a copy they kept stays.</p>}
+          {retry ? <button type="button" data-testid="composer-identity-stop" className="composer-identities-manage" aria-disabled={!!busy || undefined} aria-busy={(working && stopping) || undefined} onClick={onStop}>{working && stopping ? t("identities.ghostly.stopping") : t("identities.stopSharing")}</button>
+            : on && <p className="id-card-back-note">{t("identities.picker.stopNote", { contact })}</p>}
         </>}
         {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
       </div>

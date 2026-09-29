@@ -1,5 +1,5 @@
 import { useI18n } from "../../contexts/I18nContext";
-import { categoryLabel, chatsByPeer, contactName, currentStatus, dateTime, providerLabel, RECEIVED_STATUS, shortSubject, useEngineState } from "../../lib/identities";
+import { categoryLabel, chatsByPeer, contactName, currentStatus, dateTime, providerLabel, receivedStatus, shortSubject, useEngineState } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import { Button, Row, Section } from "../wallet/ui";
@@ -25,15 +25,15 @@ export function ContactIdentitiesSection() {
   }).sort((a, b) => (ORDER[a.status] ?? 2) - (ORDER[b.status] ?? 2));
   if (!received.length) return null;
   return (
-    <Section title="From your contacts" testId="identities-received">
+    <Section title={t("identities.received.title")} testId="identities-received">
       {received.map(({ r, status, chat, name }) => (
         <Row key={`${chat?.id}/${r.id}`} testId="identity-received" leading={<ProviderMark provider={r.provider} subject={r.subject} />}
-          label={<span className="flex flex-wrap items-center gap-2"><span>{name}</span><StatusPill ok={status === "verified"} warn={status === "revoked" || status === "unconfirmed"} testId="identity-received-status">{RECEIVED_STATUS[status]}</StatusPill></span>}
+          label={<span className="flex flex-wrap items-center gap-2"><span>{name}</span><StatusPill ok={status === "verified"} warn={status === "revoked" || status === "unconfirmed"} testId="identity-received-status">{receivedStatus(status, t)}</StatusPill></span>}
           hint={<>
             <span>{providerLabel(r.provider)} · <span className="font-mono break-all" title={r.subject}>{shortSubject(r.provider, r.subject)}</span></span>
-            <span className="block">{categoryLabel(r.provider, r.verified.attester)} · checked {dateTime(r.checkedAt)}</span>
+            <span className="block">{t("identities.received.checked", { category: categoryLabel(r.provider, r.verified.attester, t), time: dateTime(r.checkedAt) })}</span>
           </>}>
-          {chat && <Button data-testid="identity-received-open" onClick={() => nav.conversation(chatPath(chat.id))}>Open chat</Button>}
+          {chat && <Button data-testid="identity-received-open" onClick={() => nav.conversation(chatPath(chat.id))}>{t("identities.openChat")}</Button>}
         </Row>
       ))}
     </Section>

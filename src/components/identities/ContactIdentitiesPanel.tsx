@@ -44,7 +44,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   onClose: () => void;
 }) {
   const state = useEngineState();
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
   const ref = useRef<HTMLElement>(null);
   const titleId = useId();
@@ -54,11 +54,11 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   const now = Math.floor(Date.now() / 1000);
   // Every identity with a mark, in the header's order (contactBadges.ts), then the ones no longer shared.
   const received = link?.identities?.received ?? [];
-  const order = contactBadges(received, { now }).map(b => b.id);
+  const order = contactBadges(received, { now, t, language }).map(b => b.id);
   const rank = (r: ReceivedIdentityView) => { const i = order.indexOf(r.id); return i < 0 ? order.length : i; };
   const entries: Entry[] = [
     ...(link ? [{ id: GHOSTLY, ghostly: true, card: contactGhostlyCard(t, link, name) } as const] : []),
-    ...[...received].sort((a, b) => rank(a) - rank(b)).map((r): Entry => ({ id: r.id, r, card: receivedIdCard(r, now) })),
+    ...[...received].sort((a, b) => rank(a) - rank(b)).map((r): Entry => ({ id: r.id, r, card: receivedIdCard(r, now, t, language) })),
   ];
 
   return (<>
@@ -72,24 +72,24 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
             <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} />
           </AvatarOpener>
           <div className="min-w-0">
-            <h2 id={titleId} className="contact-panel-title">Identities with {name}</h2>
-            <p className="contact-panel-lead">Shared in this chat only. Not proof of who they are.</p>
+            <h2 id={titleId} className="contact-panel-title">{t("identities.contact.title", { name })}</h2>
+            <p className="contact-panel-lead">{t("identities.contact.lead")}</p>
           </div>
         </div>
-        <button type="button" aria-label="Close" data-testid="chat-identities-close" onClick={onClose} className="contact-panel-close">
+        <button type="button" aria-label={t("common.close")} data-testid="chat-identities-close" onClick={onClose} className="contact-panel-close">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
       </div>
       <div className="contact-panel-body">
         <ContactFacePicker peerKey={peerKey} received={received} />
-        <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={`Shared by ${name}`}>
-          <h3 className="contact-panel-heading">Shared by {name}</h3>
+        <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name })}>
+          <h3 className="contact-panel-heading">{t("identities.contact.sharedBy", { name })}</h3>
           {link
             ? <TheirCards t={t} entries={entries} link={link} links={state?.links ?? []} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
             : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
         </section>
         {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{link.identities.error}</p>}
-        <p className="contact-panel-note" data-testid="chat-identities-share-yours">Share yours from the + in the chat.</p>
+        <p className="contact-panel-note" data-testid="chat-identities-share-yours">{t("identities.contact.shareYours")}</p>
       </div>
     </aside>
   </>);
@@ -115,17 +115,17 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
         front={<IdCardFace card={showing.card} />}
         back={showing.ghostly
           ? <TheirGhostlyBack t={t} card={showing.card} link={link} name={name} onCards={cards} />
-          : <TheirCardBack entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} onCards={cards} />} />
+          : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} onCards={cards} />} />
       : <>
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={setChosen} onChoose={id => { setChosen(id); turn(); }}
-          kind="radios" label={`Identities shared by ${name}`} name="contact-identity-deck" className="id-deck" size={{ max: 300, share: .78 }}
+          kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" className="id-deck" size={{ max: 300, share: .78 }}
           testId={e => (e.ghostly ? "chat-identity-ghostly" : "chat-identity-received")}
           face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
           mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />}
           tone={tone} />
         {entries.length === 1
           ? <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>
-          : <p className="contact-panel-hint">Tap a card to see how it was checked.</p>}
+          : <p className="contact-panel-hint">{t("identities.contact.tapHint")}</p>}
         {!entry.ghostly && (entry.card.status === "verified" || entry.card.status === "expiring") && hasIdentityActivity(entry.r.provider) &&
           <IdentityActivity key={entry.id} provider={entry.r.provider} subject={entry.r.verified.subject} profile={entry.r.publicProfile} links={links} />}
       </>}
@@ -143,7 +143,7 @@ function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={GHOSTLY} data-status={card.status}>
       <div className="id-card-back-band">
         <span className="id-card-back-title">{t("identities.ghostly.theirs")}</span>
-        <FlipTurnButton testId="chat-identity-cards" label={`Back to ${name}’s cards`} onClick={onCards} />
+        <FlipTurnButton testId="chat-identity-cards" label={t("identities.contact.backToCards", { name })} onClick={onCards} />
       </div>
       <div className="id-card-back-body">
         <div className="id-card-back-sees">
@@ -156,11 +156,11 @@ function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card
         </div>
         <code className="block break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="chat-identity-key">{card.subject}</code>
         <dl className="contact-card-facts">
-          <dt>Name</dt>
+          <dt>{t("identities.contact.name")}</dt>
           <dd>{t("identities.ghostly.nameAsSaid")}</dd>
-          <dt>Key</dt>
+          <dt>{t("identities.contact.key")}</dt>
           <dd data-testid="chat-identity-received-status" data-status={link.peerVerified ? "verified" : "unverified"}>{card.statusLabel}. {link.peerVerified ? t("identities.ghostly.verifiedExplain") : t("identities.ghostly.notVerifiedExplain")}</dd>
-          {card.issued && <><dt>Since</dt><dd>{card.validity}</dd></>}
+          {card.issued && <><dt>{t("identities.contact.since")}</dt><dd>{card.validity}</dd></>}
         </dl>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
@@ -176,7 +176,7 @@ function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card
  * checked it and until when it holds, Check again, and a public profile when the provider has one. A Nostr card's
  * back holds what the key published, loaded on request.
  */
-function TheirCardBack({ entry, linkId, name, nostr, onCards }: { entry: Received; linkId: string; name: string; nostr?: NostrContactView; onCards: () => void }) {
+function TheirCardBack({ t, entry, linkId, name, nostr, onCards }: { t: Translate; entry: Received; linkId: string; name: string; nostr?: NostrContactView; onCards: () => void }) {
   const { r, card } = entry;
   const provider = providerOf(r.provider);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
@@ -186,8 +186,8 @@ function TheirCardBack({ entry, linkId, name, nostr, onCards }: { entry: Receive
   return (
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={r.provider} data-status={card.status}>
       <div className="id-card-back-band">
-        <span className="id-card-back-title">How it was checked</span>
-        <FlipTurnButton testId="chat-identity-cards" label={`Back to ${name}’s cards`} onClick={onCards} />
+        <span className="id-card-back-title">{t("identities.contact.howChecked")}</span>
+        <FlipTurnButton testId="chat-identity-cards" label={t("identities.contact.backToCards", { name })} onClick={onCards} />
       </div>
       <div className="id-card-back-body">
         <div className="id-card-back-sees">
@@ -197,31 +197,30 @@ function TheirCardBack({ entry, linkId, name, nostr, onCards }: { entry: Receive
             <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
-            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">Name: {card.profile?.found && card.profile.name ? "their public profile" : r.display?.source ?? r.verified.display?.source}</span>}
+            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">{t("identities.contact.nameFrom", { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}
           </span>
         </div>
         {card.lookup && <PublicProfileDetails provider={r.provider} profile={card.profile} testId="chat-identity-public-profile" />}
         <dl className="contact-card-facts">
-          <dt>Proves</dt>
-          <dd>{card.attested ? `${r.verified.attester ?? "The provider"} says this account logged in: only as trustworthy as ${r.verified.attester ?? "it"}.` : "Only the holder of this key could have made this proof."}</dd>
-          <dt>How</dt>
+          <dt>{t("identities.contact.proves")}</dt>
+          <dd>{card.attested ? (r.verified.attester ? t("identities.contact.attested", { attester: r.verified.attester }) : t("identities.contact.attestedByProvider")) : t("identities.contact.holderOnly")}</dd>
+          <dt>{t("identities.contact.how")}</dt>
           <dd>{r.verified.source}</dd>
-          <dt>Checked</dt>
-          <dd data-testid="chat-identity-checked">On this device {dateTime(r.verifiedAt)}{r.checkedAt !== r.verifiedAt ? `, last ${dateTime(r.checkedAt)}` : ""}</dd>
-          <dt>Validity</dt>
+          <dt>{t("identities.contact.checked")}</dt>
+          <dd data-testid="chat-identity-checked">{r.checkedAt !== r.verifiedAt ? t("identities.contact.checkedAgain", { time: dateTime(r.verifiedAt), last: dateTime(r.checkedAt) }) : t("identities.contact.checkedOnce", { time: dateTime(r.verifiedAt) })}</dd>
+          <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
-          <dt>Status</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{card.statusLabel}
-            {r.status === "unconfirmed" && `: could not be confirmed${r.error ? ` (${r.error})` : ""}`}
-            {r.status === "revoked" && ": its owner removed it and published a revocation"}</dd>
+          <dt>{t("identities.contact.status")}</dt>
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? t("identities.contact.unconfirmedWhy", { status: card.statusLabel, error: r.error }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+            : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">
           {canCheck && <button type="button" className="contact-card-action" data-testid="chat-identity-recheck" aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? "Checking…" : "Check again"}</button>}
+            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</button>}
           {provider?.lookupDisplay && ok && <button type="button" className="contact-card-action" data-testid="chat-identity-lookup" aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? "Looking up…" : provider.lookupLabel ?? "Show public profile"}</button>}
+            onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
         </div>
-        <p className="id-card-back-note">Check again looks for a revocation by its owner{provider?.recheck ? " and repeats the check" : ""}.{provider?.lookupDisplay && ok ? " A public profile is looked up only when you ask; the servers asked learn which identity you looked up." : ""}</p>
+        <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>
         {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="chat-identities-error">{error}</p>}
         {r.provider === "nostr" && ok && nostr && <div className="contact-card-nostr"><NostrContactCard linkId={linkId} view={nostr} name={name} compact /></div>}
       </div>

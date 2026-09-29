@@ -1,6 +1,7 @@
 import { QRCodeSVG } from "qrcode.react";
 import type { ApprovalRequest } from "@ghostly/browser/proofs/contract";
 import { Button } from "../wallet/ui";
+import { useI18n } from "../../contexts/I18nContext";
 
 /**
  * A request waiting for the person's approval elsewhere, both ways on one screen (Pubky: a big button that opens
@@ -9,6 +10,7 @@ import { Button } from "../wallet/ui";
  * await, would be blocked. The QR's value is a secret: it is drawn, never copied, logged or put in a link.
  */
 export function ApprovalPanel({ request, onCancel }: { request: ApprovalRequest; onCancel?: () => void }) {
+  const { t } = useI18n();
   return (
     <div data-testid="approval" className="space-y-4">
       {request.open && (
@@ -29,7 +31,7 @@ export function ApprovalPanel({ request, onCancel }: { request: ApprovalRequest;
       {request.notes?.map(note => <p key={note} className="text-xs text-text-muted">{note}</p>)}
       {onCancel && (
         <div className="flex justify-end">
-          <Button data-testid="approval-cancel" onClick={onCancel}>Cancel</Button>
+          <Button data-testid="approval-cancel" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       )}
     </div>
