@@ -529,6 +529,10 @@ jobs:
     steps:
       - name: Check all jobs passed
         env:
+          # A draft's run may skip jobs (see `changes`). Its CI Success must not count: the dev ruleset asks for a green
+          # CI Success, so a green one from the draft run let `gh pr ready` + `gh pr merge --auto` merge at once, before
+          # the full run that leaving draft starts had finished (#590, 2026-09-29).
+          DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
           CHANGES: ${{ needs.changes.result }}
           RUST: ${{ needs.changes.outputs.rust }}
           WEBSITE_GATE: ${{ needs.changes.outputs.website }}
@@ -545,6 +549,10 @@ jobs:
           DESKTOP_MEDIA: ${{ needs.desktop-media.result }}
           DESKTOP_MACOS: ${{ needs.desktop-macos.result }}
         run: |
+          if [[ "$DRAFT" == "true" ]]; then
+            echo "::notice::Draft: the jobs this change needs ran, but CI Success only passes on the run that leaving draft starts."
+            exit 1
+          fi
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
           summary="changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS frontend-build=$FRONTEND_BUILD tauri=$TAURI cli=$CLI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
