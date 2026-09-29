@@ -25,7 +25,7 @@ afterAll(() => {
 
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string> } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: () => number; delay?: number } = {}): { a: Side; b: Side } {
   const make = (chat: string): Side => {
     const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` } } as unknown as Side;
     return side;
@@ -36,11 +36,11 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string> } = {}):
     setCallSignal: async ({ signal }) => {
       me.signals.push(signal);
       // The chat session carries it to the contact, a moment later.
-      if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, signal), 5);
+      if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, signal), stacks.delay ?? 5);
     },
   });
-  a.calls = new CallManager({ engine: engine(a, () => b), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a });
-  b.calls = new CallManager({ engine: engine(b, () => a), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp() });
+  a.calls = new CallManager({ engine: engine(a, () => b), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now });
+  b.calls = new CallManager({ engine: engine(b, () => a), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), now: stacks.now });
   return { a, b };
 }
 
@@ -198,6 +198,47 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await expect(b.calls.answer(undefined, {})).rejects.toMatchObject({ code: "not_found" });
     // The hang-up signal is cleared later, as the apps do; stopping sends nothing more.
     expect(a.signals.at(-1)).toMatch(/"t":"h"/);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  /** Both sides call each other at once; the side whose offer lost is the one that ends its call as `crossed`. */
+  async function glare(a: Side, b: Side) {
+    await Promise.allSettled([a.calls.start("chat-ab", {}), b.calls.start("chat-ba", {})]);
+    const crossed = (s: Side) => s.events.some((e) => e.type === "call.ended" && e.reason === "crossed");
+    const loser = await until(() => [a, b].find(crossed)).catch(diagnose(a, b));
+    const winner = loser === a ? b : a;
+    await until(() => loser.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
+    // Its own call ended first, then the contact's rang; it sent no hang-up, which would end the contact's call.
+    expect(loser.events.map((e) => e.type).filter((t) => t !== "call.outgoing")).toEqual(["call.ended", "call.incoming"]);
+    expect(signalsOf(loser, "h")).toEqual([]);
+    expect(crossed(winner)).toBe(false);
+    expect(winner.calls.list()).toMatchObject([{ direction: "out", state: "ringing" }]);
+    expect(loser.calls.list()).toMatchObject([{ direction: "in", state: "ringing" }]);
+    return { loser, winner };
+  }
+
+  it("both call at once: the earlier offer rings on the other side, and answering it connects", async () => {
+    const { a, b } = pairOfManagers();
+    const { loser } = await glare(a, b);
+    await loser.calls.answer(undefined, {});
+    await Promise.all([
+      until(() => a.events.find((e) => e.type === "call.connected")),
+      until(() => b.events.find((e) => e.type === "call.connected")),
+    ]).catch(diagnose(a, b));
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("both call at once in the same millisecond: the lower DTLS fingerprint wins", async () => {
+    const at = Date.now();
+    // The session is slow enough that both offers go out before either arrives: the tie is decided by the offers alone.
+    const { a, b } = pairOfManagers({ now: () => at, delay: 1500 });
+    const { winner } = await glare(a, b);
+    const offerOf = (s: Side) => JSON.parse(signalsOf(s, "o")[0]!) as { ts: number; f: string };
+    const [mine, theirs] = [offerOf(winner), offerOf(winner === a ? b : a)];
+    expect(mine.ts).toBe(theirs.ts);
+    expect(mine.f < theirs.f).toBe(true);
     await a.calls.stopAll();
     await b.calls.stopAll();
   });

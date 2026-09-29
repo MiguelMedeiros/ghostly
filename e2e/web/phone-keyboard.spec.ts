@@ -63,3 +63,29 @@ test("installed on a phone: the app fills the screen, and the composer rides the
   await expect.poll(async () => (await box(page, ".app-shell")).bottom).toBe(PHONE.height);
   expect((await box(page, ".composer-row")).bottom).toBeLessThanOrEqual(PHONE.height);
 });
+
+test("on a phone: an emoji search shows its results above the keyboard", { tag: ["@feature:app.mobile-layout", "@feature:app.emoji-picker", "@feature:app.composer.expressions"] }, async ({ peer }) => {
+  const { page } = await peer("alice", { mobile: true, viewport: PHONE });
+  await page.getByTitle("New Chat").click();
+  await page.getByTestId("composer-expressions").tap();
+  const panel = page.getByTestId("expression-panel");
+  const search = panel.getByTestId("expression-search");
+  await search.focus();
+  await page.setViewportSize({ width: PHONE.width, height: PHONE.height - KEYBOARD });
+  await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+  await search.fill("face");
+
+  // The field and three rows of results at least, all between the top of the screen and the keyboard.
+  const visible = PHONE.height - KEYBOARD;
+  await expect.poll(async () => { const rect = (await panel.boundingBox())!; return rect.y + rect.height; }).toBeLessThanOrEqual(visible + 1);
+  expect((await search.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+  const results = panel.getByTestId("emoji-section-search").getByRole("button");
+  const row = (await results.first().boundingBox())!.height;
+  await expect.poll(async () => (await panel.locator(".expression-scroll").boundingBox())!.height).toBeGreaterThanOrEqual(row * 3);
+
+  // Keyboard down: the sheet is its usual half of the screen again.
+  await search.blur();
+  await page.setViewportSize(PHONE);
+  await expect(page.locator("html")).toHaveAttribute("data-keyboard", "false");
+  await expect.poll(async () => Math.round((await panel.boundingBox())!.height)).toBe(Math.round(PHONE.height * 0.52));
+});
