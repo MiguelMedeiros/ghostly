@@ -142,10 +142,14 @@ class Driver {
     return (await this.call("POST", "/execute/async", { script, args })) as T;
   }
 
+  /** What was clicked last, for the page a failed test attaches. */
+  lastClicked: string | null = null;
+
   /** Throws when nothing matches: a click is not something to be vague about. */
   async click(selector: string): Promise<void> {
     const element = await this.find(selector);
     if (element === null) throw new Error(`Nothing to click at ${selector}`);
+    this.lastClicked = selector;
     await this.call("POST", `/element/${element}/click`, {});
   }
 
@@ -269,9 +273,22 @@ async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number): Prom
   }
 }
 
-/** What the page showed when a test failed: where it was, and its text. */
+/**
+ * What the page showed when a test failed: where it was, its text, and where the last click went: the element's
+ * box, the window, and what a click at the box's center reaches now.
+ */
 async function attachPage(app: DesktopApp): Promise<void> {
-  const page = await app.execute<string>(`return location.href + "\\n\\n" + document.body.innerText.slice(0, 8000);`).catch((error) => `No page: ${(error as Error).message}`);
+  const page = await app.execute<string>(`
+    const clicked = arguments[0] && document.querySelector(arguments[0]);
+    let hit = "";
+    if (clicked) {
+      const box = clicked.getBoundingClientRect();
+      const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      const describe = (e) => e ? e.tagName + (e.dataset.testid ? "[" + e.dataset.testid + "]" : "") + " " + JSON.stringify((e.textContent || "").slice(0, 60)) : "nothing";
+      hit = "last click: " + arguments[0] + " at " + JSON.stringify(box) + " in " + innerWidth + "x" + innerHeight
+        + "; the center reaches " + describe(at) + (at && clicked.contains(at) ? " (inside it)" : " (NOT inside it)") + "\\n\\n";
+    }
+    return hit + location.href + "\\n\\n" + document.body.innerText.slice(0, 8000);`, (app as Partial<Driver>).lastClicked ?? null).catch((error) => `No page: ${(error as Error).message}`);
   await base.info().attach("page.txt", { body: page, contentType: "text/plain" });
 }
 
