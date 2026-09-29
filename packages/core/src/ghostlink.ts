@@ -76,6 +76,8 @@ export const CROSSED_WAIT_MS = 3_000;
  * takes over.
  */
 export const CROSSED_FRESH_MS = 10_000;
+/** What a joiner is told when someone else used the invite first (`DhtDeliveryView.inviteTaken`). */
+export const INVITE_TAKEN = "Someone else joined with this invite first. Ask your contact for a new one.";
 /**
  * A dial the contact made while its mailbox, as last read here, said DHT-only waits this long for the read that says
  * it left (the mailbox is read at the DHT pace meanwhile), then closes.
@@ -636,6 +638,10 @@ export class GhostLink {
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
       changed: view => {
         options.events?.onDhtDelivery?.(view);
+        // Someone else used the invite first (the contact's envelopes are sealed to them): the pairing says so, and
+        // stops saying it if an envelope of the contact's reads here again.
+        if (view.inviteTaken) this.tracker?.failed("taken", false, INVITE_TAKEN);
+        else this.tracker?.untaken();
         this.streamBlockChanged();
         // A contact who chose DHT only (a ghostly1 code carries no mode) paired through the mailbox: the first
         // pairing ends on the DHT, chosen (WISP 400), and the stream attempt it will never answer is not a failure.
@@ -994,6 +1000,8 @@ export class GhostLink {
   /** A session is ready, but on a transport the policies do not allow: it coordinates a switch and carries nothing else. */
   private get sessionBlocked(): boolean { return this.paired?.state.status === "ready" && !this.currentTransportAllowed(); }
   validateText(text: string, timestamp: number, id: string, reply?: WireReply): string | null {
+    // Nobody reads this side's texts: the contact seals everything to whoever used the invite first.
+    if (!this.isDataLinkOpen && this.dht?.view.inviteTaken) return INVITE_TAKEN;
     if (this.textDelivery === "dht") return this.dht!.validate(text, timestamp, id, reply?.i);
     return this.canSendText ? null : "No authenticated text delivery method is available.";
   }

@@ -64,6 +64,7 @@ export function usePairingWords() {
         case "rejected": return t("pairing.reason.rejected");
         case "keyMismatch": return t("pairing.reason.keyMismatch");
         case "expired": return t("pairing.reason.expired");
+        case "taken": return t("pairing.reason.taken");
         case "unknown": return t("pairing.reason.unknown");
       }
     },

@@ -18,6 +18,7 @@
     "publish": "Não foi possível colocar seu convite na rede. Verifique sua conexão.",
     "rejected": "O app do seu contato recusou a conexão.",
     "resolve": "Não foi possível encontrar o convite na rede. Ele pode ser antigo ou estar incorreto.",
+    "taken": "Outra pessoa entrou com este convite antes. Peça um novo ao seu contato.",
     "timeout": "O app do seu contato não respondeu a tempo.",
     "transport": "Não foi possível abrir uma conexão direta entre os seus aparelhos.",
     "unknown": "Algo deu errado ao conectar."

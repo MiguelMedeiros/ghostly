@@ -18,6 +18,7 @@
     "publish": "Impossibile pubblicare il tuo invito sulla rete. Controlla la connessione.",
     "rejected": "L’app del tuo contatto ha rifiutato la connessione.",
     "resolve": "Invito non trovato sulla rete. Potrebbe essere vecchio o copiato male.",
+    "taken": "Qualcun altro è entrato prima con questo invito. Chiedine uno nuovo al tuo contatto.",
     "timeout": "L’app del tuo contatto non ha risposto in tempo.",
     "transport": "Non è stato possibile aprire un collegamento diretto tra i tuoi dispositivi.",
     "unknown": "Qualcosa è andato storto durante la connessione."

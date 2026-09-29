@@ -102,6 +102,11 @@ export interface DhtDeliveryState {
   confirmed?: string;
   /** The highest number of the contact's reactions taken from its envelopes: said back in every envelope. */
   reactionsTaken?: number;
+  /**
+   * The contact's envelope, by its hint the pinned (or expected) key's, is sealed to another key: the contact paired with
+   * someone else who used the same invite first. Kept until an envelope of the contact's newer than the last read opens.
+   */
+  inviteTaken?: true;
 }
 export interface DhtDeliveryView {
   mode: DeliveryMode;
@@ -118,6 +123,8 @@ export interface DhtDeliveryView {
    * ignored, never a reason to stop the chat: a passive warning only.
    */
   foreignKeySeenAt?: number;
+  /** The invite was used by someone else first (`DhtDeliveryState.inviteTaken`): this side's texts reach nobody. */
+  inviteTaken?: boolean;
 }
 /**
  * What can be said about one DHT envelope without opening it: which text it carried, its sequence and times, the
@@ -214,7 +221,8 @@ export class DhtDelivery {
   get view(): DhtDeliveryView {
     return { mode: this.mode, peerMode: this.state.peerMode, authenticated: !!this.options.credentials.peerKey,
       error: Object.values(this.errors).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES,
-      ...(this.lastPublished && { lastPublished: this.lastPublished }), ...(this.foreignKeySeenAt && { foreignKeySeenAt: this.foreignKeySeenAt }) };
+      ...(this.lastPublished && { lastPublished: this.lastPublished }), ...(this.foreignKeySeenAt && { foreignKeySeenAt: this.foreignKeySeenAt }),
+      ...(this.state.inviteTaken && { inviteTaken: true }) };
   }
   /**
    * Something signed by a participation key other than the pinned one came in over the chat's invite-derived keys (this
@@ -496,7 +504,9 @@ export class DhtDelivery {
     const sender = hints.length ? tryDecrypt(hints[0].value, this.key) : null;
     if (hints.length && !sender) return null;
     let plaintext: string | null;
-    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { return null; }
+    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { plaintext = null; }
+    // Sealed, by its hint, from `sender` to a key other than this side's: nothing to read, but who it names says something.
+    if (!plaintext && sender) return { sealedToAnother: sender };
     if (!plaintext || utf8Encode(plaintext).length > MAX_ENVELOPE_PLAINTEXT) return null;
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return null; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return null;
@@ -513,12 +523,27 @@ export class DhtDelivery {
     return { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded };
   }
   /**
+   * The contact's envelope is sealed to another key (`open`): it pinned someone else who used the same invite first, so
+   * nothing of this side's will ever be read. Said once this side is not proven the one it pinned (never seen in the
+   * pinned mailbox, no text confirmed, never live). The hint is sealed under the invite's key, which any copy of it
+   * holds: a passive warning, taken back by the contact's next envelope that opens here.
+   */
+  private async sealedToAnother(sender: string): Promise<void> {
+    const expected = this.options.credentials.peerKey ?? this.options.credentials.expectedPeerKey;
+    if (this.state.inviteTaken || !expected || sender !== expected) return;
+    if (this.state.peerPinned === "seen" || this.state.confirmed || this.live) return;
+    traceLink(this.from, "invite-taken", {});
+    await this.persist({ ...this.state, inviteTaken: true });
+    this.changed();
+  }
+  /**
    * One packet from one of the contact's two mailboxes: `invite` (derived from the invite, which anyone holding a copy
    * can write to) or `pinned`. `none`: nothing from the contact in it; `old`: the contact's, already read; `new`: taken.
    */
   private async receive(packet: SignedPacket, box: "invite" | "pinned"): Promise<"none" | "old" | "new"> {
     const opened = this.open(packet, box);
     if (!opened) return "none";
+    if ("sealedToAnother" in opened) { if (opened.sealedToAnother) await this.sealedToAnother(opened.sealedToAnother); return "none"; }
     const { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded } = opened;
     // Before the pin, the key the invite named: another invite holder's envelope is refused, and not remembered,
     // since whoever holds a copy can write to this mailbox and the inviter's next envelope replaces it.
@@ -566,7 +591,10 @@ export class DhtDelivery {
     const confirmed = receipt && this.state.pending?.message[0] === receipt ? receipt : this.state.confirmed;
     if (mode !== this.state.peerMode) traceLink(this.from, "dht-peer-mode", { peerMode: mode });
     if (peerPinned !== this.state.peerPinned) traceLink(this.from, "dht-peer-pinned", { peerPinned });
-    await this.persist({ ...this.state, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }),
+    // A newer envelope of the contact's that opens here: whatever said the invite was taken was not the contact.
+    if (this.state.inviteTaken) traceLink(this.from, "invite-untaken", {});
+    const { inviteTaken: _taken, ...kept } = this.state;
+    await this.persist({ ...kept, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }),
       pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending,
       ...(newest > (this.state.reactionsTaken ?? 0) && { reactionsTaken: newest }) });
     if (confirmed) await this.options.receipt(confirmed);
@@ -615,7 +643,7 @@ export class DhtDelivery {
       const packet = await this.options.transport.resolve(box === "pinned" ? pinned!.peerAddress : this.peerAddress, options);
       reads++;
       const opened = packet && this.open(packet, box);
-      if (!opened || opened.author !== expected) continue;
+      if (!opened || "sealedToAnother" in opened || opened.author !== expected) continue;
       const { sequence, message } = opened;
       const fresh = Array.isArray(message) && typeof message[0] === "string" && ID.test(message[0]) && sequence > this.state.peerSequence && this.state.receipt?.id !== message[0];
       return { reads, text: fresh ? message[0] : null };

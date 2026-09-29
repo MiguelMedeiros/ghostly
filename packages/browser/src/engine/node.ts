@@ -40,7 +40,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, parseCommunityEdit } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, parseCommunityEdit } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -1856,6 +1856,8 @@ export class GhostlyNode implements EngineImplementation {
     if (bytes > LIMITS.maxChatMessageBytes) return { error: `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`, refused: true };
     const stop = this.chatStopped(live);
     if (stop) return { error: stop };
+    // Someone else used the invite first: the contact reads nothing of this side's, so nothing waits to go either.
+    if (!link.isDataLinkOpen && link.dhtDelivery?.inviteTaken) return { error: INVITE_TAKEN, refused: true };
     const wireId = toBase64Url(randomBytes(16)), id = `me_${wireId}`;
     const delivery = link.isDataLinkOpen ? "stream" : link.textDelivery === "dht" ? "dht" : "unavailable";
     // Not live: the contact's app may be closed. Wake it, if it shared how; it then connects and takes this message.

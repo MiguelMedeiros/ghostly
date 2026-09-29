@@ -31,7 +31,7 @@ export const SLOW_AFTER_MS: Record<PairingStage, number> = {
 };
 
 /** Failure codes with words of their own; anything else reads as `unknown`, with `detail` under it. */
-export const FAILURE_REASONS = ["publish", "resolve", "timeout", "offline", "transport", "rejected", "keyMismatch", "expired"] as const;
+export const FAILURE_REASONS = ["publish", "resolve", "timeout", "offline", "transport", "rejected", "keyMismatch", "expired", "taken"] as const;
 export type FailureReason = typeof FAILURE_REASONS[number] | "unknown";
 
 export function failureReason(code: string | undefined): FailureReason {
