@@ -1,5 +1,6 @@
 {
   "copy": "复制邀请",
   "copyFailed": "无法复制。请重试或分享邀请。",
-  "shareFailed": "无法分享。请复制邀请。"
+  "shareFailed": "无法分享。请复制邀请。",
+  "title": "邀请你的联系人"
 }

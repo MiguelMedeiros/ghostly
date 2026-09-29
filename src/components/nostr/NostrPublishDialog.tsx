@@ -6,6 +6,7 @@ import { nostrSignerChoices, signNostrDraft, type NostrSignerChoice } from "../.
 import { Button, Notice, input } from "../wallet/ui";
 import { Select } from "../ui/Select";
 import { externalLinkProps } from "../../lib/externalLink";
+import { useI18n } from "../../contexts/I18nContext";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -15,6 +16,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * Nothing leaves before the confirmation; the engine refuses an event that differs from the draft.
  */
 export function NostrPublishDialog({ request, onClose, onDone }: { request: NostrDraftRequest; onClose: () => void; onDone?: (result: NostrPublishResult) => void }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<NostrDraft | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,7 +48,7 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
     try {
       const event = await signNostrDraft(draft, { signer, bunker, signal: controller.signal, onAuth: setAuthUrl, onProgress: setProgress });
       controller.signal.throwIfAborted();
-      setProgress("Sending to your relays…");
+      setProgress(t("identities.nostr.sending"));
       const r = await engine.call("nostrPublish", { draftId: draft.draftId, event });
       setResult(r);
       onDone?.(r);
@@ -54,45 +56,45 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
     finally { setBusy(false); setProgress(""); setBunker(""); if (abort.current === controller) abort.current = null; }
   };
 
-  const t = draft?.template;
+  const template = draft?.template;
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="nostr-publish-title" data-testid="nostr-publish-dialog"
         className="focus:outline-none w-full max-w-md max-h-[90dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
         <div className="flex items-start justify-between gap-4">
-          <h2 id="nostr-publish-title" className="text-lg font-medium text-text-primary">{draft?.summary ?? "Publish on Nostr"}</h2>
-          <button type="button" aria-label="Close" data-testid="nostr-publish-close" onClick={close} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
+          <h2 id="nostr-publish-title" className="text-lg font-medium text-text-primary">{draft?.summary ?? t("identities.nostr.publish")}</h2>
+          <button type="button" aria-label={t("common.close")} data-testid="nostr-publish-close" onClick={close} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
         </div>
-        {!draft && !error && <p className="text-xs text-text-muted">Preparing…</p>}
-        {t && !result && <>
+        {!draft && !error && <p className="text-xs text-text-muted">{t("identities.nostr.preparing")}</p>}
+        {template && !result && <>
           <div className="rounded-xl border border-border bg-surface-alt p-3 text-sm text-text-primary space-y-1" data-testid="nostr-publish-preview">
-            {t.kind === 1 && <p className="whitespace-pre-wrap break-words">{t.content}</p>}
-            {t.kind === 3 && <p>Your follow list, {t.tags.filter(x => x[0] === "p").length} {t.tags.filter(x => x[0] === "p").length === 1 ? "account" : "accounts"}, replaced as a whole.</p>}
-            {t.kind === 0 && <dl className="text-xs space-y-0.5">{Object.entries(safeJson(t.content)).map(([k, v]) => <div key={k} className="flex gap-2 min-w-0"><dt className="shrink-0 text-text-muted">{k}</dt><dd className="min-w-0 break-words">{typeof v === "string" ? v : JSON.stringify(v)}</dd></div>)}</dl>}
+            {template.kind === 1 && <p className="whitespace-pre-wrap break-words">{template.content}</p>}
+            {template.kind === 3 && <p>{template.tags.filter(x => x[0] === "p").length === 1 ? t("identities.nostr.followListOne") : t("identities.nostr.followList", { count: template.tags.filter(x => x[0] === "p").length })}</p>}
+            {template.kind === 0 && <dl className="text-xs space-y-0.5">{Object.entries(safeJson(template.content)).map(([k, v]) => <div key={k} className="flex gap-2 min-w-0"><dt className="shrink-0 text-text-muted">{k}</dt><dd className="min-w-0 break-words">{typeof v === "string" ? v : JSON.stringify(v)}</dd></div>)}</dl>}
           </div>
-          <Notice tone="warning" testId="nostr-publish-notice">Public on Nostr. {draft!.notice}</Notice>
+          <Notice tone="warning" testId="nostr-publish-notice">{t("identities.nostr.publicNotice")} {draft!.notice}</Notice>
           {choices.length > 1 && (
-            <label className="block space-y-1 text-xs text-text-muted">Sign with
-              <Select data-testid="nostr-publish-signer" aria-label="Sign with" value={signer} onChange={setSigner}
+            <label className="block space-y-1 text-xs text-text-muted">{t("identities.add.signWith")}
+              <Select data-testid="nostr-publish-signer" aria-label={t("identities.add.signWith")} value={signer} onChange={setSigner}
                 options={choices.map(c => ({ value: c.id, label: c.label }))} />
             </label>
           )}
           {signer === "nip46" && (
-            <label className="block text-xs text-text-muted">Signer connection link
+            <label className="block text-xs text-text-muted">{t("identities.nostr.signerLink")}
               <input data-testid="nostr-publish-bunker" type="password" autoComplete="off" value={bunker} onChange={e => setBunker(e.target.value)} placeholder="bunker://…" className={`${input} mt-1`} />
             </label>
           )}
-          {authUrl && <p className="text-xs text-text-muted">Approve it in your signer: <a {...externalLinkProps(authUrl)} className="text-accent underline break-all">{authUrl}</a></p>}
+          {authUrl && <p className="text-xs text-text-muted">{t("identities.nostr.approveIn")} <a {...externalLinkProps(authUrl)} className="text-accent underline break-all">{authUrl}</a></p>}
           {progress && <p className="text-xs text-text-muted" aria-live="polite">{progress}</p>}
           <div className="flex flex-wrap gap-2 justify-end">
-            <Button onClick={close} disabled={busy}>Cancel</Button>
-            <Button variant="primary" data-testid="nostr-publish-confirm" disabled={busy || (signer === "nip46" && !bunker.trim())} onClick={() => void confirm()}>{busy ? "Waiting…" : "Sign and publish"}</Button>
+            <Button onClick={close} disabled={busy}>{t("common.cancel")}</Button>
+            <Button variant="primary" data-testid="nostr-publish-confirm" disabled={busy || (signer === "nip46" && !bunker.trim())} onClick={() => void confirm()}>{busy ? t("identities.waiting") : t("identities.nostr.signAndPublish")}</Button>
           </div>
         </>}
         {result && (
           <div className="space-y-3">
-            <Notice tone="success" testId="nostr-publish-result">Published to {result.accepted.join(", ")}.{result.rejected.length ? ` Not accepted by ${result.rejected.map(r => `${r.relay} (${r.reason})`).join(", ")}.` : ""}</Notice>
-            <div className="flex justify-end"><Button variant="primary" onClick={close}>Done</Button></div>
+            <Notice tone="success" testId="nostr-publish-result">{t("identities.nostr.published", { relays: result.accepted.join(", ") })}{result.rejected.length ? ` ${t("identities.nostr.rejected", { relays: result.rejected.map(r => `${r.relay} (${r.reason})`).join(", ") })}` : ""}</Notice>
+            <div className="flex justify-end"><Button variant="primary" onClick={close}>{t("group.share.done")}</Button></div>
           </div>
         )}
         {error && <Notice tone="error" testId="nostr-publish-error">{error}</Notice>}

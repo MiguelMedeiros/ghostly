@@ -3,7 +3,8 @@ import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import type { ProfileLookup } from "../../hooks/usePublicProfileRequest";
 import type { Translate } from "../../contexts/I18nContext";
 import { providerIcon } from "./ProviderIcons";
-import { date, daysLeft, expiringSoon, providerLabel, providerOf, RECEIVED_STATUS, shortSubject } from "../../lib/identities";
+import { categoryLabel, date, daysLeft, expiringSoon, providerLabel, providerOf, receivedStatus, shortSubject } from "../../lib/identities";
+import { english } from "../../lib/english";
 import { ago, badgeState } from "./contactBadges";
 
 /**
@@ -65,18 +66,26 @@ const face = (profile: PublicProfileView | undefined, name: string | undefined, 
 const profileOf = (provider: string, subject: string, profile: PublicProfileView | undefined, current: boolean): { lookup?: ProfileLookup; profile?: PublicProfileView } =>
   current && hasPublicProfile(provider) ? { lookup: { provider, subject }, ...(profile ? { profile } : {}) } : {};
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** "Expires in 3 days", "Expires in 1 day". */
+const expiresIn = (t: Translate, expiresAt: number, now: number) => {
+  const days = daysLeft(expiresAt, now);
+  return days === 1 ? t("identities.card.expiresInOne") : t("identities.card.expiresIn", { count: days });
+};
+/** "Valid until 3 Oct 2026", or "Expired 3 Oct 2026". */
+const validity = (t: Translate, expiresAt: number, now: number) =>
+  expiresAt <= now ? t("identities.card.expiredOn", { date: date(expiresAt) }) : t("identities.card.validUntil", { date: date(expiresAt) });
 
-export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedBy = [], revoking = false }: { now?: number; refusedBy?: string[]; revoking?: boolean } = {}): IdCardContent {
+/** `t`: the interface's words (English by default, as in tests). */
+export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedBy = [], revoking = false, t = english }: { now?: number; refusedBy?: string[]; revoking?: boolean; t?: Translate } = {}): IdCardContent {
   const attested = providerOf(p.provider)?.category === "provider-attested";
   const expired = p.expiresAt <= now;
   const status: IdCardStatus = revoking ? "revoking" : expired ? "expired" : refusedBy.length ? "failed" : expiringSoon(p, now) ? "expiring" : "verified";
   const statusLabel = {
-    revoking: "Revoking…",
-    expired: "Expired",
-    failed: "Check failed",
-    expiring: `Expires in ${plural(daysLeft(p.expiresAt, now), "day", "days")}`,
-    verified: "Verified",
+    revoking: t("identities.card.revoking"),
+    expired: t("identities.card.expired"),
+    failed: t("identities.card.failed"),
+    expiring: expiresIn(t, p.expiresAt, now),
+    verified: t("identities.card.verified"),
   }[status];
   const pp = profileOf(p.provider, p.verified.subject, p.publicProfile, !expired && !revoking);
   return {
@@ -87,13 +96,13 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     short: shortSubject(p.provider, p.verified.subject),
     bound: p.subject,
     ...face(pp.profile, p.verified.display?.name, p.verified.display?.avatar),
-    category: attested ? `Attested by ${p.verified.attester ?? "the provider"}` : "Your own key",
+    category: categoryLabel(p.provider, p.verified.attester, t, true),
     attested,
     status,
     statusLabel,
-    validity: `${expired ? "Expired" : "Valid until"} ${date(p.expiresAt)}`,
+    validity: validity(t, p.expiresAt, now),
     issued: date(p.issuedAt),
-    shared: p.sharedWith === 0 ? "Not shared" : `Shared in ${plural(p.sharedWith, "chat", "chats")}`,
+    shared: p.sharedWith === 0 ? t("identities.card.notShared") : p.sharedWith === 1 ? t("identities.card.sharedInOne") : t("identities.card.sharedIn", { count: p.sharedWith }),
     refusedBy,
     ...pp,
   };
@@ -103,17 +112,18 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
  * A contact's identity as an ID card: the same card as one's own, its status as this app last checked it
  * (contactBadges.ts's states), "Their own key" or who attests it, and when it was checked in the last field.
  */
-export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000): IdCardContent {
+/** `t` and `language`: the interface's words, and its language for "3 h ago" (English by default, as in tests). */
+export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000, t: Translate = english, language?: string): IdCardContent {
   const attested = providerOf(r.provider)?.category === "provider-attested";
   const badge = badgeState(r, now);
   const status: IdCardStatus = badge === "revoked" ? "revoked" : badge ?? "withdrawn";
   const statusLabel = {
-    verified: "Verified",
-    expiring: `Expires in ${plural(daysLeft(r.expiresAt, now), "day", "days")}`,
-    failed: "Check failed",
-    revoked: "Revoked",
-    expired: "Expired",
-    withdrawn: RECEIVED_STATUS[r.status],
+    verified: t("identities.card.verified"),
+    expiring: expiresIn(t, r.expiresAt, now),
+    failed: t("identities.card.failed"),
+    revoked: t("identities.card.revoked"),
+    expired: t("identities.card.expired"),
+    withdrawn: receivedStatus(r.status, t),
     revoking: "",
   }[status];
   const avatar = r.display?.avatar ?? r.verified.display?.avatar;
@@ -126,13 +136,13 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000)
     short: shortSubject(r.provider, r.verified.subject),
     bound: r.subject,
     ...face(pp.profile, r.display?.name ?? r.verified.display?.name, avatar),
-    category: attested ? `Attested by ${r.verified.attester ?? "the provider"}` : "Their own key",
+    category: categoryLabel(r.provider, r.verified.attester, t),
     attested,
     status,
     statusLabel,
-    validity: `${r.expiresAt <= now ? "Expired" : "Valid until"} ${date(r.expiresAt)}`,
+    validity: validity(t, r.expiresAt, now),
     issued: date(r.verifiedAt),
-    shared: `Checked ${ago(r.checkedAt, now)}`,
+    shared: t("identities.card.checked", { time: ago(r.checkedAt, now, language) }),
     refusedBy: [],
     ...pp,
   };

@@ -25,7 +25,7 @@ export function Identities() {
     <Page title={t("tabs.identities")} width="md" testId="identities-page" trailing={state && canAdd && (
       <PageAction label={t("sidebar.new")} title={t("identities.ghostly.addOne")} testId="identities-new" onClick={() => setAdding(true)} />
     )}>
-      <p className="text-sm text-text-secondary">Optional proofs that you also hold another identity (a Nostr key, a domain, an account). You choose, one chat at a time, who sees them.</p>
+      <p className="text-sm text-text-secondary">{t("identities.page.intro")}</p>
       <IdentityProofsSection onAdd={() => setAdding(true)} />
       <ContactIdentitiesSection />
       {showNostr && <NostrSection />}

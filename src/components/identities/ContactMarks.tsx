@@ -27,14 +27,15 @@ function More({ n, ...rest }: { n: number } & Record<`data-${string}`, string | 
  * eaten. The row's own tooltip (its name and key) stays off the marks, so the two never cover each other.
  */
 export function ContactMarks({ peerKey, testId = "contact-marks" }: { peerKey: string | undefined; testId?: string }) {
+  const { t, language } = useI18n();
   const received = useReceived(peerKey);
-  const badges = contactBadges(received, { good: true });
+  const badges = contactBadges(received, { good: true, t, language });
   const tipId = useId();
   const pick = (key: string) => (key === ALL_MARKS ? badges : badges.filter(b => b.id === key));
   const { tip, handlers, swallow } = useMarkTip(key => loadShownProfiles(pick(key)));
   if (!badges.length) return null;
   const { shown, more } = takeBadges(badges, BADGE_LIMITS.row);
-  const label = `Verified identities: ${badges.map(b => b.label).join("; ")}`;
+  const label = t("identities.badge.listLabel", { list: badges.map(b => b.label).join("; ") });
   const inTip = tip ? pick(tip.key) : [];
   return (
     <>
@@ -59,9 +60,9 @@ export function ContactMarks({ peerKey, testId = "contact-marks" }: { peerKey: s
  * header. `footer`: a last line for the card (whose name and photo the contact is shown with).
  */
 export function IdentityStack({ peerKey, name, onOpen, open, footer }: { peerKey: string; name: string; onOpen: () => void; open?: boolean; footer?: string }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const received = useReceived(peerKey);
-  const badges = contactBadges(received);
+  const badges = contactBadges(received, { t, language });
   const tipId = useId();
   const shown = badges.slice(0, BADGE_LIMITS.header);
   const allGood = (n: number) => shown.length > 0 && shown.slice(0, n).every(b => isGood(b.state));
@@ -75,7 +76,7 @@ export function IdentityStack({ peerKey, name, onOpen, open, footer }: { peerKey
   const inTip = tip && !ghostly ? pick(tip.key) : [];
   return (
     <>
-      <button type="button" className="identity-stack" data-testid="chat-identity-badges" data-count={badges.length} aria-expanded={open} aria-label={`Identities with ${name}: ${label}`}
+      <button type="button" className="identity-stack" data-testid="chat-identity-badges" data-count={badges.length} aria-expanded={open} aria-label={t("identities.badge.stackLabel", { name, list: label })}
         aria-describedby={tip ? tipId : undefined} {...handlers}
         onClick={e => { if (!swallow(e)) onOpen(); }}>
         <span className="identity-stack-marks">
@@ -99,9 +100,10 @@ export function IdentityStack({ peerKey, name, onOpen, open, footer }: { peerKey
 
 /** On the avatar of a contact shown as one of their identities (contactFace.ts): that identity's provider, small. */
 export function FaceCorner({ face }: { face: ContactFace }) {
+  const { t } = useI18n();
   const icon = providerIcon(face.provider, face.subject);
   return (
-    <span role="img" aria-label={`${face.providerName} profile`} data-testid="contact-face-corner" data-provider={face.provider}
+    <span role="img" aria-label={t("identities.face.profileOf", { provider: face.providerName })} data-testid="contact-face-corner" data-provider={face.provider}
       className={`face-corner forced-color-adjust-none ${icon?.tile ?? "badge-mark-plain"}`}>{icon?.mark(10)}</span>
   );
 }

@@ -3,6 +3,7 @@ import { inviteQrSegments } from "@ghostly/core";
 import { inviteShareText } from "../lib/url";
 import { QRCodeDisplay } from "./QRCode";
 import { reducedMotion } from "./wallet/motion";
+import { useI18n } from "../contexts/I18nContext";
 import "./invite-card.css";
 
 /** How long the card takes to leave (invite-card.css). */
@@ -18,6 +19,7 @@ export const INVITE_LEAVE_MS = 220;
  * is shown again.
  */
 export function InviteCard({ code, shown = true }: { code: string; shown?: boolean }) {
+  const { t } = useI18n();
   const shared = inviteShareText(code);
   const [mounted, setMounted] = useState(shown);
   const [leaving, setLeaving] = useState(false);
@@ -39,7 +41,7 @@ export function InviteCard({ code, shown = true }: { code: string; shown?: boole
   return <div data-testid="invite-card" data-leaving={leaving || undefined} data-returning={(returning && !leaving) || undefined}
     aria-hidden={leaving || undefined} inert={leaving || undefined}
     className="invite-card mx-auto my-3 w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-surface-alt/95 p-4 text-center">
-    <h2 className="mb-3 text-sm font-medium text-text-primary">Invite your contact</h2>
+    <h2 className="mb-3 text-sm font-medium text-text-primary">{t("invite.title")}</h2>
     <QRCodeDisplay value={shared} qr={inviteQrSegments(code)} />
     {shared !== code && <p data-testid="invite-link" title={shared} dir="ltr" className="mt-2 truncate font-mono text-[11px] text-text-muted">{shared.replace(/^https:\/\//, "")}</p>}
   </div>;

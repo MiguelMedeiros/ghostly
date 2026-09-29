@@ -8,6 +8,7 @@ import { copyText, shareLink } from "../lib/shareLink";
 import { groupLinkUrl } from "../lib/groups";
 import { COMMUNITY_LIMITS, MAX_GROUP_MEMBERS } from "@ghostly/core";
 import { GroupAvatar } from "./GroupAvatar";
+import { useI18n } from "../contexts/I18nContext";
 
 function ShareIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>;
@@ -23,6 +24,7 @@ function CopyIcon() {
  * or turns it off.
  */
 export function GroupLinkPanel({ group, large = false }: { group: GroupView; large?: boolean }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [said, setSaid] = useState<"" | "copied" | "shared">("");
@@ -40,52 +42,48 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   };
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : "That did not work"); } finally { setBusy(false); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : t("group.error.generic")); } finally { setBusy(false); }
   };
   const copy = async () => {
     setError("");
-    try { await copyText(url); flash("copied"); } catch { setError("Copy did not work. Select the link and copy it."); }
+    try { await copyText(url); flash("copied"); } catch { setError(t("group.link.copyFailed")); }
   };
   const share = async () => {
     setError("");
     try {
-      const outcome = await shareLink(url, group.name ? `Join ${group.name} on Ghostly` : "Join a group on Ghostly", shareButton.current);
+      const outcome = await shareLink(url, group.name ? t("group.link.shareTitle", { name: group.name }) : t("group.link.shareTitleUnnamed"), shareButton.current);
       if (outcome !== "cancelled") flash(outcome);
-    } catch { setError("Sharing did not work. Copy the link instead."); }
+    } catch { setError(t("group.link.shareFailed")); }
   };
-  const note = full
-    ? `The group is full (${cap} of ${cap}): nobody gets in through the link until someone leaves.`
-    : community
-      ? `Anyone who opens this link joins, without being anyone's contact or saying who they are. Any member's app lets them in, so it works while you are away; up to ${cap} members. Removing someone does not stop them from opening the link again: the admin makes a new one for that.`
-      : `Anyone who opens this link joins, without being your contact or saying who they are. They get in while your app is open, up to ${cap} members.`;
+  const note = full ? t("group.link.full", { count: cap }) : community ? t("group.link.noteCommunity", { count: cap }) : t("group.link.note", { count: cap });
 
   if (!url) return <div className={large ? "text-center" : "mt-4"} data-testid="group-link" data-state="off">
-    {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">Group link</h3>}
-    <p className="mt-1 text-sm text-text-muted">The link is off: nobody can join with it. Turn it on to let anyone who has it in, without being your contact.</p>
+    {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>}
+    <p className="mt-1 text-sm text-text-muted">{t("group.link.off")}</p>
     <button disabled={busy || full} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id }))} data-testid="group-link-enable"
-      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{full ? "The group is full" : "Turn on the link"}</button>
+      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>
     {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
   </div>;
 
-  const field = <input readOnly value={url} aria-label="Group link" data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
+  const field = <input readOnly value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
     className={`min-w-0 flex-1 rounded-lg bg-input-bg px-3 font-mono text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent ${large ? "py-2.5 text-xs" : "py-1.5 text-[11px]"}`} />;
   const copyButton = <button onClick={() => void copy()} data-testid="group-link-copy"
     className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-semibold ${large ? "min-h-11 flex-1 bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover"}`}>
-    <CopyIcon /><span>{said === "copied" ? "Copied" : "Copy"}</span>
+    <CopyIcon /><span>{said === "copied" ? t("group.link.copied") : t("common.copy")}</span>
   </button>;
   const shareButtonEl = <button ref={shareButton} onClick={() => void share()} data-testid="group-link-share"
     className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover ${large ? "min-h-11 flex-1 px-4 text-sm" : "px-2.5 py-1.5 text-xs"}`}>
-    <ShareIcon /><span>{said === "shared" ? "Shared" : "Share"}</span>
+    <ShareIcon /><span>{said === "shared" ? t("group.link.shared") : t("group.link.share")}</span>
   </button>;
   const adminControls = group.isAdmin && <div className={`flex flex-wrap gap-1 ${large ? "justify-center" : ""}`}>
-    {!large && <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary">{showQr ? "Hide QR" : "Show QR"}</button>}
+    {!large && <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary">{showQr ? t("group.link.hideQr") : t("group.link.showQr")}</button>}
     <button disabled={busy} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id, reset: true }))} data-testid="group-link-reset"
-      title="A new link; the current one stops working" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40">New link</button>
+      title={t("group.link.resetHint")} className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40">{t("group.link.reset")}</button>
     <button disabled={busy} onClick={() => void run(() => engine.call("disableGroupLink", { groupId: group.id }))} data-testid="group-link-disable"
-      title="Nobody can join with the link until it is on again" className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">Turn off</button>
+      title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.link.disable")}</button>
   </div>;
   const qr = <div data-testid="group-link-qr" className={`mx-auto w-fit max-w-full rounded-2xl bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full ${large ? "" : "mt-2"}`}>
-    <QRCodeSVG value={url} size={large ? 248 : 184} marginSize={1} title="Group link QR code" bgColor="#ffffff" fgColor="#0b0f1a" level="M" />
+    <QRCodeSVG value={url} size={large ? 248 : 184} marginSize={1} title={t("group.link.qrTitle")} bgColor="#ffffff" fgColor="#0b0f1a" level="M" />
   </div>;
 
   if (large) return <div className="flex flex-col gap-3" data-testid="group-link" data-state="on">
@@ -98,7 +96,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   </div>;
 
   return <div className="mt-4 rounded-xl border border-border bg-surface-alt/40 p-3" data-testid="group-link" data-state="on">
-    <h3 className="text-xs font-bold uppercase tracking-wider text-accent">Group link</h3>
+    <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>
     <div className="mt-2 flex">{field}</div>
     <div className="mt-2 flex flex-wrap items-center gap-1.5">{shareButtonEl}{copyButton}{adminControls}</div>
     <p data-testid="group-link-note" className={`mt-2 text-xs ${full ? "text-amber-500" : "text-text-muted"}`}>{note}</p>
@@ -112,6 +110,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
  * header's Share link.
  */
 export function GroupShareDialog({ group, created = false, onClose }: { group: GroupView; created?: boolean; onClose(): void }) {
+  const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
@@ -125,12 +124,12 @@ export function GroupShareDialog({ group, created = false, onClose }: { group: G
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
       <GroupAvatar picture={group.picture} size={64} testId="group-share-avatar" className="mx-auto mb-3 bg-accent/15" />
-      <h2 id={`${id}-title`} className="text-lg font-semibold">{created ? `${group.name || "Your group"} is ready` : `Share ${group.name || "the group"}`}</h2>
-      <p className="mt-1 text-sm text-text-muted">{created ? "Share its link to bring people in: whoever opens it joins." : "Whoever opens this link joins the group."}</p>
+      <h2 id={`${id}-title`} className="text-lg font-semibold">{created ? (group.name ? t("group.share.ready", { name: group.name }) : t("group.share.readyUnnamed")) : (group.name ? t("group.share.title", { name: group.name }) : t("group.share.titleUnnamed"))}</h2>
+      <p className="mt-1 text-sm text-text-muted">{created ? t("group.share.createdHint") : t("group.share.hint")}</p>
     </div>
     <GroupLinkPanel group={group} large />
     <button onClick={onClose} data-testid="group-share-done" className="mt-4 min-h-11 w-full rounded-lg px-4 text-sm text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">
-      {created ? "Go to the group" : "Done"}
+      {created ? t("group.share.open") : t("group.share.done")}
     </button>
   </dialog>, document.body);
 }
