@@ -188,4 +188,20 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     for (const p of everyone) await p.groups.send(id, `${p.name} after the merge`);
     await world.until(() => everyone.every(p => new Set(world.texts(p, id).filter(t => t.endsWith("after the merge"))).size === everyone.length), 3 * 60_000);
   });
+
+  it("a join through the link that nobody answers yet is declined like an invitation: it stops, and the group is gone", async () => {
+    const world = new CommunityWorld();
+    const alice = world.add("alice"), bob = world.add("bob");
+    const { id, link } = await community(world, alice);
+    alice.online = false;
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.run(5_000);
+    // What `group list` shows: an invitation, still knocking. Declining it used to answer "No invitation to decline".
+    expect(world.view(bob, id)).toMatchObject({ invitation: { viaLink: true, accepted: true } });
+    await bob.groups.decline(id);
+    expect(world.view(bob, id)).toBeUndefined();
+    await world.run(5_000);
+    expect(world.view(bob, id)).toBeUndefined();
+    await expect(alice.groups.decline(id), "a member, not a join under way").rejects.toThrow("No invitation to decline");
+  });
 });

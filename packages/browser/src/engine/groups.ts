@@ -424,6 +424,7 @@ export class Groups {
   }
 
   async decline(groupId: string): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.decline(groupId);
     const group = this.stored.get(groupId);
     if (!group?.invitation) throw new Error("No invitation to decline");
     try { this.host.sendOnLink(group.invitation.linkId, { t: "group-decline", g: groupId }); } catch { /* they will notice when nobody accepts */ }
