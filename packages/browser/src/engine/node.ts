@@ -3842,6 +3842,17 @@ export class GhostlyNode implements EngineImplementation {
     await db.deleteLink(linkId);
   }
 
+  /**
+   * An edge's session opened or ended: kept, so that an app starting again knows which edges were live when it quit
+   * (`edgeLive`, `resume`). Nothing is written while the app shuts down: an edge live then was live when it quit.
+   */
+  private noteEdgeLive(linkId: string, up: boolean): void {
+    const live = this.links.get(linkId);
+    if (!live || this.shuttingDown || !!live.stored.edgeLive === up) return;
+    live.stored = { ...live.stored, edgeLive: up || undefined };
+    void db.patchLink(linkId, { edgeLive: up || undefined }).catch(() => {});
+  }
+
   /** The edge of a group toward one member: a paired link pinned to that member's key, carrying group frames and nothing else. */
   private async openEdge(state: { id: string; seedB64: string }, peer: string, expectPeer = false): Promise<string> {
     const me = identityFromSeedB64(state.seedB64);
@@ -3903,6 +3914,10 @@ export class GhostlyNode implements EngineImplementation {
       barkPaymentsSupport: !entry,
       params: stored,
       rtcAvailable: typeof RTCPeerConnection !== "undefined",
+      // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
+      // whichever end's turn it is, rather than left to its offer and a read at the background pace (WISP 100).
+      // An edge is WebRTC only (no native endpoints, `ensureNativeEndpoints`).
+      resume: !entry && stored.edgeLive ? "webrtc/1" : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
       pairing: { credentials: { seedB64: stored.participationSeed!, peerKey: peer, requireSignedSignals: true, verifiedPeerKey: peer },
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
@@ -3928,6 +3943,7 @@ export class GhostlyNode implements EngineImplementation {
           : this.groups.handleEdgeFrame(group, peer, frame),
         onGroupsSupport: supported => {
           if (supported) traceJoin(group, "link.ready", { role });
+          if (!entry) this.noteEdgeLive(linkId, supported);
           if (supported) {
             if (entry) this.groups.entryReady(group, linkId, peer);
             else {

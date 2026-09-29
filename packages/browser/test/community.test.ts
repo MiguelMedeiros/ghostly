@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { COMMUNITY_TOPOLOGY, decodeCommunityLink } from "@ghostly/core";
+import { COMMUNITY_TIMINGS } from "../src/engine/community";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.community.join, groups.community.send, groups.community.catch-up, groups.community.remove, groups.community.leave, groups.protocol.community-topology
 
@@ -187,6 +188,48 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
       state);
     for (const p of everyone) await p.groups.send(id, `${p.name} after the merge`);
     await world.until(() => everyone.every(p => new Set(world.texts(p, id).filter(t => t.endsWith("after the merge"))).size === everyone.length), 3 * 60_000);
+  });
+
+  it("a hub's app restarts: its member keeps their edge, the hub keeps its own while they come up, and what was said meanwhile arrives over it", async () => {
+    // A hub steps up after a random wait, as on a real app: its first seconds back, it is a member picking a hub.
+    const world = new CommunityWorld({ ...COMMUNITY_TIMINGS, hubJitterMs: 3_000 }, null, () => 0.9);
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    const { id, link } = await community(world, alice);
+    await joinAll(world, id, link, [bob, carol]);
+    await world.run(60_000);
+    const everyone = [alice, bob, carol];
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const edgeTo = (p: Peer, to: Peer) => [...p.links].find(([, e]) => e.kind === "edge" && e.peer === keyOf(to))?.[0];
+    // Two hubs and a member of one of them (3 members, `minHubs` 2).
+    const member = everyone.find(p => !p.groups.communities.isHub(id))!;
+    const hub = everyone.find(p => p !== member && edgeTo(member, p))!;
+    const other = everyone.find(p => p !== member && p !== hub)!;
+    expect(hub.groups.communities.isHub(id)).toBe(true);
+    // The links themselves, not only their ids (an edge opened again has the same id): closed is closed.
+    const memberEdge = edgeTo(member, hub)!, hubEdge = edgeTo(hub, member)!;
+    const memberSide = member.links.get(memberEdge), hubSide = hub.links.get(hubEdge);
+    // The hub's app quits, and says so on its edges (its member's edge drops).
+    hub.online = false;
+    await world.run(3_000);
+    // The member does not drop the hub for another at once, nor step up as a hub itself: the app is likely restarting,
+    // and the member's edge stays open, looking for it. It used to be closed at once and the hub avoided 40 s.
+    expect(member.links.get(memberEdge)).toBe(memberSide);
+    expect(member.groups.communities.isHub(id)).toBe(false);
+    await other.groups.send(id, "said while the hub restarts");
+    await world.run(2_000);
+    // Its app starts again, with none of its last run's memory; the member's side is a few polls away (cut until then).
+    world.cut = (a, b) => (a === hub && b === member) || (a === member && b === hub);
+    await world.restart(hub);
+    await world.run(5_000);
+    // Whatever the fresh topology picks first, the edge of the last run stays while it comes up.
+    expect(hub.links.get(hubEdge)).toBe(hubSide);
+    expect(member.links.get(memberEdge)).toBe(memberSide);
+    world.cut = null;
+    const back = await world.until(() => world.texts(hub, id).includes("said while the hub restarts"), 60_000);
+    expect(back).toBeLessThanOrEqual(3_000);
+    // The member, whose hub it is again, has it too (its next sync with the hub at the latest).
+    await world.until(() => world.texts(member, id).includes("said while the hub restarts"), 35_000);
+    expect(member.links.get(memberEdge)).toBe(memberSide);
   });
 
   it("a join through the link that nobody answers yet is declined like an invitation: it stops, and the group is gone", async () => {

@@ -100,6 +100,11 @@ export interface StoredLink {
    * side, toward a joiner's member key; `guest` on the joiner's, toward the link's entry key.
    */
   groupEntry?: "host" | "guest";
+  /**
+   * An edge whose session is up: set when it opens, cleared when it drops while this app runs (not when the app quits).
+   * Still set when the app starts, it was live when the app last ran, and is dialled at once (`resume`). Local only.
+   */
+  edgeLive?: boolean;
 }
 
 /** What happened to a group's membership, as a line in its history. */
