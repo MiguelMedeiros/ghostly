@@ -21,7 +21,7 @@ const ME = "me".padEnd(52, "y"), ANA = "ana".padEnd(52, "y");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: false, missing: 0, ...patch });
 const stored = (patch: Partial<StoredMessage>): StoredMessage => ({ linkId: "group:group-1", id: "g1", text: "", sender: "peer", timestamp: 1_700_000_000_000, via: "datalink", ...patch });
 const t = (language: Language, key: string, params: Record<string, string | number> = {}) =>
-  Object.entries(params).reduce((text, [k, v]) => text.replaceAll(`{{${k}}}`, String(v)), lookup(language, key)!);
+  Object.entries(params).reduce((text, [k, v]) => text.split(`{{${k}}}`).join(String(v)), lookup(language, key)!);
 const RAW_KEY = new RegExp(`\\b(?:${SECTIONS.join("|")})(?:\\.[a-zA-Z]+)+\\b`);
 
 function openGroup(language: Language, group: GroupView, history: StoredMessage[] = []) {
