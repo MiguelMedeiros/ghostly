@@ -113,6 +113,11 @@ const walletTx = (mint: string, kind: WalletTxKind, amount: number, fee: number,
 /** Where a Lightning payment stands, once the mint has been asked. */
 type MeltOutcome = "paid" | "pending" | "unpaid";
 
+/** What a failed payment left in the wallet, said to the person: all of it, or all but the fee the mint kept. */
+const backInWallet = (lost: number) => lost > 0
+  ? `The sats are back in your wallet, less ${lost} sat${lost === 1 ? "" : "s"} the mint kept as its fee.`
+  : "The sats are back in your wallet.";
+
 export interface WalletEvents {
   onChange(): void;
   /** Ecash arrived from the public test mint, which this wallet did not have yet. */
@@ -142,6 +147,8 @@ export class CashuWallet {
   private readonly locks = new Map<string, Promise<unknown>>();
   private quoteTimer: ReturnType<typeof setTimeout> | null = null;
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Per melt quote that ended unpaid: the sats the mint kept all the same (the fee of the split before the melt). */
+  private readonly failedFees = new Map<string, number>();
 
   /**
    * `getMints`: the mints of one network (the engine's default when none is named), primary first: balances,
@@ -626,7 +633,7 @@ export class CashuWallet {
   async payQuote(quoteId: string, mint: string, note?: string, paymentId?: string): Promise<boolean> {
     try {
       const outcome = await this.locked(mint, () => this.melt(quoteId, mint, note, paymentId));
-      if (outcome === "unpaid") throw new Error("The Lightning payment did not go through. The sats are back in your wallet.");
+      if (outcome === "unpaid") throw new Error(`The Lightning payment did not go through. ${backInWallet(this.takeFailedFee(quoteId))}`);
       if (outcome === "pending") void this.pollMelts();
       return outcome === "paid";
     } finally {
@@ -678,7 +685,12 @@ export class CashuWallet {
       if (!isMintOperationError(error) && !(error instanceof MeltChangeError)) return "pending";
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
       const outcome = await this.settleMelt(melt).catch((): MeltOutcome => "pending");
-      if (outcome === "unpaid") throw error;
+      if (outcome === "unpaid") {
+        // The mint's refusal ("Invoice already paid") stays what the person reads, with what it cost them.
+        const lost = this.takeFailedFee(melt.quote);
+        if (lost > 0) throw Object.assign(new Error(`${error instanceof Error ? error.message : String(error)} ${backInWallet(lost)}`), { cause: error });
+        throw error;
+      }
       return outcome;
     }
     if (result.quote.state === "PAID") {
@@ -702,6 +714,7 @@ export class CashuWallet {
           return current ? this.settleMelt(current) : null;
         });
         if (outcome === "paid" || outcome === "unpaid") {
+          this.takeFailedFee(melt.quote);
           this.events.onMeltResolved(melt, outcome === "paid");
           this.events.onChange();
         }
@@ -749,14 +762,26 @@ export class CashuWallet {
     if (states.some((s) => s.state === "PENDING")) return "pending";
     const spent = new Set(inputs.filter((_, i) => states[i]?.state === "SPENT").map((p) => p.secret));
     if (spent.size > 0) console.warn(`[wallet] melt ${melt.quote} is unpaid, yet ${spent.size} of its proofs are spent`);
-    await transact([STORES.proofs, STORES.melts], (stores) => {
+    // What left the balance for this payment and does not come back: the fee of the split that made its exact proofs
+    // (the mint keeps it whether the payment goes or not), and any proof it spent anyway. In the history, never silent.
+    const lost = melt.outlay - inputs.filter((p) => !spent.has(p.secret)).reduce((sum, p) => sum + p.amount, 0);
+    await transact([STORES.proofs, STORES.melts, ...(lost > 0 ? [STORES.walletTx] : [])], (stores) => {
       for (const p of inputs) {
         if (spent.has(p.secret)) stores[STORES.proofs].delete(p.secret);
         else stores[STORES.proofs].put({ ...p, reserved: false } satisfies StoredProof);
       }
       stores[STORES.melts].delete(melt.quote);
+      if (lost > 0) stores[STORES.walletTx].put(walletTx(melt.mint, "fee", 0, lost, melt.note ? `Payment failed: ${melt.note}` : "A Lightning payment failed"));
     });
+    if (lost > 0) this.failedFees.set(melt.quote, lost);
     return "unpaid";
+  }
+
+  /** The fee a failed melt cost, once: for the words that say it failed. */
+  private takeFailedFee(quote: string): number {
+    const lost = this.failedFees.get(quote) ?? 0;
+    this.failedFees.delete(quote);
+    return lost;
   }
 
   /** The invoice is paid: the reserved proofs are spent, the change is ours, and the payment goes in the history. */

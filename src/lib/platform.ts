@@ -146,7 +146,7 @@ export interface WalletTransaction {
   id: string;
   timestamp: number;
   mint: string;
-  kind: "lightning-in" | "lightning-out" | "ecash-in" | "ecash-out" | "reclaimed";
+  kind: "lightning-in" | "lightning-out" | "ecash-in" | "ecash-out" | "reclaimed" | "fee";
   /** Always positive; the kind gives the direction. */
   amount: number;
   /** What this movement cost, exactly. */
