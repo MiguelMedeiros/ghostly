@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostLink } from "../src/ghostlink";
+import { BLOCKED_DIAL_WAIT_MS, GhostLink } from "../src/ghostlink";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { createLink, type LinkParams } from "../src/invite";
 import { createIdentity, type Identity } from "../src/identity";
 import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import type { PkarrTransport } from "../src/transport";
+import type { FrameChannel } from "../src/frames";
+import type { NativeEndpoint } from "../src/pairedTransports";
 
 // covers: invite.delivery-mode, chat.paired.reconnect, transport.webrtc
 
@@ -21,12 +23,24 @@ const yieldToLoop = () => new Promise<void>(resolve => realSetTimeout(resolve, 0
 
 class MemoryPkarr {
   packets = new Map<string, SignedPacket>();
+  /** DHT mailboxes whose next read still answers this envelope: a relay that has not caught up with a newer one. */
+  private stale = new Map<string, SignedPacket>();
+  /** Reads that answered an older envelope than the one published. */
+  staleServed = 0;
+  lagMailboxes(): void {
+    for (const [key, packet] of this.packets) if (packet.records.some(record => record.label === "_dm")) this.stale.set(key, packet);
+  }
   transport(): PkarrTransport {
     return {
       publish: async (identity: Identity, records: GhostRecord[]) => {
         this.packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: BigInt(Date.now()) * 1000n, records });
       },
-      resolve: async (key: string) => this.packets.get(key) ?? null,
+      resolve: async (key: string) => {
+        const old = this.stale.get(key), now = this.packets.get(key) ?? null;
+        this.stale.delete(key);
+        if (old && old !== now) { this.staleServed++; return old; }
+        return now;
+      },
       describe: () => ({ protocol: "memory", relays: [] }),
     };
   }
@@ -94,14 +108,15 @@ class FakePeerConnection extends EventTarget {
 
 interface Side { params: LinkParams; seedB64: string; peerKey: string; state: DhtDeliveryState }
 
-function side(params: LinkParams, me: Identity, peer: Identity): Side {
-  return { params: { ...params, profile: "paired-chat/1", deliveryMode: "dht" }, seedB64: me.seedB64, peerKey: peer.pubKeyZ32,
-    // Paired through the DHT a while ago: each has read the other's envelopes, and both are DHT-only.
-    state: { ...emptyDhtDeliveryState(), sequence: 3, peerSequence: 3, peerMode: "dht" } };
+function side(params: LinkParams, me: Identity, peer: Identity, mode: "dht" | "stream" = "dht"): Side {
+  return { params: { ...params, profile: "paired-chat/1", deliveryMode: mode }, seedB64: me.seedB64, peerKey: peer.pubKeyZ32,
+    // Paired through the DHT a while ago: each has read the other's envelopes, and both are on `mode`.
+    state: { ...emptyDhtDeliveryState(), sequence: 3, peerSequence: 3, peerMode: mode } };
 }
 
 const links: GhostLink[] = [];
-function open(s: Side, pkarr: MemoryPkarr, active: boolean): GhostLink {
+/** `advertises: false`: its link packets carry no presence, as an offer's packet with no room left for it. */
+function open(s: Side, pkarr: MemoryPkarr, active: boolean, advertises = true): GhostLink {
   const link = new GhostLink({
     params: s.params,
     pairing: { credentials: { seedB64: s.seedB64, peerKey: s.peerKey, requireSignedSignals: true }, pinPeer: async () => {}, trustOnFirstUse: true },
@@ -110,7 +125,7 @@ function open(s: Side, pkarr: MemoryPkarr, active: boolean): GhostLink {
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
-    localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+    localFetch: vi.fn(), getServices: () => advertises ? [] : undefined, getHostedHttpService: () => undefined,
   });
   links.push(link);
   link.start();
@@ -133,11 +148,11 @@ async function untilLive(a: GhostLink, b: GhostLink, limit: number): Promise<num
 }
 
 /** A pair of which the given one dials (the lower key offers). */
-function pairWhere(dialer: "a" | "b") {
+function pairWhere(dialer: "a" | "b", mode: "dht" | "stream" = "dht") {
   for (;;) {
     const invitation = createLink();
     const [pa, pb] = [createIdentity(), createIdentity()];
-    const a = side(invitation.mine, pa, pb), b = side(invitation.invite, pb, pa);
+    const a = side(invitation.mine, pa, pb, mode), b = side(invitation.invite, pb, pa, mode);
     const aKey = invitation.invite.peerPubKeyZ32, bKey = invitation.mine.peerPubKeyZ32;
     if ((aKey < bKey) === (dialer === "a")) return { a, b };
   }
@@ -168,6 +183,62 @@ describe("leaving DHT-only after the contact reloaded", () => {
       await a.setDeliveryMode("stream");
       const took = await untilLive(a, b, 60_000);
       expect(took, "live after both left DHT-only").toBeLessThanOrEqual(10_000);
+    }, 60_000);
+  }
+});
+
+describe("back from a hold after the contact read the mailbox", () => {
+  /** A and B live, then A holds the chat on the DHT (`chat disconnect --hold`) and B reads A's mailbox saying so. */
+  async function held(dialer: "a" | "b", advertises: boolean) {
+    const pkarr = new MemoryPkarr();
+    const pair = pairWhere(dialer, "stream");
+    const a = open(pair.a, pkarr, false, advertises);
+    const b = open(pair.b, pkarr, false);
+    expect(await untilLive(a, b, 60_000), "live at first").toBeLessThan(Infinity);
+    await a.setDeliveryMode("dht");
+    for (let waited = 0; b.dhtDelivery?.peerMode !== "dht" && waited < 60_000; waited += 1_000) await run(1_000);
+    expect(b.dhtDelivery?.peerMode).toBe("dht");
+    await run(5_000);
+    return { pkarr, a, b };
+  }
+
+  // What tells B that A is back: A's presence on the link's key, or, when A's packet has no room for it, A's offer.
+  for (const [dialer, shows] of [["a", "presence"], ["a", "offer"], ["b", "presence"]] as const) {
+    it(`is live in seconds when the first read of the mailbox is stale · ${dialer.toUpperCase()} dials · A's ${shows} shows it`, async () => {
+      const { pkarr, a, b } = await held(dialer, shows === "presence");
+      // A is back: its link packet reaches B before a relay has A's new envelope, so the read it prompts is stale.
+      pkarr.lagMailboxes();
+      await a.setDeliveryMode("stream");
+      const took = await untilLive(a, b, 60_000);
+      expect(pkarr.staleServed, "a read answered the envelope from before").toBeGreaterThan(0);
+      expect(took, "live after A left the hold").toBeLessThanOrEqual(10_000);
+    }, 60_000);
+  }
+
+  // A's dial on B's native endpoint (Iroh) came while B still read A as DHT-only: B closed it, and A's whole attempt
+  // ended with "The peer closed this connection…", its next one after a backoff. It waits for the read now.
+  for (const back of [true, false]) {
+    it(`keeps a dial that came while the mailbox said DHT-only · ${back ? "taken once it says A left" : "closed if A stays"}`, async () => {
+      const { a, b } = await held("a", false);
+      const endpoint: NativeEndpoint = { transport: "iroh/1", descriptor: { id: "b:iroh/1" }, onConnection: null, onDescriptor: null,
+        connect: async () => { throw new Error("not in this test"); }, close: async () => {} };
+      b.registerEndpoint(endpoint);
+      const sent: unknown[] = [];
+      const dial: FrameChannel & { closed: boolean } = { closed: false, bufferedAmount: 0, onMessage: null, onClose: null,
+        send: data => { sent.push(data); }, drained: async () => {}, close() { if (this.closed) return; this.closed = true; this.onClose?.(); } };
+      endpoint.onConnection!({ channel: dial, binding: { transport: "iroh/1", context: "00".repeat(32), identities: ["aa".repeat(32), "bb".repeat(32)] } });
+      await run(100);
+      expect(dial.closed, "kept while B reads A's mailbox again").toBe(false);
+      if (back) {
+        await a.setDeliveryMode("stream");
+        for (let waited = 0; b.dhtDelivery?.peerMode !== "stream" && waited < BLOCKED_DIAL_WAIT_MS; waited += 100) await run(100);
+        expect(b.dhtDelivery?.peerMode).toBe("stream");
+        expect(dial.closed, "taken, not closed").toBe(false);
+        expect(sent.length, "B opened a session on it").toBeGreaterThan(0);
+      } else {
+        await run(BLOCKED_DIAL_WAIT_MS + 500);
+        expect(dial.closed, "closed once the wait is over").toBe(true);
+      }
     }, 60_000);
   }
 });
