@@ -1,11 +1,14 @@
 import { REPLY_ID } from "./replies";
+import { MESSAGE_CLOCK_SKEW_MS } from "./messageTime";
 import { nextReactionNumber, validReactionNumber } from "./reactions";
 
 /**
  * A pinned message (WISP 400 § Pinned message): one per chat, shown in a bar at the top. Whoever pins says which
  * message (the id both sides know it by, as a reply names it) and a number: the clock in milliseconds, past the pin
  * it replaces. An empty id unpins. The highest number wins, whatever order the frames arrive in, so the last pin wins
- * on every side and a late frame changes nothing.
+ * on every side and a late frame changes nothing. A number further ahead of the receiver's clock than
+ * `MESSAGE_CLOCK_SKEW_MS` is refused: clocks drift, but a number past that is the sender's choice, and one near the
+ * largest safe integer would leave nobody a higher number to pin or unpin with.
  *
  * A 1:1 chat says it on the live session once both sides list `pin/1` in `paired-capabilities`, and the contact
  * confirms the number it took:
@@ -43,24 +46,40 @@ export function mayPin(kind: "mesh" | "community", member: string, admin: string
   return kind === "mesh" || member === admin;
 }
 
-/** The number for a new pin: the clock, or one past the pin shown now, whichever is higher. */
+/**
+ * Whether a pin's number holds at `now`: a positive safe integer no further ahead of the clock than
+ * `MESSAGE_CLOCK_SKEW_MS`. A kept pin whose number does not hold (taken before receivers checked it) counts as none.
+ */
+export function pinNumberHolds(n: unknown, now = Date.now()): n is number {
+  return validReactionNumber(n) && n <= now + MESSAGE_CLOCK_SKEW_MS;
+}
+
+/**
+ * The number for a new pin: the clock, or one past the pin shown now, whichever is higher. Past a shown pin whose
+ * number does not hold, the clock: a receiver would refuse one past it.
+ */
 export function nextPinNumber(current = 0, now = Date.now()): number {
-  return nextReactionNumber(current, now);
+  if (current && !pinNumberHolds(current, now)) return Math.max(1, Math.floor(now));
+  return Math.min(nextReactionNumber(current, now), Number.MAX_SAFE_INTEGER);
 }
 
 /**
  * Whether `pin` replaces the chat's pin now: a higher number wins; two pins with the same number (two sides at the
- * same millisecond) are settled by the id, so every side ends on the same one.
+ * same millisecond) are settled by the id, so every side ends on the same one. A shown pin whose number does not hold
+ * is replaced by any pin.
  */
-export function pinIsNewer(current: WirePin | undefined, pin: WirePin): boolean {
-  return !current || pin.n > current.n || (pin.n === current.n && pin.id > current.id);
+export function pinIsNewer(current: WirePin | undefined, pin: WirePin, now = Date.now()): boolean {
+  return !current || !pinNumberHolds(current.n, now) || pin.n > current.n || (pin.n === current.n && pin.id > current.id);
 }
 
-/** A pin as a receiver takes it, or null: an id of a chat's shape or "" (unpinned), and a valid number. */
-export function readPin(raw: unknown): WirePin | null {
+/**
+ * A pin as a receiver takes it at `now`, or null: an id of a chat's shape or "" (unpinned), and a number that holds
+ * (`pinNumberHolds`). One refused is not confirmed: its sender says it again, and it is taken once the clocks agree.
+ */
+export function readPin(raw: unknown, now = Date.now()): WirePin | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const { id, n } = raw as Record<string, unknown>;
-  if (typeof id !== "string" || (id !== "" && !REPLY_ID.test(id)) || !validReactionNumber(n)) return null;
+  if (typeof id !== "string" || (id !== "" && !REPLY_ID.test(id)) || !pinNumberHolds(n, now)) return null;
   return { id, n };
 }
 

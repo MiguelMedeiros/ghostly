@@ -1,0 +1,1 @@
+Pinned message: a receiver drops a pin whose `n` is more than 5 minutes past its clock, and does not confirm it; a pin already kept with such a number counts as none, and a pinner's next number never passes the largest safe integer.

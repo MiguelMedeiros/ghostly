@@ -14,7 +14,7 @@ import { readForwarded } from "./forwards";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
 import { RateWindow, validEditNumber } from "./pairedEdits";
 import {
-  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaTag, groupName, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
 } from "./groupMeta";
 
@@ -458,7 +458,7 @@ export class CommunitySession {
     const rv = openSecret(me.seed, me.pubKeyZ32, w.rv as SealedSecret, rvAad(link.g, me.pubKeyZ32));
     const entrySeed = openSecret(me.seed, me.pubKeyZ32, w.entry as SealedSecret, entryAad(link.g, me.pubKeyZ32));
     if (!rv || !entrySeed || identityFromSeedB64(toBase64Url(entrySeed)).pubKeyZ32 !== entry) return { error: "The welcome's keys do not open" };
-    return { state: { id: link.g, name: sanitizeNick(typeof w.name === "string" ? w.name : "") ?? "Group", profile: COMMUNITY_PROFILE, seedB64, createdAt: now,
+    return { state: { id: link.g, name: groupName(w.name) ?? "Group", profile: COMMUNITY_PROFILE, seedB64, createdAt: now,
       chain, side: [], secrets, entry: { key: entry, seedB64: toBase64Url(entrySeed) }, rv: toBase64Url(rv), status: "active", seq: 0, seqH: top,
       seen: {}, nicks: {}, store: [], pendingLeaves: [] } };
   }
