@@ -117,6 +117,21 @@ export async function serve(host: Host): Promise<Served> {
   };
 }
 
+let guarded = false;
+
+/**
+ * A daemon says an error nobody caught (with its stack, on stderr: the daemon's log when detached) and keeps serving:
+ * one request gone wrong must not take the profile offline. One-shot commands do not call this; they still fail loudly.
+ */
+export function keepServing(proc: Pick<NodeJS.Process, "on"> = process, write: (text: string) => void = (text) => { process.stderr.write(text); }): void {
+  if (proc === process) { if (guarded) return; guarded = true; }
+  const log = (what: string) => (error: unknown) => {
+    try { write(`ghostly: ${what}, the daemon keeps serving: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); } catch { /* stderr is gone */ }
+  };
+  proc.on("unhandledRejection", log("unhandled rejection"));
+  proc.on("uncaughtException", log("uncaught exception"));
+}
+
 /** Sets a 077 umask; the function it returns puts the old one back. Null where there is none (Windows, a worker). */
 function ownerOnlyUmask(): (() => void) | null {
   if (process.platform === "win32") return null;
