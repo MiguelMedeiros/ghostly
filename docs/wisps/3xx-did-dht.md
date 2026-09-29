@@ -15,7 +15,7 @@
 
 ## Purpose
 
-Every Ghostly profile has a W3C [Decentralized Identifier](https://www.w3.org/TR/did-core/) of the [did:dht](https://did-dht.com) method (DIF, specification version 0): a DID document written as DNS records into the Pkarr packet of an Ed25519 key and stored in the Mainline DHT as a BEP44 mutable item, the same mechanism Ghostly uses for chats ([01](01-ghost-core.md)). Any did:dht resolver reads it, with no Ghostly server involved.
+Every Ghostly profile has a W3C [Decentralized Identifier](https://www.w3.org/TR/did-core/) of the [did:dht](https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md) method (DIF, specification version 0): a DID document written as DNS records into the Pkarr packet of an Ed25519 key and stored in the Mainline DHT as a BEP44 mutable item, the same mechanism Ghostly uses for chats ([01](01-ghost-core.md)). Any did:dht resolver reads it, with no Ghostly server involved.
 
 The DID is one identifier a person can give out in public. Chats never use it. By default its document says nothing but its key; the person may list some of their identities in it, one switch at a time.
 
@@ -126,7 +126,7 @@ A client MUST publish a profile's DID only under that profile's DID key, never u
 
 ## References
 
-- [did:dht Method Specification](https://did-dht.com) and its [registry](https://did-dht.com/registry/), Decentralized Identity Foundation.
+- [did:dht Method Specification](https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md) and its [registry](https://github.com/decentralized-identity/did-dht/blob/main/spec/registry/spec.md), Decentralized Identity Foundation.
 - [Decentralized Identifiers (DIDs) v1.0](https://www.w3.org/TR/did-core/), W3C.
 - [BEP 44](https://www.bittorrent.org/beps/bep_0044.html), storing arbitrary data in the DHT; [Pkarr](https://pkarr.org).
 - [RFC 1035](https://datatracker.ietf.org/doc/html/rfc1035), [RFC 7638](https://datatracker.ietf.org/doc/html/rfc7638).
