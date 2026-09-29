@@ -47,7 +47,8 @@ test("opens on the home screen", { tag: ["@feature:app.home"] }, async ({ peer }
   await expect(page.getByText("Private, ephemeral messaging.")).toBeVisible();
   await expect(page.getByText("It's quiet here...")).toBeVisible();
   await page.getByTestId("wallet-chip").click();
-  await expect(page.getByTestId("platform-notice")).toContainText("Pocket money only");
+  await expect(page.getByTestId("wallet")).toBeVisible();
+  await expect(page.getByTestId("platform-notice")).toHaveCount(0);
 });
 
 test("a web page says plainly what it cannot do", { tag: ["@feature:app.web-limits", "@feature:services.web-unavailable"] }, async ({ peer }) => {
