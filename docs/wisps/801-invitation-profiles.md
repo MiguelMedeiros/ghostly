@@ -79,7 +79,7 @@ A copied invitation is a bearer capability; hiding a saved invite after a messag
 
 ## Reading an invite
 
-A current app reads an invite by these rules, in order. It never guesses: a code is one format or it is refused with a reason, and nothing is stored for a refused code.
+A current app reads an invite by these rules, in order. It never guesses: a code is one format or it is refused with a reason, and nothing is stored for a refused code. A refused input that ends in `.`, `,`, `)` or `!` (an invite copied from the end of a sentence) is read once more without them, and taken only when that reads; otherwise the first refusal stands.
 
 1. Trim it. If it contains `#`, keep what follows the last `#`; then drop a leading `chat/` or `/chat/` (the earlier rule, so every link form ever shared still reads).
 2. If it starts with `ghostly1` in any case, it is a bech32m invite:

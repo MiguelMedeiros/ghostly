@@ -2,6 +2,8 @@ import { findMoney } from "./money";
 import { plainText } from "./parse";
 import { moreMoneyPreview } from "./parse/money-preview";
 import { englishT, type Translate } from "../locales/translate";
+import { languageTag } from "./documentLanguage";
+import type { Language } from "./settings";
 
 /** Previews already worked out, by language and message text: the list draws each row again on every change anywhere. */
 const CACHES = new WeakMap<Translate, Map<string, string>>();
@@ -32,7 +34,7 @@ function readPreview(text: string, t: Translate): string {
 }
 
 /** How long ago, as short as a list's column allows: "now", "5m", "3h", "2d", then the date. */
-export function formatListTime(ts: number, now = Date.now()): string {
+export function formatListTime(ts: number, now = Date.now(), language?: Language): string {
   const diff = now - ts;
   const minutes = Math.floor(diff / 60_000);
   const hours = Math.floor(diff / 3_600_000);
@@ -41,5 +43,5 @@ export function formatListTime(ts: number, now = Date.now()): string {
   if (minutes < 60) return `${minutes}m`;
   if (hours < 24) return `${hours}h`;
   if (days < 7) return `${days}d`;
-  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+  return new Date(ts).toLocaleDateString(language ? languageTag(language) : [], { month: "short", day: "numeric" });
 }
