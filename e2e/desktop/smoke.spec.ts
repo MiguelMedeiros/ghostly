@@ -19,6 +19,7 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
 
   await app.click('[title="Settings"]');
   await app.click('[data-testid="settings-advanced"]');
+  await expect.poll(() => app.text('[data-testid="settings-advanced-page"]'), { message: "Settings → Advanced opens" }).not.toBeNull();
 
   // Only `src/desktop/host.ts` describes Pkarr this way. The browser stand-in
   // would say "Pkarr relays (HTTP) → Mainline DHT (BEP44)": Rust is reaching
@@ -41,7 +42,7 @@ test("the webview's <html lang> and <html dir> follow the language", { tag: ["@f
   await expect.poll(() => app.attribute("html", "lang")).toBe("ar");
   await expect.poll(() => app.attribute("html", "dir")).toBe("rtl");
 
-  // The profile outlives the test: leave it in English for the next one.
+  // And back: the choice is not stuck on the first language picked.
   await choose(app, "settings-language", "en");
   await expect.poll(() => app.attribute("html", "lang")).toBe("en");
   await expect.poll(() => app.attribute("html", "dir")).toBe("ltr");

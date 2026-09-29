@@ -360,7 +360,7 @@ describe("the + menu of a chat that chooses its own ways", () => {
 
   it("opens with the contact's refusal on every card of Pay, and Accept still there", async () => {
     const refused = "Your contact has payments off in this chat, or needs an updated Ghostly";
-    const { user } = composerWith({ payments: payments(async () => {}), paymentsUnavailable: refused }, {});
+    const { user } = composerWith({ payments: payments(async () => {}), paymentsUnavailable: refused, paymentsUnavailableContact: true }, {});
     await user.click(screen.getByTestId("composer-more"));
     await user.click(screen.getByTestId("payment-button"));
     expect(screen.getByTestId("payment-card-cashu-mainnet")).toHaveAttribute("title", refused);

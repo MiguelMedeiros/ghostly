@@ -50,6 +50,8 @@ interface MessageInputProps {
    * paying (`payments.onSaveMethods`): then the row still opens, on the cards that say why, and on Accept.
    */
   paymentsUnavailable?: string;
+  /** `paymentsUnavailable` is about the contact's side: the payment cards say "Not accepted" rather than "Off here". */
+  paymentsUnavailableContact?: boolean;
   /** With `voice`, the file is a voice message recorded here (the mic replaces send while the text is empty). */
   onSendFile?: (file: File, voice?: VoiceMeta) => Promise<string | null>;
   /** Present when the platform has a wallet. */
@@ -122,6 +124,7 @@ export function MessageInput({
   mentions,
   fileUnavailable,
   paymentsUnavailable,
+  paymentsUnavailableContact,
   recipient,
   linkPreviews = false,
   onTyping,
@@ -650,6 +653,7 @@ export function MessageInput({
             onRequest={payments.onRequest}
             sendUnavailable={payments.sendUnavailable}
             payUnavailable={paymentsUnavailable}
+            payUnavailableContact={paymentsUnavailableContact}
             onSaveMethods={payments.onSaveMethods}
             onClose={() => setShowPayment(false)}
             // Sent or requested: back to the chat, where its bubble shows how it goes, and to writing.
