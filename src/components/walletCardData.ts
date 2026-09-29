@@ -2,7 +2,7 @@ import {formatPaymentAmount} from '@ghostly/core';
 import type {WalletInstanceView, WalletNetwork, WalletPlatform, WalletState} from '../lib/platform';
 import type {WalletCard,WalletRail} from './walletCardTypes';
 import type {Translate} from '../contexts/I18nContext';
-import englishWallet from '../locales/en/wallet.json';
+import {english} from '../lib/english';
 export type {ChatRail,WalletCard,WalletRail} from './walletCardTypes';
 export const CASHU_MINT_SOURCE = 'cashu-mint';
 /** The fee limit an on-chain payment starts with, in sats: a small transaction at a few sat/vB. The review shows the real fee. */
@@ -25,12 +25,6 @@ export const deckId=(w:Pick<WalletInstanceView,'type'|'network'|'card'>,state:Wa
 const lightningCount=(state:WalletState,network:WalletNetwork)=>(state.wallets??[]).filter(w=>w.type==='lightning'&&w.network===network).length;
 /** A test wallet's sats are test sats wherever they show: its card says Testnet, and its amounts say so too. */
 export const satsUnit=(network:WalletNetwork)=>network==='testnet'?'test sats':'sats';
-
-/** The cards' words in English, for a caller that passes no `t` (a `wallet.*` key looked up in en/wallet.json). */
-const english:Translate=(key,params)=>{
- const text=key.split('.').slice(1).reduce<unknown>((at,part)=>(at as Record<string,unknown>|undefined)?.[part],englishWallet);
- return typeof text==='string'?Object.entries(params??{}).reduce((out,[name,value])=>out.split(`{{${name}}}`).join(String(value)),text):key;
-};
 
 /**
  * Which network's Lightning pays an invoice or an address found in a chat: a test chain's is Testnet's; an invoice

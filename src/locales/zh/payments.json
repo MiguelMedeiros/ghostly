@@ -199,6 +199,50 @@
     "wrongChain": "你的 {{network}} Bitcoin 钱包在 {{chain}} 上；此地址用于 {{target}}。",
     "wrongToken": "此链接请求的代币不是你钱包中的 USDT：不会从这里支付。"
   },
+  "group": {
+    "bitcoinOnchain": "Bitcoin 链上",
+    "chooseOne": "选择一位成员来发送",
+    "describe": {
+      "cashu": "从你使用的 mint 请求 ecash。最先到达的成员的 ecash 完成支付；之后的人会退回。",
+      "lightning": "用一张 Lightning 发票请求。任何成员都可以支付一次：发票不能支付两次。",
+      "other": "整个群组只能用 Cashu 或 Lightning。"
+    },
+    "everyone": "向群组请求",
+    "everyoneHint": "群组中任何人都可以支付一次",
+    "formerMember": "一位前成员",
+    "formerMemberObject": "一位前成员",
+    "hint": {
+      "community": "付款只对你们两人密封：群组转发但不读取，不在线的人回来时会收到。所有人都能看到谁付给了谁、多少钱。",
+      "mesh": "付款只在你们两人之间进行；群组中的所有人都能看到谁付给了谁、多少钱。"
+    },
+    "listSeparator": "、",
+    "sendUnavailable": "向群组的请求由一位成员支付；要付款给某人，请选择对方",
+    "status": {
+      "claimedPaid": "{{names}} 已支付 · 等待 {{to}} 的钱包",
+      "closed": "已关闭",
+      "paid": "已支付",
+      "paidBy": "由 {{name}} 支付",
+      "saysPaid": "{{names}} 说已支付 · 等待 {{to}} 的钱包",
+      "sent": "已发送 · 等待 {{name}}",
+      "takenBack": "已撤回",
+      "waiting": "等待付款"
+    },
+    "testUsdt": "测试 USDT",
+    "theGroup": "群组",
+    "title": {
+      "asked": "{{to}} 向 {{from}} 发起请求",
+      "askedGroup": "{{to}} 向群组发起请求",
+      "paying": "{{from}} 正在付款给 {{to}}",
+      "sent": "{{from}} 向 {{to}} 付款"
+    },
+    "why": {
+      "noPayments": "对方的应用不支持群组付款（需要更新），或关闭了所有方式",
+      "noWay": "对方不接受你允许的任何付款方式",
+      "unreachable": "目前无法联系"
+    },
+    "you": "你",
+    "youObject": "你"
+  },
   "invoice": {
     "anyAmount": "任意金额",
     "checking": "检查中…",
