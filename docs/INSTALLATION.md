@@ -45,7 +45,8 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 
 ## CLI
 
-For a bot on today's Ghostly, use `ghostly` ([CLI.md](CLI.md)): the app's engine without a screen, in the same chats as the apps. Node 22.12 or newer. The npm package is not published yet, so install it from a clone:
+For a bot on today's Ghostly, use `ghostly` ([CLI.md](CLI.md)): the app's engine without a screen, in the same chats as the apps. Node 22.12 or newer. From 1.0 it is `npm install -g @ghostlytools/cli`; until then, install it from a clone:
+<!-- release-1.0: "From 1.0 it is" becomes "Install it with", and the clone steps below become "Or from a clone". -->
 
 ```bash
 npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli
@@ -55,7 +56,7 @@ npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/c
 npm install -g ./ghostlytools-cli-*.tgz
 ```
 
-### The Rust `ghostly-cli` (older bots)
+### The older Rust `ghostly-cli` (no longer shipped)
 
 The older Rust `ghostly-cli` is the compatibility client for bots and scripts built on v0.4 chats ([cli/README.md](../cli/README.md)). It talks to other CLIs over the v0.4 record format, not to `ghostly1` app chats. From 1.0 the release no longer ships its binaries, and it is not on crates.io. Build it from a clone:
 

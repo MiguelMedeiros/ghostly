@@ -7,10 +7,10 @@
 | Document kind | Contract (local API; nothing here goes on the wire between peers) |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [400](400-chat.md), [401](401-paired-chat.md), [100](100-transports.md), [200](200-payments.md), [900](900-group-sessions.md) |
-| Implementation | Experimental: `packages/cli` (`@ghostlytools/cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is not published |
+| Implementation | Experimental: `packages/cli` (`@ghostlytools/cli`, command `ghostly`), phases 1 to 5 on `dev`; the npm package is published from 1.0 |
 | Summary | Run Ghostly headless for a bot: a daemon keeps a profile online, a JSON event stream says what arrived, and the ghostly command answers, pays and shares. |
 | Availability | Available |
-| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions, forwards), private and community groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. Not on npm yet; no Bark wallet, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
+| Notes | Experimental, the same engine as the apps on Node: ghostly1 invites, chats (typing, replies, edits, reactions, forwards), private and community groups, wallets, files and voice notes, identity proofs, shared apps, and voice calls whose audio a program of yours hears and speaks. On npm from 1.0; no Bark wallet, and no video in calls. Pkarr goes to the relays and to the Mainline DHT directly. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
 
@@ -217,9 +217,9 @@ Checked on 2026-09-26 by creating each Testnet wallet in a headless profile:
 
 No wallet is made by itself on Node (`automaticWallets` is off): a bot has only the wallets it created, and none on Mainnet unless asked.
 
-## The Rust `ghostly-cli`
+## The older Rust `ghostly-cli`
 
-It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md)): older DHT records, no `ghostly1` codes, no chat sessions. Its commands and its SKILL.md keep working for the bots that use them. New bots use `ghostly`. The Rust client is marked legacy in the docs; removing it is a separate decision, announced before it happens.
+It is not the npm package `@ghostlytools/cli`. It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md)): older DHT records, no `ghostly1` codes, no chat sessions. Its commands and its SKILL.md keep working for the bots that use them. New bots use `ghostly`. From 1.0 the release no longer ships its binaries: bots on it build it from `cli/`. The docs call it the older Rust CLI; removing it is a separate decision, announced before it happens.
 
 ## Security considerations
 

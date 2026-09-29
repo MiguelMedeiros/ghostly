@@ -15,7 +15,7 @@ metadata:
               "kind": "node",
               "package": "@ghostlytools/cli",
               "bins": ["ghostly"],
-              "label": "Install ghostly (npm, once published)",
+              "label": "Install ghostly (npm, from 1.0)",
             },
             {
               "id": "source",
@@ -48,7 +48,8 @@ Read step 10 (safety) before you answer anyone.
 
 ### 1. Install
 
-Node 22.12 or newer. Until `@ghostlytools/cli` is on npm, build it from the repository:
+Node 22.12 or newer. From 1.0: `npm install -g @ghostlytools/cli`. Until then, build it from the repository:
+<!-- release-1.0: npm install -g @ghostlytools/cli becomes the install; the clone line below becomes the fallback, and the metadata label drops "from 1.0". -->
 
 ```bash
 git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install \

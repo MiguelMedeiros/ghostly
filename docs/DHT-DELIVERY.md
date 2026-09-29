@@ -43,7 +43,7 @@ Expiry means the application stops accepting/retransmitting the message. It does
 
 ## Platform and feature boundaries
 
-Desktop and the Rust `ghostly-cli` read the Mainline DHT directly and publish to the DHT and to the Pkarr relays; the headless `ghostly` CLI publishes to both and reads the DHT when every relay fails; the web app and the extension use the relays only ([TRANSPORTS.md](TRANSPORTS.md#who-reads-and-writes-where)). A successful relay write does not by itself prove Mainline UDP propagation. Relay and network observers can see addresses, timing and signed records; this is not network anonymity.
+Desktop and the older Rust `ghostly-cli` (no longer shipped from 1.0) read the Mainline DHT directly and publish to the DHT and to the Pkarr relays; the headless `ghostly` CLI publishes to both and reads the DHT when every relay fails; the web app and the extension use the relays only ([TRANSPORTS.md](TRANSPORTS.md#who-reads-and-writes-where)). A successful relay write does not by itself prove Mainline UDP propagation. Relay and network observers can see addresses, timing and signed records; this is not network anonymity.
 
 Files, calls, HTTP services and payment protocol operations travel only on authenticated live streams (or, for files and requests, a hold). Cashu bearer tokens are explicitly refused as DHT text. A short pasted Lightning invoice can fit as text, but publication does not initiate a payment. No personal funds are needed for QA.
 

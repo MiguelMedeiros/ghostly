@@ -188,7 +188,8 @@ export const home = {
         icon: "terminal",
         title: "Give your code a voice.",
         body: "The app's own engine without a screen, for scripts, bots and agents: chats, groups, files, payments and voice calls, with every event as a JSON line.",
-        extra: "Needs Node. Built from source until the npm package is published.",
+        // release-1.0: "Needs Node: npm install -g @ghostlytools/cli."
+        extra: "Needs Node. Built from source until 1.0 puts @ghostlytools/cli on npm.",
         link: { label: "CLI guide", href: "/cli" },
       },
     ],
@@ -342,7 +343,8 @@ export const home = {
       body: "Chrome, Brave, Edge",
       cta: "Add to Chrome",
     },
-    cli: { title: "Command line", body: "For bots and agents. Needs Node; built from source for now.", cta: "CLI guide" },
+    // release-1.0: "For bots and agents. Needs Node; on npm as @ghostlytools/cli."
+    cli: { title: "Command line", body: "For bots and agents. Needs Node; built from source until 1.0.", cta: "CLI guide" },
     all: "All release files",
     legal: {
       lead: "Free and open source (MIT). Using Ghostly means you accept the",
