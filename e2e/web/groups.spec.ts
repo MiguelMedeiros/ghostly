@@ -123,6 +123,7 @@ test("four people: create, invite, everyone reads everyone, catch-up, removal, a
   // Carol is removed: she is told, and reads nothing sent afterwards.
   await alice.page.getByTestId("group-members").click();
   await alice.page.getByTestId("group-member").filter({ hasText: "Carol" }).getByTestId("group-remove-member").click();
+  await alice.page.getByTestId("group-remove-confirm").click();
   await expect(alice.page.getByTestId("group-member")).toHaveCount(2);
   await alice.page.keyboard.press("Escape");
   await expect(groupChat(carol)).toHaveAttribute("data-status", "removed", { timeout: 60_000 });

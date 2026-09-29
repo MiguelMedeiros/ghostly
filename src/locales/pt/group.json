@@ -172,6 +172,10 @@
   },
   "readNote": "Todos no grupo podem ler tudo o que é enviado enquanto são membros. Quem é removido mantém o que já recebeu e não pode ler o que vem depois; quem entra depois não pode ler o que veio antes. As mensagens vão direto para cada membro; quem estava ausente recebe o que perdeu de qualquer membro que tenha (as últimas {{count}} mensagens do grupo) quando se encontrarem de novo.",
   "readNoteCommunity": "Qualquer pessoa com o link do grupo pode entrar, e qualquer membro pode deixar pessoas entrarem. Todos no grupo podem ler tudo o que é enviado enquanto são membros; quem é removido não pode ler o que vem depois, quem entra depois não pode ler o que veio antes. Membros que estavam ausentes recebem as últimas {{count}} mensagens de quem estiver lá quando voltarem.",
+  "remove": {
+    "body": "A pessoa não vai receber as novas mensagens do grupo.",
+    "title": "Remover {{name}}?"
+  },
   "rename": {
     "action": "Renomear",
     "cancel": "Cancelar",

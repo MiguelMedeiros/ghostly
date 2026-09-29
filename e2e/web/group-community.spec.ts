@@ -95,6 +95,7 @@ test("six people: join by link with the admin away, everyone reads everyone, cat
   await sees(alice, "carol while dave is away");
   await alice.page.getByTestId("group-members").click();
   await alice.page.getByTestId("group-member").filter({ hasText: "Erin" }).getByTestId("group-remove-member").click();
+  await alice.page.getByTestId("group-remove-confirm").click();
   await expect(alice.page.getByTestId("group-member")).toHaveCount(4);
   await alice.page.keyboard.press("Escape");
   await expect(groupChat(erin)).toHaveAttribute("data-status", "removed", { timeout: 120_000 });
