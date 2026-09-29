@@ -11,7 +11,7 @@ negotiation, files, payments, groups and identity proofs.
 ```bash
 npm test -w @ghostly/core                  # unit tests
 npm run typecheck -w @ghostly/core
-GHOSTLY_CLI=target/debug/ghostly-cli npm run test:interop   # live interop with the Rust CLI (network)
+GHOSTLY_CLI=target/debug/ghostly-cli npm run test:interop   # live interop with the older Rust CLI in cli/ (network)
 ```
 
 A change here can break every importer: `npm run test:affected` follows it through the barrel

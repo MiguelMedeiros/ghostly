@@ -14,7 +14,7 @@ Please **do not** open a public issue, pull request or discussion for a vulnerab
 A useful report says:
 
 - what an attacker can do, and who the attacker is (a linked contact, a relay operator, someone on the network, a web page, someone with the device)
-- which client and version: Desktop, Ghostly Browser (extension), [app.ghostly.tools](https://app.ghostly.tools), the headless CLI (`ghostly`), the Rust CLI (`ghostly-cli`), or [ghostly.tools](https://ghostly.tools)
+- which client and version: Desktop, Ghostly Browser (extension), [app.ghostly.tools](https://app.ghostly.tools), the headless CLI (`ghostly`), the older Rust CLI (`ghostly-cli`, no longer shipped from 1.0), or [ghostly.tools](https://ghostly.tools)
 - steps to reproduce, or a proof of concept
 - your name or handle if you would like credit
 
