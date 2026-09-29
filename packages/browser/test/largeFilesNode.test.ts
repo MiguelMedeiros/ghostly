@@ -131,7 +131,10 @@ it("a large file waits for the person, shows the room here, and is stored whole 
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(size));
 }, 90_000);
 
-it("a file of no bytes arrives, on storage that has no file until something is written to it (Desktop, web, CLI)", async () => {
+it.each([
+  { storage: "files on disk (Desktop, web, extension, CLI)", onDisk: true },
+  { storage: "IndexedDB pieces", onDisk: false },
+])("a file of no bytes arrives, kept as $storage", async ({ onDisk }) => {
   // Found with two headless CLIs: an empty file ended "arrived damaged and was deleted" on both sides. Nothing is
   // ever appended for it, and every backend but IndexedDB reads a file never written as missing: its check failed.
   class FilesOnDisk extends IdbFileBytes {
@@ -140,13 +143,17 @@ it("a file of no bytes arrives, on storage that has no file until something is w
     override async size(id: string) { return this.made.has(id) ? (await super.size(id)) ?? 0 : super.size(id); }
     override async digest(id: string) { if (!this.made.has(id) && (await super.size(id)) === null) throw new Error("No such file"); return super.digest(id); }
   }
-  registerFileBytes("idb", async () => new FilesOnDisk());
-  cleanup.push(async () => registerFileBytes("idb", async () => new IdbFileBytes()));
+  if (onDisk) {
+    registerFileBytes("idb", async () => new FilesOnDisk());
+    cleanup.push(async () => registerFileBytes("idb", async () => new IdbFileBytes()));
+  }
   const t = await setup();
   t.offer("empty-0001", 0);
   await vi.waitFor(async () => expect((await t.incoming("empty-0001"))?.transfer).toMatchObject({ state: "done", transferred: 0 }));
   await vi.waitFor(() => expect(t.records.get("out:empty-0001")?.state).toBe("done"));
-  expect(await (await fileBytes()).size((await t.incoming("empty-0001"))!.fileId)).toBe(0);
+  const fileId = (await t.incoming("empty-0001"))!.fileId;
+  if (onDisk) expect(await (await fileBytes()).size(fileId)).toBe(0);
+  expect((await (await fileBytes()).read(fileId, 0, 16)).length).toBe(0);
 }, 60_000);
 
 it("a file under the id of a message the contact sent already is refused, nothing stored for it", async () => {
