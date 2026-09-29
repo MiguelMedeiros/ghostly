@@ -130,6 +130,7 @@
     "roomDevice": "この端末の空き {{size}}",
     "stalled": "進んでいません · {{progress}}",
     "verifying": "ファイルを確認中… {{size}}",
+    "viewPicture": "{{name}}を表示",
     "waitingDone": "接続を待っています · {{done}} 完了",
     "waitingSize": "接続を待っています · {{size}}",
     "wantsToSend": "{{name}} が {{file}}（{{size}}）を送ろうとしています。",

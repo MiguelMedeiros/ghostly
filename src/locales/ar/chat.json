@@ -130,6 +130,7 @@
     "roomDevice": "{{size}} متاحة على هذا الجهاز",
     "stalled": "متوقف · {{progress}}",
     "verifying": "جارٍ فحص الملف… {{size}}",
+    "viewPicture": "عرض {{name}}",
     "waitingDone": "في انتظار الاتصال · اكتمل {{done}}",
     "waitingSize": "في انتظار الاتصال · {{size}}",
     "wantsToSend": "يريد {{name}} إرسال {{file}} ({{size}}).",

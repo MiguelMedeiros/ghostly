@@ -14,9 +14,10 @@ const viewerWidth = (natural: number) => Math.max(natural, Math.min(natural * UP
 /**
  * A contact's or a group's picture, large: centered over the page with the name under it, a full-screen sheet on a
  * phone. Escape, the close button and a click outside the picture close it, and the focus goes back to what opened
- * it. `src` is a checked data URL (the engine's `sanitizeAvatar`), drawn and never fetched.
+ * it. `src` is a checked data URL (the engine's `sanitizeAvatar`), drawn and never fetched. With `picture`, a picture
+ * from a chat: whole, in its own shape, as large as the screen lets it (never scaled up), its file name under it.
  */
-export function AvatarViewer({ src, name, onClose, returnFocus }: { src: string; name: string; onClose: () => void; returnFocus?: RefObject<HTMLElement | null> }) {
+export function AvatarViewer({ src, name, onClose, returnFocus, picture = false }: { src: string; name: string; onClose: () => void; returnFocus?: RefObject<HTMLElement | null>; picture?: boolean }) {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -37,16 +38,22 @@ export function AvatarViewer({ src, name, onClose, returnFocus }: { src: string;
   return createPortal(
     // Escape is handled here, before the page's own handlers: a panel under the viewer (a contact's identities)
     // closes on Escape at the document, and must stay open when only the viewer goes.
-    <dialog ref={dialog} tabIndex={-1} aria-labelledby={`${id}-name`} data-testid="avatar-viewer"
+    <dialog ref={dialog} tabIndex={-1} aria-labelledby={`${id}-name`} data-testid="avatar-viewer" data-kind={picture ? "picture" : "avatar"}
       onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); } }}
       // Not on to a dialog it was opened from (the members'): React passes `cancel` and `close` up its own tree.
       onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }} onClose={e => { e.stopPropagation(); onClose(); }}
       className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none bg-transparent p-0 text-text-primary backdrop:bg-black/75">
       <div {...backdrop} data-testid="avatar-viewer-backdrop" className="flex h-full w-full items-center justify-center p-4 max-md:bg-sidebar-bg max-md:p-0">
         <figure className="m-0 flex max-w-full flex-col items-center gap-3">
-          <img src={src} alt="" draggable={false} data-testid="avatar-viewer-image" onLoad={e => setNatural(e.currentTarget.naturalWidth || undefined)}
-            style={{ width: `min(${viewerWidth(natural ?? 128)}px, calc(100vw - 2rem), 70dvh)`, height: "auto" }}
-            className="aspect-square rounded-2xl object-cover shadow-2xl max-md:rounded-xl" />
+          {picture ? (
+            <img src={src} alt="" draggable={false} data-testid="avatar-viewer-image"
+              style={{ maxWidth: "calc(100vw - 2rem)", maxHeight: "calc(100dvh - 8rem)" }}
+              className="block h-auto w-auto rounded-lg object-contain shadow-2xl" />
+          ) : (
+            <img src={src} alt="" draggable={false} data-testid="avatar-viewer-image" onLoad={e => setNatural(e.currentTarget.naturalWidth || undefined)}
+              style={{ width: `min(${viewerWidth(natural ?? 128)}px, calc(100vw - 2rem), 70dvh)`, height: "auto" }}
+              className="aspect-square rounded-2xl object-cover shadow-2xl max-md:rounded-xl" />
+          )}
           <figcaption id={`${id}-name`} className="max-w-full truncate px-2 text-base font-medium text-white max-md:text-text-primary"><bdi>{name}</bdi></figcaption>
         </figure>
       </div>

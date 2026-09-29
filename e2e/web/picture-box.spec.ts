@@ -63,3 +63,40 @@ test("a picture's bubble is as tall from the start as the picture it shows", { t
   await expect(mine).toHaveAttribute("data-box", "sized");
   expect(await mine.evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(330);
 });
+
+test("a tap on a picture in a chat on a phone opens it large, in its own shape; a long press still opens the reactions", { tag: ["@feature:files.image.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // Only profile pictures opened large: a tap on a picture someone sent did nothing, and a phone showed it at 330px.
+  const [alice, bob] = await Promise.all([peer("view-alice"), peer("view-bob", { mobile: true, viewport: { width: 402, height: 874 } })]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await alice.page.getByTestId("file-input").setInputFiles({ name: "wide ghost.png", mimeType: "image/png", buffer: png(1200, 600) });
+
+  const bubble = chat(bob).getByTestId("file-bubble").filter({ hasText: "wide ghost.png" });
+  const picture = bubble.getByRole("img", { name: "wide ghost.png" });
+  await expect.poll(() => picture.evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth), { timeout: 30_000 }).toBe(1200);
+  const open = bubble.getByRole("button", { name: "View wide ghost.png" });
+
+  // A long press is the message's: the reactions' bar, and the tap that ends it opens nothing.
+  const box = (await open.boundingBox())!;
+  const at = { pointerType: "touch", button: 0, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true };
+  await open.dispatchEvent("pointerdown", at);
+  await bob.page.waitForTimeout(700);
+  await open.dispatchEvent("pointerup", at);
+  await open.dispatchEvent("click", at);
+  await expect(bob.page.getByTestId("reaction-bar")).toBeVisible();
+  await expect(bob.page.getByTestId("avatar-viewer")).toHaveCount(0);
+  await bob.page.keyboard.press("Escape");
+  await expect(bob.page.getByTestId("reaction-bar")).toHaveCount(0);
+
+  // A tap: the whole picture, as wide as the phone less its margins, twice as wide as it is high.
+  await open.click();
+  const viewer = bob.page.getByTestId("avatar-viewer");
+  await expect(viewer).toHaveAttribute("data-kind", "picture");
+  await expect(viewer).toContainText("wide ghost.png");
+  const large = (await viewer.getByTestId("avatar-viewer-image").boundingBox())!;
+  expect(large.width).toBeGreaterThan(360);
+  expect(large.width / large.height).toBeCloseTo(2, 1);
+  await viewer.getByTestId("avatar-viewer-close").click();
+  await expect(viewer).toHaveCount(0);
+  await expect(open).toBeFocused();
+});
