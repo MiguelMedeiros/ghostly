@@ -1,0 +1,36 @@
+{
+  "panel": {
+    "active": "Ativas",
+    "button": "Tarefas",
+    "buttonCount": "Tarefas, {{count}} ativas",
+    "finished": "Concluídas",
+    "info": "Bots publicam estes cartões e os mantêm atualizados. Toque em um para ir até ele no chat.",
+    "routines": "Rotinas",
+    "title": "Tarefas"
+  },
+  "task": {
+    "branch": "Branch:",
+    "item": {
+      "done": "Feito",
+      "failed": "Falhou",
+      "pending": "A fazer",
+      "running": "Em andamento",
+      "skipped": "Pulado"
+    },
+    "now": "Agora:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Progresso",
+    "started": "Começou {{ago}}",
+    "status": {
+      "blocked": "Bloqueada",
+      "cancelled": "Cancelada",
+      "done": "Concluída",
+      "failed": "Falhou",
+      "queued": "Na fila",
+      "running": "Em andamento"
+    },
+    "steps": "{{done}} de {{total}} etapas",
+    "updated": "atualizada {{ago}}"
+  }
+}

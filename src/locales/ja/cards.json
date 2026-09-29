@@ -1,0 +1,36 @@
+{
+  "panel": {
+    "active": "進行中",
+    "button": "タスク",
+    "buttonCount": "タスク、{{count}} 件が進行中",
+    "finished": "完了済み",
+    "info": "ボットがこのカードを投稿し、最新の状態に保ちます。タップするとチャット内のカードに移動します。",
+    "routines": "ルーティン",
+    "title": "タスク"
+  },
+  "task": {
+    "branch": "ブランチ:",
+    "item": {
+      "done": "完了",
+      "failed": "失敗",
+      "pending": "未着手",
+      "running": "進行中",
+      "skipped": "スキップ"
+    },
+    "now": "現在:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "プルリクエスト",
+    "progress": "進捗",
+    "started": "{{ago}}に開始",
+    "status": {
+      "blocked": "ブロック中",
+      "cancelled": "キャンセル",
+      "done": "完了",
+      "failed": "失敗",
+      "queued": "待機中",
+      "running": "実行中"
+    },
+    "steps": "{{total}} 件中 {{done}} 件",
+    "updated": "{{ago}}に更新"
+  }
+}
