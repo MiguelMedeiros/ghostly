@@ -7,6 +7,7 @@ import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { NewGroupDialog } from "../../components/NewGroupDialog";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { publicKeyLabel } from "../../lib/publicKeyLabel";
 
 // covers: groups.create, groups.invite, groups.remove-member, groups.admin-change, groups.link.enable, groups.link.replace, groups.hubs
 
@@ -37,6 +38,15 @@ describe("GroupMembersDialog", () => {
     expect(within(row(BOB)).getByRole("img", { name: "not reachable" })).toBeInTheDocument();
     expect(within(row(BOB)).getByText("3 missing")).toBeInTheDocument();
     expect(screen.getByTestId("group-read-note")).toHaveTextContent("Everyone in the group can read everything sent while they are a member.");
+  });
+
+  it("says an unnamed member's key once: in its name, not again beside it", () => {
+    members_(groupView({ status: "active", isAdmin: false, members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", online: true }), member({ key: BOB, role: "admin" })] }));
+    const times = (key: string) => row(key).textContent!.split(publicKeyLabel(key)).length - 1;
+    expect(row(BOB)).toHaveTextContent(/^Member bobyyy/);
+    expect(times(BOB), "an unnamed member: its name is its key").toBe(1);
+    expect(times(ALICE), "a named one: the key beside the name").toBe(1);
+    expect(times(ME)).toBe(1);
   });
 
   it("gives a member no controls over others, and no invitations", () => {

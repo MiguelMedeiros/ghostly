@@ -111,7 +111,8 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
         <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />
         <MemberAvatar src={photoOf(m)} name={m.me ? state?.settings.nick || memberName(m, t) : memberName(m, t)} />
         <span className="contact-row min-w-0 flex-1">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={contactKey(m.key)} testId="group-member-marks" />}<span className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span></span>
+          <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={contactKey(m.key)} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
+            {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span>}</span>
           {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{edgeLabel(m, Date.now(), t, agoIn(language))}</span>}
         </span>
         {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
