@@ -67,7 +67,7 @@ describe("FileBubble: a picture's box is there before the picture", () => {
     vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(1920, 1080));
     show(picture({ mime: "image/png", image: { width: 1920, height: 1080 } }));
     const image = await screen.findByRole("img", { name: "photo.jpg" });
-    expect(image.parentElement).toBe(box());
+    expect(image.closest("[data-testid=file-picture]")).toBe(box());
     expect(box()!.style.aspectRatio).toBe("1920 / 1080");
   });
 
@@ -83,7 +83,7 @@ describe("FileBubble: a picture's box is there before the picture", () => {
     const image = await screen.findByRole("img", { name: "photo.jpg" });
     expect(box()).toHaveAttribute("data-box", "sized");
     expect(box()!.style.aspectRatio).toBe("100 / 400");
-    expect(image.parentElement).toBe(box());
+    expect(image.closest("[data-testid=file-picture]")).toBe(box());
     // Shown again (the chat reopened): the size found is kept for the run, so the box is right at once.
     view.unmount();
     vi.mocked(servicesPlatform!.getFile).mockReturnValue(new Promise(() => {}));

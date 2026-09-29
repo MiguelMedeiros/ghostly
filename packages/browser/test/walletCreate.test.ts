@@ -110,7 +110,7 @@ describe("one click makes a wallet of a type on a network", () => {
     info.mockResolvedValueOnce({ network: "bitcoin", signerPubkey: `02${"ab".repeat(32)}` });
     await expect(node.walletCreate({ type: "arkade", network: "testnet" })).rejects.toThrow("Could not create the Testnet Ark wallet: That Ark provider runs on bitcoin, not mutinynet. Nothing was saved; try again.");
     info.mockRejectedValueOnce(new Error("Failed to fetch"));
-    await expect(node.walletCreate({ type: "arkade", network: "testnet" })).rejects.toThrow("Failed to fetch. Nothing was saved");
+    await expect(node.walletCreate({ type: "arkade", network: "testnet" })).rejects.toThrow("Could not reach the network. Nothing was saved");
     expect(wallets()).toEqual([]);
     expect((await settingsKeys()).filter((k) => k.startsWith("arkWallet"))).toEqual([]);
   });

@@ -390,6 +390,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (link) await engine.call("deleteMessage", { linkId: link.id, messageId });
   },
   getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? null,
+  transfersRestored: () => engine.state?.transfersRestored ?? false,
   async fileAction(fileId, action) {
     // A file's local id starts with its chat's.
     const linkId = engine.state?.links.find((link) => fileId.startsWith(`${link.id}-in-`) || fileId.startsWith(`${link.id}-out-`))?.id

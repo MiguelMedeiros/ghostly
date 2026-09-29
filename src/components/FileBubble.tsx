@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
@@ -6,10 +6,14 @@ import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import type { FileAction } from "../lib/platform";
+import { AvatarViewer } from "./AvatarViewer";
 import { Highlight } from "./chat/ChatSearch";
 import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import { useT } from "../contexts/I18nContext";
 import type { ChatFile } from "../lib/types";
+
+/** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
+const HELD_MS = 500;
 
 const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
@@ -17,7 +21,7 @@ const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-blac
 export function FileBubble({ file, peerName: named, highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
-  const { platform, transfer } = useTransfer(file.id);
+  const { platform, transfer, restoring } = useTransfer(file.id);
   /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
   const picture = PREVIEWABLE_IMAGE.test(file.mime);
@@ -33,9 +37,15 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const [missing, setMissing] = useState(false);
   /** The file is kept, but too large for this app to hand out: it is saved through the system instead. */
   const [saveOnly, setSaveOnly] = useState(false);
-  const settled = transfer === null || transfer.state === "done";
+  // Right after a start the engine has not put its transfers back yet: a file still moving is not shown as finished.
+  const settled = (transfer === null && !restoring) || transfer?.state === "done";
   // A transfer seen in progress ends with a little pop; files from history just show up.
   const [watched, setWatched] = useState(false);
+  /** The picture open large (a tap on it). */
+  const [viewing, setViewing] = useState(false);
+  const opener = useRef<HTMLDivElement>(null);
+  /** When a finger (or a pen) went down on the picture: held as long as a long press, its tap opens nothing. */
+  const pressedAt = useRef<number | null>(null);
   useEffect(() => {
     if (transfer?.state === "transferring") setWatched(true);
   }, [transfer?.state]);
@@ -106,7 +116,9 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
     setLoaded({ url, ok: true });
   };
 
-  const status = fileStatus(file, transfer, named, missing, t);
+  /** The picture is drawn, so it can open large. */
+  const drawn = !!blobUrl && loaded?.url === blobUrl && loaded.ok;
+  const status = restoring ? t("chat.file.restoring", { size: formatFileSize(file.size) }) : fileStatus(file, transfer, named, missing, t);
   const moving = transfer?.state === "transferring";
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
@@ -125,17 +137,31 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   };
 
   return (
-    <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
+    <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       {box && (
         <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
           style={{ width: box.width, maxWidth: "100%", aspectRatio: box.ratio }}>
           {blobUrl && (
-            <img src={blobUrl} alt={file.name} className="block w-full h-full object-contain"
-              onLoad={(event) => onPictureLoad(event.currentTarget, blobUrl)} onError={() => setLoaded({ url: blobUrl, ok: false })} />
+            // A tap opens it large. Not a <button>: a long press on a control is not the message's long press (the
+            // reactions' bar), and on a picture it must stay one; the tap that ends a long press opens nothing.
+            <div ref={opener} role="button" tabIndex={drawn ? 0 : -1} aria-disabled={!drawn} data-testid="file-picture-open"
+              aria-label={t("chat.file.viewPicture", { name: file.name })}
+              onPointerDown={(event) => { pressedAt.current = event.pointerType === "mouse" ? null : event.timeStamp; }}
+              onClick={(event) => {
+                const held = pressedAt.current !== null && event.timeStamp - pressedAt.current >= HELD_MS;
+                pressedAt.current = null;
+                if (drawn && !held) setViewing(true);
+              }}
+              onKeyDown={(event) => { if (drawn && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); setViewing(true); } }}
+              className={`block w-full h-full ${drawn ? "cursor-zoom-in" : ""} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent`}>
+              <img src={blobUrl} alt={file.name} className="block w-full h-full object-contain"
+                onLoad={(event) => onPictureLoad(event.currentTarget, blobUrl)} onError={() => setLoaded({ url: blobUrl, ok: false })} />
+            </div>
           )}
         </div>
       )}
+      {viewing && blobUrl && <AvatarViewer picture src={blobUrl} name={file.name} returnFocus={opener} onClose={() => setViewing(false)} />}
       <div className="flex items-center gap-3 px-2 py-1.5">
         {canRetry ? (
           <RoundRetry danger busy={busy} testId="file-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")}

@@ -247,20 +247,28 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   );
 
   const endpoint = `http://127.0.0.1:${port}`;
-  const kill = () => void driver.kill("SIGTERM");
   const exited = new Promise<void>((done) => driver.once("exit", () => done()));
+  // Closing the session closes the window, and killing the driver ends what is left. Neither is sure to end the app:
+  // it was seen running on, window open, under the machine's subreaper, and the next open of the same home then ran
+  // a second app with the same keys next to it. So what the driver started (the app among it) is listed before
+  // anything closes, and waited for by its own PIDs until it is gone.
+  const launched = () => driver.pid === undefined ? [] : descendants(driver.pid);
+  const end = async (started: Launched[]) => {
+    driver.kill("SIGTERM");
+    await Promise.race([exited, sleep(5_000)]);
+    await endAll(started);
+  };
   try {
     // The driver needs a moment to bind, and the app a while longer to boot.
     const app = await Promise.race([died, withRetries(() => Driver.open(endpoint, application), 30_000)]);
     await expectUnderTest(app);
-    // Closing the session closes the window; killing the driver ends what is left, waited for (5 s at most) so the
-    // app is done writing to its home before the test removes it.
     return { app, stop: async () => {
-      await app.close(); kill();
-      await Promise.race([exited, new Promise((done) => setTimeout(done, 5_000))]);
+      const started = launched();
+      await app.close();
+      await end(started);
     } };
   } catch (error) {
-    kill();
+    await end(launched());
     throw error;
   }
 }
@@ -279,6 +287,67 @@ async function expectUnderTest(app: Driver): Promise<void> {
       "(#682: packages/browser/src/platform/walletSetupSwitch.ts, src/desktop/host.ts desktopUnderTest) relies on it and " +
       "on GHOSTLY_E2E=1; no test runs until the WebView reports automation again.",
   );
+}
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/** A process, with when it started: a PID the system hands out again later is not the same process. */
+interface Launched { pid: number; started: string }
+
+/** `/proc/<pid>/stat`'s fields after the command name: [0] is the state, [1] the parent, [19] the start time. */
+function stat(pid: number): string[] | null {
+  try {
+    const line = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return line.slice(line.lastIndexOf(")") + 2).split(" ");
+  } catch {
+    return null;
+  }
+}
+
+/** Every process under `root` (children, theirs, and on), on Linux. Elsewhere none: there the driver's end is all. */
+function descendants(root: number): Launched[] {
+  if (process.platform !== "linux") return [];
+  const children = new Map<number, Launched[]>();
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    const fields = stat(Number(entry));
+    if (!fields) continue;
+    const parent = Number(fields[1]);
+    children.set(parent, [...(children.get(parent) ?? []), { pid: Number(entry), started: fields[19] }]);
+  }
+  const found: Launched[] = [];
+  for (const queue = [root]; queue.length > 0;) {
+    const next = children.get(queue.shift()!) ?? [];
+    found.push(...next);
+    queue.push(...next.map((child) => child.pid));
+  }
+  return found;
+}
+
+/** Still running: the same process (same start time), and not a zombie waiting for its parent to reap it. */
+function running({ pid, started }: Launched): boolean {
+  const fields = stat(pid);
+  return fields !== null && fields[19] === started && fields[0] !== "Z";
+}
+
+/**
+ * Waits for each process to end: 5 s on its own (the app is done writing to its home before the test removes it),
+ * then SIGTERM, then SIGKILL. Throws if one is still there after that, rather than let the next open run two apps.
+ */
+async function endAll(launched: Launched[]): Promise<void> {
+  const left = () => launched.filter(running);
+  const until = async (ms: number) => {
+    for (const deadline = Date.now() + ms; left().length > 0 && Date.now() < deadline;) await sleep(100);
+  };
+  await until(5_000);
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    for (const { pid } of left()) {
+      try { process.kill(pid, signal); } catch { /* ended meanwhile */ }
+    }
+    await until(5_000);
+  }
+  const still = left();
+  if (still.length > 0) throw new Error(`The Desktop app's processes ${still.map(({ pid }) => pid).join(", ")} outlived SIGKILL`);
 }
 
 async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number): Promise<T> {

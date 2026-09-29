@@ -409,6 +409,8 @@ export class GhostlyNode implements EngineImplementation {
   private activeLinkId: string | null = null;
   private nativeQueue: Promise<void> = Promise.resolve();
   private shuttingDown = false;
+  /** `start` has put the kept transfers back (EngineState.transfersRestored). */
+  private transfersRestored = false;
   private readonly feedbackStartedAt = Date.now();
   private readonly feedbackIds = new Set<string>();
   private walletFeedbackReady = false;
@@ -1199,6 +1201,7 @@ export class GhostlyNode implements EngineImplementation {
       if (note) this.reactionNotes.set(stored.id, note);
       if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
     }
+    this.transfersRestored = true;
     // Groups know their edges from the links above, and may add or drop some before anything dials.
     await this.groups.load();
     for (const group of this.groups.views()) {
@@ -1315,6 +1318,7 @@ export class GhostlyNode implements EngineImplementation {
         .map((s) => ({ ...s, requests: this.requestCounts.get(s.id) ?? 0 }))
         .sort((a, b) => a.createdAt - b.createdAt),
       transfers: Object.fromEntries(this.transfers),
+      transfersRestored: this.transfersRestored,
       wallet: this.walletView,
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
