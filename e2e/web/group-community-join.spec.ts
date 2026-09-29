@@ -25,7 +25,7 @@ function watchSteps(): void {
   }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage"] });
 }
 
-test("with a member's app open a while, joining a community through its link takes seconds and shows each step", { tag: ["@release-skip", "@feature:groups.community.join"] }, async ({ peer }) => {
+test("with a member's app open a while, joining a community through its link takes seconds and shows each step", { tag: ["@feature:groups.community.join"] }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
   const [alice, bob, carol] = await Promise.all([peer("alice"), peer("bob"), peer("carol")]);
   await alice.page.getByTestId("sidebar-new-more").click();
