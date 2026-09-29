@@ -28,6 +28,40 @@ describe("relay transport", () => {
     expect(calls).toEqual(["a.test", "b.test"]);
   });
 
+  it("takes the relays in turn for each key: one that lacks a key's newest packet answers its reads at most once in a row", async () => {
+    // Bug hunt r5a: a member's offer reached only b.test (a.test had rate limited the publish). The other member read
+    // the offerer's key between reads of its other links, and with one turn for all keys, every read of that key went to
+    // a.test, which kept serving the packet from before the offer: the offer was read 12 to 60 s late.
+    const peer = createIdentity(), other = createIdentity();
+    const reads: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.slice(1) !== peer.pubKeyZ32) return new Response(null, { status: 404 });
+      reads.push(url.host);
+      const offer = url.host === "b.test";
+      return new Response(createRelayPayload(peer, [{ label: "_ts", value: "1" }], offer ? 2000n : 1000n) as BodyInit);
+    }) as typeof fetch;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: fetchFn });
+    const seen: bigint[] = [];
+    for (let i = 0; i < 6; i++) {
+      seen.push((await relay.resolve(peer.pubKeyZ32))!.timestampMicros);
+      // The link's neighbours read their own peers in between.
+      await relay.resolve(other.pubKeyZ32);
+    }
+    expect(reads).toEqual(["a.test", "b.test", "a.test", "b.test", "a.test", "b.test"]);
+    // The offer is read on the second look, not never.
+    expect(seen[1]).toBe(2000n);
+  });
+
+  it("keeps each relay's share of the reads when every key takes them in turn", async () => {
+    const { relay, calls } = transport({ "a.test": () => new Response(null, { status: 404 }), "b.test": () => new Response(null, { status: 404 }) });
+    const keys = Array.from({ length: 5 }, () => createIdentity().pubKeyZ32);
+    for (let round = 0; round < 6; round++) for (const key of keys) await relay.resolve(key);
+    // 30 reads of five keys: as many on each relay as one turn for all keys gave.
+    expect(calls.filter((h) => h === "a.test")).toHaveLength(15);
+    expect(calls.filter((h) => h === "b.test")).toHaveLength(15);
+  });
+
   it("a packet dated far ahead never hides one dated now: the next read of a present packet is taken", async () => {
     const now = BigInt(Date.now()) * 1000n;
     const ahead = now + BigInt(PKARR_FUTURE_SKEW_MS + 3_600_000) * 1000n;
