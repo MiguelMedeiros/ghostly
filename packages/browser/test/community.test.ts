@@ -232,6 +232,39 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     expect(member.links.get(memberEdge)).toBe(memberSide);
   });
 
+  it("a member waits for a hub that went away 20 s, up to a minute once it is back, and then goes to another", async () => {
+    const world = new CommunityWorld();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    const { id, link } = await community(world, alice);
+    await joinAll(world, id, link, [bob, carol]);
+    await world.run(60_000);
+    const everyone = [alice, bob, carol];
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const edgeTo = (p: Peer, to: Peer) => [...p.links].find(([, e]) => e.kind === "edge" && e.peer === keyOf(to))?.[0];
+    const member = everyone.find(p => !p.groups.communities.isHub(id))!;
+    const hub = everyone.find(p => p !== member && edgeTo(member, p))!;
+    const other = everyone.find(p => p !== member && p !== hub)!;
+    // Back, but its edge takes long to come up (cut): the member keeps waiting past 20 s.
+    hub.online = false;
+    await world.run(5_000);
+    world.cut = (a, b) => (a === hub && b === member) || (a === member && b === hub);
+    await world.restart(hub);
+    await world.run(30_000);
+    expect(edgeTo(member, hub)).toBeDefined();
+    expect(edgeTo(member, other)).toBeUndefined();
+    world.cut = null;
+    await world.run(3_000);
+    expect(world.view(member, id)?.community?.connected).toBe(1);
+    expect(edgeTo(member, other)).toBeUndefined();
+    // Gone for good: the member gives up on it after 20 s, not a minute, and asks the other hub.
+    hub.online = false;
+    const left = await world.until(() => !edgeTo(member, hub), 60_000);
+    expect(left).toBeGreaterThan(20_000);
+    expect(left).toBeLessThanOrEqual(22_000);
+    expect(edgeTo(member, other)).toBeDefined();
+    await world.until(() => world.view(member, id)?.community?.connected === 1, 60_000);
+  });
+
   it("a join through the link that nobody answers yet is declined like an invitation: it stops, and the group is gone", async () => {
     const world = new CommunityWorld();
     const alice = world.add("alice"), bob = world.add("bob");

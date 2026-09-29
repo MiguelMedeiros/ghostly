@@ -542,16 +542,17 @@ export class Communities {
       const fresh = new Set(others.map(h => h.key));
       for (const [key, until] of live.hubsAvoided) if (until <= now) live.hubsAvoided.delete(key);
       // A hub that has not taken me after a while is full, or gone: another one, or I become one. One whose edge was up
-      // and dropped (its app closed, and usually starts again in seconds) gets the same while from the drop: its edge
-      // stays open and looks for it fast, and it takes me back as soon as it is up. Dropped at once, the edge was
-      // opened again only when the hub was picked again, a minute or more later (2026-09-29).
+      // and dropped (its app closed, and usually starts again in seconds) gets the same while from the drop, and up to
+      // three times that once it is back (a packet since): its edge stays open and looks for it, and comes up again in
+      // the seconds its signaling takes on the relays. Dropped at once, the edge was opened again only when the hub was
+      // picked again, a minute or more later (2026-09-29).
       for (const key of live.myHubs) {
         const id = edges.get(key);
         if (id && this.host.linkReady(id, 2)) { live.hubWaits.delete(key); live.hubsUp.add(key); continue; }
-        if (live.hubsUp.delete(key)) { live.hubWaits.set(key, now); continue; }
         const since = live.hubWaits.get(key) ?? now;
         live.hubWaits.set(key, since);
-        if (now - since > this.timings.hubWaitMs) { live.hubsAvoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); }
+        const back = live.hubsUp.has(key) && !!id && !!this.host.linkBack?.(id);
+        if (now - since > (back ? 3 : 1) * this.timings.hubWaitMs) { live.hubsAvoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); live.hubsUp.delete(key); }
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);

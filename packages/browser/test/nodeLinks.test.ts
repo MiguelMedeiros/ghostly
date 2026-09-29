@@ -641,6 +641,15 @@ describe("private groups through the engine", () => {
     await vi.waitFor(async () => expect((await saved(keptId))?.edgeLive).toBe(true));
     edge(droppedId).options.events.onGroupsSupport(false);
     await vi.waitFor(async () => expect((await saved(droppedId))?.edgeLive).toBeFalsy());
+    // The member of a dropped edge is back once it published since the drop (the community waits longer for it then).
+    const host = node["groups"]["host"] as { linkBack(id: string): boolean };
+    const { events } = edge(droppedId).options;
+    events.onDataLinkState("open"); events.onDataLinkState("idle");
+    const dropAt = Date.now();
+    events.onPresence({ online: true, lastPacketAt: dropAt - 5_000, services: [] });
+    expect(host.linkBack(droppedId)).toBe(false);
+    events.onPresence({ online: true, lastPacketAt: dropAt + 1_000, services: [] });
+    expect(host.linkBack(droppedId)).toBe(true);
     const stopping = node.shutdown();
     // Its links ending as the app quits say nothing about the next run.
     edge(keptId).options.events.onGroupsSupport(false);

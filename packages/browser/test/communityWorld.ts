@@ -155,6 +155,8 @@ export class CommunityWorld {
       // Version 4 (hubs) only between two apps that announce it.
       linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
       linkSeen: linkId => { const edge = links.get(linkId); return !!edge && !!this.counterpart(edge) && (!this.network || edge.polls > 0); },
+      // Its other end's app runs again (a restart): its link published, whether or not it is up yet.
+      linkBack: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && there.peer.online; },
       contactName: () => undefined,
       edges: g => new Map([...links].filter(([, e]) => e.g === g && e.kind === "edge").map(([id, e]) => [e.peer, id])),
       entries: g => new Map([...links].filter(([, e]) => e.g === g && e.kind !== "edge").map(([id, e]) => [e.peer, id])),

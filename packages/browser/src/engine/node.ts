@@ -876,6 +876,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
     linkSeen: linkId => { const live = this.links.get(linkId); return !!live?.presence?.online || (!!live?.dataLink && live.dataLink !== "idle"); },
+    // Its packet is newer than the moment the edge was last up (both clocks, near enough for seconds of a restart).
+    linkBack: linkId => { const live = this.links.get(linkId); return !!live?.lastSyncAt && !!live.presence?.online && live.presence.lastPacketAt > live.lastSyncAt; },
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
     resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
