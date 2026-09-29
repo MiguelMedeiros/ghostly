@@ -27,6 +27,20 @@ test("a new profile has no wallet and says how to start; one choice makes Testne
   await expect(deck.locator("[role=tab]")).toHaveCount(3); // Cashu, Lightning through it, USDT
 });
 
+test("on a phone: a first setup whose Ethereum RPC does not answer says so in words, not the browser's", { tag: ["@feature:wallet.instances.create", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  test.setTimeout(120_000);
+  const alice = await peer("first-rpc-silent", { mobile: true, offlineMainnet: true });
+  // The test mint is down, and Sepolia's RPC takes the request and never answers: the app gives up after 15 s. The
+  // card said the browser's words for that ("Fetch is aborted" in Safari, "signal timed out" here).
+  await alice.context.route(/^https:\/\/testnut\.cashu\.space\//, (route) => route.abort("connectionrefused"));
+  await alice.context.route(/^https:\/\/ethereum-sepolia-rpc\.publicnode\.com/, () => {});
+  await alice.page.getByTestId("mobile-tabs").getByRole("button", { name: "Wallets" }).click();
+  const first = alice.page.getByTestId("wallet-first");
+  await first.getByTestId("wallet-first-testnet").click();
+  await expect(first.getByTestId("wallet-first-error-usdt")).toHaveText(
+    "Could not create the Testnet USDT wallet: ethereum-sepolia-rpc.publicnode.com did not answer in time. Nothing was saved; try again.", { timeout: 60_000 });
+});
+
 test("on a phone: a first setup that made nothing gives way to a wallet made with New", { tag: ["@feature:wallet.instances.create", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const alice = await peer("first-fails-phone", { mobile: true, offlineMainnet: true });
   await useFakeProviders(alice);

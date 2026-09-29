@@ -4,6 +4,7 @@ import { WALLET_TYPES, type NetworkWalletsView, type StoredPayment, type WalletI
 import { CASHU_MINT_SOURCE } from "./providers/cashuMint";
 import { CASHU_CARD, LEGACY_CARD } from "./providers/lightningCards";
 import { networkLabel } from "./modeGate";
+import { networkReason } from "./networkReason";
 
 export const WALLET_NAMES: Record<WalletType, string> = {
   cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin", fedimint: "Fedimint", usdt: "USDT",
@@ -89,6 +90,6 @@ export const REAL_MONEY_UNCONFIRMED = "This pays with real money: confirm it wit
 
 /** One clear message for a creation that failed: nothing was saved, and trying again is safe. */
 export function createFailure(label: string, error: unknown): string {
-  const reason = (error instanceof Error ? error.message : String(error)).replace(/\.$/, "");
+  const reason = (networkReason(error) ?? (error instanceof Error ? error.message : String(error))).replace(/\.$/, "");
   return `Could not create the ${label} wallet: ${reason}. Nothing was saved; try again.`;
 }
