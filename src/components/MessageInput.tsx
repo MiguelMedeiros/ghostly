@@ -635,6 +635,8 @@ export function MessageInput({
           />
         ) : <button
           aria-label={t("composer.sendMessage")}
+          // The field keeps the focus: a tap on Send would take it (and on a phone close the keyboard) mid-conversation.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => handleSubmit()}
           disabled={disabled || !text.trim()}
           className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"

@@ -22,6 +22,11 @@ test("a touch screen: opening a chat or a group leaves the keyboard down; a tap 
   await input.press("Enter");
   await expect(input).toHaveValue("");
   await expect(input).toBeFocused();
+  // Send tapped rather than Enter: the field keeps the focus, and the keyboard stays up.
+  await input.fill("second");
+  await page.getByRole("button", { name: "Send message" }).tap();
+  await expect(input).toHaveValue("");
+  await expect(input).toBeFocused();
 
   // A group opens the same way.
   await page.getByTestId("chat-back").click();
