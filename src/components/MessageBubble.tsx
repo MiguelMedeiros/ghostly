@@ -655,7 +655,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const onPin = choosing ? undefined : pinIt;
   const onDelete = choosing ? undefined : deleteIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
   const onReact = choosing ? undefined : reactIt, onForward = choosing ? undefined : forwardIt, onSelect = choosing ? undefined : selectIt;
-  const { t, language } = useI18n();
+  const { t, language, dir } = useI18n();
   const chat = useCueChat();
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
@@ -797,7 +797,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const bigEmoji = contentType === "text" && isOnlyEmojis(message.text);
 
   const timestampEl = (
-    <span className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
+    <span dir={dir} className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
       {message.edit && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
@@ -930,10 +930,15 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {timestampEl}
           </div>
         ) : (
-          <div className="clearfix">
+          // What was written reads in its own direction (an English message in the Arabic app left to right, an Arabic
+          // one in the English app right to left), with the time at its end; the cards and the time keep the app's.
+          <div className="clearfix" dir="auto" data-testid="message-body">
             <RichText testId="message-text" text={message.text} sentAt={message.timestamp} mentions={message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
-            <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
-            <MessageLinkCards text={message.text} preview={message.preview} />
+            {/* No box of its own: with no card the time still floats beside the last line of text. */}
+            <div dir={dir} className="contents">
+              <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
+              <MessageLinkCards text={message.text} preview={message.preview} />
+            </div>
             {timestampEl}
           </div>
         )}
