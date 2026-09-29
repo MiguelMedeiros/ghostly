@@ -71,6 +71,19 @@ describe("chats", () => {
     expect(node.sendMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("a text past 16 KiB is a bad request, never handed to the engine, in a chat or a group", async () => {
+    const { ctx, node } = fake();
+    // 8193 two-byte letters: 16386 bytes. It used to come back as "unavailable", which reads as "try again later".
+    const long = "é".repeat(8193);
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: long })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/exceeds 16384 UTF-8 bytes/) });
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: long })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
+    // Exactly the limit, spaces around it trimmed as the engine does: it goes.
+    await callApi(ctx, "chat.send", { chat: "Alice", text: `  ${"é".repeat(8192)}\n` });
+    expect(node.sendMessage).toHaveBeenCalledOnce();
+  });
+
   it("typing tells the engine this side writes, or stopped, and says whether the chat is live", async () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });

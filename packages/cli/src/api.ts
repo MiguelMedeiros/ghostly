@@ -1,4 +1,4 @@
-import { inviteLink, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { inviteLink, LIMITS, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
@@ -20,6 +20,15 @@ import { WALLET_METHODS } from "./wallets";
 import { chatDetailsJson, chatJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
 
 const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
+
+/**
+ * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
+ * engine is asked, with a code that says it never goes as it is, not "unavailable", which reads as "try later".
+ */
+function checkTextSize(text: string): void {
+  const bytes = new TextEncoder().encode(text.trim()).length;
+  if (bytes > LIMITS.maxChatMessageBytes) throw new CliError("bad_request", `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes (${bytes}): shorten it, or send it as a file`, { bytes, max: LIMITS.maxChatMessageBytes });
+}
 
 /** Waits until the contact confirmed the latest edit of one of my messages (it is no longer pending). */
 async function waitForEdit(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<StoredMessage> {
@@ -239,6 +248,7 @@ const METHODS: Record<string, Method> = {
   async "chat.send"(ctx, params) {
     const link = chatOf(ctx, params);
     const text = str(params, "text", true);
+    checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
@@ -456,6 +466,7 @@ const METHODS: Record<string, Method> = {
   async "group.send"(ctx, params) {
     const group = groupOf(ctx, params);
     const text = str(params, "text", true);
+    checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", "The text looks like a secret or a Cashu token; send it with --force if you mean to", { kind: secret.kind });
