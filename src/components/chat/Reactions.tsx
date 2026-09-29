@@ -5,6 +5,7 @@ import { Menu } from "../Menu";
 import { EmojiTab } from "../composer/EmojiTab";
 import { SmileIcon } from "../composer/icons";
 import type { ReactionChip } from "../../lib/reactions";
+import { touchOnly } from "../../lib/touchOnly";
 
 /*
  * Reactions to a message (WISP 400 § Reactions), as the chat shows them: a quick bar of six and "+" for any emoji,
@@ -150,7 +151,8 @@ function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, on
     </Menu>
     <Menu open={open && more} onClose={onClose} anchorRef={anchorRef} testId="reaction-picker" align={align} prefer="up" portal within="[data-message-list]" label={t("chat.reactions.more")}>
       <div className="expression-panel reaction-picker" style={{ width: "min(20rem, calc(100vw - 1rem))", height: 360, border: 0, boxShadow: "none" }}>
-        <EmojiTab onPick={choose} autoFocus />
+        {/* Its search field only where the caret costs nothing: on a touch screen the keyboard would hide the emoji. */}
+        <EmojiTab onPick={choose} autoFocus={!touchOnly()} />
       </div>
     </Menu>
   </>;

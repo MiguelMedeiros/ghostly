@@ -26,6 +26,7 @@ import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPas
 import { onShareChange, peekShareFor, shareText, takeShareFor } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
 import "./composer/composer.css";
+import { touchOnly } from "../lib/touchOnly";
 
 interface MessageInputProps {
   draftId?: string;
@@ -172,8 +173,10 @@ export function MessageInput({
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
   const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled);
 
+  // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
+  // the chat before the person asked for it, so there the field waits for a tap (src/lib/touchOnly.ts).
   useEffect(() => {
-    textareaRef.current?.focus();
+    if (!touchOnly()) textareaRef.current?.focus();
   }, []);
 
   // Disabled for a moment under the caret (a 1:1 chat's send under way): the browser takes the focus from a disabled
@@ -442,7 +445,7 @@ export function MessageInput({
       const shared = shareText(share);
       if (shared) setText((was) => (was.trim() ? `${was}\n${shared}` : shared));
       if (share.files.length) offerRef.current(share.files);
-      else textareaRef.current?.focus();
+      else if (!touchOnly()) textareaRef.current?.focus();
     };
     take();
     return onShareChange(take);
@@ -658,7 +661,7 @@ export function MessageInput({
             onSaveMethods={payments.onSaveMethods}
             onClose={() => setShowPayment(false)}
             // Sent or requested: back to the chat, where its bubble shows how it goes, and to writing.
-            onDone={() => { setShowPayment(false); textareaRef.current?.focus({ preventScroll: true }); }}
+            onDone={() => { setShowPayment(false); if (!touchOnly()) textareaRef.current?.focus({ preventScroll: true }); }}
           />
         )}
 
