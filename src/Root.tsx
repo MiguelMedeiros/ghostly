@@ -202,6 +202,10 @@ export function Root() {
                 <UpdateProvider>
                   <AttentionFeedback />
                   <Routes>
+                    {/* What the intakes above take out of the history at once (a group's link, an invite code, a
+                        web+ghostly: link): nothing drawn for them, as before, and no "No routes matched" warning. */}
+                    <Route path="/join/*" element={null} />
+                    <Route path="/:intake" element={null} />
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
                       <Route path="/chat/*" element={<ChatRoute />} />
