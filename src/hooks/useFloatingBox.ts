@@ -20,10 +20,27 @@ interface Options {
 
 const MARGIN = 8;
 
-/** Keeps a box whole inside the window: first small enough, then moved back in. */
+type Insets = { top: number; right: number; bottom: number; left: number };
+const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+/**
+ * The screen's safe area (a phone's status bar, notch or Dynamic Island, home indicator): read when the window
+ * changes and as a gesture starts, not on every move. All 0 on a computer.
+ */
+let insets: Insets = NO_INSETS;
+function readInsets(): void {
+  if (typeof document === "undefined" || !document.body) return;
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
+  document.body.appendChild(probe);
+  const style = getComputedStyle(probe);
+  insets = { top: parseFloat(style.paddingTop) || 0, right: parseFloat(style.paddingRight) || 0, bottom: parseFloat(style.paddingBottom) || 0, left: parseFloat(style.paddingLeft) || 0 };
+  probe.remove();
+}
+
+/** Keeps a box whole inside the window and clear of its safe area: first small enough, then moved back in. */
 function fit(box: Box, aspect: number | undefined, minWidth: number, minHeight: number): Box {
-  const maxW = window.innerWidth - 2 * MARGIN;
-  const maxH = window.innerHeight - 2 * MARGIN;
+  const maxW = window.innerWidth - insets.left - insets.right - 2 * MARGIN;
+  const maxH = window.innerHeight - insets.top - insets.bottom - 2 * MARGIN;
   let w = Math.max(minWidth, Math.min(box.w, maxW));
   let h = aspect ? w / aspect : Math.max(minHeight, Math.min(box.h, maxH));
   if (aspect && h > maxH) {
@@ -33,9 +50,21 @@ function fit(box: Box, aspect: number | undefined, minWidth: number, minHeight: 
   return {
     w,
     h,
-    x: Math.max(MARGIN, Math.min(box.x, window.innerWidth - w - MARGIN)),
-    y: Math.max(MARGIN, Math.min(box.y, window.innerHeight - h - MARGIN)),
+    x: Math.max(insets.left + MARGIN, Math.min(box.x, window.innerWidth - insets.right - w - MARGIN)),
+    y: Math.max(insets.top + MARGIN, Math.min(box.y, window.innerHeight - insets.bottom - h - MARGIN)),
   };
+}
+
+/**
+ * The same place in a window of another size (a phone turned on its side, a resized window): as far along the room
+ * left on each axis as before, so a box in the top right corner stays in it instead of ending up mid-screen.
+ */
+function keepPlace(box: Box, from: { w: number; h: number }, to: { w: number; h: number }): Box {
+  const along = (at: number, size: number, was: number, now: number) => {
+    const before = was - size - 2 * MARGIN;
+    return before > 0 ? MARGIN + ((at - MARGIN) * Math.max(0, now - size - 2 * MARGIN)) / before : at;
+  };
+  return { ...box, x: along(box.x, box.w, from.w, to.w), y: along(box.y, box.h, from.h, to.h) };
 }
 
 /**
@@ -47,7 +76,10 @@ function fit(box: Box, aspect: number | undefined, minWidth: number, minHeight: 
 export function useFloatingBox(storageKey: string, initial: () => Box, options: Options = {}) {
   const { enabled = true, aspect, minWidth = 120, minHeight = 90 } = options;
   const ref = useRef<HTMLDivElement>(null);
+  /** The window's size the box was last placed in. */
+  const windowSize = useRef({ w: window.innerWidth, h: window.innerHeight });
   const [box, setBox] = useState<Box>(() => {
+    readInsets();
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null") as Partial<Box> | null;
       if (saved && [saved.x, saved.y, saved.w, saved.h].every((n) => typeof n === "number")) return fit(saved as Box, aspect, minWidth, minHeight);
@@ -70,11 +102,18 @@ export function useFloatingBox(storageKey: string, initial: () => Box, options: 
     [storageKey, aspect, minWidth, minHeight],
   );
 
-  // A new shape (camera to screen) or a smaller window: same place, still whole.
+  // A new shape (camera to screen) or another window size: same place, still whole. A phone turned on its side keeps
+  // the box in its corner (`keepPlace`), clear of the notch on either end.
   useEffect(() => {
     if (!enabled) return;
-    setBox((current) => fit(current, aspect, minWidth, minHeight));
-    const onResize = () => setBox((current) => fit(current, aspect, minWidth, minHeight));
+    const onResize = () => {
+      readInsets();
+      const now = { w: window.innerWidth, h: window.innerHeight }, was = windowSize.current;
+      windowSize.current = now;
+      setBox((current) => fit(was.w === now.w && was.h === now.h ? current : keepPlace(current, was, now), aspect, minWidth, minHeight));
+    };
+    // Also as it comes back (the small window again): the screen may have turned meanwhile.
+    onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [enabled, aspect, minWidth, minHeight]);
@@ -85,6 +124,7 @@ export function useFloatingBox(storageKey: string, initial: () => Box, options: 
     if (!enabled || !element) return;
     event.preventDefault();
     event.stopPropagation();
+    readInsets();
     let latest: Box | null = null;
     const move = (e: PointerEvent) => {
       latest = next(e);
