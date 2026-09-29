@@ -1,11 +1,11 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
+  groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
   type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { pinView } from "./pins";
+import { pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, metaLines, type CommunityTimings } from "./community";
@@ -309,7 +309,7 @@ export class Groups {
         memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
       if (!session) {
         const invitation = group.invitation!;
-        return { ...base, name: invitation.name, isAdmin: false, members: [], canSend: false,
+        return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false,
           invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: invitation.n, accepted: !!invitation.seedB64,
             ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
       }
@@ -792,7 +792,7 @@ export class Groups {
         // Through the group's link: the entry session is pinned to the key the link named, so this is its admin. Accepted at once.
         if (existing?.invitation?.entry && !existing.state) {
           if (existing.invitation.linkId !== linkId) return;
-          existing.invitation = { ...existing.invitation, name: frame.name.slice(0, 48), admin: frame.admin, pieces: [],
+          existing.invitation = { ...existing.invitation, name: groupName(frame.name) ?? "Group", admin: frame.admin, pieces: [],
             e: Number.isSafeInteger(frame.e) ? frame.e as number : 0, n: Number.isSafeInteger(frame.n) ? frame.n as number : 1 };
           await this.store.putGroup(existing);
           traceJoin(g, "invite.received");
@@ -803,7 +803,7 @@ export class Groups {
         if (existing?.state && existing.state.status === "active") return;
         if (existing?.invitation?.seedB64) return; // already accepting one
         if ([...this.stored.values()].filter(x => x.invitation).length >= 32) return;
-        const invitation: StoredGroup = { id: g, createdAt: Date.now(), invitation: { name: frame.name.slice(0, 48), admin: frame.admin, linkId,
+        const invitation: StoredGroup = { id: g, createdAt: Date.now(), invitation: { name: groupName(frame.name) ?? "Group", admin: frame.admin, linkId,
           e: Number.isSafeInteger(frame.e) ? frame.e as number : 0, n: Number.isSafeInteger(frame.n) ? frame.n as number : 1, pieces: [] } };
         if (existing) { this.sessions.delete(g); for (const edge of this.host.edges(g).values()) await this.host.closeEdge(edge); }
         this.stored.set(g, invitation);
@@ -1207,6 +1207,12 @@ export class Groups {
       for (const key of gone) await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
       if (top.k === "role") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === session.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
+    }
+    // A pin by someone no longer a member goes with them (WISP 9xx · Group Mesh § Pinned message).
+    const group = this.stored.get(groupId);
+    if (session.status === "active" && group && pinOfFormerMember(group.pin, key => rosterHas(after, key))) {
+      group.pin = undefined;
+      await this.store.putGroup(group);
     }
     this.reconcileEdges(groupId);
     this.host.membersChanged?.(groupId);

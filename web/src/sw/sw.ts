@@ -13,8 +13,9 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, classify, pushScopeProfile, readShare, wakeNotice, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, classify, pushScopeProfile, readShare, readShareBody, wakeNotice, type SharedItem } from "./policy";
 import { readWakeEntry } from "./wakeStore";
+import { takeWakeSlot } from "./wakeLimit";
 import { readWake } from "../../../packages/core/src/pairedWake";
 import { SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
 
@@ -92,7 +93,11 @@ function share(event: FetchEvent): void {
   const delivered = new Promise<void>((resolve) => { done = resolve; });
   event.respondWith((async () => {
     try {
-      const item = readShare(await event.request.formData());
+      // Read with a cap before it is parsed: `formData()` alone would hold a body of any size in memory.
+      const body = await readShareBody(event.request);
+      if (!body) throw new Error("share too large");
+      const type = event.request.headers.get("content-type") ?? "";
+      const item = readShare(await new Response(body, { headers: { "content-type": type } }).formData());
       held?.done();
       held = { item, done };
       setTimeout(() => { if (held?.done === done) { held = null; done(); } }, SHARE_HOLD_MS);
@@ -170,12 +175,20 @@ worker.addEventListener("push", (event) => {
     const wake = readWake(event.data?.text());
     const found = wake ? await readWakeEntry(profile, wake.token).catch(() => undefined) : undefined;
     const appVisible = (await appWindows()).some((client) => client.focused || client.visibilityState === "visible");
-    const notice = wakeNotice(found, { now: Date.now(), appVisible, profile, kind: wake?.kind });
-    if (!notice) return;
+    const now = Date.now();
+    const notice = wakeNotice(found, { now, appVisible, profile, kind: wake?.kind });
+    if (!notice || !wake) return;
+    const options = { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", requireInteraction: notice.call };
+    if (!(await takeWakeSlot(profile, wake.token, notice.call, now))) {
+      // Too soon after this token's last one (`WAKE_NOTICE_GAP_MS`): no new notice and no sound. The one still on
+      // screen is shown again, silently, since browsers expect every push to show something; a dismissed one stays gone.
+      const [shown] = await worker.registration.getNotifications({ tag: notice.tag });
+      if (shown) await worker.registration.showNotification(notice.title, { ...options, renotify: false, silent: true });
+      return;
+    }
     // A call stays until it is answered or dismissed, and buzzes again: a web app cannot ring like a phone call.
     await worker.registration.showNotification(notice.title, {
-      body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png",
-      renotify: notice.call, requireInteraction: notice.call, ...(notice.call && { vibrate: [300, 200, 300, 200, 300] }),
+      ...options, renotify: notice.call, ...(notice.call && { vibrate: [300, 200, 300, 200, 300] }),
     });
   })());
 });

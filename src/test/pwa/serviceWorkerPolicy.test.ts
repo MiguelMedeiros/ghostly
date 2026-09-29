@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SHARED_FILES, SHARE_TARGET_PATH, classify, precacheList, pushScope, pushScopeProfile, readShare, wakeNotice } from "../../../web/src/sw/policy";
+import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, classify, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../web/src/sw/policy";
 
 // covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
 
@@ -95,6 +95,57 @@ describe("a share target's form", () => {
 
   it("an empty form is an empty share", () => {
     expect(readShare(new FormData())).toEqual({ title: "", text: "", url: "", files: [] });
+  });
+
+  it("keeps files up to the size cap, all together", () => {
+    const form = new FormData();
+    for (const name of ["a", "b", "c"]) form.append("files", new File(["x".repeat(40)], `${name}.txt`));
+    expect(readShare(form, 100).files.map((f) => f.name)).toEqual(["a.txt", "b.txt"]);
+  });
+});
+
+describe("a share target's body", () => {
+  /** A POST body in pieces, counting how many pieces were read: past the cap nothing more is. */
+  function posted(pieces: number, pieceBytes: number, contentLength?: string) {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled === pieces) return controller.close();
+        pulled++;
+        controller.enqueue(new Uint8Array(pieceBytes));
+      },
+    }, { highWaterMark: 0 });
+    const headers = new Headers(contentLength === undefined ? {} : { "content-length": contentLength });
+    return { request: { body, headers }, pulled: () => pulled };
+  }
+
+  it("is read whole up to the cap", async () => {
+    const { request } = posted(4, 25);
+    expect((await readShareBody(request, 100))?.size).toBe(100);
+  });
+
+  it("is dropped, and read no further, once it passes the cap", async () => {
+    const { request, pulled } = posted(1000, 25);
+    expect(await readShareBody(request, 100)).toBeNull();
+    expect(pulled()).toBe(5);
+  });
+
+  it("is not read at all when it says it is larger", async () => {
+    const { request, pulled } = posted(1, 10, String(MAX_SHARE_BYTES + 1));
+    expect(await readShareBody(request)).toBeNull();
+    expect(pulled()).toBe(0);
+  });
+
+  it("goes back to the form the worker reads, files and all", async () => {
+    const form = new FormData();
+    form.set("text", "hello");
+    form.append("files", new File(["boo"], "ghost.txt", { type: "text/plain" }));
+    const sent = new Request("https://app.ghostly.tools/share-target", { method: "POST", body: form });
+    const body = await readShareBody(sent);
+    const item = readShare(await new Response(body, { headers: { "content-type": sent.headers.get("content-type")! } }).formData());
+    expect(item.text).toBe("hello");
+    expect(item.files.map((f) => f.name)).toEqual(["ghost.txt"]);
+    expect(await item.files[0]!.text()).toBe("boo");
   });
 });
 

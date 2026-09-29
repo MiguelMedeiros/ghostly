@@ -15,6 +15,7 @@ import {
   type PkarrTransport,
   type SignedPacket,
   setLinkTraceSink,
+  viewerResponseHeaders,
 } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
@@ -140,7 +141,7 @@ const pubkyCookieSession = (): PubkyCookieSession => {
   };
 };
 
-interface ServiceRequest {
+export interface ServiceRequest {
   id: number;
   peer: string;
   service: string;
@@ -152,31 +153,44 @@ interface ServiceRequest {
 
 const VIEWER_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
+export interface ServiceWindowResponse {
+  status: number;
+  headers: [string, string][];
+  body_b64: string;
+}
+
+/**
+ * The answer a service window gets for one request: the contact's, over the data link, with only the headers a
+ * viewer serves (`viewerResponseHeaders`), or a short page saying why there is none.
+ */
+export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "node">, payload: ServiceRequest): Promise<ServiceWindowResponse> {
+  try {
+    await server.ready;
+    const answer = await server.node.request(payload.peer, payload.service, {
+      method: payload.method,
+      path: payload.path,
+      headers: payload.headers,
+      body: payload.body_b64 ? fromBase64(payload.body_b64) : null,
+      maxResponseBytes: VIEWER_MAX_RESPONSE_BYTES,
+    });
+    return { status: answer.status, headers: viewerResponseHeaders(answer.headers), body_b64: toBase64(await answer.bytes()) };
+  } catch (error) {
+    const gone = error instanceof GhostlyHttpError && ["unreachable", "timeout", "closed", "offline"].includes(error.code);
+    const text = gone
+      ? "This service is not reachable. Services exist while their ghost is online."
+      : `The request failed: ${error instanceof Error ? error.message : String(error)}`;
+    return {
+      status: gone ? 503 : 502,
+      headers: [["content-type", "text/plain; charset=utf-8"]],
+      body_b64: toBase64(new TextEncoder().encode(text)),
+    };
+  }
+}
+
 /** Requests from a service window arrive here and leave over the contact's data link. */
 function serveServiceWindows(server: EngineServer): void {
   void listen<ServiceRequest>("ghostly-svc-request", async ({ payload }) => {
-    let response: { status: number; headers: [string, string][]; body_b64: string };
-    try {
-      await server.ready;
-      const answer = await server.node.request(payload.peer, payload.service, {
-        method: payload.method,
-        path: payload.path,
-        headers: payload.headers,
-        body: payload.body_b64 ? fromBase64(payload.body_b64) : null,
-        maxResponseBytes: VIEWER_MAX_RESPONSE_BYTES,
-      });
-      response = { status: answer.status, headers: answer.headers, body_b64: toBase64(await answer.bytes()) };
-    } catch (error) {
-      const gone = error instanceof GhostlyHttpError && ["unreachable", "timeout", "closed", "offline"].includes(error.code);
-      const text = gone
-        ? "This service is not reachable. Services exist while their ghost is online."
-        : `The request failed: ${error instanceof Error ? error.message : String(error)}`;
-      response = {
-        status: gone ? 503 : 502,
-        headers: [["content-type", "text/plain; charset=utf-8"]],
-        body_b64: toBase64(new TextEncoder().encode(text)),
-      };
-    }
+    const response = await answerServiceWindow(server, payload);
     await invoke("service_respond", { id: payload.id, response });
   });
 }

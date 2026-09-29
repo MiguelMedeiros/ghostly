@@ -578,6 +578,7 @@
     "extension/public/icons/**/*": ["extension.engine"],
     "extension/public/manifest.json": ["*"],
     "extension/src/oidc.ts": ["proofs.oidc","proofs.oidc.callback.extension"],
+    "extension/src/shared/sender.ts": ["*"],
     "extension/src/shared/viewer.ts": ["services.*"],
     "extension/src/ui/main.tsx": ["*"],
     "extension/src/updates.ts": ["app.updates.extension"],

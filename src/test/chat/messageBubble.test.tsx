@@ -44,6 +44,32 @@ describe("MessageBubble: pictures", () => {
     expect(image(container)!.getAttribute("style")).toContain("pixelated");
   });
 
+  it.each([
+    ["a capture with a timestamp", "https://web.archive.org/web/20091027000000/http://www.geocities.com/area51/dancing.gif"],
+    ["a capture with no timestamp (as the picker sends it)", "https://web.archive.org/web/http://geocities.com/ghost/0.gif"],
+    ["an image capture (im_)", "https://web.archive.org/web/20091027000000im_/http://www.geocities.com/area51/dancing.gif"],
+  ])("loads %s from the Wayback Machine by itself", (_, url) => {
+    const { container } = bubble({ text: url });
+    expect(image(container)).toHaveAttribute("src", url);
+    expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["a path that climbs out of /web/", "https://web.archive.org/web/../../save/http://example.com/x.gif"],
+    ["an encoded climb", "https://web.archive.org/web/%2e%2e/%2e%2e/save/x.gif"],
+    ["a query", "https://web.archive.org/web/20091027000000/http://www.geocities.com/a.gif?track=1"],
+    ["a query on the capture's own URL", "https://web.archive.org/web/http://example.com/pixel?id=1&x.gif"],
+    ["another path of the archive", "https://web.archive.org/save/http://example.com/x.gif"],
+    ["a path with no archived URL", "https://web.archive.org/web/20091027000000/x.gif"],
+    ["a port", "https://web.archive.org:8443/web/http://geocities.com/x.gif"],
+    ["credentials", "https://user@web.archive.org/web/http://geocities.com/x.gif"],
+    ["another host", "https://web.archive.org.example.com/web/http://geocities.com/x.gif"],
+  ])("keeps %s on web.archive.org behind a click", (_, url) => {
+    const { container } = bubble({ text: url });
+    expect(image(container)).toBeNull();
+    expect(screen.getByTestId("image-reveal")).toBeInTheDocument();
+  });
+
   it("does not draw an ordinary picture as pixel art", () => {
     const { container } = bubble({ text: PNG });
     expect(image(container)!.getAttribute("style") ?? "").not.toContain("pixelated");
