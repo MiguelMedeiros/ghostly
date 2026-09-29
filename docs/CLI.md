@@ -219,7 +219,7 @@ The audio contract, one Unix socket per call:
 - **To the call.** Write any amount, at any pace: the CLI plays it at real time, and silence when there is nothing.
 - **Barge-in.** `ghostly call flush` drops what is queued, at once.
 - **End.** The program reads EOF when the call ends; `call.ended` says why (`hangup`, `remote-hangup`, `missed`,
-  `rejected`, `unanswered`, `failed`, `stopped`).
+  `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
 - **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg.
 
 **When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log lists the candidates
