@@ -485,7 +485,8 @@ export type WalletTxKind =
   | "lightning-out"
   | "ecash-in" // from a contact, or a pasted token
   | "ecash-out"
-  | "reclaimed";
+  | "reclaimed"
+  | "fee"; // a Lightning payment failed, and the mint kept its fee for preparing it (`amount` 0)
 
 /** One movement of the wallet. `fee` is exact: what left the balance beyond `amount`, or what a redeem cost. */
 export interface WalletTx {
