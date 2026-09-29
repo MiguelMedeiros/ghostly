@@ -13,7 +13,7 @@ const FIRST: WalletType[] = ["cashu", "usdt"];
  * On Mainnet, the wallets a new profile gets by itself: these two, and Bitcoin on-chain where a Mainnet on-chain wallet
  * is made in one click here (not yet: until then it is skipped, as the setup skips it). Testnet: these two.
  */
-export const firstKinds = (network: WalletNetwork, offers: WalletOffer[] = []): WalletType[] => network === "testnet" ? FIRST
+const firstKinds = (network: WalletNetwork, offers: WalletOffer[] = []): WalletType[] => network === "testnet" ? FIRST
   : DEFAULT_WALLETS.filter((type) => FIRST.includes(type) || offers.some((o) => o.type === type && o.network === network && o.available && !o.needs));
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

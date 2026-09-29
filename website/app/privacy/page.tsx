@@ -25,7 +25,7 @@ export const metadata: Metadata = {
   },
 };
 
-const LAST_UPDATED = "September 28, 2026";
+const LAST_UPDATED = "September 29, 2026";
 
 export default function PrivacyPage() {
   return (
@@ -214,7 +214,10 @@ export default function PrivacyPage() {
             <Term>Wallets.</Term> A wallet talks to the services it runs on: a Cashu mint, a Fedimint federation, an
             Ark server, a Lightning node or wallet you connect, a Bitcoin node or block explorer, an Ethereum service,
             or a test faucet on Testnet. They see your IP address and the operations they serve. Some of them hold your
-            funds. A new profile has no wallet until you create one.
+            funds. So that you can receive right away, a new profile gets a Mainnet Cashu wallet and a Mainnet USDT
+            wallet on its first start: the app then contacts the default Cashu mints and an Ethereum service
+            (<Code>ethereum.publicnode.com</Code>), even before you open the wallet. Making them moves no money. Every
+            other wallet waits until you create it.
           </li>
           <li>
             <Term>Storage you set up.</Term> A backup or held messages in an S3-compatible bucket go to the provider

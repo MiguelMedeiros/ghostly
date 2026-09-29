@@ -3,7 +3,7 @@ import { IMAGE_HOSTS, IMAGE_REDIRECTS } from "../../packages/browser/src/profile
 import { pasteInvite } from "./clipboard";
 import { createLink, encodeInviteCode } from "@ghostly/core";
 import { test as base, expect, type Browser, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import { attachMint } from "./mint";
+import { MAINNET_MINTS, attachMint } from "./mint";
 import { LocalRelay } from "./relay";
 import { useLocalStun } from "./stun";
 
@@ -43,6 +43,8 @@ export interface PeerOptions {
    * answers never reach `context.route`, which the stubs above rely on.
    */
   serviceWorkers?: "allow";
+  /** Runs on the new context before the app first loads: stubs and storage the app reads as it starts. */
+  beforeOpen?: (context: BrowserContext) => Promise<void>;
 }
 
 /**
@@ -60,12 +62,41 @@ export async function guardPublicProfiles(context: BrowserContext): Promise<void
   await context.routeWebSocket(url => DEFAULT_NOSTR_RELAYS.some(relay => url.href.startsWith(relay)), ws => { void ws.close({ code: 1008, reason: "No public relay in the test suite" }); });
 }
 
-/** Where the Mainnet Ark and USDT wallets a new profile makes by itself go: the Ark server, its explorer, the Ethereum RPC. */
+/**
+ * The real-money servers a new profile's first-run wallets reach (packages/browser/src/engine/walletSetup.ts): the
+ * default Mainnet mints, the Ethereum RPC of Mainnet USDT, and Mainnet Esplora servers (Bitcoin on-chain).
+ */
+export const MAINNET_SETUP_SERVICES: ((url: URL) => boolean)[] = [
+  ...MAINNET_MINTS.map((mint) => (url: URL) => url.origin === new URL(mint).origin),
+  (url) => url.origin === "https://ethereum.publicnode.com",
+  (url) => url.origin === "https://blockstream.info" && url.pathname.startsWith("/api/"),
+  (url) => url.origin === "https://mempool.space" && url.pathname.startsWith("/api/"),
+];
+
+/** Requests that got past every stub to a real Mainnet server during this test. */
+const mainnetReached: string[] = [];
+
+/**
+ * No test reaches a real Mainnet server by accident: registered before every stub, this answers only what gets past
+ * them (a spec's own mocks, `mockMainnetMints`, an RPC stub, `offlineMainnet`, take precedence) and refuses it; the
+ * `mainnetGuard` fixture then fails the test. The apps never make a profile's first-run wallets under test (an automated
+ * browser), so nothing should get here.
+ */
+export async function guardMainnet(context: BrowserContext): Promise<void> {
+  await context.route((url) => MAINNET_SETUP_SERVICES.some((reaches) => reaches(url)), (route) => {
+    mainnetReached.push(route.request().url());
+    return route.abort("blockedbyclient");
+  });
+}
+
+/** The Mainnet Ark server and explorer, and the Ethereum RPC: what a spec that moves test coins only refuses at once. */
 export const MAINNET_SERVICES = [/^https:\/\/arkade\.computer\//, /^https:\/\/mempool\.space\/api\//, /^https:\/\/ethereum\.publicnode\.com/];
 
 type Fixtures = {
   /** Fails the test if any request got past the stubs to the real Internet Archive (see `guardArchive`). Automatic. */
   archiveGuard: void;
+  /** Fails the test if any request got past the stubs to a real Mainnet server (see `guardMainnet`). Automatic. */
+  mainnetGuard: void;
   relay: LocalRelay;
   /** Opens Ghostly on the web as a new person: its own browser storage, the same relay as everyone else in the test. */
   peer: (name: string, options?: PeerOptions) => Promise<Peer>;
@@ -81,6 +112,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     ...(options.serviceWorkers ? { serviceWorkers: options.serviceWorkers } : {}),
     ...(options.userAgent ? { userAgent: options.userAgent } : {}),
   });
+  await guardMainnet(context);
   await guardArchive(context);
   await guardPublicProfiles(context);
   if (!options.realRelays) await relay.attach(context);
@@ -89,6 +121,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
   await stubGifServices(context);
   if (options.offlineMainnet) for (const service of MAINNET_SERVICES) await context.route(service, (route) => route.abort("connectionrefused"));
   if (!options.irohRelay) await context.addInitScript(() => { try { localStorage.setItem("ghostly-test-iroh", "off"); } catch { /* opaque origin */ } });
+  await options.beforeOpen?.(context);
   const page = await context.newPage();
   page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));
   await page.goto("/");
@@ -161,6 +194,11 @@ export const test = base.extend<Fixtures>({
     archiveReached.length = 0;
     await use();
     expect(archiveReached.splice(0), "requests that got past the stubs to the real Internet Archive (GifCities limits requests per IP)").toEqual([]);
+  }, { auto: true }],
+  mainnetGuard: [async ({}, use) => {
+    mainnetReached.length = 0;
+    await use();
+    expect(mainnetReached.splice(0), "requests that got past the stubs to a real Mainnet server (mint, Ethereum RPC, Esplora)").toEqual([]);
   }, { auto: true }],
   relay: async ({}, use) => {
     const relay = new LocalRelay();

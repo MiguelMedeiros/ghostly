@@ -83,6 +83,36 @@ describe("a profile with no wallet yet", () => {
     expect(screen.queryByTestId("wallet-first")).not.toBeInTheDocument();
     expect(within(screen.getByRole("tablist", { name: "Testnet wallets" })).getByTestId("wallet-card-arkade-testnet")).toHaveAttribute("aria-selected", "true");
   });
+
+  it("Start on Mainnet makes Bitcoin on-chain too once Mainnet has a one-click on-chain wallet", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ offers: offers({ "bitcoin:mainnet": { available: true, reason: undefined } }) }) });
+    engine.on("walletCreate", (params) => made(params.type, params.network));
+    await user.click(await screen.findByTestId("wallet-first-mainnet"));
+    await waitFor(() => expect(engine.callsTo("walletCreate")).toEqual([{ type: "cashu", network: "mainnet" }, { type: "usdt", network: "mainnet" }, { type: "bitcoin", network: "mainnet" }]));
+  });
+});
+
+describe("a new profile's Mainnet wallets, made by themselves", () => {
+  // covers: wallet.instances.first-run
+  it("while they are made the page says so, with no Start buttons to collide with", async () => {
+    const { engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ offers: offers(), setup: { running: true, failed: [] } }) });
+    expect(await screen.findByTestId("wallet-setup-progress")).toHaveTextContent("Setting up your Mainnet wallets");
+    expect(screen.queryByTestId("wallet-first")).not.toBeInTheDocument();
+  });
+
+  it("one that could not be made says why on the Wallet page, with Try again and Skip", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 0)], offers: offers({ "cashu:mainnet": { exists: true } }), wallets: [made("cashu", "mainnet")],
+      setup: { running: false, failed: [{ type: "usdt", network: "mainnet", reason: "Could not create the Mainnet USDT wallet: RPC unavailable. Nothing was saved; try again." }] } }) });
+    expect(await screen.findByTestId("wallet-setup-error-usdt")).toHaveTextContent("RPC unavailable");
+    expect(screen.getByTestId("wallet-setup")).toHaveTextContent("Ghostly tries again at its next start");
+    await user.click(screen.getByTestId("wallet-setup-retry-usdt"));
+    expect(engine.callsTo("walletSetupRetry")).toEqual([{ type: "usdt" }]);
+    await user.click(screen.getByTestId("wallet-setup-skip-usdt"));
+    expect(engine.callsTo("walletSetupDismiss")).toEqual([{ type: "usdt" }]);
+  });
 });
 
 describe("New, in the header", () => {
