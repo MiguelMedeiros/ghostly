@@ -729,6 +729,8 @@ export interface ReactionNote {
   snippet: string;
   /** The message was mine. */
   mine: boolean;
+  /** The message's id here: an edit of it changes `snippet`. */
+  message?: string;
 }
 
 /** How a message was edited (WISP 400 § Edits). */
