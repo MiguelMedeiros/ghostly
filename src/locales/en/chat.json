@@ -178,6 +178,12 @@
   },
   "keyChanged": "This chat stopped: your contact's key changed.",
   "lastSeen": "Last seen {{time}}",
+  "listTime": {
+    "days": "{{count}}d",
+    "hours": "{{count}}h",
+    "minutes": "{{count}}m",
+    "now": "now"
+  },
   "location": {
     "mapFailed": "The map could not load. Open it in maps instead.",
     "open": "Open in maps",

@@ -2,6 +2,8 @@ import { findMoney } from "./money";
 import { plainText } from "./parse";
 import { moreMoneyPreview } from "./parse/money-preview";
 import { englishT, type Translate } from "../locales/translate";
+import { languageTag } from "./documentLanguage";
+import type { Language } from "./settings";
 
 /** Previews already worked out, by language and message text: the list draws each row again on every change anywhere. */
 const CACHES = new WeakMap<Translate, Map<string, string>>();
@@ -31,15 +33,15 @@ function readPreview(text: string, t: Translate): string {
   return money.invoice.amountSat === null ? t("chat.preview.invoice") : t("chat.preview.invoiceSats", { amount: money.invoice.amountSat.toLocaleString() });
 }
 
-/** How long ago, as short as a list's column allows: "now", "5m", "3h", "2d", then the date. */
-export function formatListTime(ts: number, now = Date.now()): string {
+/** How long ago, as short as a list's column allows ("now", "5m", "3h", "2d" in English), then the date. */
+export function formatListTime(ts: number, now = Date.now(), language?: Language, t: Translate = englishT): string {
   const diff = now - ts;
   const minutes = Math.floor(diff / 60_000);
   const hours = Math.floor(diff / 3_600_000);
   const days = Math.floor(diff / 86_400_000);
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m`;
-  if (hours < 24) return `${hours}h`;
-  if (days < 7) return `${days}d`;
-  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+  if (minutes < 1) return t("chat.listTime.now");
+  if (minutes < 60) return t("chat.listTime.minutes", { count: minutes });
+  if (hours < 24) return t("chat.listTime.hours", { count: hours });
+  if (days < 7) return t("chat.listTime.days", { count: days });
+  return new Date(ts).toLocaleDateString(language ? languageTag(language) : [], { month: "short", day: "numeric" });
 }

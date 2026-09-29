@@ -178,6 +178,12 @@
   },
   "keyChanged": "此聊天已停止：你联系人的密钥已更改。",
   "lastSeen": "最后上线 {{time}}",
+  "listTime": {
+    "days": "{{count}}天",
+    "hours": "{{count}}小时",
+    "minutes": "{{count}}分钟",
+    "now": "刚刚"
+  },
   "location": {
     "mapFailed": "地图无法加载。请在地图应用中打开。",
     "open": "在地图中打开",

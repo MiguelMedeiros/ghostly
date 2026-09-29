@@ -151,6 +151,19 @@ function readSlashForm(code: string): InviteReading {
  * the older slash forms. A refused code is never retried as another format.
  */
 export function readInviteCode(input: string): InviteReading {
+  const reading = readInviteForm(input);
+  if (reading.ok) return reading;
+  // Copied from the end of a sentence ("…#ghostly1…).", "…!"): read once more without that punctuation, taken only
+  // when what is left reads. Otherwise the first refusal stands, so a typo is still a typo.
+  const bare = input.trim().replace(/[.,)!]+$/, "");
+  if (bare !== input.trim()) {
+    const again = readInviteForm(bare);
+    if (again.ok) return again;
+  }
+  return reading;
+}
+
+function readInviteForm(input: string): InviteReading {
   const code = inviteBody(input);
   if (!code) return { ok: false, reason: "not-ghostly" };
   if (/^ghostly1/i.test(code)) return readGhostly(code.toLowerCase());

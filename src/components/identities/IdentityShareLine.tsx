@@ -8,7 +8,6 @@ import { idCard, receivedIdCard } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 
-const time = clockTime;
 
 /** Where a share stands, as the card's corner shows it. `waiting`: mine, the contact not connected yet. `unanswered`: theirs, never presented. */
 type ShareMark = "verifying" | "verified" | "failed" | "waiting" | "unanswered";
@@ -52,7 +51,7 @@ function useShown(entry: IdentityTimelineEntry, link: LinkView | undefined) {
  */
 export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: IdentityTimelineEntry; link: LinkView | undefined; contact: string; onOpen: (entry: IdentityTimelineEntry) => void }) {
   const shown = useShown(entry, link);
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const mine = entry.side === "mine";
   const what = `${shown.label}${shown.short ? ` · ${shown.short}` : ""}`;
   if (entry.kind === "stopped") {
@@ -65,7 +64,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
           className={`inline-flex max-w-full items-center gap-1.5 rounded-lg bg-surface-alt/80 px-3 py-1.5 text-start text-xs text-text-secondary transition-colors hover:bg-surface-hover ${focus}`}>
           <span className="opacity-60 grayscale"><ProviderMark provider={entry.provider} subject={shown.bound} small /></span>
           <span className="min-w-0 break-words" data-testid="identity-share-text">{text}</span>
-          <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{time(entry.at)}</time>
+          <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{clockTime(entry.at, language)}</time>
         </button>
       </div>
     );
@@ -87,7 +86,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-1.5 text-[11px] text-text-muted">
             <span className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.sharedMine", { what: shown.label }) : t("identities.share.sharedTheirs", { contact, what: shown.label })}</span>
-            <time dateTime={new Date(entry.at).toISOString()} className="ms-auto shrink-0 text-[10px]">{time(entry.at)}</time>
+            <time dateTime={new Date(entry.at).toISOString()} className="ms-auto shrink-0 text-[10px]">{clockTime(entry.at, language)}</time>
           </span>
           {shown.name && <span className="block truncate text-sm font-medium text-text-primary" data-testid="identity-share-name">{shown.name}</span>}
           <span className={`block truncate ${shown.name ? "text-xs text-text-secondary" : "text-sm font-medium text-text-primary"}`} data-testid="identity-share-subject" title={entry.subject}>{shown.short ?? "…"}</span>

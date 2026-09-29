@@ -2213,6 +2213,18 @@ export class GhostlyNode implements EngineImplementation {
     }
   }
 
+  /**
+   * The contact's app answered for a payment of mine (`pay-res`): its message gets two ticks, as a text gets from its
+   * receipt. A payment goes with no delivery state of its own, so its mark read one tick for good. 1:1 chats only: a
+   * group's payments live in the group's history, under other ids.
+   */
+  private async notePaymentReceipt(linkId: string, paymentId: string): Promise<void> {
+    const message = (await db.getMessages(linkId)).find(m => m.sender === "me" && m.paymentId === paymentId);
+    if (!message || message.delivery === "delivered") return;
+    const marked = await db.patchMessage(linkId, message.id, m => m.delivery === "delivered" ? null : { delivery: "delivered", deliveryError: undefined });
+    if (marked) { await this.messagesChanged(linkId, [message.id]); this.emitState(); }
+  }
+
   deleteMessage({ linkId, messageId }: { linkId: string; messageId: string }): void {
     const live = this.links.get(linkId);
     if (!live) return;
@@ -4265,7 +4277,11 @@ export class GhostlyNode implements EngineImplementation {
         onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
         onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),
         onPayment: (payment) => this.desk.onPayment(linkId, payment),
-        onPaymentResult: (result) => this.desk.onPaymentResult(linkId, result),
+        onPaymentResult: async (result) => {
+          await this.desk.onPaymentResult(linkId, result);
+          // Its receipt, whatever the answer (the bubble says taken or refused): the contact's app has the payment.
+          void this.notePaymentReceipt(linkId, result.id).catch(() => {});
+        },
         onFileStored: async wire => {
           const stored = (await fileStore.listForLink(linkId)).find(file => file.direction === "in" && file.wireId === wire.id);
           if (!stored?.digest || !stored.metadata) return undefined;

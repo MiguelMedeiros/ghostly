@@ -178,6 +178,12 @@
   },
   "keyChanged": "Questa chat si è fermata: la chiave del tuo contatto è cambiata.",
   "lastSeen": "Ultimo accesso {{time}}",
+  "listTime": {
+    "days": "{{count}} g",
+    "hours": "{{count}} h",
+    "minutes": "{{count}} min",
+    "now": "ora"
+  },
   "location": {
     "mapFailed": "Impossibile caricare la mappa. Aprila in Mappe.",
     "open": "Apri in Mappe",

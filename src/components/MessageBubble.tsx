@@ -212,8 +212,8 @@ function EditGlyph() {
  * not been shown it yet. The earlier versions are in the message's details.
  */
 function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean }) {
-  const { t } = useI18n();
-  const time = clockTime(edit.at);
+  const { t, language } = useI18n();
+  const time = clockTime(edit.at, language);
   return (
     <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
@@ -655,7 +655,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const onPin = choosing ? undefined : pinIt;
   const onDelete = choosing ? undefined : deleteIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
   const onReact = choosing ? undefined : reactIt, onForward = choosing ? undefined : forwardIt, onSelect = choosing ? undefined : selectIt;
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const chat = useCueChat();
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
@@ -704,7 +704,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
   };
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: retry } : {};
-  const time = clockTime(message.timestamp);
+  const time = clockTime(message.timestamp, language);
   const contentType = imgError || message.file || message.paymentId ? "text" : detectContentType(message.text);
   const download = message.file && !isSystem
     ? {

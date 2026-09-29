@@ -178,6 +178,12 @@
   },
   "keyChanged": "Esta conversa parou: a chave do seu contato mudou.",
   "lastSeen": "Visto por último {{time}}",
+  "listTime": {
+    "days": "{{count}} d",
+    "hours": "{{count}} h",
+    "minutes": "{{count}} min",
+    "now": "agora"
+  },
   "location": {
     "mapFailed": "O mapa não carregou. Abra no app de mapas.",
     "open": "Abrir no mapa",
