@@ -620,7 +620,9 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const socket = connect(audio.socket);
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
-  process.stdin.pipe(socket);
+  // A clip that ends (`ffmpeg -t 3 … | ghostly call pipe`) is queued and played, and the contact's audio goes on
+  // coming: the end of stdin never closes the socket, whose daemon side would close the call's audio with it.
+  process.stdin.pipe(socket, { end: false });
   socket.pipe(process.stdout);
   socket.on("close", () => exit(0));
   socket.on("error", () => exit(1));
