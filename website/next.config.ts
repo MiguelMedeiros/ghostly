@@ -18,8 +18,17 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
   // HTTPS only, for a year once a browser has seen the site (Cloudflare serves it over HTTPS and adds no HSTS itself).
+  // Scripts from this site only: its own files and the inline ones Next.js writes into each page (the page's data, the
+  // two head scripts in app/layout.tsx). No third-party script runs, so none that a proxy slips into the page does
+  // either (Cloudflare's Web Analytics beacon was injected into every page; /privacy says there are no analytics).
   async headers() {
-    return [{ source: "/:path*", headers: [{ key: "Strict-Transport-Security", value: "max-age=31536000" }] }];
+    return [{
+      source: "/:path*",
+      headers: [
+        { key: "Strict-Transport-Security", value: "max-age=31536000" },
+        { key: "Content-Security-Policy", value: "script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'" },
+      ],
+    }];
   },
   // Every old address lands in one hop, its #anchor riding along:
   // - The WISPs page is /wisps. It was /developers/wisps, and before that /developers/catalog.
