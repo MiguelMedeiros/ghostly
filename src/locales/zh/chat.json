@@ -130,6 +130,7 @@
     "roomDevice": "此设备剩余 {{size}}",
     "stalled": "未在传输 · {{progress}}",
     "verifying": "正在检查文件… {{size}}",
+    "viewPicture": "查看 {{name}}",
     "waitingDone": "等待连接 · 已完成 {{done}}",
     "waitingSize": "等待连接 · {{size}}",
     "wantsToSend": "{{name}} 想发送 {{file}}（{{size}}）。",
