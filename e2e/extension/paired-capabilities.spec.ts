@@ -6,7 +6,7 @@ import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
 
-test("paired extension and web exchange verified files and local-mint sats", { tag: ["@client:extension", "@client:web", "@feature:extension.interop", "@feature:files.paired.send", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage"] }, async ({ extensionPeer, webPeer }) => {
+test("paired extension and web exchange verified files and local-mint sats", { tag: ["@release-skip", "@client:extension", "@client:web", "@feature:extension.interop", "@feature:files.paired.send", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage"] }, async ({ extensionPeer, webPeer }) => {
   test.skip(!process.env.E2E_MINT_URL?.startsWith("http://127.0.0.1:"), "Requires a local fake mint");
   const [ext, web] = await Promise.all([extensionPeer("paired-ext"), webPeer("paired-web")]);
   await pair(web, ext);
