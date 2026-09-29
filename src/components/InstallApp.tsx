@@ -56,20 +56,25 @@ export function InstallHint({ hasChats }: { hasChats: boolean }) {
   const { t } = useI18n();
   if (!useInstallHint(hasChats)) return null;
   return (
-    <div role="region" aria-label={t("pwa.installLabel")} data-testid="install-hint" className="shrink-0 border-b border-border bg-accent/10 px-4 py-2.5 flex items-center gap-3">
-      <span aria-hidden="true" className="shrink-0 text-accent"><InstallIcon size={20} /></span>
-      <div className="min-w-0 flex-1">
-        <p className="text-text-primary text-xs font-semibold m-0 truncate">{t("pwa.installLabel")}</p>
-        <p className="text-text-muted text-[11px] m-0 line-clamp-2">{t("pwa.installHint")}</p>
+    // The buttons go under the text when the list is too narrow for both (a 280px sidebar, a long language).
+    <div role="region" aria-label={t("pwa.installLabel")} data-testid="install-hint" className="shrink-0 border-b border-border bg-accent/10 px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className="min-w-44 flex-1 flex items-center gap-3">
+        <span aria-hidden="true" className="shrink-0 text-accent"><InstallIcon size={20} /></span>
+        <div className="min-w-0 flex-1">
+          <p className="text-text-primary text-xs font-semibold m-0 truncate">{t("pwa.installLabel")}</p>
+          <p className="text-text-muted text-[11px] m-0 line-clamp-2">{t("pwa.installHint")}</p>
+        </div>
       </div>
-      <button type="button" data-testid="install-hint-later" onClick={dismissInstallHint}
-        className="shrink-0 min-h-9 px-2 rounded-lg text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-        {t("pwa.notNow")}
-      </button>
-      <button type="button" data-testid="install-hint-install" onClick={startInstall}
-        className="shrink-0 min-h-9 px-3 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg">
-        {t("pwa.install")}
-      </button>
+      <div className="ms-auto shrink-0 flex items-center gap-1">
+        <button type="button" data-testid="install-hint-later" onClick={dismissInstallHint}
+          className="min-h-9 px-2 rounded-lg text-xs whitespace-nowrap text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          {t("pwa.notNow")}
+        </button>
+        <button type="button" data-testid="install-hint-install" onClick={startInstall}
+          className="min-h-9 px-3 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg">
+          {t("pwa.install")}
+        </button>
+      </div>
     </div>
   );
 }
