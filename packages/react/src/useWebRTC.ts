@@ -63,6 +63,15 @@ const REFUSED_WITHOUT_PICKER_MS = 300;
 export const RESTART_GRACE_MS = 8000;
 
 /**
+ * An unanswered call rings this long (WISP 601, "Ringing"): the caller then hangs up and says "No answer"; the side
+ * it rang stops ringing on its own and keeps a "Missed call" line. The headless CLI's `RING_MS` is the same.
+ */
+export const RING_MS = 60_000;
+
+/** How long "No answer" stays on the caller's screen. */
+export const NO_ANSWER_SHOWN_MS = 6000;
+
+/**
  * What to tell the person when sharing the screen failed, or null when there is nothing to tell: closing the
  * picker, or saying no to it, is a choice and not an error.
  */
@@ -140,6 +149,8 @@ export function useWebRTC({
   const callStartedAtRef = useRef<number | null>(null);
   /** Why the last attempt to share the screen failed, for a few seconds. */
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
+  /** Our call rang out unanswered, for a few seconds (`NO_ANSWER_SHOWN_MS`). */
+  const [noAnswer, setNoAnswer] = useState(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -428,6 +439,7 @@ export function useWebRTC({
 
       const attempt = ++attemptRef.current;
       const cancelled = () => attemptRef.current !== attempt;
+      setNoAnswer(false);
       try {
         setFastPoll(true);
         callHadVideoRef.current = withVideo;
@@ -814,11 +826,41 @@ export function useWebRTC({
       if (callStateRef.current !== "idle") applyRemotePicture(signal);
     } else if (signal.t === "h") {
       lastProcessedSignalRef.current = signal.ts;
+      // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
+      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current);
       if (callStateRef.current !== "idle") {
         hangUp(false);
       }
     }
   }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection]);
+
+  // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
+  // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
+  const hangUpRef = useRef(hangUp);
+  hangUpRef.current = hangUp;
+  const addCallEventMessageRef = useRef(addCallEventMessage);
+  addCallEventMessageRef.current = addCallEventMessage;
+  useEffect(() => {
+    if (callState !== "offering" && callState !== "incoming") return;
+    const ringing = callState;
+    const timer = setTimeout(() => {
+      if (callStateRef.current !== ringing) return;
+      if (ringing === "offering") {
+        hangUpRef.current(true, false);
+        setNoAnswer(true);
+      } else {
+        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current);
+        hangUpRef.current(false, false);
+      }
+    }, RING_MS);
+    return () => clearTimeout(timer);
+  }, [callState]);
+
+  useEffect(() => {
+    if (!noAnswer) return;
+    const timer = setTimeout(() => setNoAnswer(false), NO_ANSWER_SHOWN_MS);
+    return () => clearTimeout(timer);
+  }, [noAnswer]);
 
   useEffect(() => {
     const attempts = attemptRef;
@@ -874,6 +916,8 @@ export function useWebRTC({
       : media?.screenUnavailable ?? null,
     /** Why sharing the screen just failed, for a few seconds. */
     screenShareError,
+    /** Our last call rang out with no answer, for a few seconds. */
+    noAnswer,
     callStartedAt,
     startCall,
     acceptCall,

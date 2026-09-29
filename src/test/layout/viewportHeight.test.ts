@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useViewportHeight } from "../../hooks/useViewportHeight";
 
 // covers: app.mobile-layout
@@ -76,6 +76,35 @@ describe("the app's height and the keyboard", () => {
     expect(keyboard()).toBe("false");
     resize(180, 180, 874);
     expect(keyboard()).toBe("true");
+  });
+});
+
+describe("the focused field and the keyboard", () => {
+  /** A text field at `top`..`top + 40` in the page, focused, whose scrolling the test watches. */
+  function field(top: number) {
+    const input = document.body.appendChild(document.createElement("input"));
+    input.getBoundingClientRect = () => ({ top, bottom: top + 40, left: 0, right: 300, width: 300, height: 40, x: 0, y: top, toJSON() {} });
+    input.scrollIntoView = vi.fn();
+    input.focus();
+    return input;
+  }
+  const frame = () => act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  afterEach(() => { document.body.innerHTML = ""; });
+
+  it("brings a field the keyboard came up over into what is left", async () => {
+    renderHook(() => useViewportHeight());
+    const low = field(675);
+    resize(471);
+    await frame();
+    expect(low.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+  });
+
+  it("leaves a field already in view where it is", async () => {
+    renderHook(() => useViewportHeight());
+    const high = field(132);
+    resize(471);
+    await frame();
+    expect(high.scrollIntoView).not.toHaveBeenCalled();
   });
 });
 
