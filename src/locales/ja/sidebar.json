@@ -5,8 +5,11 @@
   "deleteChat": "チャットを削除",
   "group": {
     "adminAnswered": "管理者のアプリが応答しました…",
+    "answerFailed": "うまくいきませんでした。もう一度お試しください。",
     "invitedBy": "{{contact}} からの招待 · {{members}}",
     "invitedByUnknown": "連絡先からの招待 · {{members}}",
+    "inviterAway": "{{contact}} はまだ接続されていません。少し待ってからもう一度お試しください。",
+    "inviterAwayUnknown": "招待した連絡先はまだ接続されていません。少し待ってからもう一度お試しください。",
     "letting": "メンバーが参加を受け入れています…",
     "waitingAdmin": "管理者のアプリを待っています…",
     "waitingIn": "参加の許可を待っています…"

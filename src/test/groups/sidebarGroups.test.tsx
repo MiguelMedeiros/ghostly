@@ -1,7 +1,8 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
+import { REFUSAL_SHOWN_MS } from "../../components/ChatRow";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { markGroupRead } from "../../lib/groups";
@@ -49,6 +50,27 @@ describe("Sidebar: groups in the chat list", () => {
     engine.on("acceptGroupInvitation", () => { throw new Error("The admin is gone"); });
     await user.click(within(row()).getByTestId("group-accept"));
     expect(within(row()).getByTestId("group-accept")).toBeEnabled();
+    expect(within(row()).getByTestId("group-answer-refused")).toHaveTextContent("That did not go through. Try again.");
+  });
+
+  it("says why Accept did nothing while the inviter's chat is not live yet, and forgets it after a while", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { user, engine } = sidebar([invitation(), { ...invitation({ contact: "" }), id: "group-2" }]);
+      engine.on("acceptGroupInvitation", () => { throw new Error("The contact who invited you is not connected. Try again when they are."); });
+      await user.click(within(row()).getByTestId("group-accept"));
+      expect(within(row()).getByTestId("group-answer-refused")).toHaveTextContent("Alice is not connected yet. Try again in a moment.");
+      await user.click(within(row("group-2")).getByTestId("group-accept"));
+      expect(within(row("group-2")).getByTestId("group-answer-refused")).toHaveTextContent("The contact who invited you is not connected yet. Try again in a moment.");
+      act(() => { vi.advanceTimersByTime(REFUSAL_SHOWN_MS); });
+      expect(within(row()).queryByTestId("group-answer-refused")).not.toBeInTheDocument();
+      // Once the chat is live, Accept goes and nothing is said.
+      engine.on("acceptGroupInvitation", () => undefined);
+      await user.click(within(row()).getByTestId("group-accept"));
+      expect(within(row()).queryByTestId("group-answer-refused")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

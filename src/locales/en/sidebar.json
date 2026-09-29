@@ -5,8 +5,11 @@
   "deleteChat": "Delete chat",
   "group": {
     "adminAnswered": "The admin's app answered…",
+    "answerFailed": "That did not go through. Try again.",
     "invitedBy": "Invited by {{contact}} · {{members}}",
     "invitedByUnknown": "Invited by a contact · {{members}}",
+    "inviterAway": "{{contact}} is not connected yet. Try again in a moment.",
+    "inviterAwayUnknown": "The contact who invited you is not connected yet. Try again in a moment.",
     "letting": "A member is letting you in…",
     "waitingAdmin": "Waiting for the admin's app…",
     "waitingIn": "Waiting to be let in…"
