@@ -123,7 +123,9 @@ test("a file over 25 MB waits for the receiver's answer; reloaded mid-way, it go
   // It goes on from its last durable point (every 8 MiB), not from zero.
   await expect.poll(() => percent(again), { timeout: 60_000 }).toBeGreaterThanOrEqual(before - 3);
   await expect(again.getByTestId("file-save")).toBeVisible({ timeout: 200_000 });
-  await expect(outgoing.getByTestId("file-status")).toHaveText("300.0 MB", { timeout: 30_000 });
+  // The sender's own bubble catches up after the receiver has the whole file: on a slow runner (3-6 MB/s, 2026-09-29)
+  // it still read "62% of 300.0 MB" 30 s later. What this test checks is the resume, so it waits longer here.
+  await expect(outgoing.getByTestId("file-status")).toHaveText("300.0 MB", { timeout: 120_000 });
 
   const download = bob.page.waitForEvent("download");
   await again.getByTestId("file-save").click();
