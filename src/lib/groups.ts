@@ -11,6 +11,15 @@ import type { Translate } from "../contexts/I18nContext";
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english) =>
   m.me ? t("group.member.you") : m.nick || t("group.member.unnamed", { key: publicKeyLabel(m.key) });
 
+/**
+ * Who wrote (or reacted to) a group's message: a member by the roster's name; an author no longer in the roster
+ * (removed, or back with a new member key) by the name the group knew them by, else by their key.
+ */
+export const authorName = (group: Pick<GroupView, "members" | "formerNames">, key: string, t: Translate = english) => {
+  const member = group.members.find(m => m.key === key);
+  return member ? memberName(member, t) : group.formerNames?.[key] || t("group.member.unnamed", { key: key.slice(0, 8) });
+};
+
 /** A group's state in a word, where it is not active: the header's line under the name, the members panel. */
 export function groupStatusText(status: NonNullable<GroupView["status"]>, t: Translate = english): string {
   if (status === "left") return t("group.status.left");

@@ -57,6 +57,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("the focus when a chat opens", () => {
+  /** A touch screen with no mouse (`any-pointer` coarse, never fine), or a mouse. */
+  function pointer(touch: boolean) {
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+        ? ({ ...matchMedia(query), matches: query === "(any-pointer: coarse)" ? touch : !touch } as MediaQueryList)
+        : matchMedia(query));
+  }
+
+  it("with a mouse, the message field has it", () => {
+    pointer(false);
+    composer();
+    expect(field()).toHaveFocus();
+  });
+
+  it("on a touch screen, nothing takes it: the keyboard stays down until the field is tapped", () => {
+    pointer(true);
+    composer();
+    expect(field()).not.toHaveFocus();
+  });
+});
+
 describe("the composer bar", () => {
   it("reads [+] [emoji/GIF] [message] and then send, in that order", () => {
     composer({ onSendFile: undefined });

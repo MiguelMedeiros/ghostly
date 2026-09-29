@@ -34,9 +34,13 @@ export function failedStatus(file: ChatFile, transfer: FileTransferState, tr: Tr
   return transfer.direction === "out" || (!transfer.direction && file.id.includes("-out-")) ? tr("chat.delivery.failed") : tr("chat.message.downloadFailed");
 }
 
-/** The line under the file's name: how far it got, and what it waits for. */
-export function fileStatus(file: ChatFile, transfer: FileTransferState | null, peerName: string, missing: boolean, tr: Translate = englishT): string {
+/**
+ * The line under the file's name: how far it got, and what it waits for. `named` is the contact's name, if it has
+ * one: without, the line says "your contact", in lower case, as it sits mid-sentence.
+ */
+export function fileStatus(file: ChatFile, transfer: FileTransferState | null, named: string | undefined, missing: boolean, tr: Translate = englishT): string {
   const size = formatFileSize(file.size);
+  const peerName = named ?? tr("chat.file.yourContact");
   if (!transfer || transfer.state === "done") return missing ? tr("chat.file.gone") : size;
   if (transfer.state === "failed") return failedStatus(file, transfer, tr);
   const done = `${percent(transfer)}%`;

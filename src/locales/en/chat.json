@@ -132,7 +132,8 @@
     "verifying": "Checking the file… {{size}}",
     "waitingDone": "Waiting for connection · {{done}} done",
     "waitingSize": "Waiting for connection · {{size}}",
-    "wantsToSend": "{{name}} wants to send {{file}} ({{size}})."
+    "wantsToSend": "{{name}} wants to send {{file}} ({{size}}).",
+    "yourContact": "your contact"
   },
   "fileTooLarge": "That file is too large (max {{size}}).",
   "filesNeedUpdate": "Update both peers to send files",

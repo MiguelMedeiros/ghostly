@@ -107,7 +107,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `group hub <group> <member> [--pin \| --exclude \| --auto]` | Past 16 members: pin a member as a hub, keep one from being a hub, or leave it to their app (a daemon offers itself) |
 | `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin (each prints the group; `--show-secret` for its link) |
 | `group leave <group>`, `group forget <group> --yes`, `group accept\|decline <group>` | Membership |
-| `group list [--show-secret]`, `group show <group> [--show-secret]`, `group history <group>` | Groups, members, history; a message names its author (`member` key, `nick` from the roster). The entry link prints as `<hidden>` without `--show-secret` |
+| `group list [--show-secret]`, `group show <group> [--show-secret]`, `group history <group>` | Groups, members, history; a message names its author (`member` key, `nick` from the roster, or the name an author no longer in it had). The entry link prints as `<hidden>` without `--show-secret` |
 | `group react <group> <message> <emoji> [--remove]` | React to a group's message |
 | `group rename <group> <name>` | A new name, for the admin (1 to 64 characters on one line); the picture stays. Members see it once it reaches them; until then, and on apps from before names, the group keeps the name it had when they got in |
 | `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link (printed: asking for it is asking for the secret); the picture |

@@ -158,12 +158,13 @@ export function reactionsJson(message: StoredMessage): { by: string; emoji: stri
 
 /**
  * A group's message with its author named: mesh and community messages are kept with the member's key only (the
- * name rides on the edge or the roster), so the roster fills `nick` when the message has none.
+ * name rides on the edge or the roster), so the roster fills `nick` when the message has none, and for an author no
+ * longer in it (removed, or back with a new member key) the name the group knew them by.
  */
-export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, "members"> | undefined): MessageJson {
+export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, "members" | "formerNames"> | undefined): MessageJson {
   const json = messageJson(message);
   if (json.nick || !message.member) return json;
-  const nick = group?.members.find((m) => m.key === message.member)?.nick;
+  const nick = group?.members.find((m) => m.key === message.member)?.nick ?? group?.formerNames?.[message.member];
   return nick ? { ...json, nick } : json;
 }
 

@@ -125,6 +125,8 @@ export function Wallet() {
   /** New made `made`: the dialog has closed; its card comes to the front of its network's tab, selected. */
   const created = (made: WalletInstanceView) => {
     setCreating(null);
+    // A wallet made with New ends a first setup that failed: its card is what the page shows now, not the setup.
+    setFirstRun(false);
     // Its card in the deck: a network's only Lightning card is its Lightning, one of several its own.
     const wallets = state?.wallets?.some((w) => w.id === made.id) ? state.wallets : [...(state?.wallets ?? []), made];
     const id = state ? deckId(made, { ...state, wallets }) : cardId(made.type, made.network);

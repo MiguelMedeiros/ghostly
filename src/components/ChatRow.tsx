@@ -14,7 +14,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
 import { deliveryShape, useDeliveryWords } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { groupReadAt, groupStatusText, memberName } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
@@ -139,7 +139,8 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
       </div>
       {sub}
       <div className="mt-0.5 flex items-center gap-2">
-        <p className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
+        {/* The last message in its own direction: an English one in the Arabic app, cut at its own end. */}
+        <p dir="auto" data-testid="chat-row-preview" className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
         {trailing && <div className="flex shrink-0 items-center gap-1.5">{trailing}</div>}
       </div>
     </div>
@@ -294,8 +295,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
     : group.status !== "active" ? group.statusReason ?? (group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
-  const reactor = reacted && group.members.find(m => m.key === reacted.by);
-  const note = reacted && reactionNoteText(reacted, reactor ? memberName(reactor, t) : t("group.member.unnamed", { key: reacted.by.slice(0, 8) }), t);
+  const note = reacted && reactionNoteText(reacted, authorName(group, reacted.by, t), t);
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
