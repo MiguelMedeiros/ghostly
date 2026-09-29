@@ -506,6 +506,15 @@ html[data-standalone="true"] {
     padding-bottom: 0.625rem;
   }
 
+  /* A sheet with the keyboard up stands on the keyboard: no home indicator under it to keep clear of. */
+  html[data-keyboard="true"] .sheet {
+    padding-bottom: 0;
+  }
+
+  html[data-keyboard="true"] .sheet-padded {
+    padding-bottom: 16px;
+  }
+
   .sheet-backdrop {
     display: block;
     position: fixed;

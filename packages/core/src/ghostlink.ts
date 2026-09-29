@@ -1531,12 +1531,18 @@ export class GhostLink {
       // A transport that keeps failing is tried last for an hour, not first on every attempt.
       const now = Date.now(), demoted = (t: PairedTransport) => (this.demotedUntil.get(t) ?? 0) > now;
       const ordered = choices.length > 1 ? [...choices.filter(t => !demoted(t)), ...choices.filter(demoted)] : choices;
+      // Native transports dialled before WebRTC in this attempt that did not connect (a chosen one goes first).
+      const failedFirst: PairedTransport[] = [];
       for (const [index, transport] of ordered.entries()) {
         if (index > 0 && !fallback) break;
         if (transport === "webrtc/1") {
           // WebRTC settles later (ICE can fail minutes from now): what ranks after it is where a failed attempt
           // goes, typically a relayed Iroh behind a symmetric NAT (WISP 100, "Relayed"), before the DHT floor.
-          this.afterRtc = fallback && index + 1 < ordered.length ? { epoch, rest: ordered.slice(index + 1) } : undefined;
+          // A native tried first that did not connect races the offer too, once more: after a restart of both apps the
+          // contact's endpoint may still be starting (HyperDHT answers PEER_NOT_FOUND at once), and the chosen
+          // transport would otherwise wait for the offer's 90 s timeout.
+          const rest = [...failedFirst, ...ordered.slice(index + 1)];
+          this.afterRtc = fallback && rest.length ? { epoch, rest } : undefined;
           const offeredAt = Date.now();
           this.offered = fallback ? { epoch, at: offeredAt } : undefined;
           await this.dataLink.connect();
@@ -1546,6 +1552,7 @@ export class GhostLink {
         const result = await this.dialNative(transport, epoch);
         if (result === true) return;
         lastError = result;
+        failedFirst.push(transport);
       }
       throw lastError ?? new Error("No permitted transport could connect");
     } catch (error) {

@@ -206,6 +206,22 @@ describe("the + menu", () => {
 });
 
 describe("the emoji/GIF panel", () => {
+  it("on a phone is a sheet of half the screen, and all it may be with the keyboard up (a search)", async () => {
+    viewport(390, 844);
+    const { user } = composer();
+    await user.click(smiley());
+    const height = () => screen.getByTestId("expression-panel").style.getPropertyValue("--expression-height");
+    expect(height()).toBe(`${Math.round(844 * 0.52)}px`);
+    await user.click(smiley());
+    document.documentElement.dataset.keyboard = "true";
+    try {
+      await user.click(smiley());
+      expect(height()).toBe(`${Math.round(844 * 0.82)}px`);
+    } finally {
+      delete document.documentElement.dataset.keyboard;
+    }
+  });
+
   it("opens on emoji, with categories, a search field and the grid, and a switch at the bottom", async () => {
     const { user } = composer();
     await user.click(smiley());
