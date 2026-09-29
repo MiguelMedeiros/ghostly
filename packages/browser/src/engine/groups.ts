@@ -44,6 +44,8 @@ export interface GroupsHost {
   entryDone?(linkId: string): void;
   /** The other end of this link is here (its packet is fresh), or a connection with it is under way. */
   linkSeen?(linkId: string): boolean;
+  /** The other end of this link, up before, has published since it dropped: its app is back (a restart, say). */
+  linkBack?(linkId: string): boolean;
   /**
    * Pkarr, for the knocks under a link's knock identity (and a community's beacon and lobbies).
    * `background`: a periodic look that can wait, spending only part of the relays' budget. `door`: the community

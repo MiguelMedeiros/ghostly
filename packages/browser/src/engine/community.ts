@@ -104,6 +104,12 @@ const BEACON_RETRY_MS = 5_000;
 /** An admission's links keep looking fast (see `keepLooking`), renewed this often, an edge for this long. */
 const REARM_MS = 20_000;
 const AWAIT_EDGE_MS = 2 * 60_000;
+/**
+ * After a restart, the edges of the last run stay open this long, whatever the topology picks at first: the members
+ * and hubs at their other ends watch for this app to come back (a member keeps a hub that went away `hubWaitMs`, a
+ * hub its members a minute, another hub three), and the app dials those that were live once at start (`resume`).
+ */
+const RESTORED_EDGE_MS = 60_000;
 /** After letting someone in, the door keeps its reads at the admitting pace this long. */
 const ADMITTED_QUIET_MS = 30_000;
 const MAX_PENDING_ENTRIES = 8;
@@ -193,6 +199,11 @@ interface Live {
   lastCatchUp?: number;
   /** Hubs as last seen in the beacon: an edge to one stays while it is up, even if a reading of the beacon missed it. */
   seenHubs: Map<string, number>;
+  /**
+   * The edges this app had when it started (its last run's), and since when (0: until the first tick): they stay open
+   * `RESTORED_EDGE_MS`, as their other ends are likely watching for this app to come back.
+   */
+  restored: Map<string, number>;
 }
 
 export class Communities {
@@ -240,6 +251,9 @@ export class Communities {
       if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
+      // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).
+      const live = this.live.get(group.id);
+      if (live) for (const key of this.host.edges(group.id).keys()) live.restored.set(key, 0);
     }
   }
 
@@ -527,15 +541,18 @@ export class Communities {
       const edges = this.host.edges(groupId);
       const fresh = new Set(others.map(h => h.key));
       for (const [key, until] of live.hubsAvoided) if (until <= now) live.hubsAvoided.delete(key);
-      // A hub that has not taken me after a while is full, or gone: another one, or I become one. One
-      // whose edge was up and dropped is gone now (its app closed): another one at once.
+      // A hub that has not taken me after a while is full, or gone: another one, or I become one. One whose edge was up
+      // and dropped (its app closed, and usually starts again in seconds) gets the same while from the drop, and up to
+      // three times that once it is back (a packet since): its edge stays open and looks for it, and comes up again in
+      // the seconds its signaling takes on the relays. Dropped at once, the edge was opened again only when the hub was
+      // picked again, a minute or more later (2026-09-29).
       for (const key of live.myHubs) {
         const id = edges.get(key);
         if (id && this.host.linkReady(id, 2)) { live.hubWaits.delete(key); live.hubsUp.add(key); continue; }
-        if (live.hubsUp.delete(key)) { live.hubsAvoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); continue; }
         const since = live.hubWaits.get(key) ?? now;
         live.hubWaits.set(key, since);
-        if (now - since > this.timings.hubWaitMs) { live.hubsAvoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); }
+        const back = live.hubsUp.has(key) && !!id && !!this.host.linkBack?.(id);
+        if (now - since > (back ? 3 : 1) * this.timings.hubWaitMs) { live.hubsAvoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); live.hubsUp.delete(key); }
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
@@ -717,6 +734,14 @@ export class Communities {
       // An edge that is up stays while its other end still counts on it, or was a hub a moment ago:
       // one reading of the beacon that missed a hub must not cut the group in two.
       for (const [key, id] of existing) if (this.host.linkReady(id, 2) && (live.members.has(key) || this.recentHub(live, key))) wanted.add(key);
+    }
+    // Back after a restart: an edge of the last run stays a while, since its other end is likely looking for this app
+    // (and, once up, carries the catch-up). Closed as the fresh topology's first pick did not name it, it was one about
+    // to come up (2026-09-29).
+    for (const [key, since] of live.restored) {
+      if (!since) live.restored.set(key, now);
+      if (!existing.has(key) || now - (since || now) >= RESTORED_EDGE_MS || s.wasRemoved(key)) live.restored.delete(key);
+      else wanted.add(key);
     }
     for (const [key, id] of existing) if (!wanted.has(key)) await this.host.closeEdge(id);
     for (const key of wanted) if (!existing.has(key) && key !== s.myKey) {
@@ -1072,7 +1097,7 @@ export class Communities {
     });
     this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
-      hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(),
+      hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),
       knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,
       lastRoster: session.roster, lastStatus: session.status, relayed: new Set() });
   }

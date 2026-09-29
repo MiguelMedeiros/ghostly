@@ -27,6 +27,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     canSendText = true;
     textDelivery = "stream";
     groupsSupport = false;
+    supportsGroupVersion = vi.fn(() => false);
     identitySupport = false;
     peerProofAdapters: string[] = [];
     session = { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() };
@@ -624,6 +625,41 @@ describe("private groups through the engine", () => {
     await host.closeEdge(edgeId);
     expect(edge.stop).toHaveBeenCalledWith(true);
     expect(await saved(edgeId)).toBeUndefined();
+  });
+
+  it("an edge live when the app quit is dialled at once when it starts again; one that dropped before is not", async () => {
+    const { node } = await started();
+    // A community: its edges are kept as the app starts (a private group's to keys not in its roster go at once).
+    const { groupId } = await node.createGroup({ name: "Plaza" });
+    const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+    const [kept, dropped] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+    const keptId = await node["openEdge"](state as never, kept), droppedId = await node["openEdge"](state as never, dropped);
+    const edge = (id: string) => links.filter((l) => l.options.params.id === id).at(-1)!;
+    expect(edge(keptId).options.resume).toBeUndefined();
+    // Both sessions open; one drops while the app runs (the member went away), then the app quits with the other up.
+    for (const id of [keptId, droppedId]) edge(id).options.events.onGroupsSupport(true);
+    await vi.waitFor(async () => expect((await saved(keptId))?.edgeLive).toBe(true));
+    edge(droppedId).options.events.onGroupsSupport(false);
+    await vi.waitFor(async () => expect((await saved(droppedId))?.edgeLive).toBeFalsy());
+    // The member of a dropped edge is back once it published since the drop (the community waits longer for it then).
+    const host = node["groups"]["host"] as { linkBack(id: string): boolean };
+    const { events } = edge(droppedId).options;
+    events.onDataLinkState("open"); events.onDataLinkState("idle");
+    const dropAt = Date.now();
+    events.onPresence({ online: true, lastPacketAt: dropAt - 5_000, services: [] });
+    expect(host.linkBack(droppedId)).toBe(false);
+    events.onPresence({ online: true, lastPacketAt: dropAt + 1_000, services: [] });
+    expect(host.linkBack(droppedId)).toBe(true);
+    const stopping = node.shutdown();
+    // Its links ending as the app quits say nothing about the next run.
+    edge(keptId).options.events.onGroupsSupport(false);
+    await stopping;
+    nodes.splice(nodes.indexOf(node), 1);
+    expect((await saved(keptId))?.edgeLive).toBe(true);
+    const before = links.length;
+    await started();
+    expect(links.length).toBeGreaterThan(before);
+    expect([keptId, droppedId].map(id => edge(id).options.resume)).toEqual(["webrtc/1", undefined]);
   });
 
   it("a member's name stays while their edge is down, and only the member removes it", async () => {
