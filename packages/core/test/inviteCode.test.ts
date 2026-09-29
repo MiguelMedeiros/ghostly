@@ -84,6 +84,25 @@ describe("ghostly1 invite codes (WISP 801)", () => {
   });
 });
 
+describe("an invite copied from the end of a sentence", () => {
+  it("reads with a trailing full stop, comma, bracket or exclamation mark, in a link or bare", () => {
+    for (const end of [".", ",", ")", "!", ").", "!!", ".\n"]) {
+      for (const input of [`${VECTOR}${end}`, `https://ghostly.tools/#${VECTOR}${end}`, `(https://ghostly.tools/#${VECTOR.toUpperCase()}${end}`]) {
+        expect(readInviteCode(input), JSON.stringify(input.slice(-6))).toEqual({ ok: true, format: "ghostly1", params: VECTOR_PARAMS });
+      }
+    }
+  });
+
+  it("loosens nothing else: other trailing characters, and a typo before the punctuation, are refused as before", () => {
+    const typo = VECTOR.slice(0, 30) + (VECTOR[30] === "q" ? "p" : "q") + VECTOR.slice(31);
+    expect(refusal(`${typo}.`)).toBe("typo");
+    expect(refusal(`${VECTOR}?`)).toBe("typo");
+    expect(refusal(`${VECTOR};`)).toBe("typo");
+    expect(refusal(`${VECTOR} see you`)).toBe("typo");
+    expect(refusal(".")).toBe("not-ghostly");
+  });
+});
+
 describe("refusals, each with its reason", () => {
   const payloadWords = bech32m.decode(VECTOR, INVITE_MAX_LENGTH).words.slice(1);
 
