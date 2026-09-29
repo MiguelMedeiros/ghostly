@@ -18,3 +18,16 @@ describe("the e2e stack (e2e/infra)", () => {
     expect(anvil).toMatch(/^ {4}restart: on-failure$/m);
   });
 });
+
+describe("the regtest chain (e2e/infra/chain.mjs)", () => {
+  it("mines one block when the shared chain's tip is old, so a Lightning node counts as synced; never when it is fresh", async () => {
+    const { freshTip, TIP_MAX_AGE_S } = await import("../../e2e/infra/chain.mjs");
+    const now = 1_800_000_000_000, mined: number[] = [];
+    const mineOne = () => { mined.push(1); };
+    expect(freshTip(now, () => now / 1000 - 60, mineOne), "a block a minute old").toBe(false);
+    expect(freshTip(now, () => now / 1000 - TIP_MAX_AGE_S, mineOne), "just at the limit").toBe(false);
+    expect(mined).toEqual([]);
+    expect(freshTip(now, () => now / 1000 - 4 * 24 * 3600, mineOne), "a chain idle for days").toBe(true);
+    expect(mined).toEqual([1]);
+  });
+});

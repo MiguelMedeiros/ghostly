@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DiscoveryBudgetError, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 // covers: core.relay-client
 
 describe("relay transport", () => {
@@ -547,9 +547,10 @@ describe("relay transport: a chat before its groups", () => {
       }) as typeof fetch });
       const group = withRequestOptions(relay, { group: true });
       const start = Date.now();
-      // A contact went away from a chat and from two groups: the chat and the edges all watch fast for it.
+      // A contact went away from a chat and from two groups: the chat and the edges all watch fast for it (the two edges
+      // read every 2 s each, a read a second).
       await relay.resolve(id.pubKeyZ32, { urgent: true });
-      for (let i = 0; i < 2 * REQUESTS_PER_MINUTE; i++) { vi.setSystemTime(start + i * 500); await group.resolve(id.pubKeyZ32, { urgent: true }).catch(() => {}); }
+      for (let i = 0; i < 2 * REQUESTS_PER_MINUTE; i++) { vi.setSystemTime(start + i * 1_000); await group.resolve(id.pubKeyZ32, { urgent: true }).catch(() => {}); }
       // The edges stop short of the reserve on both relays, the one the chat read from (its read counted) and the other.
       const on = (host: string) => log.filter((r) => r.host === host).length;
       expect(on("a.test") + on("b.test")).toBe(2 * (REQUESTS_PER_MINUTE - CHAT_RESERVE));
@@ -572,12 +573,33 @@ describe("relay transport: a chat before its groups", () => {
   });
 
   it("does not keep a reserve for a chat that is not waiting for anything", async () => {
-    const { relay, log, group } = counting();
-    // Its looks at the active pace and its background ones leave the groups the whole minute.
-    await relay.resolve(id.pubKeyZ32);
-    await relay.resolve(id.pubKeyZ32, { background: true });
-    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32, { urgent: true }).catch(() => {});
-    expect(log).toHaveLength(REQUESTS_PER_MINUTE);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { relay, log, group } = counting();
+      const start = Date.now();
+      // Its looks at the active pace and its background ones leave the groups the whole minute (an edge polling fast).
+      await relay.resolve(id.pubKeyZ32);
+      await relay.resolve(id.pubKeyZ32, { background: true });
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) { vi.setSystemTime(start + i * 1_900); await group.resolve(id.pubKeyZ32, { urgent: true }).catch(() => {}); }
+      expect(log).toHaveLength(REQUESTS_PER_MINUTE);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("spreads the groups' fast reads over the minute: a burst of edges does not spend it in seconds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { log, group } = counting();
+      const start = Date.now();
+      // An app back after a restart: four edges offer at once and look fast for their answers, a read every 2 s each.
+      for (let t = 0; t < 60_000; t += 500) { vi.setSystemTime(start + t); await group.resolve(id.pubKeyZ32, { urgent: true }).catch(() => {}); }
+      const inWindow = (from: number) => log.filter((r) => r.at >= start + from && r.at < start + from + GROUP_BURST_MS).length;
+      // A quarter of the relay's minute in any 15 s, and never fewer than one edge alone reads (8): the answers that
+      // come 20 or 45 s on (the members noticing the old sessions went) are read then, not a minute later.
+      for (const from of [0, 15_000, 30_000]) expect(inWindow(from)).toBe(Math.max(GROUP_BURST_ONE_LINK, REQUESTS_PER_MINUTE / 4));
+      // What the minute has left goes in its last quarter. On dev they took the whole minute in its first 15 s, and read
+      // nothing for the other 45.
+      expect(inWindow(45_000)).toBe(REQUESTS_PER_MINUTE - 3 * GROUP_BURST_ONE_LINK);
+    } finally { vi.useRealTimers(); }
   });
 
   it("does not hold a chat's reads back for a group's refused write", async () => {
