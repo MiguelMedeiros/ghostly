@@ -40,10 +40,20 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
   }, [open, ref, anchorRef]);
 }
 
+/** The open modals made of plain elements, the newest last: only the newest answers Escape and keeps Tab inside it. */
+const modals: RefObject<HTMLElement | null>[] = [];
+
+/** What Tab can reach inside `root`, in order: enabled, shown, not taken out with tabindex="-1". */
+function tabbables(root: HTMLElement): HTMLElement[] {
+  const all = root.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]');
+  return [...all].filter((el) => !(el as HTMLButtonElement).disabled && el.tabIndex >= 0 && !el.closest("[inert], [hidden]") && (el.checkVisibility?.() ?? true));
+}
+
 /**
  * A modal made of plain elements: focus moves into it when it opens (so keys reach it even when what
- * opened it is gone), Escape anywhere closes it, and focus goes back where it was on close, unless `restore` says
- * no (what it made takes the focus instead).
+ * opened it is gone), Tab and Shift+Tab go round its own controls and never to the page behind it, Escape anywhere
+ * closes it, and focus goes back where it was on close, unless `restore` says no (what it made takes the focus instead).
+ * A layer of its own that holds the focus (a select's list, a menu drawn over the page) keeps its Tab.
  */
 export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () => void, restore: () => boolean = () => true) {
   const callback = useRef(onClose); callback.current = onClose;
@@ -51,8 +61,29 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     if (ref.current && !ref.current.contains(document.activeElement)) ref.current.focus();
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); callback.current(); } };
+    modals.push(ref);
+    const key = (e: KeyboardEvent) => {
+      // Over another one, the newest answers: Escape closes it alone, Tab stays in it.
+      if (modals[modals.length - 1] !== ref) return;
+      if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); callback.current(); return; }
+      const root = ref.current;
+      if (e.key !== "Tab" || e.defaultPrevented || !root) return;
+      const active = document.activeElement;
+      const inside = !!active && root.contains(active);
+      if (!inside && active && active !== document.body) return;
+      const stops = tabbables(root);
+      if (!stops.length) { e.preventDefault(); root.focus(); return; }
+      const first = stops[0], last = stops[stops.length - 1];
+      if (!inside || active === root) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("keydown", key); if (before?.isConnected && restoring.current()) before.focus(); };
+    return () => {
+      document.removeEventListener("keydown", key);
+      const at = modals.lastIndexOf(ref);
+      if (at >= 0) modals.splice(at, 1);
+      if (before?.isConnected && restoring.current()) before.focus();
+    };
   }, [ref]);
 }
