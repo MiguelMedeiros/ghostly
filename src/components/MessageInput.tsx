@@ -156,6 +156,13 @@ export function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const caretRef = useRef<number | null>(null);
+  /**
+   * A send under way. Enter again meanwhile (a double press, or the next message typed fast) is not a second copy of
+   * the same words: it sends what the field holds once this one is out, which is nothing after a double press.
+   */
+  const sending = useRef(false);
+  const again = useRef(false);
+  const [queued, setQueued] = useState(0);
   const [canRecord] = useState(canRecordVoice);
   const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
   const hasCamera = useHasCamera();
@@ -195,6 +202,7 @@ export function MessageInput({
     textareaRef.current?.focus({ preventScroll: true });
   }, [editKey, editText]);
   const endEdit = () => {
+    again.current = false;
     const draft = draftAside.current ?? "";
     draftAside.current = null;
     setText(draft);
@@ -229,33 +237,52 @@ export function MessageInput({
   /** `confirmed` once the secret guard was answered Send; until then text that looks like a secret asks first. */
   const handleSubmit = async (confirmed = false) => {
     if (!text.trim() || disabled) return;
+    if (sending.current) { if (!edit) again.current = true; return; }
     const bytes = new TextEncoder().encode(text.trim()).length;
     if (maxBytes && bytes > maxBytes) { showToast(`This text is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}; shorten it or use a live connection. Your draft is kept.`); return; }
     const found = confirmed ? null : findSecret(text);
     if (found) { setSecret({ finding: found }); return; }
-    if (edit) {
-      // In a group, members named with @ while editing go with it; those the message named already stay by themselves.
-      const named = picker.compose(text);
-      const extra = { ...(linkPreview.preview && { preview: linkPreview.preview }), ...(named.length && { mentions: named }) };
-      const err = await edit.onSave(text, Object.keys(extra).length ? extra : undefined);
-      if (err) showToast(err); else { picker.reset(); linkPreview.reset(); endEdit(); }
-      return;
-    }
-    const named = picker.compose(text);
-    const err = await (named.length ? onSend(text, named) : linkPreview.preview ? onSend(text, undefined, { preview: linkPreview.preview }) : onSend(text));
-    if (err) {
-      showToast(err);
-    } else {
-      picker.reset();
-      linkPreview.reset();
-      onTyping?.(false);
-      setText("");
-      if(draftId) setSessionDraft(draftId, "");
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto";
+    sending.current = true;
+    let sent = false;
+    try {
+      if (edit) {
+        // In a group, members named with @ while editing go with it; those the message named already stay by themselves.
+        const named = picker.compose(text);
+        const extra = { ...(linkPreview.preview && { preview: linkPreview.preview }), ...(named.length && { mentions: named }) };
+        const err = await edit.onSave(text, Object.keys(extra).length ? extra : undefined);
+        if (err) showToast(err); else { picker.reset(); linkPreview.reset(); endEdit(); }
+        return;
       }
+      const words = text;
+      const named = picker.compose(words);
+      const err = await (named.length ? onSend(words, named) : linkPreview.preview ? onSend(words, undefined, { preview: linkPreview.preview }) : onSend(words));
+      if (err) {
+        showToast(err);
+      } else {
+        sent = true;
+        picker.reset();
+        linkPreview.reset();
+        // What was typed while it went stays in the field: only the words sent leave it.
+        const now = textareaRef.current?.value ?? "";
+        const left = now.startsWith(words) ? now.slice(words.length) : now;
+        const rest = left.trim() ? left : "";
+        onTyping?.(rest !== "");
+        setText(rest);
+        if (draftId && !rest) setSessionDraft(draftId, "");
+        if (textareaRef.current && !rest) {
+          textareaRef.current.style.height = "auto";
+        }
+      }
+    } finally {
+      sending.current = false;
+      if (again.current) { again.current = false; if (sent) setQueued((n) => n + 1); }
     }
   };
+  // Enter pressed while the last one went: sent now, with the field as it is after it.
+  useEffect(() => {
+    if (queued) void handleSubmit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queued]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (picker.onKeyDown(e)) return;
