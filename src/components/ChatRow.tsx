@@ -139,7 +139,8 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
       </div>
       {sub}
       <div className="mt-0.5 flex items-center gap-2">
-        <p className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
+        {/* The last message in its own direction: an English one in the Arabic app, cut at its own end. */}
+        <p dir="auto" data-testid="chat-row-preview" className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
         {trailing && <div className="flex shrink-0 items-center gap-1.5">{trailing}</div>}
       </div>
     </div>
