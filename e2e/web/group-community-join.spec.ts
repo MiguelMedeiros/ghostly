@@ -8,7 +8,8 @@ import { expect, test } from "../support/fixtures";
  * waited for what was left. Now 3–7 s and 7–12 s. The member's app is open a minute and a quarter
  * first, past that point; two people join, one right after the other. The second one's admission
  * shares the door's relay budget with the first one's (about 10 requests on each relay of the 30 a
- * minute), hence a little more room; the bounds leave room for a busy machine too.
+ * minute), hence a little more room; the bounds leave room for a busy machine too. STUN is answered here (`localStun`):
+ * each offer and answer waits for it, up to 5 s when Google's public servers are slow, which no bound here allows for.
  */
 const JOIN_BOUND_MS = [12_000, 15_000];
 const REACH_BOUND_MS = [20_000, 30_000];
@@ -25,9 +26,9 @@ function watchSteps(): void {
   }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage"] });
 }
 
-test("with a member's app open a while, joining a community through its link takes seconds and shows each step", { tag: ["@release-skip", "@feature:groups.community.join"] }, async ({ peer }) => {
+test("with a member's app open a while, joining a community through its link takes seconds and shows each step", { tag: ["@feature:groups.community.join"] }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
-  const [alice, bob, carol] = await Promise.all([peer("alice"), peer("bob"), peer("carol")]);
+  const [alice, bob, carol] = await Promise.all(["alice", "bob", "carol"].map(name => peer(name, { localStun: true })));
   await alice.page.getByTestId("sidebar-new-more").click();
   await alice.page.getByTestId("new-group").click();
   await expect(alice.page.getByTestId("new-group-kind-community").getByRole("radio")).toBeChecked();

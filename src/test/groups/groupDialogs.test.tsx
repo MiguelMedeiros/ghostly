@@ -53,8 +53,30 @@ describe("GroupMembersDialog", () => {
     expect(within(row(ME)).queryByRole("button")).not.toBeInTheDocument();
     await user.click(within(row(ALICE)).getByTestId("group-make-admin"));
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+    await user.click(screen.getByTestId("group-remove-confirm"));
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
     expect(engine.callsTo("removeGroupMember")).toEqual([{ groupId: "group-1", key: BOB }]);
+  });
+
+  it("asks before removing a member, naming them; Cancel and Escape remove nobody and keep the list open", async () => {
+    const { user, engine, onClose } = members_(groupView({ status: "active", isAdmin: true, members }));
+    engine.on("removeGroupMember", () => undefined);
+    await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+    const ask = screen.getByTestId("group-remove-dialog");
+    expect(ask).toHaveAccessibleName("Remove Bob?");
+    expect(ask).toHaveAccessibleDescription("They won't get the group's new messages.");
+    expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(engine.callsTo("removeGroupMember")).toEqual([]);
+    await user.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-remove-dialog")).not.toBeInTheDocument();
+    await user.click(within(row(ALICE)).getByTestId("group-remove-member"));
+    expect(screen.getByTestId("group-remove-dialog")).toHaveAccessibleName("Remove Alice?");
+    // Escape, as the browser says it to the topmost dialog: only the question closes.
+    act(() => { screen.getByTestId("group-remove-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.queryByTestId("group-remove-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-members-dialog")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(engine.callsTo("removeGroupMember")).toEqual([]);
   });
 
   it("past 16 members with hubs, marks the hubs, says who is reached through one, and lets the admin choose", async () => {
@@ -85,6 +107,7 @@ describe("GroupMembersDialog", () => {
     const { user, engine } = members_(groupView({ status: "active", isAdmin: true, members }));
     engine.on("removeGroupMember", () => { throw new Error("Bob is not reachable"); });
     await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+    await user.click(screen.getByTestId("group-remove-confirm"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Bob is not reachable");
   });
 

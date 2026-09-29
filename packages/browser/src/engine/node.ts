@@ -2204,6 +2204,13 @@ export class GhostlyNode implements EngineImplementation {
     await this.noteDetails(linkId, message.id, details => error
       ? (message.sender === "me" && details.sends?.length ? { ...details, sends: details.sends.map((s, i) => i === details.sends!.length - 1 ? { ...s, result: "failed", error } : s) } : details)
       : { ...details, completedAt: now, ...(message.sender === "me" && { receiptAt: now }) });
+    // The contact's last acknowledgement comes once the file is stored there (files/2 after it is written, files/3 once
+    // its digest checked out): its receipt. A file that went over the live session carries no delivery state while it
+    // goes, so the receipt gives it two ticks, as a text gets from its own (WISP 401).
+    if (!error && message.sender === "me" && message.delivery !== "delivered") {
+      const marked = await db.patchMessage(linkId, message.id, m => m.delivery === "delivered" ? null : { delivery: "delivered", deliveryError: undefined });
+      if (marked) { await this.messagesChanged(linkId, [message.id]); this.emitState(); }
+    }
   }
 
   /**
