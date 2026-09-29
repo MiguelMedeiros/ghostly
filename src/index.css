@@ -656,7 +656,17 @@ html[data-standalone="true"] {
  */
 [data-message-list]:not(:has([data-theater])) {
   will-change: transform;
+  container: message-list / inline-size;
 }
+
+/*
+ * The room on each side of a chat's rows: wide on a wide screen, narrow on a phone, and narrow too when the chat itself
+ * is narrow beside the chat list (a phone on its side, a small window, a wide list): 63px on each side of a 330px chat
+ * squeezed its bubbles to a third of it, and a video into a tall black box.
+ */
+.message-row-x { padding-inline: 63px; }
+@media (width < 48rem) { .message-row-x { padding-inline: 10px; } }
+@container message-list (width < 36rem) { .message-row-x { padding-inline: 10px; } }
 
 /*
  * The list's size comes from the chat's column (it is a flex item that scrolls), never from its rows. Said so, a

@@ -253,7 +253,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
         aria-label={`Video, ${durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size)}`}
         onKeyDown={onKeyDown}
         className={`${theater ? "fixed inset-0 z-[2147483000] rounded-none" : "relative rounded-[4px] max-w-full"} overflow-hidden bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
-        style={theater ? { width: "100vw", height: "100vh" } : { width: box.width, height: box.height }}
+        style={theater ? { width: "100vw", height: "100vh" } : { width: box.width, aspectRatio: `${box.width} / ${box.height}` }}
         data-testid="video-frame"
         data-theater={theater ? "true" : undefined}
       >

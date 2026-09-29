@@ -59,7 +59,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
       ? (mine ? t("identities.share.revokedMine", { what }) : t("identities.share.revokedTheirs", { contact, what }))
       : (mine ? t("identities.share.stoppedMine", { what }) : t("identities.share.stoppedTheirs", { contact, what }));
     return (
-      <div className="mb-3.5 flex flex-col items-center px-[63px] max-md:px-2.5" data-testid="identity-share" data-side={entry.side} data-kind="stopped">
+      <div className="mb-3.5 flex flex-col items-center message-row-x" data-testid="identity-share" data-side={entry.side} data-kind="stopped">
         <button type="button" onClick={() => onOpen(entry)}
           className={`inline-flex max-w-full items-center gap-1.5 rounded-lg bg-surface-alt/80 px-3 py-1.5 text-start text-xs text-text-secondary transition-colors hover:bg-surface-hover ${focus}`}>
           <span className="opacity-60 grayscale"><ProviderMark provider={entry.provider} subject={shown.bound} small /></span>
@@ -72,7 +72,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
   const mark = shareMark(entry, link);
   const title = mark === "failed" && entry.error ? t("identities.share.notVerifiedWhy", { error: entry.error }) : markText(mark, t);
   return (
-    <div className="mb-3.5 flex flex-col items-center px-[63px] max-md:px-2.5" data-testid="identity-share" data-side={entry.side} data-kind="shared" data-state={mark}>
+    <div className="mb-3.5 flex flex-col items-center message-row-x" data-testid="identity-share" data-side={entry.side} data-kind="shared" data-state={mark}>
       <button type="button" onClick={() => onOpen(entry)} aria-label={mine ? t("identities.share.sharedMineState", { what, state: title }) : t("identities.share.sharedTheirsState", { contact, what, state: title })}
         className={`flex w-full max-w-[280px] items-center gap-2.5 rounded-xl border border-border bg-surface-alt/90 p-2.5 text-start shadow-sm transition-colors hover:bg-surface-hover ${focus}`}>
         <span className="relative shrink-0">

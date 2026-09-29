@@ -740,7 +740,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       : "";
     
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
         <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
@@ -773,7 +773,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const isMissed = type === "call_missed" || type === "call_rejected";
     
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
@@ -811,7 +811,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {...rowProps}
       data-message-row
       data-sender={isMe ? "me" : "peer"}
-      className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${onReply ? "touch-pan-y" : ""} ${swipe.dx > 0 ? "overflow-x-clip" : ""} ${choosing ? `cursor-pointer ${selection.selected ? "bg-accent/10" : ""}` : ""} ${enter}`}
+      className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 message-row-x ${onReply ? "touch-pan-y" : ""} ${swipe.dx > 0 ? "overflow-x-clip" : ""} ${choosing ? `cursor-pointer ${selection.selected ? "bg-accent/10" : ""}` : ""} ${enter}`}
     >
       {selectBox}
       {/* The checkbox at the start, the message at its side of the line. */}
