@@ -46,6 +46,27 @@ export const isWorthlessMint = (url: string) => isTestMint(url) || isLocalMint(u
  */
 export const paysItsOwnInvoices = isWorthlessMint;
 
+/**
+ * Mints on this machine the operator declared test servers with a fake Lightning backend (the CLI's
+ * `GHOSTLY_TEST_MINTS`, for regtest and e2e stacks). Nothing else declares one: the apps never do.
+ */
+const declaredTestMints = new Set<string>();
+const bare = (url: string) => url.trim().replace(/\/+$/, "");
+export function declareTestMints(urls: readonly string[]): void {
+  for (const url of urls) if (isLocalMint(bare(url))) declaredTestMints.add(bare(url));
+}
+
+/**
+ * Whether a Testnet wallet may pay a Bitcoin (`lnbc`) invoice through this mint. Test mints issue `lnbc` invoices,
+ * but so does a real node: only a mint known to fake its Lightning moves nothing real when it pays one. That is the
+ * public test mint, or a mint on this machine the operator declared a test server; never any other mint on this
+ * machine, which may be a self-hosted mint with real sats behind it.
+ */
+export const fakesLightning = (url: string) => isTestMint(url) || declaredTestMints.has(bare(url));
+
+/** Refused before any mint is asked: see `fakesLightning`. */
+export const BITCOIN_INVOICE_ON_TESTNET = "This is a Bitcoin invoice (real money): test sats pay one only through the public test mint. Nothing was sent.";
+
 /** Real money, or test networks: each wallet has its own (see WalletNetwork in @ghostly/core). */
 export type WalletMode = WalletNetwork;
 /** The network a Cashu mint's ecash belongs to: test mints and mints on this machine are Testnet. */

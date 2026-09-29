@@ -38,6 +38,7 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { canEditInGroup } from "@ghostly/browser/shared/edits";
+import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -65,10 +66,23 @@ function mentionCandidates(group: GroupView): MentionCandidate[] {
   return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m), tag: `…${m.key.slice(-6)}` }));
 }
 
-/** The group note a payment of this device is part of: a request's own, or the request a payment answers. */
+/** The group note a payment of this device is part of: a request's own, or the request a payment answers (by its id on the wire). */
 function noteIdOf(state: EngineState, paymentId: string): string {
   const payment = state.payments[paymentId];
-  return payment?.kind === "payment" && payment.requestId ? payment.requestId : paymentId;
+  return paymentWireId(payment?.kind === "payment" && payment.requestId ? payment.requestId : paymentId);
+}
+
+/**
+ * The note that captions a payment bubble: the one about that bubble's own payment, which the member who started it
+ * says (the payee of a request, the payer of a payment), never a note of another member that reuses its id.
+ */
+function captionOf(state: EngineState, notes: ReadonlyMap<string, GroupPayNote>, message: StoredMessage, myKey: string | undefined): GroupPayNote | undefined {
+  const payment = state.payments[message.paymentId!];
+  // Said once, under the request (or the payment) itself: not again under a payment that answers it.
+  if (payment?.kind === "payment" && payment.requestId) return undefined;
+  const note = notes.get(noteIdOf(state, message.paymentId!));
+  const starter = message.sender === "me" ? myKey : message.member;
+  return note && starter && (note.kind === "request" ? note.to : note.from) === starter ? note : undefined;
 }
 
 /** A membership line, naming its member as the roster knows them now; what was stored, when they are gone. */
@@ -234,7 +248,9 @@ export function GroupChat() {
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   const notes = new Map<string, GroupPayNote>(messages.filter(m => m.groupPay).map(m => [m.groupPay!.id, m.groupPay!]));
-  const ownNotes = new Set(messages.filter(m => m.paymentId && !m.groupPay).map(m => noteIdOf(state, m.paymentId!)));
+  // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
+  const ownNotes = new Set(messages.filter(m => m.paymentId && !m.groupPay && (captionOf(state, notes, m, group.myKey) || state.payments[m.paymentId]?.requestId))
+    .map(m => noteIdOf(state, m.paymentId!)));
   const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
   const joiningByLink = group.invitation?.viaLink;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
@@ -354,8 +370,7 @@ export function GroupChat() {
             : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
             : m.paymentId ? <div key={m.id} data-testid="group-payment">
               <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} />
-              {/* Said once, under the request (or the payment) itself: not again under a payment that answers it. */}
-              {noteIdOf(state, m.paymentId) === m.paymentId && notes.get(m.paymentId) && <GroupPaymentCaption note={notes.get(m.paymentId)!} group={group} />}
+              {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
             </div>
             : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)}
               onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}

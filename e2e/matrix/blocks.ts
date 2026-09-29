@@ -514,10 +514,11 @@ async function cashuInChat({ a, b }: World): Promise<void> {
 async function lightningThroughMint({ a, b }: World): Promise<void> {
   for (const p of [a, b]) await localMint(p);
   await getTestCoins(a);
-  // Out: an invoice the mint does not own, so the melt is real.
+  // Out: an invoice the mint does not own, so the melt is real. A test chain's: a Testnet wallet pays a Bitcoin (lnbc)
+  // invoice only through the public test mint, and the local mint here is not it.
   await wallet(a, "lightning");
   await a.page.getByTestId("wallet-send").click();
-  await a.page.getByTestId("wallet-pay-input").fill(strangerInvoice(25));
+  await a.page.getByTestId("wallet-pay-input").fill(strangerInvoice(25, "ghostly e2e", "lntb"));
   await a.page.getByRole("button", { name: "Pay 25 sats" }).click();
   await a.page.getByRole("button", { name: either("Pay") }).click();
   await expect(a.page.getByTestId("wallet-notice")).toHaveText(either("Paid."), { timeout: 60_000 });

@@ -24,7 +24,7 @@
     "sodium-javascript": "0.8.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.3",
     "fast-check": "^4.10.2",
     "typescript": "^5.9.3",
     "vitest": "^5.0.2"

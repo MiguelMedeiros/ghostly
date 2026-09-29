@@ -6,7 +6,7 @@ import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { CashuWallet } from "../src/engine/wallet";
 import { STORES, openDb, transact } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
-import { crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "../src/engine/paymentAdapters/walletInstances";
+import { REAL_MONEY_UNCONFIRMED, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "../src/engine/paymentAdapters/walletInstances";
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { GhostlyNode } from "../src/engine/node";
 import type { NetworkWalletsView, StoredPayment } from "../src/shared/types";
@@ -129,6 +129,24 @@ describe("the wallets and their networks", () => {
     expect(paymentNetwork({ ...base, target: arkTarget("mutinynet") })).toBe("testnet");
     expect(paymentNetwork({ ...base, target: { ...arkTarget("bitcoin"), method: "cashu", provider: TEST_MINT } })).toBe("testnet");
     expect(paymentNetwork(base), "nothing to tell: real money, the careful default").toBe("mainnet");
+  });
+
+  it("Fedimint notes of a Mainnet federation are real money: created only once confirmed as such", async () => {
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    const federations = { mainnet: { id: "fed-real", network: "bitcoin" }, testnet: { id: "fed-test", network: "regtest" } } as const;
+    const spends = WALLET_NETWORKS.map((n) => {
+      const wallet = node["fedimintWallets"][n];
+      vi.spyOn(wallet, "federation").mockImplementation((id: string) => (id === federations[n].id ? federations[n] as never : undefined));
+      return vi.spyOn(wallet, "spendNotes").mockResolvedValue({ notes: "notes", operationId: "op" });
+    });
+    await expect(node.fedimintSpendNotes({ federation: "fed-real", amount: 21 })).rejects.toThrow(REAL_MONEY_UNCONFIRMED);
+    // A federation this device never joined falls to the Mainnet wallet: refused the same way.
+    await expect(node.fedimintSpendNotes({ federation: "fed-unknown", amount: 21 })).rejects.toThrow(REAL_MONEY_UNCONFIRMED);
+    for (const spend of spends) expect(spend).not.toHaveBeenCalled();
+    await expect(node.fedimintSpendNotes({ federation: "fed-real", amount: 21, confirmedReal: true })).resolves.toEqual({ notes: "notes", operation: "op" });
+    expect(spends[WALLET_NETWORKS.indexOf("mainnet")]).toHaveBeenCalledWith("fed-real", 21);
+    // Test coins need no second step.
+    await expect(node.fedimintSpendNotes({ federation: "fed-test", amount: 5 })).resolves.toEqual({ notes: "notes", operation: "op" });
   });
 
   it("a wallet backup goes into the wallet of its own network, whichever was asked", async () => {
