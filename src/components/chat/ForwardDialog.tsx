@@ -81,7 +81,9 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
       <input ref={search} type="search" data-testid="forward-search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t("chat.forward.search")} aria-label={t("chat.forward.search")}
         className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:ring-2 focus-visible:ring-accent" />
     </div>
-    <div className="min-h-0 flex-1 overflow-y-auto px-2">
+    {/* As tall as its rows, shrinking and scrolling within the dialog's max height: `flex-1` (a basis of 0) in a
+        dialog as tall as its content leaves WebKit a list of no height at all, with no chat to pick. */}
+    <div className="min-h-0 flex-auto overflow-y-auto px-2">
       {shown.length === 0 ? (
         <p className="px-2 py-3 text-sm text-text-muted" data-testid="forward-none">{t(targets.length ? "chat.forward.noMatch" : "chat.forward.noChats")}</p>
       ) : (

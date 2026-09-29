@@ -1,4 +1,4 @@
-import { chat, connect, createWallet, expect, link, openChat, openWallet, showNetwork, test, useFakeProviders, useTestnet, walletCard, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, showNetwork, test, useFakeProviders, useTestnet, walletCard, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 import { mockMainnetMints } from "../support/mint";
 import { paymentCard } from "../support/payments";
@@ -68,6 +68,21 @@ test("an empty Testnet wallet goes on one confirm, and is still gone after a rel
   await page.getByTestId("wallet-add").click();
   await page.getByTestId("new-wallet").getByRole("radio", { name: "Testnet" }).click();
   await expect(page.getByTestId("new-wallet-type-bitcoin-status")).toHaveText("Connect…");
+});
+
+test("an invoice just made on Receive is listed when removing the wallet, before anything else changed", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+  const alice = await peer("remove-receive");
+  await useTestnet(alice);
+  const page = alice.page;
+  await openWallet(alice, "cashu-testnet");
+  await page.getByTestId("wallet-receive").click();
+  await page.getByTestId("wallet-receive-amount").fill("30");
+  await page.getByTestId("wallet-create-invoice").click();
+  await expect(page.getByText("Invoice for 30 sats")).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId("wallet-remove").click();
+  const dialog = page.getByTestId("wallet-remove-dialog");
+  await expect(dialog.getByTestId("wallet-remove-awaiting-item")).toHaveText(["An invoice for 30 test sats, not paid yet"]);
+  await expect(dialog.getByTestId("wallet-remove-confirm")).toBeDisabled();
 });
 
 test("a funded wallet says how much and on which network, offers its ecash, and goes only once the loss is confirmed", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
@@ -143,4 +158,32 @@ test("a wallet holding nothing with an open chat request lists it, asks in words
   await expect(bubble(alice).getByTestId("payment-state")).toHaveText("Closed · your contact removed the wallet it was paid to");
   await expect(bubble(alice).getByTestId("payment-pay")).toHaveCount(0);
   await expect(bubble(alice).getByTestId("payment-external")).toHaveCount(0);
+});
+
+test("a request paid in ecash leaves nothing to wait for: its invoice is not listed as money still to come", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("remove-paid-a"), peer("remove-paid-b")]);
+  for (const p of [alice, bob]) await useTestnet(p);
+  await getTestCoins(bob);
+  await link(alice, bob);
+  await connect(alice, bob);
+  for (const p of [alice, bob]) await openChat(p);
+
+  // Alice asks for 20 test sats: the request carries an invoice (a quote at her mint); Bob pays it in ecash.
+  await (await composerRow(alice.page, "payment-button")).click();
+  await paymentCard(alice.page, "cashu-testnet").click();
+  await alice.page.getByTestId("payment-amount").fill("20");
+  await alice.page.getByTestId("payment-request").click();
+  const bubble = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "20" });
+  await bubble(bob).getByTestId("payment-pay").click({ timeout: 90_000 });
+  await chat(bob).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+  await expect(bubble(alice).getByTestId("payment-state")).toHaveText(/Paid|Received/, { timeout: 90_000 });
+
+  // Its invoice is still open at the mint, but nobody pays a paid request: the wallet waits for nothing.
+  await openWallet(alice, "cashu-testnet");
+  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^20\s*test sats/, { timeout: 60_000 });
+  await alice.page.getByTestId("wallet-remove").click();
+  const dialog = alice.page.getByTestId("wallet-remove-dialog");
+  await expect(dialog.getByTestId("wallet-remove-held")).toHaveText("It holds 20 test sats on Testnet, test coins worth nothing.");
+  await expect(dialog.getByTestId("wallet-remove-awaiting-item")).toHaveCount(0);
+  await expect(dialog.getByTestId("wallet-remove-consent")).toHaveText("I understand: these 20 test sats become unreachable without this wallet's backup.");
 });
