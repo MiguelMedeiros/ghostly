@@ -195,6 +195,21 @@ describe("FileBubble: files/3", () => {
     }
   });
 
+  it("a file still arriving when the app starts is not offered to save once its transfer shows it moving", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["part"], { type: "application/octet-stream" }));
+    // Just started: the chat is drawn before its transfers are restored, and what is stored is a part of the file.
+    show(null, { size: 80 });
+    expect(await screen.findByTestId("file-save")).toBeInTheDocument();
+    act(() => fakeEngine.update({ transfers: { "chat1-in-abc": { state: "transferring", direction: "in", transferred: 4, size: 80 } } }));
+    expect(screen.queryByTestId("file-save")).toBeNull();
+    expect(screen.getByTestId("file-cancel")).toBeInTheDocument();
+    // All here: read again, and offered.
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["x".repeat(80)], { type: "application/octet-stream" }));
+    act(() => fakeEngine.update({ transfers: { "chat1-in-abc": { state: "done", direction: "in", transferred: 80, size: 80 } } }));
+    expect(await screen.findByTestId("file-save")).toBeInTheDocument();
+    expect(vi.mocked(servicesPlatform!.getFile)).toHaveBeenCalledTimes(2);
+  });
+
   it("a file kept but too large to show here is saved through the system (Desktop)", async () => {
     const saveFile = vi.fn(async () => true);
     Object.assign(servicesPlatform!, { saveFile });

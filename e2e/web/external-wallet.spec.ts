@@ -11,7 +11,7 @@ import { composerRow } from "../support/composer";
  * request settles through its own source, with nobody pressing Pay in the chat. The Lightning address is
  * served by a server of this test's own (support/lnurl.ts).
  */
-test.describe("another wallet", { tag: "@network" }, () => {
+test.describe("another wallet", () => {
   test.describe.configure({ retries: 2 });
 
   test("a request is paid with another wallet, and the bubble turns Paid by itself on both sides", { tag: ["@feature:payments.external", "@feature:wallet.lightning.cashu-mint.receive"] }, async ({ peer }) => {

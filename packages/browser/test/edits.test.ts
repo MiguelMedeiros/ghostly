@@ -42,7 +42,7 @@ async function setup(contactOptions: { editSupport?: boolean; confirm?: () => bo
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-    editSupport: contactOptions.editSupport ?? true,
+    editSupport: contactOptions.editSupport ?? true, reactionsSupport: true,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); },
       onMessageEdit: edit => { contactEdits.push(edit); return contactOptions.confirm?.() ?? true; }, onEditReceipt: (id, e) => { contactReceipts.push([id, e]); } },
   });
@@ -123,6 +123,17 @@ describe("editing my message", () => {
 });
 
 describe("the contact's edits", () => {
+  it("change the chat list's reaction line that quotes their message", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("plan v1", Date.now(), WIRE("R"))).toBeNull();
+    const original = await t.peerRow("plan v1");
+    expect(await t.node.react({ linkId: t.id, messageId: original.id, emoji: "👍" })).toEqual({ error: null });
+    expect(t.view().lastReaction).toMatchObject({ by: "me", emoji: "👍", snippet: "plan v1" });
+    const at = t.view().lastReaction!.at;
+    expect(await t.contact.sendEdit({ id: WIRE("R"), e: 1, ts: Date.now(), m: "plan v2" })).toBeNull();
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "👍", snippet: "plan v2", at }));
+  });
+
   it("change its message, the highest number winning whatever order they come in; no sound, no move", async () => {
     const t = await setup();
     const at = Date.now() - 60_000;

@@ -162,7 +162,9 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
  */
 function mirrorReaction(session: ChatSession, link: LinkView): boolean {
   const note = link.lastReaction;
-  if (!note || note.at <= (session.lastReaction?.at ?? 0)) return false;
+  const shown = session.lastReaction;
+  // A newer reaction, or the same one whose message was edited since (its line quotes the text).
+  if (!note || note.at < (shown?.at ?? 0) || (note.at === shown?.at && note.snippet === shown.snippet)) return false;
   const fresh = loadSession(session.id);
   if (!fresh) return false;
   fresh.lastReaction = note;

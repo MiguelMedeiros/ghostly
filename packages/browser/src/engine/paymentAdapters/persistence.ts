@@ -16,7 +16,7 @@ export const intentRepository: IntentRepository = {
         const duplicate=saved.review.requestId && intents.some(({review})=>review.id!==id && review.requestId===saved.review.requestId && review.linkId===saved.review.linkId && ["submitted","settled","unknown"].includes(review.state));
         const pendingNonce = saved.review.method === "usdt" && intents.some(({review}) => review.id !== id && review.method === "usdt" && review.chainId === saved.review.chainId && review.evm?.from === saved.review.evm?.from && ["submitted","unknown"].includes(review.state));
         if(duplicate || pendingNonce){tx.abort();return;}
-        saved.review={...saved.review,state:"submitted",error:undefined};
+        saved.review={...saved.review,state:"submitted",error:undefined,submittedAt:Date.now()};
         tx.objectStore(STORES.intents).put(saved);
       };
       tx.oncomplete=()=>resolve(saved);
