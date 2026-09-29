@@ -10,7 +10,7 @@ import {
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
 import {
-  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupName, groupMetaChange, groupMetaNewer, groupMetaPicture, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupName, groupMetaChange, groupMetaNewer, groupMetaPicture, nextGroupMetaRevision, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame,
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
@@ -1039,7 +1039,7 @@ export class GroupSession {
   /** Signs a body under my current commit, keeps it and sends it to every member. Inside `serialize`. */
   private async publishMeta(body: string, now: number): Promise<void> {
     const before = this.state.meta;
-    const meta = signGroupMeta({ g: this.id, e: this.epoch, h: commitHash(this.top), r: (before?.r ?? 0) + 1, ts: now }, body, this.identity.seed, this.myKey);
+    const meta = signGroupMeta({ g: this.id, e: this.epoch, h: commitHash(this.top), r: nextGroupMetaRevision(before, this.epoch), ts: now }, body, this.identity.seed, this.myKey);
     this.state.meta = meta;
     await this.persist();
     const secret = this.secret(this.epoch);
