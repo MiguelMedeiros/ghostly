@@ -248,7 +248,9 @@ export function GroupChat() {
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
   const notes = new Map<string, GroupPayNote>(messages.filter(m => m.groupPay).map(m => [m.groupPay!.id, m.groupPay!]));
-  const ownNotes = new Set(messages.filter(m => m.paymentId && !m.groupPay).map(m => noteIdOf(state, m.paymentId!)));
+  // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
+  const ownNotes = new Set(messages.filter(m => m.paymentId && !m.groupPay && (captionOf(state, notes, m, group.myKey) || state.payments[m.paymentId]?.requestId))
+    .map(m => noteIdOf(state, m.paymentId!)));
   const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
   const joiningByLink = group.invitation?.viaLink;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");

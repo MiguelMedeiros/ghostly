@@ -168,6 +168,19 @@ describe("GroupChat: payments in the timeline", () => {
     expect(screen.queryByTestId("group-pay-note")).not.toBeInTheDocument();
   });
 
+  it("the copy alone never hides the real request's note: it stays a line of its own", async () => {
+    const payments = { "req-9": paymentView({ id: "req-9", linkId: "edge-b", kind: "request", direction: "in", amount: 500, state: "pending", mints: ["https://mint.example.com"] }) };
+    openGroup([
+      line({ id: "edge-b:peer_1", paymentId: "req-9", member: BOB, text: "⚡ Requested 500 sats" }),
+      line({ id: "gpay:req-9", groupPay: note({ id: "req-9", from: "*", to: ALICE }) }),
+    ], { payments });
+    await screen.findByTestId("group-payment");
+    const shown = screen.getAllByTestId("group-pay-note").filter((n) => n.dataset.id === "req-9");
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toHaveTextContent("Alice asked the group");
+    expect(within(screen.getByTestId("group-payment")).queryByTestId("group-pay-caption")).not.toBeInTheDocument();
+  });
+
   it("+ → Payment opens whom-to-pay; with nobody else in the group it says so", async () => {
     const view = openGroup([]);
     await view.user.click(screen.getByTestId("composer-more"));
