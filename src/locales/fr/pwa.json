@@ -8,6 +8,7 @@
   "offline": "Hors ligne",
   "offlineHint": "Vos discussions sont là. Rien ne part avant votre retour en ligne.",
   "shareFiles": "{{count}} fichiers",
+  "shareFrom": "Vient d'une autre app ou d'un site web. Rien ne part avant que vous l'envoyiez.",
   "shareHint": "Choisissez une discussion. Vous vérifiez et envoyez là-bas.",
   "shareNoChats": "Pas encore de discussion. Commencez-en une, puis partagez à nouveau.",
   "shareNone": "Rien n'a été partagé, ou c'est déjà récupéré.",

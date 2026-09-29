@@ -94,6 +94,24 @@ fn may_navigate(url: &url::Url, peer: &str, service: &str) -> bool {
     }
 }
 
+/// The address a link the app opens in a new window (`target="_blank"`) goes to in the system browser, the way
+/// the Ghostly window opens links since #415: a plain http(s) link to another site (`commands::is_web_link`).
+/// None for the app's own origin, which has no second window, and for anything that is not a web link.
+fn external_target(url: &url::Url, peer: &str, service: &str) -> Option<String> {
+    if !matches!(url.scheme(), "http" | "https") || may_navigate(url, peer, service) {
+        return None;
+    }
+    crate::commands::is_web_link(url.as_str()).then(|| url.as_str().to_string())
+}
+
+/// Least time between two links a viewer window opens outside. A browser opens a new window only on a click, but
+/// WebView2 lets a page open one from script; this keeps an app from filling the browser with tabs.
+const EXTERNAL_LINK_SPACING: Duration = Duration::from_secs(2);
+
+fn may_open_now(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last.is_none_or(|last| now.saturating_duration_since(last) >= EXTERNAL_LINK_SPACING)
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -115,9 +133,27 @@ pub fn open<R: tauri::Runtime>(
     let url = format!("{}://{}.{}/", SCHEME, service, peer)
         .parse()
         .map_err(|e| format!("URL: {}", e))?;
+    let (link_peer, link_service) = (peer.clone(), service.clone());
+    let last_link = Mutex::new(None);
     WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url))
         .title(format!("{} — Ghostly", title))
+        // The window itself never leaves its origin: a plain link to another site, a script or a frame that
+        // goes there is refused, with no click to tell them apart.
         .on_navigation(move |to| may_navigate(to, &peer, &service))
+        // A link that asks for a new window (`target="_blank"`, a click) opens in the system browser. No window
+        // is ever made here.
+        .on_new_window(move |to, _| {
+            if let Some(target) = external_target(&to, &link_peer, &link_service) {
+                let now = std::time::Instant::now();
+                if let Ok(mut last) = last_link.lock() {
+                    if may_open_now(*last, now) {
+                        *last = Some(now);
+                        let _ = crate::commands::launch(&target);
+                    }
+                }
+            }
+            tauri::webview::NewWindowResponse::Deny
+        })
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;
@@ -346,6 +382,52 @@ mod tests {
             assert!(!may(&elsewhere), "{elsewhere}");
         }
     }
+
+    fn outside(url: &str) -> Option<String> {
+        external_target(&url::Url::parse(url).unwrap(), PEER, "atlas")
+    }
+
+    #[test]
+    fn a_new_window_link_to_another_site_opens_in_the_system_browser() {
+        // covers: app.external-links
+        for web in [
+            "https://example.com/docs?page=2#intro",
+            "http://news.example/story",
+            "https://pt.wikipedia.org/wiki/São_Paulo",
+            "https://münchen.de/",
+        ] {
+            let target = outside(web).unwrap_or_else(|| panic!("{web}"));
+            // As `url` writes it: percent-encoded, the host in punycode, what the system opener takes.
+            assert!(crate::commands::is_web_link(&target), "{target}");
+        }
+        assert_eq!(
+            outside("https://münchen.de/straße").as_deref(),
+            Some("https://xn--mnchen-3ya.de/stra%C3%9Fe")
+        );
+        for kept in [
+            // The app's own origin has no second window; Ghostly's own pages never open from here.
+            format!("{SCHEME}://atlas.{PEER}/other"),
+            format!("http://{SCHEME}.atlas.{PEER}/page"),
+            format!("https://{SCHEME}.atlas.{PEER}/page"),
+            "tauri://localhost/".into(),
+            "file:///etc/passwd".into(),
+            "javascript:alert(1)".into(),
+            "data:text/html,<h1>Ghostly</h1>".into(),
+            "about:blank".into(),
+            "blob:https://example.com/1b4e28ba-2fa1-11d2-883f-0016d3cca427".into(),
+            "mailto:a@example.com".into(),
+        ] {
+            assert_eq!(outside(&kept), None, "{kept}");
+        }
+    }
+
+    #[test]
+    fn links_open_outside_at_most_once_every_two_seconds() {
+        let start = std::time::Instant::now();
+        assert!(may_open_now(None, start));
+        assert!(!may_open_now(Some(start), start + Duration::from_millis(1999)));
+        assert!(may_open_now(Some(start), start + EXTERNAL_LINK_SPACING));
+    }
 }
 
 /// Opening a viewer, and a request's round trip through the main window.
@@ -527,6 +609,17 @@ mod routing_tests {
             body_b64: String::new(),
         });
         assert_eq!(bad_header.status(), StatusCode::BAD_GATEWAY);
+        // A value with CR or LF never adds a header of its own: the page drops such headers first
+        // (`viewerResponseHeaders`), and here the whole answer is refused.
+        for value in ["a\r\nset-cookie: sid=evil", "a\nb", "a\rb"] {
+            let smuggled = serve(ServiceResponse {
+                status: 200,
+                headers: vec![("x-note".into(), value.into())],
+                body_b64: String::new(),
+            });
+            assert_eq!(smuggled.status(), StatusCode::BAD_GATEWAY, "{value:?}");
+            assert!(smuggled.headers().get("set-cookie").is_none());
+        }
         let bad_status = serve(ServiceResponse {
             status: 1000,
             headers: vec![],
