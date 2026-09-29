@@ -253,6 +253,36 @@ describe("a member of a private group killed and back, with a chat and an edge t
 });
 
 /**
+ * What an edge whose member is gone for good costs: the member's app is killed and never comes back. The edge that
+ * stayed notices, offers again and again (each offer stands 90 s, then waits longer between tries), and reads the
+ * member's key meanwhile. Longer-standing offers (looked at every 4 to 8 s once 10 s old) must not cost more reads.
+ */
+describe("an edge whose member never comes back", () => {
+  it("reads no more a minute than before, while its offers stand longer", async () => {
+    const relays = new MemoryRelays(["pkarr.pubky.org", "pkarr.pubky.app"]);
+    const made = invitationWhere("inviter");
+    const stays = open("stays", withRequestOptions(relays.transport("stays"), { group: true }), made.inviter, made.joiner);
+    const goes = open("goes", withRequestOptions(relays.transport("goes"), { group: true }), made.joiner, made.inviter);
+    expect(await until(() => stays.isDataLinkOpen && goes.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    await run(70_000);
+    killRtc("goes", 20_000);
+    await goes.stop(false);
+    const killedAt = Date.now();
+    await run(20 * 60_000);
+    const perMinute = (fromMin: number, toMin: number) =>
+      relays.requests.filter(r => r.who === "stays" && r.method === "GET" && r.at >= killedAt + fromMin * 60_000 && r.at < killedAt + toMin * 60_000).length / (toMin - fromMin);
+    const reads = { first2: perMinute(0, 2), next3: perMinute(2, 5), next5: perMinute(5, 10), last10: perMinute(10, 20) };
+    report({ scenario: "dead-edge", reads });
+    // Dev (eacaf6a6), reads a minute in minutes 0-2, 2-5, 5-10 and 10-20: 17.5, 16.3, 6.4 and 2. Now: 8.5, 10.7, 4.6
+    // and 2 (each offer looks fast only its first 10 s).
+    expect(reads.first2).toBeLessThanOrEqual(10);
+    expect(reads.next3).toBeLessThanOrEqual(12);
+    expect(reads.next5).toBeLessThanOrEqual(5);
+    expect(reads.last10).toBeLessThanOrEqual(2);
+  }, 600_000);
+});
+
+/**
  * Cause 3. The side that answers looks fast for 30 s from the dialer's fresh packet (`EXPECT_PEER_MS`). The dialer's
  * offer held back by its budget can land just after: on dev the answerer read it at its next background poll, 30 s on.
  */

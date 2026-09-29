@@ -53,15 +53,18 @@ export const RELAY_POLL_INTERVALS: PollIntervals = {
 const FAST_POLL_MAX_MS = 45_000;
 /**
  * An offer to a saved contact (a chat, a group's edge) is looked at fast for an answer this long after it went out,
- * then less often (`OFFER_STEP_MAX_MS`) for the rest of its window. A contact that is there answers within seconds;
+ * then less often (`OFFER_STEP_MAX`) for the rest of its window. A contact that is there answers within seconds;
  * one that still holds the session this app had before it restarted answers only once that session goes (about 20 s
  * with node-datachannel, 45 s where liveness finds out). An app back with several chats and edges, each looking every
  * 2 s meanwhile, spent the relays' minute in those seconds and could not read the answers when they came: a group's
  * edges were live again 75 and 110 s after a restart (bug hunt r5a, 2026-09-29).
  */
 export const OFFER_FAST_MS = 10_000;
-/** The longest wait between looks for an answer to an offer, once it has been out `OFFER_FAST_MS`. */
-export const OFFER_STEP_MAX_MS = 8_000;
+/**
+ * The longest wait between looks for an answer to an offer once it has been out `OFFER_FAST_MS`, in fast paces: 8 s on
+ * the relays (fast 2 s), 2.8 s on the DHT (0.7 s), which costs no relay budget.
+ */
+export const OFFER_STEP_MAX = 4;
 /** An offer to a saved contact is looked at for an answer as long as its attempt lasts (`CONNECT_TIMEOUT_MS`), not 45 s. */
 export const OFFER_LOOK_MS = 90_000;
 /**
@@ -118,8 +121,8 @@ export interface LinkSessionEvents {
   /**
    * A publish finished: how long it took, and whether it carried an `_rtc` signal. `error` when it failed; `waiting`
    * when the relays' request budget held it back (nothing went out, and it goes again once the budget frees a request).
+   * `signalOut` when it is the first to carry the current `_rtc` signal: an offer or an answer went out now.
    */
-  /** `signalOut`: this publish is the first to carry the current `_rtc` signal (an offer or an answer went out now). */
   onPublish?(result: { ms: number; rtc: boolean; error?: string; waiting?: boolean; signalOut?: boolean }): void;
   /** The first read of the peer's key is done (with `firstPublish: "after-first-poll"`, what to publish is decided now). */
   onFirstPoll?(): void;
@@ -409,7 +412,7 @@ export class LinkSession {
     const since = Date.now() - this.expectUntil;
     // An offer out a while: 4, 4, 8 s… between looks (on the relays), as long as its window lasts.
     const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
-    if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX_MS, Math.max(2 * interval, stepping));
+    if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
