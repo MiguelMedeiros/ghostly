@@ -30,7 +30,8 @@ describe("the service worker keeps one peer", () => {
       [{ url: "offscreen.html", reasons: ["WEB_RTC"], justification: expect.stringContaining("WebRTC") }],
     ]);
     // Iroh runs in the page here too (WISP 102, relay only), loaded on first use.
-    expect(engine().options).toEqual({ platform: "extension", irohWeb: true });
+    // A new profile's Mainnet wallets are made by the peer, never under test (see defaultWalletsAllowed).
+    expect(engine().options).toEqual({ platform: "extension", irohWeb: true, defaultWallets: expect.any(Function) });
 
     // Later asks find the document and only check that the peer answers.
     expect(await send({ target: "background", type: "ensure-engine" })).toEqual({ ok: true });

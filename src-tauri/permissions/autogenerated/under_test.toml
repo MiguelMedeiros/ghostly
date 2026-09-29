@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-under-test"
+description = "Enables the under_test command without any pre-configured scope."
+commands.allow = ["under_test"]
+
+[[permission]]
+identifier = "deny-under-test"
+description = "Denies the under_test command without any pre-configured scope."
+commands.deny = ["under_test"]

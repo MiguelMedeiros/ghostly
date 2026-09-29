@@ -362,6 +362,14 @@ pub fn service_respond<R: tauri::Runtime>(
     viewer::respond(&app, id, response);
 }
 
+/// Whether an end-to-end suite started this app (`GHOSTLY_E2E=1`, set by every e2e launcher). The page then never
+/// makes a new profile's default Mainnet wallets, whatever the WebView says about automation: the Linux Desktop e2e
+/// runs the real bundle id, and the app's own test driver sets no `navigator.webdriver`.
+#[tauri::command]
+pub fn under_test() -> bool {
+    env::var("GHOSTLY_E2E").as_deref() == Ok("1")
+}
+
 /// Whether the updater can replace this install in place. It can on macOS and
 /// Windows, and on Linux only for the AppImage: a `.deb` or `.rpm` belongs to
 /// the package manager that put it there, so those are sent to the download

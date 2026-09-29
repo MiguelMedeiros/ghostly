@@ -19,6 +19,8 @@ import {
 } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
+import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
+import { getIdentifier } from "@tauri-apps/api/app";
 import type { PubkyCookieSession } from "@ghostly/browser/host";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
@@ -205,6 +207,19 @@ export function macPeerBudget(agent = typeof navigator === "undefined" ? "" : na
   return /Macintosh|Mac OS X/.test(agent) && !/iPhone|iPad/.test(agent) ? { peerBudget: MAC_PEER_BUDGET } : {};
 }
 
+/** The bundle id of the Desktop builds the e2e tests drive (src-tauri/tauri.e2e.conf.json), and of their copies. */
+const E2E_IDENTIFIER = "tools.ghostly.e2e";
+
+/**
+ * Whether an e2e suite runs this app: the macOS e2e build's bundle id, or `GHOSTLY_E2E=1` from any e2e launcher (Rust's
+ * `under_test`). The Linux Desktop e2e runs the real bundle id, and the app's own test driver sets no
+ * `navigator.webdriver`, so those runs rely on the environment.
+ */
+export async function desktopUnderTest(): Promise<boolean> {
+  if ((await getIdentifier()).startsWith(E2E_IDENTIFIER)) return true;
+  return await invoke<boolean>("under_test");
+}
+
 /** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
 export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
   const { node: callOptions, callMedia } = nativeCallOptions(calls);
@@ -222,6 +237,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
       // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
       pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
+      // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
+      defaultWallets: defaultWalletsAllowed(desktopUnderTest),
       ...macPeerBudget(), ...callOptions },
     callMedia,
     onServer: serveServiceWindows,

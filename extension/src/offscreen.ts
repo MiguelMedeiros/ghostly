@@ -2,6 +2,7 @@ import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
 import { EngineServer, type EngineClientSink } from "@ghostly/browser/engine/server";
 import type { RpcRequest } from "@ghostly/browser/shared/rpc";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
+import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { UI_PORT, type EngineStatus, type HttpRequestReply, type RuntimeMessage } from "./messages";
 import { activeNamespace, databaseFor, peerLockFor } from "./profile";
 import { fromOwnPage } from "./shared/sender";
@@ -30,7 +31,8 @@ let running: EngineServer | null = null;
 const server = new Promise<EngineServer>((resolve) => {
   void navigator.locks.request(peerLockFor(profile), () => {
     // Iroh through a relay (WISP 102), over WebSockets from this document; the wasm loads on first use.
-    running = new EngineServer({ platform: "extension", irohWeb: true });
+    // A new profile gets its default Mainnet wallets; never in a test build or an automated browser.
+    running = new EngineServer({ platform: "extension", irohWeb: true, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e") });
     // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
     if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
     resolve(running);

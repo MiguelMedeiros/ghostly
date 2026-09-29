@@ -228,8 +228,10 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
       stdio: ["ignore", "pipe", "pipe"],
       // A test must never open the person's own chats: its own profile, its own storage. Nor the machine's camera
       // and microphone: a test picture and a test tone for calls on Linux (debug builds), as Chromium's fake devices.
+      // GHOSTLY_E2E: never a new profile's default Mainnet wallets (#682): this build has the real bundle id.
       env: {
         ...process.env,
+        GHOSTLY_E2E: "1",
         GHOSTLY_FAKE_MEDIA: "1",
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
@@ -249,6 +251,7 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   try {
     // The driver needs a moment to bind, and the app a while longer to boot.
     const app = await Promise.race([died, withRetries(() => Driver.open(endpoint, application), 30_000)]);
+    await expectUnderTest(app);
     // Closing the session closes the window; killing the driver ends what is left, waited for (5 s at most) so the
     // app is done writing to its home before the test removes it.
     return { app, stop: async () => {
@@ -259,6 +262,22 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
     kill();
     throw error;
   }
+}
+
+/**
+ * The app's WebView must say it is automated (`navigator.webdriver`), or a new profile would make its default Mainnet
+ * wallets by itself (#682): this build runs the real bundle id. GHOSTLY_E2E=1 guards that too, but a run where the
+ * WebView stops saying so fails here, loudly, before any test starts.
+ */
+async function expectUnderTest(app: Driver): Promise<void> {
+  const automated = await withRetries(() => app.execute<boolean>("return navigator.webdriver === true"), 10_000);
+  if (automated === true) return;
+  await app.close().catch(() => {});
+  throw new Error(
+    "The Desktop app's WebView does not set navigator.webdriver under tauri-driver. The first-run Mainnet wallet guard " +
+      "(#682: packages/browser/src/platform/walletSetupSwitch.ts, src/desktop/host.ts desktopUnderTest) relies on it and " +
+      "on GHOSTLY_E2E=1; no test runs until the WebView reports automation again.",
+  );
 }
 
 async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number): Promise<T> {

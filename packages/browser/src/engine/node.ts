@@ -171,6 +171,7 @@ import { messageAttention } from "./attention";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
 import { pushRelayProblem } from "../shared/pushRelay";
 import { traceJoin } from "./joinTrace";
+import { SETUP_NETWORK, WalletSetup } from "./walletSetup";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
 
 /** How long a chat waits before listening again after its HyperDHT relay went away. */
@@ -315,6 +316,12 @@ export interface NodeOptions {
   localFetch?: LocalFetch;
   /** Create and connect the Ark, Bark, Spark and USDT wallets at start. Default: on; tests without a network turn it off. */
   automaticWallets?: boolean;
+  /**
+   * A new profile gets its default Mainnet wallets by itself (Cashu, USDT, and Bitcoin on-chain where it runs on
+   * Mainnet), in the background, once (see `WalletSetup`). Default: off. The apps turn it on, except under test (the
+   * host decides, before the peer starts); the CLI and the unit tests never do.
+   */
+  defaultWallets?: boolean | (() => boolean | Promise<boolean>);
   /** Where this engine runs, for the wallet providers that only work on some platforms. Default: web. */
   platform?: ProviderPlatform;
   /**
@@ -476,6 +483,14 @@ export class GhostlyNode implements EngineImplementation {
   /** Group links: admins read knocks, joiners knock (WISP 9xx § Entry link). */
   private groupEntryTimer: ReturnType<typeof setInterval> | null = null;
   private walletView: WalletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
+  /** A new profile's default Mainnet wallets, made once in the background (`NodeOptions.defaultWallets`). */
+  private readonly walletSetup = new WalletSetup({
+    record: () => this.settings.walletSetup,
+    save: async (record) => { this.settings = { ...this.settings, walletSetup: record }; await db.putSettings(this.settings); },
+    offer: async (type) => { await this.refreshWallet(); return this.walletView.offers?.find((o) => o.type === type && o.network === SETUP_NETWORK); },
+    create: async (type) => { await this.walletCreate({ type, network: SETUP_NETWORK }); },
+    changed: () => { this.walletView = { ...this.walletView, setup: this.walletSetup.view() }; this.emitState(); },
+  });
 
   /**
    * Every wallet twice, one per network (real money, test coins), both open at once. Nothing is parked: a payment
@@ -1062,7 +1077,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     const wallets = walletInstances(networks);
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
-    this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents: (await intentRepository.list()).map((saved) => saved.review) };
+    this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents: (await intentRepository.list()).map((saved) => saved.review), setup: this.walletSetup.view() };
     this.announcePaymentNetworks(wallets);
     for (const tx of everything) {
       const fresh = !this.walletFeedbackIds.has(tx.id);
@@ -1129,8 +1144,11 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async start(): Promise<void> {
-    // A new profile has no wallet until one is made (New, or the first-run setup): no mint is added by itself.
-    this.settings = { ...DEFAULT_SETTINGS, ...(await db.getSettings()) };
+    // A new profile has nothing stored yet. Its wallets come from the first-run setup (where the app runs it), or from
+    // New; no mint is added by itself here.
+    const stored = await db.getSettings();
+    const fresh = Object.keys(stored).length === 0;
+    this.settings = { ...DEFAULT_SETTINGS, ...stored };
     // A profile still on an old default list gets today's defaults: a relay added to them reaches everyone.
     this.settings.relays = currentRelays(this.settings.relays);
     this.relays?.setRelays(this.settings.relays);
@@ -1205,6 +1223,28 @@ export class GhostlyNode implements EngineImplementation {
       void this.bitcoins[network].ensureReady();
       this.openWallets(network);
     }
+    // A new profile (nothing stored, no wallet, no chat) gets its default Mainnet wallets, in the background.
+    void this.startWalletSetup(fresh && !this.walletView.wallets?.length && this.links.size === 0).catch(() => {});
+  }
+
+  /** The first-run wallet setup, where the app runs it (`NodeOptions.defaultWallets`): begun once, then what is left. */
+  private async startWalletSetup(fresh: boolean): Promise<void> {
+    const option = this.options.defaultWallets;
+    const on = typeof option === "function" ? await option() : option === true;
+    if (!on || this.shuttingDown) return;
+    await this.walletSetup.begin(fresh);
+  }
+
+  /** Wallet page: try again to make a default wallet the first-run setup could not make. */
+  async walletSetupRetry({ type }: { type: WalletType }): Promise<void> {
+    if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
+    await this.walletSetup.run(type);
+  }
+
+  /** Wallet page: the person does not want this default wallet made for them; it is not tried again. */
+  async walletSetupDismiss({ type }: { type: WalletType }): Promise<void> {
+    if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
+    await this.walletSetup.dismiss(type);
   }
 
   /** Opens the wallets of a network that exist. None is made here: wallets are made one at a time, with New. */
@@ -3130,6 +3170,9 @@ export class GhostlyNode implements EngineImplementation {
     await this.refreshWallet();
     const made = this.walletView.wallets?.find((w) => w.type === type && w.network === network && (card === undefined || w.card === card));
     if (!made) throw new Error(`The ${label} wallet did not come up. Nothing was lost: try again.`);
+    // Made, by the first-run setup or by hand: the setup has nothing left to make of it (and never makes it again).
+    await this.walletSetup.made(type, network);
+    this.walletView = { ...this.walletView, setup: this.walletSetup.view() };
     return made;
   }
 
@@ -3735,6 +3778,8 @@ export class GhostlyNode implements EngineImplementation {
     delete (settings as Partial<Settings>).wakeRotate;
     delete (settings as Partial<Settings>).wakeMutedGroups;
     delete (settings as Partial<Settings>).wakeHeldBy;
+    // The first-run wallet setup's record: the engine's alone.
+    delete (settings as Partial<Settings>).walletSetup;
     const relayBefore = this.hyperdhtRelay;
     // Of the Nostr settings, only what the patch names changes; the rest stays as stored (or the defaults).
     if (nostr) {

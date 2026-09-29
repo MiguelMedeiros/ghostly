@@ -534,6 +534,13 @@
     "mainnet": "sats",
     "testnet": "sats de prueba"
   },
+  "setup": {
+    "failed": "{{wallet}}: {{reason}}",
+    "progress": "Creando tus billeteras de Mainnet…",
+    "retry": "Reintentar {{wallet}}",
+    "skip": "Omitir",
+    "title": "Aún no creadas. Ghostly lo intenta de nuevo la próxima vez que se abra."
+  },
   "source": {
     "available": "{{count}} disponibles…",
     "backToMints": "Volver a las mints Cashu",
