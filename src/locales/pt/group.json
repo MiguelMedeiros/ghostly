@@ -89,6 +89,7 @@
     "knockedCommunity": "Aguardando alguém do grupo deixar você entrar. Acontece sozinho assim que o app de qualquer membro estiver aberto: você pode sair desta página e voltar.",
     "knocking": "Deixando uma batida onde o app do admin procura…",
     "knockingCommunity": "Deixando uma batida onde os apps do grupo procuram…",
+    "stale": "Ainda sem resposta. Se o link do grupo foi trocado, este não funciona mais: peça o novo link.",
     "step": {
       "admitted": "Admitido: recebendo as chaves do grupo",
       "answered": "O app do admin respondeu",

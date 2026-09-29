@@ -142,7 +142,26 @@ const joinSteps = (community: boolean, t: Translate): { stage: JoinStep; label: 
 ];
 /** How long after joining a group with nobody reached yet says it is still connecting (later, they are simply away). */
 const JUST_JOINED_MS = 5 * 60_000;
+/**
+ * A knock nobody answered for this long: the link may have been replaced since it was shared (a replaced link reaches
+ * nobody, and nothing tells the joiner so: WISP 9xx), or every app that could answer is closed. The joiner is told both.
+ */
+const LONG_KNOCK_MS = 2 * 60_000;
 const NO_MESSAGES: StoredMessage[] = [];
+
+/** True once `ms` have passed since `since` (none: never), re-rendering when they do. */
+function usePast(since: number | undefined, ms: number): boolean {
+  const [past, setPast] = useState(false);
+  useEffect(() => {
+    if (since === undefined) { setPast(false); return; }
+    const left = since + ms - Date.now();
+    setPast(left <= 0);
+    if (left <= 0) return;
+    const timer = setTimeout(() => setPast(true), left);
+    return () => clearTimeout(timer);
+  }, [since, ms]);
+  return past;
+}
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
 
 function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate): { title: string; body: string } {
@@ -264,6 +283,9 @@ export function GroupChat() {
   // "@everyone": a private group's admin only; a community has no everyone (WISP 9xx § Mentions).
   const mentions = useMemo(() => group ? { candidates: mentionCandidates(group, t), everyone: group.profile === "mesh" && group.isAdmin } : undefined, [group, t]);
 
+  // Still knocking through a link after a while: the link may have been replaced (said under the steps).
+  const knock = rosterGroup?.invitation?.viaLink ? rosterGroup.invitation.stage ?? (rosterGroup.invitation.admin ? "admitted" : "knocked") : undefined;
+  const knockedLong = usePast(knock === "knocked" ? rosterGroup!.createdAt : undefined, LONG_KNOCK_MS);
   if (!state) return null;
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm text-text-muted">{t("group.chat.gone")}</div>;
   const nameOf = replyNames(group, t("chat.reply.you"), t);
@@ -389,6 +411,7 @@ export function GroupChat() {
               </li>;
             })}
           </ol>
+          {knockedLong && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{t("group.join.stale")}</p>}
           <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">{t("group.join.cancel")}</button>
         </div>
