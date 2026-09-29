@@ -1,6 +1,7 @@
 {
   "accept": {
     "card": "Accept {{card}} from {{name}}",
+    "cardNetwork": "{{card}} ({{network}})",
     "contactOff": "Contact: has it off",
     "contactOn": "Contact: accepts it",
     "deck": "Ways of paying this chat accepts from {{name}}",
@@ -22,6 +23,219 @@
       "savedLive": "Saved: {{name}} knows now."
     }
   },
+  "bubble": {
+    "amountSats": "{{amount}} sats",
+    "approve": "Approve payment",
+    "balance": "{{amount}} {{unit}}",
+    "bitcoinOnchain": "Bitcoin on-chain",
+    "cashuMint": "Cashu mint",
+    "cashuMints": "the Cashu mints",
+    "error": {
+      "amountMismatch": "The invoice does not match the requested amount",
+      "feeAbove": "The Lightning fee (up to {{fee}} sats) is above your maximum"
+    },
+    "externalNote": {
+      "ark": "Paid from any Ark wallet. Your contact's wallet marks it paid once it sees the money.",
+      "bitcoin": "Paid from any Bitcoin wallet. Your contact's wallet marks it paid once it sees the money, after one confirmation.",
+      "lightning": "Paid from any Lightning wallet. Your contact's wallet marks it paid once it sees the money."
+    },
+    "externalTitle": "Scan, copy or open it in a wallet that is not Ghostly",
+    "fedimintNoFederation": "Fedimint · you share no federation: Lightning",
+    "hide": "Hide",
+    "maxFee": "Maximum fee (sats)",
+    "maxGas": "Maximum gas (ETH)",
+    "noSharedMint": "No shared configured mint",
+    "noWallet": {
+      "mainnet": "Real money is asked for ({{unit}}), and you have no Mainnet wallet to pay it from. Make one under Wallets, or ask for test money instead.",
+      "testnet": "Test money is asked for ({{unit}}), and you have no Testnet wallet to pay it from. Make one under Wallets, or ask for real money instead."
+    },
+    "off": "This way of paying is off in this chat.",
+    "payElsewhere": "Pay with another wallet",
+    "payOverLightning": "Pay {{amount}} {{unit}} over Lightning",
+    "preparing": "Preparing…",
+    "review": "Review payment",
+    "state": {
+      "closed": "Closed",
+      "lightningPending": "Lightning payment pending…",
+      "payment": {
+        "failed": "Failed",
+        "pending": "Waiting for your contact…",
+        "reclaimed": "Taken back",
+        "settled": "Received"
+      },
+      "request": {
+        "failed": "Failed",
+        "pending": "Waiting for payment",
+        "settled": "Paid"
+      },
+      "waitingConfirmation": "Waiting for a confirmation…"
+    },
+    "takeBack": "Take it back",
+    "takeBackTitle": "If your contact never picks it up, the ecash is still yours",
+    "through": "Through {{source}} · fee up to {{fee}} sats",
+    "title": {
+      "requests": "Requests",
+      "sentYou": "Sent you",
+      "youRequested": "You requested",
+      "youSent": "You sent"
+    }
+  },
+  "composer": {
+    "amountIn": "Amount in {{unit}}",
+    "asking": "Asking for an address…",
+    "backToCards": "Back to the cards",
+    "balanceWith": "{{balance}} · with {{name}}",
+    "cardStatus": {
+      "notAccepted": "Not accepted",
+      "offHere": "Off here"
+    },
+    "chooseOther": "Choose someone else",
+    "continue": "Continue",
+    "error": {
+      "noAnswer": "Your contact's app did not answer. It may be offline or need an update; they can send you a Request instead.",
+      "noFederation": "You and {{name}} share no federation, and their request has no Lightning invoice.",
+      "noFederationInvoice": "You and {{name}} share no federation: pay their request over Lightning, with Review payment on it in the chat.",
+      "noMint": "Add a Cashu mint first",
+      "prepare": "Could not prepare payment",
+      "request": "Could not prepare request"
+    },
+    "how": {
+      "arkade": "Send asks {{name}}'s app for a fresh Ark address, then shows the payment to approve.",
+      "bark": "Send asks {{name}}'s app for a fresh Bark address, then shows the payment to approve.",
+      "bitcoin": "Send asks {{name}}'s app for a fresh Bitcoin address, then shows the payment to approve. Paid once it confirms on-chain.",
+      "cashu": "Send gives {{name}} ecash straight away; a request also carries a Lightning invoice.",
+      "fedimint": "Send asks {{name}}'s app which federations it takes: ecash of one you share, after a review. Otherwise their request carries a Lightning invoice.",
+      "lightning": "Request with a Lightning invoice. To pay {{name}} over Lightning, tap Pay on their request.",
+      "spark": "Send asks {{name}}'s app for a Spark invoice, then shows the payment to approve: Spark to Spark, instant, no Lightning hop.",
+      "usdt": "Send asks {{name}}'s app for a USDT address, then shows the payment to approve."
+    },
+    "memo": "What for? (optional)",
+    "networks": "Networks",
+    "newNetworkWallet": "New {{network}} wallet",
+    "noNetworkWallets": "No {{network}} wallets",
+    "noWallet": {
+      "action": "Create a wallet",
+      "text": "You have no wallet yet. Create one to pay {{name}} and be paid: it takes one click."
+    },
+    "payWith": "Pay with",
+    "payment": "Payment",
+    "preparing": "Preparing…",
+    "request": "Request",
+    "requesting": "Requesting…",
+    "send": "Send",
+    "sendHint": "To pay on this card, tap Pay on your contact's request",
+    "tooMuch": "More than the {{amount}} {{unit}} on this card.",
+    "unavailable": {
+      "noWallet": "Your contact has no {{card}} wallet",
+      "notAccepted": "Your contact does not accept {{card}} in this chat",
+      "notHere": "{{card}} cannot be used here",
+      "notSetUp": "{{card}} is not set up yet",
+      "offHere": "{{card}} is off in this chat",
+      "status": "{{card}} is {{status}}"
+    },
+    "use": "Use {{card}}",
+    "with": "with {{name}}",
+    "withTitle": "With {{name}}",
+    "yourContact": "your contact"
+  },
+  "confirmReal": {
+    "label": "Confirm real money",
+    "money": "Real money.",
+    "send": "Send real money",
+    "text": "{{money}} This sends {{what}} that cannot be taken back once it settles. Nothing has gone out yet."
+  },
+  "external": {
+    "asking": "Asking…",
+    "checking": "Checking…",
+    "checkingNote": "Your contact's wallet is being checked. It turns Paid here by itself once the payment is seen.",
+    "copied": "Copied",
+    "copyError": "Could not copy. Select the text and copy it yourself.",
+    "open": "Open wallet",
+    "openError": "Could not open a wallet: {{error}}. Copy the text or scan the code instead.",
+    "openTitle": "Open in a wallet on this device",
+    "paid": "I paid",
+    "paidTitle": "Your contact's wallet is asked to look now. It marks the request paid only once it sees the money.",
+    "qrLabel": "Payment QR code"
+  },
+  "formats": {
+    "address": "Bitcoin address",
+    "amount": "Amount ({{unit}})",
+    "amountAria": "Amount in {{unit}}",
+    "anotherChain": "another chain",
+    "arkadeHint": "Paid from an Arkade wallet of the same Ark server.",
+    "arkadeLabel": "Ark address (Arkade)",
+    "barkHint": "Paid from a Bark wallet of the same Ark server (Second's). Arkade cannot pay it.",
+    "barkLabel": "Ark address (Bark)",
+    "bolt12": "Lightning offer (BOLT 12)",
+    "bolt12Hint": "Pay it with a wallet that supports BOLT 12 offers: no wallet here pays offers yet.",
+    "chainId": "chain {{id}}",
+    "copyAddress": "Copy address",
+    "copyOffer": "Copy offer",
+    "createWallet": "Create a {{network}} {{wallet}} wallet",
+    "from": "From {{issuer}}",
+    "hideQr": "Hide QR",
+    "maxFee": "Most you accept in fees ({{unit}})",
+    "maxFeeAria": "Maximum fee in {{unit}}",
+    "millisats": "{{amount}} millisats",
+    "networkNotStated": "Network not stated",
+    "noWallet": {
+      "mainnet": "You have no Mainnet {{wallet}} wallet to pay this real money.",
+      "testnet": "You have no Testnet {{wallet}} wallet to pay this test money."
+    },
+    "offline": "Your {{network}} Bitcoin wallet is not connected right now.",
+    "openBitcoinTitle": "Open in a Bitcoin wallet on this device",
+    "orLightning": "Or over Lightning, the same payment:",
+    "otherNeverPays": "Your {{network}} {{wallet}} wallet never pays it.",
+    "paymentLink": "Bitcoin payment link",
+    "smallestUnit": "(smallest unit)",
+    "testUsdt": "test USDT",
+    "unlock": "Unlock your {{network}} {{wallet}} wallet first.",
+    "unsupported": "This link asks for something this app does not understand, so it is not paid from here.",
+    "usdtLabel": "USDT address",
+    "usdtLabelChain": "USDT address · {{chain}}",
+    "usdtNoChain": "The same address exists on every Ethereum chain: ask for a link that names the chain (ethereum:…@1 for real USDT) before paying.",
+    "usdtOtherChain": "This link is for {{chain}}, where no USDT wallet here runs.",
+    "usdtWrongChain": "Your {{network}} USDT wallet is on {{chain}}; this link is for {{target}}.",
+    "wrongChain": "Your {{network}} Bitcoin wallet is on {{chain}}; this address is for {{target}}.",
+    "wrongToken": "This link asks for another token than your wallet's USDT: not paid from here."
+  },
+  "invoice": {
+    "anyAmount": "Any amount",
+    "checking": "Checking…",
+    "confirmWhat": "{{amount}} sats (plus a fee of up to {{fee}})",
+    "copied": "Copied",
+    "ecashRequest": "Ecash payment request",
+    "ecashToken": "Ecash token",
+    "expired": "Expired",
+    "expiresDays": "Expires in {{n}} days",
+    "expiresHours": "Expires in {{n}} h",
+    "expiresMinutes": "Expires in {{n}} min",
+    "expiresSeconds": "Expires in {{n}}s",
+    "hideQr": "Hide the QR code",
+    "label": "Lightning invoice",
+    "labelNetwork": "Lightning invoice · {{network}}",
+    "lightningAddress": "Lightning address",
+    "methodOff": "{{method}} is off in this chat.",
+    "mint": "Mint: {{mint}}",
+    "mintNotAdded": "You have not added this mint, so it cannot be redeemed here.",
+    "mints": "Mints: {{mints}}",
+    "noWallet": {
+      "mainnet": "Real money: you have no Mainnet Lightning wallet to pay it from",
+      "testnet": "Test money: you have no Testnet Lightning wallet to pay it from"
+    },
+    "onchainBitcoin": "On-chain Bitcoin",
+    "openTitle": "Open in a Lightning wallet on this device",
+    "openWallet": "Open wallet",
+    "paid": "Paid ✓",
+    "pay": "Pay",
+    "payWithFee": "Pay {{amount}} + up to {{fee}} fee",
+    "paying": "Paying…",
+    "paysThrough": "Pays through {{domain}}",
+    "pendingAtMint": "Payment pending at the mint…",
+    "redeem": "Redeem",
+    "redeemed": "Redeemed ✓",
+    "redeeming": "Redeeming…"
+  },
   "mode": {
     "accept": "Accept",
     "label": "Payments with {{name}}",
@@ -30,5 +244,60 @@
   "none": {
     "action": "Choose what this chat accepts",
     "text": "No way of paying is on in this chat."
+  },
+  "payWith": {
+    "card": "Lightning card",
+    "label": "Pay with"
+  },
+  "review": {
+    "approve": "Approve payment",
+    "check": "Check existing payment",
+    "destination": "Destination",
+    "details": "Payment details",
+    "error": {
+      "update": "Could not update this payment. Check its saved status."
+    },
+    "expires": "Expires",
+    "fee": "Fee / maximum",
+    "feePerGas": "Maximum / priority fee per gas (wei)",
+    "gasLimit": "Maximum gas / your limit",
+    "gasNonce": "Gas limit / nonce",
+    "label": "Payment review",
+    "money": {
+      "mainnet": "Real money: it leaves your wallet once you confirm.",
+      "testnet": "Test money: these coins are worth nothing outside the test network."
+    },
+    "note": {
+      "arkReal": "Real bitcoin. Ark confirmation is off-chain.",
+      "arkTest": "Test funds only. Ark confirmation is off-chain.",
+      "bark": "Sent over Second's Ark server, off-chain. Only an address of that same server can be paid.",
+      "bitcoin": "An on-chain transaction, signed for exactly this review. Settled after one confirmation; checking it never sends a second one.",
+      "cashu": "The selected mint holds the backing funds. Confirmation requires token redemption at that mint.",
+      "fedimint": "Ecash notes of this federation go to your contact: they are the money until your contact redeems them. If they never do, take them back (they also come back by themselves after a week).",
+      "sparkReal": "Real bitcoin. Spark to Spark, off-chain: final once Spark's operators sign the transfer. Checking it never sends a second one.",
+      "sparkTest": "Regtest: test sats, worthless. Spark to Spark, off-chain: final once Spark's operators sign the transfer. Checking it never sends a second one.",
+      "usdt": "Gas is paid separately in ETH and may exceed a small payment's value. Confirmed after {{blocks}} blocks.",
+      "usdtTest": "Local test token, not Tether-issued USDT. Gas is paid separately in ETH and may exceed a small payment's value. Confirmed after {{blocks}} blocks."
+    },
+    "payee": "Payee",
+    "provider": "Provider",
+    "states": {
+      "cancelled": "cancelled",
+      "confirmed": "confirmed",
+      "failed": "failed",
+      "pending": "pending",
+      "settled": "settled",
+      "submitted": "submitted",
+      "unknown": "unknown"
+    },
+    "status": "Status",
+    "title": {
+      "pending": "Review payment",
+      "status": "Payment status"
+    },
+    "tokenChain": "Token / chain",
+    "tokenChainValue": "{{token}} · {{chain}} · {{decimals}} decimals",
+    "total": "Total",
+    "transaction": "Transaction"
   }
 }

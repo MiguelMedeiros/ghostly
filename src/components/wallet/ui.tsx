@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { PayExternally } from "../PayExternally";
 import { focusInPlace } from "../../lib/focus";
+import { useOptionalI18n } from "../../contexts/I18nContext";
 
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
 export { Section, Row, Block } from "../layout/Section";
@@ -60,16 +61,19 @@ const ACTION_ICON: Record<Action, ReactNode> = {
   send: <path d="M12 19V5M5 12l7-7 7 7" />,
   history: <><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></>,
 };
+/** In English where no language is given (a component rendered on its own). */
 const ACTION_LABEL: Record<Action, string> = { receive: "Receive", send: "Send", history: "History" };
+const ACTION_KEY = { receive: "wallet.ui.receive", send: "wallet.ui.send", history: "wallet.ui.history" } as const;
 /** The two (or three) things a wallet is for, as big equal buttons. */
 export function Actions({ value, onChange, actions = ["receive", "send"] }: { value: Action; onChange: (next: Action) => void; actions?: Action[] }) {
+  const i18n = useOptionalI18n();
   return (
     <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${actions.length}, minmax(0, 1fr))` }} role="tablist">
       {actions.map((action) => (
         <button key={action} type="button" role="tab" aria-selected={value === action} data-testid={`wallet-${action === "send" ? "send" : action}`} onClick={() => onChange(action)}
           className={`flex items-center justify-center gap-2 min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">{ACTION_ICON[action]}</svg>
-          <span className="truncate">{ACTION_LABEL[action]}</span>
+          <span className="truncate">{i18n ? i18n.t(ACTION_KEY[action]) : ACTION_LABEL[action]}</span>
         </button>
       ))}
     </div>
@@ -81,9 +85,10 @@ export function Actions({ value, onChange, actions = ["receive", "send"] }: { va
  * opens (`uri`: `lightning:…`, `bitcoin:…`; `qr` when the code should show something else).
  */
 export function Address({ value, qr, uri, testId, note, actions }: { value: string | undefined; qr?: string; uri?: string; testId: string; note?: ReactNode; actions?: ReactNode }) {
+  const i18n = useOptionalI18n();
   // Never a QR code or a Copy button for an address that is not there yet: someone could share it.
-  if (!value) return <Notice testId={`${testId}-pending`}>Getting an address… It shows up here once the provider answers.</Notice>;
-  return <PayExternally uri={uri ?? qr ?? value} value={value} testId={testId} note={note} actions={actions} label="Receiving address" />;
+  if (!value) return <Notice testId={`${testId}-pending`}>{i18n ? i18n.t("wallet.ui.gettingAddress") : "Getting an address… It shows up here once the provider answers."}</Notice>;
+  return <PayExternally uri={uri ?? qr ?? value} value={value} testId={testId} note={note} actions={actions} label={i18n ? i18n.t("wallet.ui.receivingAddress") : "Receiving address"} />;
 }
 
 /** A large amount field: what matters most when paying is the number. */
@@ -91,11 +96,12 @@ export function Amount({ value, onChange, unit, decimals = 0, testId, autoFocus 
   // Focused where it is, without scrolling to it (in WebKit too: focusInPlace), so the wallet's cards above it stay in
   // view. Only when `autoFocus` says so: the Wallets page asks for it when a person chose the wallet, never when its
   // card came up as the pointer passed over the deck or as the keys moved along it (pages/Wallet.tsx).
+  const i18n = useOptionalI18n();
   const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => { if (autoFocus) focusInPlace(input.current); }, [autoFocus]);
   return (
     <label className="flex items-baseline gap-2 bg-surface-alt rounded-xl px-4 py-3 border border-border focus-within:ring-2 focus-within:ring-accent">
-      <input ref={input} data-testid={testId} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={`Amount in ${unit}`}
+      <input ref={input} data-testid={testId} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={i18n ? i18n.t("wallet.ui.amountIn", { unit }) : `Amount in ${unit}`}
         className="min-w-0 flex-1 bg-transparent border-none outline-none text-3xl font-semibold text-text-primary placeholder-text-muted tabular-nums"
         value={value} onChange={(e) => onChange(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
       <span className="text-text-muted text-sm shrink-0">{unit}</span>

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { removalRisksFunds, walletRemoval, type WalletRemoval } from "@ghostly/browser/shared/walletRemoval";
 import type { WalletNetwork, WalletPlatform, WalletState, WalletType } from "../../lib/platform";
 import { useBackdropDismiss } from "../../hooks/useDismiss";
+import { useI18n } from "../../contexts/I18nContext";
 import { NetworkTag } from "../NetworkTag";
 import { networkState } from "../walletCardData";
 import { BackupRows } from "./BackupRows";
@@ -26,18 +27,19 @@ export function RemoveWalletSection({ type, network, card, wallet, state, onRemo
   /** Brings up another card (the wallet this one comes with). */
   onOpen: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const [asking, setAsking] = useState(false);
   const removal = walletRemoval(type, network, networkState(state, network), state.intents, card);
   const label = card ? networkState(state, network, card).lightning?.name || walletLabel(type, network) : walletLabel(type, network);
   return (
-    <Section title="Remove" testId="wallet-remove-section">
+    <Section title={t("wallet.remove.title")} testId="wallet-remove-section">
       {removal.comesWith ? (
-        <Row label={`This card comes with your ${NETWORK_NAME[network]} ${WALLET_NAME[removal.comesWith]} wallet`} hint="It pays through the same mints: removing that wallet removes this card too.">
-          <Button data-testid="wallet-remove-open-cashu" onClick={() => onOpen(`${removal.comesWith}:${network}`)}>Open {WALLET_NAME[removal.comesWith]}</Button>
+        <Row label={t("wallet.remove.comesWith", { network: NETWORK_NAME[network], wallet: WALLET_NAME[removal.comesWith] })} hint={t("wallet.remove.comesWithHint")}>
+          <Button data-testid="wallet-remove-open-cashu" onClick={() => onOpen(`${removal.comesWith}:${network}`)}>{t("wallet.remove.open", { wallet: WALLET_NAME[removal.comesWith] })}</Button>
         </Row>
       ) : (
-        <Row label="Remove this wallet" hint={removal.custody === "elsewhere" ? "Ghostly forgets how to reach it; the money stays where it is." : "Its keys and settings leave this device. Other wallets stay as they are."}>
-          <Button variant="danger" data-testid="wallet-remove" aria-haspopup="dialog" onClick={() => setAsking(true)}>Remove {label}…</Button>
+        <Row label={t("wallet.remove.label")} hint={removal.custody === "elsewhere" ? t("wallet.remove.hintElsewhere") : t("wallet.remove.hintDevice")}>
+          <Button variant="danger" data-testid="wallet-remove" aria-haspopup="dialog" onClick={() => setAsking(true)}>{t("wallet.remove.ask", { label })}</Button>
         </Row>
       )}
       {asking && <RemoveWalletDialog removal={removal} wallet={wallet.forNetwork(network)} source={sourceName(type, network, state, card)} onClose={() => setAsking(false)} onRemoved={() => { setAsking(false); onRemoved(); }} />}
@@ -64,6 +66,7 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
   onClose: () => void;
   onRemoved: () => void;
 }) {
+  const { t } = useI18n();
   const id = useId();
   const { type, network } = removal;
   const label = walletLabel(type, network), real = network === "mainnet";
@@ -84,20 +87,20 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
   const remove = () => void run(async () => { await wallet.remove({ type, network, ...(removal.card ? { card: removal.card } : {}), ...(risks ? { acceptLoss: true } : {}) }); onRemoved(); });
 
   const what = removal.custody === "elsewhere"
-    ? `Your money stays ${source ? `in ${source}` : "where it is"}: Ghostly only forgets how to reach it. You can connect it again later.`
-    : held === "unknown" ? "Ghostly cannot read its balance right now (it is not connected): it may hold money."
-    : held.empty ? "It holds nothing." : `It holds ${held.text} on ${NETWORK_NAME[network]}${real ? ", real money" : ", test coins worth nothing"}.`;
+    ? source ? t("wallet.remove.held.elsewhereIn", { source }) : t("wallet.remove.held.elsewhere")
+    : held === "unknown" ? t("wallet.remove.held.unknown")
+    : held.empty ? t("wallet.remove.held.empty")
+    : t(real ? "wallet.remove.held.real" : "wallet.remove.held.test", { amount: held.text, network: NETWORK_NAME[network] });
   const { awaiting, returnable } = removal;
-  const holds = held === "unknown" ? `whatever this ${label} wallet holds becomes unreachable without its backup`
-    : held.empty ? ""
-    : real ? `these ${held.text} are real money, and they become unreachable without this wallet's backup`
-    : `these ${held.text} become unreachable without this wallet's backup`;
-  const waits = awaiting.length ? `anything paid to its open requests and invoices after it is removed is lost${real && !holds ? ", and it is real money" : ""}` : "";
-  const consent = `I understand: ${[holds, waits].filter(Boolean).join("; and ")}.`;
+  // What goes (the money held, the money still coming, or both), each case one whole sentence.
+  const waits = awaiting.length > 0;
+  const consent = held === "unknown" ? t(waits ? "wallet.remove.consent.unknownWaits" : "wallet.remove.consent.unknown", { label })
+    : !held.empty ? t(real ? (waits ? "wallet.remove.consent.realWaits" : "wallet.remove.consent.real") : (waits ? "wallet.remove.consent.testWaits" : "wallet.remove.consent.test"), { amount: held.text })
+    : t(real ? "wallet.remove.consent.waitsReal" : "wallet.remove.consent.waits");
   const requests = awaiting.some((i) => i.kind === "request");
   const afterwards = removal.custody === "elsewhere"
-    ? `Anything paid to them afterwards still reaches ${source ?? "the wallet"}; Ghostly just no longer sees it.`
-    : `Anything paid to them afterwards is lost${real ? ": this is real money" : ""}. To keep it, wait until they are paid or have expired.`;
+    ? source ? t("wallet.remove.afterwards.reaches", { source }) : t("wallet.remove.afterwards.reachesWallet")
+    : t(real ? "wallet.remove.afterwards.lostReal" : "wallet.remove.afterwards.lost");
   // A backup is offered whenever something could be lost, and for any real-money wallet: an address shared before
   // may still be paid, and only its recovery phrase reaches what arrives there.
   const offerBackup = removal.custody === "device" && (risks || real);
@@ -108,38 +111,38 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
       className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-panel-header p-5 text-text-primary shadow-2xl backdrop:bg-black/60 space-y-4">
       <div className="space-y-2">
         <NetworkTag network={network} testId="wallet-remove-network" />
-        <h2 id={`${id}-title`} className="text-base font-semibold">Remove your {label} wallet?</h2>
+        <h2 id={`${id}-title`} className="text-base font-semibold">{t("wallet.remove.question", { label })}</h2>
         <p id={`${id}-body`} className="text-sm text-text-secondary" data-testid="wallet-remove-held">{what}</p>
       </div>
       {awaiting.length > 0 && (
         <div className="space-y-2" data-testid="wallet-remove-awaiting">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">Still waiting for money</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("wallet.remove.awaiting")}</h3>
           <ul className="bg-surface rounded-xl divide-y divide-border text-sm">
             {awaiting.map((item, i) => <li key={`${item.kind}-${item.paymentId ?? i}`} className="px-3 py-2" data-testid="wallet-remove-awaiting-item" data-kind={item.kind}>{item.text}</li>)}
           </ul>
-          <p className="text-xs text-text-secondary" data-testid="wallet-remove-awaiting-note">{requests ? "Removing the wallet closes its open requests, and your contacts are told. " : ""}{afterwards}</p>
+          <p className="text-xs text-text-secondary" data-testid="wallet-remove-awaiting-note">{requests ? t("wallet.remove.closesRequests", { afterwards }) : afterwards}</p>
         </div>
       )}
       {returnable.length > 0 && (
         <Notice testId="wallet-remove-returnable">
-          Ecash you sent from this wallet has not been taken yet ({returnable.map((i) => i.amount).join(", ")}). It is not lost: to take it back later, add its mint again first.
+          {t("wallet.remove.returnable", { amounts: returnable.map((i) => i.amount).join(", ") })}
         </Notice>
       )}
-      {removal.pending > 0 && <Notice tone="error" testId="wallet-remove-pending">A payment through this wallet is not finished yet ({removal.pending}). Wait for it to settle or cancel it, then remove the wallet.</Notice>}
+      {removal.pending > 0 && <Notice tone="error" testId="wallet-remove-pending">{t("wallet.remove.pending", { count: removal.pending })}</Notice>}
       {offerBackup && (
         <div className="space-y-2" data-testid="wallet-remove-backup">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">Back up first</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("wallet.remove.backupFirst")}</h3>
           {removal.backup === "phrase" ? (
             <div className="bg-surface rounded-xl divide-y divide-border">
               <BackupRows name={WALLET_NAME[type]} busy={backup.busy || busy} run={backup.run} reveal={() => reveal(wallet, type)} exportBackup={(password) => exportBackup(wallet, type, password)} />
             </div>
           ) : removal.backup === "tokens" ? (
             <Block>
-              <p className="text-xs text-text-secondary">Its ecash, as tokens: whoever has them has the sats. Keep them somewhere safe, or receive them in another wallet.</p>
-              <Button data-testid="wallet-remove-copy-tokens" disabled={backup.busy || busy} onClick={() => void backup.run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((t) => t.token).join("\n")); setNotice(tokens.length ? "Ecash copied. Whoever has these tokens has the sats." : "There is no ecash to copy."); })}>Copy ecash backup</Button>
+              <p className="text-xs text-text-secondary">{t("wallet.remove.tokensHint")}</p>
+              <Button data-testid="wallet-remove-copy-tokens" disabled={backup.busy || busy} onClick={() => void backup.run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setNotice(tokens.length ? t("wallet.remove.tokensCopied") : t("wallet.remove.noTokens")); })}>{t("wallet.remove.copyTokens")}</Button>
             </Block>
           ) : (
-            <Notice testId="wallet-remove-no-backup">Ghostly cannot show this wallet's recovery phrase again: only the phrase you wrote down when you made it brings this money back.</Notice>
+            <Notice testId="wallet-remove-no-backup">{t("wallet.remove.noBackup")}</Notice>
           )}
           {notice && <Notice testId="wallet-remove-notice">{notice}</Notice>}
           {backup.error && <Notice tone="error" testId="wallet-remove-backup-error">{backup.error}</Notice>}
@@ -153,8 +156,8 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
       )}
       {error && <Notice tone="error" testId="wallet-remove-error">{error}</Notice>}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button ref={cancel} data-testid="wallet-remove-cancel" disabled={busy} onClick={close}>Cancel</Button>
-        <Button variant="danger" data-testid="wallet-remove-confirm" disabled={busy || removal.pending > 0 || (risks && !understood)} onClick={remove}>{busy ? "Removing…" : `Remove ${label}`}</Button>
+        <Button ref={cancel} data-testid="wallet-remove-cancel" disabled={busy} onClick={close}>{t("common.cancel")}</Button>
+        <Button variant="danger" data-testid="wallet-remove-confirm" disabled={busy || removal.pending > 0 || (risks && !understood)} onClick={remove}>{busy ? t("wallet.remove.removing") : t("wallet.remove.confirm", { label })}</Button>
       </div>
     </dialog>,
     document.body,

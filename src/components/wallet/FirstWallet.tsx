@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { WalletNetwork, WalletPlatform, WalletType } from "../../lib/platform";
+import { useI18n } from "../../contexts/I18nContext";
+import { fillNodes } from "../../lib/fillNodes";
 import { WalletMark } from "../WalletCards";
 import { Button, Notice } from "./ui";
 import { WALLET_NAME as NAME } from "./names";
@@ -19,6 +21,7 @@ export function FirstWallet({ wallet, onNew, onStart, onMade }: {
   onStart: () => void;
   onMade: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState<WalletNetwork | null>(null);
   const [made, setMade] = useState<string[]>([]);
   const [failed, setFailed] = useState<{ type: WalletType; network: WalletNetwork; text: string }[]>([]);
@@ -41,23 +44,25 @@ export function FirstWallet({ wallet, onNew, onStart, onMade }: {
         {FIRST.map((type) => <span key={type} className={`wallet-card-${type} grid place-items-center w-9 h-9 rounded-lg`} style={{ color: "rgb(var(--card-rgb))", background: "rgba(var(--card-rgb), .14)" }} aria-hidden="true"><WalletMark rail={type} /></span>)}
       </div>
       <div className="space-y-1">
-        <h2 id="wallet-first-title" className="text-base font-medium text-text-primary">Create your first wallet</h2>
-        <p className="text-sm text-text-secondary">Each wallet has its own network. Start with Cashu, to pay and be paid over Lightning, and USDT: one click, on the network you choose.</p>
+        <h2 id="wallet-first-title" className="text-base font-medium text-text-primary">{t("wallet.first.title")}</h2>
+        <p className="text-sm text-text-secondary">{t("wallet.first.text")}</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button variant="primary" data-testid="wallet-first-testnet" disabled={!!busy} onClick={() => void start("testnet")}>{busy === "testnet" ? "Creating…" : "Start on Testnet"}</Button>
-        <Button data-testid="wallet-first-mainnet" disabled={!!busy} onClick={() => void start("mainnet")}>{busy === "mainnet" ? "Creating…" : "Start on Mainnet"}</Button>
+        <Button variant="primary" data-testid="wallet-first-testnet" disabled={!!busy} onClick={() => void start("testnet")}>{busy === "testnet" ? t("wallet.first.creating") : t("wallet.first.startTestnet")}</Button>
+        <Button data-testid="wallet-first-mainnet" disabled={!!busy} onClick={() => void start("mainnet")}>{busy === "mainnet" ? t("wallet.first.creating") : t("wallet.first.startMainnet")}</Button>
       </div>
-      <p className="text-xs text-text-muted">Testnet: test coins, worth nothing, to try things out. Mainnet: real money.</p>
-      {busy && <Notice testId="wallet-first-progress">Creating your wallets and checking their servers…</Notice>}
+      <p className="text-xs text-text-muted">{t("wallet.first.networks")}</p>
+      {busy && <Notice testId="wallet-first-progress">{t("wallet.first.progress")}</Notice>}
       {failed.map((f) => (
         <div key={f.type} className="flex flex-wrap items-center gap-2">
           <Notice tone="error" testId={`wallet-first-error-${f.type}`}>{f.text}</Notice>
-          <Button data-testid={`wallet-first-retry-${f.type}`} disabled={!!busy} onClick={() => void start(f.network, [f.type])}>Try {NAME[f.type]} again</Button>
+          <Button data-testid={`wallet-first-retry-${f.type}`} disabled={!!busy} onClick={() => void start(f.network, [f.type])}>{t("wallet.first.retry", { wallet: NAME[f.type] })}</Button>
         </div>
       ))}
-      {made.length > 0 && failed.length > 0 && <Button onClick={() => onMade(made[0])}>Open what was made</Button>}
-      <p className="text-sm text-text-secondary">Or pick any kind of wallet with <button type="button" data-testid="wallet-first-new" onClick={onNew} className="text-accent underline underline-offset-2 cursor-pointer">New</button>: Ark, Lightning, Bitcoin, Fedimint and more.</p>
+      {made.length > 0 && failed.length > 0 && <Button onClick={() => onMade(made[0])}>{t("wallet.first.openMade")}</Button>}
+      <p className="text-sm text-text-secondary">{fillNodes(t("wallet.first.orNew"), {
+        new: <button type="button" data-testid="wallet-first-new" onClick={onNew} className="text-accent underline underline-offset-2 cursor-pointer">{t("sidebar.new")}</button>,
+      })}</p>
     </section>
   );
 }

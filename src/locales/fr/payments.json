@@ -1,6 +1,7 @@
 {
   "accept": {
     "card": "Accepter {{card}} de {{name}}",
+    "cardNetwork": "{{card}} ({{network}})",
     "contactOff": "Contact : l'a désactivé",
     "contactOn": "Contact : l'accepte",
     "deck": "Moyens de paiement que cette conversation accepte de {{name}}",
@@ -22,6 +23,219 @@
       "savedLive": "Enregistré : {{name}} le sait déjà."
     }
   },
+  "bubble": {
+    "amountSats": "{{amount}} sats",
+    "approve": "Approuver le paiement",
+    "balance": "{{amount}} {{unit}}",
+    "bitcoinOnchain": "Bitcoin on-chain",
+    "cashuMint": "Mint Cashu",
+    "cashuMints": "les mints Cashu",
+    "error": {
+      "amountMismatch": "La facture ne correspond pas au montant demandé",
+      "feeAbove": "Les frais Lightning (jusqu'à {{fee}} sats) dépassent votre maximum"
+    },
+    "externalNote": {
+      "ark": "Payable depuis n'importe quel portefeuille Ark. Le portefeuille de votre contact le marque payé dès qu'il voit l'argent.",
+      "bitcoin": "Payable depuis n'importe quel portefeuille Bitcoin. Le portefeuille de votre contact le marque payé dès qu'il voit l'argent, après une confirmation.",
+      "lightning": "Payable depuis n'importe quel portefeuille Lightning. Le portefeuille de votre contact le marque payé dès qu'il voit l'argent."
+    },
+    "externalTitle": "Scannez, copiez ou ouvrez-le dans un portefeuille autre que Ghostly",
+    "fedimintNoFederation": "Fedimint · aucune fédération en commun : Lightning",
+    "hide": "Masquer",
+    "maxFee": "Frais maximum (sats)",
+    "maxGas": "Gas maximum (ETH)",
+    "noSharedMint": "Aucun mint configuré en commun",
+    "noWallet": {
+      "mainnet": "De l'argent réel est demandé ({{unit}}), et vous n'avez aucun portefeuille Mainnet pour payer. Créez-en un dans Portefeuilles, ou demandez plutôt de l'argent de test.",
+      "testnet": "De l'argent de test est demandé ({{unit}}), et vous n'avez aucun portefeuille Testnet pour payer. Créez-en un dans Portefeuilles, ou demandez plutôt de l'argent réel."
+    },
+    "off": "Ce moyen de paiement est désactivé dans cette conversation.",
+    "payElsewhere": "Payer avec un autre portefeuille",
+    "payOverLightning": "Payer {{amount}} {{unit}} via Lightning",
+    "preparing": "Préparation…",
+    "review": "Vérifier le paiement",
+    "state": {
+      "closed": "Clos",
+      "lightningPending": "Paiement Lightning en attente…",
+      "payment": {
+        "failed": "Échec",
+        "pending": "En attente de votre contact…",
+        "reclaimed": "Repris",
+        "settled": "Reçu"
+      },
+      "request": {
+        "failed": "Échec",
+        "pending": "En attente du paiement",
+        "settled": "Payé"
+      },
+      "waitingConfirmation": "En attente d'une confirmation…"
+    },
+    "takeBack": "Le reprendre",
+    "takeBackTitle": "Si votre contact ne le récupère jamais, l'ecash reste à vous",
+    "through": "Via {{source}} · frais jusqu'à {{fee}} sats",
+    "title": {
+      "requests": "Demande",
+      "sentYou": "Vous a envoyé",
+      "youRequested": "Vous avez demandé",
+      "youSent": "Vous avez envoyé"
+    }
+  },
+  "composer": {
+    "amountIn": "Montant en {{unit}}",
+    "asking": "Demande d'une adresse…",
+    "backToCards": "Retour aux cartes",
+    "balanceWith": "{{balance}} · avec {{name}}",
+    "cardStatus": {
+      "notAccepted": "Non accepté",
+      "offHere": "Désactivé ici"
+    },
+    "chooseOther": "Choisir quelqu'un d'autre",
+    "continue": "Continuer",
+    "error": {
+      "noAnswer": "L'app de votre contact n'a pas répondu. Elle est peut-être hors ligne ou doit être mise à jour ; votre contact peut vous envoyer une demande à la place.",
+      "noFederation": "Vous et {{name}} n'avez aucune fédération en commun, et sa demande n'a pas de facture Lightning.",
+      "noFederationInvoice": "Vous et {{name}} n'avez aucune fédération en commun : payez sa demande via Lightning, avec Vérifier le paiement dessus dans la conversation.",
+      "noMint": "Ajoutez d'abord une mint Cashu",
+      "prepare": "Impossible de préparer le paiement",
+      "request": "Impossible de préparer la demande"
+    },
+    "how": {
+      "arkade": "Envoyer demande une nouvelle adresse Ark à l'app de {{name}}, puis affiche le paiement à approuver.",
+      "bark": "Envoyer demande une nouvelle adresse Bark à l'app de {{name}}, puis affiche le paiement à approuver.",
+      "bitcoin": "Envoyer demande une nouvelle adresse Bitcoin à l'app de {{name}}, puis affiche le paiement à approuver. Payé une fois confirmé on-chain.",
+      "cashu": "Envoyer donne de l'ecash à {{name}} tout de suite ; une demande contient aussi une facture Lightning.",
+      "fedimint": "Envoyer demande à l'app de {{name}} quelles fédérations elle accepte : de l'ecash d'une fédération commune, après vérification. Sinon, sa demande contient une facture Lightning.",
+      "lightning": "Demandez avec une facture Lightning. Pour payer {{name}} via Lightning, touchez Payer sur sa demande.",
+      "spark": "Envoyer demande une facture Spark à l'app de {{name}}, puis affiche le paiement à approuver : de Spark à Spark, instantané, sans passer par Lightning.",
+      "usdt": "Envoyer demande une adresse USDT à l'app de {{name}}, puis affiche le paiement à approuver."
+    },
+    "memo": "Pour quoi ? (facultatif)",
+    "networks": "Réseaux",
+    "newNetworkWallet": "Nouveau portefeuille {{network}}",
+    "noNetworkWallets": "Aucun portefeuille {{network}}",
+    "noWallet": {
+      "action": "Créer un portefeuille",
+      "text": "Vous n'avez pas encore de portefeuille. Créez-en un pour payer {{name}} et être payé : un clic suffit."
+    },
+    "payWith": "Payer avec",
+    "payment": "Paiement",
+    "preparing": "Préparation…",
+    "request": "Demander",
+    "requesting": "Demande…",
+    "send": "Envoyer",
+    "sendHint": "Pour payer avec cette carte, touchez Payer sur la demande de votre contact",
+    "tooMuch": "Plus que les {{amount}} {{unit}} de cette carte.",
+    "unavailable": {
+      "noWallet": "Votre contact n'a pas de portefeuille {{card}}",
+      "notAccepted": "Votre contact n'accepte pas {{card}} dans cette conversation",
+      "notHere": "{{card}} ne peut pas être utilisé ici",
+      "notSetUp": "{{card}} n'est pas encore configuré",
+      "offHere": "{{card}} est désactivé dans cette conversation",
+      "status": "{{card}} : {{status}}"
+    },
+    "use": "Utiliser {{card}}",
+    "with": "avec {{name}}",
+    "withTitle": "Avec {{name}}",
+    "yourContact": "votre contact"
+  },
+  "confirmReal": {
+    "label": "Confirmer l'argent réel",
+    "money": "Argent réel.",
+    "send": "Envoyer de l'argent réel",
+    "text": "{{money}} Ceci envoie {{what}}, qui ne pourront pas être récupérés une fois réglés. Rien n'est encore parti."
+  },
+  "external": {
+    "asking": "Demande…",
+    "checking": "Vérification…",
+    "checkingNote": "Le portefeuille de votre contact est en cours de vérification. Il passe à Payé ici tout seul une fois le paiement vu.",
+    "copied": "Copié",
+    "copyError": "Copie impossible. Sélectionnez le texte et copiez-le vous-même.",
+    "open": "Ouvrir le portefeuille",
+    "openError": "Impossible d'ouvrir un portefeuille : {{error}}. Copiez le texte ou scannez le code à la place.",
+    "openTitle": "Ouvrir dans un portefeuille sur cet appareil",
+    "paid": "J'ai payé",
+    "paidTitle": "Le portefeuille de votre contact est invité à vérifier maintenant. Il ne marque la demande comme payée qu'une fois l'argent vu.",
+    "qrLabel": "QR code du paiement"
+  },
+  "formats": {
+    "address": "Adresse Bitcoin",
+    "amount": "Montant ({{unit}})",
+    "amountAria": "Montant en {{unit}}",
+    "anotherChain": "une autre chaîne",
+    "arkadeHint": "Payée depuis un portefeuille Arkade du même serveur Ark.",
+    "arkadeLabel": "Adresse Ark (Arkade)",
+    "barkHint": "Payée depuis un portefeuille Bark du même serveur Ark (celui de Second). Arkade ne peut pas la payer.",
+    "barkLabel": "Adresse Ark (Bark)",
+    "bolt12": "Offre Lightning (BOLT 12)",
+    "bolt12Hint": "Payez-la avec un portefeuille qui gère les offres BOLT 12 : aucun portefeuille ici ne paie encore les offres.",
+    "chainId": "chaîne {{id}}",
+    "copyAddress": "Copier l'adresse",
+    "copyOffer": "Copier l'offre",
+    "createWallet": "Créer un portefeuille {{wallet}} {{network}}",
+    "from": "De {{issuer}}",
+    "hideQr": "Masquer le QR",
+    "maxFee": "Frais maximum acceptés ({{unit}})",
+    "maxFeeAria": "Frais maximum en {{unit}}",
+    "millisats": "{{amount}} millisats",
+    "networkNotStated": "Réseau non précisé",
+    "noWallet": {
+      "mainnet": "Vous n'avez aucun portefeuille {{wallet}} Mainnet pour payer cet argent réel.",
+      "testnet": "Vous n'avez aucun portefeuille {{wallet}} Testnet pour payer cet argent de test."
+    },
+    "offline": "Votre portefeuille Bitcoin {{network}} n'est pas connecté pour le moment.",
+    "openBitcoinTitle": "Ouvrir dans un portefeuille Bitcoin sur cet appareil",
+    "orLightning": "Ou via Lightning, le même paiement :",
+    "otherNeverPays": "Votre portefeuille {{wallet}} {{network}} ne le paie jamais.",
+    "paymentLink": "Lien de paiement Bitcoin",
+    "smallestUnit": "(plus petite unité)",
+    "testUsdt": "USDT de test",
+    "unlock": "Déverrouillez d'abord votre portefeuille {{wallet}} {{network}}.",
+    "unsupported": "Ce lien demande quelque chose que cette app ne comprend pas, il n'est donc pas payé d'ici.",
+    "usdtLabel": "Adresse USDT",
+    "usdtLabelChain": "Adresse USDT · {{chain}}",
+    "usdtNoChain": "La même adresse existe sur toutes les chaînes Ethereum : demandez un lien qui nomme la chaîne (ethereum:…@1 pour de vrais USDT) avant de payer.",
+    "usdtOtherChain": "Ce lien est pour {{chain}}, où aucun portefeuille USDT d'ici ne fonctionne.",
+    "usdtWrongChain": "Votre portefeuille USDT {{network}} est sur {{chain}} ; ce lien est pour {{target}}.",
+    "wrongChain": "Votre portefeuille Bitcoin {{network}} est sur {{chain}} ; cette adresse est pour {{target}}.",
+    "wrongToken": "Ce lien demande un autre jeton que l'USDT de votre portefeuille : il n'est pas payé d'ici."
+  },
+  "invoice": {
+    "anyAmount": "Montant libre",
+    "checking": "Vérification…",
+    "confirmWhat": "{{amount}} sats (plus des frais jusqu'à {{fee}})",
+    "copied": "Copié",
+    "ecashRequest": "Demande de paiement ecash",
+    "ecashToken": "Jeton ecash",
+    "expired": "Expirée",
+    "expiresDays": "Expire dans {{n}} jours",
+    "expiresHours": "Expire dans {{n}} h",
+    "expiresMinutes": "Expire dans {{n}} min",
+    "expiresSeconds": "Expire dans {{n}} s",
+    "hideQr": "Masquer le QR code",
+    "label": "Facture Lightning",
+    "labelNetwork": "Facture Lightning · {{network}}",
+    "lightningAddress": "Adresse Lightning",
+    "methodOff": "{{method}} est désactivé dans cette conversation.",
+    "mint": "Mint : {{mint}}",
+    "mintNotAdded": "Vous n'avez pas ajouté ce mint, il ne peut donc pas être encaissé ici.",
+    "mints": "Mints : {{mints}}",
+    "noWallet": {
+      "mainnet": "Argent réel : vous n'avez aucun portefeuille Lightning Mainnet pour la payer",
+      "testnet": "Argent de test : vous n'avez aucun portefeuille Lightning Testnet pour la payer"
+    },
+    "onchainBitcoin": "Bitcoin on-chain",
+    "openTitle": "Ouvrir dans un portefeuille Lightning sur cet appareil",
+    "openWallet": "Ouvrir le portefeuille",
+    "paid": "Payée ✓",
+    "pay": "Payer",
+    "payWithFee": "Payer {{amount}} + frais jusqu'à {{fee}}",
+    "paying": "Paiement…",
+    "paysThrough": "Paiement via {{domain}}",
+    "pendingAtMint": "Paiement en attente au mint…",
+    "redeem": "Encaisser",
+    "redeemed": "Encaissé ✓",
+    "redeeming": "Encaissement…"
+  },
   "mode": {
     "accept": "Accepter",
     "label": "Paiements avec {{name}}",
@@ -30,5 +244,60 @@
   "none": {
     "action": "Choisir ce que cette conversation accepte",
     "text": "Aucun moyen de paiement n'est activé dans cette conversation."
+  },
+  "payWith": {
+    "card": "Carte Lightning",
+    "label": "Payer avec"
+  },
+  "review": {
+    "approve": "Approuver le paiement",
+    "check": "Vérifier le paiement existant",
+    "destination": "Destination",
+    "details": "Détails du paiement",
+    "error": {
+      "update": "Impossible de mettre à jour ce paiement. Vérifiez son état enregistré."
+    },
+    "expires": "Expire",
+    "fee": "Frais / maximum",
+    "feePerGas": "Frais maximum / de priorité par gas (wei)",
+    "gasLimit": "Gas maximum / votre limite",
+    "gasNonce": "Limite de gas / nonce",
+    "label": "Vérification du paiement",
+    "money": {
+      "mainnet": "Argent réel : il quitte votre portefeuille dès que vous confirmez.",
+      "testnet": "Argent de test : ces pièces ne valent rien hors du réseau de test."
+    },
+    "note": {
+      "arkReal": "Du vrai bitcoin. La confirmation Ark est off-chain.",
+      "arkTest": "Fonds de test uniquement. La confirmation Ark est off-chain.",
+      "bark": "Envoyé via le serveur Ark de Second, off-chain. Seule une adresse de ce même serveur peut être payée.",
+      "bitcoin": "Une transaction on-chain, signée exactement pour cette vérification. Réglée après une confirmation ; la vérifier n'en envoie jamais une seconde.",
+      "cashu": "La mint sélectionnée détient les fonds de couverture. La confirmation exige l'échange du jeton auprès de cette mint.",
+      "fedimint": "Les billets ecash de cette fédération vont à votre contact : ils sont l'argent jusqu'à ce que votre contact les échange. S'il ne le fait jamais, reprenez-les (ils reviennent aussi seuls au bout d'une semaine).",
+      "sparkReal": "Du vrai bitcoin. De Spark à Spark, off-chain : définitif une fois que les opérateurs de Spark signent le transfert. Le vérifier n'en envoie jamais un second.",
+      "sparkTest": "Regtest : sats de test, sans valeur. De Spark à Spark, off-chain : définitif une fois que les opérateurs de Spark signent le transfert. Le vérifier n'en envoie jamais un second.",
+      "usdt": "Le gas est payé à part en ETH et peut dépasser la valeur d'un petit paiement. Confirmé après {{blocks}} blocs.",
+      "usdtTest": "Jeton de test local, pas de l'USDT émis par Tether. Le gas est payé à part en ETH et peut dépasser la valeur d'un petit paiement. Confirmé après {{blocks}} blocs."
+    },
+    "payee": "Bénéficiaire",
+    "provider": "Fournisseur",
+    "states": {
+      "cancelled": "annulé",
+      "confirmed": "confirmé",
+      "failed": "échoué",
+      "pending": "en attente",
+      "settled": "réglé",
+      "submitted": "envoyé",
+      "unknown": "inconnu"
+    },
+    "status": "État",
+    "title": {
+      "pending": "Vérifier le paiement",
+      "status": "État du paiement"
+    },
+    "tokenChain": "Jeton / chaîne",
+    "tokenChainValue": "{{token}} · {{chain}} · {{decimals}} décimales",
+    "total": "Total",
+    "transaction": "Transaction"
   }
 }

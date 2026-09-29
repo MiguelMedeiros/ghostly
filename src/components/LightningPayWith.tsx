@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n } from "../contexts/I18nContext";
 import type { WalletPlatform } from "../lib/platform";
 import { Select } from "./ui/Select";
 import { lightningPayers } from "./walletCardData";
@@ -19,10 +20,11 @@ export function lightningPayer(wallet: WalletPlatform | undefined, amount: numbe
 
 /** "Pay with": the Lightning cards that can pay, each with its balance. Shown only when there is a choice. */
 export function LightningPayWith({ payer, unit, disabled, testId }: { payer: ReturnType<typeof useLightningPayer>; unit: string; disabled?: boolean; testId: string }) {
+  const { t } = useI18n();
   if (!payer.card) return null;
   return (
-    <label className="block space-y-1 text-xs">Pay with
-      <Select size="sm" aria-label="Lightning card" data-testid={testId} value={payer.card} disabled={disabled} onChange={payer.choose}
+    <label className="block space-y-1 text-xs">{t("payments.payWith.label")}
+      <Select size="sm" aria-label={t("payments.payWith.card")} data-testid={testId} value={payer.card} disabled={disabled} onChange={payer.choose}
         options={payer.cards.map((c) => ({ value: c.card, label: c.name, description: c.balance !== undefined ? `${c.balance.toLocaleString()} ${unit}` : undefined }))} />
     </label>
   );

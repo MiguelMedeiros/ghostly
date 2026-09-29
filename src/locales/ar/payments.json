@@ -1,6 +1,7 @@
 {
   "accept": {
     "card": "قبول {{card}} من {{name}}",
+    "cardNetwork": "{{card}} ({{network}})",
     "contactOff": "جهة الاتصال: أوقفتها",
     "contactOn": "جهة الاتصال: تقبلها",
     "deck": "طرق الدفع التي تقبلها هذه المحادثة من {{name}}",
@@ -22,6 +23,219 @@
       "savedLive": "تم الحفظ: {{name}} يعلم الآن."
     }
   },
+  "bubble": {
+    "amountSats": "{{amount}} sats",
+    "approve": "الموافقة على الدفع",
+    "balance": "{{amount}} {{unit}}",
+    "bitcoinOnchain": "Bitcoin على السلسلة",
+    "cashuMint": "دار سك Cashu",
+    "cashuMints": "دور سك Cashu",
+    "error": {
+      "amountMismatch": "الفاتورة لا تطابق المبلغ المطلوب",
+      "feeAbove": "رسوم Lightning (حتى {{fee}} sats) تتجاوز الحد الأقصى لديك"
+    },
+    "externalNote": {
+      "ark": "يُدفع من أي محفظة Ark. تعلّمه محفظة جهة اتصالك مدفوعًا حين ترى المال.",
+      "bitcoin": "يُدفع من أي محفظة Bitcoin. تعلّمه محفظة جهة اتصالك مدفوعًا حين ترى المال، بعد تأكيد واحد.",
+      "lightning": "يُدفع من أي محفظة Lightning. تعلّمه محفظة جهة اتصالك مدفوعًا حين ترى المال."
+    },
+    "externalTitle": "امسحه أو انسخه أو افتحه في محفظة غير Ghostly",
+    "fedimintNoFederation": "Fedimint · لا يوجد اتحاد مشترك بينكما: Lightning",
+    "hide": "إخفاء",
+    "maxFee": "الحد الأقصى للرسوم (sats)",
+    "maxGas": "الحد الأقصى للغاز (ETH)",
+    "noSharedMint": "لا توجد دار سك مشتركة مُعدّة",
+    "noWallet": {
+      "mainnet": "المطلوب أموال حقيقية ({{unit}})، وليست لديك محفظة Mainnet للدفع منها. أنشئ واحدة من المحافظ، أو اطلب أموالًا تجريبية بدلًا من ذلك.",
+      "testnet": "المطلوب أموال تجريبية ({{unit}})، وليست لديك محفظة Testnet للدفع منها. أنشئ واحدة من المحافظ، أو اطلب أموالًا حقيقية بدلًا من ذلك."
+    },
+    "off": "طريقة الدفع هذه متوقفة في هذه المحادثة.",
+    "payElsewhere": "الدفع بمحفظة أخرى",
+    "payOverLightning": "ادفع {{amount}} {{unit}} عبر Lightning",
+    "preparing": "جارٍ التحضير…",
+    "review": "مراجعة الدفع",
+    "state": {
+      "closed": "مغلق",
+      "lightningPending": "دفعة Lightning قيد المعالجة…",
+      "payment": {
+        "failed": "فشل",
+        "pending": "في انتظار جهة اتصالك…",
+        "reclaimed": "تمت استعادته",
+        "settled": "تم الاستلام"
+      },
+      "request": {
+        "failed": "فشل",
+        "pending": "في انتظار الدفع",
+        "settled": "مدفوع"
+      },
+      "waitingConfirmation": "في انتظار تأكيد…"
+    },
+    "takeBack": "استعادته",
+    "takeBackTitle": "إن لم تستلمه جهة اتصالك أبدًا، يبقى الـ ecash لك",
+    "through": "عبر {{source}} · رسوم حتى {{fee}} sats",
+    "title": {
+      "requests": "يطلب",
+      "sentYou": "أرسل إليك",
+      "youRequested": "طلبتَ",
+      "youSent": "أرسلتَ"
+    }
+  },
+  "composer": {
+    "amountIn": "المبلغ بـ {{unit}}",
+    "asking": "جارٍ طلب عنوان…",
+    "backToCards": "العودة إلى البطاقات",
+    "balanceWith": "{{balance}} · مع {{name}}",
+    "cardStatus": {
+      "notAccepted": "غير مقبول",
+      "offHere": "متوقف هنا"
+    },
+    "chooseOther": "اختر شخصًا آخر",
+    "continue": "متابعة",
+    "error": {
+      "noAnswer": "لم يستجب تطبيق جهة اتصالك. قد يكون غير متصل أو يحتاج إلى تحديث؛ يمكنه أن يرسل إليك طلبًا بدلًا من ذلك.",
+      "noFederation": "لا توجد فيدرالية مشتركة بينك وبين {{name}}، وطلبه لا يحتوي على فاتورة Lightning.",
+      "noFederationInvoice": "لا توجد فيدرالية مشتركة بينك وبين {{name}}: ادفع طلبه عبر Lightning، باستخدام مراجعة الدفع عليه في المحادثة.",
+      "noMint": "أضف mint لـ Cashu أولًا",
+      "prepare": "تعذّر تجهيز الدفع",
+      "request": "تعذّر تجهيز الطلب"
+    },
+    "how": {
+      "arkade": "الإرسال يطلب عنوان Ark جديدًا من تطبيق {{name}}، ثم يعرض الدفع للموافقة عليه.",
+      "bark": "الإرسال يطلب عنوان Bark جديدًا من تطبيق {{name}}، ثم يعرض الدفع للموافقة عليه.",
+      "bitcoin": "الإرسال يطلب عنوان Bitcoin جديدًا من تطبيق {{name}}، ثم يعرض الدفع للموافقة عليه. يُعدّ مدفوعًا بعد تأكيده على السلسلة.",
+      "cashu": "الإرسال يمنح {{name}} الـ ecash فورًا؛ ويحمل الطلب أيضًا فاتورة Lightning.",
+      "fedimint": "الإرسال يسأل تطبيق {{name}} عن الفيدراليات التي يقبلها: ecash من فيدرالية مشتركة بينكما، بعد المراجعة. وإلا فطلبه يحمل فاتورة Lightning.",
+      "lightning": "اطلب بفاتورة Lightning. للدفع إلى {{name}} عبر Lightning، اضغط ادفع على طلبه.",
+      "spark": "الإرسال يطلب فاتورة Spark من تطبيق {{name}}، ثم يعرض الدفع للموافقة عليه: من Spark إلى Spark، فوري، دون المرور عبر Lightning.",
+      "usdt": "الإرسال يطلب عنوان USDT من تطبيق {{name}}، ثم يعرض الدفع للموافقة عليه."
+    },
+    "memo": "لأجل ماذا؟ (اختياري)",
+    "networks": "الشبكات",
+    "newNetworkWallet": "محفظة {{network}} جديدة",
+    "noNetworkWallets": "لا توجد محافظ {{network}}",
+    "noWallet": {
+      "action": "أنشئ محفظة",
+      "text": "ليست لديك محفظة بعد. أنشئ واحدة لتدفع إلى {{name}} وتتلقى الدفع: يكفي نقرة واحدة."
+    },
+    "payWith": "ادفع باستخدام",
+    "payment": "دفع",
+    "preparing": "جارٍ التجهيز…",
+    "request": "اطلب",
+    "requesting": "جارٍ الطلب…",
+    "send": "أرسل",
+    "sendHint": "للدفع بهذه البطاقة، اضغط ادفع على طلب جهة اتصالك",
+    "tooMuch": "أكثر من {{amount}} {{unit}} الموجودة في هذه البطاقة.",
+    "unavailable": {
+      "noWallet": "لا تملك جهة اتصالك محفظة {{card}}",
+      "notAccepted": "لا تقبل جهة اتصالك {{card}} في هذه المحادثة",
+      "notHere": "لا يمكن استخدام {{card}} هنا",
+      "notSetUp": "لم يتم إعداد {{card}} بعد",
+      "offHere": "{{card}} متوقف في هذه المحادثة",
+      "status": "{{card}}: {{status}}"
+    },
+    "use": "استخدم {{card}}",
+    "with": "مع {{name}}",
+    "withTitle": "مع {{name}}",
+    "yourContact": "جهة اتصالك"
+  },
+  "confirmReal": {
+    "label": "تأكيد الأموال الحقيقية",
+    "money": "أموال حقيقية.",
+    "send": "أرسل أموالًا حقيقية",
+    "text": "{{money}} سيؤدي هذا إلى إرسال {{what}} ولا يمكن استرجاعها بعد التسوية. لم يُرسل شيء بعد."
+  },
+  "external": {
+    "asking": "جارٍ الطلب…",
+    "checking": "جارٍ التحقق…",
+    "checkingNote": "يجري التحقق من محفظة جهة اتصالك. ستتحول هنا إلى مدفوع تلقائيًا بمجرد رؤية الدفع.",
+    "copied": "تم النسخ",
+    "copyError": "تعذّر النسخ. حدّد النص وانسخه بنفسك.",
+    "open": "افتح المحفظة",
+    "openError": "تعذّر فتح محفظة: {{error}}. انسخ النص أو امسح الرمز بدلًا من ذلك.",
+    "openTitle": "افتح في محفظة على هذا الجهاز",
+    "paid": "لقد دفعت",
+    "paidTitle": "يُطلب من محفظة جهة اتصالك التحقق الآن. لا تضع علامة مدفوع على الطلب إلا عندما ترى المال.",
+    "qrLabel": "رمز QR للدفع"
+  },
+  "formats": {
+    "address": "عنوان Bitcoin",
+    "amount": "المبلغ ({{unit}})",
+    "amountAria": "المبلغ بـ {{unit}}",
+    "anotherChain": "سلسلة أخرى",
+    "arkadeHint": "يُدفع من محفظة Arkade على خادم Ark نفسه.",
+    "arkadeLabel": "عنوان Ark (Arkade)",
+    "barkHint": "يُدفع من محفظة Bark على خادم Ark نفسه (خادم Second). لا تستطيع Arkade دفعه.",
+    "barkLabel": "عنوان Ark (Bark)",
+    "bolt12": "عرض Lightning (BOLT 12)",
+    "bolt12Hint": "ادفعه بمحفظة تدعم عروض BOLT 12: لا توجد هنا محفظة تدفع العروض بعد.",
+    "chainId": "السلسلة {{id}}",
+    "copyAddress": "نسخ العنوان",
+    "copyOffer": "نسخ العرض",
+    "createWallet": "إنشاء محفظة {{wallet}} على {{network}}",
+    "from": "من {{issuer}}",
+    "hideQr": "إخفاء QR",
+    "maxFee": "أقصى رسوم تقبلها ({{unit}})",
+    "maxFeeAria": "الحد الأقصى للرسوم بـ {{unit}}",
+    "millisats": "{{amount}} millisats",
+    "networkNotStated": "الشبكة غير مذكورة",
+    "noWallet": {
+      "mainnet": "ليست لديك محفظة {{wallet}} على Mainnet لدفع هذه الأموال الحقيقية.",
+      "testnet": "ليست لديك محفظة {{wallet}} على Testnet لدفع هذه الأموال التجريبية."
+    },
+    "offline": "محفظة Bitcoin على {{network}} لديك غير متصلة الآن.",
+    "openBitcoinTitle": "افتحه في محفظة Bitcoin على هذا الجهاز",
+    "orLightning": "أو عبر Lightning، الدفعة نفسها:",
+    "otherNeverPays": "محفظة {{wallet}} على {{network}} لديك لا تدفعها أبدًا.",
+    "paymentLink": "رابط دفع Bitcoin",
+    "smallestUnit": "(أصغر وحدة)",
+    "testUsdt": "USDT تجريبي",
+    "unlock": "افتح قفل محفظة {{wallet}} على {{network}} أولًا.",
+    "unsupported": "يطلب هذا الرابط شيئًا لا يفهمه هذا التطبيق، لذا لا يُدفع من هنا.",
+    "usdtLabel": "عنوان USDT",
+    "usdtLabelChain": "عنوان USDT · {{chain}}",
+    "usdtNoChain": "العنوان نفسه موجود على كل سلاسل Ethereum: اطلب رابطًا يذكر السلسلة (ethereum:…@1 لـ USDT حقيقي) قبل الدفع.",
+    "usdtOtherChain": "هذا الرابط مخصص لـ {{chain}}، حيث لا تعمل أي محفظة USDT من هنا.",
+    "usdtWrongChain": "محفظة USDT على {{network}} لديك تعمل على {{chain}}؛ وهذا الرابط مخصص لـ {{target}}.",
+    "wrongChain": "محفظة Bitcoin على {{network}} لديك تعمل على {{chain}}؛ وهذا العنوان مخصص لـ {{target}}.",
+    "wrongToken": "يطلب هذا الرابط رمزًا غير USDT الموجود في محفظتك: لا يُدفع من هنا."
+  },
+  "invoice": {
+    "anyAmount": "أي مبلغ",
+    "checking": "جارٍ التحقق…",
+    "confirmWhat": "{{amount}} sats (بالإضافة إلى رسوم حتى {{fee}})",
+    "copied": "تم النسخ",
+    "ecashRequest": "طلب دفع ecash",
+    "ecashToken": "رمز ecash",
+    "expired": "منتهية الصلاحية",
+    "expiresDays": "تنتهي خلال {{n}} أيام",
+    "expiresHours": "تنتهي خلال {{n}} س",
+    "expiresMinutes": "تنتهي خلال {{n}} د",
+    "expiresSeconds": "تنتهي خلال {{n}} ث",
+    "hideQr": "إخفاء رمز QR",
+    "label": "فاتورة Lightning",
+    "labelNetwork": "فاتورة Lightning · {{network}}",
+    "lightningAddress": "عنوان Lightning",
+    "methodOff": "{{method}} متوقف في هذه المحادثة.",
+    "mint": "دار السك: {{mint}}",
+    "mintNotAdded": "لم تُضف دار السك هذه، لذا لا يمكن استرداده هنا.",
+    "mints": "دور السك: {{mints}}",
+    "noWallet": {
+      "mainnet": "أموال حقيقية: ليست لديك محفظة Lightning على Mainnet للدفع منها",
+      "testnet": "أموال تجريبية: ليست لديك محفظة Lightning على Testnet للدفع منها"
+    },
+    "onchainBitcoin": "Bitcoin على السلسلة",
+    "openTitle": "افتحها في محفظة Lightning على هذا الجهاز",
+    "openWallet": "فتح المحفظة",
+    "paid": "مدفوعة ✓",
+    "pay": "ادفع",
+    "payWithFee": "ادفع {{amount}} + رسوم حتى {{fee}}",
+    "paying": "جارٍ الدفع…",
+    "paysThrough": "يُدفع عبر {{domain}}",
+    "pendingAtMint": "الدفعة قيد المعالجة لدى دار السك…",
+    "redeem": "استرداد",
+    "redeemed": "تم الاسترداد ✓",
+    "redeeming": "جارٍ الاسترداد…"
+  },
   "mode": {
     "accept": "القبول",
     "label": "المدفوعات مع {{name}}",
@@ -30,5 +244,60 @@
   "none": {
     "action": "اختر ما تقبله هذه المحادثة",
     "text": "لا توجد طريقة دفع مفعّلة في هذه المحادثة."
+  },
+  "payWith": {
+    "card": "بطاقة Lightning",
+    "label": "ادفع باستخدام"
+  },
+  "review": {
+    "approve": "الموافقة على الدفع",
+    "check": "التحقق من الدفع الحالي",
+    "destination": "الوجهة",
+    "details": "تفاصيل الدفع",
+    "error": {
+      "update": "تعذّر تحديث هذا الدفع. تحقق من حالته المحفوظة."
+    },
+    "expires": "تنتهي صلاحيته",
+    "fee": "الرسوم / الحد الأقصى",
+    "feePerGas": "الرسوم القصوى / رسوم الأولوية لكل وحدة غاز (wei)",
+    "gasLimit": "الحد الأقصى للغاز / حدك",
+    "gasNonce": "حد الغاز / nonce",
+    "label": "مراجعة الدفع",
+    "money": {
+      "mainnet": "أموال حقيقية: تغادر محفظتك بمجرد أن تؤكد.",
+      "testnet": "أموال تجريبية: لا قيمة لهذه العملات خارج شبكة الاختبار."
+    },
+    "note": {
+      "arkReal": "بيتكوين حقيقي. تأكيد Ark يتم خارج السلسلة.",
+      "arkTest": "أموال تجريبية فقط. تأكيد Ark يتم خارج السلسلة.",
+      "bark": "يُرسل عبر خادم Ark التابع لـ Second، خارج السلسلة. لا يمكن الدفع إلا لعنوان من الخادم نفسه.",
+      "bitcoin": "معاملة على السلسلة، موقّعة لهذه المراجعة بالضبط. تتم تسويتها بعد تأكيد واحد؛ التحقق منها لا يرسل معاملة ثانية أبدًا.",
+      "cashu": "يحتفظ الـ mint المحدد بالأموال الداعمة. يتطلب التأكيد استرداد الرمز لدى ذلك الـ mint.",
+      "fedimint": "تذهب أوراق ecash من هذه الفيدرالية إلى جهة اتصالك: وهي المال إلى أن تستردها جهة اتصالك. إن لم تفعل أبدًا، فاستعدها (وهي تعود من تلقاء نفسها بعد أسبوع أيضًا).",
+      "sparkReal": "بيتكوين حقيقي. من Spark إلى Spark، خارج السلسلة: نهائي بمجرد أن يوقّع مشغّلو Spark التحويل. التحقق منه لا يرسل تحويلًا ثانيًا أبدًا.",
+      "sparkTest": "Regtest: sats تجريبية بلا قيمة. من Spark إلى Spark، خارج السلسلة: نهائي بمجرد أن يوقّع مشغّلو Spark التحويل. التحقق منه لا يرسل تحويلًا ثانيًا أبدًا.",
+      "usdt": "يُدفع الغاز بشكل منفصل بـ ETH وقد يتجاوز قيمة دفعة صغيرة. يتأكد بعد {{blocks}} كتل.",
+      "usdtTest": "رمز اختبار محلي، وليس USDT صادرًا عن Tether. يُدفع الغاز بشكل منفصل بـ ETH وقد يتجاوز قيمة دفعة صغيرة. يتأكد بعد {{blocks}} كتل."
+    },
+    "payee": "المستفيد",
+    "provider": "المزوّد",
+    "states": {
+      "cancelled": "أُلغي",
+      "confirmed": "مؤكد",
+      "failed": "فشل",
+      "pending": "قيد الانتظار",
+      "settled": "تمت التسوية",
+      "submitted": "أُرسل",
+      "unknown": "غير معروف"
+    },
+    "status": "الحالة",
+    "title": {
+      "pending": "مراجعة الدفع",
+      "status": "حالة الدفع"
+    },
+    "tokenChain": "الرمز / السلسلة",
+    "tokenChainValue": "{{token}} · {{chain}} · {{decimals}} منازل عشرية",
+    "total": "الإجمالي",
+    "transaction": "المعاملة"
   }
 }
