@@ -295,6 +295,41 @@ describe("the chat timeline's scrolling", () => {
     expect(list().scrollHeight - list().scrollTop - list().clientHeight).toBe(0);
   });
 
+  it("at the bottom, a phone turned on its side (the list much shorter, the browser moving the view first) stays at the bottom", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    expect(list().scrollTop).toBe(200);
+    // The scroll event comes before the ResizeObserver's: the browser kept the view's top about where it was.
+    act(() => { view = 120; list().scrollTop = 190; });
+    expect(list().scrollTop).toBe(380);
+    resized();
+    expect(list().scrollTop).toBe(380);
+    expect(pill()).toBeNull();
+  });
+
+  it("a tap on the list just before the phone turns (Play on a video) is not a hand scrolling it", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    fireEvent.pointerDown(list());
+    fireEvent.pointerUp(window);
+    act(() => { view = 120; list().scrollTop = 190; });
+    expect(list().scrollTop).toBe(380);
+  });
+
+  it("the list resizing under a finger held on it: the view stays where the hand put it", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    fireEvent.pointerDown(list());
+    act(() => { view = 120; list().scrollTop = 150; });
+    fireEvent.pointerUp(window);
+    expect(list().scrollTop).toBe(150);
+  });
+
+  it("scrolled up, the list resizing keeps the message it shows in place", () => {
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    scrollTo(60);
+    const before = topOf("peer_1");
+    act(() => { view = 120; list().scrollTop = 70; });
+    expect(topOf("peer_1")).toBe(before);
+  });
+
   it("at the bottom, the browser pulling the view a little up with no hand on it goes back to the bottom", () => {
     renderApp(<Timeline rows={theirs(0, 10)} />);
     expect(list().scrollTop).toBe(200);
