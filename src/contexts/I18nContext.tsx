@@ -9,21 +9,10 @@ import { useSettings } from "./SettingsContext";
 import type { Language } from "../lib/settings";
 import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
 
-import { locales as translations, type TranslationDict } from "../locales";
+import { locales as translations } from "../locales";
+import { translateWith, type Translate } from "../locales/translate";
 
-type NestedKeyOf<T, K extends string = ""> = T extends object
-  ? {
-      [P in keyof T & string]: NestedKeyOf<
-        T[P],
-        K extends "" ? P : `${K}.${P}`
-      >;
-    }[keyof T & string]
-  : K;
-
-type TranslationKey = NestedKeyOf<TranslationDict>;
-
-/** `t()` as a value: for content worked out outside a component (identities/idCard.ts). */
-export type Translate = (key: TranslationKey, params?: Record<string, string | number>) => string;
+export type { Translate, TranslationKey } from "../locales/translate";
 
 interface I18nContextValue {
   t: Translate;
@@ -32,19 +21,6 @@ interface I18nContextValue {
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);
-
-function getNestedValue(obj: unknown, path: string): string {
-  const keys = path.split(".");
-  let current: unknown = obj;
-  for (const key of keys) {
-    if (current && typeof current === "object" && key in current) {
-      current = (current as Record<string, unknown>)[key];
-    } else {
-      return path;
-    }
-  }
-  return typeof current === "string" ? current : path;
-}
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const { settings } = useSettings();
@@ -57,21 +33,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     applyDocumentLanguage(language);
   }, [language]);
 
-  const t = useMemo(() => {
-    const currentTranslations = translations[language] || translations.en;
-    return (
-      key: TranslationKey,
-      params?: Record<string, string | number>
-    ): string => {
-      let value = getNestedValue(currentTranslations, key);
-      if (params) {
-        Object.entries(params).forEach(([k, v]) => {
-          value = value.replace(new RegExp(`{{${k}}}`, "g"), String(v));
-        });
-      }
-      return value;
-    };
-  }, [language]);
+  const t = useMemo(() => translateWith(translations[language] || translations.en), [language]);
 
   return (
     <I18nContext.Provider value={{ t, language, dir }}>

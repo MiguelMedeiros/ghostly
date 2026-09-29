@@ -4,6 +4,7 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportIcon } from "./TransportIcon";
 import { transportName } from "../lib/connection";
 import { liveTransport, transportOptions } from "../lib/transportEvents";
+import { useI18n } from "../contexts/I18nContext";
 
 /** A choice for the chat's connection: Automatic, a transport, or DHT only (WISP 400). */
 export type ConnectionChoice = PairedTransport | "auto" | "dht";
@@ -19,7 +20,8 @@ export type ConnectionChoice = PairedTransport | "auto" | "dht";
 export function TransportOptions({ link, disabled = false, onChoose }: {
   link: LinkView; disabled?: boolean; onChoose(choice: ConnectionChoice): void;
 }) {
-  const options = transportOptions(link);
+  const { t } = useI18n();
+  const options = transportOptions(link, t);
   const local = options.filter(o => (link.availableTransports ?? []).includes(o.transport));
   // One transport in this app (web, the extension): nothing to choose between, only to know why.
   const single = local.length <= 1;
@@ -34,23 +36,23 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
     if (!already) onChoose(choice);
   }
   return (
-    <div role="radiogroup" aria-label="Connection for this chat" data-testid="transport-options">
+    <div role="radiogroup" aria-label={t("connection.option.group")} data-testid="transport-options">
       {!single && <Option testId="connection-option-auto" checked={automatic && !dht} disabled={disabled} onClick={() => choose("auto")}
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></svg>}
-        hint="The apps choose, WebRTC first" label="Automatic" />}
+        hint={t("connection.option.automaticHint")} label={t("connection.option.automatic")} />}
       {/* Every transport, what this app lacks too: off, and why. */}
       {options.map(o => {
         const inUse = current === o.transport && o.available, waiting = link.transportWait?.transport === o.transport && !dht;
-        const using = `In use${o.relayed ? " · relayed" : ""}${link.transportRttMs !== undefined ? ` · ${link.transportRttMs} ms` : ""}`;
+        const using = [t("connection.option.inUse"), ...(o.relayed ? [t("connection.relayed")] : []), ...(link.transportRttMs !== undefined ? [t("connection.ms", { ms: link.transportRttMs })] : [])].join(" · ");
         return <Option key={o.transport} testId={`connection-option-${o.transport.replace("/1", "")}`} icon={<TransportIcon transport={o.transport} />}
           checked={!dht && (single ? o.available : !automatic && link.preferredTransport === o.transport)} disabled={disabled || !o.available} inUse={inUse}
-          mark={inUse ? using : waiting && o.available ? "Waiting" : undefined}
-          hint={!o.available ? o.reason : inUse ? using : waiting ? "Chosen · waiting for it" : !automatic && link.preferredTransport === o.transport ? "Chosen · not in use" : o.relayed ? "Through a relay · used when nothing direct connects" : undefined}
+          mark={inUse ? using : waiting && o.available ? t("connection.option.waiting") : undefined}
+          hint={!o.available ? o.reason : inUse ? using : waiting ? t("connection.option.chosenWaiting") : !automatic && link.preferredTransport === o.transport ? t("connection.option.chosenNotInUse") : o.relayed ? t("connection.option.throughRelay") : undefined}
           onClick={() => choose(o.transport)} label={transportName(o.transport)} />;
       })}
-      <Option testId="connection-option-dht" checked={dht} disabled={disabled} onClick={() => choose("dht")} label="DHT only"
+      <Option testId="connection-option-dht" checked={dht} disabled={disabled} onClick={() => choose("dht")} label={t("connection.dhtOnly")}
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 7 9-4 9 4-9 4Z" /><path d="m3 12 9 4 9-4M3 17l9 4 9-4" /></svg>}
-        hint={peerDht && !dht ? "Your contact chose it · no live link until you both leave it" : dht ? "Short texts over the DHT, no live link · choose another to leave it" : "Short texts over the DHT, even offline"} />
+        hint={peerDht && !dht ? t("connection.option.dhtContactChose") : dht ? t("connection.option.dhtOn") : t("connection.option.dhtOff")} />
     </div>
   );
 }
