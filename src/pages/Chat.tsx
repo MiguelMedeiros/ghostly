@@ -71,6 +71,7 @@ import { TransportLine } from "../components/TransportTimeline";
 import { mergeTimeline } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
 import { cardOn } from "../lib/chatPayments";
+import { formatAt } from "../lib/time";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
@@ -898,23 +899,23 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
                 <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
                 <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
-                <TechInfoRow label={t("chat.tech.created")} value={new Date(techInfo.createdAt).toLocaleString()} />
+                <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
               </TechInfoSection>
               <TechInfoSection title={t("chat.tech.sync")}>
                 <TechInfoRow label={t("chat.tech.status")} value={status} />
                 <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
                 <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
-                <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? new Date(lastSync).toLocaleTimeString() : "—"} />
+                <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
                 <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
               </TechInfoSection>
               <TechInfoSection title={t("chat.tech.ackStatus")}>
                 <TechInfoRow 
                   label={t("chat.tech.myAck")} 
-                  value={techInfo.myAck > 0 ? new Date(techInfo.myAck).toLocaleTimeString() : t("chat.tech.none")} 
+                  value={techInfo.myAck > 0 ? formatAt(techInfo.myAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
                 />
                 <TechInfoRow 
                   label={t("chat.tech.peerAck")} 
-                  value={techInfo.peerAck > 0 ? new Date(techInfo.peerAck).toLocaleTimeString() : t("chat.tech.none")} 
+                  value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
                 />
                 <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
               </TechInfoSection>

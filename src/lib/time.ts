@@ -26,3 +26,18 @@ export function clockTime(at: number, language?: Language): string {
   if (!clock) { clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }); clocks.set(key, clock); }
   return clock.format(at);
 }
+
+const formats = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * A date or time written with `options` in the app's language when one is given, else as this device writes it (the
+ * chat's Tech Info, its connection panel and history), with one formatter per language and options.
+ */
+export function formatAt(at: number, options: Intl.DateTimeFormatOptions, language?: Language): string {
+  const locale = language ? languageTag(language) : [];
+  if (!(Math.abs(at) <= 8.64e15)) return new Date(at).toLocaleString(locale, options);
+  const key = `${language ? languageTag(language) : ""} ${JSON.stringify(options)}`;
+  let format = formats.get(key);
+  if (!format) { format = new Intl.DateTimeFormat(locale, options); formats.set(key, format); }
+  return format.format(at);
+}
