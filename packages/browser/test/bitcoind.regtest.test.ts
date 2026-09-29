@@ -86,8 +86,8 @@ describe.skipIf(!enabled)("Bitcoin Core on regtest", () => {
     const alice = `ghostly-alice-${run}`, bob = `ghostly-bob-${run}`;
     await rpc("createwallet", [alice]); await rpc("createwallet", [bob]);
     const descriptor: OnchainProviderDescriptor = { ...bitcoindRpc, platforms: ["web"], create: (s, host) => BitcoindOnchain.connect(config(s.config.wallet), host.mode, fetchTransport, host.signal) };
-    const service = new BitcoinService(() => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
-    await service.start("testnet");
+    const service = new BitcoinService("testnet", () => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
+    await service.start();
     await service.sources.set("bitcoind", { url: URL, wallet: alice, user: USER, password: PASSWORD });
     const coordinator = new PaymentCoordinator(intentRepository, [service.adapter]);
     const provider = service.sources.active!;
