@@ -1,4 +1,4 @@
-import { checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
+import { STATUS_CARD_LIMITS, checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { chatOrGroup, node, num, oneOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
@@ -122,6 +122,9 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   const id = str(params, kind, true);
   const patch = fieldsOf(params);
   const message = await cardMessage(ctx, target, kind, id);
+  // A card message takes `STATUS_CARD_LIMITS.edits` updates (WISP 4xx · Status Cards); past them, a new card goes on.
+  if ((message.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits)
+    throw new CliError("refused", `This ${kind}'s message took ${STATUS_CARD_LIMITS.edits} updates, the most one takes: start a new card with ghostly ${kind} send (a new --id, or the same one: the newest card of an id stands for it)`, { messageId: message.id, edits: message.edit!.seq });
   const pace = paceOf(ctx, `${target.linkId}\n${message.id}`);
   const base = pace.next ?? (message.card as unknown as Record<string, unknown>);
   const merged = mergeCard(base, { ...patch, ...(kind === "task" && { updatedAt: Date.now() }) });

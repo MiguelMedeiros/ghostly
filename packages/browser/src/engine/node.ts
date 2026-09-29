@@ -143,7 +143,7 @@ import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, t
 import type { MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
 import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
-import { EditBuffer, EditQueue } from "./edits";
+import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
@@ -454,6 +454,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly editQueues = new Map<string, EditQueue>();
   /** The contacts' edits of messages not here yet. */
   private readonly editBuffer = new EditBuffer();
+  /** Received status card updates, applied at most once a second per message (WISP 4xx · Status Cards). */
+  private readonly cardEdits = new CardEditPacer();
   /** At most one wake-up per contact per `WAKE_INTERVAL_MS` (WISP 401 § Wake-up push). */
   private readonly wakeLimiter = new WakeLimiter();
   /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
@@ -1301,6 +1303,7 @@ export class GhostlyNode implements EngineImplementation {
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
     for (const queue of this.editQueues.values()) queue.stop();
     this.groupEdits.stop();
+    this.cardEdits.stop();
     await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(true); await live.caps?.stop(); }));
   }
 
@@ -2119,9 +2122,17 @@ export class GhostlyNode implements EngineImplementation {
     return true;
   }
 
-  /** The contact's edit on its message here, when it is newer than what shows. Not a new message: no sound, no unread, no move. */
+  /**
+   * The contact's edit on its message here, when it is newer than what shows. Not a new message: no sound, no unread, no
+   * move. A card's update is paced: at most one applied per message a second, the highest number winning.
+   */
   private async applyPeerEdit(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
     if (!takesPeerEdit(message, edit.m) || (message.edit?.seq ?? 0) >= edit.e) return;
+    if (edit.sc) return this.cardEdits.take(`${linkId}\n${message.id}`, edit.e, () => this.applyPeerEditNow(linkId, message, edit));
+    return this.applyPeerEditNow(linkId, message, edit);
+  }
+
+  private async applyPeerEditNow(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
     const updated = await db.patchMessage(linkId, message.id, current => {
       if (!takesPeerEdit(current, edit.m) || (current.edit?.seq ?? 0) >= edit.e) return null;
       const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, preview: edit.pv, card: edit.sc });

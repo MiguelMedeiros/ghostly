@@ -4,7 +4,7 @@ import {
 } from "@ghostly/core";
 import { canEditInGroup, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import type { StoredMessage } from "../shared/types";
-import { EditBuffer } from "./edits";
+import { CardEditPacer, EditBuffer } from "./edits";
 import { RESEND_POLICY } from "./outbox";
 
 /*
@@ -45,6 +45,8 @@ const chatOf = (groupId: string) => `group:${groupId}`;
 export class GroupEdits {
   private readonly now: () => number;
   private readonly buffer: EditBuffer<GroupEdit & { sender: string }>;
+  /** Members' status card updates, applied at most once a second per message (WISP 4xx · Status Cards). */
+  private readonly cards: CardEditPacer;
   private readonly sendPace = new Map<string, RateWindow>();
   private readonly receivePace = new Map<string, RateWindow>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -54,6 +56,7 @@ export class GroupEdits {
   constructor(private readonly host: GroupEditsHost) {
     this.now = host.now ?? Date.now;
     this.buffer = new EditBuffer(this.now);
+    this.cards = new CardEditPacer(this.now);
   }
 
   /**
@@ -147,6 +150,11 @@ export class GroupEdits {
     const chat = chatOf(groupId);
     const message = await this.find(chat, edit.id);
     if (!message) { this.buffer.hold(chat, { ...edit, sender }); return "waiting"; }
+    // A card's update: paced per message, the highest number of those that came meanwhile applied when the time is up.
+    if (edit.sc && message.member === sender && (message.edit?.seq ?? 0) < edit.e) {
+      await this.cards.take(`${chat}\n${message.id}`, edit.e, async () => { await this.apply(chat, membership.me, sender, message, edit); });
+      return "applied";
+    }
     return this.apply(chat, membership.me, sender, message, edit);
   }
 
@@ -190,6 +198,7 @@ export class GroupEdits {
 
   stop(): void {
     this.stopped = true;
+    this.cards.stop();
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
   }

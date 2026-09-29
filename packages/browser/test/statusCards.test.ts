@@ -28,7 +28,8 @@ async function setup({ cards = true }: { cards?: boolean } = {}) {
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
     peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
-  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false,
+  const onAttention = vi.fn();
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
   let contactState: PairingState = { status: "connecting" };
   const contactGot: IncomingMessage[] = [], contactEdits: WireEdit[] = [];
@@ -53,7 +54,7 @@ async function setup({ cards = true }: { cards?: boolean } = {}) {
   await vi.waitFor(() => expect(mineLink()?.supportsStatusCards).toBe(cards));
   const row = async (messageId: string) => (await db.getMessages(id)).find(m => m.id === messageId)!;
   const peerRow = async (text: string) => { await vi.waitFor(async () => expect((await db.getMessages(id)).find(m => m.text === text)).toBeDefined()); return (await db.getMessages(id)).find(m => m.text === text)!; };
-  return { node, contact, id, contactGot, contactEdits, row, peerRow };
+  return { node, contact, id, contactGot, contactEdits, row, peerRow, view, onAttention };
 }
 
 const task = (extra: Record<string, unknown> = {}) => ({ kind: "task", id: "relay-rotation", title: "Fix relay rotation", status: "running", ...extra });
@@ -109,7 +110,49 @@ describe("sending a status card", () => {
   });
 });
 
+describe("a card's updates on this side", () => {
+  it("keep one card and no trail of versions, however many there are", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "", card: task() });
+    for (let i = 1; i <= 300; i++) expect((await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "", card: task({ progress: i % 101 }) })).error).toBeNull();
+    const row = await t.row(sent.messageId!);
+    expect(row.edit).toMatchObject({ seq: 300, history: [] });
+    expect(row.card).toMatchObject({ progress: 300 % 101 });
+    expect(Object.keys(row).filter(k => k === "card")).toHaveLength(1);
+  });
+});
+
 describe("receiving a status card", () => {
+  it("an update never rings, never counts as unread and never moves the chat", async () => {
+    const t = await setup();
+    const card = readStatusCard(task({ progress: 5 }))!;
+    expect(await t.contact.sendMessage(statusCardText(card), Date.now() - 60_000, WIRE("E"), undefined, undefined, undefined, card)).toBeNull();
+    const row = await t.peerRow(statusCardText(card));
+    const lastMessageAt = t.view().lastMessageAt;
+    t.onAttention.mockClear();
+    const done = readStatusCard(task({ status: "done", progress: 100 }))!;
+    expect(await t.contact.sendEdit({ id: WIRE("E"), e: 1, ts: Date.now(), m: statusCardText(done), sc: done })).toBeNull();
+    await vi.waitFor(async () => expect((await t.row(row.id)).card).toEqual(done));
+    expect(t.view().lastMessageAt).toBe(lastMessageAt);
+    expect(t.onAttention).not.toHaveBeenCalled();
+  });
+
+  it("applies a flood of updates at most once a second, ending on the highest", async () => {
+    const t = await setup();
+    const card = readStatusCard(task())!;
+    expect(await t.contact.sendMessage(statusCardText(card), Date.now(), WIRE("F"), undefined, undefined, undefined, card)).toBeNull();
+    const row = await t.peerRow(statusCardText(card));
+    const writes: number[] = [];
+    const patch = db.patchMessage.bind(db);
+    const spy = vi.spyOn(db, "patchMessage").mockImplementation(async (linkId, id, change) => { if (id === row.id) writes.push(Date.now()); return patch(linkId, id, change); });
+    for (let e = 1; e <= 20; e++) { const c = readStatusCard(task({ progress: e * 5 }))!; expect(await t.contact.sendEdit({ id: WIRE("F"), e, ts: Date.now(), m: statusCardText(c), sc: c })).toBeNull(); }
+    await vi.waitFor(async () => expect((await t.row(row.id)).card?.progress).toBe(100), { timeout: 5_000 });
+    spy.mockRestore();
+    expect(writes.length).toBeLessThanOrEqual(3);
+    expect((await t.row(row.id)).edit?.seq).toBe(20);
+  });
+
+
   it("keeps the contact's card with its text, and an edit replaces it with its own, or none", async () => {
     const t = await setup();
     const card = readStatusCard(task({ progress: 20 }))!;

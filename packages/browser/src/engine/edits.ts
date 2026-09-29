@@ -124,6 +124,42 @@ export class EditQueue {
   }
 }
 
+/** A card's updates from someone else are applied (stored, shown) at most once per this long, per message. */
+export const CARD_APPLY_GAP_MS = 1_000;
+
+/**
+ * Received status card updates, paced per message (WISP 4xx · Status Cards): the first applies at once, the rest within
+ * `CARD_APPLY_GAP_MS` wait, and only the highest edit number of them applies when the time is up. A sender that
+ * ignores its own pace costs this side one write and one render a second per card, whatever it sends.
+ */
+export class CardEditPacer {
+  private readonly slots = new Map<string, { last: number; e?: number; apply?: () => Promise<void>; timer?: ReturnType<typeof setTimeout> }>();
+
+  constructor(private readonly now: () => number = Date.now, private readonly gapMs = CARD_APPLY_GAP_MS) {}
+
+  /** Applies edit `e` of the message under `key` now, or later with whatever higher edit comes meanwhile. */
+  async take(key: string, e: number, apply: () => Promise<void>): Promise<void> {
+    const slot = this.slots.get(key) ?? { last: 0 };
+    this.slots.set(key, slot);
+    const due = slot.last + this.gapMs - this.now();
+    if (due <= 0 && !slot.timer) { slot.last = this.now(); await apply(); return; }
+    if (slot.e !== undefined && slot.e >= e) return;
+    slot.e = e; slot.apply = apply;
+    slot.timer ??= setTimeout(() => {
+      const run = slot.apply;
+      slot.timer = undefined; slot.apply = undefined; slot.e = undefined; slot.last = this.now();
+      void run?.().catch(() => {});
+    }, Math.max(0, due));
+    // Kept small: a slot whose card went quiet is forgotten.
+    if (this.slots.size > 512) for (const [k, s] of this.slots) { if (!s.timer) { this.slots.delete(k); break; } }
+  }
+
+  stop(): void {
+    for (const slot of this.slots.values()) clearTimeout(slot.timer);
+    this.slots.clear();
+  }
+}
+
 /**
  * The contact's edits of messages not here yet (an edit that overtook its message on another path), per chat: kept
  * `EDIT_BUFFER_MS` at most, the highest number per message, `EDIT_BUFFER_MAX` messages at most.

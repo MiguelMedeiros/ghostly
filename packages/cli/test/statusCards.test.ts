@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
-import { checkStatusCard, type StatusCard } from "@ghostly/core";
+import { STATUS_CARD_LIMITS, checkStatusCard, type StatusCard } from "@ghostly/core";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
@@ -142,6 +142,14 @@ describe("task update", () => {
     await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" } });
     vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
     await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 140 } })).rejects.toMatchObject({ code: "bad_request", message: /progress/ });
+  });
+
+  it("at a card's last update, says to start a new card", async () => {
+    const { ctx, node, rows } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" } });
+    rows("chat-one")[0]!.edit = { seq: STATUS_CARD_LIMITS.edits, at: 1, history: [] };
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 1 } })).rejects.toMatchObject({ code: "refused", message: /start a new card with ghostly task send/ });
+    expect(node.editMessage).not.toHaveBeenCalled();
   });
 
   it("updates a group's task", async () => {
