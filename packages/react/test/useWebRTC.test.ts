@@ -158,6 +158,79 @@ describe("placing a call", () => {
   });
 });
 
+describe("both calling at once", () => {
+  /** Their offer, with `patch` over the usual one (an earlier or later timestamp, another fingerprint). */
+  const theirOffer = (ts: number, f?: string) => JSON.stringify({ ...JSON.parse(remote.offer(ts)), ...(f ? { f } : {}) });
+  const ours = (call: ReturnType<typeof renderCall>) => JSON.parse(call.published.find((s) => s && JSON.parse(s).t === "o")!) as { ts: number; f: string };
+
+  it("an earlier offer from the contact wins: ours is dropped without a hang-up, and theirs rings", async () => {
+    const call = renderCall();
+    const { stream, pc } = await offered(call);
+    const mine = ours(call);
+
+    call.receive(theirOffer(mine.ts - 1));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(pc.close).toHaveBeenCalledOnce();
+    expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false);
+    // A hang-up would end the winner's call on the other side.
+    expect(call.publishedKinds()).toEqual(["o"]);
+
+    act(() => { void call.result.current.acceptCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+    expect(call.publishedKinds()).toEqual(["o", "a"]);
+    expect(call.result.current.callState).toBe("connecting");
+  });
+
+  it("a later offer from the contact loses: ours keeps ringing them", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    const mine = ours(call);
+
+    call.receive(theirOffer(mine.ts + 1));
+
+    expect(call.result.current.callState).toBe("offering");
+    expect(pc.close).not.toHaveBeenCalled();
+    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_received", expect.anything());
+    // Their answer to ours still connects the call.
+    call.receive(remote.answer(mine.ts + 2));
+    await settle();
+    expect(call.result.current.callState).toBe("connecting");
+  });
+
+  it("at the same millisecond the lower fingerprint wins: ours when it is lower", async () => {
+    const call = renderCall();
+    await offered(call);
+    const mine = ours(call);
+    call.receive(theirOffer(mine.ts, "ff".repeat(32)));
+    expect(call.result.current.callState).toBe("offering");
+  });
+
+  it("at the same millisecond the lower fingerprint wins: theirs when it is lower", async () => {
+    const call = renderCall();
+    await offered(call);
+    const mine = ours(call);
+    call.receive(theirOffer(mine.ts, "00".repeat(32)));
+    expect(call.result.current.callState).toBe("incoming");
+  });
+
+  it("an offer arriving while ours is still gathering wins: ours is never sent", async () => {
+    FakePeerConnection.holdGathering = true;
+    const call = renderCall();
+    const { pc } = await offered(call);
+
+    call.receive(theirOffer(Date.now()));
+    expect(call.result.current.callState).toBe("incoming");
+
+    act(() => pc.finishGathering());
+    await settle();
+    expect(call.published).toEqual([]);
+    expect(call.result.current.callState).toBe("incoming");
+  });
+});
+
 describe("answering a call", () => {
   it("rings for an incoming offer and answers with our half of the video lane open", async () => {
     const call = renderCall();
