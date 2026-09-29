@@ -47,9 +47,12 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const createdAtRef = useRef(Date.now());
 
   /** The stored session's keys, participation keys included, else the ones this chat was opened with. */
-  const linkParams = useCallback((): LinkParams => {
+  // The side that made the invite still holds it; the engine learns who invited whom from that (as sync's `ensureLink`),
+  // whichever of the two asks for the link first.
+  const linkParams = useCallback((): LinkParams & { inviteCode?: string } => {
     const stored = sessionId ? loadSession(sessionId) : null;
-    return stored ? sessionLinkParams(stored) : { profile, deliveryMode, seedB64: seedB64!, peerPubKeyZ32: peerPubKey!, encKeyB64: encKeyB64! };
+    const inviteCode = (sessionId && getInviteCode(sessionId)) || undefined;
+    return { ...(stored ? sessionLinkParams(stored) : { profile, deliveryMode, seedB64: seedB64!, peerPubKeyZ32: peerPubKey!, encKeyB64: encKeyB64! }), ...(inviteCode ? { inviteCode } : {}) };
   }, [sessionId, profile, deliveryMode, seedB64, peerPubKey, encKeyB64]);
 
   const reload = useCallback(() => {
