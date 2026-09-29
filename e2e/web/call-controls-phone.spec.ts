@@ -34,3 +34,34 @@ for (const { width, share } of [{ width: 320, share: false }, { width: 375, shar
     await bob.page.getByTestId("call-hang-up").click();
   });
 }
+
+/** Plays an iPhone 17's safe area (Chromium's DevTools protocol): the status bar and Dynamic Island, the home indicator. */
+async function safeArea(page: Page, insets: { top: number; right: number; bottom: number; left: number }) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets });
+}
+
+test("an installed iPhone: the call's corner button stays clear of the status bar, and of the notch on its side", { tag: ["@feature:calls.video", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 402, height: 874 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  await safeArea(bob.page, { top: 62, right: 0, bottom: 34, left: 0 });
+  await alice.page.getByTestId("call-video").click();
+  await bob.page.getByTitle("Accept video call").click();
+  const corner = bob.page.getByTestId("call-minimize");
+  await expect(corner).toBeVisible();
+  // Upright: below the status bar (62px on an iPhone 17; black-translucent, the page runs under it). It was at 16.
+  await expect.poll(async () => (await corner.boundingBox())!.y).toBeGreaterThanOrEqual(62);
+
+  // On its side, the Dynamic Island at the left end: past it.
+  await bob.page.setViewportSize({ width: 874, height: 402 });
+  await safeArea(bob.page, { top: 0, right: 62, bottom: 20, left: 62 });
+  await expect.poll(async () => (await corner.boundingBox())!.x).toBeGreaterThanOrEqual(62);
+  // The small window keeps its button in its own corner.
+  await corner.click();
+  await expect(bob.page.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+  const small = (await bob.page.getByTestId("call-window").boundingBox())!, button = (await corner.boundingBox())!;
+  expect(button.x - small.x).toBeLessThan(20);
+  await bob.page.getByTestId("call-hang-up").click();
+});

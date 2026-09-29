@@ -366,6 +366,13 @@ html[data-standalone="true"] {
   overflow: hidden;
 }
 
+/* The whole-screen call's corner button (Small window / Back to chat): clear of the status bar an installed iPhone
+   app runs under, and of the notch or Dynamic Island when the phone is on its side. The small window keeps 8px. */
+.call-resize {
+  top: calc(1rem + env(safe-area-inset-top));
+  left: calc(1rem + env(safe-area-inset-left));
+}
+
 .call-mini .call-resize {
   top: 8px;
   left: 8px;
