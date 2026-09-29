@@ -72,6 +72,18 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
+  it("still knocking after two minutes: says the link may have been replaced, and not before", async () => {
+    openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 })).toHaveTextContent("Still no answer. If the group's link was replaced, this one no longer works: ask for the new link.");
+  });
+
+  it("a knock someone answered is not told the link may be old", () => {
+    openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
   it("says when the admin's app answered", () => {
     openGroup(viaLink(ALICE));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");

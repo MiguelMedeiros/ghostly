@@ -25,7 +25,8 @@ export interface DataLinkOptions {
   createPeerConnection: () => RTCPeerConnection;
   /** Publishes (or clears, with null) my `_rtc` record. */
   publishSignal: (signal: string | null) => void;
-  setFastPoll: (fast: boolean) => void;
+  /** Signaling in progress (or over): look fast for the peer's signal. `offer`: for the answer to this side's offer. */
+  setFastPoll: (fast: boolean, offer?: boolean) => void;
   onOpen: (channel: FrameChannel) => void;
   onClose: () => void;
   onState?: (state: DataLinkState) => void;
@@ -63,7 +64,7 @@ export class DataLink {
   async connect(): Promise<void> {
     if (this.state !== "idle") return;
     this.setState("offering");
-    this.options.setFastPoll(true);
+    this.options.setFastPoll(true, true);
     try {
       const pc = this.createConnection();
       await pc.setLocalDescription(await pc.createOffer());
@@ -185,13 +186,27 @@ export class DataLink {
       }
     });
 
+    this.startAttemptTimer(pc);
+    return pc;
+  }
+
+  /** The attempt on `pc` gives up this long from now (`CONNECT_TIMEOUT_MS`) unless it opens. */
+  private startAttemptTimer(pc: RTCPeerConnection): void {
+    if (this.connectTimer) clearTimeout(this.connectTimer);
     this.connectTimer = setTimeout(() => {
       if (this.pc === pc && this.state !== "open") {
         traceLink(this.options.myPubKeyZ32, "attempt-timeout", { state: this.state });
         this.reset();
       }
     }, this.options.attemptTimeoutMs?.() ?? CONNECT_TIMEOUT_MS);
-    return pc;
+  }
+
+  /**
+   * This side's offer or answer reached the relays only now (their budget, or an outage, held it back): the attempt
+   * counts from here, so the other side has as long to read it as if it had gone out at once.
+   */
+  signalWentOut(): void {
+    if (this.pc && this.connectTimer && this.state !== "open" && this.state !== "idle") this.startAttemptTimer(this.pc);
   }
 
   private clearTimers(): void {
