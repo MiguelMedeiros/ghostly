@@ -274,9 +274,12 @@ export class FileDesk {
     await chat.saving;
     const stored = await fileStore.get(id);
     const bytes = (stored?.bytes && await fileBytesOf(stored.bytes)) || await fileBytes();
-    const have = (await bytes.size(id)) ?? 0;
+    const size = await bytes.size(id), have = size ?? 0;
     const offset = Math.min(have, record.confirmed);
     if (have > offset) await bytes.truncate(id, offset);
+    // A file of no bytes gets no append: it is made here, so there is a file to check and to save. Every backend
+    // but IndexedDB reads a file never written as missing, and its check said "arrived damaged".
+    if (size === null && record.file.size === 0) await bytes.append(id, 0, new Uint8Array());
     if (stored && stored.bytes !== bytes.kind) await fileStore.patch(id, { bytes: bytes.kind });
     const appender = new FileAppender(bytes, id, offset);
     return {
