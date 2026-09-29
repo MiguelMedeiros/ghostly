@@ -5,6 +5,7 @@ import { createLink, encodeInviteCode } from "@ghostly/core";
 import { test as base, expect, type Browser, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { attachMint } from "./mint";
 import { LocalRelay } from "./relay";
+import { useLocalStun } from "./stun";
 
 export { expect };
 
@@ -22,6 +23,8 @@ export interface PeerOptions {
   ignoreHTTPSErrors?: boolean;
   /** Talks to the public Pkarr relays themselves instead of the test's relay (measurements only: the suite stays offline). */
   realRelays?: boolean;
+  /** Asks a STUN server in the test process instead of Google's public ones, which may answer late (support/stun.ts). */
+  localStun?: boolean;
   /**
    * Refuses the public Mainnet services the automatic wallets reach on their own (see `MAINNET_SERVICES`), at once:
    * a test that moves test coins only then never waits on them — a Mainnet wallet still busy with a slow server
@@ -78,6 +81,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
   await guardArchive(context);
   await guardPublicProfiles(context);
   if (!options.realRelays) await relay.attach(context);
+  if (options.localStun) await useLocalStun(context);
   await attachMint(context);
   await stubGifServices(context);
   if (options.offlineMainnet) for (const service of MAINNET_SERVICES) await context.route(service, (route) => route.abort("connectionrefused"));
