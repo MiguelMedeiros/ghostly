@@ -133,9 +133,9 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   </>;
   const fieldsFilled = signer?.kind !== "in-app" || (signer.fields ?? []).every(f => f.optional || values[f.name]?.trim());
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 max-md:p-0 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="add-identity-title" data-testid="add-identity"
-        className="focus:outline-none w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4 @container">
+        className="sheet sheet-padded focus:outline-none w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4 @container">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 id="add-identity-title" className="text-lg font-medium text-text-primary">{t("identities.ghostly.addOne")}</h2>
