@@ -52,7 +52,11 @@ const MAX_AMOUNT = 1_000_000;
 const TEST_COINS_WAIT_MS = 30_000;
 const HISTORY_SHOWN = 100;
 /** `abandoned`: the mint proved the swap never happened (`reviewedCashuNeverSwapped`); it is never sent again. */
-export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:string;abandoned?:boolean}
+/**
+ * `attemptEndedAt`: when the approval's swap failed with no answer. `abandoned`: the mint proved the swap never
+ * happened (`reviewedCashuNeverSwapped`); it is never sent again.
+ */
+export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:string;attemptEndedAt?:number;abandoned?:boolean}
 
 // SDK 4.x preview.fees covers input swap fees, despite its declaration saying
 // it includes the recipient fee. includeFees(true) also tops up send outputs.

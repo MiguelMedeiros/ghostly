@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, OutputData, type Proof, type SwapPreview } from "@cashu/cashu-ts";
 import type { PaymentTarget } from "@ghostly/core";
 import { CashuWallet, type CashuPrepared } from "../src/engine/wallet";
-import { CashuAdapter, NEVER_REACHED_MINT, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
+import { CASHU_REQUEST_TIMEOUT_MS, CashuAdapter, NEVER_REACHED_MINT, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
@@ -35,6 +35,8 @@ const proof = (amount: number, secret: string): Proof => ({ id: KEYSET, amount: 
 const target: PaymentTarget = { method: "cashu", network: "bitcoin", provider: MINT, asset: "BTC", unit: "sat", address: "creqA", expiresAt: Date.now() + 3_600_000 };
 const context = { payee: "alice", linkId: "chat-1", requestId: "req-1" };
 const all = async <T>(name: string) => wrap<T[]>((await store(name, "readonly")).getAll());
+/** A swap's longest life after its approval: past it, nothing of it can still reach the mint. */
+const GATE = CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
 const reserved = async () => (await all<StoredProof>(STORES.proofs)).filter((p) => p.reserved).map((p) => p.secret);
 
 /** 64 sats in; 40 sent as 32 + 8; 16 kept; 8 of fees. */
@@ -81,7 +83,7 @@ describe("a Cashu payment whose swap never reached the mint", () => {
     const review = await approvedWhileMintDown(t);
     // The mint is back: every input UNSPENT, no output signed. Past the time a swap could still arrive.
     mintSays("UNSPENT");
-    vi.setSystemTime(Date.now() + SWAP_SETTLED_MS + 1);
+    vi.setSystemTime(Date.now() + GATE + 1);
     const release = vi.spyOn(t.wallet, "releaseReviewedCashu");
     release.mockImplementation(async function (this: CashuWallet, prepared: CashuPrepared) {
       // Marked for good before anything comes back: a reload repeats only the release.
@@ -109,7 +111,7 @@ describe("a Cashu payment whose swap never reached the mint", () => {
   it("a swap that went through with its answer lost is recovered: its token goes out, and it settles once taken, never failed", async () => {
     const t = setup();
     const review = await approvedWhileMintDown(t);
-    vi.setSystemTime(Date.now() + SWAP_SETTLED_MS + 1);
+    vi.setSystemTime(Date.now() + GATE + 1);
     // The mint did the swap: the input is spent, the outputs are signed but the contact has not taken them yet.
     mintSays("SPENT", "UNSPENT");
     mintApi.getKeys.mockResolvedValue({ keysets: [{ id: KEYSET, unit: "sat", keys: {} }] });
@@ -129,7 +131,7 @@ describe("a Cashu payment whose swap never reached the mint", () => {
   it("an input the mint reads PENDING keeps it unknown, its sats reserved", async () => {
     const t = setup();
     const review = await approvedWhileMintDown(t);
-    vi.setSystemTime(Date.now() + SWAP_SETTLED_MS + 1);
+    vi.setSystemTime(Date.now() + GATE + 1);
     mintSays("PENDING");
     expect((await t.coordinator.reconcile(review.id)).state).toBe("unknown");
     expect(await reserved()).toEqual(["in"]);
@@ -138,24 +140,40 @@ describe("a Cashu payment whose swap never reached the mint", () => {
   it("an input the mint reads SPENT with nothing signed keeps it unknown", async () => {
     const t = setup();
     const review = await approvedWhileMintDown(t);
-    vi.setSystemTime(Date.now() + SWAP_SETTLED_MS + 1);
+    vi.setSystemTime(Date.now() + GATE + 1);
     mintSays("SPENT");
     expect((await t.coordinator.reconcile(review.id)).state).toBe("unknown");
     expect(await reserved()).toEqual(["in"]);
   });
 
-  it("younger than SWAP_SETTLED_MS, it stays unknown: a swap could still be on its way", async () => {
+  it("younger than the gate, it stays unknown: a swap could still be on its way", async () => {
     const t = setup();
     const review = await approvedWhileMintDown(t);
     mintSays("UNSPENT");
-    vi.setSystemTime(Date.now() + SWAP_SETTLED_MS - 1_000);
+    vi.setSystemTime(Date.now() + GATE - 1_000);
     expect((await t.coordinator.reconcile(review.id)).state).toBe("unknown");
     expect(await reserved()).toEqual(["in"]);
     // Timed from the approval, saved with it: a new coordinator (a reload) reads the same age.
     const saved = (await intentRepository.get(review.id))!.review;
     expect(saved.submittedAt).toBeGreaterThanOrEqual(saved.createdAt);
-    vi.setSystemTime(saved.submittedAt! + SWAP_SETTLED_MS);
+    vi.setSystemTime(saved.submittedAt! + GATE);
     expect((await new PaymentCoordinator(intentRepository, [t.adapter]).reconcile(review.id)).state).toBe("failed");
+    expect(await reserved()).toEqual([]);
+  });
+
+  it("an approval whose swap took long to fail waits SWAP_SETTLED_MS from when it failed, not from when it began", async () => {
+    const t = setup();
+    mintApi.prepare.mockResolvedValue(preview());
+    const review = await t.coordinator.prepare(target, 40, 20, context);
+    // The request hung for 10 minutes (retries of a swap, NUT-19) before it failed.
+    mintApi.completeSwap.mockImplementation(async () => { vi.setSystemTime(Date.now() + 10 * 60_000); throw new TypeError("Failed to fetch"); });
+    expect((await t.coordinator.approve(review.id)).state).toBe("unknown");
+    const endedAt = Date.now();
+    mintSays("UNSPENT");
+    vi.setSystemTime(endedAt + SWAP_SETTLED_MS - 1_000);
+    expect((await t.coordinator.reconcile(review.id)).state).toBe("unknown");
+    vi.setSystemTime(endedAt + SWAP_SETTLED_MS);
+    expect((await t.coordinator.reconcile(review.id)).state).toBe("failed");
     expect(await reserved()).toEqual([]);
   });
 });

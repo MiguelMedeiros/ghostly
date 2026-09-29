@@ -10,6 +10,8 @@ import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/prov
 import { FakeLightningProvider, FakeOnchainProvider, fakeAddress, fakeInvoice, fakeLightning, fakeOnchain } from "../src/engine/paymentAdapters/providers/testing";
 import type { StoredLink, StoredPayment } from "../src/shared/types";
 import { REAL_MONEY_UNCONFIRMED } from "../src/engine/paymentAdapters/walletInstances";
+import { CASHU_REQUEST_TIMEOUT_MS, NEVER_REACHED_MINT, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
+import type { CashuPrepared } from "../src/engine/wallet";
 // covers: payments.chat.review, payments.chat.method-off, payments.chat.reconcile, wallet.mode, wallet.onchain.sources, wallet.cashu.mint.manage, wallet.cashu.export
 
 /** A connected contact, as far as the engine's payment paths look at it. */
@@ -230,6 +232,27 @@ describe("a payment in a chat", () => {
     await intentRepository.put({ review: unpaidRequest, prepared: {} });
     await expect(node.approvePayment({ id: unpaidRequest.id })).rejects.toThrow("no longer awaiting payment");
     expect(approve).not.toHaveBeenCalled();
+  });
+});
+
+describe("a Cashu payment that never reached its mint, through the engine", () => {
+  it("is saved as abandoned before its sats are released, then failed", async () => {
+    const { node } = track(engine());
+    const submittedAt = Date.now() - CASHU_REQUEST_TIMEOUT_MS - SWAP_SETTLED_MS - 1;
+    const review = savedReview({ state: "unknown", submittedAt, createdAt: submittedAt });
+    await intentRepository.put({ review, prepared: { mint: TEST_MINT, swap: {} } as unknown as CashuPrepared });
+    const wallet = node["wallet"];
+    vi.spyOn(wallet, "reviewedCashuSpent").mockResolvedValue(false);
+    vi.spyOn(wallet, "recoverReviewedCashu").mockResolvedValue(undefined);
+    vi.spyOn(wallet, "reviewedCashuNeverSwapped").mockResolvedValue(true);
+    const savedWhenReleased: (boolean | undefined)[] = [];
+    const release = vi.spyOn(wallet, "releaseReviewedCashu").mockImplementation(async () => {
+      savedWhenReleased.push(((await intentRepository.get(review.id))!.prepared as CashuPrepared).abandoned);
+    });
+    expect(await node.reconcilePayment({ id: review.id })).toMatchObject({ state: "failed", error: NEVER_REACHED_MINT });
+    expect(release).toHaveBeenCalledOnce();
+    expect(savedWhenReleased).toEqual([true]);
+    expect((await intentRepository.get(review.id))!.review.state).toBe("failed");
   });
 });
 
