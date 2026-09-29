@@ -76,8 +76,11 @@ export async function attachMint(context: BrowserContext): Promise<void> {
   });
 }
 
-/** A stand-in for the public test mint that a whole browser reaches: its Chromium flags, and how to stop it. */
-export interface MintStandIn { args: string[]; close: () => Promise<void> }
+/**
+ * A stand-in for the public test mint that a whole browser reaches: its host resolver rules (for
+ * `--host-resolver-rules`, which takes one list for the whole browser), its other Chromium flags, and how to stop it.
+ */
+export interface MintStandIn { rules: string[]; args: string[]; close: () => Promise<void> }
 
 /**
  * `attachMint` for a browser whose requests `context.route` never sees: the extension's engine runs in an offscreen
@@ -113,7 +116,8 @@ export async function mintStandIn(): Promise<MintStandIn | undefined> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return {
-    args: [`--host-resolver-rules=MAP ${host} 127.0.0.1:${port}`, `--ignore-certificate-errors-spki-list=${spki}`],
+    rules: [`MAP ${host} 127.0.0.1:${port}`],
+    args: [`--ignore-certificate-errors-spki-list=${spki}`],
     close: () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
   };
 }

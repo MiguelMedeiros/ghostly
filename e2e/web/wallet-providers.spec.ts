@@ -9,7 +9,7 @@ import { chatPayments, paymentCard } from "../support/payments";
 /**
  * Every wallet provider receiving and sending, on test networks only: each person makes the Testnet wallets the test
  * needs with New (nothing is made by itself), then moves an Ark, Bark or USDT one to the local test chain.
- *  - Cashu and Lightning: the public test mint, or the local one E2E_MINT_URL answers for (@network).
+ *  - Cashu and Lightning: the public test mint, answered by the local one when E2E_MINT_URL is set (as in CI).
  *  - Ark: arkd on e2e/infra's regtest chain (GHOSTLY_ARK_REGTEST=1). New makes it on Mutinynet first (@network).
  *  - Bark (Second's Ark): captaind on e2e/infra's regtest chain (GHOSTLY_BARK_REGTEST=1). New makes it on signet first (@network).
  *  - USDT: e2e/infra's local EVM chain with a test token (GHOSTLY_USDT_LOCAL=1). New makes it on Sepolia first (@network).
@@ -40,7 +40,7 @@ async function ecashOnly(p: Peer) {
 }
 const testSats = (p: Peer) => p.page.getByTestId("wallet-balance");
 
-test.describe("Cashu and Lightning", { tag: "@network" }, () => {
+test.describe("Cashu and Lightning", () => {
   test.describe.configure({ retries: 2 });
 
   test("Cashu: test coins in, a Send in the chat, and a Request paid in the chat", { tag: ["@feature:wallet.test-coins", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {

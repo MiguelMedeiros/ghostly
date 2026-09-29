@@ -12,7 +12,7 @@ import { closePayments, openPayments, paymentCard, paymentNetwork } from "../sup
 const mainnetCards = "[data-testid^=payment-card-][data-testid$=-mainnet]", testnetCards = "[data-testid^=payment-card-][data-testid$=-testnet]";
 
 test("the payment sheet's Mainnet | Testnet tabs: one network's cards on Pay and Accept, a Testnet payment, switches kept per network", {
-  tag: ["@network", "@feature:payments.chat.cards", "@feature:payments.chat.networks", "@feature:payments.chat.methods", "@feature:payments.cashu.send", "@feature:payments.cashu.request"],
+  tag: ["@feature:payments.chat.cards", "@feature:payments.chat.networks", "@feature:payments.chat.methods", "@feature:payments.cashu.send", "@feature:payments.cashu.request"],
 }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("tabs-alice", { viewport: { width: 1280, height: 900 } }), peer("tabs-bob")]);
   await mockMainnetMints(alice.context);

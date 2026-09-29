@@ -4,7 +4,7 @@ import { paymentCard } from "../support/payments";
 
 // Sats that come in while the wallet is closed show as a dot on the wallet icon, until it is opened. How many is in
 // the button's name and tooltip, never on the bar.
-test.describe("wallet badge", { tag: "@network" }, () => {
+test.describe("wallet badge", () => {
   test.describe.configure({ retries: 2 });
 
   test("what came in while the wallet was closed shows on its icon, and goes once it is opened", { tag: ["@feature:wallet.badge", "@feature:payments.cashu.send"] }, async ({ peer }, testInfo) => {

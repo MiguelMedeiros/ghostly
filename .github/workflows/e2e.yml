@@ -2,8 +2,10 @@ name: E2E
 
 # Real browsers against the shipped build of the web app and the extension, and
 # the real Desktop app driven through WebDriver.
-# Peers meet through a relay inside the test process, so nothing here depends
-# on outside services except the tests tagged @network (the public Cashu test mint).
+# Peers meet through a relay inside the test process and the wallets use a mint
+# started below, so nothing here depends on outside services. The tests that do
+# (tagged @network: public chain servers, Breez's regtest) are left out here and
+# run nightly in E2E (full).
 # Too slow to hold up every pull request: it runs before each release (release.yml
 # calls it and ships nothing unless it passes), and by hand from the Actions tab.
 on:
@@ -76,7 +78,8 @@ jobs:
           E2E_MINT_URL: http://127.0.0.1:3338
         # @release-skip: specs that have not passed on a GitHub runner yet and do not gate a release until they
         # do (the nightly E2E (full) still runs them). See the follow-up issue before adding one.
-        run: npm run test:e2e -- --grep-invert @release-skip
+        # @network: the tests that need a service on the Internet; a release never waits on one.
+        run: npm run test:e2e -- --grep-invert "@release-skip|@network"
 
       - name: Run end-to-end tests against ${{ inputs.web_url }}
         if: ${{ inputs.web_url }}

@@ -9,7 +9,7 @@ import { paymentCard } from "../support/payments";
  * gets it from whoever is there and pays; Carol sees the request and then sees it paid. Then Alice asks the whole
  * group: Carol pays it, once, and everyone sees who did.
  */
-test.describe("community payments", { tag: "@network" }, () => {
+test.describe("community payments", () => {
   test.describe.configure({ retries: 1 });
 
   const groupChat = (peer: Peer) => peer.page.getByTestId("group-chat");
