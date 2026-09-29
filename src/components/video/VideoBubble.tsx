@@ -18,6 +18,16 @@ type Problem = "unsupported" | "too-large" | "missing" | "not-yet";
 
 const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
+/** How long a playing video may be out of view before it stops: longer than a rotation's new layout takes to settle. */
+const OUT_OF_VIEW_MS = 1500;
+
+/** The video fills the screen: the page's full screen, or the iPhone's own player (`webkitDisplayingFullscreen`). */
+function fullScreen(video: HTMLVideoElement | null): boolean {
+  if (!video) return false;
+  const shown = typeof document !== "undefined" ? document.fullscreenElement : null;
+  return (!!shown && (shown === video || shown.contains(video))) || (video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }).webkitDisplayingFullscreen === true;
+}
+
 /**
  * A video in the chat. Before it plays: a poster (the sender's, or one made here once the file is in), its
  * length, and a big play button; a large one a person has to accept first shows "Download <size>"; one on its
@@ -163,8 +173,14 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   // Another video or voice message starts: this one stops and lets go of its bytes, so only one is ever held.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
 
-  // Scrolled away: it stops, and its bytes go (a Blob in memory, or the platform stops serving the stream).
-  useEffect(() => { if (visible === false && phase === "playing") unload(); }, [visible, phase, unload]);
+  // Scrolled away: it stops, and its bytes go (a Blob in memory, or the platform stops serving the stream). Not for a
+  // moment out of view: a phone turned on its side lays the chat out again, and the video is below the fold until the
+  // chat brings its place back, a few frames later. Nor while it fills the screen (iOS plays it full screen itself).
+  useEffect(() => {
+    if (visible !== false || phase !== "playing") return;
+    const timer = setTimeout(() => { if (!fullScreen(videoRef.current)) unload(); }, OUT_OF_VIEW_MS);
+    return () => clearTimeout(timer);
+  }, [visible, phase, unload]);
 
   useEffect(() => () => {
     releasePlayback(file.id);
