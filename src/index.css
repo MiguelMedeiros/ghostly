@@ -282,6 +282,10 @@ body {
 
 #root {
   @apply h-screen flex overflow-hidden;
+  /* A phone on its side: the notch or Dynamic Island is at one end (viewport-fit=cover lets the page under it). */
+  box-sizing: border-box;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 /* An app opened from the iPhone home screen (iOS 26): with nothing in the page's flow (the body is fixed on
@@ -524,12 +528,15 @@ html[data-standalone="true"] {
     animation: fade-in 0.2s ease-out;
   }
 
+  /* iOS keeps the page's height under the keyboard, and `--app-height` is what the keyboard leaves
+     (hooks/useViewportHeight.ts): a sheet stands on the keyboard and a dialog is centred above it, both clear of
+     the notch, instead of their fields and buttons sitting under the keyboard. */
   .sheet {
     position: fixed;
-    inset: auto 0 0 0;
+    inset: auto 0 calc(100% - var(--app-height, 100%)) 0;
     z-index: 60;
     width: 100%;
-    max-height: 82dvh;
+    max-height: min(82dvh, calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 1rem));
     margin: 0;
     overflow-y: auto;
     border-width: 1px 0 0;
@@ -546,6 +553,12 @@ html[data-standalone="true"] {
     margin: 8px auto 4px;
     border-radius: 2px;
     background: var(--color-border, rgb(255 255 255 / 0.25));
+  }
+
+  dialog:modal:not([data-testid="avatar-viewer"]) {
+    top: env(safe-area-inset-top);
+    bottom: calc(100% - var(--app-height, 100%));
+    max-height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 2rem);
   }
 
   .sheet-padded {
