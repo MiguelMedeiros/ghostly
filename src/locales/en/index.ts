@@ -27,6 +27,7 @@ import share from "./share.json";
 import sidebar from "./sidebar.json";
 import tabs from "./tabs.json";
 import updates from "./updates.json";
+import wallet from "./wallet.json";
 
 export default {
   app,
@@ -55,4 +56,5 @@ export default {
   sidebar,
   tabs,
   updates,
+  wallet,
 };

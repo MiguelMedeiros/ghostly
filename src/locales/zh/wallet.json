@@ -1,0 +1,37 @@
+{
+  "first": {
+    "creating": "正在创建…",
+    "networks": "Testnet：测试币，没有价值，用于试用。Mainnet：真实资金。",
+    "openMade": "打开已创建的钱包",
+    "orNew": "或者通过 {{new}} 选择任意类型的钱包：Ark、Lightning、Bitcoin、Fedimint 等。",
+    "progress": "正在创建钱包并检查其服务器…",
+    "retry": "重试 {{wallet}}",
+    "startMainnet": "在 Mainnet 上开始",
+    "startTestnet": "在 Testnet 上开始",
+    "text": "每个钱包都有自己的网络。先从 Cashu（通过 Lightning 付款和收款）和 USDT 开始：在你选择的网络上一键完成。",
+    "title": "创建你的第一个钱包"
+  },
+  "money": {
+    "mainnet": "真实资金",
+    "testnet": "测试资金"
+  },
+  "networks": {
+    "tab": "{{money}}，{{network}}，{{count}} 个钱包",
+    "tabOne": "{{money}}，{{network}}，1 个钱包"
+  },
+  "page": {
+    "about": {
+      "mainnet": "你自己的钱：请谨慎使用。",
+      "testnet": "测试币，没有价值：用于试用。"
+    },
+    "create": "创建钱包",
+    "networks": "网络",
+    "new": "新建 {{network}} 钱包",
+    "none": "还没有 {{network}} 钱包。",
+    "unavailable": "此处无法使用钱包。"
+  },
+  "sats": {
+    "mainnet": "sats",
+    "testnet": "测试 sats"
+  }
+}

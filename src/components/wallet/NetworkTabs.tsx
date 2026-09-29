@@ -1,7 +1,8 @@
 import { useRef, type KeyboardEvent } from "react";
 import { WALLET_NETWORKS as NETWORKS } from "@ghostly/core";
 import "./wallet-networks.css";
-import { MONEY_LABEL, NetworkTag } from "../NetworkTag";
+import { NetworkTag, moneyLabel } from "../NetworkTag";
+import { useI18n } from "../../contexts/I18nContext";
 import { NETWORK_NAME } from "./names";
 import type { WalletNetwork } from "../../lib/platform";
 
@@ -24,6 +25,7 @@ export function NetworkTabs({ network, counts, onChange, label, testId, tabTestI
   controls: string;
   compact?: boolean;
 }) {
+  const { t } = useI18n();
   const tabs = useRef<Partial<Record<WalletNetwork, HTMLButtonElement | null>>>({});
   // Two tabs, so either arrow is the other one.
   const keys = (e: KeyboardEvent) => {
@@ -41,7 +43,7 @@ export function NetworkTabs({ network, counts, onChange, label, testId, tabTestI
         const count = counts[n], on = n === network;
         return (
           <button key={n} ref={(el) => { tabs.current[n] = el; }} type="button" role="tab" id={`${idPrefix}-${n}`} data-testid={`${tabTestId}-${n}`} data-network={n}
-            aria-label={`${MONEY_LABEL[n]}, ${NETWORK_NAME[n]}, ${count} ${count === 1 ? "wallet" : "wallets"}`} aria-selected={on} aria-controls={controls} tabIndex={on ? 0 : -1} className="wallet-network" onClick={() => onChange(n)}>
+            aria-label={t(count === 1 ? "wallet.networks.tabOne" : "wallet.networks.tab", { money: moneyLabel(t, n), network: NETWORK_NAME[n], count })} aria-selected={on} aria-controls={controls} tabIndex={on ? 0 : -1} className="wallet-network" onClick={() => onChange(n)}>
             <NetworkTag network={n} testId={`${tabTestId}-${n}-tag`} />
             <span className="wallet-network-name">{NETWORK_NAME[n]} <span aria-hidden="true">·</span> <span data-testid={`${tabTestId}-${n}-count`}>{count}</span></span>
           </button>

@@ -1,0 +1,37 @@
+{
+  "first": {
+    "creating": "Creando…",
+    "networks": "Testnet: monedas de prueba, sin valor, para probar. Mainnet: dinero real.",
+    "openMade": "Abrir lo creado",
+    "orNew": "O elige cualquier tipo de billetera con {{new}}: Ark, Lightning, Bitcoin, Fedimint y más.",
+    "progress": "Creando tus billeteras y comprobando sus servidores…",
+    "retry": "Reintentar {{wallet}}",
+    "startMainnet": "Empezar en Mainnet",
+    "startTestnet": "Empezar en Testnet",
+    "text": "Cada billetera tiene su propia red. Empieza con Cashu, para pagar y cobrar por Lightning, y USDT: un clic, en la red que elijas.",
+    "title": "Crea tu primera billetera"
+  },
+  "money": {
+    "mainnet": "Dinero real",
+    "testnet": "Dinero de prueba"
+  },
+  "networks": {
+    "tab": "{{money}}, {{network}}, {{count}} billeteras",
+    "tabOne": "{{money}}, {{network}}, 1 billetera"
+  },
+  "page": {
+    "about": {
+      "mainnet": "Dinero tuyo: gástalo con cuidado.",
+      "testnet": "Monedas de prueba, sin valor: para probar."
+    },
+    "create": "Crear una billetera",
+    "networks": "Redes",
+    "new": "Nueva billetera {{network}}",
+    "none": "Aún no hay billeteras {{network}}.",
+    "unavailable": "La billetera no está disponible aquí."
+  },
+  "sats": {
+    "mainnet": "sats",
+    "testnet": "sats de prueba"
+  }
+}

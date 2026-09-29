@@ -1,0 +1,37 @@
+{
+  "first": {
+    "creating": "Création…",
+    "networks": "Testnet : pièces de test, sans valeur, pour essayer. Mainnet : argent réel.",
+    "openMade": "Ouvrir ce qui a été créé",
+    "orNew": "Ou choisissez n’importe quel type de portefeuille avec {{new}} : Ark, Lightning, Bitcoin, Fedimint et plus.",
+    "progress": "Création de vos portefeuilles et vérification de leurs serveurs…",
+    "retry": "Réessayer {{wallet}}",
+    "startMainnet": "Commencer sur Mainnet",
+    "startTestnet": "Commencer sur Testnet",
+    "text": "Chaque portefeuille a son propre réseau. Commencez avec Cashu, pour payer et être payé via Lightning, et USDT : un clic, sur le réseau de votre choix.",
+    "title": "Créez votre premier portefeuille"
+  },
+  "money": {
+    "mainnet": "Argent réel",
+    "testnet": "Argent de test"
+  },
+  "networks": {
+    "tab": "{{money}}, {{network}}, {{count}} portefeuilles",
+    "tabOne": "{{money}}, {{network}}, 1 portefeuille"
+  },
+  "page": {
+    "about": {
+      "mainnet": "Votre argent : dépensez-le avec soin.",
+      "testnet": "Pièces de test, sans valeur : pour essayer."
+    },
+    "create": "Créer un portefeuille",
+    "networks": "Réseaux",
+    "new": "Nouveau portefeuille {{network}}",
+    "none": "Aucun portefeuille {{network}} pour l’instant.",
+    "unavailable": "Le portefeuille n’est pas disponible ici."
+  },
+  "sats": {
+    "mainnet": "sats",
+    "testnet": "sats de test"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "first": {
+    "creating": "作成中…",
+    "networks": "Testnet：価値のないテスト用コインでお試し。Mainnet：本物のお金。",
+    "openMade": "作成されたものを開く",
+    "orNew": "または {{new}} から好きな種類のウォレットを選べます：Ark、Lightning、Bitcoin、Fedimint など。",
+    "progress": "ウォレットを作成し、サーバーを確認しています…",
+    "retry": "{{wallet}} を再試行",
+    "startMainnet": "Mainnet で始める",
+    "startTestnet": "Testnet で始める",
+    "text": "ウォレットごとにネットワークがあります。まずは Lightning で支払いと受け取りができる Cashu と、USDT から。選んだネットワークでワンクリックです。",
+    "title": "最初のウォレットを作成"
+  },
+  "money": {
+    "mainnet": "本物のお金",
+    "testnet": "テスト用のお金"
+  },
+  "networks": {
+    "tab": "{{money}}、{{network}}、ウォレット {{count}} 件",
+    "tabOne": "{{money}}、{{network}}、ウォレット 1 件"
+  },
+  "page": {
+    "about": {
+      "mainnet": "あなたのお金です。慎重に使ってください。",
+      "testnet": "価値のないテスト用コインです。お試し用に。"
+    },
+    "create": "ウォレットを作成",
+    "networks": "ネットワーク",
+    "new": "新しい {{network}} ウォレット",
+    "none": "{{network}} のウォレットはまだありません。",
+    "unavailable": "ここではウォレットを利用できません。"
+  },
+  "sats": {
+    "mainnet": "sats",
+    "testnet": "テスト sats"
+  }
+}

@@ -43,7 +43,6 @@ const rememberedNetwork = (): WalletNetwork | null => {
  * (Settings), asking for a copy of the phrase before money goes in. Real money with no copy is one lost device from gone.
  */
 const backupFirst = (made: WalletInstanceView) => made.network === "mainnet" && made.type === "bark";
-const ABOUT: Record<WalletNetwork, string> = { mainnet: "Money you own: spend it with care.", testnet: "Test coins, worth nothing: for trying things out." };
 
 /**
  * The wallets, as a page beside the chat list like Settings: real money and test money as two wallets apart, one tab
@@ -140,22 +139,22 @@ export function Wallet() {
   };
   return (
     <Page title={t("tabs.wallet")} testId="wallet" trailing={wallet && state && (
-      <PageAction label={t("sidebar.new")} title="Create a wallet" testId="wallet-add" onClick={() => setCreating(cards.length && !firstRun ? network : "testnet")} />
+      <PageAction label={t("sidebar.new")} title={t("wallet.page.create")} testId="wallet-add" onClick={() => setCreating(cards.length && !firstRun ? network : "testnet")} />
     )}>
       <div ref={page} className="space-y-6">
         {platform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-yellow-500 text-xs" data-testid="platform-notice">{platform.notice}</p>}
-        {!wallet || !state ? <p className="text-text-muted text-sm">The wallet is not available here.</p> : !cards.length || firstRun ? (
+        {!wallet || !state ? <p className="text-text-muted text-sm">{t("wallet.page.unavailable")}</p> : !cards.length || firstRun ? (
           <FirstWallet wallet={wallet} onNew={() => setCreating("testnet")} onStart={() => setFirstRun(true)} onMade={(id) => { setFirstRun(false); select(id); setDealt(id); }} />
         ) : <>
           <NetworkTabs network={network} counts={{ mainnet: cards.filter((c) => c.network === "mainnet").length, testnet: cards.filter((c) => c.network === "testnet").length }}
-            onChange={(n) => { setFocusPanel(false); show(n); }} label="Networks" testId="wallet-networks" tabTestId="wallet-network" idPrefix="wallet-network-tab" controls="wallet-network-panel" />
+            onChange={(n) => { setFocusPanel(false); show(n); }} label={t("wallet.page.networks")} testId="wallet-networks" tabTestId="wallet-network" idPrefix="wallet-network-tab" controls="wallet-network-panel" />
           <div role="tabpanel" id="wallet-network-panel" aria-labelledby={`wallet-network-tab-${network}`} data-testid="wallet-network-panel" data-network={network} className="space-y-6">
             <div key={network} className="wallet-network-view space-y-3" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
-              <p className="text-xs text-text-muted" data-testid="wallet-network-about">{ABOUT[network]}</p>
+              <p className="text-xs text-text-muted" data-testid="wallet-network-about">{t(network === "mainnet" ? "wallet.page.about.mainnet" : "wallet.page.about.testnet")}</p>
               {selected ? <WalletDeck network={network} cards={shown} selected={selected.id} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border px-4 py-3" data-testid={`wallet-network-${network}-empty`}>
-                  <p className="text-sm text-text-secondary">No {NETWORK_NAME[network]} wallets yet.</p>
-                  <Button data-testid={`wallet-network-${network}-new`} onClick={() => setCreating(network)}>New {NETWORK_NAME[network]} wallet</Button>
+                  <p className="text-sm text-text-secondary">{t("wallet.page.none", { network: NETWORK_NAME[network] })}</p>
+                  <Button data-testid={`wallet-network-${network}-new`} onClick={() => setCreating(network)}>{t("wallet.page.new", { network: NETWORK_NAME[network] })}</Button>
                 </div>
               )}
             </div>

@@ -1,0 +1,37 @@
+{
+  "first": {
+    "creating": "جارٍ الإنشاء…",
+    "networks": "Testnet: عملات تجريبية بلا قيمة للتجربة. Mainnet: أموال حقيقية.",
+    "openMade": "افتح ما تم إنشاؤه",
+    "orNew": "أو اختر أي نوع من المحافظ عبر {{new}}: Ark وLightning وBitcoin وFedimint وغيرها.",
+    "progress": "جارٍ إنشاء محافظك والتحقق من خوادمها…",
+    "retry": "أعد محاولة {{wallet}}",
+    "startMainnet": "ابدأ على Mainnet",
+    "startTestnet": "ابدأ على Testnet",
+    "text": "لكل محفظة شبكتها الخاصة. ابدأ بـ Cashu للدفع والاستلام عبر Lightning، وبـ USDT: بنقرة واحدة، على الشبكة التي تختارها.",
+    "title": "أنشئ محفظتك الأولى"
+  },
+  "money": {
+    "mainnet": "أموال حقيقية",
+    "testnet": "أموال تجريبية"
+  },
+  "networks": {
+    "tab": "{{money}}، {{network}}، {{count}} محافظ",
+    "tabOne": "{{money}}، {{network}}، محفظة واحدة"
+  },
+  "page": {
+    "about": {
+      "mainnet": "أموالك: أنفقها بحذر.",
+      "testnet": "عملات تجريبية بلا قيمة: للتجربة."
+    },
+    "create": "إنشاء محفظة",
+    "networks": "الشبكات",
+    "new": "محفظة {{network}} جديدة",
+    "none": "لا توجد محافظ {{network}} بعد.",
+    "unavailable": "المحفظة غير متاحة هنا."
+  },
+  "sats": {
+    "mainnet": "sats",
+    "testnet": "sats تجريبية"
+  }
+}

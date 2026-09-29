@@ -1,0 +1,37 @@
+{
+  "first": {
+    "creating": "Creating…",
+    "networks": "Testnet: test coins, worth nothing, to try things out. Mainnet: real money.",
+    "openMade": "Open what was made",
+    "orNew": "Or pick any kind of wallet with {{new}}: Ark, Lightning, Bitcoin, Fedimint and more.",
+    "progress": "Creating your wallets and checking their servers…",
+    "retry": "Try {{wallet}} again",
+    "startMainnet": "Start on Mainnet",
+    "startTestnet": "Start on Testnet",
+    "text": "Each wallet has its own network. Start with Cashu, to pay and be paid over Lightning, and USDT: one click, on the network you choose.",
+    "title": "Create your first wallet"
+  },
+  "money": {
+    "mainnet": "Real money",
+    "testnet": "Test money"
+  },
+  "networks": {
+    "tab": "{{money}}, {{network}}, {{count}} wallets",
+    "tabOne": "{{money}}, {{network}}, 1 wallet"
+  },
+  "page": {
+    "about": {
+      "mainnet": "Money you own: spend it with care.",
+      "testnet": "Test coins, worth nothing: for trying things out."
+    },
+    "create": "Create a wallet",
+    "networks": "Networks",
+    "new": "New {{network}} wallet",
+    "none": "No {{network}} wallets yet.",
+    "unavailable": "The wallet is not available here."
+  },
+  "sats": {
+    "mainnet": "sats",
+    "testnet": "test sats"
+  }
+}

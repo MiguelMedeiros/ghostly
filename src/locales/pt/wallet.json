@@ -1,0 +1,37 @@
+{
+  "first": {
+    "creating": "Criando…",
+    "networks": "Testnet: moedas de teste, sem valor, para experimentar. Mainnet: dinheiro real.",
+    "openMade": "Abrir o que foi criado",
+    "orNew": "Ou escolha qualquer tipo de carteira em {{new}}: Ark, Lightning, Bitcoin, Fedimint e mais.",
+    "progress": "Criando suas carteiras e verificando os servidores…",
+    "retry": "Tentar {{wallet}} de novo",
+    "startMainnet": "Começar na Mainnet",
+    "startTestnet": "Começar na Testnet",
+    "text": "Cada carteira tem sua própria rede. Comece com Cashu, para pagar e receber via Lightning, e USDT: um clique, na rede que você escolher.",
+    "title": "Crie sua primeira carteira"
+  },
+  "money": {
+    "mainnet": "Dinheiro real",
+    "testnet": "Dinheiro de teste"
+  },
+  "networks": {
+    "tab": "{{money}}, {{network}}, {{count}} carteiras",
+    "tabOne": "{{money}}, {{network}}, 1 carteira"
+  },
+  "page": {
+    "about": {
+      "mainnet": "Dinheiro seu: gaste com cuidado.",
+      "testnet": "Moedas de teste, sem valor: para experimentar."
+    },
+    "create": "Criar uma carteira",
+    "networks": "Redes",
+    "new": "Nova carteira {{network}}",
+    "none": "Nenhuma carteira {{network}} ainda.",
+    "unavailable": "A carteira não está disponível aqui."
+  },
+  "sats": {
+    "mainnet": "sats",
+    "testnet": "sats de teste"
+  }
+}
