@@ -56,6 +56,34 @@ test("an audio call from the other side, declined, leaves neither on a call", { 
   await expect(chat(alice).getByText("Audio call declined")).toBeVisible();
 });
 
+test("both call at once: one side rings, and answering connects the call", { tag: ["@feature:calls.paired", "@feature:calls.audio"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("paired-glare-alice"), peer("paired-glare-bob")]);
+  await pair(alice, bob);
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-audio")).toBeEnabled();
+  await Promise.all([alice.page.getByTestId("call-audio").click(), bob.page.getByTestId("call-audio").click()]);
+  // The earlier offer wins on both sides: exactly one of them rings. Both used to stay on "Calling..." for good.
+  const ringing = (p: Peer) => p.page.getByTitle("Accept audio call");
+  await expect.poll(async () => (await ringing(alice).count()) + (await ringing(bob).count()), { timeout: 30_000 }).toBe(1);
+  const [callee, caller] = (await ringing(alice).count()) ? [alice, bob] : [bob, alice];
+  await ringing(callee).click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  await caller.page.getByTitle("End call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByTitle("End call")).toHaveCount(0);
+  for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call ended")).toBeVisible();
+});
+
+test("the contact's tab closes mid-call: the call ends here with its line", { tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("paired-gone-alice"), peer("paired-gone-bob")]);
+  await pair(alice, bob);
+  await alice.page.getByTestId("call-video").click();
+  await bob.page.getByTitle("Accept video call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  await bob.page.close();
+  // No hang-up comes: the media connection fails (about 15 s in Chromium) and the call ends as a hang-up ends it.
+  await expect(alice.page.getByTitle("End call")).toHaveCount(0, { timeout: 60_000 });
+  await expect(chat(alice).getByText("Video call ended")).toBeVisible();
+});
+
 test("calls need a live connection: on the DHT the buttons are off and say so", { tag: ["@feature:calls.paired.live-only"] }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("paired-dht-alice"), peer("paired-dht-bob")]);
   await pair(alice, bob);

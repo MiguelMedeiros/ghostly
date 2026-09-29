@@ -136,6 +136,8 @@ export function useWebRTC({
   /** Whether the call negotiated a video lane we may send on, camera or screen. */
   const [videoLaneOpen, setVideoLaneOpen] = useState(false);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
+  /** When the call connected, for the length of a call that ends where no state is at hand (a connection that failed). */
+  const callStartedAtRef = useRef<number | null>(null);
   /** Why the last attempt to share the screen failed, for a few seconds. */
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
 
@@ -146,6 +148,8 @@ export function useWebRTC({
   const pendingOfferRef = useRef<CallSignal | null>(null);
   const hangupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myOfferTimestampRef = useRef<number>(0);
+  /** Our published offer's DTLS fingerprint: with its timestamp, what decides who rings when both call at once. */
+  const myOfferFingerprintRef = useRef<string>("");
   /** Whether a picture was on at any point, which is what the chat log calls a video call. */
   const callHadVideoRef = useRef<boolean>(false);
   const callConnectedEventFiredRef = useRef<boolean>(false);
@@ -228,6 +232,7 @@ export function useWebRTC({
     pictureBeforeShareRef.current = null;
     setScreenShareError(null);
     setCallStartedAt(null);
+    callStartedAtRef.current = null;
   }, [setPicture, setScreenShareError, clearRestartGrace]);
 
   /** The lane is open once both sides have described it and our half may send. */
@@ -260,7 +265,8 @@ export function useWebRTC({
     const connectedNow = () => {
       updateCallState("connected");
       refreshVideoLane();
-      setCallStartedAt(Date.now());
+      callStartedAtRef.current = Date.now();
+      setCallStartedAt(callStartedAtRef.current);
       setFastPoll(false);
       if (!callConnectedEventFiredRef.current) {
         callConnectedEventFiredRef.current = true;
@@ -278,6 +284,13 @@ export function useWebRTC({
     };
 
     const giveUp = () => {
+      // A connected call whose contact went away (a closed tab, a reload, a lost network) ends as a hang-up ends it:
+      // with its line and its length in the chat. One that never connected says nothing more.
+      if (callConnectedEventFiredRef.current) {
+        const started = callStartedAtRef.current;
+        addCallEventMessage?.("call_ended", callHadVideoRef.current, started ? Date.now() - started : undefined);
+        callConnectedEventFiredRef.current = false;
+      }
       cleanupConnection();
       updateCallState("idle");
       publishCallSignal(null);
@@ -446,6 +459,7 @@ export function useWebRTC({
 
         const offerTs = Date.now();
         myOfferTimestampRef.current = offerTs;
+        myOfferFingerprintRef.current = params.f ?? "";
 
         const signal: CallSignal = {
           t: "o",
@@ -650,6 +664,7 @@ export function useWebRTC({
       updateCallState("idle");
       pendingOfferRef.current = null;
       myOfferTimestampRef.current = 0;
+      myOfferFingerprintRef.current = "";
       callConnectedEventFiredRef.current = false;
       callHadVideoRef.current = false;
       setFastPoll(false);
@@ -762,7 +777,23 @@ export function useWebRTC({
       }
     }
 
-    if (signal.t === "o" && callStateRef.current === "idle") {
+    // Both called at once (WISP 601, "Both call at once"): each side decides alike from the two offers themselves, the
+    // earlier one wins and, at the same millisecond, the lower DTLS fingerprint. Ours still gathering is later than
+    // theirs. The side whose offer lost drops its own attempt, sends nothing (a hang-up would end the winner's call),
+    // and rings with the winner's offer; the winner's call keeps ringing the other side.
+    let yielded = false;
+    if (signal.t === "o" && callStateRef.current === "offering") {
+      lastProcessedSignalRef.current = signal.ts;
+      const mine = myOfferTimestampRef.current;
+      const theirsFirst = !mine || signal.ts < mine || (signal.ts === mine && (signal.f ?? "") < myOfferFingerprintRef.current);
+      if (!theirsFirst) return;
+      cleanupConnection();
+      myOfferTimestampRef.current = 0;
+      myOfferFingerprintRef.current = "";
+      yielded = true;
+    }
+
+    if (signal.t === "o" && (callStateRef.current === "idle" || yielded)) {
       pendingOfferRef.current = signal;
       lastProcessedSignalRef.current = signal.ts;
       const offerHasVideo = signalHasVideo(signal);
@@ -787,7 +818,7 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection]);
 
   useEffect(() => {
     const attempts = attemptRef;
