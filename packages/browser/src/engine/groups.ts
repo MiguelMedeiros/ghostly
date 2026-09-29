@@ -321,7 +321,9 @@ export class Groups {
       const hubKeys = new Set(onHubs ? this.hubs.hubs(group.id, session, now) : []), policy = session.hubPolicy;
       if (onHubs && this.hubs.isHub(group.id)) hubKeys.add(session.myKey);
       const typing = this.typings.view(session);
-      return { ...base, name: session.name, status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
+      // A name outlives its member's place in the roster: the messages stay, and are still theirs.
+      const former = Object.entries(nicks).filter(([key]) => !rosterHas(session.roster, key));
+      return { ...base, name: session.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
         ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}), ...(session.picture ? { picture: session.picture } : {}),
         canSend: session.status === "active" && session.readableEpochs.includes(session.epoch),
         ...(onHubs ? { hubs: { hub: this.hubs.isHub(group.id) } } : {}), ...(typing ? { typing } : {}),

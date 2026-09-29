@@ -19,7 +19,7 @@ import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
-import { groupStatusText, markGroupRead, memberName } from "../lib/groups";
+import { authorName, groupStatusText, markGroupRead, memberName } from "../lib/groups";
 import { chatsByPeer } from "../lib/identities";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
@@ -45,20 +45,19 @@ const snapshot = () => engine.state;
 
 /** `myName`: how a mention of me reads (my own name, as a member sees it); the others go by the roster's names. */
 function toChatMessage(message: StoredMessage, group: GroupView, t: Translate, myName = ""): ChatMessage {
-  const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
   const names = group.members.map(m => ({ key: m.key, me: m.me, name: m.me ? myName : memberName(m, t) }));
   const mentions = mentionViews(message.text, message.mentions, names, message.sender === "me");
   return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, paymentId: message.paymentId,
-    nick: message.sender === "peer" && message.member ? (member ? memberName(member, t) : t("group.member.unnamed", { key: message.member.slice(0, 8) })) : undefined,
+    nick: message.sender === "peer" && message.member ? authorName(group, message.member, t) : undefined,
     ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }),
     ...(message.edit && { edit: message.edit }), ...(message.forwarded && { forwarded: message.forwarded }) };
 }
 
-/** A member as a reply's quote names them: me, the roster's name, or the start of a key no longer in the roster. */
+/** A member as a reply's quote names them: me, the roster's name, or for a key no longer in the roster its former name or its start. */
 const replyNames = (group: GroupView, you: string, t: Translate): NameOf => (from, key) => {
   if (from === "me") return you;
   const member = key ? group.members.find(m => m.key === key) : undefined;
-  return member ? (member.me ? you : memberName(member, t)) : key ? t("group.member.unnamed", { key: key.slice(0, 8) }) : undefined;
+  return member?.me ? you : key ? authorName(group, key, t) : undefined;
 };
 
 /** Whom "@" offers in the composer: every other member, by name and the end of their key. */

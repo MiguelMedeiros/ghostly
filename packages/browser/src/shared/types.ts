@@ -248,6 +248,11 @@ export interface GroupView {
   wakeTokens?: string[];
   /** Private groups: its members were told not to wake this side while the group is muted (`setWakeMuted`). */
   wakeMuted?: boolean;
+  /**
+   * Private groups: the names of authors no longer in the roster (removed, left, or back with a new member key), by
+   * member key, so their earlier messages still say who wrote them. Absent when there are none.
+   */
+  formerNames?: Record<string, string>;
 }
 
 /** A member typing in a group: `kind` when it is not plain typing, and a bot's status line, sanitized as in a 1:1 chat. */
