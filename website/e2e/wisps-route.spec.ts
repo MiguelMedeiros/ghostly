@@ -68,19 +68,23 @@ test("only what works in the app today is drawn; what comes next is on the roadm
 });
 
 test("old links into the full list land on the layers, a draft's page or the roadmap", async ({ page }) => {
-  await page.goto("/wisps#family-pay");
+  // Each old link comes from outside, a page load of its own. Only a new hash on the page already open would be a
+  // same-page jump, and one made before the page hydrates is undone when the router first writes the address it
+  // loaded with (seen on a slow CPU: still #family-pay after going to #wisp-401).
+  const open = async (url: string) => { await page.goto("about:blank"); await page.goto(url); };
+  await open("/wisps#family-pay");
   await expect(page.locator("#family-pay")).toBeInViewport();
-  await page.goto("/wisps#wisp-401");
+  await open("/wisps#wisp-401");
   await expect(page.locator("#wisp-401")).toBeInViewport();
-  await page.goto("/wisps#list");
+  await open("/wisps#list");
   await expect(page.locator("#list")).toBeInViewport();
   // A planned draft is not drawn: its link opens its page.
-  await page.goto("/wisps#wisp-303");
+  await open("/wisps#wisp-303");
   await expect(page).toHaveURL(/^https?:\/\/[^/]+\/wisps\/303-keet$/);
   // The adapter inventory moved to the roadmap.
-  await page.goto("/wisps#candidate-webrtc");
+  await open("/wisps#candidate-webrtc");
   await expect(page).toHaveURL(/\/roadmap#candidate-webrtc$/);
-  await page.goto("/wisps#inventory");
+  await open("/wisps#inventory");
   await expect(page).toHaveURL(/\/roadmap#inventory-title$/);
 });
 
