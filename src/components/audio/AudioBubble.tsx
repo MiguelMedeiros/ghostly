@@ -173,7 +173,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
-  const status = (moving && !offered) || failed ? fileStatus(file, transfer, peerName, false, t) : null;
+  const status = (moving && !offered) || failed ? fileStatus(file, transfer, named, false, t) : null;
   const reason = actionError || (failed ? transfer.error : undefined);
   // One sent from here can be listened to while it goes, once it has been copied.
   const canPlay = playable && (ready || (sender === "me" && transfer?.stage !== "preparing" && !failed));

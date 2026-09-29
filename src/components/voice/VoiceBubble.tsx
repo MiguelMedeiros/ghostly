@@ -299,7 +299,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const unplayed = sender === "peer" && !played;
   let status: string | null = null;
   // Where it stands, as a file says it: "Waiting for connection", "Not moving", never a bare 0% that looks alive.
-  if (transfer?.state === "transferring" || transfer?.state === "failed") status = fileStatus(file, transfer, peerName, false, t);
+  if (transfer?.state === "transferring" || transfer?.state === "failed") status = fileStatus(file, transfer, named, false, t);
   // One of mine that has not started for want of a connection: the clock beside the time says it.
   if (sender === "me" && transfer?.state === "transferring" && transfer.stage === "waiting" && transfer.transferred === 0) status = null;
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
