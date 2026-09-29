@@ -5,8 +5,11 @@
   "deleteChat": "删除聊天",
   "group": {
     "adminAnswered": "管理员的应用已回应…",
+    "answerFailed": "没有成功。请重试。",
     "invitedBy": "由 {{contact}} 邀请 · {{members}}",
     "invitedByUnknown": "由一位联系人邀请 · {{members}}",
+    "inviterAway": "{{contact}} 尚未连接。请稍后重试。",
+    "inviterAwayUnknown": "邀请你的联系人尚未连接。请稍后重试。",
     "letting": "有成员正在让你加入…",
     "waitingAdmin": "正在等待管理员的应用…",
     "waitingIn": "等待被允许加入…"

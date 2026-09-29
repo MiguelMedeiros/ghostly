@@ -5,8 +5,11 @@
   "deleteChat": "Supprimer la discussion",
   "group": {
     "adminAnswered": "L'app de l'admin a répondu…",
+    "answerFailed": "Cela n'a pas abouti. Réessayez.",
     "invitedBy": "Invité par {{contact}} · {{members}}",
     "invitedByUnknown": "Invité par un contact · {{members}}",
+    "inviterAway": "{{contact}} n'est pas encore connecté. Réessayez dans un instant.",
+    "inviterAwayUnknown": "Le contact qui vous a invité n'est pas encore connecté. Réessayez dans un instant.",
     "letting": "Un membre vous fait entrer…",
     "waitingAdmin": "En attente de l'app de l'admin…",
     "waitingIn": "En attente d'être admis…"

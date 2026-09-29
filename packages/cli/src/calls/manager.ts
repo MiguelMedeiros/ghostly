@@ -13,12 +13,12 @@ import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from
  * Voice calls on the headless Ghostly (WISP 11xx § Calls): the calls/1 signals of the chat session (WISP 601), the
  * media on a WebRTC connection of the CLI's own, and the audio handed to an outside program over a Unix socket per
  * call. The rules are the apps' (packages/react/src/useWebRTC.ts): a call per chat; an offer rings while this side
- * is idle; an answer counts only after this side's offer; a hang-up ends whatever is on; a signal older than the
+ * is idle, or when it wins a glare with this side's own offer; an answer counts only after this side's offer; a hang-up ends whatever is on; a signal older than the
  * last one handled is ignored; after a hang-up the signal is cleared 5 s later.
  */
 
 export type CallState = "ringing" | "connecting" | "connected";
-export type EndReason = "hangup" | "remote-hangup" | "missed" | "rejected" | "unanswered" | "failed" | "stopped";
+export type EndReason = "hangup" | "remote-hangup" | "missed" | "rejected" | "unanswered" | "crossed" | "failed" | "stopped";
 
 /** What the engine gives the calls: its state, and a way to send this side's signal. */
 export interface CallEngine {
@@ -73,6 +73,8 @@ interface Call {
   connectedAt: number | null;
   timer: ReturnType<typeof setTimeout> | null;
   ended: boolean;
+  /** Why it ended, once it has. */
+  reason?: EndReason;
 }
 
 /** Auto-answer, kept in the profile's `calls.json`: every chat, or the listed ones, at a rate. */
@@ -111,6 +113,13 @@ export class CallManager {
     } else if (signal.t === "a" && call?.direction === "out" && call.offering && signal.ts > call.offerTs) {
       this.lastSignal.set(chat, signal.ts);
       this.accepted(call, signal);
+    } else if (signal.t === "o" && call?.direction === "out" && call.state === "ringing") {
+      // Both called at once (WISP 601, "Both call at once"): the earlier offer wins on both sides, at the same
+      // millisecond the lower DTLS fingerprint; ours still being made counts as later. The loser rings.
+      this.lastSignal.set(chat, signal.ts);
+      const mine = call.offering ? call.offerTs : 0;
+      const theirsFirst = !mine || signal.ts < mine || (signal.ts === mine && (signal.f ?? "") < (call.media?.local.f ?? ""));
+      if (theirsFirst) void this.yieldTo(call, signal);
     } else if (signal.t === "o" && call?.direction === "in" && call.state === "connecting" && call.media && signal.ts > (call.offer?.ts ?? 0)) {
       // The contact's side offered again on a new connection (see `redial`): the answered call starts over on one.
       this.lastSignal.set(chat, signal.ts);
@@ -125,6 +134,17 @@ export class CallManager {
         void this.end(call, reason, false);
       }
     }
+  }
+
+  /**
+   * The contact's offer won a glare: our call ends as `crossed`, sending nothing (a hang-up would end the contact's
+   * call, and clearing our signal could drop an answer we are about to give), and the contact's call rings here.
+   */
+  private async yieldTo(call: Call, offer: CallSignal): Promise<void> {
+    await this.end(call, "crossed", false);
+    // Something newer (the contact's hang-up) came while ours ended, or another call started: nothing rings.
+    if (this.lastSignal.get(call.chat) !== offer.ts || this.byChat(call.chat) || this.stopping) return;
+    this.incoming(call.chat, offer);
   }
 
   private incoming(chat: string, offer: CallSignal): void {
@@ -206,9 +226,12 @@ export class CallManager {
     if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
     const rate = rateOf(options.rate, this.auto.rate);
     const stack = await this.stack();
+    // The contact's call may have come in while the stack loaded.
+    if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
     const call = this.add(link.id, "out", rate);
     try {
       await this.attach(call, (media) => CallMedia.offer(stack, media));
+      if (call.reason === "crossed") throw new CliError("busy", "The contact called at the same time: their call rings here");
       if (call.ended) throw new CliError("unavailable", "The call ended before it was placed");
       call.offerTs = this.now;
       call.offering = true;
@@ -351,6 +374,7 @@ export class CallManager {
   private async end(call: Call, reason: EndReason, tell: boolean, report = true): Promise<void> {
     if (call.ended) return;
     call.ended = true;
+    call.reason = reason;
     this.disarm(call);
     this.calls.delete(call.id);
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
@@ -366,7 +390,7 @@ export class CallManager {
         timer.unref?.();
         this.clearing.set(call.chat, timer);
       }
-    } else {
+    } else if (reason !== "crossed") {
       // Nothing left to say: a signal still waiting for the next session is dropped.
       await this.sendRaw(call.chat, null).catch(() => {});
     }

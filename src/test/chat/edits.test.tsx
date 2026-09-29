@@ -125,6 +125,24 @@ describe("the composer while editing", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it("the field goes back to one line when an edit of a long text ends, saved or not", async () => {
+    const long = mine({ text: "A long message\nover two lines" });
+    const { user } = renderApp(<Composer onSave={async () => null} last={long} />);
+    // happy-dom lays nothing out: the field's content is 44px a line.
+    Object.defineProperty(field(), "scrollHeight", { configurable: true, get() { return 44 * (this as HTMLTextAreaElement).value.split("\n").length; } });
+    await user.click(screen.getByText("edit it"));
+    expect(field().style.height).toBe("88px");
+    await user.click(screen.getByTestId("composer-edit-cancel"));
+    expect(field()).toHaveValue("");
+    expect(field().style.height).toBe("44px");
+
+    await user.click(screen.getByText("edit it"));
+    expect(field().style.height).toBe("88px");
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("composer-edit")).not.toBeInTheDocument();
+    expect(field().style.height).toBe("44px");
+  });
+
   it("↑ in an empty field edits my last message; not while there is text", async () => {
     const { user } = renderApp(<Composer onSave={async () => null} />);
     await user.type(field(), "x");
