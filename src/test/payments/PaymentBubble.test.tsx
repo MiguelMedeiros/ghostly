@@ -130,6 +130,34 @@ describe("test sats", () => {
   });
 });
 
+describe("a request with a payment already on its way", () => {
+  /** Bob approved a payment of this request earlier; its outcome is not known yet (the mint could not be reached). */
+  const unfinished = (state: "unknown" | "submitted" | "failed") => ({
+    ...reviewOf({ target: { method: "cashu", network: "bitcoin", provider: REAL_MINT, asset: "BTC", unit: "sat", address: "pay-1", expiresAt: 0 }, amount: 21, feeCap: 10, payee: "peer", linkId: "link-1", requestId: "pay-1" }),
+    state, error: "Could not verify this payment yet. No second payment was sent.",
+  });
+
+  it("shows it with its state and Check, after the chat was opened again, and offers no second Review", async () => {
+    const { user, engine } = show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("unknown")] } });
+    const review = screen.getByRole("region", { name: "Payment review" });
+    expect(screen.getByTestId("review-status")).toHaveTextContent(/unknown/i);
+    expect(review).toHaveTextContent("No second payment was sent.");
+    expect(screen.getByRole("button", { name: "Check existing payment" })).toBeInTheDocument();
+    expect(payButton()).toBeDisabled();
+    // Put away with Close; it comes back once it moves on.
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+    engine.update({ wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("submitted")] } });
+    expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
+  });
+
+  it("a payment of it that failed leaves the request payable again", () => {
+    show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("failed")] } });
+    expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+    expect(payButton()).toBeEnabled();
+  });
+});
+
 describe("paying a request with Cashu", () => {
   it("reviews the payment from the mint both sides share, on that mint's network", async () => {
     const { user, engine } = show(incomingRequest({ mints: [REAL_MINT, "https://other.example"] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });

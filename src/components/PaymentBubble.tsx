@@ -23,6 +23,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const allowed = platform?.getPeer(peerPubKey)?.paymentMethods;
   const paymentsOff = !!allowed && !!payment && (payment.target ? !(allowed as Partial<Record<string, boolean>>)[payment.target.method] : !(allowed.cashu || allowed.lightning));
   const [review,setReview] = useState<Review|null>(null);
+  /** The unfinished payment of this request that was put away with Close: shown again only once it moves on. */
+  const [putAway,setPutAway] = useState<string|null>(null);
   /** A Lightning payment of the request's invoice, reviewed here before the Lightning source is asked to pay. */
   const [lnReview,setLnReview] = useState<{ fee: number; source: string } | null>(null);
   /** Real money over Lightning: Approve opens the second step, and only it pays. */
@@ -68,6 +70,12 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     }
   };
 
+  // A payment of this request already approved and not finished (its outcome unknown, or on its way) is shown with its
+  // state and Check, also after the chat was left and opened again: a second one would be refused anyway.
+  const unfinished = payment.kind === "request" && payment.direction === "in"
+    ? wallet.getState()?.intents?.find((r) => r.requestId === payment.id && r.linkId === payment.linkId && (r.state === "submitted" || r.state === "unknown"))
+    : undefined;
+  const shownReview = review ?? (unfinished && `${unfinished.id}:${unfinished.state}` !== putAway ? unfinished : null);
   const tokenPayment=payment.target?.method==='usdt';
   const outgoing = payment.direction === "out";
   const isRequest = payment.kind === "request";
@@ -140,7 +148,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       </p>
       {payment.target && <p className="text-xs text-text-primary/65">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="spark"?"Spark":payment.target.method==="bitcoin"?t("payments.bubble.bitcoinOnchain"):payment.target.method==="fedimint"?"Fedimint":"Cashu"} · {payment.target.network}</p>}
       {!payment.target && fedimint && <p className="text-xs text-text-primary/65" data-testid="payment-fedimint">{isRequest && !outgoing && payment.state === "pending" ? t("payments.bubble.fedimintNoFederation") : "Fedimint"}</p>}
-      {review && <PaymentReview review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
+      {shownReview && <PaymentReview key={shownReview.id} review={shownReview} wallet={wallet} onClose={()=>{ setReview(null); if (!review && unfinished) setPutAway(`${unfinished.id}:${unfinished.state}`); }}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
       <p
         className={`text-[11px] m-0 mt-1 ${payment.state === "failed" ? "text-danger-ink" : payment.state === "settled" ? "text-accent-hover" : "text-text-primary/65"}`}
@@ -175,7 +183,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
               )}
             </div>
           )}
-          <button data-testid="payment-pay" className={button} disabled={busy || (!payment.target && !viaLightning && !selectedMint) || !!review || !!lnReview} onClick={() => run(async () => {
+          <button data-testid="payment-pay" className={button} disabled={busy || (!payment.target && !viaLightning && !selectedMint) || !!review || !!unfinished || !!lnReview} onClick={() => run(async () => {
             if (viaLightning) {
               // What the Lightning source would spend, shown before anything is asked of it.
               const quote = await payer.quoteInvoice(payment.invoice!);
