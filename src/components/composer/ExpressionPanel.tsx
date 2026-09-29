@@ -54,8 +54,10 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
       const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
       const width = viewport?.width ?? window.innerWidth, height = viewport?.height ?? window.innerHeight;
       if (phone) {
+        // With the keyboard up (a search), half of what it leaves is a strip of results: take all the sheet may.
+        const keyboard = document.documentElement.dataset.keyboard === "true";
         setPosition({ left, right: "auto", width, bottom: Math.max(0, window.innerHeight - top - height), maxHeight: height * 0.82,
-          "--expression-height": `${Math.round(height * 0.52)}px` } as CSSProperties);
+          "--expression-height": `${Math.round(height * (keyboard ? 0.82 : 0.52))}px` } as CSSProperties);
         return;
       }
       const rect = bounds.getBoundingClientRect();
