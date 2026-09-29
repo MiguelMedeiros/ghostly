@@ -699,6 +699,9 @@ describe("the reviewed Cashu adapter", () => {
       executeReviewedCashu: vi.fn(async () => "cashuBfresh"),
       reviewedCashuSpent: vi.fn(async () => false),
       recoverReviewedCashu: vi.fn(async (): Promise<string | undefined> => "cashuBrecovered"),
+      // The mint has not proved the swap never happened: reconcile keeps waiting.
+      reviewedCashuNeverSwapped: vi.fn(async () => false),
+      releaseReviewedCashu: vi.fn(async () => {}),
     };
     const order: string[] = [];
     const publish = vi.fn(async (_review: PaymentReview, token: string) => { order.push(`publish ${token}`); });

@@ -51,7 +51,8 @@ const MAX_AMOUNT = 1_000_000;
 /** How long "Get test coins" waits for the test mint to mark its invoice paid before saying the coins come later. */
 const TEST_COINS_WAIT_MS = 30_000;
 const HISTORY_SHOWN = 100;
-export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:string}
+/** `abandoned`: the mint proved the swap never happened (`reviewedCashuNeverSwapped`); it is never sent again. */
+export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:string;abandoned?:boolean}
 
 // SDK 4.x preview.fees covers input swap fees, despite its declaration saying
 // it includes the recipient fee. includeFees(true) also tops up send outputs.
@@ -516,6 +517,41 @@ export class CashuWallet {
       stores[STORES.walletTx].put({...walletTx(prepared.mint,"ecash-out",review.amount,review.fee),id:review.id});
     });
     prepared.token=token;this.events.onChange();return token;
+  }
+
+  /**
+   * Proof from the mint that a reviewed swap never happened: every input it would spend reads UNSPENT (not PENDING,
+   * not SPENT), and the mint signed none of its outputs. Read-only: it asks, and never sends the swap.
+   */
+  async reviewedCashuNeverSwapped(prepared:CashuPrepared):Promise<boolean> {
+    const preview=deserializeSwapPreview(prepared.swap);
+    if(!preview.inputs.length)return false;
+    const wallet=await this.wallet(prepared.mint);
+    const states=await wallet.checkProofsStates(preview.inputs.map(p=>({secret:p.secret,id:p.id})));
+    if(states.length!==preview.inputs.length || !states.every(s=>s.state==="UNSPENT"))return false;
+    const outputs=[...(prepared.swap.keepOutputs??[]),...(prepared.swap.sendOutputs??[])].map(OutputData.deserialize);
+    const restored=await wallet.mint.restore({outputs:outputs.map(o=>o.blindedMessage)});
+    return restored.signatures.length===0 && restored.outputs.length===0;
+  }
+
+  /** Gives back the inputs a reviewed swap reserved, once the mint proved it never happened. Idempotent. */
+  async releaseReviewedCashu(prepared:CashuPrepared):Promise<void> {
+    const preview=deserializeSwapPreview(prepared.swap);
+    await this.locked(prepared.mint,async()=>{
+      await transact([STORES.proofs],stores=>{
+        const proofs=stores[STORES.proofs];
+        for(const input of preview.inputs){
+          const request=proofs.get(input.secret);
+          request.onsuccess=()=>{
+            const proof:StoredProof|undefined=request.result;
+            if(!proof || !proof.reserved || proof.mint!==prepared.mint || proof.C!==input.C)return;
+            const {reserved:_released,...free}=proof;
+            proofs.put(free);
+          };
+        }
+      });
+    });
+    this.events.onChange();
   }
 
   async reviewedCashuSpent(prepared:CashuPrepared):Promise<boolean> {
