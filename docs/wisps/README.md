@@ -42,6 +42,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 402 | Chat | [Compatibility Chat (v0.4 Timestamp Profile)](402-legacy-chat.md) | Profile | Draft | Available |
 | 403 | Chat | [DHT Text](403-dht-text.md) | Profile | Draft | Available |
 | 4xx | Chat | [Store-and-Forward for an Away Contact](4xx-store-and-forward.md) | Profile | Draft | Available |
+| 4xx | Chat | [Status Cards for Bots](4xx-status-cards.md) | Profile | Draft | Planned |
 | 500 | Files | [File Transfer](500-files.md) | Contract | Draft | Available |
 | 501 | Files | [Chat Files](501-paired-files.md) | Profile | Draft | Available |
 | 502 | Files | [Compatibility File Frames](502-legacy-files.md) | Profile | Draft | Available |

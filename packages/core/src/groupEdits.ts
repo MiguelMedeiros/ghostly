@@ -2,6 +2,7 @@ import { utf8Encode } from "./bytes";
 import { MEMBER_KEY } from "./groupCommits";
 import { MENTION_LIMITS, validMentions, type GroupMention } from "./groupMentions";
 import { validEditNumber } from "./pairedEdits";
+import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
 
 /**
  * Editing a sent text in a group (WISP 9xx § Edits, both profiles). As in a 1:1 chat (WISP 401 § Edits), the author says
@@ -14,7 +15,10 @@ import { validEditNumber } from "./pairedEdits";
  * - A community (`group-community/1`) sends an application frame through the group, sealed and signed like any payload,
  *   so every hub carries it and a member who was away gets it with the catch-up:
  *
- *       { "x": { "t": "edit", "id": <message id>, "v": 3, "ts": 1790000000000, "text": "Done: 12 of 12", "m"?: [mentions] } }
+ *       { "x": { "t": "edit", "id": <message id>, "v": 3, "ts": 1790000000000, "text": "Done: 12 of 12", "m"?: [mentions], "sc"?: {card} } }
+ *
+ * `sc` is the status card of this version (WISP 4xx · Status Cards); an edit with one may be numbered up to
+ * `STATUS_CARD_LIMITS.edits`, one without only up to `MAX_EDITS_PER_MESSAGE`.
  *
  * Older apps drop both: a mesh session ignores a `t` it does not know, a community app the `x` frames it does not know.
  */
@@ -32,6 +36,8 @@ export interface GroupEdit {
   m: string;
   /** Places of the new text that name members. */
   k?: GroupMention[];
+  /** The status card of this version (WISP 4xx · Status Cards). */
+  sc?: StatusCard;
 }
 
 /** An edit as a group hands it to the engine: `sender` is the member it is authenticated as. */
@@ -63,7 +69,7 @@ export function validEditText(text: unknown): text is string {
 
 /** The `x` frame a community edit travels as. */
 export function communityEditFrame(edit: GroupEdit): Record<string, unknown> {
-  return { t: COMMUNITY_EDIT_FRAME, id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, ...(edit.k?.length ? { m: edit.k } : {}) };
+  return { t: COMMUNITY_EDIT_FRAME, id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, ...(edit.k?.length ? { m: edit.k } : {}), ...(edit.sc ? { sc: edit.sc } : {}) };
 }
 
 /**
@@ -74,10 +80,12 @@ export function communityEditFrame(edit: GroupEdit): Record<string, unknown> {
 export function parseCommunityEdit(frame: Record<string, unknown>, sender: string): GroupEdit | null {
   if (frame?.t !== COMMUNITY_EDIT_FRAME) return null;
   const { id, v, ts, text } = frame;
-  if (typeof id !== "string" || communityMessageAuthor(id) !== sender || !validEditNumber(v)) return null;
+  if (typeof id !== "string" || communityMessageAuthor(id) !== sender || !cardEditNumber(v)) return null;
   if (typeof ts !== "number" || !Number.isSafeInteger(ts) || ts <= 0 || !validEditText(text)) return null;
+  const sc = frame.sc === undefined ? undefined : readStatusCard(frame.sc);
+  if (!validEditNumber(v) && !sc) return null;
   const k = validMentions(frame.m, text, false);
-  return { id, e: v, ts, m: text, ...(k.length ? { k } : {}) };
+  return { id, e: v, ts, m: text, ...(k.length ? { k } : {}), ...(sc ? { sc } : {}) };
 }
 
 /**
