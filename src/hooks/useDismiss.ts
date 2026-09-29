@@ -66,17 +66,7 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
       // Over another one, the newest answers: Escape closes it alone, Tab stays in it.
       if (modals[modals.length - 1] !== ref) return;
       if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); callback.current(); return; }
-      const root = ref.current;
-      if (e.key !== "Tab" || e.defaultPrevented || !root) return;
-      const active = document.activeElement;
-      const inside = !!active && root.contains(active);
-      if (!inside && active && active !== document.body) return;
-      const stops = tabbables(root);
-      if (!stops.length) { e.preventDefault(); root.focus(); return; }
-      const first = stops[0], last = stops[stops.length - 1];
-      if (!inside || active === root) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
-      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+      keepTabInside(e, ref.current);
     };
     document.addEventListener("keydown", key);
     return () => {
@@ -86,4 +76,38 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
       if (before?.isConnected && restoring.current()) before.focus();
     };
   }, [ref]);
+}
+
+/**
+ * Tab only, for a modal that moves the focus and answers Escape its own way (the message details panel): Tab and
+ * Shift+Tab go round its own controls and never to the page behind it. Over other open modals, the newest keeps Tab.
+ */
+export function useTabTrap(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    modals.push(ref);
+    const key = (e: KeyboardEvent) => { if (modals[modals.length - 1] === ref) keepTabInside(e, ref.current); };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("keydown", key);
+      const at = modals.lastIndexOf(ref);
+      if (at >= 0) modals.splice(at, 1);
+    };
+  }, [ref]);
+}
+
+/**
+ * Tab and Shift+Tab go round `root`'s own controls, and a Tab from the page's body goes into it. Focus in a layer of
+ * its own (a select's list, a menu drawn over the page) keeps its Tab.
+ */
+function keepTabInside(e: KeyboardEvent, root: HTMLElement | null) {
+  if (e.key !== "Tab" || e.defaultPrevented || !root) return;
+  const active = document.activeElement;
+  const inside = !!active && root.contains(active);
+  if (!inside && active && active !== document.body) return;
+  const stops = tabbables(root);
+  if (!stops.length) { e.preventDefault(); root.focus(); return; }
+  const first = stops[0], last = stops[stops.length - 1];
+  if (!inside || active === root) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+  if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
 }

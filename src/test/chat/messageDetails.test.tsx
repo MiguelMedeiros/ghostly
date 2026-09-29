@@ -116,6 +116,27 @@ describe("opening and closing", () => {
     expect(rows("delivery")).toMatchObject({ State: "Sent, waiting for the receipt" });
     expect(section("path")).toBeNull();
   });
+
+  it("Tab and Shift+Tab go round the panel's own buttons, never to the chat behind it", async () => {
+    fakeEngine.on("messageDetails", () => textView());
+    const { user } = bubble();
+    await user.dblClick(screen.getByText("hello"));
+    const panel = await screen.findByTestId("message-details");
+    await waitFor(() => expect(panel).toHaveAttribute("data-loaded", "yes"));
+    const close = screen.getByTestId("message-details-close"), copyAll = screen.getByTestId("message-details-copy-all");
+    const stops = [close, ...screen.getAllByTestId("message-details-copy"), copyAll];
+    await user.tab();
+    expect(close).toHaveFocus();
+    for (const stop of stops.slice(1)) { await user.tab(); expect(stop).toHaveFocus(); }
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(copyAll).toHaveFocus();
+    expect(panel.contains(document.activeElement)).toBe(true);
+    // Escape still closes it once, as before.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+  });
 });
 
 describe("what it says", () => {
