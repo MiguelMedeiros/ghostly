@@ -333,6 +333,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   // Forward, and Select then Forward (WISP 400 § Forwards): texts and files, to other chats and groups.
   const forwarding = useForwarding(chatLink?.id, messages);
   // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.
+  // Live, and the contact's app says no to payments here (no wallet, off, or too old): its side, not this chat's.
+  const contactRefusesPay = paired && chatLive && !chatPeer?.capabilities?.payments;
   const paymentsOn = walletState?.wallets?.length ? walletCards(walletState).some((c) => cardOn(chatPeer ?? undefined, c.rail, c.network)) : !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showHold, setShowHold] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
@@ -791,7 +793,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         onSendFile={platform ? sendFile : undefined}
         fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? t("chat.filesNeedUpdate") : undefined) : undefined}
         // The + → Payment row still opens on these: its Accept side is where this chat's ways of paying are chosen.
-        paymentsUnavailable={!paymentsOn ? t("chat.payments.off") : chatStop ? chatStop : paired && chatLive && !chatPeer?.capabilities?.payments ? (chatPeer?.capabilities?.networks && !Object.keys(chatPeer.capabilities.networks).length ? t("chat.payments.noWallet") : t("chat.payments.offOrOld")) : undefined}
+        paymentsUnavailable={!paymentsOn ? t("chat.payments.off") : chatStop ? chatStop : contactRefusesPay ? (chatPeer?.capabilities?.networks && !Object.keys(chatPeer.capabilities.networks).length ? t("chat.payments.noWallet") : t("chat.payments.offOrOld")) : undefined}
+        paymentsUnavailableContact={paymentsOn && !chatStop && contactRefusesPay}
         payments={
           walletState && wallet && peerKey
             ? { balance: walletState.balance, contact: isAnonymous ? undefined : shownName, onSend: paySend, onRequest: payRequest,

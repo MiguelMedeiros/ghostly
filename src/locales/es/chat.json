@@ -242,6 +242,20 @@
     "pin": "Fijar",
     "unpin": "Desfijar"
   },
+  "preview": {
+    "arkAddress": "Dirección Ark",
+    "bitcoinAddress": "₿ Dirección Bitcoin",
+    "ecash": "⚡ Ecash",
+    "invoice": "⚡ Factura Lightning",
+    "invoiceSats": "⚡ Factura Lightning · {{amount}} sats",
+    "lightningAddress": "Dirección Lightning",
+    "lightningOffer": "⚡ Oferta Lightning",
+    "realMoney": "Dinero real",
+    "sats": "{{amount}} sats",
+    "testMoney": "Dinero de prueba",
+    "testSats": "{{amount}} sats de prueba",
+    "usdtAddress": "Dirección USDT"
+  },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",
     "more": "Más emojis",

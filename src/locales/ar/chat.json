@@ -242,6 +242,20 @@
     "pin": "تثبيت",
     "unpin": "إلغاء التثبيت"
   },
+  "preview": {
+    "arkAddress": "عنوان Ark",
+    "bitcoinAddress": "₿ عنوان Bitcoin",
+    "ecash": "⚡ Ecash",
+    "invoice": "⚡ فاتورة Lightning",
+    "invoiceSats": "⚡ فاتورة Lightning · {{amount}} ساتس",
+    "lightningAddress": "عنوان Lightning",
+    "lightningOffer": "⚡ عرض Lightning",
+    "realMoney": "أموال حقيقية",
+    "sats": "{{amount}} ساتس",
+    "testMoney": "أموال تجريبية",
+    "testSats": "{{amount}} ساتس تجريبية",
+    "usdtAddress": "عنوان USDT"
+  },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",
     "more": "المزيد من الرموز",

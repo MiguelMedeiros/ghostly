@@ -229,7 +229,7 @@ export function ChatRow(p: ChatRowProps) {
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} />}
-              {previewText(p.lastMessage.text)}
+              {previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
