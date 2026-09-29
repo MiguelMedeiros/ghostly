@@ -190,8 +190,12 @@ export interface DesktopOptions {
 /** A directory for `DesktopOptions.home`, removed by the returned function. */
 export function desktopHome(name: string): { dir: string; remove: () => void } {
   const dir = mkdtempSync(join(tmpdir(), `ghostly-desktop-${name}-`));
-  // The app may still be writing its store for a moment after it closed.
-  return { dir, remove: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }) };
+  // The app may still be writing its store (or WebKit its shader cache) for a moment after it closed. A temporary
+  // directory left behind is never a reason to fail the test that used it.
+  return { dir, remove: () => {
+    try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+    catch (error) { console.warn(`Left ${dir} behind: ${(error as Error).message}`); }
+  } };
 }
 
 /** Attaches each app log (`ghostly.log`) under a Desktop home to the running test: what a failure looked like from Rust. */
@@ -237,11 +241,16 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
 
   const endpoint = `http://127.0.0.1:${port}`;
   const kill = () => void driver.kill("SIGTERM");
+  const exited = new Promise<void>((done) => driver.once("exit", () => done()));
   try {
     // The driver needs a moment to bind, and the app a while longer to boot.
     const app = await Promise.race([died, withRetries(() => Driver.open(endpoint, application), 30_000)]);
-    // Closing the session closes the window; killing the driver ends what is left.
-    return { app, stop: async () => { await app.close(); kill(); } };
+    // Closing the session closes the window; killing the driver ends what is left, waited for (5 s at most) so the
+    // app is done writing to its home before the test removes it.
+    return { app, stop: async () => {
+      await app.close(); kill();
+      await Promise.race([exited, new Promise((done) => setTimeout(done, 5_000))]);
+    } };
   } catch (error) {
     kill();
     throw error;

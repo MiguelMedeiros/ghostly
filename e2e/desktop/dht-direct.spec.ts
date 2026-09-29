@@ -26,7 +26,7 @@ const discovery = (p: DesktopPerson) => p.app.execute<{ path: string | null; rel
   };`);
 
 test("two Desktop apps pair and go live on the DHT directly, never reading a relay", {
-  tag: ["@release-skip", "@feature:settings.network.native-dht", "@feature:chat.paired.discovery-health", "@feature:core.dht-direct"],
+  tag: ["@feature:settings.network.native-dht", "@feature:chat.paired.discovery-health", "@feature:core.dht-direct"],
 }, async () => {
   test.setTimeout(10 * 60_000);
   const relay = new LocalRelay();

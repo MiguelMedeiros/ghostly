@@ -38,6 +38,17 @@ export const CAPS_REFRESH_MS = 60 * 60_000;
 /** Reads of the contact's record closer together than this are merged into one. */
 const CAPS_READ_SPACING_MS = 15_000;
 /**
+ * An envelope named a revision of the contact's record and the read found an older one, or none: read again this long
+ * after each read, while still behind. A DHT read directly (Desktop, CLI, relay reads off) hands back the copy it
+ * already knows and looks the key up behind it, and a lookup that started before the publication landed finds the old
+ * one; a relay may serve an old copy for a while too. The envelope names each revision once, so one read was the last
+ * until the next envelope, minutes away, and the chat stayed on the DHT with no descriptors to dial.
+ */
+const CAPS_READ_RETRY_MS = [5_000, 15_000, 30_000, 60_000] as const;
+const NATIVE = ["iroh/1", "hyperdht/1"] as const;
+/** The native transports a record says how to dial. */
+const described = (content: CapsContent) => NATIVE.filter(t => !!content.descriptors[t]);
+/**
  * Changes closer together than this go out as one publication, the last: every publication spends one of the
  * relays' requests per relay, a budget the chat's signaling needs more.
  */
@@ -273,6 +284,12 @@ export class CapsExchange {
   private running = false;
   private lastRead = 0;
   private readTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The newest revision of the contact's record an envelope named, and the reads made again since for it. */
+  private named = -1;
+  private retries = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** What the last publication of this run carried. */
+  private lastOut?: CapsContent;
   private dropped: ("name" | "extensions")[] = [];
 
   constructor(private readonly options: {
@@ -316,7 +333,8 @@ export class CapsExchange {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     if (this.readTimer) clearTimeout(this.readTimer);
-    this.timer = this.readTimer = null;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.timer = this.readTimer = this.retryTimer = null;
     await this.chain.catch(() => {});
   }
 
@@ -334,7 +352,10 @@ export class CapsExchange {
       const unpublished = this.state.digest !== undefined && !this.state.publishedAt;
       const due = changed || peerKey !== this.state.sealedFor || !this.state.publishedAt || now - this.state.publishedAt >= CAPS_REFRESH_MS;
       // A change right after a publication waits for the spacing; a new pin does not (the contact reads it next).
-      const soon = changed && peerKey === this.state.sealedFor && !!this.state.publishedAt && now - this.state.publishedAt < CAPS_PUBLISH_SPACING_MS;
+      // Nor does a native transport that can be dialled now and could not at the last one (its endpoint came up after the
+      // record went out): the contact waits for it to go live. Once per transport and run, so the budget barely notices.
+      const dialable = !!this.lastOut && described(content).some(t => !described(this.lastOut!).includes(t));
+      const soon = changed && !dialable && peerKey === this.state.sealedFor && !!this.state.publishedAt && now - this.state.publishedAt < CAPS_PUBLISH_SPACING_MS;
       if (due && soon) { this.schedule(this.state.publishedAt! + CAPS_PUBLISH_SPACING_MS - now); return; }
       if (due) {
         const rev = changed ? this.state.rev + 1 : this.state.rev;
@@ -350,7 +371,10 @@ export class CapsExchange {
           throw error;
         }
         await this.persist({ ...this.state, publishedAt: now });
+        this.lastOut = content;
         if (changed || unpublished) this.options.published?.(rev);
+        // This side can dial it now: a contact's record that listed it with no descriptor is worth a few reads again.
+        if (dialable) { this.retries = 0; this.readAgainIfBehind(); }
       }
       this.schedule();
     });
@@ -366,6 +390,7 @@ export class CapsExchange {
   /** An envelope named this revision of the contact's record: read it when it is newer than the one known. */
   peerRev(rev: number): void {
     if (!Number.isSafeInteger(rev) || rev <= (this.state.peer?.rev ?? -1)) return;
+    if (rev > this.named) { this.named = rev; this.retries = 0; }
     this.refresh(true);
   }
 
@@ -380,7 +405,7 @@ export class CapsExchange {
 
   /** Reads and checks the contact's record; the last good one stays when this one is refused. */
   read(): Promise<CapsRecord | undefined> {
-    return this.serialize(async () => {
+    const read = this.serialize(async () => {
       if (!this.running) return this.state.peer;
       this.lastRead = Date.now();
       const packet = await this.options.transport.resolve(this.keys.peerAddress);
@@ -394,8 +419,28 @@ export class CapsExchange {
       }
       if (this.state.peer && record.rev === this.state.peer.rev && record.author === this.state.peer.author) return this.state.peer;
       await this.persist({ ...this.state, peer: record });
+      // A new revision: what it still lacks (a transport without its descriptor) is worth a few reads again.
+      this.retries = 0;
       this.options.changed?.(record);
       return record;
     });
+    return read.finally(() => this.readAgainIfBehind());
+  }
+
+  /**
+   * Read again in a moment, a few times at most, while the record known is short of what the contact has: of the
+   * revision an envelope named, or of a descriptor for a native transport it lists (its endpoint was still starting)
+   * that this side runs too. Its next revision, with the descriptor, is named only once, by an envelope that may
+   * come before the record is out; without it neither side could dial the other.
+   */
+  private readAgainIfBehind(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    if (!this.running || this.retries >= CAPS_READ_RETRY_MS.length) return;
+    const peer = this.state.peer;
+    const behind = this.named > (peer?.rev ?? -1);
+    const starting = !!peer && described(this.options.local()).some(t => peer.transports.includes(t) && !peer.descriptors[t]);
+    if (!behind && !starting) return;
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.read().catch(() => {}); }, CAPS_READ_RETRY_MS[this.retries++]);
   }
 }
