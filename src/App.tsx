@@ -169,7 +169,7 @@ export function App() {
 
   if (!isMobile) {
     return (
-      <div className="h-screen w-screen flex bg-app-bg">
+      <div className="h-screen w-full flex bg-app-bg">
         <Sidebar />
         {chats("flex-1 flex flex-col min-w-0")}
         {!inChat && (
@@ -186,7 +186,7 @@ export function App() {
   // what keeps the sessions polling and the notifications coming.
   const onChatList = pathname === "/";
   return (
-    <div className="app-shell w-screen flex flex-col bg-app-bg">
+    <div className="app-shell w-full flex flex-col bg-app-bg">
       <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
         <Sidebar />
       </div>

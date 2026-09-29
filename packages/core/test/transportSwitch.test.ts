@@ -191,3 +191,26 @@ it("tries a target kept on a fallback again, and waits for one the other side do
   expect(w.switches[0].wanted()).toEqual({ transport: "hyperdht/1", by: "contact" });
   w.switches.forEach(s => s.stop());
 });
+it.each([0, 1])("plans a choice made on side %s while another move was dialling, once that move fails (WISP 100)", side => {
+  const h = peers({ waits: true }); h.policies[1].preferred = "hyperdht/1";
+  h.switches[1].changed(); h.flush();
+  // The coordinator dials HyperDHT (`go` sent): a newer choice cannot cut in, it waits for that move to end.
+  expect(h.prepare[0]).toHaveBeenCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["hyperdht/1"]) }), true);
+  h.policies[side].preferred = "iroh/1"; h.switches[side].changed(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  // The HyperDHT move fails (here its time ran out: the chat was busy). Iroh is what both policies want now: planned
+  // at once, not left waiting with nothing to try it until someone chooses again.
+  h.switches[0].fail("Transport change timed out."); h.flush();
+  expect(h.switches.map(s => s.wanted()?.transport)).toEqual(["iroh/1", "iroh/1"]);
+  expect(h.switches.every(s => s.pending?.choices[0] === "iroh/1")).toBe(true);
+  expect(h.prepare[0]).toHaveBeenLastCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["iroh/1"]) }), true);
+  h.switches.forEach(s => s.stop());
+});
+it("does not plan a failed move again by itself when nothing changed since (the owner's retry pace does)", () => {
+  const h = peers({ waits: true }); h.policies[1].preferred = "hyperdht/1"; h.policies[1].fallback = false;
+  h.switches[1].changed(); h.flush();
+  h.switches[0].fail("hyperdht/1 unreachable"); h.flush();
+  expect(h.prepare[0]).toHaveBeenCalledTimes(1);
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  h.switches.forEach(s => s.stop());
+});

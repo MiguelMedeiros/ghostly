@@ -1,0 +1,1 @@
+Both call at once, headless CLI: the CLI now follows the rule too. Its call whose offer lost (or was still being made) ends as `crossed` without a hang-up, and the contact's call rings as `call.incoming`. Desktop's Linux native calls already did, since their signaling is the apps' own logic. No wire identifier or field changed.

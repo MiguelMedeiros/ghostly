@@ -5,8 +5,11 @@
   "deleteChat": "Elimina chat",
   "group": {
     "adminAnswered": "L'app dell'admin ha risposto…",
+    "answerFailed": "Non è andato a buon fine. Riprova.",
     "invitedBy": "Invitato da {{contact}} · {{members}}",
     "invitedByUnknown": "Invitato da un contatto · {{members}}",
+    "inviterAway": "{{contact}} non è ancora connesso. Riprova tra un momento.",
+    "inviterAwayUnknown": "Il contatto che ti ha invitato non è ancora connesso. Riprova tra un momento.",
     "letting": "Un membro ti sta facendo entrare…",
     "waitingAdmin": "In attesa dell'app dell'admin…",
     "waitingIn": "In attesa di essere ammesso…"

@@ -3284,11 +3284,14 @@ export class GhostlyNode implements EngineImplementation {
    */
   async walletReceiveLightning({ amount, via, network, card }: { amount: number; via?: "cashu"; network?: WalletNetwork; card?: string }) {
     const n = this.net(network);
+    // A new invoice is money the wallet now waits for: removing it must say so at once, not after something else changed.
     if (via === "cashu") {
       const quote = await this.wallet.receiveLightning(amount, undefined, n);
+      this.awaitingSoon();
       return { quote: quote.quote, invoice: quote.invoice, expiresAt: quote.expiresAt, source: CASHU_MINT_SOURCE };
     }
     const created = await (await this.lightningCard(n, card)).createInvoice(amount);
+    this.awaitingSoon();
     return { quote: created.paymentHash, invoice: created.invoice, expiresAt: created.expiresAt, paymentHash: created.paymentHash, source: created.source };
   }
 
