@@ -7,6 +7,9 @@ COPY package.json package-lock.json .npmrc ./
 COPY packages/core/package.json packages/core/
 COPY packages/react/package.json packages/react/
 COPY packages/browser/package.json packages/browser/
+# The web app loads Iroh from this workspace (packages/browser/src/platform/irohWeb.ts); without its package.json
+# npm ci links nothing and the type check fails on "@ghostly/iroh-web".
+COPY packages/iroh-web/package.json packages/iroh-web/
 COPY extension/package.json extension/
 COPY web/package.json web/
 RUN npm ci --ignore-scripts
