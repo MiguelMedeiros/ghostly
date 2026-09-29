@@ -229,6 +229,11 @@ describe("a payment in a chat", () => {
     const unpaidRequest = savedReview({ linkId: chat.id, requestId: "gone" });
     await intentRepository.put({ review: unpaidRequest, prepared: {} });
     await expect(node.approvePayment({ id: unpaidRequest.id })).rejects.toThrow("no longer awaiting payment");
+    // Closed because the contact removed its wallet, which also turned Cashu off in the chat: the request is the reason.
+    const closedChat = addChat(node, stubLink({ allowsPayment: vi.fn(() => false) }));
+    const closedRequest = savedReview({ linkId: closedChat.id, requestId: "closed-by-removal" });
+    await intentRepository.put({ review: closedRequest, prepared: {} });
+    await expect(node.approvePayment({ id: closedRequest.id })).rejects.toThrow("no longer awaiting payment");
     expect(approve).not.toHaveBeenCalled();
   });
 });

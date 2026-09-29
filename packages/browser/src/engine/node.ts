@@ -3505,6 +3505,11 @@ export class GhostlyNode implements EngineImplementation {
     if(intent?.review.linkId) {
       const link=this.paymentLink(intent.review.linkId);
       if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
+      // A request closed or paid meanwhile says so first: the contact may have turned that way of paying off because of it.
+      if (intent.review.requestId) {
+        const request = this.desk.payment(intent.review.requestId);
+        if (!request || request.state !== "pending" || request.lightningPending) throw new Error("This request is no longer awaiting payment. Check its status before spending.");
+      }
       if(intent.review.method==="usdt" && !link.supportsUsdtPayments)throw new Error("Reconnect a peer supporting USDT before approving");
       if(intent.review.method==="bark" && !link.supportsBarkPayments)throw new Error("Reconnect a peer supporting Bark before approving");
       if(intent.review.method==="bitcoin" && !link.supportsBitcoinPayments)throw new Error("Reconnect a peer taking on-chain Bitcoin before approving");
@@ -3512,10 +3517,6 @@ export class GhostlyNode implements EngineImplementation {
       if(intent.review.method==="spark" && !link.supportsSparkPayments)throw new Error("Reconnect a peer taking Spark before approving");
       if(intent.review.method==="cashu" && !link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
       await link.requirePaymentSupport();
-      if (intent.review.requestId) {
-        const request = this.desk.payment(intent.review.requestId);
-        if (!request || request.state !== "pending" || request.lightningPending) throw new Error("This request is no longer awaiting payment. Check its status before spending.");
-      }
     }
     const review=await this.paymentCoordinator.approve(params.id);
     await this.desk.confirmReviewedCashu(review);
