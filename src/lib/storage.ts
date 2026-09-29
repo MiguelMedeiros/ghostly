@@ -83,6 +83,11 @@ function getKey(sessionId: string): string {
   return `${getPrefix()}${sessionId}`;
 }
 
+/** Whether a stored key is one of this profile's chats: the prefix and the chat's id; a longer key is another profile's, or not a chat. */
+export function isSessionKey(key: string | null | undefined): key is string {
+  return !!key?.startsWith(getPrefix()) && !key.slice(getPrefix().length).includes("_");
+}
+
 export function saveSession(session: ChatSession): void {
   try {
     localStorage.setItem(getKey(session.id), JSON.stringify(session));
@@ -253,8 +258,7 @@ export function listSessions(cache?: SessionCache): ChatSession[] {
   for (let i = 0; i < localStorage.length; i++) {
     try {
       const key = localStorage.key(i);
-      // A chat's key is the prefix and its id; a longer key is another profile's, or not a chat.
-      if (!key?.startsWith(getPrefix()) || key.slice(getPrefix().length).includes("_")) continue;
+      if (!isSessionKey(key)) continue;
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const hit = cache?.get(key);

@@ -284,6 +284,14 @@ body {
   @apply h-screen flex overflow-hidden;
 }
 
+/* An app opened from the iPhone home screen (iOS 26): with nothing in the page's flow (the body is fixed on
+   phones), WebKit sizes the viewport as the screen less the status bar, and draws nothing in a band as tall as
+   the status bar at the bottom, under the tab bar and the composer. A document as tall as the screen gets it all.
+   Installed apps only (hooks/useViewportHeight.ts): in a browser tab 100vh is taller than what its toolbars leave. */
+html[data-standalone="true"] {
+  height: 100vh;
+}
+
 /* ── Phones: one screen at a time, sized to what is really visible ── */
 .app-shell {
   height: 100vh;

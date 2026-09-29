@@ -128,4 +128,15 @@ describe("errors", () => {
     expect(asCliError(new Error("boom")).toJSON()).toEqual({ code: "engine", message: "boom" });
     expect(asCliError({ code: "not_found", message: "x" }).code).toBe("not_found");
   });
+
+  it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {
+    // Found in bug hunt r3a: `file save --dir` into a folder that did not exist was `engine`, exit 1, with Node's words.
+    const { open } = await import("node:fs/promises");
+    const missing = await open("/nonexistent-ghostly-folder/x.bin", "wx").catch((error: unknown) => error);
+    expect(asCliError(missing).toJSON()).toEqual({ code: "not_found", message: "No such file or folder: /nonexistent-ghostly-folder/x.bin" });
+    expect(asCliError(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES", syscall: "open", path: "/x" })).code).toBe("refused");
+    expect(asCliError(Object.assign(new Error("EISDIR: illegal operation"), { code: "EISDIR", syscall: "open", path: "/tmp" })).code).toBe("bad_request");
+    // An engine error that only mentions a file keeps its words.
+    expect(asCliError(new Error("The file is gone")).code).toBe("engine");
+  });
 });

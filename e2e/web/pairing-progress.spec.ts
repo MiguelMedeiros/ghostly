@@ -9,6 +9,8 @@ import { expect, test } from "../support/fixtures";
 
 const INVITER = ["publishing", "waiting", "answering", "connecting", "live"];
 const JOINER = ["resolving", "knocking", "answering", "connecting", "live"];
+/** STUN is answered in the test process: each offer and answer waits for it, up to 5 s when Google's servers are slow. */
+const PAIRING = { localStun: true };
 
 /** Records every stage the scene shows, however briefly: polling from the test would miss the short ones. */
 async function recordStages(page: Page) {
@@ -40,8 +42,8 @@ function expectInOrder(stages: string[], steps: string[]) {
   expect(stages.at(-1)).toBe("live");
 }
 
-test("pairing shows its stages in order on both sides, ends live, then gives the chat back", { tag: ["@release-skip", "@feature:chat.paired.pairing-progress", "@feature:chat.paired.progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
-  const [alice, bob] = await Promise.all([peer("progress-alice"), peer("progress-bob")]);
+test("pairing shows its stages in order on both sides, ends live, then gives the chat back", { tag: ["@feature:chat.paired.pairing-progress", "@feature:chat.paired.progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all(["progress-alice", "progress-bob"].map(name => peer(name, PAIRING)));
   await Promise.all([recordStages(alice.page), recordStages(bob.page)]);
 
   await alice.page.getByTitle("New Chat").click();
@@ -88,7 +90,7 @@ test("pairing shows its stages in order on both sides, ends live, then gives the
 });
 
 test("the inviter's invite card leaves once the joiner knocks, and the scene alone goes on to live", { tag: ["@feature:chat.paired.pairing-progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
-  const [alice, bob] = await Promise.all([peer("invite-leaves-alice"), peer("invite-leaves-bob")]);
+  const [alice, bob] = await Promise.all(["invite-leaves-alice", "invite-leaves-bob"].map(name => peer(name, PAIRING)));
   await alice.page.getByTitle("New Chat").click();
   const scene = alice.page.getByTestId("pairing-scene");
   await expect(scene).toHaveAttribute("data-stage", "waiting");
@@ -151,7 +153,7 @@ async function recordSounds(page: Page) {
 const sounds = (page: Page) => page.evaluate(() => (window as unknown as { qaSounds: { heard: { duration: number; at: number }[]; liveAt: number | null } }).qaSounds);
 
 test("the connected moment is heard once on each side, together with the scene going live, and not while waiting", { tag: ["@feature:chat.paired.pairing-progress", "@feature:app.attention.sounds"] }, async ({ peer }) => {
-  const [alice, bob] = await Promise.all([peer("sound-alice"), peer("sound-bob")]);
+  const [alice, bob] = await Promise.all(["sound-alice", "sound-bob"].map(name => peer(name, PAIRING)));
   await Promise.all([recordSounds(alice.page), recordSounds(bob.page)]);
   // The clicks below are the gestures that let each page play sound at all.
   await alice.page.getByTitle("New Chat").click();
@@ -181,7 +183,7 @@ test("the connected moment is heard once on each side, together with the scene g
 });
 
 test("a chat muted before its contact joins goes live in silence; the contact, not muted, hears it", { tag: ["@feature:chat.paired.pairing-progress", "@feature:app.attention.sounds", "@feature:chats.mute"] }, async ({ peer }) => {
-  const [alice, bob] = await Promise.all([peer("sound-muted-alice"), peer("sound-muted-bob")]);
+  const [alice, bob] = await Promise.all(["sound-muted-alice", "sound-muted-bob"].map(name => peer(name, PAIRING)));
   await Promise.all([recordSounds(alice.page), recordSounds(bob.page)]);
   await alice.page.getByTitle("New Chat").click();
   await expect(alice.page.getByTestId("pairing-scene")).toHaveAttribute("data-stage", "waiting");

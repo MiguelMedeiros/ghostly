@@ -438,6 +438,26 @@ describe("files sent to a contact", () => {
     expect(sent.delivery, "from now on it shows by its transfer").toBeUndefined();
   });
 
+  it("a file still waiting for live when the app restarts keeps waiting, not an interrupted transfer, and goes when the session opens", async () => {
+    // Found with two headless CLIs: a file sent to a contact who was away, then the sender's app restarted. The file
+    // said "Transfer interrupted" (`file wait` failed at once) while its message still said it goes once live, and it did.
+    const chat = row();
+    await db.putLink(chat);
+    const file = { id: `${chat.id}-out-w8`, name: "a.txt", size: 5, mime: "text/plain" };
+    await fileStore.put({ id: file.id, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "out", wireId: "w8",
+      transfer: { state: "transferring", transferred: 0, size: 5 } });
+    await db.addMessage({ linkId: chat.id, id: "me_3", text: "📎 a.txt", sender: "me", timestamp: 3, via: "datalink", file,
+      delivery: "waiting", deliveryError: "Sent when you are live." });
+    const { node, linkOf } = await started();
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    expect(node.getState().transfers[file.id]).toBeUndefined();
+    const link = linkOf(chat.id);
+    link.options.events.onDataLinkState("open");
+    await vi.waitFor(() => expect(link.sendFile).toHaveBeenCalledOnce());
+    expect(link.sendFile.mock.calls[0][0]).toMatchObject({ id: "w8", name: "a.txt", timestamp: 3 });
+    expect(node.getState().transfers[file.id]).toMatchObject({ state: "transferring" });
+  });
+
   it("a waiting file for an app that takes no files fails with that reason; a cancelled one never goes", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
