@@ -72,6 +72,18 @@ test("both call at once: one side rings, and answering connects the call", { tag
   for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call ended")).toBeVisible();
 });
 
+test("the contact's tab closes mid-call: the call ends here with its line", { tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("paired-gone-alice"), peer("paired-gone-bob")]);
+  await pair(alice, bob);
+  await alice.page.getByTestId("call-video").click();
+  await bob.page.getByTitle("Accept video call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  await bob.page.close();
+  // No hang-up comes: the media connection fails (about 15 s in Chromium) and the call ends as a hang-up ends it.
+  await expect(alice.page.getByTitle("End call")).toHaveCount(0, { timeout: 60_000 });
+  await expect(chat(alice).getByText("Video call ended")).toBeVisible();
+});
+
 test("calls need a live connection: on the DHT the buttons are off and say so", { tag: ["@feature:calls.paired.live-only"] }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("paired-dht-alice"), peer("paired-dht-bob")]);
   await pair(alice, bob);
