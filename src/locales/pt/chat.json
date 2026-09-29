@@ -1,4 +1,12 @@
 {
+  "audio": {
+    "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
+    "pause": "Pausar áudio",
+    "play": "Tocar áudio",
+    "position": "Posição no áudio",
+    "save": "Salvar áudio",
+    "tooLarge": "Grande demais para tocar aqui. Baixe para ouvir."
+  },
   "compat": {
     "continued": "Convidou o seu contacto para uma nova conversa.",
     "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam a funcionar nos dois sentidos; uma nova conversa acrescenta ficheiros, pagamentos e mensagens guardadas.",
@@ -6,6 +14,7 @@
     "open": "Abrir a nova conversa"
   },
   "connecting": "conectando",
+  "createdHere": "Você criou esta conversa",
   "deleteMessage": "Apagar mensagem",
   "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele.",
   "delivery": {
@@ -25,10 +34,47 @@
     "sent": "Enviada",
     "waiting": "Aguardando seu contato ficar online"
   },
+  "disabledPlaceholder": "Mensagem…",
   "edit": {
     "cancel": "Cancelar edição",
     "editing": "Editando"
   },
+  "editFailed": "Não foi possível editar a mensagem",
+  "empty": "Envie uma mensagem ou aguarde seu contato",
+  "file": {
+    "accept": "Aceitar",
+    "askAgain": "Pedir de novo",
+    "askAgainHint": "Pede o restante ao seu contato. O que chegou fica.",
+    "askingThem": "Aguardando {{name}} aceitar · {{size}}",
+    "askingYou": "{{size}} · aguardando sua resposta",
+    "cancelled": "Cancelado",
+    "decline": "Recusar",
+    "declined": "Recusado",
+    "gone": "Não está mais disponível",
+    "leftHours": "{{hours}} h restantes",
+    "leftHoursMinutes": "{{hours}} h {{minutes}} min restantes",
+    "leftMinutes": "{{minutes}} min restantes",
+    "leftUnderMinute": "menos de um minuto restante",
+    "noRoomDevice": "Espaço insuficiente: {{size}} livres neste aparelho",
+    "notSentHint": "Não enviado. Envie de novo.",
+    "of": "{{done}} de {{size}}",
+    "pause": "Pausar",
+    "paused": "Pausado",
+    "pausedBy": "Pausado por {{name}}",
+    "preparing": "Preparando… {{progress}}",
+    "queuedHere": "Aguardando a vez · {{done}} concluído",
+    "queuedThere": "Na fila de {{name}} · {{done}} concluído",
+    "resendHint": "Oferece de novo. Continua do que seu contato já tem.",
+    "resume": "Continuar",
+    "roomDevice": "{{size}} livres neste aparelho",
+    "stalled": "Parado · {{progress}}",
+    "verifying": "Verificando o arquivo… {{size}}",
+    "waitingDone": "Aguardando conexão · {{done}} concluído",
+    "waitingSize": "Aguardando conexão · {{size}}",
+    "wantsToSend": "{{name}} quer enviar {{file}} ({{size}})."
+  },
+  "fileTooLarge": "Esse arquivo é grande demais (máx. {{size}}).",
+  "filesNeedUpdate": "Atualize os dois lados para enviar arquivos",
   "forward": {
     "filesHint": "Grupos só recebem texto",
     "forward": "Encaminhar",
@@ -44,13 +90,21 @@
     "send": "Enviar",
     "title": "Encaminhar para…"
   },
+  "joined": "entrou na conversa",
   "jump": {
     "bottom": "Rolar até o fim",
     "count": "{{count}} novas",
     "new": "{{count}} mensagens novas, rolar até o fim",
     "newOne": "1 mensagem nova, rolar até o fim"
   },
+  "keyChanged": "Esta conversa parou: a chave do seu contato mudou.",
   "lastSeen": "Visto por último {{time}}",
+  "media": {
+    "downloadSize": "Baixar {{size}}",
+    "noRoom": "Espaço insuficiente: {{size}} livres",
+    "notYet": "Toca depois de enviado.",
+    "wantsToSend": "{{name}} quer enviar · {{size}} livres"
+  },
   "menu": {
     "continueNew": "Continuar numa nova conversa",
     "hold": "Reter mensagens…",
@@ -88,6 +142,12 @@
   "offline": "offline",
   "online": "online",
   "options": "Opções",
+  "payments": {
+    "needLive": "Pagamentos precisam de uma conexão direta",
+    "noWallet": "Seu contato ainda não tem carteira",
+    "off": "Desligado nesta conversa: ative uma forma em Aceitar",
+    "offOrOld": "Seu contato desligou pagamentos nesta conversa ou precisa atualizar o Ghostly"
+  },
   "pinned": {
     "bar": "Mensagem fixada",
     "info": "Uma mensagem fixada por conversa, vista por todos nela. Uma nova fixação substitui a anterior. Numa comunidade, só o admin fixa.",
@@ -135,10 +195,77 @@
     "placeholder": "Buscar nesta conversa"
   },
   "send": "Enviar",
+  "setName": "Defina um nome...",
+  "setNameHint": "Clique para definir um nome",
+  "showPicture": "Mostrar imagem · {{host}}",
+  "shownWith": "Mostrado com o perfil {{provider}} · chave Ghostly {{key}}",
+  "tech": {
+    "ackStatus": "Status de ACK",
+    "created": "Criado",
+    "encKey": "Chave de criptografia",
+    "encryption": "Criptografia",
+    "identity": "Identidade",
+    "lastSync": "Última sincronização",
+    "messages": "Mensagens",
+    "myAck": "Meu ACK",
+    "myKey": "Minha chave",
+    "network": "Rede",
+    "none": "nenhum",
+    "peerAck": "ACK do contato",
+    "peerKey": "Chave do contato",
+    "pendingBuffer": "Buffer pendente",
+    "pendingCount": "{{count}} mensagens",
+    "pollInterval": "Intervalo de consulta",
+    "polls": "Consultas",
+    "protocol": "Protocolo",
+    "sessionId": "ID da sessão",
+    "status": "Status",
+    "sync": "Sincronização"
+  },
   "today": "Hoje",
   "typeMessage": "Digite uma mensagem...",
   "typing": "digitando…",
   "typingRecording": "gravando áudio…",
   "typingThinking": "pensando…",
+  "video": {
+    "arriving": "Chegando",
+    "cantPlay": "Este aparelho não reproduz este vídeo ({{format}}). Baixe para assistir.",
+    "exitFullScreen": "Sair da tela cheia",
+    "fullScreen": "Tela cheia",
+    "play": "Reproduzir vídeo",
+    "save": "Salvar vídeo",
+    "tooLarge": "Grande demais para tocar aqui. Baixe para assistir."
+  },
+  "voice": {
+    "cancelled": "Mensagem de voz cancelada",
+    "cantPlay": "Este aparelho não reproduz esta gravação ({{format}}). Salve para ouvir em outro lugar.",
+    "couldNotPlay": "Não foi possível tocar esta gravação.",
+    "discard": "Descartar",
+    "discardAsk": "Descartar mensagem de voz?",
+    "discarded": "Mensagem de voz descartada",
+    "handsFree": "Gravando sem as mãos. Enter envia, Esc descarta.",
+    "holdHint": "Segure para gravar, solte para enviar",
+    "keep": "Manter",
+    "limit": "Mensagens de voz têm no máximo {{minutes}} minutos",
+    "message": "Mensagem de voz",
+    "micDenied": "O Ghostly não consegue usar o microfone. Permita nas configurações do site no navegador (no app desktop: Ajustes do Sistema → Privacidade e Segurança → Microfone) e tente de novo.",
+    "micUnavailable": "Nenhum microfone disponível. Conecte um ou feche o app que está usando, e tente de novo.",
+    "micUnsupported": "Este navegador não grava mensagens de voz.",
+    "pause": "Pausar mensagem de voz",
+    "pausePlayback": "Pausar reprodução",
+    "play": "Tocar mensagem de voz",
+    "playback": "Tocar",
+    "position": "Posição na mensagem de voz",
+    "previewFailed": "Não foi possível tocar a gravação.",
+    "record": "Gravar mensagem de voz",
+    "recordHint": "Segure para gravar ou clique para gravar sem as mãos",
+    "recorded": "Gravado {{time}}",
+    "sent": "Mensagem de voz enviada",
+    "slideCancel": "Deslize para cancelar",
+    "speed": "Velocidade {{speed}}",
+    "tooShort": "Curta demais para enviar",
+    "tooShortHold": "Curta demais. Segure para gravar, solte para enviar",
+    "unplayed": "Mensagem de voz, ainda não ouvida"
+  },
   "yesterday": "Ontem"
 }

@@ -143,6 +143,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
   const addCallEventMessage = useCallback(
     (type: CallEventType, hasVideo: boolean, duration?: number) => {
+      // Kept in English in the history: the call line is worded in the person's language where it is drawn (MessageBubble).
       const textMap: Record<CallEventType, string> = {
         call_started: hasVideo ? "Video call started" : "Audio call started",
         call_received: hasVideo ? "Incoming video call" : "Incoming audio call",
@@ -213,11 +214,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
-  const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? "Calls need a live connection" : deliveryPeer.callsUnavailable) : null;
+  const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? t("calls.needLive") : deliveryPeer.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
-  const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? deliveryPeer.pairing.error ?? "This chat stopped: your contact's key changed." : undefined;
+  const chatStop = paired && deliveryPeer?.pairing?.keyMismatch ? deliveryPeer.pairing.error ?? t("chat.keyChanged") : undefined;
   // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
   // invite code is forgotten when the contact shows up.
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
@@ -252,7 +253,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
       if (!platform || !peerKey) return null;
       const tooLarge = platform.fileTooLarge ? platform.fileTooLarge(peerKey, source.size)
-        : source.size > platform.maxFileBytes ? `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).` : null;
+        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes) }) : null;
       if (tooLarge) return tooLarge;
       // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
       const answering = paired ? replyingRef.current : null;
@@ -270,7 +271,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         return e instanceof Error ? e.message : String(e);
       }
     },
-    [platform, peerKey, paired, addSystemMessage, replied],
+    [platform, peerKey, paired, addSystemMessage, replied, t],
   );
 
   /**
@@ -512,7 +513,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           <button
             onClick={nav.up}
             className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0"
-            title="Back"
+            title={t("common.back")}
             data-testid="chat-back"
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -530,7 +531,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                 </svg>
                 <span className="absolute top-1/2 -translate-y-1/2 start-full ms-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
-                  You created this chat
+                  {t("chat.createdHere")}
                 </span>
               </span>
             )}
@@ -547,7 +548,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   if (e.key === "Escape") setIsEditingLabel(false);
                 }}
                 onBlur={saveLabel}
-                placeholder="Set a name..."
+                placeholder={t("chat.setName")}
                 className="bg-input-bg border-none rounded px-2 py-0.5 text-[15px] text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent w-full max-w-[200px]"
                 maxLength={30}
               />
@@ -556,7 +557,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <p
                 onClick={startEditLabel}
                 className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
-                title="Click to set a name"
+                title={t("chat.setNameHint")}
               >
                 <bdi data-testid="chat-name">{shownName}</bdi>
                 {!chatLabel && (
@@ -577,7 +578,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 )}
               </p>
               {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
-                footer={face ? `Shown with their ${face.providerName} profile · Ghostly key ${truncatedPeerKey}` : undefined} />}
+                footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
@@ -709,7 +710,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             <div className="flex items-center justify-center min-h-[200px]">
               <div className="bg-surface-alt/90 rounded-lg px-4 py-2 text-center">
                 <p className="text-text-muted text-xs">
-                  Send a message or wait for your contact
+                  {t("chat.empty")}
                 </p>
               </div>
             </div>
@@ -776,26 +777,26 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? e.message : "Could not edit the message" }))).error } : undefined}
+            .catch((e: unknown) => ({ error: e instanceof Error ? e.message : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }
         } : undefined}
         // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
         disabled={isSending || (paired && (!!chatStop || engine.state?.settings.online === false))}
-        disabledPlaceholder="Message…"
+        disabledPlaceholder={t("chat.disabledPlaceholder")}
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
         softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         onSendFile={platform ? sendFile : undefined}
-        fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? "Update both peers to send files" : undefined) : undefined}
+        fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? t("chat.filesNeedUpdate") : undefined) : undefined}
         // The + → Payment row still opens on these: its Accept side is where this chat's ways of paying are chosen.
-        paymentsUnavailable={!paymentsOn ? "Off in this chat: turn a way on in Accept" : chatStop ? chatStop : paired && chatLive && !chatPeer?.capabilities?.payments ? (chatPeer?.capabilities?.networks && !Object.keys(chatPeer.capabilities.networks).length ? "Your contact has no wallet yet" : "Your contact has payments off in this chat, or needs an updated Ghostly") : undefined}
+        paymentsUnavailable={!paymentsOn ? t("chat.payments.off") : chatStop ? chatStop : paired && chatLive && !chatPeer?.capabilities?.payments ? (chatPeer?.capabilities?.networks && !Object.keys(chatPeer.capabilities.networks).length ? t("chat.payments.noWallet") : t("chat.payments.offOrOld")) : undefined}
         payments={
           walletState && wallet && peerKey
             ? { balance: walletState.balance, contact: isAnonymous ? undefined : shownName, onSend: paySend, onRequest: payRequest,
               // Paying needs live: a bearer token never waits in a queue or a hold. A request can wait.
-              sendUnavailable: paired && !chatLive ? "Payments need a live connection" : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined,
+              sendUnavailable: paired && !chatLive ? t("chat.payments.needLive") : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined,
               // Which ways this chat accepts: chosen on the composer's Accept side, for this chat only.
               onSaveMethods: chatPeer && platform ? ({ methods, networks }) => platform.setChatPaymentMethods(peerKey, methods, networks) : undefined }
             : undefined
@@ -871,9 +872,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-4 border-b border-border">
-              <h2 className="text-lg font-semibold text-text-primary">Tech Info</h2>
+              <h2 className="text-lg font-semibold text-text-primary">{t("chat.menu.techInfo")}</h2>
               <button
                 onClick={() => setShowTechInfo(false)}
+                aria-label={t("common.close")}
                 className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-full transition-colors"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -883,35 +885,35 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </button>
             </div>
             <div className="p-4 space-y-4 text-sm">
-              <TechInfoSection title="Identity">
-                <TechInfoRow label="Session ID" value={techInfo.sessionId} mono copyable />
-                <TechInfoRow label="My Key" value={techInfo.myPubKey} mono copyable />
-                <TechInfoRow label="Peer Key" value={techInfo.peerPubKey} mono copyable />
-                <TechInfoRow label="Enc Key" value={techInfo.encKeyPreview} mono />
+              <TechInfoSection title={t("chat.tech.identity")}>
+                <TechInfoRow label={t("chat.tech.sessionId")} value={techInfo.sessionId} mono copyable />
+                <TechInfoRow label={t("chat.tech.myKey")} value={techInfo.myPubKey} mono copyable />
+                <TechInfoRow label={t("chat.tech.peerKey")} value={techInfo.peerPubKey} mono copyable />
+                <TechInfoRow label={t("chat.tech.encKey")} value={techInfo.encKeyPreview} mono />
               </TechInfoSection>
-              <TechInfoSection title="Protocol">
-                <TechInfoRow label="Network" value={techInfo.protocol} />
-                <TechInfoRow label="Encryption" value={techInfo.encryption} />
+              <TechInfoSection title={t("chat.tech.protocol")}>
+                <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
+                <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
                 <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
-                <TechInfoRow label="Created" value={new Date(techInfo.createdAt).toLocaleString()} />
+                <TechInfoRow label={t("chat.tech.created")} value={new Date(techInfo.createdAt).toLocaleString()} />
               </TechInfoSection>
-              <TechInfoSection title="Sync">
-                <TechInfoRow label="Status" value={status} />
-                <TechInfoRow label="Poll Interval" value={`${techInfo.currentPollInterval / 1000}s`} />
-                <TechInfoRow label="Polls" value={techInfo.pollCount.toString()} />
-                <TechInfoRow label="Last Sync" value={lastSync ? new Date(lastSync).toLocaleTimeString() : "—"} />
-                <TechInfoRow label="Messages" value={messages.length.toString()} />
+              <TechInfoSection title={t("chat.tech.sync")}>
+                <TechInfoRow label={t("chat.tech.status")} value={status} />
+                <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
+                <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
+                <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? new Date(lastSync).toLocaleTimeString() : "—"} />
+                <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
               </TechInfoSection>
-              <TechInfoSection title="ACK Status">
+              <TechInfoSection title={t("chat.tech.ackStatus")}>
                 <TechInfoRow 
-                  label="My ACK" 
-                  value={techInfo.myAck > 0 ? new Date(techInfo.myAck).toLocaleTimeString() : "none"} 
+                  label={t("chat.tech.myAck")} 
+                  value={techInfo.myAck > 0 ? new Date(techInfo.myAck).toLocaleTimeString() : t("chat.tech.none")} 
                 />
                 <TechInfoRow 
-                  label="Peer ACK" 
-                  value={techInfo.peerAck > 0 ? new Date(techInfo.peerAck).toLocaleTimeString() : "none"} 
+                  label={t("chat.tech.peerAck")} 
+                  value={techInfo.peerAck > 0 ? new Date(techInfo.peerAck).toLocaleTimeString() : t("chat.tech.none")} 
                 />
-                <TechInfoRow label="Pending Buffer" value={`${techInfo.sentBufferSize} messages`} />
+                <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
               </TechInfoSection>
             </div>
           </div>
@@ -940,6 +942,7 @@ function TechInfoSection({ title, children }: { title: string; children: React.R
 
 function TechInfoRow({ label, value, mono, copyable }: { label: string; value: string; mono?: boolean; copyable?: boolean }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
 
   const handleCopy = () => {
     navigator.clipboard.writeText(value);
@@ -954,9 +957,9 @@ function TechInfoRow({ label, value, mono, copyable }: { label: string; value: s
         <button
           onClick={handleCopy}
           className={`text-end break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
-          title="Click to copy"
+          title={t("chat.message.copyHint")}
         >
-          {copied ? "Copied!" : value}
+          {copied ? t("common.copied") : value}
         </button>
       ) : (
         <span className={`text-text-secondary text-end break-all ${mono ? "font-mono" : ""}`}>

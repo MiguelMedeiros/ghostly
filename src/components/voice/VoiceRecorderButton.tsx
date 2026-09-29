@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { VOICE_LIMITS, formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { toChosenSpeaker } from "../../lib/mediaDevices";
-import { MICROPHONE_MESSAGES, VoiceRecorder, canRecordVoice } from "../../lib/voiceRecorder";
+import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
+import { useT, type Translate } from "../../contexts/I18nContext";
+
+/** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
+function microphoneText(t: Translate, problem: MicrophoneProblem): string {
+  switch (problem) {
+    case "denied": return t("chat.voice.micDenied");
+    case "unavailable": return t("chat.voice.micUnavailable");
+    case "unsupported": return t("chat.voice.micUnsupported");
+  }
+}
 import { LiveWaveform, Waveform } from "./Waveform";
 import "./voice.css";
 
@@ -62,6 +72,7 @@ const PauseIcon = ({ size = 18 }: { size?: number }) => (
  * resume. Enter sends; Esc discards, asking first once there is more than a few seconds to lose.
  */
 export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, onActiveChange }: Props) {
+  const t = useT();
   const [mode, setMode] = useState<Mode>("idle");
   const [phase, setPhase] = useState<Phase>("starting");
   const [elapsed, setElapsed] = useState(0);
@@ -131,11 +142,11 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setDrag({ x: 0, y: 0 });
   }, [stopPreview]);
 
-  const cancel = useCallback((why = "Voice message discarded") => {
+  const cancel = useCallback((why?: string) => {
     recorderRef.current?.cancel();
     reset();
-    setAnnounce(why);
-  }, [reset]);
+    setAnnounce(why ?? t("chat.voice.discarded"));
+  }, [reset, t]);
 
   const send = useCallback(async () => {
     const recorder = recorderRef.current;
@@ -153,37 +164,38 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     try {
       const recording = await recorder.stop();
       reset();
-      if (!recording) { showHint(locked ? "Too short to send" : "Too short. Hold to record, release to send"); return; }
-      setAnnounce("Voice message sent");
+      if (!recording) { showHint(locked ? t("chat.voice.tooShort") : t("chat.voice.tooShortHold")); return; }
+      setAnnounce(t("chat.voice.sent"));
       const error = await onSend(recording.file, recording.voice);
       if (error) onError(error);
     } finally {
       sendingRef.current = false;
     }
-  }, [cancel, reset, stopPreview, showHint, onSend, onError]);
+  }, [cancel, reset, stopPreview, showHint, onSend, onError, t]);
 
   const begin = useCallback(async (next: Exclude<Mode, "idle">) => {
     if (disabled || recorderRef.current) return;
     if (unavailable) { onError(unavailable); return; }
-    if (!canRecordVoice()) { onError(MICROPHONE_MESSAGES.unsupported); return; }
+    if (!canRecordVoice()) { onError(microphoneText(t, "unsupported")); return; }
     const recorder = new VoiceRecorder();
     recorderRef.current = recorder;
     recorder.onLevel = () => setLevels(recorder.recentLevels(48));
-    recorder.onLimit = () => { showHint(`Voice messages are at most ${VOICE_LIMITS.maxDurationMs / 60_000} minutes`); void send(); };
+    recorder.onLimit = () => { showHint(t("chat.voice.limit", { minutes: VOICE_LIMITS.maxDurationMs / 60_000 })); void send(); };
     setModeBoth(next);
     setPhase("starting");
     try {
       await recorder.start();
     } catch (error) {
       if (recorderRef.current === recorder) reset();
-      onError(error instanceof Error ? error.message : MICROPHONE_MESSAGES.unavailable);
+      onError(error instanceof MicrophoneError && error.message === MICROPHONE_MESSAGES[error.problem] ? microphoneText(t, error.problem)
+        : error instanceof Error ? error.message : microphoneText(t, "unavailable"));
       return;
     }
     if (recorderRef.current !== recorder) return;
     setAnnounce("Recording");
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
     setPhase("recording");
-  }, [disabled, unavailable, onError, reset, showHint, send]);
+  }, [disabled, unavailable, onError, reset, showHint, send, t]);
 
   // A chat left mid-recording gives the microphone back.
   useEffect(() => () => {
@@ -256,9 +268,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     gestureRef.current = null;
     setDrag({ x: 0, y: 0 });
     setModeBoth("locked");
-    setAnnounce("Recording hands-free. Enter sends, Escape discards.");
+    setAnnounce(t("chat.voice.handsFree"));
     buttonRef.current?.focus();
-  }, []);
+  }, [t]);
 
   const bin = useCallback(() => {
     if (binTimer.current) clearTimeout(binTimer.current);
@@ -284,7 +296,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     if (!gesture || gesture.id !== event.pointerId || modeRef.current !== "hold") return;
     const x = (event.clientX - gesture.x) * direction();
     const y = event.clientY - gesture.y;
-    if (x < -CANCEL_PX) { suppressClickRef.current = true; cancel("Voice message discarded"); bin(); return; }
+    if (x < -CANCEL_PX) { suppressClickRef.current = true; cancel(t("chat.voice.discarded")); bin(); return; }
     if (y < -LOCK_PX) { suppressClickRef.current = true; lock(); return; }
     setDrag({ x: Math.min(0, x), y: Math.min(0, y) });
   };
@@ -310,13 +322,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       return;
     }
     // A tap on a touch screen was a question.
-    if (tap) { cancel(""); showHint("Hold to record, release to send"); return; }
+    if (tap) { cancel(""); showHint(t("chat.voice.holdHint")); return; }
     void send();
   };
 
   const onPointerCancel = () => {
     sendPressRef.current = null;
-    if (modeRef.current === "hold") cancel("Voice message cancelled");
+    if (modeRef.current === "hold") cancel(t("chat.voice.cancelled"));
   };
 
   const onClick = () => {
@@ -358,7 +370,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       previewAudio.current = { audio, url };
       await toChosenSpeaker(audio);
     }
-    await audio.play().catch(() => onError("Could not play the recording."));
+    await audio.play().catch(() => onError(t("chat.voice.previewFailed")));
   };
 
   const recording = mode !== "idle";
@@ -372,40 +384,40 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   return (
     <>
       {recording && (
-        <div className="voice-bar" data-testid="voice-bar" data-mode={mode} data-phase={phase} data-confirming={confirming || undefined} role="group" aria-label="Voice message">
+        <div className="voice-bar" data-testid="voice-bar" data-mode={mode} data-phase={phase} data-confirming={confirming || undefined} role="group" aria-label={t("chat.voice.message")}>
           {confirming ? (
-            <div className="voice-confirm" role="alertdialog" aria-label="Discard voice message?" data-testid="voice-confirm">
-              <span className="voice-confirm-text">Discard voice message?</span>
-              <button ref={keepRef} type="button" className="voice-text-button" data-testid="voice-confirm-keep" onClick={keep}>Keep</button>
-              <button type="button" className="voice-text-button voice-text-danger" data-testid="voice-confirm-discard" onClick={() => cancel()}>Discard</button>
+            <div className="voice-confirm" role="alertdialog" aria-label={t("chat.voice.discardAsk")} data-testid="voice-confirm">
+              <span className="voice-confirm-text">{t("chat.voice.discardAsk")}</span>
+              <button ref={keepRef} type="button" className="voice-text-button" data-testid="voice-confirm-keep" onClick={keep}>{t("chat.voice.keep")}</button>
+              <button type="button" className="voice-text-button voice-text-danger" data-testid="voice-confirm-discard" onClick={() => cancel()}>{t("chat.voice.discard")}</button>
             </div>
           ) : (
             <>
               {locked && (
-                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label="Discard" title="Discard" disabled={sending} onClick={() => cancel()}>
+                <button type="button" className="voice-icon-button" data-testid="voice-delete" aria-label={t("chat.voice.discard")} title={t("chat.voice.discard")} disabled={sending} onClick={() => cancel()}>
                   <BinIcon />
                 </button>
               )}
               {paused && preview ? (
                 <>
                   <button type="button" className="voice-icon-button" data-testid="voice-preview"
-                    aria-label={preview.playing ? "Pause playback" : "Play"} title={preview.playing ? "Pause playback" : "Play"} onClick={() => void togglePreview()}>
+                    aria-label={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} title={preview.playing ? t("chat.voice.pausePlayback") : t("chat.voice.playback")} onClick={() => void togglePreview()}>
                     {preview.playing ? <PauseIcon /> : <PlayIcon />}
                   </button>
                   <Waveform ref={previewWave} peaks={preview.peaks} className="flex-1 min-w-0" data-testid="voice-preview-wave" style={{ ["--voice-fill" as string]: "var(--color-accent)" }} />
-                  <span className="text-[13px] tabular-nums text-text-secondary min-w-[36px]" data-testid="voice-timer" aria-label={`Recorded ${time}`}>{time}</span>
+                  <span className="text-[13px] tabular-nums text-text-secondary min-w-[36px]" data-testid="voice-timer" aria-label={t("chat.voice.recorded", { time })}>{time}</span>
                 </>
               ) : (
                 <>
                   <span className="voice-bar-dot" aria-hidden="true" />
-                  <span className="text-[15px] tabular-nums text-text-primary min-w-[40px]" data-testid="voice-timer" aria-label={`Recorded ${time}`}>{time}</span>
+                  <span className="text-[15px] tabular-nums text-text-primary min-w-[40px]" data-testid="voice-timer" aria-label={t("chat.voice.recorded", { time })}>{time}</span>
                   {mode === "hold" ? (
                     <>
                       <LiveWaveform levels={levels} bars={24} className="voice-hold-live" />
                       <span className="voice-slide" style={{ transform: `translateX(${drag.x * direction() * 0.6}px)` }} data-testid="voice-slide">
                         <span className="voice-slide-fade" style={{ opacity: slideFade }}>
                           <svg className="voice-slide-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
-                          Slide to cancel
+                          {t("chat.voice.slideCancel")}
                         </span>
                       </span>
                     </>
@@ -417,7 +429,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
               {locked && (
                 <button type="button" className="voice-icon-button voice-pause-button" data-testid="voice-pause" data-paused={paused || undefined}
                   disabled={phase === "starting" || sending}
-                  aria-label={paused ? "Resume" : "Pause"} title={paused ? "Resume" : "Pause"} onClick={togglePause}>
+                  aria-label={paused ? t("chat.file.resume") : t("chat.file.pause")} title={paused ? t("chat.file.resume") : t("chat.file.pause")} onClick={togglePause}>
                   {paused ? <MicIcon size={20} color="var(--color-danger)" /> : <PauseIcon size={20} />}
                 </button>
               )}
@@ -449,10 +461,10 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
         type="button"
         data-testid={locked ? "voice-send" : "voice-record"}
         data-mode={mode}
-        aria-label={locked ? "Send" : "Record a voice message"}
+        aria-label={locked ? t("chat.send") : t("chat.voice.record")}
         aria-disabled={disabled || !!unavailable || undefined}
         aria-busy={sending || undefined}
-        title={locked ? "Send" : mode === "idle" ? (unavailable ?? "Hold to record, or click for hands-free") : undefined}
+        title={locked ? t("chat.send") : mode === "idle" ? (unavailable ?? t("chat.voice.recordHint")) : undefined}
         disabled={disabled}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

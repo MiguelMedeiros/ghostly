@@ -10,7 +10,7 @@ import type { Language } from "../lib/settings";
 import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
 
 import { locales as translations } from "../locales";
-import { translateWith, type Translate } from "../locales/translate";
+import { englishT, translateWith, type Translate } from "../locales/translate";
 
 export type { Translate, TranslationKey } from "../locales/translate";
 
@@ -45,6 +45,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 /** The translator where there may be no provider (layout primitives rendered on their own): null there. */
 export function useOptionalI18n(): I18nContextValue | null {
   return useContext(I18nContext);
+}
+
+/** `t()` where there may be no provider (a bubble drawn on its own): English there. */
+export function useT(): Translate {
+  return useContext(I18nContext)?.t ?? englishT;
 }
 
 export function useI18n(): I18nContextValue {

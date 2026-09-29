@@ -1,4 +1,12 @@
 {
+  "audio": {
+    "cantPlay": "この端末ではこの音声（{{format}}）を再生できません。ダウンロードして聴いてください。",
+    "pause": "音声を一時停止",
+    "play": "音声を再生",
+    "position": "音声の再生位置",
+    "save": "音声を保存",
+    "tooLarge": "大きすぎてここでは再生できません。ダウンロードして聴いてください。"
+  },
   "compat": {
     "continued": "相手を新しいチャットに招待しました。",
     "hint": "このチャットは Ghostly 0.4 のコードで作成されました。テキストと通話は双方向で引き続き使えます。新しいチャットではファイル、支払い、保留メッセージも使えます。",
@@ -6,6 +14,7 @@
     "open": "新しいチャットを開く"
   },
   "connecting": "接続中",
+  "createdHere": "このチャットはあなたが作成しました",
   "deleteMessage": "メッセージを削除",
   "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。",
   "delivery": {
@@ -25,10 +34,47 @@
     "sent": "送信済み",
     "waiting": "相手がオンラインになるのを待っています"
   },
+  "disabledPlaceholder": "メッセージ…",
   "edit": {
     "cancel": "編集をキャンセル",
     "editing": "編集中"
   },
+  "editFailed": "メッセージを編集できませんでした",
+  "empty": "メッセージを送るか、相手を待ちましょう",
+  "file": {
+    "accept": "受け取る",
+    "askAgain": "もう一度頼む",
+    "askAgainHint": "残りを相手に頼みます。届いた分はそのまま残ります。",
+    "askingThem": "{{name}} の承認待ち · {{size}}",
+    "askingYou": "{{size}} · あなたの返答待ち",
+    "cancelled": "キャンセルされました",
+    "decline": "断る",
+    "declined": "拒否されました",
+    "gone": "利用できなくなりました",
+    "leftHours": "残り {{hours}} 時間",
+    "leftHoursMinutes": "残り {{hours}} 時間 {{minutes}} 分",
+    "leftMinutes": "残り {{minutes}} 分",
+    "leftUnderMinute": "残り 1 分未満",
+    "noRoomDevice": "容量が足りません: この端末の空き {{size}}",
+    "notSentHint": "送信されていません。もう一度送ってください。",
+    "of": "{{size}} 中 {{done}}",
+    "pause": "一時停止",
+    "paused": "一時停止中",
+    "pausedBy": "{{name}} が一時停止",
+    "preparing": "準備中… {{progress}}",
+    "queuedHere": "順番待ち · {{done}} 完了",
+    "queuedThere": "{{name}} 側で順番待ち · {{done}} 完了",
+    "resendHint": "もう一度送ります。相手がすでに受け取った分から続けます。",
+    "resume": "再開",
+    "roomDevice": "この端末の空き {{size}}",
+    "stalled": "進んでいません · {{progress}}",
+    "verifying": "ファイルを確認中… {{size}}",
+    "waitingDone": "接続を待っています · {{done}} 完了",
+    "waitingSize": "接続を待っています · {{size}}",
+    "wantsToSend": "{{name}} が {{file}}（{{size}}）を送ろうとしています。"
+  },
+  "fileTooLarge": "ファイルが大きすぎます（最大 {{size}}）。",
+  "filesNeedUpdate": "ファイルを送るには双方の更新が必要です",
   "forward": {
     "filesHint": "グループはテキストのみ",
     "forward": "転送",
@@ -44,13 +90,21 @@
     "send": "送信",
     "title": "転送先…"
   },
+  "joined": "がチャットに参加しました",
   "jump": {
     "bottom": "最下部へ移動",
     "count": "新着 {{count}} 件",
     "new": "新着メッセージ {{count}} 件、最下部へ移動",
     "newOne": "新着メッセージ 1 件、最下部へ移動"
   },
+  "keyChanged": "このチャットは停止しました。相手の鍵が変わりました。",
   "lastSeen": "最終オンライン {{time}}",
+  "media": {
+    "downloadSize": "ダウンロード {{size}}",
+    "noRoom": "容量が足りません: 空き {{size}}",
+    "notYet": "送信が終わると再生できます。",
+    "wantsToSend": "{{name}} が送ろうとしています · 空き {{size}}"
+  },
   "menu": {
     "continueNew": "新しいチャットで続ける",
     "hold": "メッセージを保留…",
@@ -88,6 +142,12 @@
   "offline": "オフライン",
   "online": "オンライン",
   "options": "オプション",
+  "payments": {
+    "needLive": "支払いには直接接続が必要です",
+    "noWallet": "相手はまだウォレットを持っていません",
+    "off": "このチャットではオフです。「受け取る」で方法をオンにしてください",
+    "offOrOld": "相手はこのチャットで支払いをオフにしているか、Ghostly の更新が必要です"
+  },
   "pinned": {
     "bar": "ピン留めされたメッセージ",
     "info": "ピン留めはチャットごとに1件で、参加者全員に表示されます。新しいピンが前のものに置き換わります。コミュニティでは管理者のみがピン留めできます。",
@@ -135,10 +195,77 @@
     "placeholder": "このチャットを検索"
   },
   "send": "送信",
+  "setName": "名前を設定...",
+  "setNameHint": "クリックして名前を設定",
+  "showPicture": "画像を表示 · {{host}}",
+  "shownWith": "{{provider}} のプロフィールで表示 · Ghostly 鍵 {{key}}",
+  "tech": {
+    "ackStatus": "ACK の状態",
+    "created": "作成日時",
+    "encKey": "暗号鍵",
+    "encryption": "暗号化",
+    "identity": "ID",
+    "lastSync": "最終同期",
+    "messages": "メッセージ",
+    "myAck": "自分の ACK",
+    "myKey": "自分の鍵",
+    "network": "ネットワーク",
+    "none": "なし",
+    "peerAck": "相手の ACK",
+    "peerKey": "相手の鍵",
+    "pendingBuffer": "保留バッファ",
+    "pendingCount": "{{count}} 件のメッセージ",
+    "pollInterval": "ポーリング間隔",
+    "polls": "ポーリング回数",
+    "protocol": "プロトコル",
+    "sessionId": "セッション ID",
+    "status": "状態",
+    "sync": "同期"
+  },
   "today": "今日",
   "typeMessage": "メッセージを入力...",
   "typing": "入力中…",
   "typingRecording": "録音中…",
   "typingThinking": "考え中…",
+  "video": {
+    "arriving": "受信中",
+    "cantPlay": "この端末ではこの動画（{{format}}）を再生できません。ダウンロードして観てください。",
+    "exitFullScreen": "全画面を終了",
+    "fullScreen": "全画面",
+    "play": "動画を再生",
+    "save": "動画を保存",
+    "tooLarge": "大きすぎてここでは再生できません。ダウンロードして観てください。"
+  },
+  "voice": {
+    "cancelled": "ボイスメッセージをキャンセルしました",
+    "cantPlay": "この端末ではこの録音（{{format}}）を再生できません。保存してほかで再生してください。",
+    "couldNotPlay": "この録音を再生できませんでした。",
+    "discard": "破棄",
+    "discardAsk": "ボイスメッセージを破棄しますか？",
+    "discarded": "ボイスメッセージを破棄しました",
+    "handsFree": "ハンズフリーで録音中。Enter で送信、Esc で破棄。",
+    "holdHint": "押し続けて録音、離して送信",
+    "keep": "残す",
+    "limit": "ボイスメッセージは最長 {{minutes}} 分です",
+    "message": "ボイスメッセージ",
+    "micDenied": "Ghostly がマイクを使えません。ブラウザのサイト設定で Ghostly に許可してから（デスクトップアプリでは: システム設定 → プライバシーとセキュリティ → マイク）、もう一度お試しください。",
+    "micUnavailable": "使えるマイクがありません。マイクを接続するか、使用中のアプリを閉じてから、もう一度お試しください。",
+    "micUnsupported": "このブラウザではボイスメッセージを録音できません。",
+    "pause": "ボイスメッセージを一時停止",
+    "pausePlayback": "再生を一時停止",
+    "play": "ボイスメッセージを再生",
+    "playback": "再生",
+    "position": "ボイスメッセージの再生位置",
+    "previewFailed": "録音を再生できませんでした。",
+    "record": "ボイスメッセージを録音",
+    "recordHint": "押し続けて録音、またはクリックでハンズフリー",
+    "recorded": "録音 {{time}}",
+    "sent": "ボイスメッセージを送信しました",
+    "slideCancel": "スライドしてキャンセル",
+    "speed": "再生速度 {{speed}}",
+    "tooShort": "短すぎて送信できません",
+    "tooShortHold": "短すぎます。押し続けて録音、離して送信",
+    "unplayed": "ボイスメッセージ（未再生）"
+  },
   "yesterday": "昨日"
 }

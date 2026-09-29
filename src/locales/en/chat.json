@@ -1,4 +1,12 @@
 {
+  "audio": {
+    "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
+    "pause": "Pause audio",
+    "play": "Play audio",
+    "position": "Position in audio",
+    "save": "Save audio",
+    "tooLarge": "Too large to play here. Download it to listen."
+  },
   "compat": {
     "continued": "You invited your contact to a new chat.",
     "hint": "This chat was made with a Ghostly 0.4 code. Text and calls keep working both ways; a chat made with a current invite adds files, payments and held messages.",
@@ -6,6 +14,7 @@
     "open": "Open the new chat"
   },
   "connecting": "connecting",
+  "createdHere": "You created this chat",
   "deleteMessage": "Delete message",
   "deleteMessageHint": "Deleted only here. Your contact keeps their copy.",
   "delivery": {
@@ -25,10 +34,47 @@
     "sent": "Sent",
     "waiting": "Waiting for your contact to be online"
   },
+  "disabledPlaceholder": "Message…",
   "edit": {
     "cancel": "Cancel edit",
     "editing": "Editing"
   },
+  "editFailed": "Could not edit the message",
+  "empty": "Send a message or wait for your contact",
+  "file": {
+    "accept": "Accept",
+    "askAgain": "Ask again",
+    "askAgainHint": "Asks your contact for the rest. What arrived stays.",
+    "askingThem": "Waiting for {{name}} to accept · {{size}}",
+    "askingYou": "{{size}} · waiting for your answer",
+    "cancelled": "Cancelled",
+    "decline": "Decline",
+    "declined": "Declined",
+    "gone": "No longer available",
+    "leftHours": "{{hours}} h left",
+    "leftHoursMinutes": "{{hours}} h {{minutes}} min left",
+    "leftMinutes": "{{minutes}} min left",
+    "leftUnderMinute": "less than a minute left",
+    "noRoomDevice": "Not enough space: {{size}} free on this device",
+    "notSentHint": "Not sent. Send it again.",
+    "of": "{{done}} of {{size}}",
+    "pause": "Pause",
+    "paused": "Paused",
+    "pausedBy": "Paused by {{name}}",
+    "preparing": "Preparing… {{progress}}",
+    "queuedHere": "Waiting its turn · {{done}} done",
+    "queuedThere": "Queued by {{name}} · {{done}} done",
+    "resendHint": "Offers it again. It goes on from what your contact already has.",
+    "resume": "Resume",
+    "roomDevice": "{{size}} free on this device",
+    "stalled": "Not moving · {{progress}}",
+    "verifying": "Checking the file… {{size}}",
+    "waitingDone": "Waiting for connection · {{done}} done",
+    "waitingSize": "Waiting for connection · {{size}}",
+    "wantsToSend": "{{name}} wants to send {{file}} ({{size}})."
+  },
+  "fileTooLarge": "That file is too large (max {{size}}).",
+  "filesNeedUpdate": "Update both peers to send files",
   "forward": {
     "filesHint": "Groups take text only",
     "forward": "Forward",
@@ -44,13 +90,21 @@
     "send": "Send",
     "title": "Forward to…"
   },
+  "joined": "joined the chat",
   "jump": {
     "bottom": "Scroll to bottom",
     "count": "{{count}} new",
     "new": "{{count}} new messages, scroll to bottom",
     "newOne": "1 new message, scroll to bottom"
   },
+  "keyChanged": "This chat stopped: your contact's key changed.",
   "lastSeen": "Last seen {{time}}",
+  "media": {
+    "downloadSize": "Download {{size}}",
+    "noRoom": "Not enough space: {{size}} free",
+    "notYet": "It plays once it has been sent.",
+    "wantsToSend": "{{name}} wants to send it · {{size}} free"
+  },
   "menu": {
     "continueNew": "Continue in a new chat",
     "hold": "Hold messages…",
@@ -88,6 +142,12 @@
   "offline": "offline",
   "online": "online",
   "options": "Options",
+  "payments": {
+    "needLive": "Payments need a live connection",
+    "noWallet": "Your contact has no wallet yet",
+    "off": "Off in this chat: turn a way on in Accept",
+    "offOrOld": "Your contact has payments off in this chat, or needs an updated Ghostly"
+  },
   "pinned": {
     "bar": "Pinned message",
     "info": "One pinned message per chat, seen by everyone in it. A new pin replaces it. In a community, only the admin pins.",
@@ -135,10 +195,77 @@
     "placeholder": "Search this chat"
   },
   "send": "Send",
+  "setName": "Set a name...",
+  "setNameHint": "Click to set a name",
+  "showPicture": "Show picture · {{host}}",
+  "shownWith": "Shown with their {{provider}} profile · Ghostly key {{key}}",
+  "tech": {
+    "ackStatus": "ACK Status",
+    "created": "Created",
+    "encKey": "Enc Key",
+    "encryption": "Encryption",
+    "identity": "Identity",
+    "lastSync": "Last Sync",
+    "messages": "Messages",
+    "myAck": "My ACK",
+    "myKey": "My Key",
+    "network": "Network",
+    "none": "none",
+    "peerAck": "Peer ACK",
+    "peerKey": "Peer Key",
+    "pendingBuffer": "Pending Buffer",
+    "pendingCount": "{{count}} messages",
+    "pollInterval": "Poll Interval",
+    "polls": "Polls",
+    "protocol": "Protocol",
+    "sessionId": "Session ID",
+    "status": "Status",
+    "sync": "Sync"
+  },
   "today": "Today",
   "typeMessage": "Type a message...",
   "typing": "typing…",
   "typingRecording": "recording audio…",
   "typingThinking": "thinking…",
+  "video": {
+    "arriving": "Arriving",
+    "cantPlay": "This device can't play this video ({{format}}). Download it to watch.",
+    "exitFullScreen": "Exit full screen",
+    "fullScreen": "Full screen",
+    "play": "Play video",
+    "save": "Save video",
+    "tooLarge": "Too large to play here. Download it to watch."
+  },
+  "voice": {
+    "cancelled": "Voice message cancelled",
+    "cantPlay": "This device can't play this recording ({{format}}). Save it to play it elsewhere.",
+    "couldNotPlay": "Could not play this recording.",
+    "discard": "Discard",
+    "discardAsk": "Discard voice message?",
+    "discarded": "Voice message discarded",
+    "handsFree": "Recording hands-free. Enter sends, Escape discards.",
+    "holdHint": "Hold to record, release to send",
+    "keep": "Keep",
+    "limit": "Voice messages are at most {{minutes}} minutes",
+    "message": "Voice message",
+    "micDenied": "Ghostly can't use the microphone. Allow it for Ghostly in your browser's site settings (on the desktop app: System Settings → Privacy & Security → Microphone), then try again.",
+    "micUnavailable": "No microphone is available. Connect one, or close the app that is using it, then try again.",
+    "micUnsupported": "This browser can't record voice messages.",
+    "pause": "Pause voice message",
+    "pausePlayback": "Pause playback",
+    "play": "Play voice message",
+    "playback": "Play",
+    "position": "Position in voice message",
+    "previewFailed": "Could not play the recording.",
+    "record": "Record a voice message",
+    "recordHint": "Hold to record, or click for hands-free",
+    "recorded": "Recorded {{time}}",
+    "sent": "Voice message sent",
+    "slideCancel": "Slide to cancel",
+    "speed": "Playback speed {{speed}}",
+    "tooShort": "Too short to send",
+    "tooShortHold": "Too short. Hold to record, release to send",
+    "unplayed": "Voice message, not played yet"
+  },
   "yesterday": "Yesterday"
 }
