@@ -12,7 +12,7 @@ import { ghostly, home, localRelay, ok, Running } from "./support/cli";
  * the coordinator, one bot, the person; more bots with a larger N), everything on loopback.
  */
 const N = Math.max(3, Number(process.env.MESH_CLI_N ?? 3));
-let relay: { url: string; server: Server };
+let relays: { url: string; server: Server }[] = [];
 const running = new Map<string, Running>();
 const homes = Array.from({ length: N }, (_, i) => home(i === 0 ? "coordinator" : i === N - 1 ? "person" : `bot${i}`));
 const [coordinator, author] = homes, person = homes[N - 1];
@@ -38,10 +38,12 @@ async function until<T>(what: string, read: () => Promise<T>, done: (value: T) =
 const texts = async (dir: string, group: string) => (ok(await as(dir, "group", "history", group, "--limit", "200")).messages as { text: string; event?: string }[]).filter((m) => !m.event).map((m) => m.text);
 const members = async (dir: string, group: string) => ok(await as(dir, "group", "show", group)).members as { online: boolean; me: boolean }[];
 
-beforeAll(async () => { relay = await localRelay(); }, 30_000);
+// Two relays, as the defaults are: each allows a daemon 30 requests a minute, and on one alone the edges' offers and
+// answers waited out the minute behind their polls, for minutes when a member came back.
+beforeAll(async () => { relays = [await localRelay(), await localRelay()]; }, 30_000);
 afterAll(async () => {
   await Promise.all([...running.keys()].map(down));
-  relay?.server.close();
+  for (const relay of relays) relay.server.close();
 }, 60_000);
 
 describe(`a private group of ${N} headless members`, { timeout: 480_000 }, () => {
@@ -49,7 +51,7 @@ describe(`a private group of ${N} headless members`, { timeout: 480_000 }, () =>
 
   it("joins everyone through the coordinator's link and connects every pair", async () => {
     for (const [i, dir] of homes.entries()) {
-      ok(await as(dir, "settings", "set", "relays", JSON.stringify([relay.url])));
+      ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((relay) => relay.url))));
       ok(await as(dir, "profile", "set", "--name", i === 0 ? "Coordinator" : dir === person ? "Person" : `Bot ${i}`));
     }
     await Promise.all(homes.map(up));
