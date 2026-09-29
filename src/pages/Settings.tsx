@@ -3,7 +3,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
-import { promptInstall, useInstallState } from "../lib/installPrompt";
+import { canInstall, startInstall, useInstallState } from "../lib/installPrompt";
 import { pushPlatform, setWake, useWakeOn } from "../lib/wakePush";
 import { noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
@@ -238,6 +238,16 @@ export function Settings() {
         </div>
       )}
 
+      {/* First while there is something to install (the web app only): it goes once installed. */}
+      {canInstall(install) && (
+        <Section title={t("pwa.installTitle")}>
+          <Row label={t(install === "ios" ? "pwa.iosLabel" : install === "dock" ? "pwa.dockLabel" : "pwa.installLabel")}
+            hint={t(install === "ios" ? "pwa.iosHint" : install === "dock" ? "pwa.dockHint" : "pwa.installHint")}>
+            <Button variant="primary" data-testid="install-app" onClick={startInstall}>{t("pwa.install")}</Button>
+          </Row>
+        </Section>
+      )}
+
       <Section title={t("settings.profile")}>
         {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
         {isMobile && (
@@ -442,18 +452,6 @@ export function Settings() {
           )}
         </Row>
       </Section>
-
-      {(install === "prompt" || install === "ios") && (
-        <Section title={t("pwa.installTitle")}>
-          {install === "prompt" ? (
-            <Row label={t("pwa.installLabel")} hint={t("pwa.installHint")}>
-              <Button variant="primary" data-testid="install-app" onClick={() => void promptInstall()}>{t("pwa.install")}</Button>
-            </Row>
-          ) : (
-            <Row label={t("pwa.iosLabel")} hint={t("pwa.iosHint")} />
-          )}
-        </Section>
-      )}
 
       {update.supported && (
         <Section title={t("updates.title")}>
