@@ -220,6 +220,37 @@ describe("Lightning out: melts", () => {
     expect(rows("melts")).toHaveLength(0);
   });
 
+  it("books the fee the split before a refused payment cost, and says it", async () => {
+    // The split to exact proofs cost the mint's input fee (1 sat): 108 in, 8 kept and 99 to send. The mint then refuses
+    // the melt (a test mint says "Invoice already paid" to an invoice it made itself): 107 come back, 1 is gone for good.
+    mint.send.mockResolvedValue({ keep: [proof(8, "c")], send: [proof(64, "a2"), proof(32, "b2"), proof(3, "e")] });
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValue(new MintOperationError(20005, "Invoice already paid"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    const { wallet } = setup();
+
+    await expect(wallet.payQuote("m1", MINT)).rejects.toThrow("Invoice already paid The sats are back in your wallet, less 1 sat the mint kept as its fee.");
+    expect(balance()).toBe(107);
+    expect(rows("melts")).toHaveLength(0);
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "fee", amount: 0, fee: 1, mint: MINT }]);
+  });
+
+  it("books the fee of a pending payment that ends unpaid, found by the poll", async () => {
+    mint.send.mockResolvedValue({ keep: [proof(8, "c")], send: [proof(64, "a2"), proof(32, "b2"), proof(2, "e")] });
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
+    mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [], outputData: [] });
+    const { wallet, events } = setup();
+    expect(await wallet.payQuote("m1", MINT)).toBe(false);
+
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    await wallet["pollMelts"]();
+
+    expect(balance()).toBe(106);
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "fee", amount: 0, fee: 2 }]);
+    expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false);
+  });
+
   it("refuses to pay an invoice that is already in flight", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [], outputData: [] });
