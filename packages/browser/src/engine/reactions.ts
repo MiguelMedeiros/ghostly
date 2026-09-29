@@ -47,6 +47,20 @@ function note(message: StoredMessage, by: string, emoji: string, at: number): Re
   return { at, by, emoji, snippet: replySnippet(message.text), mine: message.sender === "me" };
 }
 
+/**
+ * My reactions in a private group to say again to an edge that opened, in case it missed them: the newest `limit`, of
+ * this membership only. One made before I was removed and invited again went out under my old member key; said again
+ * now it would go under the new one, and every member would show it twice.
+ */
+export function groupReactionsToResend(messages: readonly StoredMessage[], limit: number): WireReaction[] {
+  let joinedAt = 0;
+  for (const m of messages) if (m.event === "joined" && !m.member) joinedAt = Math.max(joinedAt, m.timestamp);
+  return messages.flatMap(m => {
+    const r = m.reactions?.me, id = replyRef(m, true);
+    return r && id && r.at >= joinedAt ? [{ id, e: r.e, n: r.n }] : [];
+  }).sort((a, b) => b.n - a.n).slice(0, limit).reverse();
+}
+
 /** This side's highest number in a chat: the next one goes past it (and past what still waits to be confirmed). */
 function lastMine(messages: readonly StoredMessage[], pending: readonly WireReaction[] = []): number {
   let last = 0;
