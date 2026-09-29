@@ -3,6 +3,7 @@
   "camera": "Câmera",
   "cameraFailed": "Não foi possível abrir a câmera.",
   "caption": "Adicionar legenda",
+  "captionTooLong": "Esta legenda tem {{bytes}} bytes UTF-8. A DHT aceita até {{max}}.",
   "category": {
     "activity": "Atividades",
     "flags": "Bandeiras",
@@ -15,6 +16,7 @@
     "symbols": "Símbolos"
   },
   "closeCamera": "Fechar câmera",
+  "dhtTooLong": "Este texto tem {{bytes}} bytes UTF-8. A DHT aceita até {{max}}; encurte ou use uma conexão direta. Seu rascunho foi mantido.",
   "document": "Documento",
   "dropFiles": "Solte para enviar",
   "emoji": "Emoji",
@@ -45,7 +47,11 @@
   "media": "Fotos e vídeos",
   "noEmoji": "Nenhum emoji encontrado",
   "noGifs": "Nenhum GIF encontrado",
+  "overSoft": "Acima dos {{bytes}} bytes que a DHT leva: é enviado quando houver conexão direta",
   "payment": "Pagamento",
+  "previewLoading": "Carregando prévia de {{host}}…",
+  "previewRemove": "Remover prévia do link",
+  "previewWithout": "Enviar sem prévia",
   "removeFile": "Remover {{name}}",
   "retake": "Tirar outra",
   "retry": "Tentar de novo",
@@ -55,10 +61,13 @@
   "send": "Enviar",
   "sendCount": "Enviar {{count}}",
   "sendFiles": "Enviar arquivos",
+  "sendMessage": "Enviar mensagem",
   "sendPhoto": "Enviar foto",
   "services": "Serviços compartilhados",
   "servicesNeedApp": "Precisa da extensão ou do app desktop do Ghostly",
   "servicesShared": "{{count}} compartilhado(s) nesta conversa",
   "skinTone": "Tom de pele",
-  "takePhoto": "Tirar foto"
+  "takePhoto": "Tirar foto",
+  "tooLong": "Longo demais para enviar ({{count}} caracteres, o limite é {{max}}).",
+  "tooLongDht": "Longo demais para a DHT. Com a conexão direta entre vocês, faturas longas e tokens de ecash cabem."
 }

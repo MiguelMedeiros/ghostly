@@ -124,7 +124,6 @@
   "panel": {
     "codesMatch": "代码一致",
     "compare": "请在可信的渠道与你的联系人核对此代码。",
-    "copied": "已复制！",
     "copyKey": "{{label}}：{{value}}。复制",
     "details": "详情",
     "dhtAvailability": "不保证送达。已发布不等于已接收。文件、sats、通话和网页服务需要直连方式。",

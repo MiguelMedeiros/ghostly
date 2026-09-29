@@ -124,7 +124,6 @@
   "panel": {
     "codesMatch": "The codes match",
     "compare": "Compare this code with your contact somewhere you trust.",
-    "copied": "Copied!",
     "copyKey": "{{label}}: {{value}}. Copy",
     "details": "Details",
     "dhtAvailability": "Availability is not guaranteed. Published is not received. Files, sats, calls and web services require a live method.",

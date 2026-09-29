@@ -124,7 +124,6 @@
   "panel": {
     "codesMatch": "I codici corrispondono",
     "compare": "Confronta questo codice con il tuo contatto in un canale di fiducia.",
-    "copied": "Copiato!",
     "copyKey": "{{label}}: {{value}}. Copia",
     "details": "Dettagli",
     "dhtAvailability": "La disponibilità non è garantita. Pubblicato non significa ricevuto. File, sats, chiamate e servizi web richiedono un metodo diretto.",

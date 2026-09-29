@@ -11,6 +11,7 @@ import {
   resolveMessages,
 } from "../lib/pkarr";
 import type { CompactMessage } from "../lib/pkarr";
+import { useT } from "../contexts/I18nContext";
 import {
   loadSession,
   saveSession,
@@ -30,6 +31,7 @@ const MESSAGE_TTL = 300;
 const MAX_DHT_TEXT_BYTES = 500;
 
 export function useChat(params: ChatParams | null) {
+  const t = useT();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [lastSync, setLastSync] = useState<number | null>(null);
@@ -421,13 +423,13 @@ export function useChat(params: ChatParams | null) {
   const sendMessage = useCallback(
     // A preview needs a paired chat (WISP 401): these DHT-only messages go as plain text.
     async (text: string, _extra?: { preview?: import("@ghostly/core").LinkPreview; replyTo?: string }): Promise<string | null> => {
-      if (burnedRef.current) return "Chat has been burned";
+      if (burnedRef.current) return t("chat.compat.burned");
       if (!text.trim()) return null;
 
       const trimmed = text.trim();
       const byteLen = new TextEncoder().encode(trimmed).length;
       if (byteLen > MAX_DHT_TEXT_BYTES) {
-        return `Message too large for DHT (${byteLen} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`;
+        return t("chat.compat.tooLarge", { bytes: byteLen, max: MAX_DHT_TEXT_BYTES });
       }
 
       setIsSending(true);
@@ -475,11 +477,11 @@ export function useChat(params: ChatParams | null) {
         );
 
         if (kept === 0) {
-          return "Message could not be published — DHT payload limit exceeded.";
+          return t("chat.compat.overLimit");
         }
       } catch {
         setStatus("error");
-        return "Failed to send message. Check your connection.";
+        return t("chat.compat.sendFailed");
       } finally {
         setIsSending(false);
       }
@@ -494,7 +496,7 @@ export function useChat(params: ChatParams | null) {
 
       return null;
     },
-    [],
+    [t],
   );
 
   const burn = useCallback(() => {
