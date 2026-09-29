@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -506,9 +506,24 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       }
       expect(peer.services.map((s) => s.id)).toContain(service);
       const opened = ok(await as(bob, "service", "open", "alice", service));
-      const page = await fetch(new URL("/docs?x=1", opened.url as string));
+      // As a browser: the link's host name (`<random>.localhost`, which Node's resolver may not know), its cookie, then the page.
+      const link = new URL(opened.url as string);
+      expect(link.hostname).toMatch(/^[0-9a-f]{32}\.localhost$/);
+      const visit = (path: string, cookie?: string) => new Promise<{ status: number; cookie: string; body: string }>((resolve, reject) => {
+        const req = httpRequest({ host: "127.0.0.1", port: Number(link.port), path, headers: { host: link.host, ...(cookie ? { cookie } : {}) } }, (res) => {
+          const parts: Buffer[] = [];
+          res.on("data", (c: Buffer) => parts.push(c));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, cookie: String(res.headers["set-cookie"] ?? "").split(";")[0], body: Buffer.concat(parts).toString() }));
+        });
+        req.on("error", reject);
+        req.end();
+      });
+      expect((await visit("/docs?x=1")).status).toBe(404);
+      const first = await visit(link.pathname);
+      expect(first.status).toBe(303);
+      const page = await visit("/docs?x=1", first.cookie);
       expect(page.status).toBe(200);
-      expect(await page.text()).toBe("hello from /docs?x=1");
+      expect(page.body).toBe("hello from /docs?x=1");
       ok(await as(bob, "service", "close", "alice", service));
       ok(await as(alice, "service", "share", service, "bob", "--off"));
     } finally { app.close(); }
