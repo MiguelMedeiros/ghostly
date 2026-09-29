@@ -160,7 +160,7 @@ test("a wallet holding nothing with an open chat request lists it, asks in words
   await expect(bubble(alice).getByTestId("payment-external")).toHaveCount(0);
 });
 
-test("a request paid in ecash leaves nothing to wait for: its invoice is not listed as money still to come", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+test("a request paid in ecash leaves nothing to wait for: its invoice is not listed as money still to come", { tag: ["@feature:wallet.instances.remove"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("remove-paid-a"), peer("remove-paid-b")]);
   for (const p of [alice, bob]) await useTestnet(p);
   await getTestCoins(bob);
