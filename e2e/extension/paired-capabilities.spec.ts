@@ -6,7 +6,7 @@ import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
 
-test("paired extension and web exchange verified files and local-mint sats", { tag: ["@release-skip", "@client:extension", "@client:web", "@feature:extension.interop", "@feature:files.paired.send", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage"] }, async ({ extensionPeer, webPeer }) => {
+test("paired extension and web exchange verified files and local-mint sats", { tag: ["@client:extension", "@client:web", "@feature:extension.interop", "@feature:files.paired.send", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage"] }, async ({ extensionPeer, webPeer }) => {
   test.skip(!process.env.E2E_MINT_URL?.startsWith("http://127.0.0.1:"), "Requires a local fake mint");
   const [ext, web] = await Promise.all([extensionPeer("paired-ext"), webPeer("paired-web")]);
   await pair(web, ext);
@@ -19,7 +19,7 @@ test("paired extension and web exchange verified files and local-mint sats", { t
   }
   for (const p of [ext, web]) {
     // A mint on this machine holds test sats: it belongs to the Testnet Cashu wallet, made with New first (on the public
-    // test mint: the web's requests to it are answered by the local one, the extension's offscreen engine reaches it).
+    // test mint, which the local one answers for: the web through its routes, the extension through mintStandIn).
     await createWallet(p, "cashu", "testnet");
     await openWallet(p, "cashu-testnet");
     await p.page.getByTestId("wallet-mint-url").fill(process.env.E2E_MINT_URL!); await p.page.getByTestId("wallet-add-mint").click();
