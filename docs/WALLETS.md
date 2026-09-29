@@ -17,6 +17,7 @@ Route `/wallet` (`src/pages/Wallet.tsx`).
 - **The deck**: one card per wallet (`src/components/WalletDeck.tsx`, deck mechanics in `src/components/deck/`, shared with the identity cards). The chosen card's panel sits below it: receive, send, options, Remove.
 - **New** in the header (#277, #288) opens a picker: network first (Real money / Test money), then a kind. Each kind says what clicking does ("Create", "Create…" (Spark on Mainnet asks for a Breez API key first), "Connect…", "Add another…", "Join with invite…", "Added", "Not yet"). Once made, the dialog closes and the new card is dealt in, selected (#309). A new Mainnet Bark wallet opens on its backup rows first.
 - **Remove** (#288) sits in the chosen wallet's panel. See [Removal](#removal-protects-money-in-flight).
+- **Backup reminder** (#693, `packages/browser/src/shared/backupReminder.ts`, `src/components/wallet/BackupReminder.tsx`). The first time a Mainnet wallet holds money, a card above the deck and a dot on the wallet icon ask once for a copy: the recovery phrase for a phrase wallet (USDT, Ark, Bark, Spark, Fedimint), a profile backup for Cashu. A phrase shown, a wallet backup file, or a profile backup made after the money arrived ends it. Later puts it off until the next receive or three days, once. The engine keeps it per wallet in the profile's settings (`backupReminders`). Testnet never asks.
 
 ## Lightning cards
 

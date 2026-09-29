@@ -9,12 +9,12 @@ import type { FedimintFederationView, FedimintWalletView } from "@ghostly/browse
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { SparkCreate, SparkWalletView } from "@ghostly/browser/engine/paymentAdapters/sparkWallet";
 import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
-import type { BackupReminders } from "@ghostly/browser/shared/backupReminder";
 import type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletTestCoins, WalletType } from "@ghostly/browser/shared/types";
 export type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletTestCoins, WalletType, WalletNetwork };
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
+import type { BackupReminders } from "@ghostly/browser/shared/backupReminder";
 import type { DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
 import type { ChatFile } from "./types";
 
