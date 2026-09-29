@@ -70,6 +70,21 @@ test("an empty Testnet wallet goes on one confirm, and is still gone after a rel
   await expect(page.getByTestId("new-wallet-type-bitcoin-status")).toHaveText("Connect…");
 });
 
+test("an invoice just made on Receive is listed when removing the wallet, before anything else changed", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+  const alice = await peer("remove-receive");
+  await useTestnet(alice);
+  const page = alice.page;
+  await openWallet(alice, "cashu-testnet");
+  await page.getByTestId("wallet-receive").click();
+  await page.getByTestId("wallet-receive-amount").fill("30");
+  await page.getByTestId("wallet-create-invoice").click();
+  await expect(page.getByText("Invoice for 30 sats")).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId("wallet-remove").click();
+  const dialog = page.getByTestId("wallet-remove-dialog");
+  await expect(dialog.getByTestId("wallet-remove-awaiting-item")).toHaveText(["An invoice for 30 test sats, not paid yet"]);
+  await expect(dialog.getByTestId("wallet-remove-confirm")).toBeDisabled();
+});
+
 test("a funded wallet says how much and on which network, offers its ecash, and goes only once the loss is confirmed", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
   const alice = await peer("remove-funded");
   await mockMainnetMints(alice.context);
