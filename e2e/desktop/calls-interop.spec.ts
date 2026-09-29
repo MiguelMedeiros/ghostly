@@ -40,11 +40,11 @@ function startNative(app: DesktopApp, id: string, offer?: string): Promise<strin
     const frames = T.transformCallback(() => {});
     (async () => {
       await T.invoke("native_call_open", { id, events: "__CHANNEL__:" + events });
-      const camera = await T.invoke("native_camera_open", { frames: "__CHANNEL__:" + frames });
+      const { camera } = await T.invoke("native_camera_open", { frames: "__CHANNEL__:" + frames });
       return offer === null
         ? await T.invoke("native_call_offer", { id, camera })
         : await T.invoke("native_call_answer", { id, offer, camera });
-    })().then(done, (error) => done("error: " + error));`, id, offer ?? null);
+    })().then(({ sdp }) => done(sdp), (error) => done("error: " + error));`, id, offer ?? null);
 }
 
 const nativeStats = (app: DesktopApp, id: string) => app.executeAsync<NativeStats & { pictures: number }>(`
