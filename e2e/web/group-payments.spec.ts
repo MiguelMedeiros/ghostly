@@ -7,7 +7,7 @@ import { paymentCard } from "../support/payments";
  * see support/mint.ts). Alice asks Bob; Carol sees the request and then sees it paid, though the ecash went only
  * between the two. Then Alice asks the whole group: Carol pays it, once, and everyone sees who did.
  */
-test.describe("group payments", { tag: "@network" }, () => {
+test.describe("group payments", () => {
   test.describe.configure({ retries: 1 });
 
   const groupChat = (peer: Peer) => peer.page.getByTestId("group-chat");

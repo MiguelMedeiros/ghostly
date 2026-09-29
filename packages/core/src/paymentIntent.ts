@@ -44,6 +44,8 @@ export interface PaymentReview extends PaymentTarget {
   fee: number;
   feeCap: number;
   createdAt: number;
+  /** When it was approved (claimed for spending): how old an attempt whose outcome is unknown is, across a reload. */
+  submittedAt?: number;
   state: IntentState;
   txid?: string;
   error?: string;

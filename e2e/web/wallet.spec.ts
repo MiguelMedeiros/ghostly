@@ -11,7 +11,7 @@ import { chatPayments, paymentCard } from "../support/payments";
  * these tests need the internet only when nobody gave them a mint.
  * A new profile has no wallet: each test makes the Testnet Cashu wallets it needs with New, before the two meet.
  */
-test.describe("wallet", { tag: "@network" }, () => {
+test.describe("wallet", () => {
   test.describe.configure({ retries: 2 });
 
   const balance = async (peer: Peer) => {

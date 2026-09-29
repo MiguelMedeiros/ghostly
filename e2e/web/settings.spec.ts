@@ -162,7 +162,9 @@ test("lock screen: locks by itself after the chosen idle time", { tag: ["@featur
 });
 
 test("network: relays can be changed and reset", { tag: ["@feature:settings.network.relays"] }, async ({ peer }) => {
-  const { page } = await peer("alice");
+  const { page, context } = await peer("alice");
+  // The relay typed below is a real name on the Internet: refused here, so the peer never reaches it.
+  await context.route(/^https?:\/\/relay\.example\.org\//, (route) => route.abort());
   // Rarely changed: under Advanced, a page of its own.
   await page.goto("/#/settings");
   await page.getByTestId("settings-advanced").click();

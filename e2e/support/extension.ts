@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { expect, guardArchive, openPeer, type Peer, type PeerOptions } from "./fixtures";
 import { test as base } from "./fixtures";
 import { mintStandIn, type MintStandIn } from "./mint";
+import { LocalRelay } from "./relay";
 
 const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
 
@@ -43,7 +44,10 @@ export const test = base.extend<Fixtures>({
     let mint: Promise<MintStandIn | undefined> | undefined;
     await use(async (name, options = {}) => {
       extensionDir ??= prepareExtension(work);
-      const mintArgs = (await (mint ??= mintStandIn()))?.args ?? [];
+      const standIn = await (mint ??= mintStandIn());
+      // The engine starts on the public Pkarr relays, before the settings below point it at the test's relay: to the
+      // browser they do not exist, so nothing reaches them meanwhile.
+      const rules = [...standIn?.rules ?? [], ...LocalRelay.hosts.map((host) => `MAP ${host} ~NOTFOUND`)];
       const context = await chromium.launchPersistentContext(join(work, name), {
         channel: "chromium",
         headless: !process.env.HEADED,
@@ -59,7 +63,8 @@ export const test = base.extend<Fixtures>({
           // The context option covers pages, not the extension's offscreen document, where its engine runs.
           ...(options.ignoreHTTPSErrors ? ["--ignore-certificate-errors"] : []),
           // Its engine's requests to the public test mint are out of reach of `context.route` too: see mintStandIn.
-          ...mintArgs,
+          ...standIn?.args ?? [],
+          `--host-resolver-rules=${rules.join(", ")}`,
         ],
       });
       await guardArchive(context);
