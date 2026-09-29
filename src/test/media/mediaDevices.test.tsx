@@ -232,6 +232,27 @@ describe("Settings → Audio & video", () => {
       expect(screen.queryByTestId("settings-media-names")).toBeNull();
     });
 
+    it("shows the speaker row before the list arrives, and keeps it: the rows under it stay where they were", async () => {
+      let answer: (list: DeviceList) => void = () => {};
+      const pending = new Promise<DeviceList>((resolve) => { answer = resolve; });
+      source({ list: () => pending });
+      renderApp(<MediaSettings />);
+      await screen.findByTestId("settings-microphone");
+      const rows = () => [...screen.getByTestId("settings-media").querySelectorAll("[data-testid$='-row']")].map((row) => row.getAttribute("data-testid"));
+      const before = rows();
+      expect(before).toEqual(["settings-microphone-row", "settings-camera-row", "settings-speaker-row"]);
+      expect(screen.getByTestId("settings-speaker")).toHaveAttribute("data-value", "");
+      await act(async () => answer({ audioinput: [{ id: "Mic A", label: "Mic A" }], videoinput: [], audiooutput: [{ id: "Speaker B", label: "Speaker B" }], defaults: {}, named: true }));
+      expect(rows()).toEqual(before);
+    });
+
+    it("keeps the speaker row where the list has no speakers: the default still plays", async () => {
+      source({ list: async () => ({ audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: true }) });
+      const { user } = renderApp(<MediaSettings />);
+      await screen.findByTestId("settings-speaker-row");
+      expect((await optionsOf(user, screen.getByTestId("settings-speaker"))).map((o) => o.label)).toEqual(["System default"]);
+    });
+
     it("meters the chosen microphone there, and lets it go on Stop", async () => {
       let level: (level: number) => void = () => {};
       const stop = vi.fn();
