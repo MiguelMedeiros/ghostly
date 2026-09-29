@@ -199,6 +199,50 @@
     "wrongChain": "Il tuo portafoglio Bitcoin {{network}} è su {{chain}}; questo indirizzo è per {{target}}.",
     "wrongToken": "Questo link chiede un token diverso dall'USDT del tuo portafoglio: non si paga da qui."
   },
+  "group": {
+    "bitcoinOnchain": "Bitcoin on-chain",
+    "chooseOne": "Scegli un membro a cui inviare",
+    "describe": {
+      "cashu": "Richiedi ecash da un mint che usi. Paga il primo membro il cui ecash arriva; chi arriva dopo lo riceve indietro.",
+      "lightning": "Richiedi con una fattura Lightning. Qualsiasi membro può pagarla, una volta: una fattura non si paga due volte.",
+      "other": "Solo Cashu o Lightning per tutto il gruppo."
+    },
+    "everyone": "Richiedi al gruppo",
+    "everyoneHint": "Chiunque nel gruppo può pagarla, una volta",
+    "formerMember": "Un ex membro",
+    "formerMemberObject": "un ex membro",
+    "hint": {
+      "community": "Il pagamento è sigillato per voi due: il gruppo lo inoltra senza leggerlo, e chi è assente lo riceve al ritorno. Tutti vedono chi ha pagato chi e quanto.",
+      "mesh": "Il pagamento passa solo tra voi due; tutti nel gruppo vedono chi ha pagato chi e quanto."
+    },
+    "listSeparator": ", ",
+    "sendUnavailable": "Una richiesta al gruppo la paga un membro; per pagare qualcuno, sceglilo",
+    "status": {
+      "claimedPaid": "{{names}} ha pagato · in attesa del portafoglio di {{to}}",
+      "closed": "Chiuso",
+      "paid": "Pagato",
+      "paidBy": "Pagato da {{name}}",
+      "saysPaid": "{{names}} dice di aver pagato · in attesa del portafoglio di {{to}}",
+      "sent": "Inviato · in attesa di {{name}}",
+      "takenBack": "Ripreso",
+      "waiting": "In attesa del pagamento"
+    },
+    "testUsdt": "USDT di prova",
+    "theGroup": "il gruppo",
+    "title": {
+      "asked": "{{to}} ha chiesto a {{from}}",
+      "askedGroup": "{{to}} ha chiesto al gruppo",
+      "paying": "{{from}} sta pagando {{to}}",
+      "sent": "{{from}} ha inviato a {{to}}"
+    },
+    "why": {
+      "noPayments": "La sua app non accetta pagamenti nei gruppi (serve un aggiornamento), o ha disattivato ogni metodo",
+      "noWay": "Non accetta nessun metodo di pagamento che consenti",
+      "unreachable": "Non raggiungibile ora"
+    },
+    "you": "Tu",
+    "youObject": "te"
+  },
   "invoice": {
     "anyAmount": "Importo libero",
     "checking": "Verifica…",

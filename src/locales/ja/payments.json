@@ -199,6 +199,50 @@
     "wrongChain": "{{network}} の Bitcoin ウォレットは {{chain}} 上にあります。このアドレスは {{target}} 用です。",
     "wrongToken": "このリンクはウォレットの USDT とは別のトークンを求めているため、ここからは支払えません。"
   },
+  "group": {
+    "bitcoinOnchain": "Bitcoin オンチェーン",
+    "chooseOne": "送る相手を 1 人選んでください",
+    "describe": {
+      "cashu": "使っている mint の ecash で請求します。最初に ecash が届いたメンバーが支払い、後の人には返金されます。",
+      "lightning": "Lightning インボイス 1 件で請求します。どのメンバーも 1 回だけ支払えます：インボイスは 2 回支払えません。",
+      "other": "グループ全体には Cashu か Lightning のみです。"
+    },
+    "everyone": "グループに請求",
+    "everyoneHint": "グループの誰でも 1 回だけ支払えます",
+    "formerMember": "元メンバー",
+    "formerMemberObject": "元メンバー",
+    "hint": {
+      "community": "支払いはお二人だけに封印されます：グループは読まずに中継し、不在の人は戻ったときに受け取ります。誰が誰にいくら払ったかは全員に見えます。",
+      "mesh": "支払いはお二人の間だけで行われます。誰が誰にいくら払ったかはグループ全員に見えます。"
+    },
+    "listSeparator": "、",
+    "sendUnavailable": "グループへの請求は 1 人のメンバーが支払います。誰かに支払うには、その人を選んでください",
+    "status": {
+      "claimedPaid": "{{names}} が支払い済み · {{to}} のウォレット待ち",
+      "closed": "終了",
+      "paid": "支払い済み",
+      "paidBy": "{{name}} が支払い済み",
+      "saysPaid": "{{names}} が支払ったと言っています · {{to}} のウォレット待ち",
+      "sent": "送信済み · {{name}} を待っています",
+      "takenBack": "取り消し済み",
+      "waiting": "支払い待ち"
+    },
+    "testUsdt": "テスト USDT",
+    "theGroup": "グループ",
+    "title": {
+      "asked": "{{to}} が {{from}} に請求",
+      "askedGroup": "{{to}} がグループに請求",
+      "paying": "{{from}} が {{to}} に支払い中",
+      "sent": "{{from}} が {{to}} に送金"
+    },
+    "why": {
+      "noPayments": "相手のアプリはグループでの支払いに対応していないか（更新が必要）、すべての方法をオフにしています",
+      "noWay": "あなたが許可する支払い方法を受け付けていません",
+      "unreachable": "現在つながりません"
+    },
+    "you": "あなた",
+    "youObject": "あなた"
+  },
   "invoice": {
     "anyAmount": "金額自由",
     "checking": "確認中…",
