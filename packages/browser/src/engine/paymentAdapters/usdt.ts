@@ -3,6 +3,7 @@ import WalletManagerEvm, { type WalletAccountEvm } from '@tetherto/wdk-wallet-ev
 import { Interface, Transaction, getAddress, keccak256 } from 'ethers';
 import { ETHEREUM_USDT, EVM_TEST_CHAINS, USDT_PUBLIC_RPC, SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, PaymentPreflightError, validatePaymentTarget, type PaymentAdapter, type PaymentExecution, type PaymentReview, type PaymentTarget } from '@ghostly/core';
 import { sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
+import { networkReason, rpcHost } from './networkReason';
 
 export interface UsdtConfig {
   network: 'ethereum' | 'sepolia' | 'evm-local';
@@ -68,7 +69,10 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
     return adapter;
   }
   async rpc<T>(method: string, params: unknown[] = []): Promise<T> {
-    const response = await fetch(this.config.provider, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({jsonrpc:'2.0',id:++this.nextId,method,params}), signal:AbortSignal.timeout(15000)});
+    let response: Response;
+    // The browser's words for a request that got no answer ("Fetch is aborted") say nothing: the RPC's host does.
+    try { response = await fetch(this.config.provider, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({jsonrpc:'2.0',id:++this.nextId,method,params}), signal:AbortSignal.timeout(15000)}); }
+    catch (error) { const reason = networkReason(error, rpcHost(this.config.provider)); throw reason ? Object.assign(new Error(reason), {cause: error}) : error; }
     if (!response.ok) throw new Error('USDT RPC unavailable');
     const result = await response.json();
     if (result.error || !Object.prototype.hasOwnProperty.call(result, 'result')) throw new Error('USDT RPC rejected the operation');
