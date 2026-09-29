@@ -18,7 +18,7 @@ Your name on Ghostly: Casper
 
 1. Read the agent guide first: https://raw.githubusercontent.com/MiguelMedeiros/ghostly/dev/packages/cli/SKILL.md
 2. Install the ghostly CLI. It is not on npm yet, so build it (Node 22.12 or newer):
-   git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w ghostly-cli && npm pack -w ghostly-cli && npm install -g ./ghostly-cli-*.tgz
+   git clone https://github.com/MiguelMedeiros/ghostly && cd ghostly && npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/cli && npm install -g ./ghostlytools-cli-*.tgz
 3. Run ghostly profile set --name "<your name>", then ghostly daemon --detach
 4. Run ghostly invite create --label owner and give me the "link" it prints. I will open it in my Ghostly app.
 5. When ghostly chat wait owner --timeout 600 returns, say hello with ghostly send owner "Hi!"

@@ -80,7 +80,7 @@ Checked on 2026-09-24/25 with worthless coins only:
 npm run e2e:infra:up        # the federation, its gateway and the LND peer on the environment's regtest chain (e2e/infra)
 npm test --workspace @ghostly/browser -- test/fedimint.test.ts
 GHOSTLY_FEDIMINT_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/fedimint-wallet.spec.ts
-npm test --workspace ghostly-cli -- test/fedimint.test.ts   # on Node: preview, join, Lightning in and out, restart (skipped without the federation)
+npm test --workspace @ghostlytools/cli -- test/fedimint.test.ts   # on Node: preview, join, Lightning in and out, restart (skipped without the federation)
 ```
 
 Not yet exercised: a Mainnet federation with real funds, iroh federations (a public signet or mutinynet federation), a federation of four guardians or one losing guardians, a gateway that refunds a payment, recovery of a real profile backup, peg-in and peg-out, v2 modules, the extension's offscreen document and Desktop's WebView with money (the same engine and build run there; the OPFS lock means one tab of a profile at a time), and the SDK's canary moving under the pin.

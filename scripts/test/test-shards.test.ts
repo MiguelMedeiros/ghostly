@@ -5,7 +5,7 @@ const unit = (id: string, files: string[], alone = false) => ({ id, dir: id, fil
 
 describe("the packages shards", () => {
   it("test what npm run test:packages tests", () => {
-    expect(packages().map((p) => p.name)).toEqual(["@ghostly/core", "@ghostly/browser", "@ghostly/sdk", "@ghostly/extension", "ghostly-cli"]);
+    expect(packages().map((p) => p.name)).toEqual(["@ghostly/core", "@ghostly/browser", "@ghostly/sdk", "@ghostly/extension", "@ghostlytools/cli"]);
     expect(ALONE).toContain("packages/cli/test/twoPeers.test.ts");
   });
 

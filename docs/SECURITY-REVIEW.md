@@ -149,7 +149,7 @@ Every fix is verified in the client it affects, not only in unit tests.
 | Extension | `npm run test:e2e -- --project=extension`; `npm run test:attacks -w @ghostly/extension` (a malicious contact) |
 | Web | `npm run test:e2e -- --project=web`; headers: `curl -sI https://app.ghostly.tools` |
 | Desktop | `cargo test --manifest-path src-tauri/Cargo.toml` (IPC against the real capabilities); two apps: `npm run test:e2e:desktop` (Linux), `npm run test:e2e:desktop-macos`; attacks: `npm run tauri dev` + `node extension/test/desktop-attacks.mjs` |
-| Headless CLI | `npm test -w ghostly-cli` (builds it, then two bots pair over the network); against the web app: `e2e/web/headless-chat.spec.ts` |
+| Headless CLI | `npm test -w @ghostlytools/cli` (builds it, then two bots pair over the network); against the web app: `e2e/web/headless-chat.spec.ts` |
 | Rust CLI | `cargo build -p ghostly-cli && GHOSTLY_CLI=target/debug/ghostly-cli npm run test:interop` (Rust ↔ TS over the real network) |
 | Website | `cd website && npx next build`; after deploy, `curl -sI https://ghostly.tools` |
 | Dependencies | `node scripts/security-scan.mjs` |
