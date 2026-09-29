@@ -207,10 +207,10 @@ describe("MessageBubble: system lines", () => {
   });
 
   it.each([
-    ["call_missed", "Missed call", true],
-    ["call_rejected", "Call declined", true],
-    ["call_ended", "Call ended", false],
-    ["call_received", "Incoming call", false],
+    ["call_missed", "Missed audio call", true],
+    ["call_rejected", "Audio call declined", true],
+    ["call_ended", "Audio call ended", false],
+    ["call_received", "Incoming audio call", false],
   ] as const)("marks a %s event as missed or not", (type, text, missed) => {
     bubble({ sender: "system", text, callEvent: { type } });
     const pill = screen.getByText(text).parentElement!;
@@ -223,8 +223,8 @@ describe("MessageBubble: system lines", () => {
   });
 
   it("shows no length for a call that never started", () => {
-    bubble({ sender: "system", text: "Missed call", callEvent: { type: "call_missed", duration: 0 } });
-    expect(screen.getByText("Missed call").parentElement).not.toHaveTextContent("(");
+    bubble({ sender: "system", text: "Missed audio call", callEvent: { type: "call_missed", duration: 0 } });
+    expect(screen.getByText("Missed audio call").parentElement).not.toHaveTextContent("(");
   });
 
   it("lets a system line be deleted too, from its menu", async () => {

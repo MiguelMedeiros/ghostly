@@ -66,7 +66,7 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
   }));
   const card = cards.find((c) => c.id === active);
   /** What a card's switch does, as a screen reader says it: "Accept Cashu (Testnet) from Alice". */
-  const label = (card: InstanceCard) => t("payments.accept.card", { card: `${card.name} (${card.network === "testnet" ? "Testnet" : "Mainnet"})`, name: contact });
+  const label = (card: InstanceCard) => t("payments.accept.card", { card: t("payments.accept.cardNetwork", { card: card.name, network: card.network === "testnet" ? "Testnet" : "Mainnet" }), name: contact });
   const hint = (card: InstanceCard) => {
     const params = { card: card.network === "testnet" ? `Testnet ${card.name}` : card.name, name: contact };
     if (!draft[card.id]) return t("payments.accept.hint.off", params);

@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { transportEventText, transportLineDetails, transportLineText, type TransportEntry, type TransportEvent } from "../lib/transportEvents";
 import { focus } from "../lib/connection";
 import { clockTime } from "../lib/time";
+import { useI18n } from "../contexts/I18nContext";
 
 const time = clockTime;
 const when = (at: number) => new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
@@ -14,33 +15,34 @@ const when = (at: number) => new Date(at).toLocaleString([], { dateStyle: "mediu
 export function TransportLine({ entry, contact, earlier = [] }: { entry: TransportEntry; contact: string; earlier?: readonly TransportEntry[] }) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const { t } = useI18n();
   const warn = entry.kind === "failed" || entry.kind === "lost" || (entry.kind === "flapping" && !entry.live);
   return (
     <div className="mb-3.5 flex flex-col items-center px-[63px] max-md:px-2.5" data-testid="transport-line" data-kind={entry.kind}>
       <button type="button" aria-expanded={open} aria-controls={`${id}-details`} onClick={() => setOpen(!open)}
         className={`inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-start text-xs transition-colors ${warn ? "bg-surface-alt/80 text-text-muted" : "bg-surface-alt/80 text-text-secondary"} hover:bg-surface-hover ${focus}`}>
         <TransportLineIcon entry={entry} />
-        <span className="min-w-0 break-words" data-testid="transport-line-text">{transportLineText(entry, contact)}</span>
+        <span className="min-w-0 break-words" data-testid="transport-line-text">{transportLineText(entry, contact, t)}</span>
         {earlier.length > 0 && <span className="shrink-0 text-[10px] text-text-muted" data-testid="transport-line-earlier-count"
-          aria-label={`and ${earlier.length} earlier ${earlier.length === 1 ? "change" : "changes"}`}>+{earlier.length}</span>}
+          aria-label={earlier.length === 1 ? t("connection.history.earlierOne") : t("connection.history.earlierMany", { count: earlier.length })}>+{earlier.length}</span>}
         <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{time(entry.at)}</time>
       </button>
       {open && (
         <dl id={`${id}-details`} data-testid="transport-line-details"
           className="mt-1 grid w-full max-w-sm grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg border border-border bg-surface-alt/90 px-3 py-2 text-[11px] text-text-secondary">
-          {transportLineDetails(entry, contact, when).map(row => (
+          {transportLineDetails(entry, contact, when, t).map(row => (
             <div key={row.label} className="contents">
               <dt className="text-text-muted">{row.label}</dt>
               <dd className="min-w-0 break-words text-text-primary">{row.value}</dd>
             </div>
           ))}
           {earlier.length > 0 && <div className="contents">
-            <dt className="text-text-muted">Before this</dt>
+            <dt className="text-text-muted">{t("connection.history.before")}</dt>
             <dd className="min-w-0 text-text-primary">
-              <span>…and {earlier.length} more {earlier.length === 1 ? "change" : "changes"}</span>
+              <span>{earlier.length === 1 ? t("connection.history.moreOne") : t("connection.history.moreMany", { count: earlier.length })}</span>
               <ul className="mt-0.5 space-y-0.5 text-text-secondary" data-testid="transport-line-earlier">
                 {[...earlier].reverse().map(e => <li key={e.id} className="break-words">
-                  <time dateTime={new Date(e.at).toISOString()} className="text-text-muted">{time(e.at)}</time> <span>{transportLineText(e, contact)}</span>
+                  <time dateTime={new Date(e.at).toISOString()} className="text-text-muted">{time(e.at)}</time> <span>{transportLineText(e, contact, t)}</span>
                 </li>)}
               </ul>
             </dd>
@@ -60,6 +62,7 @@ const HISTORY_SHOWN = 20;
  */
 export function ConnectionHistory({ events, contact }: { events: readonly TransportEvent[]; contact: string }) {
   const [all, setAll] = useState(false);
+  const { t } = useI18n();
   const newest = [...events].reverse(), shown = all ? newest : newest.slice(0, HISTORY_SHOWN);
   const day = new Date().toDateString();
   const stamp = (at: number) => new Date(at).toDateString() === day
@@ -67,17 +70,17 @@ export function ConnectionHistory({ events, contact }: { events: readonly Transp
     : new Date(at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   return (
     <details className="mt-2 border-t border-border pt-1 text-[11px]" data-testid="connection-history">
-      <summary className={`w-fit cursor-pointer rounded-md py-2 pr-2 text-text-secondary ${focus}`}>Connection history ({events.length})</summary>
-      <ol className="space-y-1 pb-2" aria-label="Connection history, newest first">
+      <summary className={`w-fit cursor-pointer rounded-md py-2 pr-2 text-text-secondary ${focus}`}>{t("connection.history.title", { count: events.length })}</summary>
+      <ol className="space-y-1 pb-2" aria-label={t("connection.history.list")}>
         {shown.map((e, i) => (
           <li key={`${e.at}-${i}`} className="grid grid-cols-[auto_1fr] gap-x-2" data-testid="connection-history-event" data-kind={e.kind}>
             <time dateTime={new Date(e.at).toISOString()} className="tabular-nums text-text-muted">{stamp(e.at)}</time>
-            <span className="min-w-0 break-words text-text-primary">{transportEventText(e, contact)}</span>
+            <span className="min-w-0 break-words text-text-primary">{transportEventText(e, contact, t)}</span>
           </li>
         ))}
       </ol>
       {!all && newest.length > shown.length && <button type="button" onClick={() => setAll(true)} data-testid="connection-history-more"
-        className={`mb-2 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`}>Show all {newest.length}</button>}
+        className={`mb-2 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`}>{t("connection.history.showAll", { count: newest.length })}</button>}
     </details>
   );
 }

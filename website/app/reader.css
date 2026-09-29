@@ -227,6 +227,8 @@
 }
 .reader-summary {
   display: grid;
+  /* One column no wider than the card: a long source path wraps instead of pushing the card past a phone's edge. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding: 24px;
   border-radius: var(--radius);
@@ -277,6 +279,7 @@
 .reader-facts dd {
   color: var(--muted);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .reader-facts a {
   color: var(--cyan);
@@ -356,7 +359,7 @@
 }
 @media (max-width: 640px) {
   .reader-facts > div {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 4px;
   }
 }

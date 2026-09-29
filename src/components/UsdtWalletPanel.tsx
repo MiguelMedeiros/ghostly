@@ -6,13 +6,16 @@ import {BackupRows} from './wallet/BackupRows';
 import {Actions,Address,Amount,Block,Button,Notice,Row,Section,Segmented,input,type Action} from './wallet/ui';
 import {useRun} from './wallet/run';
 import {ButtonGroup,InputGroup,Truncate} from './layout';
+import {useI18n} from '../contexts/I18nContext';
 
 type Network='ethereum'|'sepolia'|'evm-local';
 const RPC:Record<Network,string>={ethereum:'https://ethereum.publicnode.com',sepolia:'https://ethereum-sepolia-rpc.publicnode.com','evm-local':'http://127.0.0.1:47070'};
 const TOKEN:Record<Network,string>={ethereum:ETHEREUM_USDT,sepolia:SEPOLIA_TEST_USDT,'evm-local':''};
-const PLACE:Record<Network,string>={ethereum:'Ethereum',sepolia:'Sepolia','evm-local':'this local chain'};
+/** Where a network's USDT lives, for the chains with a name (a local chain is "this local chain", in words). */
+const PLACE:Record<Exclude<Network,'evm-local'>,string>={ethereum:'Ethereum',sepolia:'Sepolia'};
 export function UsdtWalletPanel({wallet,state}:{wallet:WalletPlatform;state:WalletState}) {
  const usdt=state.usdt;
+ const {t}=useI18n();
  const {busy,error,run}=useRun();
  const [action,setAction]=useState<Action>('receive');
  const [recipient,setRecipient]=useState(''),[amount,setAmount]=useState(''),[gas,setGas]=useState('0.001'),[review,setReview]=useState<Review|null>(null);
@@ -30,43 +33,43 @@ export function UsdtWalletPanel({wallet,state}:{wallet:WalletPlatform;state:Wall
  /** Back to the network in use only closes the form; a network that needs a token contract asks for it first. */
  const choose=(next:Network)=>{setPending(null);if(next===network)return;if(next==='ethereum')void run(()=>use('ethereum'));else{setPending(next);setProvider(RPC[next]);setToken(TOKEN[next]);}};
 
- return <div className="space-y-6" data-testid="usdt-wallet" aria-label="USDT wallet">
-  {!usdt?.configured||(usdt.locked&&usdt.automatic)?<div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="usdt-connecting"><p className="text-text-primary">Connecting your USDT wallet…</p><Notice>{usdt?.error??'This takes a few seconds the first time.'}</Notice></div>
-  :!ready?<Section title="Unlock"><Row label="This wallet was created with a password"/><Block><InputGroup><input aria-label="USDT wallet password" type="password" autoComplete="current-password" className={input} value={password} onChange={e=>setPassword(e.target.value)}/><Button variant="primary" disabled={busy} onClick={()=>void run(async()=>{await wallet.usdtUnlock(password);setPassword('');})}>Unlock USDT</Button></InputGroup></Block></Section>
+ return <div className="space-y-6" data-testid="usdt-wallet" aria-label={t('wallet.usdt.wallet')}>
+  {!usdt?.configured||(usdt.locked&&usdt.automatic)?<div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="usdt-connecting"><p className="text-text-primary">{t('wallet.panel.connecting',{wallet:'USDT'})}</p><Notice>{usdt?.error??t('wallet.panel.firstTime')}</Notice></div>
+  :!ready?<Section title={t('wallet.panel.unlock.title')}><Row label={t('wallet.panel.unlock.withPassword')}/><Block><InputGroup><input aria-label={t('wallet.panel.unlock.password',{wallet:'USDT'})} type="password" autoComplete="current-password" className={input} value={password} onChange={e=>setPassword(e.target.value)}/><Button variant="primary" disabled={busy} onClick={()=>void run(async()=>{await wallet.usdtUnlock(password);setPassword('');})}>{t('wallet.panel.unlock.button',{wallet:'USDT'})}</Button></InputGroup></Block></Section>
   :<div className="space-y-4">
    <div>
     <p className="text-text-primary break-words" data-testid="usdt-balance"><span className="text-4xl font-semibold tabular-nums">{formatPaymentAmount(usdt.balance,usdt.decimals)}</span> <span className="text-text-muted text-sm">{label}</span></p>
-    <p className="mt-1 text-xs text-text-muted" data-testid="usdt-gas">{formatPaymentAmount(usdt.gasBalance,18)} ETH for network fees</p>
-    {usdt.chainId!==1&&<p className="mt-1 text-xs text-yellow-500">{PLACE[network]==='Sepolia'?'Sepolia test network':'Local test chain'} · worthless token, not issued by Tether</p>}
+    <p className="mt-1 text-xs text-text-muted" data-testid="usdt-gas">{t('wallet.usdt.gas',{amount:formatPaymentAmount(usdt.gasBalance,18)})}</p>
+    {usdt.chainId!==1&&<p className="mt-1 text-xs text-yellow-500">{network==='sepolia'?t('wallet.usdt.sepoliaTest'):t('wallet.usdt.localTest')}</p>}
    </div>
    <Actions value={action} onChange={setAction}/>
-   {action==='receive'&&<div className="bg-surface rounded-xl p-4 animate-fade-in"><Address value={usdt.address} qr={usdt.address ? `ethereum:${usdt.address}@${usdt.chainId}` : undefined} testId="usdt-address" note={`Only ${label} on ${PLACE[network]}. Incoming transfers show up by themselves.`}/></div>}
+   {action==='receive'&&<div className="bg-surface rounded-xl p-4 animate-fade-in"><Address value={usdt.address} qr={usdt.address ? `ethereum:${usdt.address}@${usdt.chainId}` : undefined} testId="usdt-address" note={network==='evm-local'?t('wallet.usdt.receiveNoteLocal',{token:label}):t('wallet.usdt.receiveNote',{token:label,place:PLACE[network]})}/></div>}
    {action==='send'&&<div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
-    <input aria-label="USDT recipient address" placeholder="Recipient address (0x…)" spellCheck={false} className={`${input} font-mono text-xs`} value={recipient} onChange={e=>setRecipient(e.target.value.trim())}/>
+    <input aria-label={t('wallet.panel.recipient',{wallet:'USDT'})} placeholder={t('wallet.usdt.recipientPlaceholder')} spellCheck={false} className={`${input} font-mono text-xs`} value={recipient} onChange={e=>setRecipient(e.target.value.trim())}/>
     <Amount value={amount} onChange={setAmount} unit={label} decimals={usdt.decimals}/>
-    <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">Network fee limit<span className="flex items-center gap-2"><input aria-label="Maximum gas in ETH" inputMode="decimal" className={`${input} w-28 text-right`} value={gas} onChange={e=>setGas(e.target.value.replace(/[^0-9.]/g,''))}/>ETH</span></label>
-    <Button variant="primary" className="w-full" disabled={busy||!!review||!funded||!recipient||!Number(amount)} onClick={()=>void run(async()=>{const now=Date.now();setReview(await wallet.preparePayment({target:{method:'usdt',network:usdt.network!,provider:usdt.provider!,asset:usdt.chainId===1?'USDT':'TEST-USDT',unit:'token-base',address:recipient,token:usdt.token,decimals:usdt.decimals,chainId:usdt.chainId,issuedAt:now,expiresAt:now+15*60*1000},amount:parsePaymentAmount(amount,usdt.decimals!),feeCap:parsePaymentAmount(gas,18),payee:recipient}));})}>{funded?'Review payment':'No balance to send yet'}</Button>
-    <Notice>{BigInt(usdt.gasBalance)===0n?'Sending needs a little ETH at this same address to pay the network fee.':'Nothing is sent until you approve the review.'}</Notice>
+    <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">{t('wallet.usdt.feeLimit')}<span className="flex items-center gap-2"><input aria-label={t('wallet.usdt.gasInput')} inputMode="decimal" className={`${input} w-28 text-end`} value={gas} onChange={e=>setGas(e.target.value.replace(/[^0-9.]/g,''))}/>ETH</span></label>
+    <Button variant="primary" className="w-full" disabled={busy||!!review||!funded||!recipient||!Number(amount)} onClick={()=>void run(async()=>{const now=Date.now();setReview(await wallet.preparePayment({target:{method:'usdt',network:usdt.network!,provider:usdt.provider!,asset:usdt.chainId===1?'USDT':'TEST-USDT',unit:'token-base',address:recipient,token:usdt.token,decimals:usdt.decimals,chainId:usdt.chainId,issuedAt:now,expiresAt:now+15*60*1000},amount:parsePaymentAmount(amount,usdt.decimals!),feeCap:parsePaymentAmount(gas,18),payee:recipient}));})}>{funded?t('wallet.panel.review'):t('wallet.panel.noBalance')}</Button>
+    <Notice>{BigInt(usdt.gasBalance)===0n?t('wallet.usdt.needsGas'):t('wallet.usdt.approve')}</Notice>
    </div>}
    {review&&<PaymentReview key={review.id} review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
-   {intents.filter(i=>i.id!==review?.id).map(i=><Button key={i.id} className="block w-full text-left" onClick={()=>setReview(i)}>{formatPaymentAmount(i.amount,i.decimals)} {i.asset} · {i.state==='settled'?'confirmed':i.state}</Button>)}
+   {intents.filter(i=>i.id!==review?.id).map(i=><Button key={i.id} className="block w-full text-start" onClick={()=>setReview(i)}>{t('wallet.panel.intent',{amount:formatPaymentAmount(i.amount,i.decimals),unit:i.asset,state:i.state==='settled'?t('wallet.usdt.confirmed'):i.state})}</Button>)}
   </div>}
   {error&&<Notice tone="error">{error}</Notice>}
   {usdt?.error&&ready&&<Notice tone="warning">{usdt.error}</Notice>}
   {/* Test USDT from Aave's Sepolia faucet: "Get test coins" above the panel (wallet/TestCoins.tsx). */}
 
-  {(ready||stuck)&&<Section title="Settings">
+  {(ready||stuck)&&<Section title={t('wallet.panel.settings')}>
    {/* A Mainnet wallet is Ethereum only; a Testnet wallet may move between the test chains while empty. */}
-   {state.mode==='testnet'&&<Row label="Network" hint={stuck?'This network is not answering. You can switch to another one.':canReplace?'Sepolia and the local chain carry worthless test tokens.':'Only while this wallet is empty and has no payments.'}>
-    <Segmented label="USDT network" value={pending??network} disabled={busy||!canReplace} options={[{value:'sepolia',label:'Sepolia'},{value:'evm-local',label:'Local test chain'}]} onChange={choose}/>
+   {state.mode==='testnet'&&<Row label={t('wallet.panel.network')} hint={stuck?t('wallet.panel.networkStuck'):canReplace?t('wallet.usdt.networkTest'):t('wallet.panel.onlyEmpty')}>
+    <Segmented label={t('wallet.usdt.networkLabel')} value={pending??network} disabled={busy||!canReplace} options={[{value:'sepolia',label:'Sepolia'},{value:'evm-local',label:t('wallet.usdt.localChain')}]} onChange={choose}/>
    </Row>}
    {pending&&<Block>
-    <input aria-label="RPC URL" className={`${input} font-mono text-xs`} value={provider} onChange={e=>setProvider(e.target.value)} spellCheck={false}/>
-    <input aria-label="Token contract" placeholder="Token contract (0x…)" className={`${input} font-mono text-xs`} value={token} onChange={e=>setToken(e.target.value.trim())} spellCheck={false}/>
-    <ButtonGroup><Button variant="primary" disabled={busy||!token} onClick={()=>void run(async()=>{await use(pending,{provider,token});setPending(null);})}>Switch network</Button><Button onClick={()=>setPending(null)}>Cancel</Button></ButtonGroup>
+    <input aria-label={t('wallet.usdt.rpcInput')} className={`${input} font-mono text-xs`} value={provider} onChange={e=>setProvider(e.target.value)} spellCheck={false}/>
+    <input aria-label={t('wallet.usdt.tokenContract')} placeholder={t('wallet.usdt.tokenContractPlaceholder')} className={`${input} font-mono text-xs`} value={token} onChange={e=>setToken(e.target.value.trim())} spellCheck={false}/>
+    <ButtonGroup><Button variant="primary" disabled={busy||!token} onClick={()=>void run(async()=>{await use(pending,{provider,token});setPending(null);})}>{t('wallet.usdt.switchNetwork')}</Button><Button onClick={()=>setPending(null)}>{t('common.cancel')}</Button></ButtonGroup>
    </Block>}
-   {ready&&<><Row label="RPC provider" hint={<><Truncate className="font-mono">{usdt.provider??''}</Truncate>Sees your public address</>}/>
-   <Row label="Token" hint={<><Truncate className="font-mono">{usdt.token??''}</Truncate>{`${usdt.decimals} decimals${usdt.chainId===1?' · Tether can freeze USDT':''}`}</>}/>
+   {ready&&<><Row label={t('wallet.usdt.rpcProvider')} hint={<><Truncate className="font-mono">{usdt.provider??''}</Truncate>{t('wallet.usdt.seesAddress')}</>}/>
+   <Row label={t('wallet.usdt.token')} hint={<><Truncate className="font-mono">{usdt.token??''}</Truncate>{t(usdt.chainId===1?'wallet.usdt.decimalsFreeze':'wallet.usdt.decimals',{count:String(usdt.decimals)})}</>}/>
    <BackupRows name="USDT" busy={busy} run={run} canReplace={canReplace}
     reveal={()=>wallet.usdtReveal()} exportBackup={pw=>wallet.usdtExportBackup(pw)}
     restorePhrase={mnemonic=>use(network,{provider:usdt.provider,token:usdt.token,mnemonic})} restoreFile={(text,pw)=>wallet.usdtRestoreBackup(text,pw)}/></>}

@@ -1,3 +1,5 @@
+import { useI18n } from "../contexts/I18nContext";
+
 interface IncomingCallNotificationProps {
   peerName: string;
   hasVideo: boolean;
@@ -13,6 +15,7 @@ export function IncomingCallNotification({
   onAcceptVideo,
   onReject,
 }: IncomingCallNotificationProps) {
+  const { t } = useI18n();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:bg-chat-bg backdrop-blur-sm animate-fade-in">
       <div className="incoming-call bg-surface-alt rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4 text-center space-y-6">
@@ -26,7 +29,7 @@ export function IncomingCallNotification({
           <div>
             <p className="text-text-primary text-lg font-medium">{peerName}</p>
             <p className="text-text-muted text-sm">
-              Incoming {hasVideo ? "video" : "audio"} call...
+              {hasVideo ? t("calls.incomingVideo") : t("calls.incomingAudio")}
             </p>
           </div>
         </div>
@@ -37,7 +40,8 @@ export function IncomingCallNotification({
           <button
             onClick={onReject}
             className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
-            title="Decline"
+            title={t("calls.decline")}
+            aria-label={t("calls.decline")}
           >
             <svg
               width="24"
@@ -58,7 +62,7 @@ export function IncomingCallNotification({
           <button
             onClick={onAcceptAudio}
             className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-on-accent hover:bg-accent-hover transition-colors cursor-pointer"
-            title="Accept audio call"
+            title={t("calls.acceptAudio")} aria-label={t("calls.acceptAudio")}
           >
             <svg
               width="24"
@@ -79,7 +83,7 @@ export function IncomingCallNotification({
             <button
               onClick={onAcceptVideo}
               className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-on-accent hover:bg-accent-hover transition-colors cursor-pointer"
-              title="Accept video call"
+              title={t("calls.acceptVideo")} aria-label={t("calls.acceptVideo")}
             >
               <svg
                 width="24"

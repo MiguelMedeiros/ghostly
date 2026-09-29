@@ -23,7 +23,7 @@ export function composerServices(t: Translate, platform: ServicesPlatform | null
   if (!platform || !peer) return undefined;
   const { shareLocalServices, openServices } = platform.features;
   if (!shareLocalServices && !openServices) return { onOpen, unavailable: t("composer.servicesNeedApp") };
-  const why = servicesUnavailable(peer, name) ?? undefined;
+  const why = servicesUnavailable(peer, name, t) ?? undefined;
   if (servicesBlock(peer) === "contact-cannot") return { onOpen, unavailable: why };
   const mine = shareLocalServices ? platform.getSharedServices().filter((s) => s.enabled && s.sharedWith?.includes(peerKey)).length : 0;
   const shared = mine + (peer.services ?? []).filter((s) => s.type === "http").length;

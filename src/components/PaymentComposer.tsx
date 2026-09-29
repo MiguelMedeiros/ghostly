@@ -6,11 +6,11 @@ import { cardOn, rememberNetwork, rememberRail, rememberedRail, startNetwork, ty
 import type { WalletNetwork, WalletPlatform } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { PaymentReview as Review } from "@ghostly/core";
-import { NetworkTag } from "./NetworkTag";
+import { NetworkTag, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
-import { ONCHAIN_FEE_CAP, byNetwork, cardWallet, networkState, receivingFirst, satsUnit, walletCards, type InstanceCard } from "./walletCardData";
+import { ONCHAIN_FEE_CAP, byNetwork, cardNotSetUp, cardWallet, networkState, receivingFirst, walletCards, type InstanceCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
@@ -56,6 +56,17 @@ interface PaymentComposerProps {
 }
 
 type Mode = "pay" | "accept";
+/** What Send and Request do on each card, with this contact (`{{name}}`). */
+const HOW = {
+  cashu: "payments.composer.how.cashu",
+  lightning: "payments.composer.how.lightning",
+  fedimint: "payments.composer.how.fedimint",
+  spark: "payments.composer.how.spark",
+  arkade: "payments.composer.how.arkade",
+  bark: "payments.composer.how.bark",
+  bitcoin: "payments.composer.how.bitcoin",
+  usdt: "payments.composer.how.usdt",
+} as const satisfies Record<ChatRail, string>;
 /** Cashu fees are per proof: a few sats at most. The review shows the real fee before anything is spent. */
 const CASHU_FEE_CAP = 10;
 
@@ -72,28 +83,33 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const state = wallet?.getState();
   const chat = reviewContext?.peer;
   const peer = useServicesPlatform()?.getPeer(chat ?? "");
-  const who = contact || "your contact";
+  const who = contact || t("payments.composer.yourContact");
   const networkName = (card: InstanceCard) => `${card.network === "testnet" ? "Testnet" : "Mainnet"} ${card.name}`;
-  /** Why a card cannot be used in this chat: not set up, off here, off for the contact, or no wallet of its network there. */
-  const unavailable = (card: InstanceCard) => {
+  /**
+   * Why a card cannot be used in this chat: not set up, off here, off for the contact, or no wallet of its network
+   * there. `contact`: it is the contact's side that says no (the card's face says "Not accepted", else "Off here").
+   */
+  const blockedBy = (card: InstanceCard): { why: string; contact?: boolean } | undefined => {
     // A card with nothing to connect to yet (no mint, no source) says so; one on its way says where it is ("Ark is connecting…").
-    if (payUnavailable) return payUnavailable;
-    if (rails && !rails.includes(card.rail)) return `${card.name} cannot be used here`;
-    if (!card.ready) return card.status === "Set up" || card.status === "Shared balance" ? `${card.name} is not set up yet` : `${card.name} is ${card.balance.toLowerCase()}`;
-    if (peer && !cardOn(peer, card.rail, card.network)) return `${networkName(card)} is off in this chat`;
+    // The chat's own reason comes in English from its page; one about the contact starts with "Your contact".
+    if (payUnavailable) return { why: payUnavailable, contact: payUnavailable.startsWith("Your contact") };
+    if (rails && !rails.includes(card.rail)) return { why: t("payments.composer.unavailable.notHere", { card: card.name }) };
+    if (!card.ready) return { why: cardNotSetUp(card, t) ? t("payments.composer.unavailable.notSetUp", { card: card.name }) : t("payments.composer.unavailable.status", { card: card.name, status: card.balance.toLowerCase() }) };
+    if (peer && !cardOn(peer, card.rail, card.network)) return { why: t("payments.composer.unavailable.offHere", { card: networkName(card) }) };
     // The contact said which networks it has wallets on (none for a kind it has no wallet of): a test card meets only
     // a test wallet, and real money only real.
     const theirs = peer?.dataLink === "open" ? peer.capabilities?.networks : undefined;
-    if (theirs && !theirs[card.rail]) return `Your contact has no ${networkName(card)} wallet`;
-    if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.rail]) return `Your contact does not accept ${card.name} in this chat`;
-    if (theirs && !theirs[card.rail]!.includes(card.network)) return `Your contact has no ${networkName(card)} wallet`;
+    if (theirs && !theirs[card.rail]) return { why: t("payments.composer.unavailable.noWallet", { card: networkName(card) }), contact: true };
+    if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.rail]) return { why: t("payments.composer.unavailable.notAccepted", { card: card.name }), contact: true };
+    if (theirs && !theirs[card.rail]!.includes(card.network)) return { why: t("payments.composer.unavailable.noWallet", { card: networkName(card) }), contact: true };
     return undefined;
   };
+  const unavailable = (card: InstanceCard) => blockedBy(card)?.why;
   // Real money, then test money: the two never mingle in the deck, and every card says its network.
   // A network's default Lightning card leads its Lightning cards: a request starts on it unless another is picked.
-  const cards = state && wallet ? byNetwork(receivingFirst(walletCards(state))) : [];
+  const cards = state && wallet ? byNetwork(receivingFirst(walletCards(state, { t }))) : [];
   // Accept keeps one Lightning card per network: a request's invoice comes from the default for receiving.
-  const acceptCards = state && wallet ? byNetwork(walletCards(state, { lightning: "default" })) : [];
+  const acceptCards = state && wallet ? byNetwork(walletCards(state, { lightning: "default", t })) : [];
   // With an Accept side, a card this chat has off is chosen there, not shown on Pay.
   const offHere = (c: InstanceCard) => !!peer && !cardOn(peer, c.rail, c.network);
   const payCards = onSaveMethods ? cards.filter((c) => !offHere(c)) : cards;
@@ -154,7 +170,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const bound = wallet && card ? cardWallet(wallet, card) : wallet;
   const method: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark" = rail === "lightning" ? "cashu" : rail;
   const usdt = here?.usdt;
-  const unit = method === "usdt" ? (network === "testnet" || (usdt?.chainId && usdt.chainId !== 1) ? "TEST-USDT" : "USDT") : satsUnit(network ?? "mainnet");
+  const unit = method === "usdt" ? (network === "testnet" || (usdt?.chainId && usdt.chainId !== 1) ? "TEST-USDT" : "USDT") : satsIn(t, network ?? "mainnet");
   const decimals = method === "usdt" ? usdt?.decimals ?? 6 : 0;
   const value = Number(amount);
   // What the second step names is what it sends: another amount or card asks again.
@@ -165,7 +181,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const [asking, setAsking] = useState<string | null>(null);
   const blocked = card ? unavailable(card) : undefined;
   // A card that cannot be used says so on its face, briefly; its title says why in full.
-  const shown = netPayCards.map((c) => { const why = unavailable(c); return !why || !c.ready ? c : { ...c, status: why.startsWith("Your contact") ? "Not accepted" : "Off here" }; });
+  const shown = netPayCards.map((c) => { const why = blockedBy(c); return !why || !c.ready ? c : { ...c, status: t(why.contact ? "payments.composer.cardStatus.notAccepted" : "payments.composer.cardStatus.offHere") }; });
 
   /** Turn the chosen card over, and back to the cards. */
   const use = (next: string) => {
@@ -215,7 +231,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       if (reviewContext && bound && here) {
         // The mint that can pay, of this card's network: test sats and real ones never mix.
         const mint = [...here.mints].sort((a, b) => b.balance - a.balance).find((m) => m.balance >= value + CASHU_FEE_CAP) ?? [...here.mints].sort((a, b) => b.balance - a.balance)[0];
-        if (!mint) throw new Error("Add a Cashu mint first");
+        if (!mint) throw new Error(t("payments.composer.error.noMint"));
         setReview(await bound.preparePayment({ target: { method: "cashu", network: network === "testnet" ? "cashu-test" : "bitcoin", provider: mint.url, address: reviewContext.peer, asset: "BTC", unit: "sat", expiresAt: Date.now() + 15 * 60 * 1000 }, amount: value, feeCap: CASHU_FEE_CAP, payee: reviewContext.peer, linkId: reviewContext.linkId, memo: memo || undefined }));
       } else {
         // Ecash sent without a review: on real money, only once the second step confirms it (no network is Mainnet).
@@ -223,7 +239,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         const err = await onSend(value, memo, network, confirmedReal || undefined);
         if (err) setError(err); else onDone();
       }
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not prepare payment"); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("payments.composer.error.prepare")); }
     finally { setBusy(null); }
   };
   // The contact's app answers an ask with a request: review it here, as Pay on that request would.
@@ -236,28 +252,28 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         // Fedimint, but no federation in common: their request carries an invoice of their federation instead.
         clearInterval(timer);
         setAsking(null);
-        setError(answer.invoice ? `You and ${who} share no federation: pay their request over Lightning, with Review payment on it in the chat.` : `You and ${who} share no federation, and their request has no Lightning invoice.`);
+        setError(t(answer.invoice ? "payments.composer.error.noFederationInvoice" : "payments.composer.error.noFederation", { name: who }));
       } else if (answer?.target) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";
         void bound.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : answer.target.method === "bitcoin" ? ONCHAIN_FEE_CAP : CASHU_FEE_CAP, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
-          .then(setReview, (e: unknown) => setError(e instanceof Error ? e.message : "Could not prepare payment"))
+          .then(setReview, (e: unknown) => setError(e instanceof Error ? e.message : t("payments.composer.error.prepare")))
           .finally(() => setAsking(null));
       } else if (Date.now() - started > 45_000) {
         clearInterval(timer);
         setAsking(null);
-        setError("Your contact's app did not answer. It may be offline or need an update; they can send you a Request instead.");
+        setError(t("payments.composer.error.noAnswer"));
       }
     }, 400);
     return () => clearInterval(timer);
-  }, [asking, reviewContext, bound, who]);
+  }, [asking, reviewContext, bound, who, t]);
 
   const request = async () => {
     setError(""); setBusy("request");
     try {
       const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method, rail, network, ...(card?.card ? [card.card] : []));
       if (err) setError(err); else onDone();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not prepare request"); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("payments.composer.error.request")); }
     finally { setBusy(null); }
   };
 
@@ -265,12 +281,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const spendable = method === "cashu" ? (network ? here?.balance : balance) : method === "arkade" ? here?.ark?.balance : method === "bark" ? here?.bark?.balance : method === "spark" ? here?.spark?.balance : method === "bitcoin" ? here?.bitcoin?.balance : method === "fedimint" ? here?.fedimint?.balance : usdt ? Number(formatPaymentAmount(usdt.balance, decimals)) : undefined;
   const tooMuch = spendable !== undefined && value > spendable;
   /** What Send and Request do on this card, with this contact. */
-  const how = (id: ChatRail) => describe ? describe(id) : id === "cashu"
-    ? `Send gives ${who} ecash straight away; a request also carries a Lightning invoice.`
-    : id === "lightning" ? `Request with a Lightning invoice. To pay ${who} over Lightning, tap Pay on their request.`
-    : id === "fedimint" ? `Send asks ${who}'s app which federations it takes: ecash of one you share, after a review. Otherwise their request carries a Lightning invoice.`
-    : id === "spark" ? `Send asks ${who}'s app for a Spark invoice, then shows the payment to approve: Spark to Spark, instant, no Lightning hop.`
-    : `Send asks ${who}'s app for a ${id === "arkade" ? "fresh Ark" : id === "bark" ? "fresh Bark" : id === "bitcoin" ? "fresh Bitcoin" : "USDT"} address, then shows the payment to approve.${id === "bitcoin" ? " Paid once it confirms on-chain." : ""}`;
+  const how = (id: ChatRail) => describe ? describe(id) : t(HOW[id], { name: who });
 
   const back = (
     <div className={`payment-back${card ? ` wallet-card-${card.rail}` : ""}`} data-testid="payment-back" data-network={network}>
@@ -278,30 +289,30 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       <div className="payment-back-body">
         <div className="payment-back-head">
           {cards.length > 0 && !review && (
-            <FlipTurnButton testId="payment-change-card" label="Back to the cards" onClick={backToCards} />
+            <FlipTurnButton testId="payment-change-card" label={t("payments.composer.backToCards")} onClick={backToCards} />
           )}
           {card && <span className="payment-back-mark" aria-hidden="true"><WalletMark rail={card.rail} /></span>}
           <span className="payment-back-title">
-            <span className="payment-back-name">{card ? (card.network === "testnet" ? `${card.name} · Testnet` : card.name) : "Payment"}</span>
+            <span className="payment-back-name">{card ? (card.network === "testnet" ? `${card.name} · Testnet` : card.name) : t("payments.composer.payment")}</span>
             {card && <NetworkTag network={card.network} testId="payment-back-network" className="payment-back-network" />}
-            <span className="payment-back-meta">{card ? `${card.balance} · with ${who}` : `With ${who}`}</span>
+            <span className="payment-back-meta">{card ? t("payments.composer.balanceWith", { balance: card.balance, name: who }) : t("payments.composer.withTitle", { name: who })}</span>
           </span>
         </div>
         {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} onSent={onDone} /> : <>
           <label className="payment-back-amount" data-over={tooMuch || undefined}>
-            <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={`Amount in ${unit}`}
+            <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={t("payments.composer.amountIn", { unit })}
               value={amount} onChange={(e) => setAmount(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
             <span>{unit}</span>
           </label>
-          <input className="payment-back-memo" placeholder="What for? (optional)" aria-label="What for? (optional)" maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
-          <p className="payment-back-hint">{blocked ?? (tooMuch ? `More than the ${spendable!.toLocaleString()} ${unit} on this card.` : how(rail))}</p>
+          <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
+          <p className="payment-back-hint">{blocked ?? (tooMuch ? t("payments.composer.tooMuch", { amount: spendable!.toLocaleString(), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${value.toLocaleString()} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions">
             <button data-testid="payment-request" disabled={!value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
-              {busy === "request" ? "Requesting…" : "Request"}
+              {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </button>
             <button data-testid="payment-send" disabled={!canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => void send()}
-              title={canSend ? undefined : sendUnavailable ?? "To pay on this card, tap Pay on your contact's request"} className="payment-back-primary">
-              {asking ? "Asking for an address…" : busy === "send" ? "Preparing…" : "Send"}
+              title={canSend ? undefined : sendUnavailable ?? t("payments.composer.sendHint")} className="payment-back-primary">
+              {asking ? t("payments.composer.asking") : busy === "send" ? t("payments.composer.preparing") : t("payments.composer.send")}
             </button>
           </div>}
         </>}
@@ -343,9 +354,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // No wallet of the tab's network: say so, and where to make one, rather than an empty deck.
   const noWallet = (
     <div className="payment-none" data-testid="payment-network-empty">
-      <p className="composer-sheet-hint">No {NETWORK_NAME[net]} wallets</p>
+      <p className="composer-sheet-hint">{t("payments.composer.noNetworkWallets", { network: NETWORK_NAME[net] })}</p>
       <button type="button" data-testid="payment-network-new" className="payment-network-new" onClick={() => { onClose(); nav.place("/wallet", { newWallet: { network: net } }); }}>
-        New {NETWORK_NAME[net]} wallet
+        {t("payments.composer.newNetworkWallet", { network: NETWORK_NAME[net] })}
         <ForwardArrow />
       </button>
     </div>
@@ -362,17 +373,17 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
       onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onClose(); } }}
     >
       {side === "cards" ? <>
-        <ComposerSheetHead title={modes || (sendUnavailable ? "Request" : "Pay or request")} who={`with ${who}`} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
+        <ComposerSheetHead title={modes || (sendUnavailable ? t("payments.composer.request") : t("payments.mode.pay"))} who={t("payments.composer.with", { name: who })} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label={t("payments.composer.chooseOther")} title={t("payments.composer.chooseOther")} onClick={onBack}>
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>} />
         {!cards.length && state ? <div className="payment-none" data-testid="payment-no-wallet">
-            <p className="composer-sheet-hint">You have no wallet yet. Create one to pay {who} and be paid: it takes one click.</p>
+            <p className="composer-sheet-hint">{t("payments.composer.noWallet.text", { name: who })}</p>
             <button type="button" data-testid="payment-no-wallet-create" className="composer-sheet-action" onClick={() => { onClose(); nav.place("/wallet"); }}>
-              Create a wallet
+              {t("payments.composer.noWallet.action")}
               <ForwardArrow />
             </button>
           </div> : cards.length > 0 && <>
-          <NetworkTabs compact network={net} onChange={showNetwork} label="Networks" testId="payment-tabs" tabTestId="payment-tab" idPrefix="payment-tab" controls="payment-tab-panel"
+          <NetworkTabs compact network={net} onChange={showNetwork} label={t("payments.composer.networks")} testId="payment-tabs" tabTestId="payment-tab" idPrefix="payment-tab" controls="payment-tab-panel"
             counts={{ mainnet: (accepting ? cards : payCards).filter((c) => c.network === "mainnet").length, testnet: (accepting ? cards : payCards).filter((c) => c.network === "testnet").length }} />
           {/* Not keyed by the network: Accept keeps both networks' switches while the tab changes. Each deck is. */}
           <div role="tabpanel" id="payment-tab-panel" aria-labelledby={`payment-tab-${net}`} data-testid="payment-tab-panel" data-network={net}
@@ -386,11 +397,11 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             </button>
           </div>
           : <>
-            <CardDeck<string> key={net} compact tagAll kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
+            <CardDeck<string> key={net} compact tagAll kind="radios" label={t("payments.composer.payWith")} name="payment-deck" cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
               testId={paymentCardTestId} blocked={(c) => unavailable(c as InstanceCard)} size={{ max: 250, share: .62 }} />
             <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
             <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked || !card} onClick={() => use(selected)}>
-              {card ? `Use ${card.name}` : "Continue"}
+              {card ? t("payments.composer.use", { card: card.name }) : t("payments.composer.continue")}
               <ForwardArrow />
             </button>
           </>}

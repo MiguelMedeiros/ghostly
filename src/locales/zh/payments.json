@@ -1,6 +1,7 @@
 {
   "accept": {
     "card": "接受来自{{name}}的{{card}}",
+    "cardNetwork": "{{card}}（{{network}}）",
     "contactOff": "联系人：已关闭",
     "contactOn": "联系人：接受",
     "deck": "此聊天接受 {{name}} 使用的付款方式",
@@ -22,6 +23,263 @@
       "savedLive": "已保存：{{name}} 已收到通知。"
     }
   },
+  "bubble": {
+    "amountSats": "{{amount}} sats",
+    "approve": "批准付款",
+    "balance": "{{amount}} {{unit}}",
+    "bitcoinOnchain": "Bitcoin 链上",
+    "cashuMint": "Cashu 铸币厂",
+    "cashuMints": "Cashu 铸币厂",
+    "error": {
+      "amountMismatch": "发票与请求的金额不符",
+      "feeAbove": "Lightning 手续费（最多 {{fee}} sats）超出你的上限"
+    },
+    "externalNote": {
+      "ark": "可从任何 Ark 钱包支付。你的联系人的钱包看到款项后，会将其标为已付款。",
+      "bitcoin": "可从任何 Bitcoin 钱包支付。你的联系人的钱包看到款项并经过一次确认后，会将其标为已付款。",
+      "lightning": "可从任何 Lightning 钱包支付。你的联系人的钱包看到款项后，会将其标为已付款。"
+    },
+    "externalTitle": "扫描、复制，或在 Ghostly 以外的钱包中打开",
+    "fedimintNoFederation": "Fedimint · 你们没有共同的联盟：Lightning",
+    "hide": "隐藏",
+    "maxFee": "最高手续费（sats）",
+    "maxGas": "最高 gas（ETH）",
+    "noSharedMint": "没有共同配置的铸币厂",
+    "noWallet": {
+      "mainnet": "对方请求真实资金（{{unit}}），而你没有可用于支付的 Mainnet 钱包。请在钱包中创建一个，或改为请求测试资金。",
+      "testnet": "对方请求测试资金（{{unit}}），而你没有可用于支付的 Testnet 钱包。请在钱包中创建一个，或改为请求真实资金。"
+    },
+    "off": "此付款方式在本聊天中已关闭。",
+    "payElsewhere": "用其他钱包支付",
+    "payOverLightning": "通过 Lightning 支付 {{amount}} {{unit}}",
+    "preparing": "准备中…",
+    "review": "查看付款",
+    "state": {
+      "closed": "已关闭",
+      "lightningPending": "Lightning 付款处理中…",
+      "payment": {
+        "failed": "失败",
+        "pending": "正在等待你的联系人…",
+        "reclaimed": "已取回",
+        "settled": "已收到"
+      },
+      "request": {
+        "failed": "失败",
+        "pending": "等待付款",
+        "settled": "已付款"
+      },
+      "waitingConfirmation": "等待确认…"
+    },
+    "takeBack": "取回",
+    "takeBackTitle": "如果你的联系人一直没有领取，这笔 ecash 仍归你所有",
+    "through": "经由 {{source}} · 手续费最多 {{fee}} sats",
+    "title": {
+      "requests": "请求付款",
+      "sentYou": "发给你的",
+      "youRequested": "你发起的请求",
+      "youSent": "你已发送"
+    }
+  },
+  "composer": {
+    "amountIn": "金额（{{unit}}）",
+    "asking": "正在索取地址…",
+    "backToCards": "返回卡片",
+    "balanceWith": "{{balance}} · 与 {{name}}",
+    "cardStatus": {
+      "notAccepted": "不接受",
+      "offHere": "此处已关闭"
+    },
+    "chooseOther": "选择其他人",
+    "continue": "继续",
+    "error": {
+      "noAnswer": "你的联系人的应用没有响应。它可能已离线或需要更新；对方可以改为向你发送请求。",
+      "noFederation": "你和 {{name}} 没有共同的联邦，且其请求没有 Lightning 发票。",
+      "noFederationInvoice": "你和 {{name}} 没有共同的联邦：请在聊天中对其请求使用“查看付款”，通过 Lightning 支付。",
+      "noMint": "请先添加一个 Cashu 铸币所",
+      "prepare": "无法准备付款",
+      "request": "无法准备请求"
+    },
+    "how": {
+      "arkade": "发送会向 {{name}} 的应用索取一个新的 Ark 地址，然后显示待批准的付款。",
+      "bark": "发送会向 {{name}} 的应用索取一个新的 Bark 地址，然后显示待批准的付款。",
+      "bitcoin": "发送会向 {{name}} 的应用索取一个新的 Bitcoin 地址，然后显示待批准的付款。链上确认后即为已付款。",
+      "cashu": "发送会立即把 ecash 给 {{name}}；请求还会附带一张 Lightning 发票。",
+      "fedimint": "发送会询问 {{name}} 的应用接受哪些联邦：审核后发送你们共同联邦的 ecash。否则其请求会附带 Lightning 发票。",
+      "lightning": "用 Lightning 发票请求。要通过 Lightning 付款给 {{name}}，请在对方的请求上点按“付款”。",
+      "spark": "发送会向 {{name}} 的应用索取 Spark 发票，然后显示待批准的付款：Spark 到 Spark，即时到账，不经过 Lightning。",
+      "usdt": "发送会向 {{name}} 的应用索取一个 USDT 地址，然后显示待批准的付款。"
+    },
+    "memo": "用途（可选）",
+    "networks": "网络",
+    "newNetworkWallet": "新建 {{network}} 钱包",
+    "noNetworkWallets": "没有 {{network}} 钱包",
+    "noWallet": {
+      "action": "创建钱包",
+      "text": "你还没有钱包。创建一个即可向 {{name}} 付款和收款：只需点一下。"
+    },
+    "payWith": "付款方式",
+    "payment": "付款",
+    "preparing": "准备中…",
+    "request": "请求",
+    "requesting": "请求中…",
+    "send": "发送",
+    "sendHint": "要用此卡付款，请在联系人的请求上点按“付款”",
+    "tooMuch": "超过此卡上的 {{amount}} {{unit}}。",
+    "unavailable": {
+      "noWallet": "你的联系人没有 {{card}} 钱包",
+      "notAccepted": "你的联系人在此聊天中不接受 {{card}}",
+      "notHere": "{{card}} 无法在此使用",
+      "notSetUp": "{{card}} 尚未设置",
+      "offHere": "{{card}} 在此聊天中已关闭",
+      "status": "{{card}}：{{status}}"
+    },
+    "use": "使用 {{card}}",
+    "with": "与 {{name}}",
+    "withTitle": "与 {{name}}",
+    "yourContact": "你的联系人"
+  },
+  "confirmReal": {
+    "label": "确认真实资金",
+    "money": "真实资金。",
+    "send": "发送真实资金",
+    "text": "{{money}}这将发送 {{what}}，结算后无法撤回。目前还没有发出任何款项。"
+  },
+  "external": {
+    "asking": "请求中…",
+    "checking": "检查中…",
+    "checkingNote": "正在检查联系人的钱包。一旦看到付款，这里会自动变为“已付款”。",
+    "copied": "已复制",
+    "copyError": "无法复制。请选中文本自行复制。",
+    "open": "打开钱包",
+    "openError": "无法打开钱包：{{error}}。请改为复制文本或扫描二维码。",
+    "openTitle": "在此设备上的钱包中打开",
+    "paid": "我已付款",
+    "paidTitle": "会请联系人的钱包立即查看。只有看到这笔钱后，它才会把请求标记为已付款。",
+    "qrLabel": "付款二维码"
+  },
+  "formats": {
+    "address": "Bitcoin 地址",
+    "amount": "金额（{{unit}}）",
+    "amountAria": "金额，单位 {{unit}}",
+    "anotherChain": "另一条链",
+    "arkadeHint": "由同一 Ark 服务器的 Arkade 钱包支付。",
+    "arkadeLabel": "Ark 地址（Arkade）",
+    "barkHint": "由同一 Ark 服务器（Second 的）的 Bark 钱包支付。Arkade 无法支付。",
+    "barkLabel": "Ark 地址（Bark）",
+    "bolt12": "Lightning 报价（BOLT 12）",
+    "bolt12Hint": "请使用支持 BOLT 12 报价的钱包支付：这里还没有能支付报价的钱包。",
+    "chainId": "链 {{id}}",
+    "copyAddress": "复制地址",
+    "copyOffer": "复制报价",
+    "createWallet": "创建 {{network}} {{wallet}} 钱包",
+    "from": "来自 {{issuer}}",
+    "hideQr": "隐藏二维码",
+    "maxFee": "可接受的最高手续费（{{unit}}）",
+    "maxFeeAria": "最高手续费，单位 {{unit}}",
+    "millisats": "{{amount}} millisats",
+    "networkNotStated": "未注明网络",
+    "noWallet": {
+      "mainnet": "你没有可用于支付这笔真实资金的 Mainnet {{wallet}} 钱包。",
+      "testnet": "你没有可用于支付这笔测试资金的 Testnet {{wallet}} 钱包。"
+    },
+    "offline": "你的 {{network}} Bitcoin 钱包目前未连接。",
+    "openBitcoinTitle": "在此设备上的 Bitcoin 钱包中打开",
+    "orLightning": "或通过 Lightning 完成同一笔付款：",
+    "otherNeverPays": "你的 {{network}} {{wallet}} 钱包不会支付它。",
+    "paymentLink": "Bitcoin 付款链接",
+    "smallestUnit": "（最小单位）",
+    "testUsdt": "测试 USDT",
+    "unlock": "请先解锁你的 {{network}} {{wallet}} 钱包。",
+    "unsupported": "此链接请求了本应用无法理解的内容，因此不会从这里支付。",
+    "usdtLabel": "USDT 地址",
+    "usdtLabelChain": "USDT 地址 · {{chain}}",
+    "usdtNoChain": "同一地址存在于所有 Ethereum 链上：付款前，请索取注明链的链接（真实 USDT 为 ethereum:…@1）。",
+    "usdtOtherChain": "此链接用于 {{chain}}，这里没有在该链上运行的 USDT 钱包。",
+    "usdtWrongChain": "你的 {{network}} USDT 钱包在 {{chain}} 上；此链接用于 {{target}}。",
+    "wrongChain": "你的 {{network}} Bitcoin 钱包在 {{chain}} 上；此地址用于 {{target}}。",
+    "wrongToken": "此链接请求的代币不是你钱包中的 USDT：不会从这里支付。"
+  },
+  "group": {
+    "bitcoinOnchain": "Bitcoin 链上",
+    "chooseOne": "选择一位成员来发送",
+    "describe": {
+      "cashu": "从你使用的 mint 请求 ecash。最先到达的成员的 ecash 完成支付；之后的人会退回。",
+      "lightning": "用一张 Lightning 发票请求。任何成员都可以支付一次：发票不能支付两次。",
+      "other": "整个群组只能用 Cashu 或 Lightning。"
+    },
+    "everyone": "向群组请求",
+    "everyoneHint": "群组中任何人都可以支付一次",
+    "formerMember": "一位前成员",
+    "formerMemberObject": "一位前成员",
+    "hint": {
+      "community": "付款只对你们两人密封：群组转发但不读取，不在线的人回来时会收到。所有人都能看到谁付给了谁、多少钱。",
+      "mesh": "付款只在你们两人之间进行；群组中的所有人都能看到谁付给了谁、多少钱。"
+    },
+    "listSeparator": "、",
+    "sendUnavailable": "向群组的请求由一位成员支付；要付款给某人，请选择对方",
+    "status": {
+      "claimedPaid": "{{names}} 已支付 · 等待 {{to}} 的钱包",
+      "closed": "已关闭",
+      "paid": "已支付",
+      "paidBy": "由 {{name}} 支付",
+      "saysPaid": "{{names}} 说已支付 · 等待 {{to}} 的钱包",
+      "sent": "已发送 · 等待 {{name}}",
+      "takenBack": "已撤回",
+      "waiting": "等待付款"
+    },
+    "testUsdt": "测试 USDT",
+    "theGroup": "群组",
+    "title": {
+      "asked": "{{to}} 向 {{from}} 发起请求",
+      "askedGroup": "{{to}} 向群组发起请求",
+      "paying": "{{from}} 正在付款给 {{to}}",
+      "sent": "{{from}} 向 {{to}} 付款"
+    },
+    "why": {
+      "noPayments": "对方的应用不支持群组付款（需要更新），或关闭了所有方式",
+      "noWay": "对方不接受你允许的任何付款方式",
+      "unreachable": "目前无法联系"
+    },
+    "you": "你",
+    "youObject": "你"
+  },
+  "invoice": {
+    "anyAmount": "任意金额",
+    "checking": "检查中…",
+    "confirmWhat": "{{amount}} sats（另加最多 {{fee}} 的手续费）",
+    "copied": "已复制",
+    "ecashRequest": "ecash 付款请求",
+    "ecashToken": "ecash 代币",
+    "expired": "已过期",
+    "expiresDays": "{{n}} 天后过期",
+    "expiresHours": "{{n}} 小时后过期",
+    "expiresMinutes": "{{n}} 分钟后过期",
+    "expiresSeconds": "{{n}} 秒后过期",
+    "hideQr": "隐藏二维码",
+    "label": "Lightning 发票",
+    "labelNetwork": "Lightning 发票 · {{network}}",
+    "lightningAddress": "Lightning 地址",
+    "methodOff": "{{method}} 在本聊天中已关闭。",
+    "mint": "铸币厂：{{mint}}",
+    "mintNotAdded": "你尚未添加此铸币厂，因此无法在这里兑换。",
+    "mints": "铸币厂：{{mints}}",
+    "noWallet": {
+      "mainnet": "真实资金：你没有可用于支付的 Mainnet Lightning 钱包",
+      "testnet": "测试资金：你没有可用于支付的 Testnet Lightning 钱包"
+    },
+    "onchainBitcoin": "链上 Bitcoin",
+    "openTitle": "在此设备上的 Lightning 钱包中打开",
+    "openWallet": "打开钱包",
+    "paid": "已付款 ✓",
+    "pay": "支付",
+    "payWithFee": "支付 {{amount}} + 最多 {{fee}} 手续费",
+    "paying": "付款中…",
+    "paysThrough": "经由 {{domain}} 支付",
+    "pendingAtMint": "铸币厂正在处理付款…",
+    "redeem": "兑换",
+    "redeemed": "已兑换 ✓",
+    "redeeming": "兑换中…"
+  },
   "mode": {
     "accept": "接受",
     "label": "与 {{name}} 的付款",
@@ -30,5 +288,60 @@
   "none": {
     "action": "选择此聊天接受的方式",
     "text": "此聊天中没有开启任何付款方式。"
+  },
+  "payWith": {
+    "card": "Lightning 卡",
+    "label": "付款方式"
+  },
+  "review": {
+    "approve": "批准付款",
+    "check": "检查现有付款",
+    "destination": "目的地",
+    "details": "付款详情",
+    "error": {
+      "update": "无法更新此付款。请查看其已保存的状态。"
+    },
+    "expires": "过期时间",
+    "fee": "手续费 / 上限",
+    "feePerGas": "每单位 gas 的最高 / 优先费用（wei）",
+    "gasLimit": "最大 gas / 你的上限",
+    "gasNonce": "Gas 上限 / nonce",
+    "label": "付款审核",
+    "money": {
+      "mainnet": "真实资金：你确认后就会离开你的钱包。",
+      "testnet": "测试资金：这些币在测试网络之外毫无价值。"
+    },
+    "note": {
+      "arkReal": "真实比特币。Ark 确认在链下完成。",
+      "arkTest": "仅限测试资金。Ark 确认在链下完成。",
+      "bark": "通过 Second 的 Ark 服务器在链下发送。只能向同一服务器的地址付款。",
+      "bitcoin": "一笔链上交易，完全按照此次审核签名。一次确认后结算；检查它绝不会再发送一笔。",
+      "cashu": "所选铸币所持有支撑资金。确认需要在该铸币所兑换代币。",
+      "fedimint": "此联邦的 ecash 票据会交给你的联系人：在对方兑换之前，它们就是这笔钱。如果对方一直不兑换，你可以取回（一周后也会自动退回）。",
+      "sparkReal": "真实比特币。Spark 到 Spark，链下完成：Spark 运营方签署转账后即为最终结果。检查它绝不会再发送一笔。",
+      "sparkTest": "Regtest：测试 sats，毫无价值。Spark 到 Spark，链下完成：Spark 运营方签署转账后即为最终结果。检查它绝不会再发送一笔。",
+      "usdt": "Gas 以 ETH 单独支付，可能超过小额付款的金额。{{blocks}} 个区块后确认。",
+      "usdtTest": "本地测试代币，并非 Tether 发行的 USDT。Gas 以 ETH 单独支付，可能超过小额付款的金额。{{blocks}} 个区块后确认。"
+    },
+    "payee": "收款人",
+    "provider": "提供方",
+    "states": {
+      "cancelled": "已取消",
+      "confirmed": "已确认",
+      "failed": "失败",
+      "pending": "待处理",
+      "settled": "已结算",
+      "submitted": "已提交",
+      "unknown": "未知"
+    },
+    "status": "状态",
+    "title": {
+      "pending": "查看付款",
+      "status": "付款状态"
+    },
+    "tokenChain": "代币 / 链",
+    "tokenChainValue": "{{token}} · {{chain}} · {{decimals}} 位小数",
+    "total": "总计",
+    "transaction": "交易"
   }
 }

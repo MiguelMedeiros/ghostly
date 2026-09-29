@@ -2,6 +2,7 @@ import { TRANSPORTS, type IdentityTimelineEntry, type LiveAttempt, type PairedTr
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
 import { transportName } from "./connection";
+import { englishT, type Translate } from "../locales/translate";
 
 export type { TransportEntry, TransportEvent };
 
@@ -20,100 +21,108 @@ export function shortReason(reason: string): string {
 }
 
 /** How long a run of changes took, as people say it. */
-function span(ms: number): string {
+function span(ms: number, tr: Translate): string {
   const minutes = Math.max(1, Math.round(ms / 60_000));
-  return minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
+  return minutes < 60 ? tr("connection.duration.minutes", { n: minutes }) : tr("connection.duration.hours", { n: Math.round(minutes / 60) });
+}
+
+/** "Couldn't switch to Iroh: it timed out": the head of a failed switch, with the engine's reason when there is one. */
+function couldNotSwitch(target: PairedTransport | undefined, reason: string | undefined, tr: Translate): string {
+  const head = target ? tr("connection.line.failTo", { target: name(target) }) : tr("connection.line.failAny");
+  const short = reason ? shortReason(reason) : "";
+  return short ? tr("connection.line.withReason", { text: head, reason: short }) : head;
 }
 
 /** The line a transport change reads as in the chat. `contact`: the name the chat shows for the other side. */
-export function transportLineText(entry: TransportEntry, contact: string): string {
-  const t = name(entry.transport);
+export function transportLineText(entry: TransportEntry, contact: string, tr: Translate = englishT): string {
+  const transport = name(entry.transport);
   switch (entry.kind) {
-    case "connected": return `Connected over ${t}`;
+    case "connected": return tr("connection.line.connected", { transport });
     case "back":
-      if (entry.downMs === undefined) return `Back live over ${t}`;
-      return `Reconnected over ${t} after ${lasting(entry.downMs)}${entry.from ? ` · ${name(entry.from)} dropped` : ""}`;
+      if (entry.downMs === undefined) return tr("connection.line.backLive", { transport });
+      return entry.from ? tr("connection.line.reconnectedDropped", { transport, time: lasting(entry.downMs, tr), from: name(entry.from) })
+        : tr("connection.line.reconnected", { transport, time: lasting(entry.downMs, tr) });
     case "chose": {
-      const who = entry.cause === "contact" ? contact : "You";
-      if (entry.target) return `${who} chose ${name(entry.target)}`;
-      const back = entry.cause === "contact" ? `${contact} went back to automatic` : "Back to automatic";
-      return entry.from && entry.transport ? `${back} · now on ${t}` : back;
+      if (entry.target) return entry.cause === "contact" ? tr("connection.line.contactChose", { contact, transport: name(entry.target) }) : tr("connection.line.youChose", { transport: name(entry.target) });
+      const now = !!(entry.from && entry.transport);
+      if (entry.cause === "contact") return now ? tr("connection.line.contactBackAutoNow", { contact, transport }) : tr("connection.line.contactBackAuto", { contact });
+      return now ? tr("connection.line.backAutoNow", { transport }) : tr("connection.line.backAuto");
     }
     case "switched":
-      if (entry.cause === "you") return `You switched to ${t}`;
-      if (entry.cause === "contact") return `${contact} switched to ${t}`;
-      if (entry.cause === "dropped") return `Switched to ${t}: ${name(entry.from)} dropped`;
-      if (entry.relayed) return `Moved to ${t}, through a relay`;
-      return native(entry.transport) ? `Moved to ${t}, a direct path was found` : `Moved to ${t}`;
+      if (entry.cause === "you") return tr("connection.line.youSwitched", { transport });
+      if (entry.cause === "contact") return tr("connection.line.contactSwitched", { contact, transport });
+      if (entry.cause === "dropped") return tr("connection.line.switchedDropped", { transport, from: name(entry.from) });
+      if (entry.relayed) return tr("connection.line.movedRelay", { transport });
+      return native(entry.transport) ? tr("connection.line.movedDirect", { transport }) : tr("connection.line.moved", { transport });
     case "failed": {
-      const reason = entry.reason ? shortReason(entry.reason) : "";
-      return `Couldn't switch${entry.target ? ` to ${name(entry.target)}` : " transport"}${reason ? `: ${reason}` : ""}.${entry.transport ? ` Still on ${t}` : ""}`;
+      const text = couldNotSwitch(entry.target, entry.reason, tr);
+      return entry.transport ? tr("connection.line.failedStill", { text, transport }) : tr("connection.line.failed", { text });
     }
     case "lost":
-      if (entry.fallback === "dht-only") return entry.cause === "you" ? "You turned on DHT only · no live connection" : "DHT only · no live connection";
-      if (entry.fallback === "dht") return "Live connection lost · texts go through the DHT";
-      if (entry.fallback === "hold") return `Live connection lost · messages wait for ${contact}`;
-      return "Live connection lost";
+      if (entry.fallback === "dht-only") return entry.cause === "you" ? tr("connection.line.youDhtOnlyOn") : tr("connection.line.dhtOnlyNoLive");
+      if (entry.fallback === "dht") return tr("connection.line.lostDht");
+      if (entry.fallback === "hold") return tr("connection.line.lostHold", { contact });
+      return tr("connection.line.lost");
     // Worded as WISP 400 § "Pairing progress and transport rows" has them.
-    case "dht-only": return entry.cause === "contact" ? `${contact} switched to DHT only` : "You switched to DHT only";
-    case "dht-left": return "Left DHT only · connecting live";
+    case "dht-only": return entry.cause === "contact" ? tr("connection.line.contactDhtOnly", { contact }) : tr("connection.line.youDhtOnly");
+    case "dht-left": return tr("connection.line.dhtLeft");
     case "flapping": {
-      const count = entry.count ?? 0;
-      const times = `Reconnected ${count} ${count === 1 ? "time" : "times"} in ${span(entry.at - (entry.since ?? entry.at))}`;
-      return entry.live ? `${times} · on ${t}` : `${times} · not live now`;
+      const count = entry.count ?? 0, within = span(entry.at - (entry.since ?? entry.at), tr);
+      const times = count === 1 ? tr("connection.line.reconnectedOnce", { span: within }) : tr("connection.line.reconnectedTimes", { count, span: within });
+      return entry.live ? tr("connection.line.flapLive", { text: times, transport }) : tr("connection.line.flapNotLive", { text: times });
     }
   }
 }
 
 /** What tapping a line shows: the transport, since when, why, and the round trip if known. */
-export function transportLineDetails(entry: TransportEntry, contact: string, format: (at: number) => string): { label: string; value: string }[] {
+export function transportLineDetails(entry: TransportEntry, contact: string, format: (at: number) => string, tr: Translate = englishT): { label: string; value: string }[] {
   const rows: { label: string; value: string }[] = [];
   const live = entry.kind === "flapping" ? entry.live : entry.kind !== "lost" && entry.kind !== "dht-only" && entry.kind !== "dht-left" && entry.kind !== "failed" && !!entry.transport;
-  rows.push({ label: "Transport", value: live ? `${name(entry.transport)}${entry.relayed ? " · relayed" : ""}` : entry.kind === "dht-only" ? "DHT only" : "None live" });
-  rows.push({ label: "Since", value: format(entry.at) });
-  rows.push({ label: "Why", value: transportLineWhy(entry, contact, format) });
-  if (entry.kind === "back" && entry.downMs !== undefined) rows.push({ label: "Not live for", value: lasting(entry.downMs) });
-  if (entry.rttMs !== undefined && live) rows.push({ label: "Round trip", value: `${entry.rttMs} ms` });
+  rows.push({ label: tr("connection.detail.transport"), value: live ? (entry.relayed ? tr("connection.detail.relayedOn", { transport: name(entry.transport) }) : name(entry.transport))
+    : entry.kind === "dht-only" ? tr("connection.dhtOnly") : tr("connection.detail.noneLive") });
+  rows.push({ label: tr("connection.detail.since"), value: format(entry.at) });
+  rows.push({ label: tr("connection.detail.why"), value: transportLineWhy(entry, contact, format, tr) });
+  if (entry.kind === "back" && entry.downMs !== undefined) rows.push({ label: tr("connection.detail.notLiveFor"), value: lasting(entry.downMs, tr) });
+  if (entry.rttMs !== undefined && live) rows.push({ label: tr("connection.detail.roundTrip"), value: tr("connection.ms", { ms: entry.rttMs }) });
   return rows;
 }
 
-const t = (entry: TransportEntry) => name(entry.transport);
-
-function transportLineWhy(entry: TransportEntry, contact: string, format: (at: number) => string): string {
+function transportLineWhy(entry: TransportEntry, contact: string, format: (at: number) => string, tr: Translate): string {
+  const transport = name(entry.transport), from = name(entry.from);
+  const join = (...parts: (string | false | undefined)[]) => parts.filter(Boolean).join(" ");
   switch (entry.kind) {
-    case "connected": return entry.transport === "webrtc/1"
-      ? "The chat opened its live connection. A first pairing always uses WebRTC."
-      : "The chat opened its live connection on the transport both apps rank first.";
+    case "connected": return entry.transport === "webrtc/1" ? tr("connection.why.connectedWebrtc") : tr("connection.why.connected");
     case "back": {
-      if (entry.downMs === undefined) return "DHT only ended, and the live connection came back.";
-      const meanwhile = entry.fallback === "dht" ? " Texts went through the DHT meanwhile."
-        : entry.fallback === "hold" ? ` What you sent waited in your storage for ${contact}.` : "";
-      return `The live connection${entry.from ? ` over ${name(entry.from)}` : ""} ended at ${format(entry.at - entry.downMs)} and was down for ${lasting(entry.downMs)}.${meanwhile}${entry.from ? ` It came back over ${t(entry)}.` : ""}`;
+      if (entry.downMs === undefined) return tr("connection.why.backDhtEnded");
+      const when = { time: format(entry.at - entry.downMs), duration: lasting(entry.downMs, tr) };
+      return join(entry.from ? tr("connection.why.backOver", { ...when, from }) : tr("connection.why.back", when),
+        entry.fallback === "dht" && tr("connection.why.meanwhileDht"), entry.fallback === "hold" && tr("connection.why.meanwhileHold", { contact }),
+        !!entry.from && tr("connection.why.cameBack", { transport }));
     }
     case "chose": {
-      const who = entry.cause === "contact" ? `${contact} chose` : "You chose";
-      if (entry.target) return entry.transport === entry.target ? `${who} ${name(entry.target)} for this chat. It was already on it.`
-        : `${who} ${name(entry.target)} for this chat. It moves there when both apps can reach each other over it.`;
-      const back = entry.cause === "contact" ? `${contact} went back to automatic` : "You went back to automatic";
-      return `${back}: the apps choose the transport again.${entry.from && entry.transport ? ` The chat moved from ${name(entry.from)} to ${t(entry)}.` : ""}`;
+      if (entry.target) {
+        const target = name(entry.target), already = entry.transport === entry.target;
+        if (entry.cause === "contact") return already ? tr("connection.why.contactChoseAlready", { contact, transport: target }) : tr("connection.why.contactChoseMoves", { contact, transport: target });
+        return already ? tr("connection.why.youChoseAlready", { transport: target }) : tr("connection.why.youChoseMoves", { transport: target });
+      }
+      return join(entry.cause === "contact" ? tr("connection.why.contactBackAuto", { contact }) : tr("connection.why.youBackAuto"),
+        !!(entry.from && entry.transport) && tr("connection.why.movedFromTo", { from, transport }));
     }
     case "switched":
-      if (entry.cause === "you") return `You chose ${name(entry.transport)} for this chat. The session moved from ${name(entry.from)} without reconnecting.`;
-      if (entry.cause === "contact") return `${contact} chose ${name(entry.transport)} for this chat. The session moved from ${name(entry.from)} without reconnecting.`;
-      if (entry.cause === "dropped") return `${name(entry.from)} dropped, and the chat came back over ${name(entry.transport)}.`;
-      if (entry.relayed) return `Both apps allow ${name(entry.transport)} and moved there by themselves, from ${name(entry.from)}. It goes through a relay, which sees when you talk, never what you say.`;
-      return `Both apps allow ${name(entry.transport)} and moved there by themselves, from ${name(entry.from)}.`;
-    case "failed": return `${entry.reason ?? "The new transport did not connect."}${entry.transport ? ` The chat stayed on ${name(entry.transport)}.` : ""}`;
+      if (entry.cause === "you") return tr("connection.why.youSwitched", { transport, from });
+      if (entry.cause === "contact") return tr("connection.why.contactSwitched", { contact, transport, from });
+      if (entry.cause === "dropped") return tr("connection.why.dropped", { transport, from });
+      if (entry.relayed) return tr("connection.why.autoRelayed", { transport, from });
+      return tr("connection.why.auto", { transport, from });
+    case "failed": return join(entry.reason ?? tr("connection.why.failedDefault"), !!entry.transport && tr("connection.why.stayedOn", { transport }));
     case "lost":
-      if (entry.fallback === "dht-only") return "DHT only is on: short texts go through the DHT, with no live connection.";
-      if (entry.fallback === "dht") return `The live connection over ${name(entry.from)} ended. Short texts go through the DHT until it is back.`;
-      if (entry.fallback === "hold") return `The live connection over ${name(entry.from)} ended. What you send waits in your storage for ${contact}.`;
-      return `The live connection over ${name(entry.from)} ended. Ghostly reconnects when ${contact} is reachable.`;
-    case "dht-only": return `${entry.cause === "contact" ? `${contact} chose` : "You chose"} DHT only: short texts go through the DHT, with no live connection, until you both leave it.`;
-    case "dht-left": return entry.transport
-      ? `DHT only ended for both of you. You chose ${name(entry.transport)} for this chat; the live connection comes back when both apps can reach each other.`
-      : "DHT only ended for both of you. The apps choose the transport again; the live connection comes back when both apps can reach each other.";
-    case "flapping": return `The live connection dropped and came back ${entry.count ?? 0} times between ${format(entry.since ?? entry.at)} and ${format(entry.at)}.`;
+      if (entry.fallback === "dht-only") return tr("connection.why.lostDhtOnly");
+      if (entry.fallback === "dht") return tr("connection.why.lostDht", { from });
+      if (entry.fallback === "hold") return tr("connection.why.lostHold", { from, contact });
+      return tr("connection.why.lost", { from, contact });
+    case "dht-only": return entry.cause === "contact" ? tr("connection.why.contactDhtOnly", { contact }) : tr("connection.why.youDhtOnly");
+    case "dht-left": return entry.transport ? tr("connection.why.dhtLeftChosen", { transport }) : tr("connection.why.dhtLeftAuto");
+    case "flapping": return tr("connection.why.flapping", { count: entry.count ?? 0, from: format(entry.since ?? entry.at), to: format(entry.at) });
   }
 }
 
@@ -130,22 +139,22 @@ export interface TransportOption {
 }
 
 /** Why this app lacks a transport, and how to get it where there is a way. */
-function missing(transport: PairedTransport): string {
-  if (transport === "webrtc/1") return "This app has no WebRTC";
-  if (transport === "hyperdht/1") return "HyperDHT needs Ghostly Desktop, or a HyperDHT relay in Settings";
-  return `${name(transport)} needs Ghostly Desktop`;
+function missing(transport: PairedTransport, tr: Translate): string {
+  if (transport === "webrtc/1") return tr("connection.option.noWebrtc");
+  if (transport === "hyperdht/1") return tr("connection.option.hyperdhtNeeds");
+  return tr("connection.option.needsDesktop", { transport: name(transport) });
 }
 
 /**
  * What the chat's Connection menu offers: transports this app runs and the contact's app supports on this link
  * (per its last word; unknown before a first session, then only this app's side is known). Never one this app lacks.
  */
-export function transportOptions(link: Pick<LinkView, "availableTransports" | "peerTransports" | "transportErrors" | "relayedTransports">): TransportOption[] {
+export function transportOptions(link: Pick<LinkView, "availableTransports" | "peerTransports" | "transportErrors" | "relayedTransports">, tr: Translate = englishT): TransportOption[] {
   const mine = link.availableTransports ?? [], theirs = link.peerTransports;
   return MENU_ORDER.map(transport => {
     const error = link.transportErrors?.[transport];
-    if (!mine.includes(transport)) return { transport, available: false, reason: error ?? missing(transport) };
-    if (theirs && !theirs.includes(transport)) return { transport, available: false, reason: `Your contact's app doesn't support ${name(transport)}` };
+    if (!mine.includes(transport)) return { transport, available: false, reason: error ?? missing(transport, tr) };
+    if (theirs && !theirs.includes(transport)) return { transport, available: false, reason: tr("connection.option.contactLacks", { transport: name(transport) }) };
     return { transport, available: true, ...(link.relayedTransports?.includes(transport) ? { relayed: true } : {}) };
   });
 }
@@ -187,67 +196,67 @@ export function mergeTimeline<M extends { timestamp: number }>(messages: readonl
 }
 
 /** How long, to the second when short: the connection history is about exact moments. */
-function duration(ms: number): string {
-  return ms < 60_000 ? `${Math.max(1, Math.round(ms / 1_000))} s` : lasting(ms);
+function duration(ms: number, tr: Translate): string {
+  return ms < 60_000 ? tr("connection.duration.seconds", { n: Math.max(1, Math.round(ms / 1_000)) }) : lasting(ms, tr);
 }
 
 /** One event of the connection panel's history, in a line. */
-export function transportEventText(event: TransportEvent, contact: string): string {
-  const t = name(event.transport), rtt = event.rttMs !== undefined ? ` · ${event.rttMs} ms` : "";
+export function transportEventText(event: TransportEvent, contact: string, tr: Translate = englishT): string {
+  const transport = name(event.transport), rtt = event.rttMs !== undefined ? tr("connection.ms", { ms: event.rttMs }) : undefined;
+  const parts = (...items: (string | false | undefined)[]) => items.filter(Boolean).join(" · ");
   switch (event.kind) {
     case "live": {
-      const how = event.started ? " · this app started" : event.downMs !== undefined ? ` · after ${duration(event.downMs)} down` : "";
-      return `Live over ${t}${event.from ? ` (was ${name(event.from)})` : ""}${how}${rtt}`;
+      const how = event.started ? tr("connection.event.started") : event.downMs !== undefined ? tr("connection.event.afterDown", { duration: duration(event.downMs, tr) }) : undefined;
+      return parts(event.from ? tr("connection.event.liveFrom", { transport, from: name(event.from) }) : tr("connection.event.live", { transport }), how, rtt);
     }
     case "down": {
-      const meanwhile = event.text === "dht" ? " · texts go through the DHT" : event.text === "hold" ? ` · messages wait for ${contact}` : "";
+      const meanwhile = event.text === "dht" ? tr("connection.event.textsDht") : event.text === "hold" ? tr("connection.event.messagesWait", { contact }) : undefined;
       // Off live to wait for a chosen transport (Fallback off), not a drop.
-      if (event.target) return `Waiting for ${name(event.target)}${event.from ? ` · off ${name(event.from)}` : ""}${meanwhile}`;
-      return `Live connection lost${event.from ? ` (${name(event.from)})` : ""}${meanwhile}${event.reason ? ` · ${event.reason}` : ""}`;
+      if (event.target) return parts(tr("connection.waitingFor", { transport: name(event.target) }), !!event.from && tr("connection.event.offFrom", { from: name(event.from) }), meanwhile);
+      return parts(event.from ? tr("connection.event.lostFrom", { from: name(event.from) }) : tr("connection.line.lost"), meanwhile, event.reason);
     }
     case "switched": {
-      const why = event.cause === "you" ? "your choice" : event.cause === "contact" ? `${contact}'s choice` : event.cause === "dropped" ? "after a drop" : "automatic";
-      return `Moved from ${name(event.from)} to ${t} · ${why}${rtt}`;
+      const why = event.cause === "you" ? tr("connection.event.yourChoice") : event.cause === "contact" ? tr("connection.event.contactsChoice", { contact })
+        : event.cause === "dropped" ? tr("connection.event.afterDrop") : tr("connection.event.automatic");
+      return parts(tr("connection.event.moved", { from: name(event.from), transport }), why, rtt);
     }
-    case "chose": {
-      const who = event.cause === "contact" ? contact : "You";
-      return event.target ? `${who} chose ${name(event.target)}` : event.cause === "contact" ? `${contact} went back to automatic` : "You went back to automatic";
-    }
-    case "failed": {
-      const reason = event.reason ? shortReason(event.reason) : "";
-      return `Couldn't switch${event.target ? ` to ${name(event.target)}` : " transport"}${reason ? `: ${reason}` : ""}`;
-    }
+    case "chose":
+      if (event.target) return event.cause === "contact" ? tr("connection.line.contactChose", { contact, transport: name(event.target) }) : tr("connection.line.youChose", { transport: name(event.target) });
+      return event.cause === "contact" ? tr("connection.line.contactBackAuto", { contact }) : tr("connection.event.youBackAuto");
+    case "failed": return couldNotSwitch(event.target, event.reason, tr);
     case "attempt":
-      if (event.target) return `Waiting for ${name(event.target)}${event.reason ? ` · last attempt: ${shortReason(event.reason)}` : ""}`;
-      return `Connection attempt failed${event.reason ? `: ${shortReason(event.reason)}` : ""}`;
-    case "dht-only": return event.cause === "contact" ? `${contact} switched to DHT only` : "You switched to DHT only";
-    case "dht-left": return `Left DHT only${event.transport ? ` · set to ${t}` : " · automatic"}`;
+      if (event.target) return parts(tr("connection.waitingFor", { transport: name(event.target) }), !!event.reason && tr("connection.event.lastAttempt", { reason: shortReason(event.reason) }));
+      return event.reason ? tr("connection.line.withReason", { text: tr("connection.event.attemptFailed"), reason: shortReason(event.reason) }) : tr("connection.event.attemptFailed");
+    case "dht-only": return event.cause === "contact" ? tr("connection.line.contactDhtOnly", { contact }) : tr("connection.line.youDhtOnly");
+    case "dht-left": return parts(tr("connection.event.dhtLeft"), event.transport ? tr("connection.event.setTo", { transport }) : tr("connection.event.automatic"));
   }
 }
+
+const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /**
  * What a chat waits for, said for people (WISP 100, "A chosen transport not reached yet"): the header's label when
  * nothing else carries the chat, why in a sentence, where the chat is meanwhile, and whether Automatic is the way out
  * (the contact's app lacks it). `contact`: the name the chat shows for the other side.
  */
-export function transportWaitText(wait: TransportWait, contact: string, format: (at: number) => string = at => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })):
+export function transportWaitText(wait: TransportWait, contact: string, format: (at: number) => string = clock, tr: Translate = englishT):
   { label: string; why: string; meanwhile: string; automatic: boolean } {
-  const t = name(wait.transport), their = `${contact}'s`;
-  const who = wait.by === "you" ? `You chose ${t}` : wait.by === "contact" ? `${contact} chose ${t}` : `Fallback is off, so only ${t} may carry this chat`;
-  const next = wait.retryAt ? ` Trying again at ${format(wait.retryAt)}.` : " It is tried again by itself.";
+  const transport = name(wait.transport);
+  const who = wait.by === "you" ? tr("connection.line.youChose", { transport }) : wait.by === "contact" ? tr("connection.line.contactChose", { contact, transport }) : tr("connection.wait.fallbackOff", { transport });
+  const next = wait.retryAt ? tr("connection.wait.retryAt", { time: format(wait.retryAt) }) : tr("connection.wait.retryAuto");
   const reason = {
-    "unknown": `${their} app hasn't said yet whether it has ${t}.`,
-    "starting": `${their} ${t} is starting.`,
-    "connecting": `Connecting over ${t}…`,
-    "unreachable": `${wait.error ? `The last attempt failed: ${shortReason(wait.error)}` : "The last attempt didn't connect"}.${next}`,
-    "waiting": `It connects when ${contact} is reachable over it.`,
-    "contact-lacks": `${their} app doesn't have ${t}.`,
-    "app-lacks": `This app isn't running ${t}${wait.by === "contact" ? "" : " right now"}.`,
-  }[wait.reason];
+    "unknown": () => tr("connection.wait.unknown", { contact, transport }),
+    "starting": () => tr("connection.wait.starting", { contact, transport }),
+    "connecting": () => tr("connection.wait.connecting", { transport }),
+    "unreachable": () => `${wait.error ? tr("connection.wait.failedWith", { reason: shortReason(wait.error) }) : tr("connection.wait.failed")} ${next}`,
+    "waiting": () => tr("connection.wait.waiting", { contact }),
+    "contact-lacks": () => tr("connection.wait.contactLacks", { contact, transport }),
+    "app-lacks": () => wait.by === "contact" ? tr("connection.wait.appLacks", { transport }) : tr("connection.wait.appLacksNow", { transport }),
+  }[wait.reason]();
   return {
-    label: `Waiting for ${t}`,
-    why: `${who}. ${reason}`,
-    meanwhile: wait.live ? `The chat stays on ${name(wait.live)} meanwhile.` : "Short texts go through the DHT meanwhile; the rest waits.",
+    label: tr("connection.waitingFor", { transport }),
+    why: tr("connection.wait.why", { who, reason }),
+    meanwhile: wait.live ? tr("connection.wait.stays", { transport: name(wait.live) }) : tr("connection.wait.dht"),
     automatic: wait.reason === "contact-lacks" || (wait.reason === "app-lacks" && wait.by !== "contact"),
   };
 }
@@ -258,16 +267,16 @@ export function transportWaitText(wait: TransportWait, contact: string, format: 
  * app dials, and what of its attempts reached this one. Nothing when there is nothing to say yet.
  */
 export function liveAttemptText(attempt: LiveAttempt | undefined, dialer: "you" | "contact" | undefined, contact: string,
-  format: (at: number) => string = at => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })): { label: string; lines: string[] } | undefined {
+  format: (at: number) => string = clock, tr: Translate = englishT): { label: string; lines: string[] } | undefined {
   if (!attempt && dialer !== "contact") return undefined;
   const lines: string[] = [];
-  if (dialer === "contact") lines.push(`${contact}'s app connects to this one: this app answers.`);
-  if (!attempt) return { label: "Not live yet", lines: [...lines, `No attempt of ${contact}'s has reached this app yet.`] };
-  if (attempt.side === "answered") lines.push(`${contact}'s last attempt reached this app and did not connect:`);
-  for (const f of attempt.failed) lines.push(`${name(f.transport)}: ${shortReason(f.error)}.`);
-  if (!attempt.failed.length && attempt.reason) lines.push(`${shortReason(attempt.reason)}.`);
-  if (attempt.retryAt) lines.push(`Trying again at about ${format(attempt.retryAt)}.`);
-  return { label: `Last attempt at ${format(attempt.at)}`, lines };
+  if (dialer === "contact") lines.push(tr("connection.attempt.contactDials", { contact }));
+  if (!attempt) return { label: tr("connection.attempt.notLiveYet"), lines: [...lines, tr("connection.attempt.none", { contact })] };
+  if (attempt.side === "answered") lines.push(tr("connection.attempt.answered", { contact }));
+  for (const f of attempt.failed) lines.push(tr("connection.attempt.failure", { transport: name(f.transport), reason: shortReason(f.error) }));
+  if (!attempt.failed.length && attempt.reason) lines.push(tr("connection.attempt.reason", { reason: shortReason(attempt.reason) }));
+  if (attempt.retryAt) lines.push(tr("connection.attempt.retryAt", { time: format(attempt.retryAt) }));
+  return { label: tr("connection.attempt.label", { time: format(attempt.at) }), lines };
 }
 
 /** The live transport of a chat: on it, and nothing moving. */
@@ -277,13 +286,13 @@ export function liveTransport(link?: Pick<LinkView, "dataLink" | "pairing" | "de
 }
 
 /** How long something has lasted, as a person says it: "less than a minute", "12 min", "3 h", "2 days". */
-export function lasting(ms: number): string {
+export function lasting(ms: number, tr: Translate = englishT): string {
   const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) return "less than a minute";
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 1) return tr("connection.duration.lessThanMinute");
+  if (minutes < 60) return tr("connection.duration.minutes", { n: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} h`;
-  return `${Math.floor(hours / 24)} days`;
+  if (hours < 48) return tr("connection.duration.hours", { n: hours });
+  return tr("connection.duration.days", { n: Math.floor(hours / 24) });
 }
 
 /** What a chat's live connection is, at a glance: the tooltip, the ⋮ row and the popover all read from this. */
@@ -305,25 +314,24 @@ export interface ConnectionSummary {
   detail: string;
 }
 
-export function connectionSummary(link: LinkView | undefined, now: number, contact = "Your contact"): ConnectionSummary | undefined {
+export function connectionSummary(link: LinkView | undefined, now: number, contact?: string, tr: Translate = englishT): ConnectionSummary | undefined {
   const transport = liveTransport(link);
   if (!link || !transport) return undefined;
   const t = name(transport), chosen = link.transportAutomatic === false || (link.transportAutomatic === undefined && link.preferredTransport !== undefined);
   const cause = link.transportLive?.cause, only = (link.availableTransports ?? []).length === 1;
   const relayed = link.transportRelayed;
-  const [whyShort, why] = only ? ["the only one here", `${t} is the only transport this app runs.`]
-    : cause === "contact" ? [`${contact === "Your contact" ? "your contact's" : `${contact}'s`} choice`, `${contact} chose ${t} for this chat.`]
-    : chosen && link.preferredTransport === transport ? ["your choice", `You chose ${t} for this chat.`]
-    : chosen ? ["fallback", `You chose ${name(link.preferredTransport)} for this chat; it is not available now, so the chat uses ${t}.`]
-    : cause === "dropped" ? ["automatic, after a drop", `Automatic: the chat came back over ${t} after the previous transport dropped.`]
-    : relayed ? ["no direct path", `Automatic: a direct connection could not be made, so the chat goes through ${t}'s relay.`]
-    : ["automatic", `Automatic: both apps rank ${t} first${transport === "webrtc/1" ? ", and a first pairing always uses WebRTC" : ""}.`];
+  const [whyShort, why] = only ? [tr("connection.summary.onlyShort"), tr("connection.summary.only", { transport: t })]
+    : cause === "contact" ? [contact ? tr("connection.event.contactsChoice", { contact }) : tr("connection.summary.yourContactsChoice"), tr("connection.summary.contactChose", { contact: contact ?? tr("pairing.contact"), transport: t })]
+    : chosen && link.preferredTransport === transport ? [tr("connection.event.yourChoice"), tr("connection.summary.youChose", { transport: t })]
+    : chosen ? [tr("connection.summary.fallbackShort"), tr("connection.summary.fallback", { preferred: name(link.preferredTransport), transport: t })]
+    : cause === "dropped" ? [tr("connection.summary.afterDropShort"), tr("connection.summary.afterDrop", { transport: t })]
+    : relayed ? [tr("connection.summary.noDirectShort"), tr("connection.summary.noDirect", { transport: t })]
+    : [tr("connection.event.automatic"), transport === "webrtc/1" ? tr("connection.summary.automaticWebrtc") : tr("connection.summary.automatic", { transport: t })];
   const since = link.transportLive?.since;
-  const rtt = link.transportRttMs !== undefined ? [`${link.transportRttMs} ms`] : [];
-  const path = relayed ? ["relayed"] : [];
-  const parts = [...path, ...rtt, ...(since !== undefined ? [`live for ${lasting(now - since)}`] : []), whyShort];
+  const rtt = link.transportRttMs !== undefined ? [tr("connection.ms", { ms: link.transportRttMs })] : [];
+  const path = relayed ? [tr("connection.relayed")] : [];
+  const parts = [...path, ...rtt, ...(since !== undefined ? [tr("connection.summary.liveFor", { duration: lasting(now - since, tr) })] : []), whyShort];
   return { transport, name: t, rttMs: link.transportRttMs, since, relays: relayed?.relays, whyShort,
-    why: relayed ? `${why} Relayed: ${relayed.relays.join(" and ") || "a relay"} sees which devices talk and when, never what they say.` : why,
+    why: relayed ? tr("connection.summary.relayedWhy", { why, relays: relayed.relays.join(tr("connection.summary.relaysJoin")) || tr("connection.summary.aRelay") }) : why,
     line: [t, ...parts].join(" · "), detail: parts.join(" · "), short: [t, ...path, ...rtt, whyShort].join(" · ") };
 }
-

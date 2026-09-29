@@ -946,6 +946,7 @@
     "src/lib/webrtc.ts": ["transport.webrtc","calls.*"],
     "src/lib/{mp3Encode,voiceMp3,voiceMp3.worker}.ts": ["files.download"],
     "src/lib/{voiceRecorder,voicePlayback}.ts": ["files.voice.*","files.audio.*"],
+    "src/locales/translate.ts": ["*"],
     "src/locales/{ar,es,fr,it,ja,pt,zh}/**": ["app.i18n"],
     "src/locales/{en/**,index.ts}": ["*"],
     "src/main.tsx": ["desktop.*","app.i18n"],
