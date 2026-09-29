@@ -9,7 +9,7 @@ import { MAX_DNS_PACKET_BYTES, PacketTooLargeError, openRelayPayload, signRelayP
 import { DEFAULT_RELAYS, normalizeRelayUrl } from "./relay";
 
 /**
- * did:dht (the DIF method, https://did-dht.com): a W3C DID document written as DNS records into the
+ * did:dht (the DIF method, https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md): a W3C DID document written as DNS records into the
  * Pkarr packet of an Ed25519 key, the BEP44 mutable item Ghostly already publishes chats under. This
  * module maps a document to that packet and back (strictly: a malformed packet is an error, never a
  * guess) and resolves a did:dht through Pkarr relays. WISP 3xx-did-dht describes Ghostly's use.
