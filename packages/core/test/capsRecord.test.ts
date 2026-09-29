@@ -283,6 +283,53 @@ describe("capability record: publishing and reading", () => {
     await aSide.stop(); await bSide.stop();
   });
 
+  it("reads again when the record read is older than the revision an envelope named, a few times at most", async () => {
+    // A DHT read directly (Desktop, CLI: relay reads off) hands back the copy it already knows and looks the key up
+    // behind it, and the lookup that answers first may predate the publication. One read per named revision left the
+    // contact on the old record, with no Iroh or HyperDHT descriptors to dial, until an envelope minutes away.
+    vi.useFakeTimers();
+    const { link, a, b } = pair(), { packets, transport } = exchange();
+    const aCreds: PairingCredentials = { seedB64: a.seedB64, peerKey: b.pubKeyZ32 }, bCreds: PairingCredentials = { seedB64: b.seedB64, peerKey: a.pubKeyZ32 };
+    let aName = "Ada", stale: SignedPacket | undefined, staleReads = 0;
+    // The DHT as a direct reader sees it: the copy it had, for the next `staleReads` reads after a publication.
+    transport.publish.mockImplementation(async (identity: { pubKeyZ32: string }, records: GhostRecord[]) => {
+      stale = packets.get(identity.pubKeyZ32);
+      packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: 0n, records });
+    });
+    transport.resolve.mockImplementation(async (key: string) => {
+      if (stale?.pubKeyZ32 === key && staleReads > 0) { staleReads--; return stale; }
+      return packets.get(key) ?? null;
+    });
+    const aSide = new CapsExchange({ params: link.mine, credentials: aCreds, transport, local: () => content({ name: aName }), save: async () => {} });
+    const changed = vi.fn();
+    const bSide = new CapsExchange({ params: link.invite, credentials: bCreds, transport, local: () => content({ name: "Bob" }), save: async () => {}, changed });
+    aSide.start(); await vi.advanceTimersByTimeAsync(0);
+    bSide.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(bSide.peer).toMatchObject({ rev: 1, name: "Ada" });
+
+    aName = "Ada L."; await vi.advanceTimersByTimeAsync(CAPS_PUBLISH_SPACING_MS); await aSide.update();
+    staleReads = 2;
+    const reads = () => transport.resolve.mock.calls.filter(([key]) => key === a.pubKeyZ32 || key === aSide.address).length;
+    const before = reads();
+    bSide.peerRev(2); await vi.advanceTimersByTimeAsync(0);
+    expect(bSide.peer, "the first read found the old copy").toMatchObject({ rev: 1 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(bSide.peer, "read again until the named revision came").toMatchObject({ rev: 2, name: "Ada L." });
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ rev: 2 }));
+    const settled = reads();
+    expect(settled - before).toBe(3);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(reads(), "nothing more once it has it").toBe(settled);
+
+    // A revision named that never shows up: a few reads, then the next envelope's word.
+    aName = "Ada Lovelace"; await vi.advanceTimersByTimeAsync(CAPS_PUBLISH_SPACING_MS); await aSide.update();
+    staleReads = Infinity;
+    bSide.peerRev(3); await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(bSide.peer).toMatchObject({ rev: 2 });
+    expect(reads() - settled, "one read and four more").toBe(5);
+    await aSide.stop(); await bSide.stop();
+  });
+
   it("merges reads asked for close together", async () => {
     vi.useFakeTimers();
     const { link, a, b } = pair(), { transport } = exchange();
