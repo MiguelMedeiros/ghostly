@@ -94,6 +94,19 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
   });
 
+  it("says the share came from outside, and picks no chat by itself, not even the only one", async () => {
+    receiveShare(share({ text: "from a website", files: [file()] }));
+    const { user } = picker();
+    expect(screen.getByTestId("share-from")).toHaveTextContent("From another app or website. Nothing is sent until you send it.");
+    expect(screen.getAllByTestId("share-chat")).toHaveLength(1);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByTestId("where")).toBeNull();
+    expect(incomingShare()?.text).toBe("from a website");
+    expect(takeShareFor("chat1")).toBeNull();
+    await user.click(screen.getByTestId("share-chat"));
+    expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
+  });
+
   it("files go to 1:1 chats only: groups do not take files yet", () => {
     receiveShare(share({ files: [file("a.png"), file("b.png")] }));
     picker();

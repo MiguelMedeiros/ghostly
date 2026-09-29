@@ -19,6 +19,7 @@ import {
   sanitizeResponseHeaders,
   utf8Decode,
   utf8Encode,
+  viewerResponseHeaders,
   type FrameChannel,
   type LocalFetch,
   type LocalRequest,
@@ -142,6 +143,39 @@ describe("header hygiene", () => {
       ["location", "/next"],
       ["set-cookie", "sid=1; Path=/; HttpOnly"],
       ["set-cookie", "fix=1; Path=/"],
+    ]);
+  });
+
+  it("serves a contact's response headers to a viewer only when they are headers: no CR, LF or NUL, a token name", () => {
+    expect(
+      viewerResponseHeaders([
+        ["Content-Type", "text/html"],
+        ["X-Note", "a\r\nSet-Cookie: sid=evil"],
+        ["X-Line", "a\nb"],
+        ["X-Return", "a\rb"],
+        ["X-Nul", "a\u0000b"],
+        ["Bad Name", "x"],
+        ["X-Bad:Name", "x"],
+        ["X-Bad\r\nName", "x"],
+        ["", "x"],
+        ["X-Kept", "fine; really"],
+      ]),
+    ).toEqual([
+      ["Content-Type", "text/html"],
+      ["X-Kept", "fine; really"],
+    ]);
+  });
+
+  it("keeps a contact's cookies on the exact origin they came from, one header per cookie", () => {
+    expect(
+      viewerResponseHeaders([
+        ["Set-Cookie", "sid=1; Domain=peer.invalid; Path=/\r\nother=2; domain = .invalid; HttpOnly\n"],
+        ["X-Domain", "Domain=kept"],
+      ]),
+    ).toEqual([
+      ["Set-Cookie", "sid=1; Path=/"],
+      ["Set-Cookie", "other=2; HttpOnly"],
+      ["X-Domain", "Domain=kept"],
     ]);
   });
 });

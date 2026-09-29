@@ -93,13 +93,51 @@ export interface SharedItem {
 /** Most files one share brings; larger shares keep their first ones. */
 export const MAX_SHARED_FILES = 32;
 
-/** What a share target POST carries, bounded: strings of a sane length, files that are files. */
-export function readShare(form: FormData): SharedItem {
+/**
+ * The most one share may bring, all of it together. Any website can post to the share target (a form can), and the
+ * worker holds what arrives in memory, so a larger body is not read on: it is dropped whole.
+ */
+export const MAX_SHARE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * A share target POST's body, read up to `max` bytes: null past that (the rest is never read), or when the body
+ * says up front that it is larger.
+ */
+export async function readShareBody(request: { body: ReadableStream<Uint8Array> | null; headers: { get(name: string): string | null } }, max = MAX_SHARE_BYTES): Promise<Blob | null> {
+  const declared = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > max) return null;
+  if (!request.body) return new Blob([]);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > max) return null;
+      chunks.push(value);
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  return new Blob(chunks as BlobPart[]);
+}
+
+/** What a share target POST carries, bounded: strings of a sane length, files that are files, `max` bytes of them in all. */
+export function readShare(form: FormData, max = MAX_SHARE_BYTES): SharedItem {
   const text = (name: string) => {
     const value = form.get(name);
     return typeof value === "string" ? value.slice(0, 64 * 1024) : "";
   };
-  const files = form.getAll("files").filter((value): value is File => typeof value !== "string" && value.size >= 0).slice(0, MAX_SHARED_FILES);
+  let room = max;
+  const files: File[] = [];
+  for (const value of form.getAll("files")) {
+    if (typeof value === "string" || !(value.size >= 0)) continue;
+    if (files.length >= MAX_SHARED_FILES || value.size > room) break;
+    room -= value.size;
+    files.push(value);
+  }
   return { title: text("title"), text: text("text"), url: text("url"), files };
 }
 
@@ -119,6 +157,19 @@ export function pushScopeProfile(scope: string): string | null {
   if (!match) return null;
   const profile = decodeURIComponent(match[1]!);
   return profile === "default" ? "" : profile;
+}
+
+/**
+ * How often one token may make a wake-up buzz. Senders keep to one wake-up per contact per 5 minutes, but a contact
+ * who does not could otherwise fill the screen with "Incoming call" notices that stay until dismissed. Past the gap
+ * the next one shows; inside it the notice already on screen is kept, with no new sound.
+ */
+export const WAKE_NOTICE_GAP_MS = { call: 30_000, message: 5 * 60_000 } as const;
+
+/** Whether a wake-up of this kind may show now, given when this token last showed one of its kind. */
+export function wakeNoticeDue(lastShown: number | undefined, call: boolean, now: number): boolean {
+  if (lastShown === undefined || lastShown > now) return true;
+  return now - lastShown >= WAKE_NOTICE_GAP_MS[call ? "call" : "message"];
 }
 
 /**

@@ -13,6 +13,7 @@ const WAIT_MS = 5000;
  * "Share to…": something another app shared into Ghostly waits here for a chat. Picking one opens it with the
  * text in the draft and the files on the attachment sheet, to look over and send there; nothing is sent from
  * here. Groups take text only (files are not part of groups yet), so a share with files lists 1:1 chats.
+ * A chat is never picked for the person, not even when there is only one: any website can post a share.
  */
 export function SharePicker() {
   const { t } = useI18n();
@@ -44,6 +45,8 @@ export function SharePicker() {
       ) : (
         <>
           <div className="rounded-xl bg-surface px-4 py-3 space-y-1" data-testid="share-summary">
+            {/* Any website can post to the share target, so the page says where this came from. */}
+            <p className="m-0 text-xs font-medium text-text-secondary" data-testid="share-from">{t("pwa.shareFrom")}</p>
             {hasFiles && (
               <p className="m-0 text-sm text-text-primary font-medium" data-testid="share-files">
                 {share.files.length === 1 ? share.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(share.files.length) })}

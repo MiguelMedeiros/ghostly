@@ -65,6 +65,8 @@ export interface FakePort {
   /** Messages this end posted. */
   posted: unknown[];
   peer?: FakePort;
+  /** Who opened it, on the end `onConnect` hands out. */
+  sender?: chrome.runtime.MessageSender;
 }
 
 export interface Tab {
@@ -101,6 +103,8 @@ export interface FakeWorld {
    * the app page (`app.html`), the offscreen document or the worker, all with the extension's id.
    */
   sendMessageFrom(sender: chrome.runtime.MessageSender, message: unknown): Promise<unknown>;
+  /** `runtime.connect` as `sender` opened it; `connect` itself opens as the context calling it. */
+  connectFrom(sender: chrome.runtime.MessageSender, name: string): FakePort;
   /** Each `runtime.connect`: the caller's end and the end `onConnect` handed out. */
   ports: { caller: FakePort; receiver: FakePort }[];
   /** The offscreen document's window events. */
@@ -138,6 +142,12 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
 
   const onMessage = event<(message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (r: unknown) => void) => boolean | undefined>();
   const onConnect = event<(port: FakePort) => void>();
+
+  /** Who a context's own `sendMessage` and `connect` come from: the extension, at that context's page. */
+  function ownSender(): chrome.runtime.MessageSender {
+    const page = world.context === "offscreen" ? "offscreen.html" : world.context === "background" ? "background.js" : "app.html";
+    return { id: chromeApi.runtime.id, url: chromeApi.runtime.getURL(page) };
+  }
 
   function makePort(name: string): FakePort {
     const port: FakePort = {
@@ -177,18 +187,10 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
       getManifest: () => world.manifest,
       getURL: (path: string) => `chrome-extension://nbedaagicniejlmfcncndfjcejaidbcf/${path}`,
       sendMessage(message: unknown): Promise<unknown> {
-        const url = chromeApi.runtime.getURL(world.context === "offscreen" ? "offscreen.html" : world.context === "background" ? "background.js" : "app.html");
-        return world.sendMessageFrom({ id: chromeApi.runtime.id, url }, message);
+        return world.sendMessageFrom(ownSender(), message);
       },
       connect({ name }: { name: string }) {
-        record("runtime.connect", name);
-        const mine = makePort(name);
-        const theirs = makePort(name);
-        mine.peer = theirs;
-        theirs.peer = mine;
-        world.ports.push({ caller: mine, receiver: theirs });
-        onConnect.dispatch(theirs as never);
-        return mine;
+        return world.connectFrom(ownSender(), name);
       },
       requestUpdateCheck: async () => {
         record("runtime.requestUpdateCheck");
@@ -297,6 +299,17 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     for (const e of world.events) e.dropContext("background");
   };
   world.callsTo = (api) => world.calls.filter((c) => c.api === api).map((c) => c.args);
+  world.connectFrom = (sender, name) => {
+    record("runtime.connect", name);
+    const mine = makePort(name);
+    const theirs = makePort(name);
+    theirs.sender = { ...sender };
+    mine.peer = theirs;
+    theirs.peer = mine;
+    world.ports.push({ caller: mine, receiver: theirs });
+    onConnect.dispatch(theirs as never);
+    return mine;
+  };
   world.sendMessageFrom = (sender, message) => {
     record("runtime.sendMessage", message);
     return new Promise((resolve, reject) => {
