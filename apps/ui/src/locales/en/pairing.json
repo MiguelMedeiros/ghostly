@@ -39,6 +39,7 @@
     "answeringInviter": "Your contact knocked. Answering…",
     "answeringJoiner": "Your contact is answering…",
     "connecting": "Opening a direct, encrypted link…",
+    "contactSeen": "Your contact opened the invite. Connecting…",
     "failed": "Could not connect",
     "knocking": "Knocking on your contact's door…",
     "live": "Connected",
