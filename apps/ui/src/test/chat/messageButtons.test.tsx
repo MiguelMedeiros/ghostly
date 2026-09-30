@@ -86,6 +86,14 @@ describe("buttons under a bot's message", () => {
     expect(byId("no")).not.toHaveAttribute("aria-disabled");
   });
 
+  it("my reply typed as \"yes\" answers a once question, as the bot takes it: no button offers a press after it", () => {
+    const q = question();
+    const typed: ChatMessage = { id: "p1", text: "yes", sender: "me", timestamp: 2e12, replyTo: { id: "q1", snippet: "Deploy to production?", from: "peer", messageId: "paired-q1" } };
+    renderApp(bubble(q, [q, typed]));
+    expect(byId("yes")).toHaveAttribute("aria-pressed", "true");
+    for (const button of shown()) expect(button).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("keeps my last press from the history, and the bot's answer over it", () => {
     const press = (id: string, button: string, label: string, timestamp: number): ChatMessage =>
       ({ id, text: label, sender: "me", timestamp, replyTo: { id: "q1", snippet: "Deploy to production?", from: "peer", button, messageId: "paired-q1" } });

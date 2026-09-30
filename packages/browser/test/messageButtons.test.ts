@@ -141,7 +141,8 @@ describe("pressing a contact's buttons", () => {
 describe("the buttons' state and a press, as pure rules", () => {
   const card = readStatusCard(ask())!;
   const question: StoredMessage = { linkId: "l", id: "peer_Q", wireId: WIRE("Q"), text: QUESTION, sender: "peer", timestamp: 1, card };
-  const mine = (button: string, at: number): StoredMessage => ({ linkId: "l", id: `me_${at}`, text: button, sender: "me", timestamp: at, replyTo: { id: WIRE("Q"), snippet: "", messageId: "peer_Q", button } });
+  // A press as the app sends it: the button's label as its text.
+  const mine = (button: string, at: number): StoredMessage => ({ linkId: "l", id: `me_${at}`, text: card.buttons.find(b => b.id === button)!.label, sender: "me", timestamp: at, replyTo: { id: WIRE("Q"), snippet: "", messageId: "peer_Q", button } });
 
   it("marks my last press, and stays open until a once button answers it", () => {
     expect(buttonsState(question, WIRE("Q"), [])).toEqual({ card, open: true });
@@ -151,6 +152,17 @@ describe("the buttons' state and a press, as pure rules", () => {
     const closed = { ...question, card: readStatusCard(ask({ chosen: "yes", closed: true }))! };
     expect(buttonsState(closed, WIRE("Q"), [])).toMatchObject({ chosen: "yes", open: false });
     expect(buttonsState({ ...question, sender: "me" }, WIRE("Q"), [])).toMatchObject({ open: false });
+  });
+
+  it("counts my reply typed in words as the press the author's app takes it for", () => {
+    const typed = (text: string, at: number): StoredMessage => ({ linkId: "l", id: `me_${at}`, text, sender: "me", timestamp: at, replyTo: { id: WIRE("Q"), snippet: "", messageId: "peer_Q" } });
+    // "yes" answering the question is the author's inferred press of a once button: no more presses here either.
+    expect(buttonsState(question, WIRE("Q"), [typed(" yes ", 2)])).toEqual({ card, mine: "yes", chosen: "yes", open: false });
+    // The author takes it so: the same row on its side is a press.
+    const original = { ...question, id: "me_Q", sender: "me" as const };
+    expect(buttonPress({ ...typed(" yes ", 2), id: "peer_2", sender: "peer", replyTo: { id: WIRE("Q"), snippet: "", messageId: "me_Q" } }, original, [original])).toMatchObject({ button: "yes", inferred: true });
+    // Words that are no label stay a reply, and the buttons open.
+    expect(buttonsState(question, WIRE("Q"), [typed("maybe later", 2)])).toEqual({ card, open: true });
   });
 
   it("takes a group member's press, once per member", () => {

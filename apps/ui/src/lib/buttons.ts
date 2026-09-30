@@ -10,7 +10,7 @@ import type { MessageReply, StoredMessage } from "@ghostly/browser/shared/types"
 export type ButtonsView = NonNullable<ReturnType<typeof buttonsState>>;
 
 /** What the rule needs of a row: a 1:1 chat's `ChatMessage` and a group's `StoredMessage` both have it. */
-export interface ButtonsRow { id: string; sender: string; timestamp: number; card?: StatusCard; replyTo?: MessageReply }
+export interface ButtonsRow { id: string; sender: string; timestamp: number; text: string; card?: StatusCard; replyTo?: MessageReply }
 
 /**
  * The buttons of every message of these rows that has some, by the message's id. `refOf`: the id a reply to a row
@@ -18,7 +18,7 @@ export interface ButtonsRow { id: string; sender: string; timestamp: number; car
  */
 export function buttonsViews<R extends ButtonsRow>(rows: readonly R[], refOf: (row: R) => string | undefined): Map<string, ButtonsView> {
   const views = new Map<string, ButtonsView>();
-  const history = rows as unknown as readonly Pick<StoredMessage, "sender" | "replyTo" | "timestamp">[];
+  const history = rows as unknown as readonly Pick<StoredMessage, "sender" | "replyTo" | "timestamp" | "text">[];
   for (const row of rows) {
     if (row.card?.kind !== "buttons") continue;
     const view = buttonsState(row as unknown as Pick<StoredMessage, "id" | "card" | "sender">, refOf(row), history);
@@ -33,7 +33,7 @@ export function buttonsViews<R extends ButtonsRow>(rows: readonly R[], refOf: (r
  * whose text changed after the press, a `b` naming no button of it, or a text that is not its label ("No" naming
  * `yes`), leaves the reply a reply, its quote shown.
  */
-export function compactPresses<R extends ButtonsRow & { text: string; file?: unknown; paymentId?: string }>(rows: readonly R[], refOf: (row: R) => string | undefined): Set<string> {
+export function compactPresses<R extends ButtonsRow & { file?: unknown; paymentId?: string }>(rows: readonly R[], refOf: (row: R) => string | undefined): Set<string> {
   const compact = new Set<string>();
   for (const row of rows) {
     const reply = row.replyTo;
