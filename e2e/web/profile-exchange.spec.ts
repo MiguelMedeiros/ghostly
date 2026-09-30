@@ -49,8 +49,9 @@ test("a contact's name and picture arrive by themselves when pairing, follow cha
   await expect(bob.page.getByTestId("chat-row-avatar")).toBeVisible();
   const first = await bob.page.getByTestId("chat-avatar").getAttribute("src");
 
-  // Bob never set a name: Alice sees a steady "Contact · <start of his key>" and a pattern of his key, not "Anonymous".
-  await expect(header(alice)).toHaveText(/^Contact · \S{6}$/);
+  // Bob never set a name: Alice's list says a steady "Contact · <start of his key>", her header "Contact" over his key, and a
+  // pattern of his key, not "Anonymous".
+  await expect(header(alice)).toHaveText("Contact");
   await expect(row(alice).getByText(/^Contact · \S{6}$/)).toBeVisible();
   await expect(row(alice).getByTestId("identicon")).toBeVisible();
   await expect(row(alice).getByText("Anonymous")).toHaveCount(0);
@@ -100,7 +101,7 @@ test("a profile that stops sharing its name and picture is shown as a contact wi
   await expect(bob.page.getByTestId("chat-avatar")).toBeVisible({ timeout: 15_000 });
 
   await onProfile(alice, () => alice.page.getByTestId("profile-share").click());
-  await expect(header(bob)).toHaveText(/^Contact · \S{6}$/, { timeout: 15_000 });
+  await expect(header(bob)).toHaveText("Contact", { timeout: 15_000 });
   await expect(bob.page.getByTestId("chat-avatar")).toHaveCount(0);
   // The chat's name, that is: the join notice sent before still names her, as history does.
   await expect(row(bob).getByText("Private Alice", { exact: true })).toHaveCount(0);
