@@ -8,8 +8,6 @@
   "copied": "Copied!",
   "copy": "Copy",
   "deck": {
-    "next": "Next card",
-    "previous": "Previous card",
     "turnBack": "Cards"
   },
   "delete": "Delete",
