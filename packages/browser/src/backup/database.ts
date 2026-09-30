@@ -43,11 +43,14 @@ export async function snapshotDatabase(name: string): Promise<DatabaseSnapshot |
 export async function restoreDatabase(name: string, snapshot: DatabaseSnapshot): Promise<void> {
   if (!Number.isSafeInteger(snapshot.version) || snapshot.version < 1 || !Array.isArray(snapshot.stores) || new Set(snapshot.stores.map((s) => s.name)).size !== snapshot.stores.length ||
     snapshot.stores.some((s) => typeof s.name !== "string" || !Array.isArray(s.keys) || !Array.isArray(s.values) || s.keys.length !== s.values.length)) throw new Error("This backup's database is malformed");
-  let fresh = true, created = false;
+  let fresh = true, created = false, failure = null as DOMException | null;
   const request = indexedDB.open(name, snapshot.version);
   request.onupgradeneeded = (event) => {
     if (event.oldVersion !== 0) { fresh = false; request.transaction?.abort(); return; }
     created = true;
+    // A write that fails (no room left, say) aborts the upgrade: its reason, not the open request's "AbortError", is the error.
+    const upgrade = request.transaction!;
+    upgrade.addEventListener("abort", () => { failure = upgrade.error; });
     for (const entry of snapshot.stores) {
       const store = request.result.createObjectStore(entry.name, { keyPath: entry.keyPath, autoIncrement: entry.autoIncrement });
       for (const index of entry.indexes ?? []) store.createIndex(index.name, index.keyPath, { unique: index.unique, multiEntry: index.multiEntry });
@@ -58,7 +61,7 @@ export async function restoreDatabase(name: string, snapshot: DatabaseSnapshot):
     const db = await wrap(request);
     db.close();
   } catch (error) {
-    throw fresh ? error : new Error(`A database named ${name} already exists`);
+    throw fresh ? failure ?? error : new Error(`A database named ${name} already exists`);
   }
   // Opened at the same version without an upgrade: it existed, and nothing was written.
   if (!fresh || !created) throw new Error(`A database named ${name} already exists`);
