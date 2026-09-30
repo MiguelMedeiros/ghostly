@@ -9,10 +9,11 @@ import { useI18n } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
+import { formatAt } from "../lib/time";
 
 /** Spark transfers cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
-const when = (at: number) => new Date(at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+const WHEN: Intl.DateTimeFormatOptions = { dateStyle: "short", timeStyle: "short" };
 
 /**
  * Spark: wallet to wallet, instant and off-chain, through the Breez SDK. Its address is the wallet's identity, the
@@ -74,7 +75,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
      {spark.history.map(entry => <li key={entry.id} className="flex items-center gap-3 py-2 text-sm" data-testid="spark-history-row">
       <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}>{entry.direction === "in" ? "+" : "−"}{formatAmount(entry.amount, t.language)} <span className="text-xs text-text-muted">{unit}</span></span>
       <span className="flex-1 min-w-0 truncate text-text-muted text-xs">{[entry.via === "spark" ? "Spark" : entry.via === "lightning" ? "Lightning" : entry.via === "onchain" ? t("wallet.spark.via.onchain") : t("wallet.spark.via.other"), entry.memo, entry.status !== "completed" ? entry.status : "", entry.fee ? t("wallet.spark.fee", { fee: entry.fee }) : ""].filter(Boolean).join(" · ")}</span>
-      <span className="text-text-muted text-xs tabular-nums">{when(entry.at)}</span>
+      <span className="text-text-muted text-xs tabular-nums">{formatAt(entry.at, WHEN, t.language)}</span>
      </li>)}
     </ul>
    </Section>}
