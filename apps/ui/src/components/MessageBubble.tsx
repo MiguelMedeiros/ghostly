@@ -120,7 +120,11 @@ function useLongPress(fire: () => void) {
     onPointerCancel: clear,
     // The browser's own long-press menu would sit on top of the details.
     onContextMenu: (e: React.MouseEvent) => { if (fired.current || start.current) e.preventDefault(); },
-    onClickCapture: (e: React.MouseEvent) => { if (fired.current) { fired.current = false; e.preventDefault(); e.stopPropagation(); } },
+    // Only on the control the press went through: the quick bar it opened takes its taps.
+    onClickCapture: (e: React.MouseEvent) => {
+      if (!fired.current || !(e.target as HTMLElement).closest("[data-press-through]")) return;
+      fired.current = false; e.preventDefault(); e.stopPropagation();
+    },
   };
 }
 
