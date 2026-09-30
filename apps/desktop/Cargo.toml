@@ -69,5 +69,6 @@ libc = "0.2"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-user-notifications = "0.3"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSSharingService"] }
+# `NSApplication` and `NSDockTile`: the test driver reads the Dock icon's badge (src/e2e_driver.rs).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSView", "NSSharingService"] }
 block2 = "0.6"

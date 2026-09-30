@@ -28,6 +28,8 @@ import { desktopOidc } from "./oidc";
 import { desktopAtproto } from "./atproto";
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
+import { setAppBadgeTarget } from "../lib/appBadge";
+import { dockBadge } from "./dockBadge";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
@@ -230,6 +232,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
   // Files sent and received are real files in the app's data folder, written and read through Rust.
   registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
+  // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
+  setAppBadgeTarget(dockBadge());
   return createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
