@@ -109,6 +109,7 @@ One mark beside the time, as in WhatsApp (#360, `apps/ui/src/components/chat/Del
 - A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs, also when you come to a group from another group (#468).
 - A long chat has a window of its messages in the page, never its whole history (`apps/ui/src/hooks/useRowWindow.ts`): it opens on its last 100, and as you scroll near the top 100 older ones come in above without moving the view. Past 300, the ones at the far end leave the page, so a chat of 20,000 messages opens and scrolls like a short one. A jump to a message not in the page (a quote, a search match, a Tasks row, the pinned message) brings in the messages around it first. A long group reads its newest 50 from the store first (#494). A chat left scrolled up opens around the message you left it on.
 - 1:1 chats, groups and communities alike.
+- A 1:1 chat's history lives in the engine (IndexedDB). The page keeps a copy of each chat's last 200 messages in localStorage, for the chat list and a chat's first moment, plus the lines only the page keeps (a call's). The rest it reads from the engine's copy (`STORED_MESSAGES`, `apps/ui/src/lib/storage.ts`, `packages/browser/src/platform/sync.ts`). A chat of thousands of messages used to fill that storage (5 MB in WebKit, the Desktop app's), and then stopped showing new messages.
 
 ## How messages render
 
