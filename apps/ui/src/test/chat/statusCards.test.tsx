@@ -570,7 +570,7 @@ describe("the Tasks panel under a bot room's load", () => {
     await user.click(button);
     const panel = screen.getByTestId("chat-tasks-panel");
     expect(panel).toHaveAttribute("data-layout", "sheet");
-    expect(panel.className).toContain("max-h-[calc(100dvh-2.5rem)]");
+    expect(panel.className).toContain("max-h-[calc(100dvh_-_2.5rem_-_env(safe-area-inset-top))]");
     expect(within(panel).getByTestId("chat-tasks-scroll").className).toMatch(/\boverflow-y-auto\b/);
     expect(screen.getByTestId("chat-tasks-backdrop")).toBeInTheDocument();
     await user.click(within(panel).getByTestId("chat-tasks-close"));
