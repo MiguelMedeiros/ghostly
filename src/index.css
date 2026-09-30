@@ -316,8 +316,8 @@ html[data-standalone="true"] {
    reached under its toolbar and cut the tab bar). On a touch screen with the keyboard up (an iPad, a phone on its
    side) iOS leaves the page its height, so the panes take what the keyboard leaves (`--app-height`) and the message
    field stays above it; Safari scrolled the whole page instead, and left it scrolled with a blank band once the
-   keyboard went. Only while it is up: after a rotation the Simulator's installed iPhone app once reported a visible
-   height 68px short of the screen (stale or iOS's own), and the panes must not shrink to that. */
+   keyboard went. Only while it is up, or while a hardware keyboard's shortcut bar is (a field has the focus): the
+   visible height 68px short that an iPhone on its side reported was that bar over the message field. */
 .two-pane {
   height: 100vh;
   height: 100dvh;
