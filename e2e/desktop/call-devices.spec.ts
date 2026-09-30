@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, expect } from "@playwright/test";
@@ -34,8 +34,11 @@ interface Stats {
 const MICS = { a: "Ghostly mic A", b: "Ghostly mic B" };
 const SPEAKERS = { a: "Ghostly speaker A", b: "Ghostly speaker B" };
 
+/** Where this test's PulseAudio listens (`pulseAudio`): `unix:<socket>`. */
+let server = "";
+
 /** PulseAudio's client, on the server this test uses. */
-const pactl = (...args: string[]) => execFileSync("pactl", args, { encoding: "utf8" });
+const pactl = (...args: string[]) => execFileSync("pactl", ["-s", server, ...args], { encoding: "utf8" });
 
 /** Loads a module, and returns its index for unloading. */
 const load = (module: string, ...args: string[]) => pactl("load-module", module, ...args).trim();
@@ -51,24 +54,27 @@ function inUse(): { sources: string[]; sinks: string[] } {
   return { sources: used("source-outputs", names("sources")), sinks: used("sink-inputs", names("sinks")) };
 }
 
-/** A PulseAudio server for this test: the one running, or one it starts (and stops). Null without PulseAudio. */
-function pulseAudio(): { stop: () => void } | null {
-  if (spawnSync("pactl", ["info"]).status === 0) return { stop: () => {} };
+/**
+ * A PulseAudio of this test's own, always: its folder and socket, no module but the socket (`-n`), so no hardware,
+ * ended by `stop`. Never the machine's running server: this test sets the default microphone and speaker, which on a
+ * desktop would be the person's own, and a PipeWire server's PulseAudio face has no null source. Null without PulseAudio.
+ */
+async function pulseAudio(): Promise<{ server: string; stop: () => void } | null> {
   if (spawnSync("pulseaudio", ["--version"]).status !== 0) return null;
-  if (!process.env.XDG_RUNTIME_DIR) {
-    const runtime = join(tmpdir(), `ghostly-pulse-${process.pid}`);
-    mkdirSync(runtime, { recursive: true, mode: 0o700 });
-    process.env.XDG_RUNTIME_DIR = runtime;
-  }
-  execFileSync("pulseaudio", ["--daemonize=yes", "--exit-idle-time=-1", "--system=false"]);
-  for (let i = 0; i < 50 && spawnSync("pactl", ["info"]).status !== 0; i++) execFileSync("sleep", ["0.1"]);
-  return { stop: () => void spawnSync("pulseaudio", ["--kill"]) };
-}
-
-/** Where the apps find the server: their HOME and XDG folders are their own, so it is named for them. */
-function pulseServer(): string {
-  const socket = /Server String: (.+)/.exec(pactl("info"))?.[1]?.trim() ?? "";
-  return socket.startsWith("/") ? `unix:${socket}` : socket;
+  const dir = mkdtempSync(join(tmpdir(), "ghostly-pulse-"));
+  const socket = join(dir, "native");
+  const address = `unix:${socket}`;
+  const daemon = spawn("pulseaudio", [
+    "-n", "--daemonize=no", "--exit-idle-time=-1", "--use-pid-file=no", "--realtime=no", "--high-priority=no", "--log-target=stderr",
+    "-L", `module-native-protocol-unix socket=${socket} auth-anonymous=1`,
+  ], { env: { PATH: process.env.PATH, HOME: dir, XDG_RUNTIME_DIR: dir, XDG_CONFIG_HOME: dir }, stdio: ["ignore", "ignore", "pipe"] });
+  let log = "";
+  daemon.stderr!.on("data", (chunk: Buffer) => (log += chunk.toString()));
+  const up = () => spawnSync("pactl", ["-s", address, "info"]).status === 0;
+  for (let i = 0; i < 100 && !up() && daemon.exitCode === null; i++) await new Promise((done) => setTimeout(done, 100));
+  const stop = () => { daemon.kill("SIGTERM"); rmSync(dir, { recursive: true, force: true }); };
+  if (!up()) { stop(); throw new Error(`PulseAudio did not start: ${log}`); }
+  return { server: address, stop };
 }
 
 const stats = (p: DesktopPerson) => p.app.executeAsync<Stats | null>(`
@@ -133,25 +139,25 @@ test("a Linux Desktop call uses the devices chosen in Settings, and switches the
   tag: ["@feature:calls.devices-linux", "@feature:settings.media", "@feature:calls.devices"],
 }, async () => {
   test.setTimeout(10 * 60_000);
-  const pulse = pulseAudio();
+  const pulse = await pulseAudio();
   test.skip(!pulse, "PulseAudio is not installed");
+  server = pulse!.server;
   const cleanup: (() => Promise<void> | void)[] = [() => pulse!.stop()];
   try {
     // A room microphone and speaker as the defaults, so the chosen ones are only ever used by the calls.
-    const modules = [
-      mic("ghostly_room_mic", "Room microphone"), speaker("ghostly_room", "Room speaker"),
-      speaker("ghostly_speaker_a", SPEAKERS.a), speaker("ghostly_speaker_b", SPEAKERS.b),
-      mic("ghostly_mic_b", MICS.b),
-    ];
+    mic("ghostly_room_mic", "Room microphone");
+    speaker("ghostly_room", "Room speaker");
+    speaker("ghostly_speaker_a", SPEAKERS.a);
+    speaker("ghostly_speaker_b", SPEAKERS.b);
+    mic("ghostly_mic_b", MICS.b);
     let micA = mic("ghostly_mic_a", MICS.a);
-    cleanup.push(() => { for (const m of [...modules, micA]) spawnSync("pactl", ["unload-module", m]); });
     pactl("set-default-source", "ghostly_room_mic");
     pactl("set-default-sink", "ghostly_room");
 
     const relay = new LocalRelay();
     const network = await desktopNetwork(relay);
     cleanup.push(() => relay.close(), () => network.close());
-    const env = { ...network.env, PULSE_SERVER: pulseServer() };
+    const env = { ...network.env, PULSE_SERVER: server };
     const open = async (name: string): Promise<DesktopPerson> => {
       const home = desktopHome(name);
       const person = await desktopPerson(name, { home: home.dir, env });
@@ -244,7 +250,7 @@ test("a Linux Desktop call uses the devices chosen in Settings, and switches the
       .toContain(MICS.a);
 
     // Mic A is unplugged: the call goes on with the default, says so, and offers mic A back when it returns.
-    spawnSync("pactl", ["unload-module", micA]);
+    pactl("unload-module", micA);
     await expect.poll(() => notice(a), { timeout: 30_000, message: "ana is told mic A went" })
       .toEqual({ type: "lost", text: expect.stringContaining(MICS.a) });
     await expect.poll(async () => (await stats(a))?.microphone, { message: "ana sends the default microphone" }).toBeNull();
