@@ -251,6 +251,20 @@ describe("the chat's connection control and its panel", () => {
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
   });
 
+  it("with DHT only on a Linux Desktop, whose native transports are released meanwhile, still offers the way back", async () => {
+    // As the engine reports it: DHT only started none of this app's transports, and WebKitGTK has no WebRTC.
+    const { user, engine } = control({ availableTransports: [], runnableTransports: ["iroh/1", "hyperdht/1"], peerTransports: ["iroh/1", "hyperdht/1"],
+      deliveryMode: "dht", dataLink: "idle", pairing: undefined, transportAutomatic: true });
+    engine.on("setChatTransport", () => undefined);
+    await user.click(screen.getByTestId("connection-options"));
+    expect(within(panel()).getAllByRole("radio").map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
+      ["Automatic", "false", false], ["WebRTC", "false", true], ["Iroh", "false", false], ["HyperDHT", "false", false], ["DHT only", "true", false],
+    ]);
+    expect(within(panel()).getByTestId("connection-option-webrtc")).toHaveAttribute("title", "WebRTC: This app has no WebRTC");
+    await user.click(within(panel()).getByTestId("connection-option-auto"));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
+  });
+
   it("says when the contact chose DHT only", () => {
     control({ availableTransports: all, dataLink: "idle", pairing: undefined, textDelivery: "dht", transportAutomatic: true, dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
     expect(screen.getByTestId("connection-option-dht")).toHaveAttribute("aria-checked", "false");

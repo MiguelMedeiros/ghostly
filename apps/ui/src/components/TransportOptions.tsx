@@ -3,7 +3,7 @@ import type { PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportIcon } from "./TransportIcon";
 import { transportName } from "../lib/connection";
-import { liveTransport, transportOptions } from "../lib/transportEvents";
+import { liveTransport, ownTransports, transportOptions } from "../lib/transportEvents";
 import { useI18n } from "../contexts/I18nContext";
 
 /** A choice for the chat's connection: Automatic, a transport, or DHT only (WISP 400). */
@@ -22,7 +22,7 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
 }) {
   const { t } = useI18n();
   const options = transportOptions(link, t);
-  const local = options.filter(o => (link.availableTransports ?? []).includes(o.transport));
+  const local = options.filter(o => ownTransports(link).includes(o.transport));
   // One transport in this app (web, the extension): nothing to choose between, only to know why.
   const single = local.length <= 1;
   const dht = link.deliveryMode === "dht";
