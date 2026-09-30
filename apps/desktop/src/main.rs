@@ -17,6 +17,7 @@ mod link_preview;
 mod lnd;
 mod local_access;
 mod local_fetch;
+mod microphone;
 mod native_call;
 mod notifications;
 mod oidc;
@@ -208,6 +209,8 @@ fn main() {
             // the webview).
             if let Some(main) = app.get_webview_window("main") {
                 fullscreen::install(&main);
+                // A voice message's microphone: WebKitGTK denies it unless the app answers.
+                microphone::install(&main);
             }
             #[cfg(feature = "e2e-driver")]
             {

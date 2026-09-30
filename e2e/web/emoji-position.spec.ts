@@ -51,7 +51,10 @@ test("mobile emoji sheet stays visible and supports touch selection and dismissa
  await page.screenshot({path:info.outputPath("emoji-phone.png")});
  await panel.getByTestId("emoji-section-search").getByRole("button",{name:"👻",exact:true}).first().tap();
  await expect(page.getByPlaceholder("Message…")).toHaveValue("👻");
+ // A tap on the backdrop over the header closes the sheet and nothing else: the chat's Back button is under it.
+ const chatHash=await page.evaluate(()=>location.hash);
  await page.locator(".sheet-backdrop").tap({position:{x:10,y:10}});await expect(panel).toHaveCount(0);
+ await expect(page.getByTestId("composer-expressions")).toBeVisible();expect(await page.evaluate(()=>location.hash)).toBe(chatHash);
  await page.setViewportSize({width:320,height:480});await page.getByTestId("composer-expressions").tap();await fits(page);
  await page.keyboard.press("Escape");await expect(panel).toHaveCount(0);
 });
