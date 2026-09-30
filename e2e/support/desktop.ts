@@ -1,6 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -303,10 +303,18 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
  * (not Linux, no `dbus-daemon`). On a Linux desktop an app under test otherwise joins the person's own session bus
  * while it draws on Xvfb, and each WebDriver session took about 30 s to open there (2.5 s on a bus of its own); it
  * also kept the app's names (one per profile, apps/desktop/src/single_instance.rs) off the person's bus.
+ *
+ * The bus activates nothing: its configuration is the session one without service directories. With the system's
+ * (`--session`), the WebView's first call into xdg-desktop-portal started a whole set of portals on the person's live
+ * Wayland session for each app, and xdg-desktop-portal-hyprland crashed as each bus went away.
  */
 export async function privateBus(): Promise<{ address: string; stop: () => void } | null> {
   if (process.platform !== "linux" || spawnSync("dbus-daemon", ["--version"]).status !== 0) return null;
-  const daemon = spawn("dbus-daemon", ["--session", "--nofork", "--print-address=1"], { stdio: ["ignore", "pipe", "ignore"] });
+  const dir = mkdtempSync(join(tmpdir(), "ghostly-bus-"));
+  const config = join(dir, "session.conf");
+  writeFileSync(config, BUS_CONFIG.replace("@DIR@", dir));
+  const daemon = spawn("dbus-daemon", [`--config-file=${config}`, "--nofork", "--print-address=1"], { stdio: ["ignore", "pipe", "ignore"] });
+  daemon.once("exit", () => rmSync(dir, { recursive: true, force: true }));
   const address = await new Promise<string>((done, fail) => {
     let out = "";
     daemon.stdout!.on("data", (chunk: Buffer) => {
@@ -317,6 +325,22 @@ export async function privateBus(): Promise<{ address: string; stop: () => void 
   });
   return { address, stop: () => void daemon.kill("SIGTERM") };
 }
+
+/** A session bus as dbus's own session.conf, less `<standard_session_servicedirs/>`: nothing is activated on demand. */
+const BUS_CONFIG = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <keep_umask/>
+  <listen>unix:tmpdir=@DIR@</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+`;
 
 /** A process, with when it started: a PID the system hands out again later is not the same process. */
 interface Launched { pid: number; started: string }

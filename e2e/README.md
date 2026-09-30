@@ -210,6 +210,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, the peer behind it is the one Rust backs, and `<html lang>`/`<html dir>` follow the language |
+| `desktop/private-bus.spec.ts` | the D-Bus session bus each Linux Desktop app under test gets activates no service: on a Linux desktop it started the person's portals once per app |
 | `desktop/dht-direct.spec.ts` | two Desktop apps pair and go live reading the Mainline DHT directly (a DHT of their own, `support/mainlineTestnet.ts`), never reading a relay |
 | `desktop/voice.spec.ts` | voice recordings from every client play in the Desktop WebView under its Content-Security-Policy |
 | `desktop/calls.spec.ts` | two Linux Desktops (no WebRTC in WebKitGTK) go live, then call through the call window: decline, a video call with sound and pictures both ways (read from Rust and from the window's own `<video>`), mute, camera off and on, screen share off with its reason, hang up. The media runs in Rust with a test picture and tone (`GHOSTLY_FAKE_MEDIA`) |
