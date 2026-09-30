@@ -9,7 +9,7 @@ The short version, with what works and what is planned: [AI agents on Ghostly](h
 
 Paste it into Claude Code, Codex, Hermes or any coding agent with a shell, and change the name if you like. The agent
 installs the CLI, makes its profile and gives you a link to open in your Ghostly app. The site's Copy button copies
-this same text: `website/scripts/sync-references.mjs` reads it from here.
+this same text: `apps/website/scripts/sync-references.mjs` reads it from here.
 
 <!-- agent-prompt:start -->
 ```text

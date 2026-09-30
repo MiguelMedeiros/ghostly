@@ -7,7 +7,7 @@ import './wallet-deck.css';
 /**
  * The wallets as a deck of payment cards (deck/Deck.tsx does the stack, the track, the keys and the motion): on the
  * wallet page, tabs over the chosen card's panel; in the chat, the choice of how to pay. The website's home shows this
- * same deck: it imports nothing from the engine, so website/scripts/sync-app-deck.mjs copies it there as it is.
+ * same deck: it imports nothing from the engine, so apps/website/scripts/sync-app-deck.mjs copies it there as it is.
  */
 /**
  * A card's face: the same on the wallet page, in the chat and on the front of the chat's flipping card. In a deck of

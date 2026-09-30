@@ -36,7 +36,7 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`native/transports`](../native/transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node) and the Iroh wasm crate |
 | [`services/hyperdht-relay`](../services/hyperdht-relay) | The HyperDHT relay for browsers (dht-relay over WebSocket) |
 | [`services/push-relay`](../services/push-relay) | A reference push relay for browsers that cannot post a wake-up themselves |
-| [`website`](../website) | ghostly.tools |
+| [`apps/website`](../apps/website) | ghostly.tools |
 | [`e2e`](../e2e) | End-to-end tests. See [TESTING.md](TESTING.md) |
 | [`examples/sdk-adapter`](../examples/sdk-adapter) | A complete SDK adapter project |
 
