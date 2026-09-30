@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Locator } from "@playwright/test";
+import { test, type Locator } from "@playwright/test";
 import { createWallet, expect, showNetwork, type CreateWallet, type Peer, type WalletKind, type WalletNetwork } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
@@ -140,6 +140,56 @@ export async function paymentCard(actor: Actor, name: string): Promise<void> {
     await target.click();
   }
   await expect(actor.page.getByTestId("payment-amount")).toBeVisible();
+}
+
+/**
+ * The turned card at rest: it turns and grows for half a second (deck/useCardFlip.ts FLIP_MS), and grows again when
+ * the amount changes the line under it. Running transitions are waited on until none is left (a retargeted one
+ * cancels the one before it).
+ */
+async function cardAtRest(actor: Actor): Promise<void> {
+  const flip = actor.page.getByTestId("payment-composer").locator(".deck-flip");
+  if (!(await flip.count())) return;
+  await flip.evaluate(async (el) => {
+    for (let i = 0; i < 20; i++) {
+      const running = el.getAnimations({ subtree: true }).filter((a) => a.playState === "running");
+      if (!running.length) return;
+      await Promise.allSettled(running.map((a) => a.finished));
+    }
+  });
+}
+
+/**
+ * Request or Send on the turned card (after `paymentCard`, the amount and the note), and it went: a request closes the
+ * sheet; a send is under review (or already out). Twice on a slow runner (runs 36683342965 and 36675234574) a Request
+ * clicked while the card was still turning did nothing at all: the sheet stayed with its amount and note, the button
+ * never said Requesting…, no error, nothing sent, and the scenario failed a minute later on the payer's side, waiting
+ * for a request that was never made. Why the click was lost is not known (a local loop clicking mid-turn never lost
+ * one). So the card is at rest first, and a click that left the button as it was (still enabled, no error, sheet still
+ * open) is made again, noted in the test's annotations. A click that took is never repeated: the button is disabled
+ * while it works, and gone once it has worked. An error fails here, with its text.
+ */
+export async function cardAction(actor: Actor, action: "request" | "send"): Promise<void> {
+  const sheet = actor.page.getByTestId("payment-composer");
+  const button = actor.page.getByTestId(`payment-${action}`);
+  const done = action === "request" ? sheet : sheet.getByTestId("payment-review");
+  await cardAtRest(actor);
+  await button.click();
+  let again = 0, failed = "";
+  await expect(async () => {
+    if (action === "request" ? !(await sheet.count()) : await done.count()) return;
+    const error = sheet.getByRole("alert");
+    if (await error.count()) { failed = await error.innerText(); return; }
+    if (await button.isEnabled()) {
+      again++;
+      await cardAtRest(actor);
+      await button.click();
+    }
+    if (action === "request") await expect(sheet).toHaveCount(0, { timeout: 5_000 });
+    else await expect(done).toBeVisible({ timeout: 5_000 });
+  }, `${actor.name}'s ${action} goes out`).toPass({ timeout: 90_000, intervals: [1_000] });
+  if (failed) throw new Error(`${actor.name}'s ${action} failed: ${failed}`);
+  if (again) test.info().annotations.push({ type: "card-action-again", description: `${actor.name}: ${action} clicked ${again} more time(s)` });
 }
 
 /** The wallet page, with one wallet's card in front (see `card` for its name). */

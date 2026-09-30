@@ -1,12 +1,12 @@
 import { screen } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { WalletInstanceView, WalletView } from "@ghostly/browser/shared/types";
 import type { WalletNetwork } from "@ghostly/core";
 import { PaymentComposer } from "../../components/PaymentComposer";
 import { rememberRail } from "../../lib/chatPayments";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { everyWallet, reviewContext, usdtReady } from "./fixtures";
+import { REAL_MINT, everyWallet, lightningSource, mint, reviewContext, usdtReady } from "./fixtures";
 
 // covers: payments.usdt.send, payments.bitcoin.offer, payments.chat.networks
 
@@ -32,6 +32,38 @@ it("warns when a USDT amount is more than the card holds", async () => {
   await user.type(screen.getByTestId("payment-amount"), "3");
   expect(screen.getByText("More than the 2 TEST-USDT on this card.")).toBeInTheDocument();
   expect(screen.getByTestId("payment-send")).toBeDisabled();
+});
+
+// A Lightning card on its own node (LND, CLN, NWC, Breez...) was checked against the Cashu balance: with no ecash, any
+// amount said "More than the 0 sats on this card". It reads its own source's balance, and claims none it has not read.
+describe("a Lightning card with its own source", () => {
+  const lightningOn = (lightning: Partial<NonNullable<WalletView["lightning"]>>) => {
+    rememberRail("peer", "lightning:mainnet");
+    return open(everyWallet({ mints: [mint(REAL_MINT, 0)], balance: 0, lightning: lightningSource({ providerId: "lnd-1", alias: "My node", ...lightning }) }));
+  };
+
+  it("checks an amount against its source's balance, not the Cashu one", async () => {
+    const { user } = lightningOn({ balance: 5_000 });
+    await user.click(screen.getByTestId("payment-use"));
+    expect(screen.getByTestId("payment-back")).toHaveClass("wallet-card-lightning");
+    await user.type(screen.getByTestId("payment-amount"), "100");
+    expect(screen.queryByText(/^More than/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("payment-request")).toBeEnabled();
+    await user.clear(screen.getByTestId("payment-amount"));
+    await user.type(screen.getByTestId("payment-amount"), "6000");
+    expect(screen.getByText("More than the 5,000 sats on this card.")).toBeInTheDocument();
+  });
+
+  // Ready, but its source has not said what it holds: no number to compare with. (One reconnecting or failing is not
+  // ready, so the sheet does not open on it: walletCardData.test.ts has those.)
+  it("claims no number while its source has not read a balance", async () => {
+    const { user } = lightningOn({});
+    await user.click(screen.getByTestId("payment-use"));
+    expect(screen.getByTestId("payment-back")).toHaveClass("wallet-card-lightning");
+    await user.type(screen.getByTestId("payment-amount"), "100");
+    expect(screen.queryByText(/^More than/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("payment-request")).toBeEnabled();
+  });
 });
 
 // A card that is not ready explains itself with its balance line ("Ark is connecting…"), but one with nothing set

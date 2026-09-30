@@ -1,4 +1,4 @@
-import { expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
+import { chat, expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
 
 /**
  * Mentions in a group (WISP 9xx § Mentions) between three browsers that never pair. Alice picks Bob from the
@@ -100,7 +100,10 @@ async function mentionBob(alice: Peer, text: string): Promise<void> {
   await expect(box).toHaveValue("@Bob ");
   await box.pressSequentially(text);
   await box.press("Enter");
-  await expect(groupChat(alice).getByText(text)).toBeVisible();
+  // In the timeline, and the composer empties. The composer is inside the group chat too, and for a moment after
+  // Enter it still holds the words while the message is already shown: a text search of the whole chat finds both.
+  await expect(chat(alice).getByText(text)).toBeVisible();
+  await expect(box).toHaveValue("");
 }
 
 test("three members: A mentions B, B's muted group still notifies, C's stays quiet", { tag: ["@feature:groups.mentions", "@feature:groups.mentions.notify", "@feature:groups.protocol.mentions", "@feature:app.attention.cues"] }, async ({ peer }) => {
