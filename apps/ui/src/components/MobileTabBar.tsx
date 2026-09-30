@@ -50,7 +50,8 @@ const TABS = [
   },
   {
     path: "/settings",
-    label: "sidebar.settings",
+    // The short word phones use in a tab bar ("Ajustes", "Réglages"): "Configurações" never fit in one.
+    label: "tabs.settings",
     icon: (
       <svg {...icon}>
         <circle cx="12" cy="12" r="3" />
@@ -64,7 +65,8 @@ const TABS = [
  * Phone navigation: the places the sidebar's account bar holds on a wide screen, five at most (a 320px phone
  * gives each 64px). Identities is one: it is where a proof about to expire is noticed, and its dot must be
  * seen. Profile is left out, set up once and rarely visited; it is reached from Settings, which carries the
- * active profile's picture on its icon, and holding Settings opens the account switcher.
+ * active profile's picture on its icon, and holding Settings opens the account switcher. Below 360px the names are
+ * 10px, as in iOS's own tab bars, and fill the tab: "Identidades", "Discussions" and "Portefeuilles" fit whole.
  */
 export function MobileTabBar() {
   const nav = useAppNavigation();
@@ -98,7 +100,7 @@ export function MobileTabBar() {
               aria-current={active ? "page" : undefined}
               aria-label={label}
               data-testid={`mobile-tab-${tab.path.slice(1) || "chats"}`}
-              className={`flex-1 min-w-0 min-h-14 px-0.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors select-none [-webkit-touch-callout:none] ${
+              className={`flex-1 min-w-0 min-h-14 px-0.5 max-[359px]:px-0 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors select-none [-webkit-touch-callout:none] ${
                 active ? "text-accent" : "text-text-muted"
               }`}
             >
@@ -114,7 +116,7 @@ export function MobileTabBar() {
                   </span>
                 )}
               </span>
-              <span className="max-w-full truncate text-[11px] font-medium leading-none">{t(tab.label)}</span>
+              <span className="max-w-full truncate text-[11px] max-[359px]:text-[10px] font-medium leading-none">{t(tab.label)}</span>
             </button>
           );
         })}
