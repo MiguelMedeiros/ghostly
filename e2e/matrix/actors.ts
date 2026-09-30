@@ -59,6 +59,22 @@ export function template(english: string): RegExp {
   return new RegExp([...translations].map((t) => t.split(/\{\{\w+\}\}/).map(escape).join(".*?")).join("|"));
 }
 
+/**
+ * Text written from a string with values in it, exactly, in English or Portuguese: each `{{name}}` matches
+ * `values[name]`, a regular expression source (`alternatives("test sats")` for a unit that is translated too).
+ */
+export function filled(english: string, values: Record<string, string>): RegExp {
+  const translations = new Set([english]);
+  for (const [key, value] of en) if (value === english && pt.get(key)) translations.add(pt.get(key)!);
+  const fill = (t: string) => t.split(/(\{\{\w+\}\})/).map((part) => {
+    const name = /^\{\{(\w+)\}\}$/.exec(part)?.[1];
+    if (name === undefined) return escape(part);
+    if (!(name in values)) throw new Error(`filled: no value for {{${name}}} in "${english}"`);
+    return `(?:${values[name]})`;
+  }).join("");
+  return new RegExp(`^(?:${[...translations].map(fill).join("|")})$`);
+}
+
 /** The open conversation, not the chat list. */
 export const chatPane = (actor: Peer) => actor.page.locator(".chat-wallpaper");
 

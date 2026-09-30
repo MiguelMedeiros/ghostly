@@ -72,13 +72,13 @@ test.describe("NWC with a fake wallet service", () => {
       expect(invoice).toMatch(/^lnbcrt/);
       const hash = [...mine.incoming.values()].find((i) => i.invoice === invoice)!.paymentHash;
       mine.markPaid(hash);
-      await expect(page.getByTestId("wallet-paid")).toContainText("12 sats received", { timeout: 30_000 });
+      await expect(page.getByTestId("wallet-paid")).toContainText("12 test sats received", { timeout: 30_000 });
 
       // Out: someone else's invoice, paid by the wallet.
       const bill = other.makeInvoice(30, "fake bill");
       await page.getByTestId("wallet-send").click();
       await page.getByTestId("wallet-pay-input").fill(bill.invoice);
-      await page.getByRole("button", { name: "Pay 30 sats" }).click();
+      await page.getByRole("button", { name: "Pay 30 test sats" }).click();
       await page.getByRole("button", { name: "Pay", exact: true }).click();
       await expect(page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 30_000 });
       expect(other.balance).toBe(100_030);

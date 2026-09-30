@@ -124,3 +124,27 @@ test("an iPhone with a hardware keyboard: the message field stays above the shor
   await input.blur();
   await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height > 874 - BAR; }).toBe(true);
 });
+
+test("on an iPhone: a message's quick bar opened while typing puts the keyboard down", { tag: ["@feature:app.mobile-layout", "@feature:chat.reactions", "@feature:app.menus"] }, async ({ peer }) => {
+  const { page } = await peer("hold-typing", { mobile: true, viewport: PHONE });
+  await iosKeyboard(page);
+  // iOS moves no focus to a button from a timer (the long press): the quick bar's first reaction took none, and the
+  // message field kept it, the keyboard up over the bar's rows and the keys going into the field behind it (iOS 26
+  // Simulator). Chromium would move it, so the page plays iOS here.
+  await page.evaluate(() => { HTMLButtonElement.prototype.focus = () => {}; });
+  await page.getByTitle("New Chat").first().click();
+  const input = page.getByPlaceholder("Message…");
+  await input.fill("hold me while typing");
+  await input.press("Enter");
+  await expect(input).toBeFocused();
+  await keyboard(page, KEYBOARD);
+
+  const row = page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: "hold me while typing" }).last();
+  const box = (await row.boundingBox())!;
+  const at = { pointerType: "touch", button: 0, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true };
+  await row.dispatchEvent("pointerdown", at);
+  await page.waitForTimeout(700);
+  await row.dispatchEvent("pointerup", at);
+  await expect(page.getByTestId("reaction-bar")).toBeVisible();
+  await expect(input).not.toBeFocused();
+});

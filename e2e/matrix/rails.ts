@@ -5,7 +5,7 @@ import { recoverExpiredArk, smallExpiredArk } from "../support/arkRecover";
 import { exclusive } from "../support/exclusive";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
-import { alternatives, cardAction, chatPane, containing, either, newWallet, openChat, paymentCard, template, wallet, type Actor } from "./actors";
+import { alternatives, cardAction, chatPane, containing, either, filled, newWallet, openChat, paymentCard, template, wallet, type Actor } from "./actors";
 
 /**
  * The Testnet payment blocks of the rails that need e2e/infra (Lightning through LND, Core Lightning, NWC
@@ -193,7 +193,7 @@ async function payInvoiceOfCard(from: Actor, to: Actor, sats: number): Promise<v
   await wallet(from, "lightning");
   await from.page.getByTestId("wallet-send").click();
   await from.page.getByTestId("wallet-pay-input").fill(invoice);
-  await from.page.getByRole("button", { name: new RegExp(`${alternatives("Pay")} ${sats.toLocaleString("en")} sats`) }).click();
+  await from.page.getByRole("button", { name: filled("Pay {{amount}} {{unit}}", { amount: String(sats), unit: alternatives("test sats") }) }).click();
   await from.page.getByRole("button", { name: either("Pay") }).click();
   await expect(from.page.getByTestId("wallet-notice")).toHaveText(either("Paid."), { timeout: 90_000 });
   await expect(to.page.getByTestId("wallet-paid")).toBeVisible({ timeout: 60_000 });
