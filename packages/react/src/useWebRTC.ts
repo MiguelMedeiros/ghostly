@@ -21,7 +21,11 @@ interface UseWebRTCParams {
   incomingCallSignal: string | null;
   publishCallSignal: (signal: string | null) => void;
   setFastPoll: (fast: boolean) => void;
-  addCallEventMessage?: (type: CallEventType, hasVideo: boolean, duration?: number) => void;
+  /**
+   * A line for the chat. `call`, on the lines a call has one of on this side (its ring, its miss): the time of the offer
+   * it rang with, the same when that offer is heard again (the app reopened while it rang), so its line is not added twice.
+   */
+  addCallEventMessage?: (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => void;
   /** Called when a call could not be placed or answered, e.g. the microphone was denied. */
   onError?: (error: unknown) => void;
   /** Where the media comes from, when not the browser's own WebRTC (Ghostly Desktop on Linux). */
@@ -881,7 +885,7 @@ export function useWebRTC({
       const offerHasVideo = signalHasVideo(signal);
       callHadVideoRef.current = offerHasVideo;
       callConnectedEventFiredRef.current = false;
-      addCallEventMessage?.("call_received", offerHasVideo);
+      addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts);
       updateCallState("incoming");
       setFastPoll(true);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
@@ -897,7 +901,7 @@ export function useWebRTC({
     } else if (signal.t === "h") {
       lastProcessedSignalRef.current = signal.ts;
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
-      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current);
+      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
       else if (signal.r === "u" && callStateRef.current !== "idle" && !callConnectedEventFiredRef.current) {
         // The contact's side could not connect (it found no candidate, or the call did not connect in time): this
         // side's call could not either, and says so the same way.
@@ -923,7 +927,7 @@ export function useWebRTC({
         hangUpRef.current(true, false);
         setNoAnswer(true);
       } else {
-        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current);
+        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
         hangUpRef.current(false, false);
       }
     }, RING_MS);
