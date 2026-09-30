@@ -190,6 +190,85 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # ============================================
+  # The headless CLI on Linux ARM64 (Graviton, Ampere, Hetzner ARM, a Raspberry Pi)
+  # ============================================
+  # The shards above run on x64 only. Here: the CLI packed as npm publishes it, installed into an empty folder the way
+  # `npm install -g @ghostlytools/cli` does (its dependencies from npm, so node-datachannel's linux-arm64 build comes
+  # from its own optional package), must start a daemon with WebRTC and calls on. Then the CLI's whole test suite, the
+  # two-peer story included: pairing, messages, files and a voice call over libdatachannel, on arm64.
+  # No Rust: the Iroh WebAssembly the CLI bundles is committed (packages/iroh-web/pkg).
+  # Not in CI Success yet: libdatachannel 0.24.5's answer race ("Got a remote candidate without ICE transport", see
+  # CallManager's `redial`) hit one arm64 run in six twice in a row, and callManager.test.ts failed. Add it to CI
+  # Success's `needs` (with `ok "$CLI_ARM64" "$PACKAGES"`) once calls get past that.
+  cli-linux-arm64:
+    name: CLI on Linux ARM64
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: ubuntu-24.04-arm
+    # A daemon that never exits would otherwise hold the runner for 6 hours.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the CLI
+        run: npm run build -w @ghostlytools/cli
+
+      # What `npm publish` would upload, installed with nothing of this checkout around it. `--prefer-offline`: the
+      # npm ci above filled the cache with most of what it needs.
+      - name: Pack and install the package
+        run: |
+          set -euo pipefail
+          tarball="$RUNNER_TEMP/$(npm pack -w @ghostlytools/cli --pack-destination "$RUNNER_TEMP" --silent | tail -n 1)"
+          ls -l "$tarball"
+          mkdir "$RUNNER_TEMP/installed"
+          cd "$RUNNER_TEMP/installed"
+          npm init -y > /dev/null
+          npm install --prefer-offline --no-audit --no-fund "$tarball"
+          ls node_modules/@node-datachannel/
+
+      # The packed CLI on its own, with no Pkarr relay, Mainline DHT or HyperDHT to reach: it starts a daemon, and that daemon
+      # has WebRTC and calls, which need node-datachannel's native module and opusscript to load on arm64.
+      - name: The installed CLI runs a daemon with WebRTC and calls
+        working-directory: ${{ runner.temp }}/installed
+        env:
+          GHOSTLY_HOME: ${{ runner.temp }}/ghostly-home
+          GHOSTLY_DHT: "0"
+          GHOSTLY_HYPERDHT_BOOTSTRAP: 127.0.0.1:9
+        run: |
+          set -euo pipefail
+          ghostly=node_modules/.bin/ghostly
+          $ghostly --version
+          $ghostly settings set relays '["http://127.0.0.1:9"]'
+          trap '$ghostly daemon stop || true' EXIT
+          $ghostly daemon --detach
+          $ghostly status | tee status.json
+          node -e '
+            const s = JSON.parse(require("fs").readFileSync("status.json", "utf8").trim().split("\n").pop());
+            if (s.webrtc !== true || s.calls !== true) { console.error("::error::the installed CLI has webrtc=" + s.webrtc + " calls=" + s.calls); process.exit(1); }
+          '
+          $ghostly daemon stop
+          trap - EXIT
+
+      # The CLI's own suite, as the packages shards run it on x64 (its Vitest builds dist/ again first). Skipped here as
+      # on x64: fedimint (a regtest federation) and payments (a test mint), which need the Docker e2e services, the long
+      # chat bench, and the ffmpeg comparisons in voicePeaks when ffmpeg is missing.
+      - name: jq for the Claude Code agent example
+        run: command -v jq || { sudo apt-get update && sudo apt-get install -y jq; }
+
+      - name: CLI tests
+        run: npm run test -w @ghostlytools/cli
+
   frontend-build:
     name: Frontend builds
     runs-on: ubuntu-24.04

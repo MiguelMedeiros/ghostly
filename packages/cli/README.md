@@ -28,6 +28,9 @@ Node 22.12 or newer. WebRTC comes from `node-datachannel` (a native
 module with prebuilt binaries for Linux, macOS and Windows); without it the CLI still runs, over HyperDHT, Iroh and
 the DHT, and groups are unavailable.
 
+Tested in CI on Linux x64 and Linux arm64 (glibc); developed on macOS arm64. macOS x64 and Windows x64 get the same
+prebuilt modules but no CI run.
+
 The bundle holds the app's engine (`@ghostly/browser`, `@ghostly/core`, Iroh's and Breez's WebAssembly); every other
 package it imports is a dependency in package.json, which `test/packageDeps.test.ts` keeps true.
 

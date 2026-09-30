@@ -34,6 +34,10 @@ WebRTC comes from `node-datachannel`
 (prebuilt for Linux, macOS and Windows). Without it the CLI still chats over HyperDHT, Iroh and the DHT, but groups
 and voice calls need WebRTC and are unavailable.
 
+Platforms: CI tests the CLI on Linux x64 and Linux arm64 (glibc; Graviton, Ampere, Hetzner ARM, a 64-bit Raspberry Pi
+OS), including the package installed from its npm tarball on arm64. It is developed on macOS arm64. macOS x64 and
+Windows x64 have the same prebuilt modules but no CI run.
+
 ## A first chat
 
 ```bash
