@@ -4,6 +4,7 @@ import { Button, Notice } from "../ui";
 import { Select } from "../../ui/Select";
 import type { ProviderFormProps } from "./forms";
 import { useI18n } from "../../../contexts/I18nContext";
+import { formatAmount } from "../../../lib/amount";
 
 /**
  * The Fedimint source's form: one of the federations joined on the Fedimint card (with a gateway module), not an
@@ -19,7 +20,7 @@ export function FedimintForm({ descriptor, busy, onSubmit }: ProviderFormProps) 
   return (
     <form className="space-y-3" data-testid={`provider-form-${descriptor.id}`} onSubmit={(e) => { e.preventDefault(); if (federation) onSubmit({ federation }); }}>
       <Select aria-label={t("wallet.source.fedimint.label")} value={federation} onChange={setChosen}
-        options={federations.map((f) => ({ value: f.id, label: f.name ?? `${f.id.slice(0, 8)}…`, description: t("wallet.source.fedimint.description", { amount: f.balance.toLocaleString(), network: f.network ?? t("wallet.source.fedimint.unknownNetwork") }) }))} />
+        options={federations.map((f) => ({ value: f.id, label: f.name ?? `${f.id.slice(0, 8)}…`, description: t("wallet.source.fedimint.description", { amount: formatAmount(f.balance, t.language), network: f.network ?? t("wallet.source.fedimint.unknownNetwork") }) }))} />
       <Button type="submit" variant="primary" disabled={busy || !federation}>{t("wallet.source.fedimint.use")}</Button>
     </form>
   );

@@ -9,6 +9,7 @@ import { changeableFields } from "./wallet/providers/sourceStatus";
 import { useI18n } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
+import { formatAmount } from "../lib/amount";
 
 /** The most the person accepts to pay in fees unless they change it; the review shows the real fee. */
 const DEFAULT_FEE_CAP = 2_000;
@@ -44,7 +45,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           <p className="text-text-primary">{bt.status === "error" ? (bt.label ? t("wallet.bitcoin.notConnected", { label: bt.label }) : t("wallet.bitcoin.notConnectedDefault")) : bt.label ? t("wallet.bitcoin.connectingTo", { label: bt.label }) : t("wallet.bitcoin.connectingDefault")}</p>
           {bt.balance !== undefined && (
             <p className="text-text-secondary text-sm" data-testid="bitcoin-last-balance">
-              {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: new Date(bt.balanceAt).toLocaleString() }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{bt.balance.toLocaleString()}</span> })}
+              {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: new Date(bt.balanceAt).toLocaleString() }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
             </p>
           )}
           {bt.error && <Notice tone={bt.status === "error" ? "error" : "warning"} testId="bitcoin-connect-error">{bt.status === "connecting" ? t("wallet.bitcoin.retrying", { error: bt.error }) : bt.error}</Notice>}
@@ -59,9 +60,9 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
       ) : (
         <div className="space-y-4">
           <p className="text-text-primary" data-testid="bitcoin-balance">
-            <span className="text-4xl font-semibold tabular-nums">{(bt.balance ?? 0).toLocaleString()}</span>
+            <span className="text-4xl font-semibold tabular-nums">{formatAmount(bt.balance ?? 0, t.language)}</span>
             <span className="text-text-muted text-sm ms-2">{unit}</span>
-            {!!bt.unconfirmed && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.bitcoin.unconfirmed", { amount: bt.unconfirmed.toLocaleString(), unit })}</span>}
+            {!!bt.unconfirmed && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.bitcoin.unconfirmed", { amount: formatAmount(bt.unconfirmed, t.language), unit })}</span>}
             {bt.network !== "bitcoin" && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.panel.testCoins", { network: bt.network ?? "" })}</span>}
           </p>
           <Actions value={action} onChange={setAction} actions={["receive", "send", "history"]} />
@@ -90,13 +91,13 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
               {bt.history.length === 0 ? <Notice>{t("wallet.bitcoin.nothingYet")}</Notice> : bt.history.map((tx) => (
                 <div key={tx.txid} className="text-sm py-1 flex flex-wrap justify-between gap-x-2" data-testid="bitcoin-tx">
                   <span className="min-w-0 flex-1 font-mono text-xs text-text-muted truncate">{tx.txid}</span>
-                  <span className={`tabular-nums shrink-0 ${tx.amount > 0 ? "text-accent" : "text-text-primary"}`}>{tx.confirmations ? t("wallet.bitcoin.tx.confirmed", { sign: tx.amount > 0 ? "+" : "−", amount: Math.abs(tx.amount).toLocaleString(), count: tx.confirmations }) : t("wallet.bitcoin.tx.unconfirmed", { sign: tx.amount > 0 ? "+" : "−", amount: Math.abs(tx.amount).toLocaleString() })}</span>
+                  <span className={`tabular-nums shrink-0 ${tx.amount > 0 ? "text-accent" : "text-text-primary"}`}>{tx.confirmations ? t("wallet.bitcoin.tx.confirmed", { sign: tx.amount > 0 ? "+" : "−", amount: formatAmount(Math.abs(tx.amount), t.language), count: tx.confirmations }) : t("wallet.bitcoin.tx.unconfirmed", { sign: tx.amount > 0 ? "+" : "−", amount: formatAmount(Math.abs(tx.amount), t.language) })}</span>
                 </div>
               ))}
             </div>
           )}
           {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
-          {intents.map((i) => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: i.amount.toLocaleString(), unit, state: i.state })}</Button>)}
+          {intents.map((i) => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: i.state })}</Button>)}
           {error && <Notice tone="error" testId="bitcoin-error">{error}</Notice>}
         </div>
       )}

@@ -33,7 +33,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     applyDocumentLanguage(language);
   }, [language]);
 
-  const t = useMemo(() => translateWith(translations[language] || translations.en), [language]);
+  const t = useMemo(() => translateWith(translations[language] || translations.en, translations[language] ? language : "en"), [language]);
 
   return (
     <I18nContext.Provider value={{ t, language, dir }}>

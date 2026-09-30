@@ -8,6 +8,7 @@ import { useRun } from "./wallet/run";
 import { externalLinkProps } from "../lib/externalLink";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
+import { formatAmount } from "../lib/amount";
 
 type Network = "bitcoin" | "signet" | "regtest";
 /** Second's public servers (Bitcoin, signet), or a local regtest one (e2e/support/bark-regtest). */
@@ -48,9 +49,9 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
  return <div className="space-y-6" data-testid="bark-wallet">
   {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="bark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Bark" })}</p><Notice>{bark?.error ?? t("wallet.bark.connectingNote")}</Notice></div>
   : <div className="space-y-4">
-   <p className="text-text-primary" data-testid="bark-balance"><span className="text-4xl font-semibold tabular-nums">{bark.balance.toLocaleString()}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{bark.network !== "bitcoin" && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.bark.testCoins", { network: NETWORKS[network].label })}</span>}</p>
-   {!!bark.pending && <Notice tone="warning" testId="bark-pending">{t("wallet.bark.pending", { amount: bark.pending.toLocaleString(), unit })}</Notice>}
-   {!!bark.exiting && <Notice tone="warning" testId="bark-exiting">{t("wallet.bark.exiting", { amount: bark.exiting.toLocaleString(), unit })}</Notice>}
+   <p className="text-text-primary" data-testid="bark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(bark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{bark.network !== "bitcoin" && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.bark.testCoins", { network: NETWORKS[network].label })}</span>}</p>
+   {!!bark.pending && <Notice tone="warning" testId="bark-pending">{t("wallet.bark.pending", { amount: formatAmount(bark.pending, t.language), unit })}</Notice>}
+   {!!bark.exiting && <Notice tone="warning" testId="bark-exiting">{t("wallet.bark.exiting", { amount: formatAmount(bark.exiting, t.language), unit })}</Notice>}
    <Essentials t={t} expiry={bark.expiry} real={real} />
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
@@ -58,7 +59,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
     {via === "ark" ? <Address value={bark.address} uri={bark.address ? paymentUri({ kind: "ark", address: bark.address }) : undefined} testId="bark-address" note={t("wallet.bark.addressNote")} />
      : <Address value={bark.onchainAddress} qr={bark.onchainAddress ? `bitcoin:${bark.onchainAddress}` : undefined} testId="bark-onchain-address" note={t("wallet.bark.onchainNote")} />}
     {!!bark.onchain && <div className="flex items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="bark-onchain">
-     <p className="flex-1 text-xs text-yellow-500">{t("wallet.bark.onchain", { amount: bark.onchain.toLocaleString(), unit })}</p>
+     <p className="flex-1 text-xs text-yellow-500">{t("wallet.bark.onchain", { amount: formatAmount(bark.onchain, t.language), unit })}</p>
      <Button data-testid="bark-board" disabled={busy} onClick={() => void run(() => wallet.barkBoard())}>{busy ? t("wallet.bark.moving") : t("wallet.bark.board")}</Button>
     </div>}
    </div>}
@@ -69,7 +70,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
     <Notice>{t("wallet.bark.approve")}</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
-   {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intentSats", { amount: i.amount.toLocaleString(), state: i.state })}</Button>)}
+   {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intentSats", { amount: formatAmount(i.amount, t.language), state: i.state })}</Button>)}
   </div>}
   {error && <Notice tone="error">{error}</Notice>}
   {bark?.error && ready && <Notice tone="warning">{bark.error}</Notice>}

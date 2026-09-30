@@ -14,6 +14,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { moneyLabel, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
+import { formatAmount, formatTokenAmount } from "../lib/amount";
 
 const button =
   "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
@@ -106,7 +107,7 @@ function Amount({ sats, network }: { sats?: number; network: WalletNetwork }) {
   if (sats === undefined) return <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>;
   return (
     <>
-      <span className="text-[22px] font-semibold" data-testid="money-amount">{sats.toLocaleString()}</span>
+      <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(sats, t.language)}</span>
       <span className="text-text-primary/65 text-xs ms-1">{satsIn(t, network)}</span>
     </>
   );
@@ -328,7 +329,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
   const usdt = view?.usdt;
   const decimals = usdt?.decimals ?? 6;
   const amount = request.amount !== undefined
-    ? <><span className="text-[22px] font-semibold" data-testid="money-amount">{formatPaymentAmount(request.amount.toString(), decimals)}</span><span className="text-text-primary/65 text-xs ms-1">{network === "mainnet" ? "USDT" : t("payments.formats.testUsdt")}</span></>
+    ? <><span className="text-[22px] font-semibold" data-testid="money-amount">{formatTokenAmount(request.amount.toString(), decimals, t.language)}</span><span className="text-text-primary/65 text-xs ms-1">{network === "mainnet" ? "USDT" : t("payments.formats.testUsdt")}</span></>
     : <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>;
   let status: React.ReactNode = null;
   if (!network) {

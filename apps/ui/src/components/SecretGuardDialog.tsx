@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../contexts/I18nContext";
 import type { SecretFinding } from "../lib/parse/secrets";
+import { formatAmount } from "../lib/amount";
 
 /**
  * Asked before the composer sends text that looks like a secret (`findSecret`): a seed or a private key, or a Cashu
@@ -26,7 +27,7 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
   let title: string, body: string;
   if (finding.kind === "cashu") {
     const { amount, unit } = finding;
-    const worth = amount === null ? null : unit === "sat" ? t(amount === 1 ? "secretGuard.sat" : "secretGuard.sats", { count: amount.toLocaleString() }) : `${amount.toLocaleString()} ${unit.toUpperCase()}`;
+    const worth = amount === null ? null : unit === "sat" ? t(amount === 1 ? "secretGuard.sat" : "secretGuard.sats", { count: formatAmount(amount, t.language) }) : `${formatAmount(amount, t.language)} ${unit.toUpperCase()}`;
     title = worth === null ? t("secretGuard.cashuUnknownTitle", { contact }) : t("secretGuard.cashuTitle", { amount: worth, contact });
     body = t("secretGuard.cashu");
   } else {
