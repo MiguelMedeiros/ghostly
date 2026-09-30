@@ -3249,14 +3249,17 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * `network`: the Cashu wallet it is added from. A mint's network is its own (a test mint is Testnet's, any other
-   * Mainnet's): one of the other network is refused before it is contacted, never filed into that network's wallet
-   * (which it would make, unseen from the wallet it was added from).
+   * Mainnet's): one of the other network is refused, never filed into that network's wallet (which it would make,
+   * unseen from the wallet it was added from). A test mint or one on this machine is known by its address, and is
+   * refused from Mainnet before it is contacted. Any other address is Mainnet's only by default: from Testnet it is
+   * contacted first, so a typo or a server that is not a mint is named as such, and it is called a mint of real sats
+   * only once it answered as a mint.
    */
   async walletAddMint({ url, primary, network }: { url: string; primary?: boolean; network?: WalletNetwork }): Promise<{ url: string; name: string }> {
-    if (network && mintNetwork(normalizeMintUrl(url)) !== network) {
-      throw engineError(network === "mainnet" ? "testMintOnMainnet" : "realMintOnTestnet");
-    }
+    const other = !!network && mintNetwork(normalizeMintUrl(url)) !== network;
+    if (other && network === "mainnet") throw engineError("testMintOnMainnet");
     const mint = await this.wallet.checkMint(url);
+    if (other) throw engineError("realMintOnTestnet");
     const others = this.settings.mints.filter((m) => m !== mint.url);
     const known = others.length !== this.settings.mints.length;
     if (primary) await this.updateSettings({ settings: { mints: [mint.url, ...others] } });
