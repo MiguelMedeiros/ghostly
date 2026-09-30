@@ -502,6 +502,9 @@ describe("the toolbar button", () => {
     const appUrl = world.chrome.runtime.getURL("app.html");
     expect(world.callsTo("tabs.create")).toEqual([[appUrl]]);
     const [tab] = [...world.tabs.values()];
+    // The person went on to a chat, and has a web page open beside it.
+    tab.url = `${appUrl}#/chat/abc`;
+    world.tabs.set(99, { id: 99, url: "https://example.org/", windowId: 2 });
 
     fire(world.chrome.action.onClicked);
     await settle();
