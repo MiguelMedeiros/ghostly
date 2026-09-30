@@ -1,16 +1,23 @@
 {
   "panel": {
-    "active": "In corso",
     "activeCount": "{{count}} in corso",
+    "allOk": "tutto OK",
     "button": "Attività",
     "buttonCount": "Attività, {{count}} in corso",
-    "finished": "Concluse",
+    "close": "Chiudi",
+    "empty": "Nessuna attività in corso",
+    "failedCount": "{{count}} non riuscite",
+    "finishedCount": "Concluse ({{count}})",
+    "idle": "Niente in corso",
     "info": "I bot pubblicano queste schede e le tengono aggiornate. Tocca una scheda per andarci nella chat.",
-    "routines": "Routine",
+    "nextRun": "prossima {{when}}",
+    "routinesMany": "{{count}} routine",
+    "routinesOne": "1 routine",
     "title": "Attività"
   },
   "routine": {
     "cron": "Cron:",
+    "lastRun": "Ultima esecuzione: {{result}}",
     "next": "Prossima {{when}}",
     "noRuns": "Nessuna esecuzione ancora",
     "result": {

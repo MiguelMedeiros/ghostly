@@ -56,7 +56,7 @@ function TaskView({ card }: { card: TaskCard }) {
     <div data-testid="status-card" data-kind="task" data-card-id={card.id} data-status={card.status} data-open={open ? "" : undefined}
       className="my-0.5 w-[min(320px,72vw)] max-w-full rounded-lg border border-text-primary/10 bg-text-primary/5 text-start">
       <button type="button" data-testid="status-card-toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)}
-        className="block w-full cursor-pointer rounded-lg p-2.5 text-start focus-visible:outline-2 focus-visible:outline-accent">
+        className="block w-full cursor-pointer rounded-lg px-2.5 py-2 text-start focus-visible:outline-2 focus-visible:outline-accent">
         <span className="flex items-center gap-2">
           <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${STATUS_TONE[card.status].dot}`} />
           <bdi data-testid="status-card-title" className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-text-primary">{card.title}</bdi>
@@ -64,8 +64,8 @@ function TaskView({ card }: { card: TaskCard }) {
             {STATUS_TONE[card.status].mark && <span aria-hidden="true">{STATUS_TONE[card.status].mark} </span>}{t(`cards.task.status.${card.status}`)}
           </span>
         </span>
-        <ProgressBar card={card} className="mt-2" />
-        <span className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-text-primary/65">
+        <ProgressBar card={card} className="mt-1.5" />
+        <span className="mt-1 flex items-center justify-between gap-2 text-[11px] text-text-primary/65">
           <span className="min-w-0 truncate">
             {progress !== undefined && <span>{progress}%</span>}
             {card.done !== undefined && card.total !== undefined && <span>{progress !== undefined ? " · " : ""}{t("cards.task.steps", { done: card.done, total: card.total })}</span>}

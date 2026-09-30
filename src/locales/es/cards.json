@@ -1,16 +1,23 @@
 {
   "panel": {
-    "active": "Activas",
     "activeCount": "{{count}} activas",
+    "allOk": "todo OK",
     "button": "Tareas",
     "buttonCount": "Tareas, {{count}} activas",
-    "finished": "Terminadas",
+    "close": "Cerrar",
+    "empty": "Ninguna tarea en curso",
+    "failedCount": "{{count}} con fallo",
+    "finishedCount": "Terminadas ({{count}})",
+    "idle": "Nada en curso",
     "info": "Los bots publican estas tarjetas y las mantienen al día. Toca una para ir a ella en el chat.",
-    "routines": "Rutinas",
+    "nextRun": "próxima {{when}}",
+    "routinesMany": "{{count}} rutinas",
+    "routinesOne": "1 rutina",
     "title": "Tareas"
   },
   "routine": {
     "cron": "Cron:",
+    "lastRun": "Última ejecución: {{result}}",
     "next": "Próxima {{when}}",
     "noRuns": "Aún no se ha ejecutado",
     "result": {
