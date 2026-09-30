@@ -23,7 +23,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile } from "../lib/fileStatus";
-import { useServicesPlatform, useTransfer } from "../hooks/useServicesPlatform";
+import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
 import type { QuoteView } from "../lib/replies";
@@ -447,15 +447,16 @@ const cancelIcon = (
  */
 function DownloadItem({ file, name, sender, format = "original", onDone }: { file: ChatFile; name: string; sender: "me" | "peer"; format?: DownloadFormat; onDone: () => void }) {
   const { t } = useI18n();
-  const platform = useServicesPlatform();
+  const { platform, transfer, restoring } = useTransfer(file.id);
   const [problem, setProblem] = useState<"missing" | "unconverted" | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const state = downloadState(platform?.getTransfer(file.id) ?? null, sender);
+  const state = downloadState(transfer, sender, restoring);
   const reason = problem === "missing" ? t("chat.message.downloadMissing")
     : problem === "unconverted" ? t("chat.message.downloadUnconverted")
     : state === "preparing" ? t("chat.message.downloadPreparing")
+    : state === "restoring" ? t("common.loading")
     : state === "arriving" ? t("chat.message.downloadArriving")
     : state === "failed" ? t("chat.message.downloadFailed")
     : busy && format === "mp3" ? t("chat.message.downloadConverting")
@@ -483,9 +484,10 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
  */
 function ForwardItem({ file, sender, onForward }: { file?: ChatFile; sender: "me" | "peer"; onForward: () => void }) {
   const { t } = useI18n();
-  const platform = useServicesPlatform();
-  const state = file ? downloadState(platform?.getTransfer(file.id) ?? null, sender) : "ready";
-  const reason = state === "preparing" ? t("chat.message.downloadPreparing") : state === "arriving" ? t("chat.message.downloadArriving")
+  const { transfer, restoring } = useTransfer(file?.id);
+  const state = file ? downloadState(transfer, sender, restoring) : "ready";
+  const reason = state === "preparing" ? t("chat.message.downloadPreparing") : state === "restoring" ? t("common.loading")
+    : state === "arriving" ? t("chat.message.downloadArriving")
     : state === "failed" ? t("chat.message.downloadFailed") : undefined;
   return (
     <MenuItem testId="message-forward" onClick={onForward} disabled={!!reason} hint={reason} icon={<ForwardGlyph />}>

@@ -260,6 +260,29 @@ describe("an audio file not here yet", () => {
     expect(screen.getByTestId("audio-play")).toBeEnabled();
   });
 
+  it("right after a start, one whose transfer is not restored yet is not offered to play or save", () => {
+    const file = song({ size: 10 * MB });
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<AudioBubble file={file} sender="peer" peerName="Ana" />);
+    expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-stage", "restoring");
+    expect(screen.getByTestId("audio-play")).toBeDisabled();
+    expect(screen.queryByTestId("audio-save")).toBeNull();
+    // Restored: it is still arriving.
+    act(() => fakeEngine.update({ transfersRestored: true, transfers: { [file.id]: { state: "transferring", direction: "in", transferred: 4 * MB, size: file.size } } }));
+    expect(screen.getByTestId("audio-progress")).toBeInTheDocument();
+    expect(screen.getByTestId("audio-play")).toBeDisabled();
+    expect(screen.queryByTestId("audio-save")).toBeNull();
+  });
+
+  it("one from history plays once the transfers are restored with none for it", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<AudioBubble file={song()} sender="peer" peerName="Ana" />);
+    expect(screen.getByTestId("audio-play")).toBeDisabled();
+    act(() => fakeEngine.update({ transfersRestored: true }));
+    expect(screen.getByTestId("audio-play")).toBeEnabled();
+    expect(screen.getByTestId("audio-save")).toBeInTheDocument();
+  });
+
   it("one that did not go offers the round Send again, with the reason behind its ⓘ", () => {
     const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
     const file = song({ id: "chat1-out-song" });

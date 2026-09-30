@@ -38,8 +38,9 @@ function fullScreen(video: HTMLVideoElement | null): boolean {
 export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile; sender: "me" | "peer"; peerName?: string }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
-  const { platform, transfer } = useTransfer(file.id);
-  const ready = transfer === null || transfer.state === "done";
+  const { platform, transfer, restoring } = useTransfer(file.id);
+  // No transfer is "finished" only once the engine has put its kept transfers back after a start.
+  const ready = (transfer === null && !restoring) || transfer?.state === "done";
   const [playable] = useState(() => canPlayVideo(file.mime));
   const [phase, setPhase] = useState<Phase>("poster");
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -247,7 +248,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     : null;
 
   return (
-    <div className="max-w-full" data-testid="video-bubble" data-stage={transfer?.stage ?? transfer?.state ?? "done"} data-phase={phase} data-playable={playable ? "true" : "false"}>
+    <div className="max-w-full" data-testid="video-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")} data-phase={phase} data-playable={playable ? "true" : "false"}>
       <div
         ref={rootRef}
         tabIndex={phase === "playing" ? 0 : -1}

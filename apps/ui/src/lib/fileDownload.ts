@@ -3,16 +3,18 @@ import type { FileTransferState, ServicesPlatform } from "./platform";
 import type { ChatFile } from "./types";
 
 /** Whether a file message's bytes can be saved now: the others say why not. */
-export type DownloadState = "ready" | "preparing" | "arriving" | "failed";
+export type DownloadState = "ready" | "preparing" | "restoring" | "arriving" | "failed";
 
 /**
  * A file sent from here is kept whole once it is prepared (a large one is copied into storage first). One
  * received can be saved once its transfer is done, or when nothing is known about a transfer (history, after a
- * restart).
+ * restart) once the engine has put its kept transfers back (`restoring` until then: it may still be arriving).
  */
-export function downloadState(transfer: FileTransferState | null, sender: "me" | "peer"): DownloadState {
+export function downloadState(transfer: FileTransferState | null, sender: "me" | "peer", restoring = false): DownloadState {
   if (transfer?.state === "transferring" && transfer.stage === "preparing") return "preparing";
-  if (sender === "me" || transfer === null || transfer.state === "done") return "ready";
+  if (sender === "me") return "ready";
+  if (transfer === null && restoring) return "restoring";
+  if (transfer === null || transfer.state === "done") return "ready";
   return transfer.state === "failed" ? "failed" : "arriving";
 }
 
