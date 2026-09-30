@@ -14,6 +14,10 @@
     "recovering": "Récupération…",
     "renewalOpen": "Tant que Ghostly est ouvert",
     "renewalRegtest": "Désactivé en regtest",
+    "small": "{{amount}} {{unit}} ont expiré, trop peu pour être récupérés seuls. Ils sont récupérés avec les prochaines pièces qui expirent.",
+    "smallInfo": "Une récupération crée une seule nouvelle pièce, et le serveur Ark n'en crée aucune sous sa taille minimale. Ces sats sont toujours à vous : quand d'autres pièces expirent, Récupérer les prend toutes ensemble.",
+    "sweeping": "{{amount}} {{unit}} ont expiré. Vous pourrez les récupérer une fois que le serveur Ark aura balayé leur lot.",
+    "sweepingInfo": "Les pièces Ark vivent dans un lot qui expire ; Ghostly les renouvelle avant, tant qu'il est ouvert. Les pièces expirées sont toujours à vous, mais le serveur Ark reprend d'abord leur lot on-chain (un balayage). Cela attend de nouveaux blocs Bitcoin, souvent une heure ou plus. D'ici là, elles ne peuvent être ni dépensées ni récupérées ; ensuite, Récupérer les place dans un nouveau lot.",
     "useProvider": "Utiliser ce fournisseur"
   },
   "backup": {

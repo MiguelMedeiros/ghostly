@@ -14,6 +14,10 @@
     "recovering": "Recuperando…",
     "renewalOpen": "Enquanto o Ghostly estiver aberto",
     "renewalRegtest": "Desligada no regtest",
+    "small": "{{amount}} {{unit}} expiraram, poucos demais para recuperar sozinhos. Eles serão recuperados com as próximas moedas que expirarem.",
+    "smallInfo": "Uma recuperação cria uma moeda nova, e o servidor Ark não cria moedas abaixo do tamanho mínimo. Estes sats continuam sendo seus: quando mais moedas expirarem, Recuperar leva todas juntas.",
+    "sweeping": "{{amount}} {{unit}} expiraram. Você poderá recuperá-los quando o servidor Ark tiver varrido o lote deles.",
+    "sweepingInfo": "Moedas Ark ficam num lote que expira; o Ghostly as renova antes disso enquanto está aberto. Moedas que expiraram continuam sendo suas, mas antes o servidor Ark leva o lote de volta para a blockchain (uma varredura). Isso espera novos blocos de Bitcoin, muitas vezes uma hora ou mais. Até lá elas não podem ser gastas nem recuperadas; depois, Recuperar as move para um novo lote.",
     "useProvider": "Usar este provedor"
   },
   "backup": {

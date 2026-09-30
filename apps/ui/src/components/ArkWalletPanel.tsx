@@ -50,8 +50,17 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
     {via === "ark" ? <Address value={ark.address} uri={ark.address ? paymentUri({ kind: "ark", address: ark.address }) : undefined} testId="ark-address" note={t("wallet.ark.arrives")} />
      : <Address value={ark.boardingAddress} qr={ark.boardingAddress ? `bitcoin:${ark.boardingAddress}` : undefined} testId="ark-boarding-address" note={network === "regtest" ? t("wallet.ark.boardingRegtest") : t("wallet.ark.boarding")} />}
    </div>}
-   {/* Outputs whose batch expired before renewal are still this wallet's: say so, and bring them back. */}
-   {!!ark.recoverable && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="ark-recoverable">
+   {/* Outputs whose batch expired before renewal are still this wallet's. Until the server sweeps that batch they
+       can be neither spent nor recovered (a recovery then fails, and the server bans the coins for a while): say
+       so plainly, and offer Recover only once every expired coin is swept. */}
+   {!!ark.sweeping && <div className="rounded-xl bg-yellow-500/10" data-testid="ark-sweeping">
+    <Row label={<span className="text-xs text-yellow-500">{t("wallet.ark.sweeping", { amount: formatAmount(ark.sweeping, t.language), unit })}</span>} info={t("wallet.ark.sweepingInfo")} />
+   </div>}
+   {/* Swept, but too few together for the one coin a recovery makes: they wait for more to expire. */}
+   {!!ark.small && <div className="rounded-xl bg-yellow-500/10" data-testid="ark-small">
+    <Row label={<span className="text-xs text-yellow-500">{t("wallet.ark.small", { amount: formatAmount(ark.small, t.language), unit })}</span>} info={t("wallet.ark.smallInfo")} />
+   </div>}
+   {!!ark.recoverable && !ark.sweeping && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="ark-recoverable">
     <p className="flex-[1_1_12rem] min-w-0 text-xs text-yellow-500">{t("wallet.ark.expired", { amount: formatAmount(ark.recoverable, t.language), unit })}</p>
     <Button data-testid="ark-recover" disabled={busy} onClick={() => void run(() => wallet.arkRecover())}>{busy ? t("wallet.ark.recovering") : t("wallet.ark.recover")}</Button>
    </div>}

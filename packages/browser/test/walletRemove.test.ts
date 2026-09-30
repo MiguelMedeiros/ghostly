@@ -16,7 +16,7 @@ vi.mock("@arkade-os/sdk", async (original) => ({ ...await original<object>(), Re
 const arkBalance = { value: 0 };
 vi.mock("../src/engine/paymentAdapters/arkade", () => ({
   ARK_NETWORKS: ["bitcoin", "mutinynet", "signet", "regtest"],
-  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => arkBalance.value, boardingAddress: async () => "tb1qme", incoming: async () => 0, recoverable: async () => 0, dispose: vi.fn() })) },
+  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => arkBalance.value, boardingAddress: async () => "tb1qme", incoming: async () => 0, expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: vi.fn() })) },
 }));
 vi.mock("../src/engine/paymentAdapters/usdt", () => ({
   UsdtAdapter: {

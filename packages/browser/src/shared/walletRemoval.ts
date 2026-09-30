@@ -99,7 +99,7 @@ export function walletRemoval(type: WalletType, network: WalletNetwork, view: Re
     }
     case "arkade": {
       const ark = view?.ark, open = !!ark?.configured && !ark.locked;
-      return { ...base, custody: "device", held: open ? known(ark!.balance + (ark!.recoverable ?? 0) + (ark!.incoming ?? 0), network) : "unknown", backup: "phrase", pending };
+      return { ...base, custody: "device", held: open ? known(ark!.balance + (ark!.recoverable ?? 0) + (ark!.sweeping ?? 0) + (ark!.small ?? 0) + (ark!.incoming ?? 0), network) : "unknown", backup: "phrase", pending };
     }
     case "bark": {
       const bark = view?.bark, open = !!bark?.configured && !bark.locked;

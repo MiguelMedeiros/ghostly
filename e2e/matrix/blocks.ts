@@ -704,8 +704,9 @@ export const payments: Block = {
   id: "payments",
   run: async (w) => {
     if (w.combo.wallet === "mainnet") return mainnetUi(w);
-    // Setting a source up, funding it and paying four times on a chain takes minutes of its own.
-    w.info.setTimeout(w.info.timeout + 10 * 60_000);
+    // Setting a source up, funding it and paying four times on a chain takes minutes of its own. Arkade's coins
+    // outlive their regtest batch on the way, and each recovery waits for the server's sweep (rails.ts).
+    w.info.setTimeout(w.info.timeout + (w.combo.rail === "ark-arkade" ? 20 : 10) * 60_000);
     // A new profile has no wallet: each person makes the rail's Testnet wallets with New.
     for (const p of [w.a, w.b]) for (const kind of TESTNET_WALLETS[w.combo.rail] ?? []) await newWallet(p, kind, "testnet");
     await TESTNET[w.combo.rail]!(w);
