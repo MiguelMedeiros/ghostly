@@ -1,4 +1,4 @@
-import { ACTIVE_TASK_STATUSES, type StatusCard, type TaskStatus } from "@ghostly/core";
+import { ACTIVE_TASK_STATUSES, type RunResult, type StatusCard, type TaskStatus } from "@ghostly/core";
 
 /*
  * The status cards of a chat or group, as its Tasks panel lists them (WISP 4xx · Status Cards): the newest message of
@@ -68,7 +68,26 @@ export const STATUS_TONE: Record<TaskStatus, { dot: string; bar: string; label: 
 /** A task that is over: done, failed or cancelled. It no longer says what it is doing now. */
 export const isFinished = (status: TaskStatus) => status === "done" || status === "failed" || status === "cancelled";
 
+/** A routine run's dot and word: green when it went well, red when it failed, muted when it was skipped. */
+export const RESULT_TONE: Record<RunResult, { dot: string; label: string }> = {
+  ok: { dot: "bg-success", label: "text-success" },
+  failed: { dot: "bg-danger", label: "text-danger-ink" },
+  skipped: { dot: "bg-text-muted", label: "text-text-primary/65" },
+};
+
+/** "in 3 h", "tomorrow" in the interface's language: a routine's next run from now. */
+export function untilIn(language: string): (at: number, now?: number) => string {
+  return (at, now = Date.now()) => {
+    const d = Math.max(0, (at - now) / 1000);
+    const rtf = new Intl.RelativeTimeFormat(language, { numeric: "auto", style: "short" });
+    if (d < 60) return rtf.format(0, "second");
+    if (d < 3600) return rtf.format(Math.round(d / 60), "minute");
+    if (d < 86_400) return rtf.format(Math.round(d / 3600), "hour");
+    return rtf.format(Math.round(d / 86_400), "day");
+  };
+}
+
 /** Whether a message shows as its card: a kind this app draws. Anything else shows the message's text. */
 export function showsCard(card: StatusCard | undefined): card is StatusCard {
-  return card?.kind === "task";
+  return card?.kind === "task" || card?.kind === "routine";
 }

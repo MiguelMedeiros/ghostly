@@ -9,6 +9,21 @@
     "routines": "Rotinas",
     "title": "Tarefas"
   },
+  "routine": {
+    "cron": "Cron:",
+    "next": "Próxima {{when}}",
+    "noRuns": "Nenhuma execução ainda",
+    "result": {
+      "failed": "Falhou",
+      "ok": "OK",
+      "skipped": "Pulada"
+    },
+    "runs": "Execuções recentes",
+    "state": {
+      "active": "Ativa",
+      "paused": "Pausada"
+    }
+  },
   "task": {
     "branch": "Branch:",
     "item": {

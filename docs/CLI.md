@@ -200,7 +200,9 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
 - A task card: `ghostly task send <chat|group> --title "…" --steps 1/4`, then `ghostly task update <chat|group> <task>
   --steps 2/4 --step "…"` as the work goes, and `--status done` at the end. People see a small card with a progress
   bar and the pull request's size, which opens on a tap; apps without cards read a short text. Updates merge, at
-  most one per card every 2.5 s ([WISP 4xx · Status Cards](wisps/4xx-status-cards.md)).
+  most one per card every 2.5 s ([WISP 4xx · Status Cards](wisps/4xx-status-cards.md)). A routine the same way:
+  `ghostly routine send <chat|group> --name "…" --schedule "every day 01:00" --next <date>`, then
+  `ghostly routine update <chat|group> <routine> --run ok` after each run.
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 

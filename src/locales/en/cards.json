@@ -9,6 +9,21 @@
     "routines": "Routines",
     "title": "Tasks"
   },
+  "routine": {
+    "cron": "Cron:",
+    "next": "Next {{when}}",
+    "noRuns": "No runs yet",
+    "result": {
+      "failed": "Failed",
+      "ok": "OK",
+      "skipped": "Skipped"
+    },
+    "runs": "Recent runs",
+    "state": {
+      "active": "Active",
+      "paused": "Paused"
+    }
+  },
   "task": {
     "branch": "Branch:",
     "item": {

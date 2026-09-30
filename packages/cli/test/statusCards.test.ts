@@ -161,6 +161,34 @@ describe("task update", () => {
   });
 });
 
+describe("routines", () => {
+  it("take their fields and a run from flags", () => {
+    expect(params("routine send", ["g1", "--name", "Nightly bug hunt", "--schedule", "every day 01:00", "--cron", "0 1 * * *", "--next", "2026-09-30T01:00:00Z", "--run", "ok:12 issues checked"])).toEqual({
+      chat: "g1", text: undefined, wait: undefined, timeout: undefined, run: { result: "ok", summary: "12 issues checked" },
+      card: { name: "Nightly bug hunt", schedule: "every day 01:00", cron: "0 1 * * *", nextRunAt: Date.UTC(2026, 8, 30, 1, 0) },
+    });
+    expect(params("routine update", ["g1", "nightly", "--run", "failed", "--state", "paused"])).toMatchObject({ routine: "nightly", run: { result: "failed" }, card: { state: "paused" } });
+    expect(() => params("routine update", ["g1", "nightly", "--run", "maybe"])).toThrow(/--run takes ok, failed or skipped/);
+    expect(() => params("routine update", ["g1", "nightly", "--next", "someday"])).toThrow(/--next takes a time/);
+  });
+
+  it("send a routine active from now, and each run becomes the last and the newest of ten recent ones", async () => {
+    const { ctx, node, rows } = fake();
+    const next = Date.now() + 3_600_000;
+    expect(await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "nightly", name: "Nightly", schedule: "every day 01:00", nextRunAt: next } })).toMatchObject({ chat: "chat-one", routine: "nightly" });
+    expect(node.sendMessage.mock.calls[0]![0]).toMatchObject({ card: { kind: "routine", id: "nightly", state: "active", nextRunAt: next } });
+    vi.useFakeTimers({ now: Date.now() });
+    for (let i = 0; i < 12; i++) {
+      vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+      await callApi(ctx, "routine.update", { chat: "Coordinator", routine: "nightly", card: {}, run: { result: i % 2 ? "ok" : "failed", summary: `run ${i}` } });
+    }
+    const card = rows("chat-one")[0]!.card as { lastRun: { summary: string }; runs: { summary: string }[] };
+    expect(card.lastRun.summary).toBe("run 11");
+    expect(card.runs.map(r => r.summary)).toEqual(Array.from({ length: 10 }, (_, i) => `run ${11 - i}`));
+    await expect(callApi(ctx, "routine.update", { chat: "Coordinator", routine: "nightly", card: { state: "sleeping" } })).rejects.toMatchObject({ code: "bad_request", message: /state is one of/ });
+  });
+});
+
 describe("mergeCard", () => {
   it("never changes a card's kind or id", () => {
     expect(mergeCard({ kind: "task", id: "a", title: "x" }, { kind: "routine", id: "b", title: "y" })).toEqual({ kind: "task", id: "a", title: "y" });
