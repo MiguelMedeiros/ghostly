@@ -20,7 +20,7 @@ export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
       <button
         onClick={() => onCall(false)}
         disabled={!!blocked || busy}
-        className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+        className="p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
         title={blocked ?? t("calls.audio")}
         aria-label={t("calls.audio")}
         data-testid="call-audio"
@@ -42,7 +42,7 @@ export function CallButtons({ blocked, busy, onCall }: CallButtonsProps) {
       <button
         onClick={() => onCall(true)}
         disabled={!!blocked || busy}
-        className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+        className="p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
         title={blocked ?? t("calls.video")}
         aria-label={t("calls.video")}
         data-testid="call-video"
