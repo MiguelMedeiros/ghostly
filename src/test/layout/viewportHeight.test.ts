@@ -69,6 +69,28 @@ describe("the app's height and the keyboard", () => {
     expect(keyboard()).toBe("false");
   });
 
+  it("a hardware keyboard's shortcut bar counts while a field has the focus", () => {
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      // An iPhone on its side: the bar leaves 334 of 402px, less than a keyboard takes.
+      resize(402, 402, 874);
+      act(() => field.focus());
+      resize(334, 402, 874);
+      expect(appHeight()).toBe("334px");
+      expect(keyboard()).toBe("true");
+      // The field loses the focus and the bar goes.
+      act(() => field.blur());
+      resize(402, 402, 874);
+      expect(keyboard()).toBe("false");
+      // Without a field, a gap that small is a toolbar sliding away.
+      resize(334, 402, 874);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
   it("starts over when the phone turns", () => {
     renderHook(() => useViewportHeight());
     // Landscape: a much shorter screen, with no keyboard.

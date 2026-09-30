@@ -72,7 +72,7 @@ for (const phone of [{ width: 402, height: 874, keyboard: 336 }, { width: 375, h
   });
 }
 
-for (const screen of [{ name: "an iPad mini on its side", width: 1133, height: 744, keyboard: 360 }, { name: "an iPhone on its side", width: 874, height: 402, keyboard: 200 }]) {
+for (const screen of [{ name: "an iPad mini on its side", width: 1133, height: 744, keyboard: 360, bar: 66 }, { name: "an iPhone on its side", width: 874, height: 402, keyboard: 200, bar: 68 }]) {
   test(`${screen.name}: two panes, and the message field stands above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
     // From 768px the app shows two panes, and they kept the screen's height with the keyboard up: the message field
     // was under it. In the iOS Simulator (iPad mini on its side) Safari scrolled the whole page to reach the field,
@@ -89,5 +89,15 @@ for (const screen of [{ name: "an iPad mini on its side", width: 1133, height: 7
     await within(page.getByTestId("chat-options"), screen.height - screen.keyboard);
     await keyboard(page, 0);
     await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height > screen.height - screen.keyboard; }).toBe(true);
+
+    // A hardware keyboard: iOS shows only its shortcut bar (66-68px in the Simulator), too short to be taken for a
+    // keyboard, and it covered the message field. While a field has the focus, it counts.
+    await keyboard(page, screen.bar);
+    await within(input, screen.height - screen.bar);
+    await keyboard(page, 0);
+    await input.blur();
+    // With nothing focused, a gap that small is a toolbar sliding away: the panes keep the screen's height.
+    await keyboard(page, screen.bar);
+    await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height > screen.height - screen.bar; }).toBe(true);
   });
 }
