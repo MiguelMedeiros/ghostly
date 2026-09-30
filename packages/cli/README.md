@@ -370,7 +370,7 @@ with no framing:
 | `rejected` | The contact declined this side's call |
 | `unanswered` | This side's call rang 60 s with no answer |
 | `crossed` | Both sides called at once and the contact's call came first: it rings here instead (`call.incoming` follows) |
-| `failed` | The media did not connect within 30 s, or dropped |
+| `failed` | The media did not connect within 30 s, or dropped, or the contact's app could not connect (it hung up saying so) |
 | `stopped` | The daemon stopped (its calls are hung up first) |
 
 **Rules**, as in the apps: one call per chat, several chats may each have one; a call needs the chat live (the call
