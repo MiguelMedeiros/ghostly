@@ -64,7 +64,7 @@ test("a long chat opens without costing in proportion to its length", { tag: ["@
   expect(long.idleLong).toBeLessThan(150);
 });
 
-test("leaving a long chat still drawing its older rows costs what leaving a short one does", { tag: ["@feature:app.navigation"] }, async ({ peer }) => {
+test("leaving a long chat costs what leaving a short one does", { tag: ["@feature:app.navigation"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const bob = await peer("switch-bob");
   await bob.context.addInitScript(countCommits);
@@ -125,41 +125,45 @@ test("scrolled up, a long chat's older messages come into the page above without
   await expect(chat(bob).locator("[data-message-row]").last()).toBeInViewport();
   expect((await inPage(bob.page)).rows).toBe(OPEN_ROWS);
 
-  // A hand scrolls up a page at a time, as a wheel would, and each time older rows come in above: the row at the top of
-  // the view stays where it was, to the pixel.
-  const box = (await chat(bob).boundingBox())!;
-  await bob.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // A hand scrolls two screens at a time, as a wheel would, and rows come into the page and leave it at the edges: the
+  // row at the top of the view stays where it was, to the pixel.
+  const scroll = (views: number) => chat(bob).evaluate(async (el, views) => {
+    const edges = () => { const rows = el.querySelectorAll<HTMLElement>("[data-message-id]"); return `${rows[0].dataset.messageId}|${rows[rows.length - 1].dataset.messageId}`; };
+    const top = el.getBoundingClientRect().top;
+    el.scrollTop = Math.max(0, el.scrollTop + views * el.clientHeight);
+    const row = [...el.querySelectorAll<HTMLElement>("[data-message-id]")].find(r => r.getBoundingClientRect().bottom > top + 1)!;
+    const id = row.dataset.messageId!, y = row.getBoundingClientRect().top;
+    const before = edges();
+    const at = () => el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`)?.getBoundingClientRect().top ?? Infinity;
+    // Where the row is each time the list's content changes size, as it will be painted: this observer is made after the
+    // app's own, so it sees the view once the app has put it back (reading it in a frame callback would force a layout
+    // before the app has had its turn).
+    let drift = 0;
+    const watcher = new ResizeObserver(() => { drift = Math.max(drift, Math.abs(at() - y)); });
+    watcher.observe(el.firstElementChild!);
+    // The scroll event, the rows it brings, and what they load (pictures, previews).
+    for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
+    watcher.disconnect();
+    return { moved: edges() !== before, drift: Math.max(drift, Math.abs(at() - y)), rows: el.querySelectorAll("[data-message-id]").length };
+  }, views);
   let loads = 0, most = 0;
   for (let step = 0; step < 600 && (await inPage(bob.page)).first !== "me_r000000ab"; step++) {
-    const moved = await chat(bob).evaluate(async el => {
-      const firstRow = () => el.querySelector<HTMLElement>("[data-message-id]")!.dataset.messageId;
-      const top = el.getBoundingClientRect().top;
-      el.scrollTop = Math.max(0, el.scrollTop - 2 * el.clientHeight);
-      const row = [...el.querySelectorAll<HTMLElement>("[data-message-id]")].find(r => r.getBoundingClientRect().bottom > top + 1)!;
-      const id = row.dataset.messageId!, y = row.getBoundingClientRect().top;
-      const before = firstRow();
-      const at = () => el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`)?.getBoundingClientRect().top ?? Infinity;
-      // Where the row is each time the list's content changes size, as it will be painted: this observer is made after the
-      // app's own, so it sees the view once the app has put it back (reading it in a frame callback would force a layout
-      // before the app has had its turn).
-      let drift = 0;
-      const watcher = new ResizeObserver(() => { drift = Math.max(drift, Math.abs(at() - y)); });
-      watcher.observe(el.firstElementChild!);
-      // The scroll event, the rows it brings, and what they load (pictures, previews).
-      for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
-      watcher.disconnect();
-      return { loaded: firstRow() !== before, drift: Math.max(drift, Math.abs(at() - y)), rows: el.querySelectorAll("[data-message-id]").length };
-    });
-    if (moved.loaded) {
-      loads++;
-      expect(moved.drift, `the view moved when older rows came in (load ${loads})`).toBeLessThan(1);
-    }
-    most = Math.max(most, moved.rows);
+    const up = await scroll(-2);
+    if (up.moved) expect(up.drift, `the view moved when older rows came in (load ${++loads})`).toBeLessThan(1);
+    most = Math.max(most, up.rows);
   }
   // Up to the very first message, a page at a time, never more than the window in the page.
   expect((await inPage(bob.page)).first).toBe("me_r000000ab");
   expect(loads).toBeGreaterThan(40);
   expect(most).toBeLessThanOrEqual(MAX_ROWS);
+  // Down again: newer rows come in below and the top ones leave the page, above the view, which does not move.
+  let downs = 0;
+  for (let step = 0; step < 60 && downs < 5; step++) {
+    const down = await scroll(2);
+    if (down.moved) expect(down.drift, `the view moved when rows left the page above it (${++downs})`).toBeLessThan(1);
+    expect(down.rows).toBeLessThanOrEqual(MAX_ROWS);
+  }
+  expect(downs).toBe(5);
   // Up there, the ↓ takes the view back to the last message.
   await bob.page.getByTestId("jump-latest").click();
   await expect(chat(bob).locator("[data-message-id=peer_r004999ab]")).toBeInViewport();
