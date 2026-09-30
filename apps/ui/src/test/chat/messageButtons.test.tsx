@@ -43,8 +43,10 @@ describe("buttons under a bot's message", () => {
     expect(group).toHaveAttribute("data-testid", "message-buttons");
     expect(within(group).getAllByRole("button").map(b => b.textContent)).toEqual(["Yes", "No", "Stop it"]);
     expect(byId("yes")).toHaveAttribute("data-style", "primary");
-    expect(byId("yes").className).toContain("bg-accent");
-    expect(byId("stop").className).toContain("text-danger-ink");
+    // The card's surface (index.css `.message-button`): its look follows `data-style`, never a solid fill of its own.
+    for (const b of shown()) expect(b.className).toContain("message-button");
+    expect(byId("stop")).toHaveAttribute("data-style", "danger");
+    expect(byId("no")).toHaveAttribute("data-style", "neutral");
     for (const b of shown()) {
       expect(b).toHaveAttribute("aria-pressed", "false");
       expect(b).not.toHaveAttribute("aria-disabled");

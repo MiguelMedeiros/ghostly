@@ -93,6 +93,13 @@ test("a bot asks with Yes and No, the person taps Yes, and the bot hears it and 
     expect(box!.x + box!.width).toBeLessThanOrEqual(375);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
     await page.screenshot({ path: test.info().outputPath("phone-dark.png") });
+    // The narrowest phone: still no spill.
+    await page.setViewportSize({ width: 320, height: 700 });
+    await sizes.scrollIntoViewIfNeeded();
+    const narrow = await sizes.boundingBox();
+    expect(narrow!.x + narrow!.width).toBeLessThanOrEqual(320);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+    await page.screenshot({ path: test.info().outputPath("phone-320-dark.png") });
   } finally {
     await bot.stop();
   }

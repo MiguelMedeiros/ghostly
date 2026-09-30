@@ -14,17 +14,6 @@ import { jumpToQuoted } from "../../lib/replies";
 /** How long "Couldn't send" stays under the buttons. */
 const ERROR_MS = 4000;
 
-const STYLE: Record<NonNullable<CardButton["style"]> | "neutral", string> = {
-  primary: "bg-accent text-on-accent border-accent",
-  danger: "bg-surface text-danger-ink border-danger/45",
-  neutral: "bg-surface text-text-primary border-border",
-};
-const HOVER: Record<NonNullable<CardButton["style"]> | "neutral", string> = {
-  primary: "hover:bg-accent-hover",
-  danger: "hover:bg-danger/10",
-  neutral: "hover:bg-surface-hover",
-};
-
 /** Two in a row share it; three, five or six go three to a row; four, two by two. A last row's buttons fill it. */
 function basis(count: number): string {
   if (count === 1) return "basis-full";
@@ -76,7 +65,7 @@ export function MessageButtons({ view, messageId, linkId }: { view: ButtonsView;
               data-chosen={isChosen || undefined} aria-pressed={isChosen} aria-disabled={off || undefined} aria-busy={sending || undefined}
               title={sending ? t("cards.buttons.sending") : isChosen ? t("cards.buttons.chosen") : undefined}
               onClick={(e) => { e.stopPropagation(); void press(button); }}
-              className={`inline-flex min-h-10 min-w-0 grow ${basis(card.buttons.length)} items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-center text-[13.5px] font-medium leading-tight wrap-break-word shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] transition-[background-color,opacity] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-chat-bg ${STYLE[style]} ${off ? "cursor-default" : `cursor-pointer ${HOVER[style]}`} ${sending ? "opacity-70" : off && !isChosen ? "opacity-50" : ""} ${isChosen ? "font-semibold" : ""}`}>
+              className={`message-button inline-flex min-h-10 min-w-0 grow ${basis(card.buttons.length)} items-center justify-center gap-1.5 rounded-[10px] px-3 py-1.5 text-center text-[13.5px] font-medium leading-tight wrap-break-word transition-[background-color,opacity] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-chat-bg ${off ? "cursor-default" : "cursor-pointer"} ${sending ? "opacity-70" : ""} ${isChosen ? "font-semibold" : ""}`}>
               {sending
                 ? <span aria-hidden="true" className="size-3 shrink-0 animate-spin rounded-full border-2 border-current border-e-transparent motion-reduce:animate-none" />
                 : isChosen && <span aria-hidden="true" data-testid="message-button-check">✓</span>}
