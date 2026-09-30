@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {ETHEREUM_USDT,SEPOLIA_TEST_USDT,formatPaymentAmount,parsePaymentAmount,type PaymentReview as Review} from '@ghostly/core';
+import {ETHEREUM_USDT,SEPOLIA_TEST_USDT,parsePaymentAmount,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform,WalletState} from '../lib/platform';
 import {PaymentReview} from './PaymentReview';
 import {BackupRows} from './wallet/BackupRows';
@@ -7,6 +7,7 @@ import {Actions,Address,Amount,Block,Button,Notice,Row,Section,Segmented,input,t
 import {useRun} from './wallet/run';
 import {ButtonGroup,InputGroup,Truncate} from './layout';
 import {useI18n} from '../contexts/I18nContext';
+import { formatTokenAmount } from "../lib/amount";
 
 type Network='ethereum'|'sepolia'|'evm-local';
 const RPC:Record<Network,string>={ethereum:'https://ethereum.publicnode.com',sepolia:'https://ethereum-sepolia-rpc.publicnode.com','evm-local':'http://127.0.0.1:47070'};
@@ -38,8 +39,8 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
   :!ready?<Section title={t('wallet.panel.unlock.title')}><Row label={t('wallet.panel.unlock.withPassword')}/><Block><InputGroup><input aria-label={t('wallet.panel.unlock.password',{wallet:'USDT'})} type="password" autoComplete="current-password" className={input} value={password} onChange={e=>setPassword(e.target.value)}/><Button variant="primary" disabled={busy} onClick={()=>void run(async()=>{await wallet.usdtUnlock(password);setPassword('');})}>{t('wallet.panel.unlock.button',{wallet:'USDT'})}</Button></InputGroup></Block></Section>
   :<div className="space-y-4">
    <div>
-    <p className="text-text-primary break-words" data-testid="usdt-balance"><span className="text-4xl font-semibold tabular-nums">{formatPaymentAmount(usdt.balance,usdt.decimals)}</span> <span className="text-text-muted text-sm">{label}</span></p>
-    <p className="mt-1 text-xs text-text-muted" data-testid="usdt-gas">{t('wallet.usdt.gas',{amount:formatPaymentAmount(usdt.gasBalance,18)})}</p>
+    <p className="text-text-primary break-words" data-testid="usdt-balance"><span className="text-4xl font-semibold tabular-nums">{formatTokenAmount(usdt.balance,usdt.decimals,t.language)}</span> <span className="text-text-muted text-sm">{label}</span></p>
+    <p className="mt-1 text-xs text-text-muted" data-testid="usdt-gas">{t('wallet.usdt.gas',{amount:formatTokenAmount(usdt.gasBalance,18,t.language)})}</p>
     {usdt.chainId!==1&&<p className="mt-1 text-xs text-yellow-500">{network==='sepolia'?t('wallet.usdt.sepoliaTest'):t('wallet.usdt.localTest')}</p>}
    </div>
    <Actions value={action} onChange={setAction}/>
@@ -52,7 +53,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
     <Notice>{BigInt(usdt.gasBalance)===0n?t('wallet.usdt.needsGas'):t('wallet.usdt.approve')}</Notice>
    </div>}
    {review&&<PaymentReview key={review.id} review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
-   {intents.filter(i=>i.id!==review?.id).map(i=><Button key={i.id} className="block w-full text-start" onClick={()=>setReview(i)}>{t('wallet.panel.intent',{amount:formatPaymentAmount(i.amount,i.decimals),unit:i.asset,state:i.state==='settled'?t('wallet.usdt.confirmed'):i.state})}</Button>)}
+   {intents.filter(i=>i.id!==review?.id).map(i=><Button key={i.id} className="block w-full text-start" onClick={()=>setReview(i)}>{t('wallet.panel.intent',{amount:formatTokenAmount(i.amount,i.decimals,t.language),unit:i.asset,state:i.state==='settled'?t('wallet.usdt.confirmed'):i.state})}</Button>)}
   </div>}
   {error&&<Notice tone="error">{error}</Notice>}
   {usdt?.error&&ready&&<Notice tone="warning">{usdt.error}</Notice>}

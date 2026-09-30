@@ -20,6 +20,7 @@ import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { NetworkTabs } from "./wallet/NetworkTabs";
 import { NETWORK_NAME } from "./wallet/names";
 import "./payment-composer.css";
+import { formatAmount } from "../lib/amount";
 
 interface PaymentComposerProps {
   balance: number;
@@ -316,8 +317,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             <span>{unit}</span>
           </label>
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
-          <p className="payment-back-hint">{blocked ?? (tooMuch ? t("payments.composer.tooMuch", { amount: holds!.toLocaleString(), unit }) : how(rail))}</p>
-          {confirmSend ? <ConfirmRealMoney what={`${value.toLocaleString()} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
+          <p className="payment-back-hint">{blocked ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
+          {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
             <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </button>

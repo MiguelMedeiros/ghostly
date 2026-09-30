@@ -3,6 +3,7 @@ import type {WalletInstanceView, WalletNetwork, WalletPlatform, WalletState} fro
 import type {WalletCard,WalletRail} from './walletCardTypes';
 import type {Translate} from '../contexts/I18nContext';
 import {english} from '../lib/english';
+import { formatAmount, formatTokenAmount } from "../lib/amount";
 export type {ChatRail,WalletCard,WalletRail} from './walletCardTypes';
 export const CASHU_MINT_SOURCE = 'cashu-mint';
 /** The fee limit an on-chain payment starts with, in sats: a small transaction at a few sat/vB. The review shows the real fee. */
@@ -92,7 +93,7 @@ export const byNetwork=<C extends {network:WalletNetwork}>(cards:C[]):C[]=>[...c
  */
 export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState,card?:string,t:Translate=english):InstanceCard {
  const unit=t(network==='testnet'?'wallet.sats.testnet':'wallet.sats.mainnet'),base={id:cardId(rail,network,card),rail,network,...(card?{card}:{})};
- const sats=(n:number)=>t('wallet.cards.amount',{amount:n.toLocaleString(),unit});
+ const sats=(n:number)=>t('wallet.cards.amount',{amount:formatAmount(n, t.language),unit});
  const cashu=sats(Math.max(0,s.balance));
  const ready_=t('wallet.cards.status.ready'),connecting=t('wallet.cards.status.connecting'),experimental=t('wallet.cards.status.experimental'),setUp=t('wallet.cards.status.setUp'),realBitcoin=t('wallet.cards.status.realBitcoin');
  switch(rail) {
@@ -119,7 +120,7 @@ export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState,c
   case 'fedimint': return {...base,...fedimintCard(t,s,sats)};
   case 'usdt': {
    const usdt=s.usdt,ready=!!usdt?.configured&&!usdt.locked,test=network==='testnet'||(!!usdt?.chainId&&usdt.chainId!==1);
-   return {...base,name:'USDT',balance:ready?t('wallet.cards.amount',{amount:formatPaymentAmount(usdt!.balance,usdt!.decimals),unit:test?'TEST-USDT':'USDT'}):usdt?.configured&&!usdt.automatic?t('wallet.cards.balance.locked'):connecting,detail:usdt?.chainId===31337?t('wallet.cards.detail.usdtLocal'):usdt?.chainId===11155111||(!usdt?.chainId&&test)?t('wallet.cards.detail.usdtSepolia'):t('wallet.cards.detail.usdtEthereum'),status:ready?ready_:experimental,ready};
+   return {...base,name:'USDT',balance:ready?t('wallet.cards.amount',{amount:formatTokenAmount(usdt!.balance,usdt!.decimals,t.language),unit:test?'TEST-USDT':'USDT'}):usdt?.configured&&!usdt.automatic?t('wallet.cards.balance.locked'):connecting,detail:usdt?.chainId===31337?t('wallet.cards.detail.usdtLocal'):usdt?.chainId===11155111||(!usdt?.chainId&&test)?t('wallet.cards.detail.usdtSepolia'):t('wallet.cards.detail.usdtEthereum'),status:ready?ready_:experimental,ready};
   }
  }
 }

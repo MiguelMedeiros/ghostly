@@ -1,9 +1,10 @@
 import {useState} from 'react';
-import {formatPaymentAmount,walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
+import {walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform} from '../lib/platform';
 import {useI18n} from '../contexts/I18nContext';
 import {NetworkTag,satsIn} from './NetworkTag';
 import {ConfirmRealMoney} from './ConfirmRealMoney';
+import { formatAmount, formatTokenAmount } from "../lib/amount";
 
 /** A payment's state as the review shows it, in the app's language (the English is the state itself). */
 const STATE_KEY={pending:'payments.review.states.pending',submitted:'payments.review.states.submitted',settled:'payments.review.states.settled',failed:'payments.review.states.failed',unknown:'payments.review.states.unknown',cancelled:'payments.review.states.cancelled',confirmed:'payments.review.states.confirmed'} as const;
@@ -21,7 +22,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
  const review=wallet.getState()?.intents?.find(i=>i.id===saved.id)??saved;
  const token=review.method==='usdt';
  const network=walletNetworkOf(review.network),real=network==='mainnet',unit=token?review.asset:satsIn(t,network);
- const shown=token?formatPaymentAmount(review.amount,review.decimals):review.amount.toLocaleString();
+ const shown=token?formatTokenAmount(review.amount,review.decimals,t.language):formatAmount(review.amount, t.language);
  const run=async(action:()=>Promise<Review>):Promise<Review|null>=>{setBusy(true);setError('');try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?e.message:t('payments.review.error.update'));return null;}finally{setBusy(false);}};
  // Only the real-money step says so: the engine refuses a Mainnet approval without it.
  const approve=()=>void run(()=>wallet.approvePayment(review.id,real)).then(next=>{setConfirming(false);if(next&&(next.state==='submitted'||next.state==='settled'))onSent?.();});
@@ -35,8 +36,8 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
   <p className="text-xs text-text-secondary" data-testid="review-money">{real?t('payments.review.money.mainnet'):t('payments.review.money.testnet')}</p>
   <dl className="text-xs text-text-secondary space-y-2 break-all">
    <div><dt className="text-text-muted">{t('payments.review.destination')}</dt><dd className="font-mono">{review.address}</dd></div>
-   <div><dt className="text-text-muted">{token?t('payments.review.gasLimit'):t('payments.review.fee')}</dt><dd>{token?`${formatPaymentAmount(review.fee,18)} / ${formatPaymentAmount(review.feeCap,18)} ETH`:`${review.fee} / ${review.feeCap} ${unit}`}</dd></div>
-   {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{(review.amount+review.fee).toLocaleString()} {unit}</dd></div>}
+   <div><dt className="text-text-muted">{token?t('payments.review.gasLimit'):t('payments.review.fee')}</dt><dd>{token?`${formatTokenAmount(review.fee,18,t.language)} / ${formatTokenAmount(review.feeCap,18,t.language)} ETH`:`${formatAmount(review.fee,t.language)} / ${formatAmount(review.feeCap,t.language)} ${unit}`}</dd></div>
+   {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{formatAmount(review.amount+review.fee, t.language)} {unit}</dd></div>}
    <div><dt className="text-text-muted">{t('payments.review.status')}</dt><dd aria-live="polite" data-testid="review-status">{status in STATE_KEY?t(STATE_KEY[status as keyof typeof STATE_KEY]):status}</dd></div>
   </dl>
   <details className="text-xs text-text-secondary"><summary className="cursor-pointer text-text-muted">{t('payments.review.details')}</summary><dl className="space-y-2 pt-2 break-all"><div><dt>{t('payments.review.payee')}</dt><dd>{review.payee}</dd></div><div><dt>{t('payments.review.provider')}</dt><dd>{review.provider}</dd></div><div><dt>{t('payments.review.expires')}</dt><dd>{new Date(review.expiresAt).toLocaleString()}</dd></div>{token&&<><div><dt>{t('payments.review.tokenChain')}</dt><dd>{t('payments.review.tokenChainValue',{token:review.token??'',chain:review.chainId??'',decimals:review.decimals??''})}</dd></div><div><dt>{t('payments.review.gasNonce')}</dt><dd>{review.evm?.gasLimit} / {review.evm?.nonce}</dd></div><div><dt>{t('payments.review.feePerGas')}</dt><dd>{review.evm?.maxFeePerGas} / {review.evm?.maxPriorityFeePerGas}</dd></div></>}{review.txid&&<div><dt>{t('payments.review.transaction')}</dt><dd>{review.txid}</dd></div>}</dl></details>

@@ -12,6 +12,7 @@ import type { CashuInspection } from "../lib/platform";
 import type { MoneyInText } from "../lib/money";
 import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
 import { moreMoneyMethod } from "../lib/parse/money-more";
+import { formatAmount } from "../lib/amount";
 
 const SETTLED_KEY = "ghostly_settled_money";
 
@@ -70,7 +71,7 @@ function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
         ) : (
           <>
             <span className="text-accent me-1">⚡</span>
-            <span className="text-[22px] font-semibold" data-testid="money-amount">{amount.toLocaleString()}</span>
+            <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</span>
             <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
           </>
         )}
@@ -182,11 +183,11 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
       ) : pending ? (
         <span className="text-xs self-center text-text-primary/80" data-testid="invoice-pending">{t("payments.invoice.pendingAtMint")}</span>
       ) : quote && confirming ? (
-        <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: quote.amount.toLocaleString(), fee: quote.feeReserve.toLocaleString() })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
+        <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
       ) : quote ? (
         <>
           <button className={button} disabled={busy} data-testid="invoice-confirm" onClick={() => network === "mainnet" ? setConfirming(true) : pay(quote, false)}>
-            {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: quote.amount.toLocaleString(), fee: quote.feeReserve.toLocaleString() })}
+            {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })}
           </button>
           <button className={quiet} disabled={busy} onClick={() => setQuote(null)}>{t("common.cancel")}</button>
         </>

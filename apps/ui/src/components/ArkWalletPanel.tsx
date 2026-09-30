@@ -8,6 +8,7 @@ import { useRun } from "./wallet/run";
 import { InputGroup, Truncate } from "./layout";
 import { useI18n } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
+import { formatAmount } from "../lib/amount";
 
 type Network = "bitcoin" | "mutinynet" | "signet" | "regtest";
 /** Where each network's wallet connects unless someone types another provider. */
@@ -42,7 +43,7 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
   {!ark?.configured || (ark.locked && ark.automatic) ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="ark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Ark" })}</p><Notice>{ark?.error ?? t("wallet.panel.firstTime")}</Notice></div>
   : !ready ? <Section title={t("wallet.panel.unlock.title")}><Row label={t("wallet.panel.unlock.withPassword")} /><Block><InputGroup><input aria-label={t("wallet.panel.unlock.password", { wallet: "Ark" })} type="password" autoComplete="current-password" className={input} value={password} onChange={e => setPassword(e.target.value)} /><Button variant="primary" disabled={busy} onClick={() => void run(async () => { await wallet.arkUnlock(password); setPassword(""); })}>{t("wallet.panel.unlock.button", { wallet: "Ark" })}</Button></InputGroup></Block></Section>
   : <div className="space-y-4">
-   <p className="text-text-primary" data-testid="ark-balance"><span className="text-4xl font-semibold tabular-nums">{ark.balance.toLocaleString()}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{test && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.panel.testCoins", { network: NETWORKS[network].label })}</span>}</p>
+   <p className="text-text-primary" data-testid="ark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(ark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{test && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.panel.testCoins", { network: NETWORKS[network].label })}</span>}</p>
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
     <Segmented label={t("wallet.panel.receiveOn")} value={via} onChange={setVia} options={[{ value: "ark", label: t("wallet.panel.instant", { wallet: "Ark" }) }, { value: "onchain", label: t("wallet.panel.onchain") }]} />
@@ -51,10 +52,10 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
    </div>}
    {/* Outputs whose batch expired before renewal are still this wallet's: say so, and bring them back. */}
    {!!ark.recoverable && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="ark-recoverable">
-    <p className="flex-[1_1_12rem] min-w-0 text-xs text-yellow-500">{t("wallet.ark.expired", { amount: ark.recoverable.toLocaleString(), unit })}</p>
+    <p className="flex-[1_1_12rem] min-w-0 text-xs text-yellow-500">{t("wallet.ark.expired", { amount: formatAmount(ark.recoverable, t.language), unit })}</p>
     <Button data-testid="ark-recover" disabled={busy} onClick={() => void run(() => wallet.arkRecover())}>{busy ? t("wallet.ark.recovering") : t("wallet.ark.recover")}</Button>
    </div>}
-   {!!ark.incoming && <Notice tone="warning" testId="ark-incoming">{t("wallet.ark.incoming", { amount: ark.incoming.toLocaleString(), unit })}</Notice>}
+   {!!ark.incoming && <Notice tone="warning" testId="ark-incoming">{t("wallet.ark.incoming", { amount: formatAmount(ark.incoming, t.language), unit })}</Notice>}
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <input aria-label={t("wallet.panel.recipient", { wallet: "Ark" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Ark" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={e => setAddress(e.target.value.trim())} />
     <Amount value={amount} onChange={setAmount} unit={unit} />
@@ -62,7 +63,7 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
     <Notice>{t("wallet.ark.approve")}</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
-   {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intentSats", { amount: i.amount.toLocaleString(), state: i.state })}</Button>)}
+   {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intentSats", { amount: formatAmount(i.amount, t.language), state: i.state })}</Button>)}
   </div>}
   {error && <Notice tone="error">{error}</Notice>}
   {ark?.error && ready && <Notice tone="warning">{ark.error}</Notice>}

@@ -204,6 +204,7 @@ fn main() {
             ));
             let files = file_store::FileStore::new(app.path().app_data_dir()?.join("files"));
             files.keep_private();
+            files.remove_staged_saves();
             app.manage(files);
             // A video's Full screen button works in the Ghostly window (WKWebView has it off, WebView2 fills only
             // the webview).
