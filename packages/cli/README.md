@@ -51,7 +51,7 @@ arguments, so a contact's text cannot reach the shell):
 ```bash
 ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   event="$(cat)"
-  printf "echo: %s" "$(jq -r .message.text <<<"$event")" | ghostly send "$(jq -r .chat <<<"$event")" --stdin'
+  printf "echo: %s" "$(printf "%s" "$event" | jq -r .message.text)" | ghostly send "$(printf "%s" "$event" | jq -r .chat)" --stdin'
 ```
 
 The same bot on the socket, without jq: [examples/echo-bot.mjs](examples/echo-bot.mjs). A payment bot that takes
