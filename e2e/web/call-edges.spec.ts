@@ -131,6 +131,8 @@ test("declining leaves neither side on a call", { tag: ["@feature:calls.decline"
   for (const p of [alice, bob]) await noCall(p);
   for (const p of [alice, bob]) await callButtonsBack(p);
   await expect(chat(bob).getByText("Video call declined")).toBeVisible();
+  // The caller's chat says so too, not only "Video call started".
+  await expect(chat(alice).getByText("Video call declined")).toBeVisible();
   for (const p of [alice, bob]) await expect(chat(p).getByText(/(Video|Audio) call connected/)).toHaveCount(0);
 
   // Declined is not blocked: the same two can talk right after.
@@ -159,6 +161,8 @@ test("a call nobody answers can be cancelled, and lets go of the camera", { tag:
   await noCall(alice);
   await callButtonsBack(alice);
   await expect.poll(async () => (await mediaState(alice)).live, "and gave it back").toBe(0);
+  // The chat keeps how it ended: cancelled, and never connected.
+  await expect(chat(alice).getByText("Video call cancelled")).toBeVisible();
   await expect(chat(alice).getByText(/(Video|Audio) call (ended|connected)/)).toHaveCount(0);
 
   // Calling again works the same way, and cancels the same way.

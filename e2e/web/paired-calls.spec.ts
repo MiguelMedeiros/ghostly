@@ -52,8 +52,8 @@ test("an audio call from the other side, declined, leaves neither on a call", { 
   await expect(alice.page.getByText("Incoming audio call...")).toBeVisible();
   await alice.page.getByTitle("Decline").click();
   for (const p of [alice, bob]) await expect(p.page.getByTitle("End call")).toHaveCount(0);
-  await expect(chat(bob).getByText("Audio call declined")).toHaveCount(0);
-  await expect(chat(alice).getByText("Audio call declined")).toBeVisible();
+  // Both chats say so: the caller's too, not only "Audio call started".
+  for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call declined")).toBeVisible();
 });
 
 test("both call at once: one side rings, and answering connects the call", { tag: ["@feature:calls.paired", "@feature:calls.audio"] }, async ({ peer }) => {
