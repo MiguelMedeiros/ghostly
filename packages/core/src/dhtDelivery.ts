@@ -332,13 +332,15 @@ export class DhtDelivery {
     this.fastUntil = until; this.urgent = true; void this.tick();
   }
   /**
-   * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes; the
-   * moment it is lost, at once (WISP 403, poll pace), and then at the chat's pace.
+   * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes, after one
+   * last look as it goes live: a text the contact put on the DHT in the seconds before (after this side's last
+   * read) would otherwise wait for the next look. The moment it is lost, at once (WISP 403, poll pace), and then
+   * at the chat's pace.
    */
   setLive(live: boolean): void {
     if (live === this.live) return;
     this.live = live;
-    if (live) { this.fastUntil = 0; this.schedule(); return; }
+    if (live) this.fastUntil = 0;
     this.urgent = true;
     void this.tick();
   }

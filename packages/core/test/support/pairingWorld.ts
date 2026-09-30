@@ -47,6 +47,8 @@ export class MemoryPkarr {
   readsByKey = new Map<string, number>();
   /** Publishes per key. */
   publishesByKey = new Map<string, number>();
+  /** Keys whose reads find nothing while listed: a reader whose last look came just before the packet did. */
+  unseen = new Set<string>();
   constructor(private readonly model: NetworkModel) {}
 
   transport(): PkarrTransport {
@@ -65,7 +67,7 @@ export class MemoryPkarr {
         if (options?.background) this.readsBackground++;
         await after(this.model.readMs);
         const entry = this.packets.get(key);
-        return entry && entry.visibleAt <= Date.now() ? entry.packet : null;
+        return entry && entry.visibleAt <= Date.now() && !this.unseen.has(key) ? entry.packet : null;
       },
       describe: () => ({ protocol: "memory", relays: [] }),
     };

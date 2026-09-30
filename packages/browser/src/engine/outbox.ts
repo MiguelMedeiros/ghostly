@@ -52,6 +52,8 @@ export class Outbox {
   private waiting = new Map<string, { timer?: ReturnType<typeof setTimeout>; step: number; since: number }>();
   private attempts = new Map<string, number>();
   private busy = new Set<string>();
+  /** In flight when the chat reopened (`flush({ reopened })`): sent again on the new link once that send returns. */
+  private reopenedWhileBusy = new Set<string>();
   private stopped = false;
   private readonly resender: Resender;
   private readonly policy: ResendPolicy;
@@ -108,6 +110,12 @@ export class Outbox {
       this.clear(id);
       await this.requeue(id, error instanceof Error ? error.message : "Sending failed");
     } finally { this.busy.delete(id); }
+    // The chat went live while this send was on its way (on the DHT, or on a link that just closed): a reader that
+    // is live now may not look at the DHT for minutes, so it goes again on the new link, under the same id.
+    if (this.reopenedWhileBusy.delete(id)) {
+      const message = (await this.store.read()).find(m => m.id === id);
+      if (message) await this.again(message);
+    }
   }
 
   /**
@@ -138,15 +146,22 @@ export class Outbox {
    */
   async flush({ reopened = false }: { reopened?: boolean } = {}): Promise<void> {
     if (this.stopped || (!reopened && !this.waiting.size)) return;
+    // A send still on its way (a DHT publish takes a moment) is not `sent` yet: it goes again once it returns.
+    if (reopened) for (const id of this.busy) this.reopenedWhileBusy.add(id);
     const due = (await this.store.read())
-      .filter(m => m.sender === "me" && m.via !== "hold" && (m.delivery === "queued" || m.delivery === "waiting" || (reopened && m.delivery === "sent" && this.receipts.has(m.id))))
+      .filter(m => m.sender === "me" && m.via !== "hold" && !this.busy.has(m.id) && (m.delivery === "queued" || m.delivery === "waiting" || (reopened && m.delivery === "sent" && this.receipts.has(m.id))))
       .sort((a, b) => a.timestamp - b.timestamp);
-    for (const message of due) {
-      if (message.delivery !== "sent") { await this.attempt(message.id); continue; }
-      this.clear(message.id);
-      if (this.resender.ready(message)) await this.transmit(message.id);
-      else await this.requeue(message.id, "Connection closed before receipt. Delivery is unconfirmed.");
-    }
+    for (const message of due) await this.again(message);
+  }
+
+  /** A queued or waiting message is looked at; one sent and awaiting its receipt goes again now, if the chat can carry it. */
+  private async again(message: StoredMessage): Promise<void> {
+    if (message.sender !== "me" || message.via === "hold") return;
+    if (message.delivery === "queued" || message.delivery === "waiting") { await this.attempt(message.id); return; }
+    if (message.delivery !== "sent" || !this.receipts.has(message.id)) return;
+    this.clear(message.id);
+    if (this.resender.ready(message)) await this.transmit(message.id);
+    else await this.requeue(message.id, "Connection closed before receipt. Delivery is unconfirmed.");
   }
 
   async disconnected(): Promise<void> {
@@ -162,6 +177,7 @@ export class Outbox {
   }
   async stop(): Promise<void> {
     this.stopped = true;
+    this.reopenedWhileBusy.clear();
     for (const wait of this.waiting.values()) if (wait.timer) clearTimeout(wait.timer);
     this.waiting.clear();
     await this.disconnected();

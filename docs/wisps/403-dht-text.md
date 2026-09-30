@@ -129,7 +129,7 @@ What changes is where the choice is made: not in the invite, but in the chat's C
 | A text of ours awaits its receipt | 4 s |
 | `on-dht`, chat open and app in front | 10 s |
 | `on-dht`, in the background | 30 s |
-| `live` | 5 min, and at once when layer 1 is lost |
+| `live` | Once as layer 1 comes up, then 5 min, and at once when layer 1 is lost |
 
 `on-dht` with the chat open was 4 s in the proposal; 10 s leaves room in the relays' budget for presence reads and hold pointers while layer 1 is redialled.
 
