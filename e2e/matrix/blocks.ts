@@ -567,6 +567,9 @@ async function lightningThroughWebln(w: World): Promise<void> {
     await wallet(p, "lightning-testnet");
     await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-status")).toContainText(containing("Connected"));
   }
+  // Both pages were reloaded for the browser wallet: the chat is live again before B asks. A request made before that
+  // goes by what A allowed at the last session, when A had no wallet yet ("Cashu and Lightning are off in this chat").
+  for (const p of [a, b]) { await openChat(p); await connected(p); }
   await openChat(b);
   await paymentCard(b, "lightning-testnet");
   await b.page.getByTestId("payment-amount").fill("40");
