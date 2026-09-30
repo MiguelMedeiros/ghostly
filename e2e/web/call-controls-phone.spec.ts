@@ -4,7 +4,9 @@ import { connect, expect, link, test, type Peer } from "../support/fixtures";
 /**
  * A call's buttons stay round and off the edges on a narrow screen. With Share screen (a browser that can capture one,
  * in a narrow window) the row had five buttons of 64 px with 32 px between them: wider than 375 px, so flex squeezed
- * four of them into ovals pressed against both edges. A phone's browser has no screen capture: three buttons, which fit.
+ * four of them into ovals pressed against both edges. A phone's browser has no screen capture, but its video call has
+ * four: microphone, camera (once the video lane is open), devices and hang up, 360 px with those gaps, past a 320 px
+ * phone. The row is measured once all of them are there.
  */
 /** Buttons of the row that are squeezed out of round (flex shrinks them) or reach the screen's edges. */
 const misshapen = (page: Page) => page.getByTestId("call-hang-up").evaluate((hangUp) => {
@@ -29,6 +31,8 @@ for (const { width, share } of [{ width: 320, share: false }, { width: 375, shar
     await alice.page.getByTestId("call-video").click();
     await bob.page.getByTitle("Accept video call").click();
     await expect(bob.page.getByTestId("call-hang-up")).toBeVisible();
+    await expect(bob.page.getByTestId("call-camera")).toBeVisible();
+    await expect(bob.page.getByTestId("call-devices")).toBeVisible();
     await expect(bob.page.getByTestId("share-screen")).toHaveCount(share ? 1 : 0);
     await expect.poll(() => misshapen(bob.page)).toEqual([]);
     await bob.page.getByTestId("call-hang-up").click();

@@ -18,7 +18,7 @@ import type { LocalRelay } from "../support/relay";
 import { testSshKey } from "../support/ssh";
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
 import {
-  alternatives, chatOption, chatPane, composerButton, containing, either, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
+  alternatives, cardAction, chatOption, chatPane, composerButton, containing, either, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
 } from "./actors";
 import type { Combination } from "./dimensions";
 import { CARD, type Step } from "./plan";
@@ -504,7 +504,7 @@ async function cashuInChat({ a, b }: World): Promise<void> {
   await paymentCard(a, "cashu");
   await a.page.getByTestId("payment-amount").fill("21");
   await memo(a, "matrix send");
-  await a.page.getByTestId("payment-send").click();
+  await cardAction(a, "send");
   await approve(a.page.getByTestId("payment-composer"));
   await openChat(b);
   await expect(bubble(b, "matrix send").getByTestId("payment-state")).toHaveText(either("Received"), { timeout: 90_000 });
@@ -515,7 +515,7 @@ async function cashuInChat({ a, b }: World): Promise<void> {
   await paymentCard(b, "cashu");
   await b.page.getByTestId("payment-amount").fill("10");
   await memo(b, "matrix request");
-  await b.page.getByTestId("payment-request").click();
+  await cardAction(b, "request");
   await openChat(a);
   const request = bubble(a, "matrix request");
   await request.getByTestId("payment-pay").click();
@@ -586,7 +586,7 @@ async function lightningThroughWebln(w: World): Promise<void> {
   await paymentCard(b, "lightning-testnet");
   await b.page.getByTestId("payment-amount").fill("40");
   await memo(b, "matrix lightning request");
-  await b.page.getByTestId("payment-request").click();
+  await cardAction(b, "request");
   await openChat(a);
   const request = bubble(a, "matrix lightning request");
   await request.getByTestId("payment-pay").click();

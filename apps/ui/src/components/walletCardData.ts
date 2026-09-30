@@ -130,6 +130,30 @@ export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState,c
  */
 export const cardNotSetUp=(card:Pick<WalletCard<string>,'status'>,t:Translate=english)=>card.status===t('wallet.cards.status.setUp')||card.status===t('wallet.cards.status.sharedBalance');
 
+/**
+ * What a card can spend now, from its own wallet: `s` is its network's state (`networkState`, with the card's
+ * Lightning). In sats, USDT in whole tokens. `undefined` when the card cannot say (not ready, locked, its source has
+ * not read a balance): nothing is claimed then. Lightning through the Cashu mints spends the Cashu balance, as its
+ * face says; through its own source (LND, CLN, NWC, Breez...), that source's.
+ */
+export function spendable(rail:WalletRail,s:WalletState):number|undefined {
+ const cashu=s.mints.length?Math.max(0,s.balance):undefined;
+ switch(rail){
+  case 'cashu': return cashu;
+  case 'lightning': {
+   const ln=s.lightning;
+   if(!ln||!ln.providerId||ln.providerId===CASHU_MINT_SOURCE)return cashu;
+   return ln.status==='ready'?ln.balance:undefined;
+  }
+  case 'arkade': return s.ark?.configured&&!s.ark.locked&&s.ark.address?s.ark.balance:undefined;
+  case 'bark': return s.bark?.configured&&!s.bark.locked&&s.bark.address?s.bark.balance:undefined;
+  case 'spark': return s.spark?.configured&&!s.spark.locked&&s.spark.address?s.spark.balance:undefined;
+  case 'bitcoin': return s.bitcoin?.status==='ready'?s.bitcoin.balance:undefined;
+  case 'fedimint': return s.fedimint?.federations?.some(f=>f.status==='ready')?s.fedimint.balance:undefined;
+  case 'usdt': return s.usdt?.configured&&!s.usdt.locked?Number(formatPaymentAmount(s.usdt.balance,s.usdt.decimals)):undefined;
+ }
+}
+
 type Face=Omit<WalletCard<string>,'id'|'rail'|'network'>;
 /** Lightning goes through its network's source: the Cashu mints (sharing the Cashu balance) unless another was chosen. */
 function lightningCard(t:Translate,s:WalletState,cashu:string,sats:(n:number)=>string):Face {
